@@ -1,4 +1,4 @@
-<img width="392" height="398" alt="image" src="https://github.com/user-attachments/assets/c7618dcc-b1d5-4e59-b4ae-1f8a0f559ac6" />
+<img alt="Growler logo" src="./logo.jpg" />
 
 
 # Growler
