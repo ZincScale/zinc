@@ -1,0 +1,40 @@
+// Fibonacci — demonstrates recursion and basic arithmetic
+
+fn fib(n: Int): Int {
+    if (n <= 1) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn fibIterative(n: Int): Int {
+    if (n <= 1) {
+        return n
+    }
+    var a: Int = 0
+    var b: Int = 1
+    var i: Int = 2
+    while (i <= n) {
+        var tmp: Int = a + b
+        a = b
+        b = tmp
+        i += 1
+    }
+    return b
+}
+
+fn main() {
+    print("Fibonacci (recursive):")
+    var i: Int = 0
+    while (i <= 10) {
+        print(fib(i))
+        i += 1
+    }
+
+    print("Fibonacci (iterative):")
+    var j: Int = 0
+    while (j <= 10) {
+        print(fibIterative(j))
+        j += 1
+    }
+}

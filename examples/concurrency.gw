@@ -1,0 +1,13 @@
+fn main() {
+    var ch: Chan<String> = Chan.new(2)
+
+    go {
+        ch.send("hello from goroutine")
+        ch.send("second message")
+    }
+
+    var msg1 = ch.receive()
+    var msg2 = ch.receive()
+    print(msg1)
+    print(msg2)
+}

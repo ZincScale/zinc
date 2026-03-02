@@ -1,0 +1,39 @@
+// Generic functions and classes in Growl
+
+fn identity<T>(val: T): T {
+    return val
+}
+
+fn mapLen<K, V>(m: Map<K, V>): Int {
+    return len(m)
+}
+
+class Box<T> {
+    var value: T
+
+    construct new(v: T) {
+        this.value = v
+    }
+
+    pub fn get(): T {
+        return this.value
+    }
+
+    pub fn set(v: T) {
+        this.value = v
+    }
+}
+
+fn main() {
+    var n: Int = identity(42)
+    print(n)
+
+    var s: String = identity("Growl")
+    print(s)
+
+    var box: Box<Int> = Box.new(100)
+    print(box.get())
+
+    box.set(200)
+    print(box.get())
+}

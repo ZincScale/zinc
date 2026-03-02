@@ -1,0 +1,13 @@
+package "myapp/utils"
+
+pub fn add(a: Int, b: Int): Int {
+    return a + b
+}
+
+pub fn multiply(a: Int, b: Int): Int {
+    return a * b
+}
+
+pub fn square(n: Int): Int {
+    return n * n
+}

@@ -1,0 +1,19 @@
+enum Direction { North, South, East, West }
+
+fn describe(d: Direction): String {
+    match d {
+        case 0 => { return "Going North" }
+        case 1 => { return "Going South" }
+        case 2 => { return "Going East" }
+        case 3 => { return "Going West" }
+        case _ => { return "Unknown direction" }
+    }
+}
+
+fn main() {
+    var dir: Direction = 0
+    print(describe(dir))
+
+    var dir2: Direction = 2
+    print(describe(dir2))
+}

@@ -1,0 +1,39 @@
+interface Speaker {
+    pub fn speak(): String
+}
+
+class Animal {
+    var name: String
+
+    construct new(name: String) {
+        this.name = name
+    }
+
+    pub fn getName(): String {
+        return this.name
+    }
+}
+
+class Dog : Animal, Speaker {
+    var breed: String
+
+    construct new(name: String, breed: String) {
+        super(name)
+        this.breed = breed
+    }
+
+    pub fn speak(): String {
+        return "Woof!"
+    }
+
+    pub fn describe(): String {
+        return this.getName()
+    }
+}
+
+fn main() {
+    var d = Dog.new("Rex", "Labrador")
+    print(d.speak())
+    print(d.describe())
+    print(d.getName())
+}
