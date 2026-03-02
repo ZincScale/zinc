@@ -238,6 +238,52 @@ func (p *Parser) parseUnary() Expr {
 	return p.parsePrimary()
 }
 
+// isLambdaStart returns true if the current TOKEN_LPAREN begins a lambda, not a grouping.
+// Heuristics (peekAt is relative to current position = the '('):
+//
+//	() =>         → peek(1)==RPAREN, peek(2)==FAT_ARROW
+//	(name: Type)  → peek(1)==IDENT,  peek(2)==COLON
+func (p *Parser) isLambdaStart() bool {
+	ahead1 := p.peekAt(1)
+	switch ahead1.Type {
+	case lexer.TOKEN_RPAREN:
+		// () => or (): ReturnType =>
+		next := p.peekAt(2).Type
+		return next == lexer.TOKEN_FAT_ARROW || next == lexer.TOKEN_COLON
+	case lexer.TOKEN_IDENT:
+		return p.peekAt(2).Type == lexer.TOKEN_COLON
+	}
+	return false
+}
+
+func (p *Parser) parseLambda() *LambdaExpr {
+	p.expect(lexer.TOKEN_LPAREN)
+	var params []*ParamDecl
+	if !p.check(lexer.TOKEN_RPAREN) {
+		params = append(params, p.parseParam())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			params = append(params, p.parseParam())
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+
+	var retType TypeExpr
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		retType = p.parseType()
+	}
+
+	p.expect(lexer.TOKEN_FAT_ARROW)
+
+	if p.check(lexer.TOKEN_LBRACE) {
+		body := p.parseBlock()
+		return &LambdaExpr{Params: params, ReturnType: retType, Body: body}
+	}
+	expr := p.parseExpr()
+	return &LambdaExpr{Params: params, ReturnType: retType, Expr: expr}
+}
+
 func (p *Parser) parsePrimary() Expr {
 	tok := p.peek()
 
@@ -277,6 +323,9 @@ func (p *Parser) parsePrimary() Expr {
 		p.expect(lexer.TOKEN_RPAREN)
 		return &SuperCallExpr{Args: args}
 	case lexer.TOKEN_LPAREN:
+		if p.isLambdaStart() {
+			return p.parseLambda()
+		}
 		p.advance()
 		expr := p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)

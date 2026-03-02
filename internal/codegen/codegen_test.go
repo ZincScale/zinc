@@ -620,3 +620,78 @@ func TestLastSegment(t *testing.T) {
 		}
 	}
 }
+
+func TestLambdaSingleExpr(t *testing.T) {
+	src := `fn main() {
+    var double = (x: Int): Int => x * 2
+    print(double(5))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x int) int { return (x * 2) }")
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaNoReturnType(t *testing.T) {
+	src := `fn main() {
+    var double = (x: Int) => x * 2
+    print(double(3))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x int) interface{} { return")
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaZeroParams(t *testing.T) {
+	src := `fn main() {
+    var greet = (): String => "hello"
+    print(greet())
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func() string { return")
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaBlockBody(t *testing.T) {
+	src := `fn main() {
+    var classify = (x: Int): String => {
+        if (x > 0) {
+            return "positive"
+        }
+        return "non-positive"
+    }
+    print(classify(5))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x int) string {")
+	assertContains(t, out, `"positive"`)
+	assertContains(t, out, `"non-positive"`)
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaAsArgument(t *testing.T) {
+	src := `
+fn applyFn(val: Int, callback: Any): Int {
+    return callback(val)
+}
+fn main() {
+    var result = applyFn(5, (x: Int): Int => x * 3)
+    print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x int) int { return")
+}

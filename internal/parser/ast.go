@@ -474,3 +474,14 @@ type MapLit struct {
 
 func (m *MapLit) nodeTag() {}
 func (m *MapLit) exprTag() {}
+
+// LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
+type LambdaExpr struct {
+	Params     []*ParamDecl
+	ReturnType TypeExpr   // nil = void (block) or interface{} (single-expr)
+	Body       *BlockStmt // non-nil for block-body form
+	Expr       Expr       // non-nil for single-expression form
+}
+
+func (*LambdaExpr) nodeTag()            {}
+func (*LambdaExpr) exprTag()            {}

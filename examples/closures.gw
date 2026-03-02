@@ -1,0 +1,26 @@
+fn main() {
+    // Single-expression lambdas with explicit return type
+    var double = (x: Int): Int => x * 2
+    var addTen = (x: Int): Int => x + 10
+
+    print(double(5))    // 10
+    print(addTen(3))    // 13
+
+    // Zero-parameter lambda
+    var greet = (): String => "Hello from lambda!"
+    print(greet())
+
+    // Block-body lambda
+    var describe = (x: Int): String => {
+        if (x > 0) {
+            return "positive"
+        }
+        return "non-positive"
+    }
+    print(describe(42))
+    print(describe(-1))
+
+    // String interpolation in lambda
+    var makeMsg = (name: String): String => "Hello, {name}!"
+    print(makeMsg("Growler"))
+}

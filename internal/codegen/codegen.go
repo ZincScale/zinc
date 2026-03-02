@@ -1098,6 +1098,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return fmt.Sprintf("(%s%s)", ex.Op, g.emitExpr(ex.Operand))
 	case *parser.CallExpr:
 		return g.emitCallExpr(ex)
+	case *parser.LambdaExpr:
+		return g.emitLambda(ex)
 	case *parser.SelectorExpr:
 		if ident, ok := ex.Object.(*parser.Ident); ok {
 			if g.enumNames[ident.Name] {
@@ -1146,6 +1148,47 @@ func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
 		return fmt.Sprintf("%q", format)
 	}
 	return fmt.Sprintf("fmt.Sprintf(%q, %s)", format, strings.Join(args, ", "))
+}
+
+func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
+	var paramParts []string
+	for _, p := range e.Params {
+		paramParts = append(paramParts, p.Name+" "+g.emitType(p.Type))
+	}
+	paramStr := strings.Join(paramParts, ", ")
+
+	retStr := ""
+	if e.ReturnType != nil {
+		retStr = " " + g.emitType(e.ReturnType)
+	}
+
+	if e.Expr != nil {
+		// Single-expression form
+		if retStr == "" {
+			retStr = " interface{}"
+		}
+		return fmt.Sprintf("func(%s)%s { return %s }", paramStr, retStr, g.emitExpr(e.Expr))
+	}
+
+	// Block-body form: use sub-generator to capture body
+	sub := &Generator{
+		neededImports:     g.neededImports, // shared — imports flow back to parent
+		classNames:        g.classNames,
+		interfaceNames:    g.interfaceNames,
+		enumNames:         g.enumNames,
+		canThrowFns:       g.canThrowFns,
+		classCtors:        g.classCtors,
+		receiver:          g.receiver,
+		currentReturnType: e.ReturnType,
+		currentCanThrow:   false,
+		indent:            1,
+	}
+	for _, stmt := range e.Body.Stmts {
+		sub.emitStmt(stmt)
+	}
+	bodyStr := strings.TrimRight(sub.buf.String(), "\n")
+	outerIndent := strings.Repeat("\t", g.indent)
+	return fmt.Sprintf("func(%s)%s {\n%s\n%s}", paramStr, retStr, bodyStr, outerIndent)
 }
 
 func (g *Generator) emitCallExpr(call *parser.CallExpr) string {

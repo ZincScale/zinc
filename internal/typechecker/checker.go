@@ -591,6 +591,26 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 			c.inferExpr(arg)
 		}
 		return TypeVoid
+	case *parser.LambdaExpr:
+		// Phase 1: treat lambda as TypeUnknown; still check body for errors
+		savedReturn := c.currentReturnType
+		if e.ReturnType != nil {
+			c.currentReturnType = c.resolveTypeExpr(e.ReturnType)
+		} else {
+			c.currentReturnType = TypeVoid
+		}
+		c.pushScope()
+		for _, param := range e.Params {
+			c.scope.define(param.Name, c.resolveTypeExpr(param.Type))
+		}
+		if e.Body != nil {
+			c.checkBlock(e.Body)
+		} else if e.Expr != nil {
+			c.inferExpr(e.Expr)
+		}
+		c.popScope()
+		c.currentReturnType = savedReturn
+		return TypeUnknown
 	}
 	return TypeUnknown
 }
