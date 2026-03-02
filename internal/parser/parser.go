@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"growl/internal/lexer"
+	"growler/internal/lexer"
 )
 
 // Parser converts a token stream into an AST.

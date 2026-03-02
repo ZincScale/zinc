@@ -1,4 +1,4 @@
-// Generic functions and classes in Growl
+// Generic functions and classes in Growler
 
 fn identity<T>(val: T): T {
     return val
@@ -28,7 +28,7 @@ fn main() {
     var n: Int = identity(42)
     print(n)
 
-    var s: String = identity("Growl")
+    var s: String = identity("Growler")
     print(s)
 
     var box: Box<Int> = Box.new(100)

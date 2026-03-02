@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"growl/internal/lexer"
-	"growl/internal/parser"
+	"growler/internal/lexer"
+	"growler/internal/parser"
 )
 
 func transpile(src string) (string, []string) {

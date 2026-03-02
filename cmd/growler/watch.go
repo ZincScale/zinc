@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"growl/internal/codegen"
-	"growl/internal/lexer"
-	"growl/internal/parser"
+	"growler/internal/codegen"
+	"growler/internal/lexer"
+	"growler/internal/parser"
 )
 
 func runWatch(inFile, outFile string) {

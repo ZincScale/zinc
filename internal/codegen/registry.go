@@ -1,6 +1,6 @@
 package codegen
 
-import "growl/internal/parser"
+import "growler/internal/parser"
 
 // TypeRegistry holds cross-file type information for a multi-file package.
 // It is populated from all source files in a package before any file is

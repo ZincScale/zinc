@@ -7,19 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"growl/internal/codegen"
-	"growl/internal/lexer"
-	"growl/internal/parser"
-	"growl/internal/project"
+	"growler/internal/codegen"
+	"growler/internal/lexer"
+	"growler/internal/parser"
+	"growler/internal/project"
 )
 
-const usage = `Growl transpiler — compiles .gw files to Go source.
+const usage = `Growler transpiler — compiles .gw files to Go source.
 
 Usage:
-  growl <file.gw> [flags]   Transpile a single file
-  growl build [dir]         Transpile all .gw files in project and run go build
-  growl run [dir]           Transpile all .gw files and run the project
-  growl repl                Launch interactive REPL
+  growler <file.gw> [flags]   Transpile a single file
+  growler build [dir]         Transpile all .gw files in project and run go build
+  growler run [dir]           Transpile all .gw files and run the project
+  growler repl                Launch interactive REPL
 
 Flags:
   -o <file>    Output Go file (default: <input>.go)

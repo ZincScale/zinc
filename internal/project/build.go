@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"growl/internal/codegen"
-	"growl/internal/lexer"
-	"growl/internal/parser"
+	"growler/internal/codegen"
+	"growler/internal/lexer"
+	"growler/internal/parser"
 )
 
 // FileUnit represents a single .gw → .go transpilation result.

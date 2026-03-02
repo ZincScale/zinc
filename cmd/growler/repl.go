@@ -7,13 +7,13 @@ import (
 	"os/exec"
 	"strings"
 
-	"growl/internal/codegen"
-	"growl/internal/lexer"
-	"growl/internal/parser"
+	"growler/internal/codegen"
+	"growler/internal/lexer"
+	"growler/internal/parser"
 )
 
 func runREPL() {
-	fmt.Println("Growl REPL — type Growl code, press Enter to run. Ctrl+C to exit.")
+	fmt.Println("Growler REPL — type Growler code, press Enter to run. Ctrl+C to exit.")
 	fmt.Println("Tip: Multi-line input — end a line with '{' to continue. Close with '}'.")
 	fmt.Println()
 
@@ -21,7 +21,7 @@ func runREPL() {
 	var history []string // accumulated top-level decls across session
 
 	for {
-		fmt.Print("growl> ")
+		fmt.Print("growler> ")
 		var lines []string
 		depth := 0
 
@@ -119,7 +119,7 @@ func replEval(input string, history []string) {
 	goSrc := gen.Generate(prog)
 
 	// Write to temp file and run
-	tmp, err := os.CreateTemp("", "growl_repl_*.go")
+	tmp, err := os.CreateTemp("", "growler_repl_*.go")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return

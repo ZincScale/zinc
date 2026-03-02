@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Lexer tokenizes Growl source code.
+// Lexer tokenizes Growler source code.
 type Lexer struct {
 	src     []rune
 	pos     int // current position

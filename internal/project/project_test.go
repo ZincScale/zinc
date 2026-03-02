@@ -10,8 +10,8 @@ import (
 // --- ParseMod tests ----------------------------------------------------------
 
 func TestParseMod(t *testing.T) {
-	content := "module myapp\ngrowl 0.1\n"
-	path := writeTempFile(t, "growl.mod", content)
+	content := "module myapp\ngrowler 0.1\n"
+	path := writeTempFile(t, "growler.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -26,8 +26,8 @@ func TestParseMod(t *testing.T) {
 }
 
 func TestParseModWithComments(t *testing.T) {
-	content := "# This is a comment\nmodule myproject\n# another comment\ngrowl 0.2\n"
-	path := writeTempFile(t, "growl.mod", content)
+	content := "# This is a comment\nmodule myproject\n# another comment\ngrowler 0.2\n"
+	path := writeTempFile(t, "growler.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -42,8 +42,8 @@ func TestParseModWithComments(t *testing.T) {
 }
 
 func TestParseModMissingModule(t *testing.T) {
-	content := "growl 0.1\n"
-	path := writeTempFile(t, "growl.mod", content)
+	content := "growler 0.1\n"
+	path := writeTempFile(t, "growler.mod", content)
 
 	_, err := ParseMod(path)
 	if err == nil {
@@ -52,15 +52,15 @@ func TestParseModMissingModule(t *testing.T) {
 }
 
 func TestParseModNotFound(t *testing.T) {
-	_, err := ParseMod("/nonexistent/path/growl.mod")
+	_, err := ParseMod("/nonexistent/path/growler.mod")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
 func TestParseModEmptyLines(t *testing.T) {
-	content := "\n\nmodule   spacious\n\ngrowl 0.3\n\n"
-	path := writeTempFile(t, "growl.mod", content)
+	content := "\n\nmodule   spacious\n\ngrowler 0.3\n\n"
+	path := writeTempFile(t, "growler.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -75,8 +75,8 @@ func TestParseModEmptyLines(t *testing.T) {
 
 func TestFindModInSameDir(t *testing.T) {
 	dir := t.TempDir()
-	modPath := filepath.Join(dir, "growl.mod")
-	os.WriteFile(modPath, []byte("module test\ngrowl 0.1\n"), 0644)
+	modPath := filepath.Join(dir, "growler.mod")
+	os.WriteFile(modPath, []byte("module test\ngrowler 0.1\n"), 0644)
 
 	found, root, err := FindMod(dir)
 	if err != nil {
@@ -95,8 +95,8 @@ func TestFindModInParentDir(t *testing.T) {
 	subDir := filepath.Join(dir, "models")
 	os.Mkdir(subDir, 0755)
 
-	modPath := filepath.Join(dir, "growl.mod")
-	os.WriteFile(modPath, []byte("module test\ngrowl 0.1\n"), 0644)
+	modPath := filepath.Join(dir, "growler.mod")
+	os.WriteFile(modPath, []byte("module test\ngrowler 0.1\n"), 0644)
 
 	found, root, err := FindMod(subDir)
 	if err != nil {
@@ -114,9 +114,9 @@ func TestFindModNotFound(t *testing.T) {
 	dir := t.TempDir()
 	_, _, err := FindMod(dir)
 	if err == nil {
-		t.Error("expected error when growl.mod not found")
+		t.Error("expected error when growler.mod not found")
 	}
-	if !strings.Contains(err.Error(), "growl.mod not found") {
+	if !strings.Contains(err.Error(), "growler.mod not found") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

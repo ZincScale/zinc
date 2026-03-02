@@ -1,3 +1,3 @@
-module growl
+module growler
 
 go 1.21

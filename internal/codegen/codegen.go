@@ -5,10 +5,10 @@ import (
 	"strings"
 	"unicode"
 
-	"growl/internal/parser"
+	"growler/internal/parser"
 )
 
-// Generator converts a Growl AST to Go source code.
+// Generator converts a Growler AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
 	indent         int
@@ -1141,7 +1141,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 	}
 }
 
-// emitBuiltinCall maps Growl built-in function names to Go equivalents.
+// emitBuiltinCall maps Growler built-in function names to Go equivalents.
 func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) string {
 	switch name {
 	// I/O

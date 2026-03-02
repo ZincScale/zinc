@@ -1,2 +1,2 @@
 module myapp
-growl 0.1
+growler 0.1

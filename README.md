@@ -1,6 +1,6 @@
-# Growl
+# Growler
 
-**Growl** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
+**Growler** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
 
 ```
 fn main() {
@@ -25,7 +25,7 @@ func main() {
 ```bash
 git clone https://github.com/victorybhg/go-transpiler
 cd go-transpiler
-go build -o growl ./cmd/growl/
+go build -o growler ./cmd/growler/
 ```
 
 Requires Go 1.21+.
@@ -35,12 +35,12 @@ Requires Go 1.21+.
 ## CLI
 
 ```bash
-growl <file.gw>               # transpile to <file>.go
-growl <file.gw> -o out.go     # specify output file
-growl <file.gw> --run         # transpile and run immediately
-growl <file.gw> --watch       # watch for changes, re-transpile automatically
-growl <file.gw> --verbose     # show token/AST debug info
-growl repl                    # launch interactive REPL
+growler <file.gw>               # transpile to <file>.go
+growler <file.gw> -o out.go     # specify output file
+growler <file.gw> --run         # transpile and run immediately
+growler <file.gw> --watch       # watch for changes, re-transpile automatically
+growler <file.gw> --verbose     # show token/AST debug info
+growler repl                    # launch interactive REPL
 ```
 
 ---
@@ -49,9 +49,9 @@ growl repl                    # launch interactive REPL
 
 ### Variables
 
-```growl
+```growler
 var x: Int = 42
-var name: String = "Growl"
+var name: String = "Growler"
 var flag: Bool = true
 var ratio: Float = 3.14
 var maybeNull: String? = null    // optional (nullable) type
@@ -59,7 +59,7 @@ var maybeNull: String? = null    // optional (nullable) type
 
 ### Functions
 
-```growl
+```growler
 fn add(a: Int, b: Int): Int {
     return a + b
 }
@@ -71,7 +71,7 @@ pub fn greet(name: String): String {
 
 ### Generic Functions
 
-```growl
+```growler
 fn identity<T>(val: T): T {
     return val
 }
@@ -83,7 +83,7 @@ fn pair<K, V>(key: K, value: V): K {
 
 ### Classes
 
-```growl
+```growler
 class Dog {
     var name: String
     var age: Int
@@ -105,7 +105,7 @@ class Dog {
 
 ### Generic Classes
 
-```growl
+```growler
 class Box<T> {
     var value: T
 
@@ -121,7 +121,7 @@ class Box<T> {
 
 ### Interfaces
 
-```growl
+```growler
 interface Speaker {
     pub fn speak(): String
 }
@@ -135,7 +135,7 @@ class Cat : Speaker {
 
 ### Inheritance
 
-```growl
+```growler
 class Animal {
     var name: String
     construct new(name: String) { this.name = name }
@@ -152,7 +152,7 @@ class Dog : Animal, Speaker {
 
 ### Enums
 
-```growl
+```growler
 enum Direction { North, South, East, West }
 enum Status { Pending, Active, Closed }
 ```
@@ -171,7 +171,7 @@ const (
 
 ### Match / Switch
 
-```growl
+```growler
 match direction {
     case 0 => { print("North") }
     case 1 => { print("South") }
@@ -181,8 +181,8 @@ match direction {
 
 ### String Interpolation
 
-```growl
-var name: String = "Growl"
+```growler
+var name: String = "Growler"
 var version: Int = 1
 print("Welcome to {name} v{version}!")
 // → fmt.Println(fmt.Sprintf("Welcome to %v v%v!", name, version))
@@ -190,7 +190,7 @@ print("Welcome to {name} v{version}!")
 
 ### Control Flow
 
-```growl
+```growler
 // if / else if / else
 if (x > 0) {
     print("positive")
@@ -218,7 +218,7 @@ for item in items {
 
 ### Error Handling
 
-```growl
+```growler
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
         throw Error("division by zero")
@@ -237,7 +237,7 @@ fn main() {
 
 ### Concurrency
 
-```growl
+```growler
 fn main() {
     var ch: Chan<Int> = Chan.new(1)
 
@@ -252,9 +252,9 @@ fn main() {
 
 ### Tuple Unpacking
 
-Growl maps directly to Go's multi-return. The most common use is unpacking a value + error from a `CanThrow` function (which automatically returns `(T, error)` in Go):
+Growler maps directly to Go's multi-return. The most common use is unpacking a value + error from a `CanThrow` function (which automatically returns `(T, error)` in Go):
 
-```growl
+```growler
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
         throw Error("division by zero")
@@ -276,7 +276,7 @@ fn main() {
 
 You can also unpack any Go function that returns multiple values via `import`:
 
-```growl
+```growler
 import "strconv"
 
 fn main() {
@@ -289,7 +289,7 @@ fn main() {
 
 ### Imports
 
-```growl
+```growler
 import "os"
 import "math/rand" as rand
 
@@ -300,39 +300,39 @@ fn main() {
 
 ### Built-in Functions
 
-| Growl             | Go equivalent              |
-|-------------------|---------------------------|
-| `print(x)`        | `fmt.Println(x)`          |
-| `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`  |
-| `len(x)`          | `len(x)`                  |
-| `append(s, x)`    | `append(s, x)`            |
-| `toString(x)`     | `fmt.Sprintf("%v", x)`    |
-| `parseInt(s)`     | `strconv.Atoi(s)`         |
-| `parseFloat(s)`   | `strconv.ParseFloat(s,64)`|
-| `sqrt(x)`         | `math.Sqrt(x)`            |
-| `pow(x, y)`       | `math.Pow(x, y)`          |
-| `abs(x)`          | `math.Abs(x)`             |
-| `floor(x)`        | `math.Floor(x)`           |
-| `ceil(x)`         | `math.Ceil(x)`            |
-| `round(x)`        | `math.Round(x)`           |
-| `max(a, b)`       | `math.Max(a, b)`          |
-| `min(a, b)`       | `math.Min(a, b)`          |
-| `strUpper(s)`     | `strings.ToUpper(s)`      |
-| `strLower(s)`     | `strings.ToLower(s)`      |
-| `strContains(s,x)`| `strings.Contains(s, x)` |
-| `strTrim(s)`      | `strings.TrimSpace(s)`    |
-| `strSplit(s, sep)`| `strings.Split(s, sep)`   |
-| `strJoin(a, sep)` | `strings.Join(a, sep)`    |
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `print(x)`        | `fmt.Println(x)`           |
+| `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`   |
+| `len(x)`          | `len(x)`                   |
+| `append(s, x)`    | `append(s, x)`             |
+| `toString(x)`     | `fmt.Sprintf("%v", x)`     |
+| `parseInt(s)`     | `strconv.Atoi(s)`          |
+| `parseFloat(s)`   | `strconv.ParseFloat(s,64)` |
+| `sqrt(x)`         | `math.Sqrt(x)`             |
+| `pow(x, y)`       | `math.Pow(x, y)`           |
+| `abs(x)`          | `math.Abs(x)`              |
+| `floor(x)`        | `math.Floor(x)`            |
+| `ceil(x)`         | `math.Ceil(x)`             |
+| `round(x)`        | `math.Round(x)`            |
+| `max(a, b)`       | `math.Max(a, b)`           |
+| `min(a, b)`       | `math.Min(a, b)`           |
+| `strUpper(s)`     | `strings.ToUpper(s)`       |
+| `strLower(s)`     | `strings.ToLower(s)`       |
+| `strContains(s,x)`| `strings.Contains(s, x)`  |
+| `strTrim(s)`      | `strings.TrimSpace(s)`     |
+| `strSplit(s, sep)`| `strings.Split(s, sep)`    |
+| `strJoin(a, sep)` | `strings.Join(a, sep)`     |
 | `strReplace(s,a,b)`| `strings.ReplaceAll(s,a,b)` |
-| `sortInts(s)`     | `sort.Ints(s)`            |
-| `sortStrings(s)`  | `sort.Strings(s)`         |
-| `sortFloats(s)`   | `sort.Float64s(s)`        |
-| `panic(msg)`      | `panic(msg)`              |
-| `exit(code)`      | `os.Exit(code)`           |
+| `sortInts(s)`     | `sort.Ints(s)`             |
+| `sortStrings(s)`  | `sort.Strings(s)`          |
+| `sortFloats(s)`   | `sort.Float64s(s)`         |
+| `panic(msg)`      | `panic(msg)`               |
+| `exit(code)`      | `os.Exit(code)`            |
 
 ### Type System
 
-| Growl       | Go          |
+| Growler     | Go          |
 |-------------|-------------|
 | `Int`       | `int`       |
 | `Float`     | `float64`   |
@@ -361,7 +361,7 @@ See the [`examples/`](examples/) directory:
 Run any example:
 
 ```bash
-./growl examples/hello.gw --run
+./growler examples/hello.gw --run
 ```
 
 ---
