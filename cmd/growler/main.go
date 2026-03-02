@@ -11,6 +11,7 @@ import (
 	"growler/internal/lexer"
 	"growler/internal/parser"
 	"growler/internal/project"
+	"growler/internal/typechecker"
 )
 
 const usage = `Growler transpiler — compiles .gw files to Go source.
@@ -126,6 +127,14 @@ func main() {
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] %d top-level declarations\n", len(prog.Decls))
+	}
+
+	// Type checking
+	if errs := typechecker.Check(prog); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "%s: type error: %s\n", inFile, e)
+		}
+		os.Exit(1)
 	}
 
 	// Code generation

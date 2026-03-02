@@ -10,6 +10,7 @@ import (
 	"growler/internal/codegen"
 	"growler/internal/lexer"
 	"growler/internal/parser"
+	"growler/internal/typechecker"
 )
 
 // FileUnit represents a single .gw → .go transpilation result.
@@ -130,6 +131,14 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 		progs[i] = pf.prog
 	}
 	reg := codegen.BuildRegistry(progs)
+
+	// Type checking across all files in this directory
+	if tcErrs := typechecker.CheckAll(progs); len(tcErrs) > 0 {
+		for _, e := range tcErrs {
+			fmt.Fprintf(os.Stderr, "%s: type error: %s\n", dir, e)
+		}
+		return nil, fmt.Errorf("%s: %d type error(s) found", dir, len(tcErrs))
+	}
 
 	// Phase 2: generate .go files
 	var units []FileUnit

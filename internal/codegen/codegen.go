@@ -444,12 +444,15 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	g.writeln("}")
 	g.writeln("")
 
-	// Verify interface implementation (compile-time check)
-	for _, iface := range ifaces {
-		g.writeln(fmt.Sprintf("var _ %s = (*%s)(nil)", iface, cls.Name))
-	}
-	if len(ifaces) > 0 {
-		g.writeln("")
+	// Verify interface implementation (compile-time check).
+	// Skip for generic classes: can't instantiate without concrete type args.
+	if len(cls.TypeParams) == 0 {
+		for _, iface := range ifaces {
+			g.writeln(fmt.Sprintf("var _ %s = (*%s)(nil)", iface, cls.Name))
+		}
+		if len(ifaces) > 0 {
+			g.writeln("")
+		}
 	}
 
 	// 2. Constructor
@@ -461,7 +464,7 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	recv := strings.ToLower(cls.Name[:1])
 	g.receiver = recv
 	for _, m := range cls.Methods {
-		g.emitMethod(cls.Name, recv, m)
+		g.emitMethod(cls.Name, cls.TypeParams, recv, m)
 	}
 	g.receiver = ""
 }
@@ -477,12 +480,27 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	}
 	paramStr := strings.Join(params, ", ")
 
-	g.writeln(fmt.Sprintf("func %s(%s) *%s {", name, paramStr, cls.Name))
+	// Build type parameter string and instantiated type for generic classes.
+	// e.g. class Box<T> → func NewBox[T any](v T) *Box[T]
+	typeParamStr := ""
+	classInstStr := cls.Name
+	if len(cls.TypeParams) > 0 {
+		constraints := make([]string, len(cls.TypeParams))
+		typeArgs := make([]string, len(cls.TypeParams))
+		for i, tp := range cls.TypeParams {
+			constraints[i] = tp + " any"
+			typeArgs[i] = tp
+		}
+		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
+		classInstStr = cls.Name + "[" + strings.Join(typeArgs, ", ") + "]"
+	}
+
+	g.writeln(fmt.Sprintf("func %s%s(%s) *%s {", name, typeParamStr, paramStr, classInstStr))
 	g.push()
 
 	// Build struct literal
 	g.writeIndent()
-	g.write(fmt.Sprintf("obj := &%s{\n", cls.Name))
+	g.write(fmt.Sprintf("obj := &%s{\n", classInstStr))
 
 	g.push()
 	// Base class init
@@ -548,7 +566,7 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	g.writeln("")
 }
 
-func (g *Generator) emitMethod(className, recv string, m *parser.MethodDecl) {
+func (g *Generator) emitMethod(className string, typeParams []string, recv string, m *parser.MethodDecl) {
 	name := exportName(m.Name, m.IsPub)
 
 	var params []string
@@ -570,10 +588,17 @@ func (g *Generator) emitMethod(className, recv string, m *parser.MethodDecl) {
 		retStr = " " + retType
 	}
 
+	// For generic classes, the receiver type must include type params.
+	// e.g. func (b *Box[T]) Get() T
+	recvTypeStr := className
+	if len(typeParams) > 0 {
+		recvTypeStr = className + "[" + strings.Join(typeParams, ", ") + "]"
+	}
+
 	if m.IsStatic {
 		g.writeln(fmt.Sprintf("func %s_%s(%s)%s {", className, name, paramStr, retStr))
 	} else {
-		g.writeln(fmt.Sprintf("func (%s *%s) %s(%s)%s {", recv, className, name, paramStr, retStr))
+		g.writeln(fmt.Sprintf("func (%s *%s) %s(%s)%s {", recv, recvTypeStr, name, paramStr, retStr))
 	}
 	g.push()
 	savedRecv := g.receiver
@@ -623,7 +648,7 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 	if len(fn.TypeParams) > 0 {
 		constraints := make([]string, len(fn.TypeParams))
 		for i, tp := range fn.TypeParams {
-			constraints[i] = tp + " any"
+			constraints[i] = tp + " " + typeParamConstraint(tp, fn.Params)
 		}
 		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
 	}
@@ -728,12 +753,15 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 
 	if v.Value != nil {
 		valStr := g.emitExpr(v.Value)
+		// For enum types, emit an explicit type cast to preserve the named type.
+		// e.g. var dir: Direction = 0  →  dir := Direction(0)
 		if v.Type != nil {
-			// typed: var x Type = val → x := Type(val) or typed literal
-			g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
-		} else {
-			g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
+			if st, ok := v.Type.(*parser.SimpleType); ok && g.enumNames[st.Name] {
+				g.writeln(fmt.Sprintf("%s := %s(%s)", v.Name, st.Name, valStr))
+				return
+			}
 		}
+		g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
 	} else if v.Type != nil {
 		// no value: var x Type  → var x GoType
 		g.writeln(fmt.Sprintf("var %s %s", v.Name, g.emitType(v.Type)))
@@ -1264,6 +1292,43 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 }
 
 // --- Helpers -----------------------------------------------------------------
+
+// typeParamConstraint returns the Go constraint for a generic type parameter.
+// If the parameter is used as a map key in any of the function's params, it
+// must be "comparable"; otherwise "any".
+func typeParamConstraint(paramName string, fnParams []*parser.ParamDecl) string {
+	for _, p := range fnParams {
+		if typeExprUsesAsMapKey(paramName, p.Type) {
+			return "comparable"
+		}
+	}
+	return "any"
+}
+
+// typeExprUsesAsMapKey returns true if typeName appears in a map key position
+// within the given type expression.
+func typeExprUsesAsMapKey(typeName string, t parser.TypeExpr) bool {
+	if t == nil {
+		return false
+	}
+	gt, ok := t.(*parser.GenericType)
+	if !ok {
+		return false
+	}
+	if gt.Name == "Map" && len(gt.TypeArgs) >= 1 {
+		// First type arg is the key
+		if st, ok := gt.TypeArgs[0].(*parser.SimpleType); ok && st.Name == typeName {
+			return true
+		}
+	}
+	// Recurse into all type args
+	for _, arg := range gt.TypeArgs {
+		if typeExprUsesAsMapKey(typeName, arg) {
+			return true
+		}
+	}
+	return false
+}
 
 // exportName returns an exported (uppercase) or unexported (lowercase) name.
 func exportName(name string, pub bool) string {
