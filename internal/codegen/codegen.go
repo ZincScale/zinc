@@ -376,9 +376,9 @@ func (g *Generator) emitEnum(e *parser.EnumDecl) {
 	g.push()
 	for i, v := range e.Variants {
 		if i == 0 {
-			g.writeln(fmt.Sprintf("%s %s = iota", v, e.Name))
+			g.writeln(fmt.Sprintf("%s%s %s = iota", e.Name, v, e.Name))
 		} else {
-			g.writeln(v)
+			g.writeln(fmt.Sprintf("%s%s", e.Name, v))
 		}
 	}
 	g.pop()
@@ -1099,6 +1099,11 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.CallExpr:
 		return g.emitCallExpr(ex)
 	case *parser.SelectorExpr:
+		if ident, ok := ex.Object.(*parser.Ident); ok {
+			if g.enumNames[ident.Name] {
+				return ident.Name + capitalize(ex.Field)
+			}
+		}
 		return fmt.Sprintf("%s.%s", g.emitExpr(ex.Object), capitalize(ex.Field))
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.emitExpr(ex.Object), g.emitExpr(ex.Index))

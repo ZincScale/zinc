@@ -360,9 +360,45 @@ func TestEnum(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "type Color int")
-	assertContains(t, out, "Red Color = iota")
-	assertContains(t, out, "Green")
-	assertContains(t, out, "Blue")
+	assertContains(t, out, "ColorRed Color = iota")
+	assertContains(t, out, "ColorGreen")
+	assertContains(t, out, "ColorBlue")
+}
+
+func TestEnumMemberExpr(t *testing.T) {
+	src := `
+enum Color { Red, Green, Blue }
+fn main() {
+    var c: Color = Color.Red
+    print(c)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "ColorRed Color = iota")
+	assertContains(t, out, "ColorRed")       // used as value
+	assertNotContains(t, out, "Color.Red")   // no dot in emitted Go
+}
+
+func TestMatchWithEnumMembers(t *testing.T) {
+	src := `
+enum Status { Active, Idle, Done }
+fn describe(s: Status): String {
+    match s {
+        case Status.Active => { return "active" }
+        case Status.Idle   => { return "idle" }
+        case _ => { return "done" }
+    }
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "case StatusActive:")
+	assertContains(t, out, "case StatusIdle:")
+	assertNotContains(t, out, "case 0:")
+	assertNotContains(t, out, "Status.Active")
 }
 
 func TestMatch(t *testing.T) {
