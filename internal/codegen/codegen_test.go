@@ -923,8 +923,10 @@ fn main() {
 	}
 	assertContains(t, out, "f := openFile(\"data.txt\")")
 	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+	assertContains(t, out, "if _l, ok := any(f).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }")
 	assertContains(t, out, "fmt.Println(\"reading\")")
 	assertContains(t, out, `"io"`)
+	assertContains(t, out, `"sync"`)
 }
 
 func TestWithStmtMultipleResources(t *testing.T) {
@@ -981,6 +983,24 @@ fn main() { process() }
 	assertContains(t, out, "func process()")
 	assertContains(t, out, "f := openFile(\"data.txt\")")
 	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+}
+
+func TestWithStmtLocker(t *testing.T) {
+	src := `
+import "sync"
+fn main() {
+    var mu = sync.Mutex{}
+    with var locked = mu {
+        print("critical section")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "locked := mu")
+	assertContains(t, out, "if _l, ok := any(locked).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }")
 }
 
 func TestWithStmtNestedInTry(t *testing.T) {

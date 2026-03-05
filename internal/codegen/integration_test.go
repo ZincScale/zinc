@@ -326,6 +326,30 @@ fn main() {
 	assertContains(t, out, "if _c, ok := any(handle).(io.Closer); ok { defer _c.Close() }")
 }
 
+// --- sync.Locker via with ----------------------------------------------------
+
+func TestIntegrationWithMutexInGoroutine(t *testing.T) {
+	src := `
+import "sync"
+fn main() {
+    var mu = sync.Mutex{}
+    go {
+        with var lock = mu {
+            print("critical section")
+        }
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "lock := mu")
+	assertContains(t, out, "if _l, ok := any(lock).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }")
+	assertContains(t, out, `"sync"`)
+}
+
 // --- goroutine combinations --------------------------------------------------
 
 func TestIntegrationGoRoutineTryCatch(t *testing.T) {

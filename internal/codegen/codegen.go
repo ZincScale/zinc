@@ -946,16 +946,22 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 }
 
 // emitWithStmt emits a scoped resource block.
-// Each resource is declared with := and its Close() method (if any) is deferred
-// via a runtime io.Closer type assertion. If the resource does not implement
-// io.Closer the assertion is false and nothing is deferred — no compile error.
+// For each resource two runtime interface checks are emitted:
+//   - io.Closer  → defer Close()        (e.g. files, connections)
+//   - sync.Locker → Lock() + defer Unlock() (e.g. mutexes, RWMutexes)
+//
+// Defer order: Closer is registered first so it runs last; Locker is registered
+// second so Unlock runs before Close — correct for anything implementing both.
+// If a resource implements neither, both assertions are false and nothing happens.
 func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.neededImports["io"] = true
+	g.neededImports["sync"] = true
 	g.writeln("{")
 	g.push()
 	for _, r := range w.Resources {
 		g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
 		g.writeln(fmt.Sprintf("if _c, ok := any(%s).(io.Closer); ok { defer _c.Close() }", r.Name))
+		g.writeln(fmt.Sprintf("if _l, ok := any(%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }", r.Name))
 	}
 	g.emitBlock(w.Body)
 	g.pop()
