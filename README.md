@@ -106,6 +106,68 @@ class Dog {
 }
 ```
 
+#### Named Constructors
+
+Every class has one primary constructor declared with `construct new(...)`, called as `ClassName.new(...)`. Additional named constructors are `pub static fn` factory methods that call `new` internally:
+
+```growler
+class Point {
+    var x: Float
+    var y: Float
+
+    construct new(x: Float, y: Float) {
+        this.x = x
+        this.y = y
+    }
+
+    // Named constructor — origin
+    pub static fn origin(): Point {
+        return Point.new(0.0, 0.0)
+    }
+
+    // Named constructor — from a single value
+    pub static fn diagonal(v: Float): Point {
+        return Point.new(v, v)
+    }
+}
+
+fn main() {
+    var a = Point.new(3.0, 4.0)   // primary constructor
+    var b = Point.origin()         // named constructor
+    var c = Point.diagonal(5.0)    // named constructor
+}
+```
+
+Transpiles to:
+
+```go
+type Point struct {
+    X float64
+    Y float64
+}
+
+func NewPoint(x float64, y float64) *Point {
+    obj := &Point{}
+    obj.X = x
+    obj.Y = y
+    return obj
+}
+
+func Point_Origin() *Point {
+    return NewPoint(0.0, 0.0)
+}
+
+func Point_Diagonal(v float64) *Point {
+    return NewPoint(v, v)
+}
+
+func main() {
+    a := NewPoint(3.0, 4.0)
+    b := Point_Origin()
+    c := Point_Diagonal(5.0)
+}
+```
+
 ### Generic Classes
 
 ```growler
