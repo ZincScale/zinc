@@ -557,3 +557,38 @@ func TestUndefinedType(t *testing.T) {
 		t.Errorf("expected 'undefined type Baz' error, got %v", errs)
 	}
 }
+
+// --- Throwing lambda restrictions --------------------------------------------
+
+func TestThrowingLambdaAsArgRejected(t *testing.T) {
+	src := `
+fn apply(callback: Any): Int {
+    return callback(5)
+}
+fn main() {
+    apply((x: Int): Int => {
+        throw Error("bad")
+        return x
+    })
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "throwing lambda") {
+		t.Fatalf("expected 'throwing lambda' error, got: %v", errs)
+	}
+}
+
+func TestNonThrowingLambdaAsArgAllowed(t *testing.T) {
+	src := `
+fn apply(callback: Any): Int {
+    return callback(5)
+}
+fn main() {
+    apply((x: Int): Int => x * 2)
+}`
+	errs := checkSrc(src)
+	for _, e := range errs {
+		if strings.Contains(e.Msg, "throwing lambda") {
+			t.Fatalf("non-throwing lambda should not trigger error: %v", e)
+		}
+	}
+}

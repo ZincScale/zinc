@@ -708,6 +708,15 @@ func (c *Checker) inferUnary(e *parser.UnaryExpr) Type {
 }
 
 func (c *Checker) inferCall(e *parser.CallExpr) Type {
+	// Reject throwing lambdas passed as arguments
+	for _, arg := range e.Args {
+		if lambda, ok := arg.(*parser.LambdaExpr); ok && lambda.Body != nil {
+			if c.lambdaBodyCanThrow(lambda.Body) {
+				c.errorf(0, 0, "throwing lambda cannot be passed as argument; assign to a variable and call within try/catch")
+			}
+		}
+	}
+
 	// SelectorExpr callee: obj.method(args) or Dog.new(args)
 	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
 		return c.inferMethodCall(sel, e.Args)
@@ -957,4 +966,39 @@ func (s *FnSig) isGeneric() bool {
 
 func (c *ClassType) isGeneric() bool {
 	return len(c.TypeParams) > 0
+}
+
+func (c *Checker) lambdaBodyCanThrow(body *parser.BlockStmt) bool {
+	for _, s := range body.Stmts {
+		if c.stmtHasThrow(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) stmtHasThrow(s parser.Stmt) bool {
+	switch st := s.(type) {
+	case *parser.ThrowStmt:
+		return true
+	case *parser.BlockStmt:
+		return c.lambdaBodyCanThrow(st)
+	case *parser.IfStmt:
+		if c.lambdaBodyCanThrow(st.Then) {
+			return true
+		}
+		if st.ElseStmt != nil {
+			if b, ok := st.ElseStmt.(*parser.BlockStmt); ok {
+				return c.lambdaBodyCanThrow(b)
+			}
+			if i, ok := st.ElseStmt.(*parser.IfStmt); ok {
+				return c.stmtHasThrow(i)
+			}
+		}
+	case *parser.ForStmt:
+		return c.lambdaBodyCanThrow(st.Body)
+	case *parser.WhileStmt:
+		return c.lambdaBodyCanThrow(st.Body)
+	}
+	return false
 }

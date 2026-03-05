@@ -23,4 +23,21 @@ fn main() {
     // String interpolation in lambda
     var makeMsg = (name: String): String => "Hello, {name}!"
     print(makeMsg("Growler"))
+
+    // Throwing lambda caught by parent try block
+    var safeDivide = (a: Int, b: Int): Int => {
+        if (b == 0) {
+            throw Error("division by zero")
+        }
+        return a / b
+    }
+
+    try {
+        var result = safeDivide(10, 2)
+        print(result)          // 5
+        var bad = safeDivide(10, 0)
+        print(bad)
+    } catch(err) {
+        print("Caught: {err}") // Caught: division by zero
+    }
 }

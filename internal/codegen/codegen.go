@@ -29,6 +29,8 @@ type Generator struct {
 	userImports []*parser.ImportDecl
 	// enumNames: set of declared enum type names
 	enumNames map[string]bool
+	// throwingVars: local variables that hold throwing lambdas (need error unwrap in try blocks)
+	throwingVars map[string]bool
 	// packageName overrides the emitted package declaration.
 	// Empty means auto-detect from PackageDecl or default to "main".
 	packageName string
@@ -43,6 +45,7 @@ func New() *Generator {
 		canThrowFns:    make(map[string]bool),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
+		throwingVars:   make(map[string]bool),
 	}
 }
 
@@ -57,6 +60,7 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		canThrowFns:    make(map[string]bool),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
+		throwingVars:   make(map[string]bool),
 		packageName:    pkgName,
 	}
 	for k, v := range reg.ClassNames {
@@ -734,6 +738,13 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 }
 
 func (g *Generator) emitVarStmt(v *parser.VarStmt) {
+	// Track variables that hold throwing lambdas so try blocks can unwrap them
+	if lambda, ok := v.Value.(*parser.LambdaExpr); ok && lambda.Body != nil {
+		if g.bodyCanThrow(lambda.Body) {
+			g.throwingVars[v.Name] = true
+		}
+	}
+
 	// Special case: Chan.new(n) where type is Chan<T>
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
@@ -963,7 +974,7 @@ func (g *Generator) exprHasThrowingCall(e parser.Expr) bool {
 func (g *Generator) callCanThrow(call *parser.CallExpr) bool {
 	switch callee := call.Callee.(type) {
 	case *parser.Ident:
-		return g.canThrowFns[callee.Name]
+		return g.canThrowFns[callee.Name] || g.throwingVars[callee.Name]
 	case *parser.SelectorExpr:
 		if ident, ok := callee.Object.(*parser.Ident); ok {
 			return g.canThrowFns[ident.Name+"."+callee.Field]
@@ -1170,7 +1181,17 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		return fmt.Sprintf("func(%s)%s { return %s }", paramStr, retStr, g.emitExpr(e.Expr))
 	}
 
-	// Block-body form: use sub-generator to capture body
+	// Block-body form: detect CanThrow
+	lambdaCanThrow := g.bodyCanThrow(e.Body)
+	if lambdaCanThrow {
+		g.neededImports["fmt"] = true
+		if retStr == "" {
+			retStr = " error"
+		} else {
+			retStr = " (" + strings.TrimPrefix(retStr, " ") + ", error)"
+		}
+	}
+
 	sub := &Generator{
 		neededImports:     g.neededImports, // shared — imports flow back to parent
 		classNames:        g.classNames,
@@ -1179,8 +1200,9 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		canThrowFns:       g.canThrowFns,
 		classCtors:        g.classCtors,
 		receiver:          g.receiver,
+		throwingVars:      g.throwingVars, // share so nested calls resolve
 		currentReturnType: e.ReturnType,
-		currentCanThrow:   false,
+		currentCanThrow:   lambdaCanThrow, // was hardcoded false
 		indent:            1,
 	}
 	for _, stmt := range e.Body.Stmts {

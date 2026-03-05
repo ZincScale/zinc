@@ -695,3 +695,50 @@ fn main() {
 	}
 	assertContains(t, out, "func(x int) int { return")
 }
+
+func TestLambdaThrowSignature(t *testing.T) {
+	src := `fn main() {
+    var safeDivide = (a: Int, b: Int): Int => {
+        if (a == 0) {
+            throw Error("bad input")
+        }
+        return a / b
+    }
+    print(safeDivide(10, 2))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Lambda should emit (int, error) return type
+	assertContains(t, out, "func(a int, b int) (int, error)")
+	// Normal return inside throwing lambda should append nil
+	assertContains(t, out, "return (a / b), nil")
+	// throw should emit return zero, error
+	assertContains(t, out, `return 0, fmt.Errorf`)
+}
+
+func TestLambdaThrowCaughtByTry(t *testing.T) {
+	src := `fn main() {
+    var safeDivide = (a: Int, b: Int): Int => {
+        if (b == 0) {
+            throw Error("division by zero")
+        }
+        return a / b
+    }
+    try {
+        var result = safeDivide(10, 0)
+        print(result)
+    } catch(err) {
+        print("caught")
+    }
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Try body should unpack the error from the throwing lambda call
+	assertContains(t, out, "_err := safeDivide(10, 0)")
+	assertContains(t, out, "if _err != nil { return _err }")
+	assertNotContains(t, out, "result := safeDivide") // must NOT be a plain assignment
+}
