@@ -742,3 +742,125 @@ func TestLambdaThrowCaughtByTry(t *testing.T) {
 	assertContains(t, out, "if _err != nil { return _err }")
 	assertNotContains(t, out, "result := safeDivide") // must NOT be a plain assignment
 }
+
+func TestIntegrationMixedThrowingAndNonThrowingLambdas(t *testing.T) {
+	src := `fn main() {
+    var double = (x: Int): Int => x * 2
+    var safeSqrt = (x: Int): Int => {
+        if (x < 0) {
+            throw Error("negative input")
+        }
+        return x * x
+    }
+    print(double(4))
+    try {
+        var r = safeSqrt(3)
+        print(r)
+    } catch(err) {
+        print("caught: {err}")
+    }
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Non-throwing lambda must NOT have error return
+	assertContains(t, out, "func(x int) int { return (x * 2) }")
+	// Throwing lambda MUST have error return
+	assertContains(t, out, "func(x int) (int, error)")
+	// Try block must unwrap the throwing lambda call
+	assertContains(t, out, "_err := safeSqrt(3)")
+	// Non-throwing call must remain a plain assignment
+	assertNotContains(t, out, "_err := double(")
+}
+
+func TestIntegrationMultipleThrowingCallsInTry(t *testing.T) {
+	src := `fn main() {
+    var safeDivide = (a: Int, b: Int): Int => {
+        if (b == 0) {
+            throw Error("division by zero")
+        }
+        return a / b
+    }
+    try {
+        var r1 = safeDivide(10, 2)
+        print(r1)
+        var r2 = safeDivide(8, 4)
+        print(r2)
+    } catch(err) {
+        print("caught: {err}")
+    }
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Both calls must be unwrapped — plain assignments must not appear
+	assertContains(t, out, "_err := safeDivide(10, 2)")
+	assertContains(t, out, "_err := safeDivide(8, 4)")
+	assertNotContains(t, out, "r1 := safeDivide")
+	assertNotContains(t, out, "r2 := safeDivide")
+}
+
+func TestIntegrationStringInterpolationInLambda(t *testing.T) {
+	src := `fn main() {
+    var makeMsg = (name: String): String => "Hello, {name}!"
+    print(makeMsg("World"))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Interpolation must become Sprintf inside the func literal
+	assertContains(t, out, `fmt.Sprintf("Hello, %v!", name)`)
+	assertNotContains(t, out, "=>")
+}
+
+func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
+	src := `fn main() {
+    var base = 100
+    var addBase = (x: Int): Int => x + base
+    print(addBase(5))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Outer variable must appear inside the func literal body
+	assertContains(t, out, "func(x int) int { return (x + base) }")
+	// base must be declared before the lambda
+	assertContains(t, out, "base := 100")
+}
+
+func TestIntegrationThrowingLambdaMultipleReturnPaths(t *testing.T) {
+	src := `fn main() {
+    var classify = (x: Int): String => {
+        if (x < 0) {
+            throw Error("negative")
+        }
+        if (x == 0) {
+            return "zero"
+        }
+        return "positive"
+    }
+    try {
+        var r = classify(5)
+        print(r)
+    } catch(err) {
+        print("caught: {err}")
+    }
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Throwing lambda must have (string, error) return
+	assertContains(t, out, "func(x int) (string, error)")
+	// Both regular returns must have nil appended
+	assertContains(t, out, `return "zero", nil`)
+	assertContains(t, out, `return "positive", nil`)
+	// Throw must emit zero value + error
+	assertContains(t, out, `return "", fmt.Errorf`)
+	// Try block must unwrap the call
+	assertContains(t, out, "_err := classify(5)")
+}
