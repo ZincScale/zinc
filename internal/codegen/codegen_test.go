@@ -181,12 +181,27 @@ func TestImport(t *testing.T) {
 }
 
 func TestListLiteral(t *testing.T) {
-	src := `fn main() { var x: Any = [1, 2, 3] }`
-	out, errs := transpile(src)
+	out, errs := transpile(`fn main() { var x: Any = [1, 2, 3] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "[]interface{}{1, 2, 3}")
+	assertContains(t, out, "[]int{1, 2, 3}")
+}
+
+func TestListLiteralStrings(t *testing.T) {
+	out, errs := transpile(`fn main() { var x: Any = ["a", "b"] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `[]string{"a", "b"}`)
+}
+
+func TestListLiteralEmpty(t *testing.T) {
+	out, errs := transpile(`fn main() { var x: Any = [] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "[]interface{}{}")
 }
 
 func TestMapLiteral(t *testing.T) {

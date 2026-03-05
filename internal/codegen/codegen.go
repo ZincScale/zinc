@@ -487,8 +487,24 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	}
 
 	// 2. Constructor
+	classInstStr := cls.Name
+	if len(cls.TypeParams) > 0 {
+		typeArgs := make([]string, len(cls.TypeParams))
+		for i, tp := range cls.TypeParams {
+			typeArgs[i] = tp
+		}
+		classInstStr = cls.Name + "[" + strings.Join(typeArgs, ", ") + "]"
+	}
 	if cls.Ctor != nil {
 		g.emitCtor(cls, baseClass)
+	} else {
+		// No explicit constructor — emit a default no-arg one so ClassName.new() works.
+		g.writeln(fmt.Sprintf("func New%s%s() *%s {", cls.Name, typeParamStr, classInstStr))
+		g.push()
+		g.writeln(fmt.Sprintf("return &%s{}", classInstStr))
+		g.pop()
+		g.writeln("}")
+		g.writeln("")
 	}
 
 	// 3. Methods
@@ -534,40 +550,17 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	g.write(fmt.Sprintf("obj := &%s{\n", classInstStr))
 
 	g.push()
-	// Base class init
-	if baseClass != "" && g.classCtors[baseClass] != nil {
-		parentCtor := g.classCtors[baseClass]
-		var superArgStrs []string
-		// Map super args by position to parent ctor params
-		for i, arg := range ctor.SuperArgs {
-			_ = i
-			superArgStrs = append(superArgStrs, g.emitExpr(arg))
-		}
-		// Build parent struct literal
-		var parentFields []string
-		for i, pp := range parentCtor.Params {
-			val := ""
-			if i < len(superArgStrs) {
-				val = superArgStrs[i]
-			} else {
-				val = g.zeroValue(pp.Type)
-			}
-			parentFields = append(parentFields, capitalize(pp.Name)+": "+val)
-		}
-		if len(parentFields) > 0 {
-			g.writeln(fmt.Sprintf("%s: %s{%s},", baseClass, baseClass, strings.Join(parentFields, ", ")))
-		} else {
-			g.writeln(fmt.Sprintf("%s: %s{},", baseClass, baseClass))
-		}
-	} else if baseClass != "" {
-		// super call with raw args
+	// Base class init — call the parent constructor to avoid field-name mismatches.
+	if baseClass != "" {
 		var superArgStrs []string
 		for _, arg := range ctor.SuperArgs {
 			superArgStrs = append(superArgStrs, g.emitExpr(arg))
 		}
-		if len(superArgStrs) > 0 {
-			g.writeln(fmt.Sprintf("%s: %s{%s},", baseClass, baseClass, strings.Join(superArgStrs, ", ")))
+		if g.classCtors[baseClass] != nil {
+			// Parent has a named constructor: embed via *NewParent(args...)
+			g.writeln(fmt.Sprintf("%s: *New%s(%s),", baseClass, baseClass, strings.Join(superArgStrs, ", ")))
 		} else {
+			// Parent has no registered constructor: zero-value embed
 			g.writeln(fmt.Sprintf("%s: %s{},", baseClass, baseClass))
 		}
 	}
@@ -1194,7 +1187,20 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		for _, el := range ex.Elements {
 			elems = append(elems, g.emitExpr(el))
 		}
-		return fmt.Sprintf("[]interface{}{%s}", strings.Join(elems, ", "))
+		elemType := "interface{}"
+		if len(ex.Elements) > 0 {
+			switch ex.Elements[0].(type) {
+			case *parser.IntLit:
+				elemType = "int"
+			case *parser.FloatLit:
+				elemType = "float64"
+			case *parser.StringLit:
+				elemType = "string"
+			case *parser.BoolLit:
+				elemType = "bool"
+			}
+		}
+		return fmt.Sprintf("[]%s{%s}", elemType, strings.Join(elems, ", "))
 	case *parser.MapLit:
 		var pairs []string
 		for i, k := range ex.Keys {
