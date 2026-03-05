@@ -72,6 +72,80 @@ pub fn greet(name: String): String {
 }
 ```
 
+#### Default Parameter Values
+
+Parameters may declare a default value with `= expr`. Callers that omit the argument receive the default — inlined by the transpiler into the emitted Go call site (no runtime overhead):
+
+```growler
+fn greet(name: String, greeting: String = "Hello") {
+    print("{greeting}, {name}!")
+}
+
+fn main() {
+    greet("Alice")              // greeting defaults to "Hello"
+    greet("Bob", "Hi")          // explicit override
+}
+```
+
+Transpiles to:
+
+```go
+func greet(name string, greeting string) {
+    fmt.Println(fmt.Sprintf("%v, %v!", greeting, name))
+}
+
+func main() {
+    greet("Alice", "Hello")
+    greet("Bob", "Hi")
+}
+```
+
+#### Named Arguments
+
+Arguments may be passed by name at any call site using `name: value` syntax. Named arguments may appear in any order and can be mixed with leading positional arguments. Positional arguments must always come first.
+
+```growler
+fn connect(host: String, port: Int = 8080, tls: Bool = false) { }
+
+fn main() {
+    connect("localhost")                       // both defaults used
+    connect("example.com", port: 443, tls: true)  // named, positional host
+    connect(tls: true, host: "example.com")    // fully named, reordered
+}
+```
+
+Named arguments also work on constructors:
+
+```growler
+class Dog {
+    var name: String
+    var age: Int
+
+    construct new(name: String, age: Int = 0) {
+        this.name = name
+        this.age = age
+    }
+}
+
+fn main() {
+    var d1 = Dog.new("Rex")              // age defaults to 0
+    var d2 = Dog.new("Buddy", 3)         // explicit
+    var d3 = Dog.new(name: "Max")        // named, age defaults
+    var d4 = Dog.new(age: 5, name: "Spot") // named, reordered
+}
+```
+
+Transpiles to:
+
+```go
+func main() {
+    d1 := NewDog("Rex", 0)
+    d2 := NewDog("Buddy", 3)
+    d3 := NewDog("Max", 0)
+    d4 := NewDog("Spot", 5)
+}
+```
+
 ### Generic Functions
 
 ```growler
@@ -91,7 +165,7 @@ class Dog {
     var name: String
     var age: Int
 
-    construct new(name: String, age: Int) {
+    construct new(name: String, age: Int = 0) {
         this.name = name
         this.age = age
     }
@@ -101,7 +175,7 @@ class Dog {
     }
 
     pub static fn create(name: String): Dog {
-        return Dog.new(name, 0)
+        return Dog.new(name)
     }
 }
 ```
