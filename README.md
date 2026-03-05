@@ -165,20 +165,26 @@ Emits Go `iota` constants:
 ```go
 type Direction int
 const (
-    North Direction = iota
-    South
-    East
-    West
+    DirectionNorth Direction = iota
+    DirectionSouth
+    DirectionEast
+    DirectionWest
 )
 ```
 
 ### Match / Switch
 
 ```growler
-match direction {
-    case 0 => { print("North") }
-    case 1 => { print("South") }
-    case _ => { print("Other") }
+enum Direction { North, South, East, West }
+
+fn describe(d: Direction): String {
+    match d {
+        case Direction.North => { return "Going North" }
+        case Direction.South => { return "Going South" }
+        case Direction.East  => { return "Going East"  }
+        case Direction.West  => { return "Going West"  }
+        case _ => { return "Unknown" }
+    }
 }
 ```
 
@@ -216,6 +222,87 @@ for (var i: Int = 0; i < 10; i += 1) {
 // for-in (range)
 for item in items {
     print(item)
+}
+```
+
+### Closures / Lambdas
+
+Lambdas use the `(params): ReturnType => body` syntax. The body is either a
+single expression or a block `{ ... }`.
+
+```growler
+// Single-expression lambda (inferred as a func literal)
+var double = (x: Int): Int => x * 2
+var greet  = (): String => "Hello!"
+
+// Block-body lambda
+var describe = (x: Int): String => {
+    if (x > 0) {
+        return "positive"
+    }
+    return "non-positive"
+}
+
+// Closure capture — lambda body may reference outer variables
+var base   = 100
+var addBase = (x: Int): Int => x + base
+
+// String interpolation works inside lambda bodies
+var makeMsg = (name: String): String => "Hello, {name}!"
+```
+
+Transpiles to idiomatic Go `func` literals:
+
+```go
+double  := func(x int) int { return (x * 2) }
+greet   := func() string { return "Hello!" }
+describe := func(x int) string { ... }
+base    := 100
+addBase := func(x int) int { return (x + base) }
+makeMsg := func(name string) string { return fmt.Sprintf("Hello, %v!", name) }
+```
+
+#### Throwing lambdas
+
+A lambda that contains `throw` automatically gets an `error` return appended to
+its signature. Calls to that lambda inside a `try` block are automatically
+unwrapped — you don't write any error-handling boilerplate:
+
+```growler
+var safeDivide = (a: Int, b: Int): Int => {
+    if (b == 0) {
+        throw Error("division by zero")
+    }
+    return a / b
+}
+
+try {
+    var result = safeDivide(10, 2)   // unwrapped automatically
+    print(result)
+} catch(err) {
+    print("Error: {err}")
+}
+```
+
+Transpiles to:
+
+```go
+safeDivide := func(a int, b int) (int, error) {
+    if b == 0 {
+        return 0, fmt.Errorf("division by zero")
+    }
+    return (a / b), nil
+}
+{
+    err := func() error {
+        result, _err := safeDivide(10, 2)
+        if _err != nil { return _err }
+        fmt.Println(result)
+        return nil
+    }()
+    if err != nil {
+        fmt.Println(fmt.Sprintf("Error: %v", err))
+    }
 }
 ```
 
@@ -360,6 +447,7 @@ See the [`examples/`](examples/) directory:
 - [`enums.gw`](examples/enums.gw) — Enums + match
 - [`generics.gw`](examples/generics.gw) — Generic functions and classes
 - [`fibonacci.gw`](examples/fibonacci.gw) — Recursion
+- [`closures.gw`](examples/closures.gw) — Lambdas, closures, throwing lambdas
 
 Run any example:
 
