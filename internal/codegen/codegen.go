@@ -34,6 +34,10 @@ type Generator struct {
 	// packageName overrides the emitted package declaration.
 	// Empty means auto-detect from PackageDecl or default to "main".
 	packageName string
+	// fnParams: top-level function name → param list (for default/named-arg resolution)
+	fnParams map[string][]*parser.ParamDecl
+	// methodParams: class name → method name → param list
+	methodParams map[string]map[string][]*parser.ParamDecl
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -46,6 +50,8 @@ func New() *Generator {
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
+		fnParams:       make(map[string][]*parser.ParamDecl),
+		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
 	}
 }
 
@@ -62,6 +68,8 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
 		packageName:    pkgName,
+		fnParams:       make(map[string][]*parser.ParamDecl),
+		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
 	}
 	for k, v := range reg.ClassNames {
 		g.classNames[k] = v
@@ -142,6 +150,25 @@ func (g *Generator) firstPass(prog *parser.Program) {
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
 			g.enumNames[d.Name] = true
+		}
+	}
+
+	// Collect fn and method param lists for named-arg / default resolution
+	for _, decl := range prog.Decls {
+		switch d := decl.(type) {
+		case *parser.FnDecl:
+			if len(d.Params) > 0 {
+				g.fnParams[d.Name] = d.Params
+			}
+		case *parser.ClassDecl:
+			for _, m := range d.Methods {
+				if len(m.Params) > 0 {
+					if g.methodParams[d.Name] == nil {
+						g.methodParams[d.Name] = make(map[string][]*parser.ParamDecl)
+					}
+					g.methodParams[d.Name][m.Name] = m.Params
+				}
+			}
 		}
 	}
 
@@ -1201,6 +1228,8 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		classCtors:        g.classCtors,
 		receiver:          g.receiver,
 		throwingVars:      g.throwingVars, // share so nested calls resolve
+		fnParams:          g.fnParams,
+		methodParams:      g.methodParams,
 		currentReturnType: e.ReturnType,
 		currentCanThrow:   lambdaCanThrow, // was hardcoded false
 		indent:            1,
@@ -1213,29 +1242,73 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	return fmt.Sprintf("func(%s)%s {\n%s\n%s}", paramStr, retStr, bodyStr, outerIndent)
 }
 
-func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
-	var args []string
-	for _, a := range call.Args {
-		args = append(args, g.emitExpr(a))
+// resolveArgs merges positional args, named args, and defaults for a call.
+// If params is nil (unknown callee), positional args are emitted followed by
+// named arg values in source order (no reordering possible).
+func (g *Generator) resolveArgs(params []*parser.ParamDecl, call *parser.CallExpr) []string {
+	if len(params) == 0 {
+		// No param info: emit positional then named (in order)
+		var out []string
+		for _, a := range call.Args {
+			out = append(out, g.emitExpr(a))
+		}
+		for _, na := range call.NamedArgs {
+			out = append(out, g.emitExpr(na.Value))
+		}
+		return out
 	}
-	argStr := strings.Join(args, ", ")
 
+	result := make([]string, len(params))
+	// 1. Fill positional args
+	for i, arg := range call.Args {
+		if i < len(result) {
+			result[i] = g.emitExpr(arg)
+		}
+	}
+	// 2. Fill named args (may reorder)
+	for _, na := range call.NamedArgs {
+		for i, p := range params {
+			if p.Name == na.Name {
+				result[i] = g.emitExpr(na.Value)
+				break
+			}
+		}
+	}
+	// 3. Fill remaining slots with defaults
+	for i, p := range params {
+		if result[i] == "" && p.Default != nil {
+			result[i] = g.emitExpr(p.Default)
+		}
+	}
+	return result
+}
+
+func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 	switch callee := call.Callee.(type) {
 	case *parser.SelectorExpr:
 		// Could be ClassName.new(...) → NewClassName(...)
 		if ident, ok := callee.Object.(*parser.Ident); ok {
 			if g.classNames[ident.Name] && callee.Field == "new" {
-				return fmt.Sprintf("New%s(%s)", ident.Name, argStr)
+				var ctorParams []*parser.ParamDecl
+				if ctor := g.classCtors[ident.Name]; ctor != nil {
+					ctorParams = ctor.Params
+				}
+				resolved := g.resolveArgs(ctorParams, call)
+				return fmt.Sprintf("New%s(%s)", ident.Name, strings.Join(resolved, ", "))
 			}
 		}
 		// Could be send/receive (already handled via SendExpr/ReceiveExpr in parser)
 		obj := g.emitExpr(callee.Object)
 		method := capitalize(callee.Field)
-		return fmt.Sprintf("%s.%s(%s)", obj, method, argStr)
+		resolved := g.resolveArgs(nil, call)
+		return fmt.Sprintf("%s.%s(%s)", obj, method, strings.Join(resolved, ", "))
 	case *parser.Ident:
-		return g.emitBuiltinCall(callee.Name, argStr, call.Args)
+		params := g.fnParams[callee.Name]
+		resolved := g.resolveArgs(params, call)
+		return g.emitBuiltinCall(callee.Name, strings.Join(resolved, ", "), call.Args)
 	default:
-		return fmt.Sprintf("%s(%s)", g.emitExpr(callee), argStr)
+		resolved := g.resolveArgs(nil, call)
+		return fmt.Sprintf("%s(%s)", g.emitExpr(callee), strings.Join(resolved, ", "))
 	}
 }
 

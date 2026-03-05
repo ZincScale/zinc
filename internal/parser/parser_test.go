@@ -308,3 +308,93 @@ class Dog { var name: String }`)
 		t.Errorf("expected 1 decl, got %d", len(prog.Decls))
 	}
 }
+
+// --- Default parameter values ------------------------------------------------
+
+func TestParseParamWithDefault(t *testing.T) {
+	prog, p := parse(`fn greet(name: String, greeting: String = "Hello") {}`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	if len(fn.Params) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(fn.Params))
+	}
+	if fn.Params[0].Default != nil {
+		t.Error("expected no default for first param")
+	}
+	if fn.Params[1].Default == nil {
+		t.Fatal("expected default for second param")
+	}
+	lit, ok := fn.Params[1].Default.(*StringLit)
+	if !ok {
+		t.Fatal("expected StringLit default")
+	}
+	if lit.Value != "Hello" {
+		t.Errorf("expected default %q, got %q", "Hello", lit.Value)
+	}
+}
+
+func TestParseCtorParamWithDefault(t *testing.T) {
+	prog, p := parse(`class Dog {
+		var name: String
+		var age: Int
+		construct new(name: String, age: Int = 0) {}
+	}`)
+	assertNoErrors(t, p)
+	cls := prog.Decls[0].(*ClassDecl)
+	if cls.Ctor == nil {
+		t.Fatal("expected ctor")
+	}
+	if len(cls.Ctor.Params) != 2 {
+		t.Fatalf("expected 2 ctor params, got %d", len(cls.Ctor.Params))
+	}
+	if cls.Ctor.Params[0].Default != nil {
+		t.Error("expected no default for first ctor param")
+	}
+	if cls.Ctor.Params[1].Default == nil {
+		t.Fatal("expected default for second ctor param")
+	}
+	lit, ok := cls.Ctor.Params[1].Default.(*IntLit)
+	if !ok {
+		t.Fatalf("expected IntLit default, got %T", cls.Ctor.Params[1].Default)
+	}
+	if lit.Value != "0" {
+		t.Errorf("expected default 0, got %q", lit.Value)
+	}
+}
+
+// --- Named arguments at call sites -------------------------------------------
+
+func TestParseNamedArgs(t *testing.T) {
+	prog, p := parse(`fn main() { foo(x: 5, y: 10) }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	call := fn.Body.Stmts[0].(*ExprStmt).Expr.(*CallExpr)
+	if len(call.Args) != 0 {
+		t.Errorf("expected 0 positional args, got %d", len(call.Args))
+	}
+	if len(call.NamedArgs) != 2 {
+		t.Fatalf("expected 2 named args, got %d", len(call.NamedArgs))
+	}
+	if call.NamedArgs[0].Name != "x" {
+		t.Errorf("expected named arg x, got %q", call.NamedArgs[0].Name)
+	}
+	if call.NamedArgs[1].Name != "y" {
+		t.Errorf("expected named arg y, got %q", call.NamedArgs[1].Name)
+	}
+}
+
+func TestParseMixedPositionalAndNamedArgs(t *testing.T) {
+	prog, p := parse(`fn main() { greet("Bob", greeting: "Hi") }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	call := fn.Body.Stmts[0].(*ExprStmt).Expr.(*CallExpr)
+	if len(call.Args) != 1 {
+		t.Fatalf("expected 1 positional arg, got %d", len(call.Args))
+	}
+	if len(call.NamedArgs) != 1 {
+		t.Fatalf("expected 1 named arg, got %d", len(call.NamedArgs))
+	}
+	if call.NamedArgs[0].Name != "greeting" {
+		t.Errorf("expected named arg greeting, got %q", call.NamedArgs[0].Name)
+	}
+}

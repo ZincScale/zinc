@@ -120,10 +120,17 @@ type FieldDecl struct {
 	Default Expr // may be nil
 }
 
-// ParamDecl: name: Type
+// ParamDecl: name: Type [= expr]
 type ParamDecl struct {
-	Name string
-	Type TypeExpr
+	Name    string
+	Type    TypeExpr
+	Default Expr // nil if no default
+}
+
+// NamedArg: name: expr at a call site
+type NamedArg struct {
+	Name  string
+	Value Expr
 }
 
 // --- Type Expressions --------------------------------------------------------
@@ -347,8 +354,9 @@ func (u *UnaryExpr) exprTag() {}
 
 // CallExpr: callee(args)  e.g. Dog.new("Rex") or obj.method(x)
 type CallExpr struct {
-	Callee Expr
-	Args   []Expr
+	Callee    Expr
+	Args      []Expr     // positional args (must come before named args)
+	NamedArgs []NamedArg // named args, may be empty
 }
 
 func (c *CallExpr) nodeTag() {}

@@ -99,6 +99,8 @@ func (t *TypeParamType) String() string     { return t.Name }
 // FnSig describes a function or method signature.
 type FnSig struct {
 	TypeParams []string
+	ParamNames []string // parallel to Params: parameter names (for named-arg validation)
+	HasDefault []bool   // parallel to Params: whether each param has a default value
 	Params     []Type
 	Return     Type
 	CanThrow   bool

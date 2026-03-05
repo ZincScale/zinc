@@ -864,3 +864,63 @@ func TestIntegrationThrowingLambdaMultipleReturnPaths(t *testing.T) {
 	// Try block must unwrap the call
 	assertContains(t, out, "_err := classify(5)")
 }
+
+// --- Default parameters and named arguments ----------------------------------
+
+func TestDefaultAndNamedArgs(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    var age: Int
+    construct new(name: String, age: Int = 0) {
+        this.name = name
+        this.age = age
+    }
+}
+
+fn greet(name: String, greeting: String = "Hello") {
+    print("{greeting}, {name}!")
+}
+
+fn main() {
+    var d1 = Dog.new("Rex")
+    var d2 = Dog.new("Buddy", 3)
+    var d3 = Dog.new(name: "Max")
+    var d4 = Dog.new(age: 5, name: "Spot")
+    greet("Alice")
+    greet("Bob", greeting: "Hi")
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Default age=0 filled in
+	assertContains(t, out, `NewDog("Rex", 0)`)
+	// Fully explicit
+	assertContains(t, out, `NewDog("Buddy", 3)`)
+	// Named arg with default filled in
+	assertContains(t, out, `NewDog("Max", 0)`)
+	// Named args reordered
+	assertContains(t, out, `NewDog("Spot", 5)`)
+	// Function default filled in (greet is not pub so stays lowercase)
+	assertContains(t, out, `greet("Alice", "Hello")`)
+	// Named override
+	assertContains(t, out, `greet("Bob", "Hi")`)
+}
+
+func TestDefaultParamOnly(t *testing.T) {
+	src := `
+fn add(x: Int, y: Int = 10): Int {
+    return x + y
+}
+fn main() {
+    var r = add(5)
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "add(5, 10)")
+}

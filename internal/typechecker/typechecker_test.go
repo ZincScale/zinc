@@ -308,8 +308,8 @@ fn add(a: Int, b: Int): Int { return a + b }
 fn main() { add(1) }
 `
 	errs := checkSrc(src)
-	if !hasError(errs, "wrong number of arguments") {
-		t.Errorf("expected 'wrong number of arguments' error, got %v", errs)
+	if !hasError(errs, "missing required argument") && !hasError(errs, "wrong number of arguments") {
+		t.Errorf("expected argument count mismatch error, got %v", errs)
 	}
 }
 
@@ -599,5 +599,103 @@ fn main() {
 		if strings.Contains(e.Msg, "throwing lambda") {
 			t.Fatalf("non-throwing lambda should not trigger error: %v", e)
 		}
+	}
+}
+
+// --- Default parameters and named arguments ----------------------------------
+
+func TestDefaultParamNoError(t *testing.T) {
+	src := `fn greet(name: String, greeting: String = "Hello") {}
+fn main() { greet("Alice") }`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestNamedArgsAllValid(t *testing.T) {
+	src := `fn greet(name: String, greeting: String = "Hello") {}
+fn main() { greet(greeting: "Hi", name: "Bob") }`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestMixedPositionalAndNamedArgs(t *testing.T) {
+	src := `fn greet(name: String, greeting: String = "Hello") {}
+fn main() { greet("Bob", greeting: "Hi") }`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestMissingRequiredArg(t *testing.T) {
+	src := `fn greet(name: String, greeting: String = "Hello") {}
+fn main() { greet() }`
+	errs := checkSrc(src)
+	if !hasError(errs, "missing required argument") {
+		t.Errorf("expected missing required argument error, got: %v", errs)
+	}
+}
+
+func TestUnknownNamedArg(t *testing.T) {
+	src := `fn greet(name: String) {}
+fn main() { greet(badParam: "hi") }`
+	errs := checkSrc(src)
+	if !hasError(errs, "unknown named argument") {
+		t.Errorf("expected unknown named argument error, got: %v", errs)
+	}
+}
+
+func TestTooManyArgs(t *testing.T) {
+	src := `fn add(x: Int, y: Int): Int { return x }
+fn main() { add(1, 2, 3) }`
+	errs := checkSrc(src)
+	if !hasError(errs, "too many arguments") {
+		t.Errorf("expected too many arguments error, got: %v", errs)
+	}
+}
+
+func TestCtorDefaultParam(t *testing.T) {
+	src := `class Dog {
+    var name: String
+    var age: Int
+    construct new(name: String, age: Int = 0) {
+        this.name = name
+        this.age = age
+    }
+}
+fn main() {
+    var d = Dog.new("Rex")
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestCtorNamedArg(t *testing.T) {
+	src := `class Dog {
+    var name: String
+    var age: Int
+    construct new(name: String, age: Int = 0) {
+        this.name = name
+        this.age = age
+    }
+}
+fn main() {
+    var d = Dog.new(name: "Rex")
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestCtorUnknownNamedArg(t *testing.T) {
+	src := `class Dog {
+    var name: String
+    construct new(name: String) {
+        this.name = name
+    }
+}
+fn main() {
+    var d = Dog.new(badField: "Rex")
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "unknown named argument") {
+		t.Errorf("expected unknown named argument error, got: %v", errs)
 	}
 }

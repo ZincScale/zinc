@@ -214,15 +214,30 @@ func (p *Parser) finishCallArgs(callee Expr) Expr {
 
 func (p *Parser) finishCallArgsNoLParen(callee Expr) Expr {
 	var args []Expr
+	var namedArgs []NamedArg
+	seenNamed := false
+
 	if !p.check(lexer.TOKEN_RPAREN) {
-		args = append(args, p.parseExpr())
-		for p.check(lexer.TOKEN_COMMA) {
+		for {
+			if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_COLON {
+				seenNamed = true
+				name := p.advance().Literal
+				p.advance() // consume ':'
+				namedArgs = append(namedArgs, NamedArg{Name: name, Value: p.parseExpr()})
+			} else {
+				if seenNamed {
+					p.errorf("positional argument after named argument")
+				}
+				args = append(args, p.parseExpr())
+			}
+			if !p.check(lexer.TOKEN_COMMA) {
+				break
+			}
 			p.advance()
-			args = append(args, p.parseExpr())
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
-	return &CallExpr{Callee: callee, Args: args}
+	return &CallExpr{Callee: callee, Args: args, NamedArgs: namedArgs}
 }
 
 func (p *Parser) parseUnary() Expr {
@@ -697,7 +712,12 @@ func (p *Parser) parseParam() *ParamDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.expect(lexer.TOKEN_COLON)
 	typ := p.parseType()
-	return &ParamDecl{Name: name, Type: typ}
+	var def Expr
+	if p.check(lexer.TOKEN_ASSIGN) {
+		p.advance()
+		def = p.parseExpr()
+	}
+	return &ParamDecl{Name: name, Type: typ, Default: def}
 }
 
 func (p *Parser) parseParamList() []*ParamDecl {

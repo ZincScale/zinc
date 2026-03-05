@@ -179,7 +179,12 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					for i, p := range d.Ctor.Params {
 						params[i] = c.resolveTypeExpr(p.Type)
 					}
-					ct.Ctor = &FnSig{Params: params, Return: ct}
+					ct.Ctor = &FnSig{
+					Params:     params,
+					ParamNames: paramNamesFrom(d.Ctor.Params),
+					HasDefault: hasDefaultsFrom(d.Ctor.Params),
+					Return:     ct,
+				}
 				}
 				// Methods
 				for _, m := range d.Methods {
@@ -191,7 +196,13 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					if m.ReturnType != nil {
 						ret = c.resolveTypeExpr(m.ReturnType)
 					}
-					ct.Methods[m.Name] = &FnSig{Params: params, Return: ret, CanThrow: m.CanThrow}
+					ct.Methods[m.Name] = &FnSig{
+					Params:     params,
+					ParamNames: paramNamesFrom(m.Params),
+					HasDefault: hasDefaultsFrom(m.Params),
+					Return:     ret,
+					CanThrow:   m.CanThrow,
+				}
 				}
 				c.currentTypeParams = saved
 
@@ -226,6 +237,8 @@ func (c *Checker) prePass(progs []*parser.Program) {
 				c.fns[d.Name] = &FnSig{
 					TypeParams: d.TypeParams,
 					Params:     params,
+					ParamNames: paramNamesFrom(d.Params),
+					HasDefault: hasDefaultsFrom(d.Params),
 					Return:     ret,
 					CanThrow:   d.CanThrow,
 				}
@@ -716,15 +729,22 @@ func (c *Checker) inferCall(e *parser.CallExpr) Type {
 			}
 		}
 	}
+	for _, na := range e.NamedArgs {
+		if lambda, ok := na.Value.(*parser.LambdaExpr); ok && lambda.Body != nil {
+			if c.lambdaBodyCanThrow(lambda.Body) {
+				c.errorf(0, 0, "throwing lambda cannot be passed as argument; assign to a variable and call within try/catch")
+			}
+		}
+	}
 
 	// SelectorExpr callee: obj.method(args) or Dog.new(args)
 	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
-		return c.inferMethodCall(sel, e.Args)
+		return c.inferMethodCall(sel, e.Args, e.NamedArgs)
 	}
 
 	// Direct function call: fn(args)
 	if id, ok := e.Callee.(*parser.Ident); ok {
-		return c.inferFnCall(id.Name, e.Args)
+		return c.inferFnCall(id.Name, e.Args, e.NamedArgs)
 	}
 
 	// Other callable expression
@@ -732,37 +752,40 @@ func (c *Checker) inferCall(e *parser.CallExpr) Type {
 	for _, arg := range e.Args {
 		c.inferExpr(arg)
 	}
+	for _, na := range e.NamedArgs {
+		c.inferExpr(na.Value)
+	}
 	return TypeUnknown
 }
 
-func (c *Checker) inferFnCall(name string, args []parser.Expr) Type {
+func (c *Checker) inferFnCall(name string, args []parser.Expr, namedArgs []parser.NamedArg) Type {
 	for _, arg := range args {
 		c.inferExpr(arg)
 	}
+	for _, na := range namedArgs {
+		c.inferExpr(na.Value)
+	}
 	if sig, ok := c.fns[name]; ok {
-		if !sig.isGeneric() && len(args) != len(sig.Params) {
-			c.errorf(0, 0, "wrong number of arguments to %q: expected %d, got %d",
-				name, len(sig.Params), len(args))
-		}
+		c.validateArgs(sig, name, args, namedArgs)
 		return sig.Return
 	}
 	// Could be a built-in or imported fn — don't report error
 	return TypeUnknown
 }
 
-func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr) Type {
+func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, namedArgs []parser.NamedArg) Type {
 	for _, arg := range args {
 		c.inferExpr(arg)
+	}
+	for _, na := range namedArgs {
+		c.inferExpr(na.Value)
 	}
 
 	// Check for ClassName.new(args) → constructor call
 	if id, ok := sel.Object.(*parser.Ident); ok {
 		if ct, found := c.classes[id.Name]; found && sel.Field == "new" {
 			if ct.Ctor != nil && !ct.isGeneric() {
-				if len(args) != len(ct.Ctor.Params) {
-					c.errorf(0, 0, "wrong number of arguments to %s.new: expected %d, got %d",
-						id.Name, len(ct.Ctor.Params), len(args))
-				}
+				c.validateArgs(ct.Ctor, id.Name+".new", args, namedArgs)
 			}
 			return ct
 		}
@@ -788,10 +811,7 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr) 
 
 	if ct, ok := objType.(*ClassType); ok {
 		if sig, found := c.findMethod(ct, sel.Field); found {
-			if !sig.isGeneric() && len(args) != len(sig.Params) {
-				c.errorf(0, 0, "wrong number of arguments to %s.%s: expected %d, got %d",
-					ct.Name, sel.Field, len(sig.Params), len(args))
-			}
+			c.validateArgs(sig, ct.Name+"."+sel.Field, args, namedArgs)
 			return sig.Return
 		}
 		c.errorf(0, 0, "undefined method %q on %s", sel.Field, ct.Name)
@@ -909,6 +929,78 @@ func (c *Checker) inferSend(e *parser.SendExpr) {
 }
 
 // --- Helpers -----------------------------------------------------------------
+
+// paramNamesFrom extracts parameter names from a ParamDecl slice.
+func paramNamesFrom(params []*parser.ParamDecl) []string {
+	names := make([]string, len(params))
+	for i, p := range params {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// hasDefaultsFrom extracts which params have default values.
+func hasDefaultsFrom(params []*parser.ParamDecl) []bool {
+	result := make([]bool, len(params))
+	for i, p := range params {
+		result[i] = p.Default != nil
+	}
+	return result
+}
+
+// validateArgs validates positional and named arguments against a function signature.
+// It reports errors for too many args, unknown named arg names, and missing required args.
+func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, namedArgs []parser.NamedArg) {
+	if sig.isGeneric() {
+		return
+	}
+	totalProvided := len(args) + len(namedArgs)
+	if totalProvided > len(sig.Params) {
+		c.errorf(0, 0, "too many arguments to %s: expected at most %d, got %d",
+			callName, len(sig.Params), totalProvided)
+		return
+	}
+	// Validate named arg names
+	for _, na := range namedArgs {
+		found := false
+		for _, pname := range sig.ParamNames {
+			if pname == na.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.errorf(0, 0, "unknown named argument %q to %s", na.Name, callName)
+		}
+	}
+	// Check all required params are covered
+	covered := make([]bool, len(sig.Params))
+	for i := range args {
+		if i < len(covered) {
+			covered[i] = true
+		}
+	}
+	for _, na := range namedArgs {
+		for i, pname := range sig.ParamNames {
+			if pname == na.Name {
+				covered[i] = true
+				break
+			}
+		}
+	}
+	for i := range sig.Params {
+		if !covered[i] {
+			isRequired := i >= len(sig.HasDefault) || !sig.HasDefault[i]
+			if isRequired {
+				paramName := fmt.Sprintf("param %d", i+1)
+				if i < len(sig.ParamNames) {
+					paramName = sig.ParamNames[i]
+				}
+				c.errorf(0, 0, "missing required argument %q to %s", paramName, callName)
+			}
+		}
+	}
+}
 
 // findMethod walks the class hierarchy to find a method by name.
 func (c *Checker) findMethod(ct *ClassType, name string) (*FnSig, bool) {
