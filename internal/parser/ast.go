@@ -113,11 +113,22 @@ type EnumDecl struct {
 func (e *EnumDecl) nodeTag()      {}
 func (e *EnumDecl) topLevelTag() {}
 
+// ConstDecl: const NAME: Type = expr
+type ConstDecl struct {
+	Name  string
+	Type  TypeExpr // may be nil (inferred)
+	Value Expr
+}
+
+func (c *ConstDecl) nodeTag()      {}
+func (c *ConstDecl) topLevelTag() {}
+
 // FieldDecl: var name: Type [= expr]
 type FieldDecl struct {
-	Name    string
-	Type    TypeExpr
-	Default Expr // may be nil
+	Name      string
+	Type      TypeExpr
+	Default   Expr // may be nil
+	IsPrivate bool // private var → unexported Go field
 }
 
 // ParamDecl: name: Type [= expr]
@@ -229,17 +240,18 @@ type IfStmt struct {
 func (i *IfStmt) nodeTag() {}
 func (i *IfStmt) stmtTag() {}
 
-// ForStmt: for (init; cond; post) { }  OR  for item in list { }
+// ForStmt: for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
 type ForStmt struct {
 	// C-style
 	Init Stmt // VarStmt or AssignStmt
 	Cond Expr
 	Post Stmt // AssignStmt
 
-	// Range-style (for item in list)
-	IsRange bool
-	Item    string
-	Range   Expr
+	// Range-style (for item in list OR for (i, item) in list)
+	IsRange  bool
+	IndexVar string // optional index variable (for (i, item) in list); empty if not present
+	Item     string
+	Range    Expr
 
 	Body *BlockStmt
 }
@@ -324,6 +336,30 @@ type ContinueStmt struct{}
 
 func (c *ContinueStmt) nodeTag() {}
 func (c *ContinueStmt) stmtTag() {}
+
+// DeferStmt: defer expr
+type DeferStmt struct {
+	Expr Expr
+}
+
+func (d *DeferStmt) nodeTag() {}
+func (d *DeferStmt) stmtTag() {}
+
+// WithResource is a single resource binding inside a with statement.
+type WithResource struct {
+	Name  string
+	Value Expr
+}
+
+// WithStmt: with var name = expr [, var name = expr ...] { body }
+// Each resource has .Close() deferred automatically.
+type WithStmt struct {
+	Resources []*WithResource
+	Body      *BlockStmt
+}
+
+func (w *WithStmt) nodeTag() {}
+func (w *WithStmt) stmtTag() {}
 
 // --- Expressions -------------------------------------------------------------
 
@@ -482,6 +518,24 @@ type MapLit struct {
 
 func (m *MapLit) nodeTag() {}
 func (m *MapLit) exprTag() {}
+
+// TypeAssertExpr: x as Type  OR  x is Type
+type TypeAssertExpr struct {
+	Object   Expr
+	TypeName string
+	IsCheck  bool // true = "is" (returns bool), false = "as" (type assertion)
+}
+
+func (*TypeAssertExpr) nodeTag() {}
+func (*TypeAssertExpr) exprTag() {}
+
+// RawStringLit: `raw string` (backtick literal — no escape processing)
+type RawStringLit struct {
+	Value string
+}
+
+func (r *RawStringLit) nodeTag() {}
+func (r *RawStringLit) exprTag() {}
 
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {

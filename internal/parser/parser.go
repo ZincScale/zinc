@@ -111,19 +111,23 @@ func (p *Parser) parseType() TypeExpr {
 type precedence int
 
 const (
-	precNone       precedence = iota
-	precOr                    // ||
-	precAnd                   // &&
-	precEquality              // == !=
-	precComparison            // < > <= >=
-	precAddSub                // + -
-	precMulDiv                // * / %
-	precUnary                 // ! -
-	precCall                  // . () []
+	precNone            precedence = iota
+	precNullCoalesce               // ??
+	precOr                         // ||
+	precAnd                        // &&
+	precEquality                   // == !=
+	precComparison                 // < > <= >=
+	precAddSub                     // + -
+	precMulDiv                     // * / %
+	precTypeOp                     // as is
+	precUnary                      // ! -
+	precCall                       // . () []
 )
 
 func tokenPrec(t lexer.TokenType) precedence {
 	switch t {
+	case lexer.TOKEN_QUESTION_QUESTION:
+		return precNullCoalesce
 	case lexer.TOKEN_PIPE_PIPE:
 		return precOr
 	case lexer.TOKEN_AMP_AMP:
@@ -136,6 +140,8 @@ func tokenPrec(t lexer.TokenType) precedence {
 		return precAddSub
 	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
 		return precMulDiv
+	case lexer.TOKEN_AS, lexer.TOKEN_IS:
+		return precTypeOp
 	case lexer.TOKEN_DOT, lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return precCall
 	}
@@ -178,6 +184,12 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 			idx := p.parseExpr()
 			p.expect(lexer.TOKEN_RBRACKET)
 			left = &IndexExpr{Object: left, Index: idx}
+		case lexer.TOKEN_AS:
+			typeName := p.expect(lexer.TOKEN_IDENT).Literal
+			left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: false}
+		case lexer.TOKEN_IS:
+			typeName := p.expect(lexer.TOKEN_IDENT).Literal
+			left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: true}
 		default:
 			right := p.parseExprPrec(prec)
 			left = &BinaryExpr{Left: left, Op: tok.Literal, Right: right}
@@ -312,6 +324,9 @@ func (p *Parser) parsePrimary() Expr {
 	case lexer.TOKEN_STRING_LIT:
 		p.advance()
 		return &StringLit{Value: tok.Literal}
+	case lexer.TOKEN_RAW_STRING:
+		p.advance()
+		return &RawStringLit{Value: tok.Literal}
 	case lexer.TOKEN_INTERP_STRING:
 		p.advance()
 		return p.parseInterpString(tok.Literal)
@@ -507,6 +522,12 @@ func (p *Parser) parseStmt() Stmt {
 	case lexer.TOKEN_CONTINUE:
 		p.advance()
 		return &ContinueStmt{}
+	case lexer.TOKEN_DEFER:
+		p.advance()
+		expr := p.parseExpr()
+		return &DeferStmt{Expr: expr}
+	case lexer.TOKEN_WITH:
+		return p.parseWithStmt()
 	case lexer.TOKEN_LBRACE:
 		return p.parseBlock()
 	}
@@ -582,6 +603,25 @@ func (p *Parser) parseForStmt() Stmt {
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
 		return &ForStmt{IsRange: true, Item: item, Range: rangeExpr, Body: body}
+	}
+
+	// Detect: for (i, item) in expr { }
+	// Look ahead: LPAREN IDENT COMMA IDENT RPAREN "in"
+	if p.check(lexer.TOKEN_LPAREN) &&
+		p.peekAt(1).Type == lexer.TOKEN_IDENT &&
+		p.peekAt(2).Type == lexer.TOKEN_COMMA &&
+		p.peekAt(3).Type == lexer.TOKEN_IDENT &&
+		p.peekAt(4).Type == lexer.TOKEN_RPAREN &&
+		p.peekAt(5).Literal == "in" {
+		p.advance()                      // (
+		indexVar := p.advance().Literal  // i
+		p.advance()                      // ,
+		item := p.advance().Literal      // item
+		p.advance()                      // )
+		p.advance()                      // in
+		rangeExpr := p.parseExpr()
+		body := p.parseBlock()
+		return &ForStmt{IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// C-style: for (init; cond; post) { }
@@ -675,6 +715,24 @@ func (p *Parser) parseMatchStmt() *MatchStmt {
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return &MatchStmt{Subject: subject, Cases: cases}
+}
+
+func (p *Parser) parseWithStmt() *WithStmt {
+	p.expect(lexer.TOKEN_WITH)
+	var resources []*WithResource
+	for {
+		p.expect(lexer.TOKEN_VAR)
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		p.expect(lexer.TOKEN_ASSIGN)
+		val := p.parseExpr()
+		resources = append(resources, &WithResource{Name: name, Value: val})
+		if !p.check(lexer.TOKEN_COMMA) {
+			break
+		}
+		p.advance()
+	}
+	body := p.parseBlock()
+	return &WithStmt{Resources: resources, Body: body}
 }
 
 func (p *Parser) parseExprOrAssignStmt() Stmt {

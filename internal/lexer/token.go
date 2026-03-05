@@ -45,6 +45,11 @@ const (
 	TOKEN_MATCH
 	TOKEN_CASE
 	TOKEN_PACKAGE
+	TOKEN_CONST
+	TOKEN_DEFER
+	TOKEN_IS
+	TOKEN_PRIVATE
+	TOKEN_WITH
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -77,8 +82,10 @@ const (
 	TOKEN_MINUS_EQ   // -=
 	TOKEN_STAR_EQ    // *=
 	TOKEN_SLASH_EQ   // /=
-	TOKEN_FAT_ARROW  // =>
-	TOKEN_QUESTION   // ?
+	TOKEN_FAT_ARROW          // =>
+	TOKEN_QUESTION           // ?
+	TOKEN_QUESTION_QUESTION  // ??
+	TOKEN_RAW_STRING         // `raw string`
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -124,6 +131,11 @@ var tokenNames = map[TokenType]string{
 	TOKEN_MATCH:     "match",
 	TOKEN_CASE:      "case",
 	TOKEN_PACKAGE:   "package",
+	TOKEN_CONST:     "const",
+	TOKEN_DEFER:     "defer",
+	TOKEN_IS:        "is",
+	TOKEN_PRIVATE:   "private",
+	TOKEN_WITH:      "with",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -155,8 +167,10 @@ var tokenNames = map[TokenType]string{
 	TOKEN_MINUS_EQ:  "-=",
 	TOKEN_STAR_EQ:   "*=",
 	TOKEN_SLASH_EQ:  "/=",
-	TOKEN_FAT_ARROW: "=>",
-	TOKEN_QUESTION:  "?",
+	TOKEN_FAT_ARROW:         "=>",
+	TOKEN_QUESTION:          "?",
+	TOKEN_QUESTION_QUESTION: "??",
+	TOKEN_RAW_STRING:        "RAW_STRING",
 
 	TOKEN_EOF:     "EOF",
 	TOKEN_ILLEGAL: "ILLEGAL",
@@ -211,6 +225,11 @@ var keywords = map[string]TokenType{
 	"match":     TOKEN_MATCH,
 	"case":      TOKEN_CASE,
 	"package":   TOKEN_PACKAGE,
+	"const":     TOKEN_CONST,
+	"defer":     TOKEN_DEFER,
+	"is":        TOKEN_IS,
+	"private":   TOKEN_PRIVATE,
+	"with":      TOKEN_WITH,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

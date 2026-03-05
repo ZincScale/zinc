@@ -97,6 +97,11 @@ func (l *Lexer) NextToken() Token {
 		return l.readString(line, col)
 	}
 
+	// Raw string literal
+	if ch == '`' {
+		return l.readRawString(line, col)
+	}
+
 	// Number literal
 	if isDigit(ch) {
 		return l.readNumber(line, col)
@@ -131,6 +136,10 @@ func (l *Lexer) NextToken() Token {
 	case ';':
 		return l.makeToken(TOKEN_SEMICOLON, ";", line, col)
 	case '?':
+		if l.peek() == '?' {
+			l.advance()
+			return l.makeToken(TOKEN_QUESTION_QUESTION, "??", line, col)
+		}
 		return l.makeToken(TOKEN_QUESTION, "?", line, col)
 	case '%':
 		return l.makeToken(TOKEN_PERCENT, "%", line, col)
@@ -261,6 +270,24 @@ func (l *Lexer) readString(line, col int) Token {
 		return l.makeToken(TOKEN_INTERP_STRING, sb.String(), line, col)
 	}
 	return l.makeToken(TOKEN_STRING_LIT, sb.String(), line, col)
+}
+
+func (l *Lexer) readRawString(line, col int) Token {
+	l.advance() // consume opening `
+	var sb strings.Builder
+	for {
+		ch := l.peek()
+		if ch == 0 {
+			l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unterminated raw string", line, col))
+			break
+		}
+		if ch == '`' {
+			l.advance()
+			break
+		}
+		sb.WriteRune(l.advance())
+	}
+	return l.makeToken(TOKEN_RAW_STRING, sb.String(), line, col)
 }
 
 func (l *Lexer) readNumber(line, col int) Token {

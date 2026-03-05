@@ -909,6 +909,41 @@ fn main() {
 	assertContains(t, out, `greet("Bob", "Hi")`)
 }
 
+func TestWithStmt(t *testing.T) {
+	src := `
+fn main() {
+    with var f = openFile("data.txt") {
+        print("reading")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "f := openFile(\"data.txt\")")
+	assertContains(t, out, "defer f.Close()")
+	assertContains(t, out, "fmt.Println(\"reading\")")
+}
+
+func TestWithStmtMultipleResources(t *testing.T) {
+	src := `
+fn main() {
+    with var src = openFile("in.txt"), var dst = createFile("out.txt") {
+        print("copying")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "src := openFile(\"in.txt\")")
+	assertContains(t, out, "defer src.Close()")
+	assertContains(t, out, "dst := createFile(\"out.txt\")")
+	assertContains(t, out, "defer dst.Close()")
+}
+
 func TestDefaultParamOnly(t *testing.T) {
 	src := `
 fn add(x: Int, y: Int = 10): Int {

@@ -745,6 +745,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("break")
 	case *parser.ContinueStmt:
 		g.writeln("continue")
+	case *parser.WithStmt:
+		g.emitWithStmt(st)
 	}
 }
 
@@ -934,6 +936,21 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 	g.emitBlock(gs.Body)
 	g.pop()
 	g.writeln("}()")
+}
+
+// emitWithStmt emits a scoped resource block.
+// Each resource is declared with := and immediately followed by defer .Close(),
+// mirroring Java's try-with-resources / C#'s using pattern.
+func (g *Generator) emitWithStmt(w *parser.WithStmt) {
+	g.writeln("{")
+	g.push()
+	for _, r := range w.Resources {
+		g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
+		g.writeln(fmt.Sprintf("defer %s.Close()", r.Name))
+	}
+	g.emitBlock(w.Body)
+	g.pop()
+	g.writeln("}")
 }
 
 // emitTryStmt emits a try/catch block.

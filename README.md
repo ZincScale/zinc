@@ -442,6 +442,53 @@ safeDivide := func(a int, b int) (int, error) {
 }
 ```
 
+### With (Resource Management)
+
+The `with` statement is Growler's equivalent of Java's try-with-resources. It ensures resources are closed automatically when the block exits — even if an error is thrown — without the developer having to remember to call `Close()`.
+
+```growler
+import "os"
+
+fn main() {
+    with var f = os.Open("data.txt") {
+        // use f — it is closed automatically when the block exits
+        print("reading file")
+    }
+}
+```
+
+Transpiles to:
+
+```go
+func main() {
+    {
+        f := os.Open("data.txt")
+        defer f.Close()
+        fmt.Println("reading file")
+    }
+}
+```
+
+Multiple resources can be declared in a single `with`, separated by commas. They are closed in reverse declaration order (last-in, first-out), matching Go's `defer` stack behaviour:
+
+```growler
+with var src = os.Open("in.txt"), var dst = os.Create("out.txt") {
+    // src and dst both deferred — dst closes before src
+}
+```
+
+`with` can be nested inside a `try` block for combined error handling and resource safety:
+
+```growler
+try {
+    with var f = os.Open("missing.txt") {
+        print("opened")
+    }
+} catch(err) {
+    print("error: {err}")
+}
+```
+
 ### Error Handling
 
 ```growler
