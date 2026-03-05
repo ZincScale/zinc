@@ -325,3 +325,110 @@ fn main() {
 	assertContains(t, out, "handle := openFile(\"data.txt\")")
 	assertContains(t, out, "if _c, ok := any(handle).(io.Closer); ok { defer _c.Close() }")
 }
+
+// --- goroutine combinations --------------------------------------------------
+
+func TestIntegrationGoRoutineTryCatch(t *testing.T) {
+	src := `
+fn main() {
+    go {
+        try {
+            throw Error("oops")
+        } catch(err) {
+            print("caught")
+        }
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "func() error")
+	assertContains(t, out, "fmt.Println(\"caught\")")
+}
+
+func TestIntegrationGoRoutineWith(t *testing.T) {
+	src := `
+fn main() {
+    go {
+        with var f = openFile("x") {
+            print("reading")
+        }
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "f := openFile(\"x\")")
+	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+}
+
+func TestIntegrationGoRoutineClosure(t *testing.T) {
+	src := `
+fn main() {
+    var base = 10
+    go {
+        var addBase = (x: Int): Int => x + base
+        print(addBase(5))
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "addBase := func(x int) int")
+	assertContains(t, out, "(x + base)")
+}
+
+func TestIntegrationGoRoutineThrowPanics(t *testing.T) {
+	// throw directly inside a goroutine (no try/catch) should panic, not return
+	src := `
+fn main() {
+    go {
+        throw Error("fatal")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "panic(fmt.Errorf(\"fatal\"))")
+	assertNotContains(t, out, "return fmt.Errorf")
+}
+
+func TestIntegrationGoRoutineThrowInsideThrowingFn(t *testing.T) {
+	// throw inside a goroutine that's inside a throwing function — goroutine
+	// still gets panic, not return, because it has its own void scope.
+	src := `
+fn risky() {
+    go {
+        throw Error("goroutine error")
+    }
+    throw Error("fn error")
+}
+fn main() {
+    try {
+        risky()
+    } catch(err) {
+        print(err)
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "go func()")
+	assertContains(t, out, "panic(fmt.Errorf(\"goroutine error\"))")
+	// The fn-level throw is still a return
+	assertContains(t, out, "return fmt.Errorf(\"fn error\")")
+}

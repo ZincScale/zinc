@@ -930,12 +930,19 @@ func (g *Generator) emitWhileStmt(w *parser.WhileStmt) {
 }
 
 func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
+	// Goroutine func has no return type, so throw inside must panic not return.
+	savedCT := g.currentCanThrow
+	savedRT := g.currentReturnType
+	g.currentCanThrow = false
+	g.currentReturnType = nil
 	g.writeIndent()
 	g.write("go func() {\n")
 	g.push()
 	g.emitBlock(gs.Body)
 	g.pop()
 	g.writeln("}()")
+	g.currentCanThrow = savedCT
+	g.currentReturnType = savedRT
 }
 
 // emitWithStmt emits a scoped resource block.
@@ -1072,7 +1079,6 @@ func (g *Generator) inferCallReturnType(call *parser.CallExpr) string {
 func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
 	g.neededImports["fmt"] = true
 	// The thrown value must be something with a message — typically Error("msg") call
-	// We emit: return <zero>, fmt.Errorf(msg)
 	var errStr string
 	switch v := t.Value.(type) {
 	case *parser.CallExpr:
@@ -1090,6 +1096,12 @@ func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
 		errStr = fmt.Sprintf("fmt.Errorf(\"%%v\", %s)", g.emitExpr(t.Value))
 	}
 
+	// In a non-throwing context (goroutine, void fn) there is no error return —
+	// panic is the correct Go behavior.
+	if !g.currentCanThrow {
+		g.writeln(fmt.Sprintf("panic(%s)", errStr))
+		return
+	}
 	zero := g.zeroValue(g.currentReturnType)
 	if zero != "" {
 		g.writeln(fmt.Sprintf("return %s, %s", zero, errStr))
