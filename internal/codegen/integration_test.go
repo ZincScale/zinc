@@ -279,3 +279,49 @@ fn main() {
 	assertContains(t, out, "func (d *Dog) Speak() string")
 	assertContains(t, out, "var _ Speaker = (*Dog)(nil)")
 }
+
+func TestIntegrationWithAndTryCatch(t *testing.T) {
+	src := `
+fn main() {
+    try {
+        with var f = openFile("x") {
+            print("ok")
+        }
+    } catch(err) {
+        print("error")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "f := openFile(\"x\")")
+	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+	assertContains(t, out, "func() error")
+	assertContains(t, out, "fmt.Println(\"error\")")
+}
+
+func TestIntegrationWithInClassMethod(t *testing.T) {
+	src := `
+class DataProcessor {
+    construct new() {}
+    pub fn process() {
+        with var handle = openFile("data.txt") {
+            print("processing")
+        }
+    }
+}
+fn main() {
+    var p = DataProcessor.new()
+    p.process()
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func (d *DataProcessor) Process()")
+	assertContains(t, out, "handle := openFile(\"data.txt\")")
+	assertContains(t, out, "if _c, ok := any(handle).(io.Closer); ok { defer _c.Close() }")
+}

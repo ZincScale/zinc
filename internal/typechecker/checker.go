@@ -416,6 +416,16 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.inferExpr(s.Value) // any type is OK
 	case *parser.ExprStmt:
 		c.inferExpr(s.Expr)
+	case *parser.WithStmt:
+		c.pushScope()
+		for _, r := range s.Resources {
+			c.inferExpr(r.Value)
+			c.scope.define(r.Name, TypeAny)
+		}
+		for _, st := range s.Body.Stmts {
+			c.checkStmt(st)
+		}
+		c.popScope()
 	case *parser.BreakStmt, *parser.ContinueStmt:
 		// nothing to check
 	}

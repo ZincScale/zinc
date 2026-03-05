@@ -699,3 +699,41 @@ fn main() {
 		t.Errorf("expected unknown named argument error, got: %v", errs)
 	}
 }
+
+// --- with statement ----------------------------------------------------------
+
+func TestWithStmtTypecheck(t *testing.T) {
+	src := `fn main() {
+    with var f = openFile("data.txt") {
+        print("ok")
+    }
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestWithStmtResourceInScope(t *testing.T) {
+	src := `fn main() {
+    with var f = openFile("data.txt") {
+        print(f)
+    }
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestWithStmtGrowlerClassNoCloseOK(t *testing.T) {
+	// A Growler class without close() is valid — the runtime type assertion handles it gracefully.
+	src := `
+class NoClose {
+    construct new() {}
+    pub fn read(): String { return "data" }
+}
+fn main() {
+    with var f = NoClose.new() {
+        print("ok")
+    }
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}

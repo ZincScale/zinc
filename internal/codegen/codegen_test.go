@@ -922,8 +922,9 @@ fn main() {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "f := openFile(\"data.txt\")")
-	assertContains(t, out, "defer f.Close()")
+	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
 	assertContains(t, out, "fmt.Println(\"reading\")")
+	assertContains(t, out, `"io"`)
 }
 
 func TestWithStmtMultipleResources(t *testing.T) {
@@ -939,9 +940,68 @@ fn main() {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "src := openFile(\"in.txt\")")
-	assertContains(t, out, "defer src.Close()")
+	assertContains(t, out, "if _c, ok := any(src).(io.Closer); ok { defer _c.Close() }")
 	assertContains(t, out, "dst := createFile(\"out.txt\")")
-	assertContains(t, out, "defer dst.Close()")
+	assertContains(t, out, "if _c, ok := any(dst).(io.Closer); ok { defer _c.Close() }")
+}
+
+func TestWithStmtThreeResources(t *testing.T) {
+	src := `
+fn main() {
+    with var a = open("a"), var b = open("b"), var c = open("c") {
+        print("ok")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "a := open(\"a\")")
+	assertContains(t, out, "if _c, ok := any(a).(io.Closer); ok { defer _c.Close() }")
+	assertContains(t, out, "b := open(\"b\")")
+	assertContains(t, out, "if _c, ok := any(b).(io.Closer); ok { defer _c.Close() }")
+	assertContains(t, out, "c := open(\"c\")")
+	assertContains(t, out, "if _c, ok := any(c).(io.Closer); ok { defer _c.Close() }")
+}
+
+func TestWithStmtInsideFunction(t *testing.T) {
+	src := `
+fn process() {
+    with var f = openFile("data.txt") {
+        print("reading")
+    }
+}
+fn main() { process() }
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func process()")
+	assertContains(t, out, "f := openFile(\"data.txt\")")
+	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+}
+
+func TestWithStmtNestedInTry(t *testing.T) {
+	src := `
+fn main() {
+    try {
+        with var f = openFile("x") {
+            print("ok")
+        }
+    } catch(err) {
+        print("error")
+    }
+}
+`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "f := openFile(\"x\")")
+	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
+	assertContains(t, out, "func() error")
 }
 
 func TestDefaultParamOnly(t *testing.T) {

@@ -398,3 +398,41 @@ func TestParseMixedPositionalAndNamedArgs(t *testing.T) {
 		t.Errorf("expected named arg greeting, got %q", call.NamedArgs[0].Name)
 	}
 }
+
+func TestParseWithStmtSingle(t *testing.T) {
+	prog, p := parse(`fn main() { with var f = openFile("x") { } }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	ws, ok := fn.Body.Stmts[0].(*WithStmt)
+	if !ok {
+		t.Fatal("expected WithStmt")
+	}
+	if len(ws.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(ws.Resources))
+	}
+	if ws.Resources[0].Name != "f" {
+		t.Errorf("expected resource name 'f', got %q", ws.Resources[0].Name)
+	}
+	if _, ok := ws.Resources[0].Value.(*CallExpr); !ok {
+		t.Error("expected resource value to be CallExpr")
+	}
+}
+
+func TestParseWithStmtMultiple(t *testing.T) {
+	prog, p := parse(`fn main() { with var a = foo(), var b = bar() { } }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	ws, ok := fn.Body.Stmts[0].(*WithStmt)
+	if !ok {
+		t.Fatal("expected WithStmt")
+	}
+	if len(ws.Resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(ws.Resources))
+	}
+	if ws.Resources[0].Name != "a" {
+		t.Errorf("expected resource[0] name 'a', got %q", ws.Resources[0].Name)
+	}
+	if ws.Resources[1].Name != "b" {
+		t.Errorf("expected resource[1] name 'b', got %q", ws.Resources[1].Name)
+	}
+}

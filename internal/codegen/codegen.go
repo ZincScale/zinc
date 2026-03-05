@@ -939,14 +939,16 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 }
 
 // emitWithStmt emits a scoped resource block.
-// Each resource is declared with := and immediately followed by defer .Close(),
-// mirroring Java's try-with-resources / C#'s using pattern.
+// Each resource is declared with := and its Close() method (if any) is deferred
+// via a runtime io.Closer type assertion. If the resource does not implement
+// io.Closer the assertion is false and nothing is deferred — no compile error.
 func (g *Generator) emitWithStmt(w *parser.WithStmt) {
+	g.neededImports["io"] = true
 	g.writeln("{")
 	g.push()
 	for _, r := range w.Resources {
 		g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
-		g.writeln(fmt.Sprintf("defer %s.Close()", r.Name))
+		g.writeln(fmt.Sprintf("if _c, ok := any(%s).(io.Closer); ok { defer _c.Close() }", r.Name))
 	}
 	g.emitBlock(w.Body)
 	g.pop()
