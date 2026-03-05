@@ -538,6 +538,15 @@ func TestValidConcurrency(t *testing.T) {
 	noErrors(t, errs, string(src))
 }
 
+func TestValidClosures(t *testing.T) {
+	src, err := os.ReadFile("../../examples/closures.gw")
+	if err != nil {
+		t.Skip("examples/closures.gw not found")
+	}
+	errs := checkSrc(string(src))
+	noErrors(t, errs, string(src))
+}
+
 // --- Extra: "this" outside class ---------------------------------------------
 
 func TestThisOutsideClass(t *testing.T) {
