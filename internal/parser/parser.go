@@ -224,7 +224,7 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 			}
 			left = nav
 		case lexer.TOKEN_LPAREN:
-			left = p.finishCallArgs(left)
+			left = p.finishCallArgsNoLParen(left)
 		case lexer.TOKEN_LBRACKET:
 			idx := p.parseExpr()
 			p.expect(lexer.TOKEN_RBRACKET)
@@ -340,11 +340,6 @@ func (p *Parser) finishCall(callee Expr) Expr {
 	}
 	// Consume '(' then parse args
 	p.expect(lexer.TOKEN_LPAREN)
-	return p.finishCallArgsNoLParen(callee)
-}
-
-// finishCallArgs is called when '(' has already been consumed (Pratt loop TOKEN_LPAREN case).
-func (p *Parser) finishCallArgs(callee Expr) Expr {
 	return p.finishCallArgsNoLParen(callee)
 }
 

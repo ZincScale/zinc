@@ -10,6 +10,7 @@ import (
 	"growler/internal/codegen"
 	"growler/internal/lexer"
 	"growler/internal/parser"
+	"growler/internal/typechecker"
 )
 
 func runREPL() {
@@ -58,35 +59,31 @@ func runREPL() {
 
 		replEval(input, history)
 
-		// If the input looks like a top-level decl, keep it in history
-		trimmed := strings.TrimSpace(input)
-		if strings.HasPrefix(trimmed, "fn ") ||
-			strings.HasPrefix(trimmed, "pub fn ") ||
-			strings.HasPrefix(trimmed, "class ") ||
-			strings.HasPrefix(trimmed, "interface ") ||
-			strings.HasPrefix(trimmed, "enum ") {
+		if isTopLevelDecl(input) {
 			history = append(history, input)
 		}
 	}
 }
 
-func replEval(input string, history []string) {
-	// Wrap bare statements in a main fn if they don't look like top-level decls
+// isTopLevelDecl returns true if input looks like a top-level declaration.
+func isTopLevelDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
-	isTopLevel := strings.HasPrefix(trimmed, "fn ") ||
+	return strings.HasPrefix(trimmed, "fn ") ||
 		strings.HasPrefix(trimmed, "pub fn ") ||
 		strings.HasPrefix(trimmed, "class ") ||
 		strings.HasPrefix(trimmed, "interface ") ||
 		strings.HasPrefix(trimmed, "enum ") ||
 		strings.HasPrefix(trimmed, "import ")
+}
 
+func replEval(input string, history []string) {
 	var src strings.Builder
 	for _, h := range history {
 		src.WriteString(h)
 		src.WriteString("\n")
 	}
 
-	if isTopLevel {
+	if isTopLevelDecl(input) {
 		src.WriteString(input)
 		src.WriteString("\n")
 		src.WriteString("fn main() { }\n")
@@ -111,6 +108,13 @@ func replEval(input string, history []string) {
 	if len(p.Errors) > 0 {
 		for _, e := range p.Errors {
 			fmt.Fprintln(os.Stderr, "parse:", e)
+		}
+		return
+	}
+
+	if errs := typechecker.Check(prog); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(os.Stderr, "type error:", e)
 		}
 		return
 	}

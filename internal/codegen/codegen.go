@@ -606,14 +606,12 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	g.write("}\n")
 
 	// Body statements (super call already removed)
-	recv := strings.ToLower(cls.Name[:1])
 	savedRecv := g.receiver
 	g.receiver = "obj"
 	for _, s := range ctor.Body.Stmts {
 		g.emitStmt(s)
 	}
 	g.receiver = savedRecv
-	_ = recv
 
 	g.writeln("return obj")
 	g.pop()
@@ -1314,12 +1312,6 @@ func (g *Generator) emitStmtWithErrReturn(s parser.Stmt) {
 	}
 }
 
-func (g *Generator) inferCallReturnType(call *parser.CallExpr) string {
-	// Simple heuristic: if the function is known and has a return type
-	// For now just return empty — we don't track return types of arbitrary calls
-	return ""
-}
-
 func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
 	g.neededImports["fmt"] = true
 	// The thrown value must be something with a message — typically Error("msg") call
@@ -1370,23 +1362,16 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 		g.writeln(fmt.Sprintf("%s <- %s", g.emitExpr(se.Chan), g.emitExpr(se.Value)))
 		return
 	}
-	// Special: ListAddStmt/MapRemoveStmt flowing through ExprStmt
-	if add, ok := e.Expr.(*parser.ListAddStmt); ok {
-		list := g.emitExpr(add.List)
-		val := g.emitExpr(add.Value)
-		g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, val))
+	// Dual Stmt+Expr nodes that may flow through ExprStmt — delegate to emitStmt
+	switch st := e.Expr.(type) {
+	case *parser.ListAddStmt:
+		g.emitStmt(st)
 		return
-	}
-	if rm, ok := e.Expr.(*parser.MapRemoveStmt); ok {
-		m := g.emitExpr(rm.Map)
-		key := g.emitExpr(rm.Key)
-		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
+	case *parser.MapRemoveStmt:
+		g.emitStmt(st)
 		return
-	}
-	if sl, ok := e.Expr.(*parser.ListSortStmt); ok {
-		g.neededImports["sort"] = true
-		list := g.emitExpr(sl.List)
-		g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] })", list, list, list))
+	case *parser.ListSortStmt:
+		g.emitStmt(st)
 		return
 	}
 	// Special: SafeNavExpr as statement — emit clean if-guard, no IIFE

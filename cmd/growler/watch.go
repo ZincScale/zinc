@@ -11,30 +11,33 @@ import (
 	"growler/internal/codegen"
 	"growler/internal/lexer"
 	"growler/internal/parser"
+	"growler/internal/typechecker"
 )
 
 func runWatch(inFile, outFile string) {
 	fmt.Printf("Watching %s for changes (Ctrl+C to stop)...\n", inFile)
 
-	var lastMod time.Time
+	// Record initial mod time so we only transpile on actual changes
+	info, err := os.Stat(inFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		os.Exit(1)
+	}
+	lastMod := info.ModTime()
 
 	for {
+		time.Sleep(300 * time.Millisecond)
+
 		info, err := os.Stat(inFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "watch: %v\n", err)
-			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
 		if info.ModTime().After(lastMod) {
 			lastMod = info.ModTime()
-			if !lastMod.IsZero() {
-				watchTranspile(inFile, outFile)
-			} else {
-				// First iteration — just record mod time
-			}
+			watchTranspile(inFile, outFile)
 		}
-		time.Sleep(300 * time.Millisecond)
 	}
 }
 
@@ -63,6 +66,14 @@ func watchTranspile(inFile, outFile string) {
 		fmt.Fprintf(os.Stderr, "[%s] parse errors:\n", ts)
 		for _, e := range p.Errors {
 			fmt.Fprintf(os.Stderr, "  %s:%s\n", inFile, e)
+		}
+		return
+	}
+
+	if errs := typechecker.Check(prog); len(errs) > 0 {
+		fmt.Fprintf(os.Stderr, "[%s] type errors:\n", ts)
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "  %s\n", e)
 		}
 		return
 	}
