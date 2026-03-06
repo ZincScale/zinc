@@ -301,6 +301,19 @@ func (p *Parser) finishCall(callee Expr) Expr {
 			p.expect(lexer.TOKEN_LPAREN)
 			p.expect(lexer.TOKEN_RPAREN)
 			return &ListSortStmt{List: sel.Object}
+		case "keys":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &MapKeysExpr{Object: sel.Object}
+		case "values":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &MapValuesExpr{Object: sel.Object}
+		case "containsKey":
+			p.expect(lexer.TOKEN_LPAREN)
+			key := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &MapContainsExpr{Object: sel.Object, Key: key}
 		}
 	}
 	// Consume '(' then parse args

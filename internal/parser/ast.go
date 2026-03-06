@@ -622,6 +622,21 @@ type ListJoinExpr struct{ Object Expr; Sep Expr }
 func (l *ListJoinExpr) nodeTag() {}
 func (l *ListJoinExpr) exprTag() {}
 
+// MapKeysExpr: m.keys() → collect keys into slice
+type MapKeysExpr struct{ Object Expr }
+func (m *MapKeysExpr) nodeTag() {}
+func (m *MapKeysExpr) exprTag() {}
+
+// MapValuesExpr: m.values() → collect values into slice
+type MapValuesExpr struct{ Object Expr }
+func (m *MapValuesExpr) nodeTag() {}
+func (m *MapValuesExpr) exprTag() {}
+
+// MapContainsExpr: m.containsKey(k) → check if key exists
+type MapContainsExpr struct{ Object Expr; Key Expr }
+func (m *MapContainsExpr) nodeTag() {}
+func (m *MapContainsExpr) exprTag() {}
+
 // ListSortStmt: list.sort() → sort.Ints/Strings/Float64s(list)
 type ListSortStmt struct{ List Expr }
 func (l *ListSortStmt) nodeTag() {}

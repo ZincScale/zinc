@@ -523,6 +523,9 @@ func (c *Checker) checkForStmt(s *parser.ForStmt) {
 	if s.IsRange {
 		// Range-style: for item in list { }
 		c.pushScope()
+		if s.IndexVar != "" {
+			c.scope.define(s.IndexVar, TypeUnknown) // key/index variable
+		}
 		c.scope.define(s.Item, TypeUnknown) // permissive
 		c.inferExpr(s.Range)
 		for _, st := range s.Body.Stmts {
@@ -700,6 +703,16 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 	case *parser.ListSortStmt:
 		c.inferExpr(e.List)
 		return TypeVoid
+	case *parser.MapKeysExpr:
+		c.inferExpr(e.Object)
+		return TypeUnknown
+	case *parser.MapValuesExpr:
+		c.inferExpr(e.Object)
+		return TypeUnknown
+	case *parser.MapContainsExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Key)
+		return TypeBool
 	}
 	return TypeUnknown
 }

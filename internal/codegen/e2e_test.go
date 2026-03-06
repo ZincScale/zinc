@@ -1032,6 +1032,51 @@ fn main() {
 	assertOutput(t, out, "1\n1\n3\n4\n5")
 }
 
+// --- For (k, v) in map -------------------------------------------------------
+
+func TestE2EForKeyValueInMap(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m = {"a": 1}
+    for (k, v) in m {
+        print("{k}={v}")
+    }
+}`)
+	assertOutput(t, out, "a=1")
+}
+
+// --- Map utility methods -----------------------------------------------------
+
+func TestE2EMapKeys(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m = {"x": 1}
+    var ks = m.keys()
+    print(ks.size())
+}`)
+	assertOutput(t, out, "1")
+}
+
+func TestE2EMapValues(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m = {"x": 42}
+    var vs = m.values()
+    print(vs.size())
+}`)
+	assertOutput(t, out, "1")
+}
+
+func TestE2EMapContainsKey(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m = {"hello": 1, "world": 2}
+    print(m.containsKey("hello"))
+    print(m.containsKey("nope"))
+}`)
+	assertOutput(t, out, "true\nfalse")
+}
+
 func TestE2EStringMethodChaining(t *testing.T) {
 	out := e2eRun(t, `
 fn main() {

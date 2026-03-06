@@ -932,7 +932,11 @@ func (g *Generator) emitForStmt(f *parser.ForStmt) {
 	}
 	if f.IsRange {
 		g.writeIndent()
-		g.write(fmt.Sprintf("for _, %s := range %s ", f.Item, g.emitExpr(f.Range)))
+		indexVarName := "_"
+		if f.IndexVar != "" {
+			indexVarName = f.IndexVar
+		}
+		g.write(fmt.Sprintf("for %s, %s := range %s ", indexVarName, f.Item, g.emitExpr(f.Range)))
 		g.write("{\n")
 		g.push()
 		g.emitBlock(f.Body)
@@ -1503,6 +1507,16 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.ListJoinExpr:
 		g.neededImports["strings"] = true
 		return fmt.Sprintf("strings.Join(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Sep))
+	case *parser.MapKeysExpr:
+		obj := g.emitExpr(ex.Object)
+		return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", obj, obj)
+	case *parser.MapValuesExpr:
+		obj := g.emitExpr(ex.Object)
+		return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", obj, obj)
+	case *parser.MapContainsExpr:
+		obj := g.emitExpr(ex.Object)
+		key := g.emitExpr(ex.Key)
+		return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, key)
 	}
 	return "/* unknown expr */"
 }
