@@ -8,6 +8,23 @@ import (
 	"growler/internal/parser"
 )
 
+// goMultiReturnFuncs is the set of known Go stdlib functions that return (T, error).
+// Used by emitWithStmt to auto-detect multi-return calls without requiring `try`.
+var goMultiReturnFuncs = map[string]bool{
+	"os.Create":     true,
+	"os.Open":       true,
+	"os.OpenFile":   true,
+	"os.CreateTemp": true,
+	"os.MkdirTemp":  true,
+	"net.Dial":      true,
+	"net.Listen":    true,
+	"http.Get":      true,
+	"http.Post":     true,
+	"http.NewRequest": true,
+	"sql.Open":      true,
+	"tls.Dial":      true,
+}
+
 // Generator converts a Growler AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
@@ -750,6 +767,14 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		}
 	case *parser.WithStmt:
 		g.emitWithStmt(st)
+	case *parser.ListAddStmt:
+		list := g.emitExpr(st.List)
+		val := g.emitExpr(st.Value)
+		g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, val))
+	case *parser.MapRemoveStmt:
+		m := g.emitExpr(st.Map)
+		key := g.emitExpr(st.Key)
+		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
 	}
 }
 
@@ -777,18 +802,29 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
-	// Special case: Chan.new(n) where type is Chan<T>
+	// Special case: collection .new() constructors — Chan, List, Map
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if ident, ok := sel.Object.(*parser.Ident); ok && ident.Name == "Chan" && sel.Field == "new" {
-					chanType := g.emitType(v.Type)
-					bufSize := "0"
-					if len(call.Args) > 0 {
-						bufSize = g.emitExpr(call.Args[0])
+				if ident, ok := sel.Object.(*parser.Ident); ok && sel.Field == "new" {
+					switch ident.Name {
+					case "Chan":
+						chanType := g.emitType(v.Type)
+						bufSize := "0"
+						if len(call.Args) > 0 {
+							bufSize = g.emitExpr(call.Args[0])
+						}
+						g.writeln(fmt.Sprintf("%s := make(%s, %s)", v.Name, chanType, bufSize))
+						return
+					case "List":
+						listType := g.emitType(v.Type)
+						g.writeln(fmt.Sprintf("%s := %s{}", v.Name, listType))
+						return
+					case "Map":
+						mapType := g.emitType(v.Type)
+						g.writeln(fmt.Sprintf("%s := %s{}", v.Name, mapType))
+						return
 					}
-					g.writeln(fmt.Sprintf("%s := make(%s, %s)", v.Name, chanType, bufSize))
-					return
 				}
 			}
 		}
@@ -1089,6 +1125,27 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.neededImports["io"] = true
 	g.neededImports["sync"] = true
+	// Auto-detect multi-return (T, error) calls for each resource.
+	for _, r := range w.Resources {
+		if r.AutoErr {
+			continue // already set
+		}
+		if call, ok := r.Value.(*parser.CallExpr); ok {
+			switch callee := call.Callee.(type) {
+			case *parser.SelectorExpr:
+				if ident, ok := callee.Object.(*parser.Ident); ok {
+					key := ident.Name + "." + callee.Field
+					if goMultiReturnFuncs[key] {
+						r.AutoErr = true
+					}
+				}
+			case *parser.Ident:
+				if g.canThrowFns[callee.Name] {
+					r.AutoErr = true
+				}
+			}
+		}
+	}
 	g.writeln("{")
 	g.push()
 	for i, r := range w.Resources {
@@ -1149,7 +1206,7 @@ func (g *Generator) emitTryStmt(t *parser.TryStmt) {
 
 func (g *Generator) emitTryBody(body *parser.BlockStmt) {
 	// Inside a try body, we're in a func() error closure.
-	// Set currentCanThrow so that 'with try' and 'throw' emit 'return err'.
+	// Set currentCanThrow so that 'with' auto-err and 'throw' emit 'return err'.
 	savedCT := g.currentCanThrow
 	savedRT := g.currentReturnType
 	g.currentCanThrow = true
@@ -1293,6 +1350,19 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 		g.writeln(fmt.Sprintf("%s <- %s", g.emitExpr(se.Chan), g.emitExpr(se.Value)))
 		return
 	}
+	// Special: ListAddStmt/MapRemoveStmt flowing through ExprStmt
+	if add, ok := e.Expr.(*parser.ListAddStmt); ok {
+		list := g.emitExpr(add.List)
+		val := g.emitExpr(add.Value)
+		g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, val))
+		return
+	}
+	if rm, ok := e.Expr.(*parser.MapRemoveStmt); ok {
+		m := g.emitExpr(rm.Map)
+		key := g.emitExpr(rm.Key)
+		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
+		return
+	}
 	// Special: SafeNavExpr as statement — emit clean if-guard, no IIFE
 	if sn, ok := e.Expr.(*parser.SafeNavExpr); ok {
 		g.emitSafeNavStmt(sn)
@@ -1391,6 +1461,11 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		}
 		// x as Type  →  x.(Type)
 		return fmt.Sprintf("%s.(%s)", obj, goType)
+	case *parser.SizeExpr:
+		return fmt.Sprintf("len(%s)", g.emitExpr(ex.Object))
+	case *parser.CloneExpr:
+		obj := g.emitExpr(ex.Object)
+		return fmt.Sprintf("append(%s[:0:0], %s...)", obj, obj)
 	}
 	return "/* unknown expr */"
 }
@@ -1580,18 +1655,6 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 	case "toBool":
 		g.neededImports["strconv"] = true
 		return fmt.Sprintf("func() bool { b, _ := strconv.ParseBool(%s); return b }()", argStr)
-
-	// Collections
-	case "len":
-		return fmt.Sprintf("len(%s)", argStr)
-	case "append":
-		return fmt.Sprintf("append(%s)", argStr)
-	case "make":
-		return fmt.Sprintf("make(%s)", argStr)
-	case "delete":
-		return fmt.Sprintf("delete(%s)", argStr)
-	case "copy":
-		return fmt.Sprintf("copy(%s)", argStr)
 
 	// Math
 	case "abs":

@@ -261,6 +261,31 @@ fn main() {
 	assertOutput(t, out, "42")
 }
 
+// --- Collection constructors -------------------------------------------------
+
+func TestE2EListNew(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums: List<Int> = List.new()
+    nums.add(1)
+    nums.add(2)
+    nums.add(3)
+    print(nums.size())
+}`)
+	assertOutput(t, out, "3")
+}
+
+func TestE2EMapNew(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m: Map<String, Int> = Map.new()
+    m["a"] = 1
+    m["b"] = 2
+    print(m.size())
+}`)
+	assertOutput(t, out, "2")
+}
+
 // --- Enums + match -----------------------------------------------------------
 
 func TestE2EEnumMatch(t *testing.T) {
@@ -663,13 +688,13 @@ fn main() {
 	assertOutput(t, out, "no city")
 }
 
-// --- with multi-return (try) -------------------------------------------------
+// --- with multi-return (auto-detect) -----------------------------------------
 
 func TestE2EWithTryMultiReturn(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    with var f = try os.CreateTemp("", "test*.txt") {
+    with var f = os.CreateTemp("", "test*.txt") {
         f.WriteString("hello")
         print("ok")
     }
@@ -677,29 +702,29 @@ fn main() {
 	assertOutput(t, out, "ok")
 }
 
-// with + try: write and read back to verify file actually works
+// with: write and read back to verify file actually works
 func TestE2EWithTryFileWriteRead(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    var path = os.TempDir() + "/growler_with_try_test.txt"
-    with var f = try os.Create(path) {
-        f.WriteString("hello from with-try")
+    var path = os.TempDir() + "/growler_with_test.txt"
+    with var f = os.Create(path) {
+        f.WriteString("hello from with")
     }
     var content = readFile(path)
     print(content)
     os.Remove(path)
 }`)
-	assertOutput(t, out, "hello from with-try")
+	assertOutput(t, out, "hello from with")
 }
 
-// with + try: error causes panic, caught by try/catch
+// with: error causes panic, caught by try/catch
 func TestE2EWithTryErrorPanics(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
     try {
-        with var f = try os.Open("/nonexistent/path/that/does/not/exist") {
+        with var f = os.Open("/nonexistent/path/that/does/not/exist") {
             print("should not reach")
         }
     } catch(err) {
@@ -725,14 +750,14 @@ fn main() {
 	assertOutput(t, out, "inside with\n1")
 }
 
-// with + try: multiple try resources
+// with: multiple resources with auto-detected multi-return
 func TestE2EWithMultipleTryResources(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
     var p1 = os.TempDir() + "/growler_multi1.txt"
     var p2 = os.TempDir() + "/growler_multi2.txt"
-    with var f1 = try os.Create(p1), var f2 = try os.Create(p2) {
+    with var f1 = os.Create(p1), var f2 = os.Create(p2) {
         f1.WriteString("file1")
         f2.WriteString("file2")
     }
@@ -772,20 +797,20 @@ fn main() {
 	assertOutput(t, out, "42")
 }
 
-// with + try: using readFile built-in inside with block
+// with: using readFile built-in inside with block
 func TestE2EWithTryReadAfterWrite(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
     var path = os.TempDir() + "/growler_with_rw.txt"
-    with var f = try os.Create(path) {
-        f.WriteString("growler with-try rocks")
+    with var f = os.Create(path) {
+        f.WriteString("growler with rocks")
     }
     // File is now closed (defer Close() ran), safe to read
     print(readFile(path))
     os.Remove(path)
 }`)
-	assertOutput(t, out, "growler with-try rocks")
+	assertOutput(t, out, "growler with rocks")
 }
 
 // with: RWMutex (implements sync.Locker via RLock/Lock)
@@ -854,4 +879,60 @@ fn main() {
     os.Remove(path)
 }`)
 	assertOutput(t, out, "hello growler")
+}
+
+// --- OO collection methods ---------------------------------------------------
+
+func TestE2EListAdd(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums: List<Int> = List.new()
+    nums.add(10)
+    nums.add(20)
+    nums.add(30)
+    print(nums.size())
+    for n in nums {
+        print(n)
+    }
+}`)
+	assertOutput(t, out, "3\n10\n20\n30")
+}
+
+func TestE2EMapRemove(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var m: Map<String, Int> = Map.new()
+    m["a"] = 1
+    m["b"] = 2
+    m["c"] = 3
+    m.remove("b")
+    print(m.size())
+}`)
+	assertOutput(t, out, "2")
+}
+
+func TestE2EListClone(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var a = [1, 2, 3]
+    var b = a.clone()
+    b.add(4)
+    print(a.size())
+    print(b.size())
+}`)
+	assertOutput(t, out, "3\n4")
+}
+
+func TestE2ECollectionSize(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var list = [1, 2, 3, 4, 5]
+    print(list.size())
+    var m: Map<String, Int> = Map.new()
+    m["x"] = 1
+    print(m.size())
+    var s = "hello"
+    print(s.size())
+}`)
+	assertOutput(t, out, "5\n1\n5")
 }

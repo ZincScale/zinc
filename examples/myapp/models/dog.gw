@@ -8,10 +8,10 @@ class Dog : Animal {
     }
 
     pub fn learnTrick(trick: String) {
-        this.tricks = append(this.tricks, trick)
+        this.tricks.add(trick)
     }
 
     pub fn trickCount(): Int {
-        return len(this.tricks)
+        return this.tricks.size()
     }
 }

@@ -210,7 +210,7 @@ fn main() {
     for w in words {
         print(strUpper(w))
     }
-    print(len(words))
+    print(words.size())
 }`
 	out, errs := transpile(src)
 	if errs != nil {

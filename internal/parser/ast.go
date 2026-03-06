@@ -356,7 +356,7 @@ func (d *DeferStmt) stmtTag() {}
 type WithResource struct {
 	Name     string
 	Value    Expr
-	AutoErr  bool // true = auto-unpack (val, err) and throw on error
+	AutoErr  bool // set by codegen when multi-return (T, error) is auto-detected
 }
 
 // WithStmt: with var name = expr [, var name = expr ...] { body }
@@ -554,6 +554,28 @@ type RawStringLit struct {
 
 func (r *RawStringLit) nodeTag() {}
 func (r *RawStringLit) exprTag() {}
+
+// ListAddStmt: list.add(item) → list = append(list, item)
+type ListAddStmt struct{ List Expr; Value Expr }
+func (l *ListAddStmt) nodeTag() {}
+func (l *ListAddStmt) stmtTag() {}
+func (l *ListAddStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
+
+// MapRemoveStmt: map.remove(key) → delete(map, key)
+type MapRemoveStmt struct{ Map Expr; Key Expr }
+func (m *MapRemoveStmt) nodeTag() {}
+func (m *MapRemoveStmt) stmtTag() {}
+func (m *MapRemoveStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
+
+// SizeExpr: x.size() → len(x)
+type SizeExpr struct{ Object Expr }
+func (s *SizeExpr) nodeTag() {}
+func (s *SizeExpr) exprTag() {}
+
+// CloneExpr: list.clone() → append(list[:0:0], list...)
+type CloneExpr struct{ Object Expr }
+func (c *CloneExpr) nodeTag() {}
+func (c *CloneExpr) exprTag() {}
 
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {

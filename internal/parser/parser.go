@@ -183,9 +183,22 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 			field := p.expect(lexer.TOKEN_IDENT).Literal
 			nav := &SafeNavExpr{Object: left, Field: field}
 			if p.check(lexer.TOKEN_LPAREN) {
-				// obj?.method(args) — build call with placeholder callee
 				sel := &SelectorExpr{Object: left, Field: field}
-				nav.Call = p.finishCall(sel).(*CallExpr)
+				result := p.finishCall(sel)
+				if call, ok := result.(*CallExpr); ok {
+					nav.Call = call
+				} else if sz, ok := result.(*SizeExpr); ok {
+					// obj?.size() — wrap safe-nav as the object
+					sz.Object = nav
+					left = sz
+					continue
+				} else if cl, ok := result.(*CloneExpr); ok {
+					cl.Object = nav
+					left = cl
+					continue
+				} else {
+					p.errorf("cannot use ?.%s() in this context", field)
+				}
 			}
 			left = nav
 		case lexer.TOKEN_LPAREN:
@@ -222,6 +235,24 @@ func (p *Parser) finishCall(callee Expr) Expr {
 			p.expect(lexer.TOKEN_LPAREN)
 			p.expect(lexer.TOKEN_RPAREN)
 			return &ReceiveExpr{Chan: sel.Object}
+		case "add":
+			p.expect(lexer.TOKEN_LPAREN)
+			val := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &ListAddStmt{List: sel.Object, Value: val}
+		case "remove":
+			p.expect(lexer.TOKEN_LPAREN)
+			key := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &MapRemoveStmt{Map: sel.Object, Key: key}
+		case "size":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &SizeExpr{Object: sel.Object}
+		case "clone":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &CloneExpr{Object: sel.Object}
 		}
 	}
 	// Consume '(' then parse args
@@ -756,14 +787,8 @@ func (p *Parser) parseWithStmt() *WithStmt {
 		p.expect(lexer.TOKEN_VAR)
 		name := p.expect(lexer.TOKEN_IDENT).Literal
 		p.expect(lexer.TOKEN_ASSIGN)
-		// Check for "try" modifier → auto-unpack (val, err) and throw on error
-		autoErr := false
-		if p.check(lexer.TOKEN_TRY) {
-			p.advance()
-			autoErr = true
-		}
 		val := p.parseExpr()
-		resources = append(resources, &WithResource{Name: name, Value: val, AutoErr: autoErr})
+		resources = append(resources, &WithResource{Name: name, Value: val})
 		if !p.check(lexer.TOKEN_COMMA) {
 			break
 		}

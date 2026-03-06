@@ -426,6 +426,12 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 			c.checkStmt(st)
 		}
 		c.popScope()
+	case *parser.ListAddStmt:
+		c.inferExpr(s.List)
+		c.inferExpr(s.Value)
+	case *parser.MapRemoveStmt:
+		c.inferExpr(s.Map)
+		c.inferExpr(s.Key)
 	case *parser.BreakStmt, *parser.ContinueStmt:
 		// nothing to check
 	}
@@ -642,6 +648,19 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 			return TypeBool
 		}
 		return c.resolveSimpleName(e.TypeName)
+	case *parser.SizeExpr:
+		c.inferExpr(e.Object)
+		return TypeInt
+	case *parser.CloneExpr:
+		return c.inferExpr(e.Object)
+	case *parser.ListAddStmt:
+		c.inferExpr(e.List)
+		c.inferExpr(e.Value)
+		return TypeVoid
+	case *parser.MapRemoveStmt:
+		c.inferExpr(e.Map)
+		c.inferExpr(e.Key)
+		return TypeVoid
 	}
 	return TypeUnknown
 }

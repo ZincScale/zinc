@@ -556,16 +556,16 @@ fn main() {
 }
 ```
 
-#### Multi-Return with `try`
+#### Auto-Detected Multi-Return
 
-Many Go functions return `(value, error)`. The `try` keyword inside `with` auto-unpacks the tuple and throws on error — no manual error handling needed:
+Many Go functions return `(value, error)`. Growler auto-detects these and unpacks the tuple, throwing on error — no manual error handling needed:
 
 ```growler
 import "os"
 
 fn main() {
-    // os.Create returns (*File, error) — try unpacks it automatically
-    with var f = try os.Create("output.txt") {
+    // os.Create returns (*File, error) — auto-detected and unpacked
+    with var f = os.Create("output.txt") {
         f.WriteString("hello from Growler")
     }
     // f is closed automatically, error was auto-checked
@@ -585,13 +585,13 @@ func main() {
 }
 ```
 
-#### `with try` + `try/catch`
+#### `with` + `try/catch`
 
-When `with try` is inside a `try` block, errors propagate correctly to the catch block instead of panicking:
+When `with` is inside a `try` block, errors propagate correctly to the catch block instead of panicking:
 
 ```growler
 try {
-    with var f = try os.Open("/nonexistent/file") {
+    with var f = os.Open("/nonexistent/file") {
         print("should not reach")
     }
 } catch(err) {
@@ -622,7 +622,7 @@ Comma-separated resources are closed in reverse order (LIFO), matching Go's `def
 import "os"
 
 fn main() {
-    with var f1 = try os.Create("a.txt"), var f2 = try os.Create("b.txt") {
+    with var f1 = os.Create("a.txt"), var f2 = os.Create("b.txt") {
         f1.WriteString("file A")
         f2.WriteString("file B")
     }
@@ -736,13 +736,15 @@ fn main() {
 
 #### Collections
 
-| Growler            | Go equivalent              |
-|-------------------|----------------------------|
-| `len(x)`          | `len(x)`                   |
-| `append(s, x)`    | `append(s, x)`             |
-| `make(x)`         | `make(x)`                  |
-| `delete(m, k)`    | `delete(m, k)`             |
-| `copy(dst, src)`  | `copy(dst, src)`           |
+| Growler            | Go equivalent              | Notes |
+|-------------------|----------------------------|-------|
+| `list.add(item)`  | `list = append(list, item)` | Appends to list in-place |
+| `map.remove(key)` | `delete(map, key)`          | Removes key from map |
+| `x.size()`        | `len(x)`                    | Works on lists, maps, strings |
+| `list.clone()`    | `append(list[:0:0], list...)`| Deep-copies a list |
+| `List<T>.new()`   | `[]T{}`                    | |
+| `Map<K,V>.new()`  | `map[K]V{}`                | |
+| `Chan<T>.new(n)`  | `make(chan T, n)`           | |
 
 #### Math
 
@@ -831,7 +833,7 @@ See the [`examples/`](examples/) directory:
 - [`fibonacci.gw`](examples/fibonacci.gw) — Recursion
 - [`closures.gw`](examples/closures.gw) — Lambdas, closures, throwing lambdas
 - [`safe_navigation.gw`](examples/safe_navigation.gw) — Safe navigation `?.` with chaining
-- [`with_resources.gw`](examples/with_resources.gw) — Resource management with `with` and `try`
+- [`with_resources.gw`](examples/with_resources.gw) — Resource management with `with`
 
 Run any example:
 

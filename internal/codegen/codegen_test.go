@@ -233,8 +233,8 @@ func TestStaticMethod(t *testing.T) {
 	assertContains(t, out, "func Math_Square(n int) int {")
 }
 
-func TestBuiltinLen(t *testing.T) {
-	src := `fn main() { var n: Int = len(items) }`
+func TestBuiltinSize(t *testing.T) {
+	src := `fn main() { var n: Int = items.size() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)

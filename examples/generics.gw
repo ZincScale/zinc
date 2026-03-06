@@ -5,7 +5,7 @@ fn identity<T>(val: T): T {
 }
 
 fn mapLen<K, V>(m: Map<K, V>): Int {
-    return len(m)
+    return m.size()
 }
 
 class Box<T> {
