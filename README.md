@@ -289,6 +289,27 @@ class Dog : Animal, Speaker {
 }
 ```
 
+### Go Type Construction (`.new()`)
+
+Growler extends its `ClassName.new()` pattern to any Go type — the OO constructor pattern every Java/Python/C#/Ruby developer knows:
+
+```growler
+import "sync"
+import "bytes"
+
+fn main() {
+    var mu = sync.Mutex.new()       // zero-value construction
+    var buf = bytes.Buffer.new()
+}
+```
+
+Transpiles to idiomatic Go zero-value struct literals:
+
+```go
+mu := sync.Mutex{}
+buf := bytes.Buffer{}
+```
+
 ### Enums
 
 ```growler
@@ -358,6 +379,17 @@ for (var i: Int = 0; i < 10; i += 1) {
 // for-in (range)
 for item in items {
     print(item)
+}
+
+// for-in with index (lists)
+for (i, item) in items {
+    print("{i}: {item}")
+}
+
+// for-in with key-value (maps)
+var scores = {"Alice": 95, "Bob": 87}
+for (name, score) in scores {
+    print("{name} got {score}")
 }
 ```
 
@@ -453,6 +485,56 @@ city := func() interface{} {
     _s1 := _s0.Address; if _s1 == nil { return nil }
     return _s1.City
 }()
+```
+
+### Type Casting (`as` / `is`)
+
+Growler uses `as` for type assertions and `is` for type checks — familiar from Kotlin, C#, and TypeScript:
+
+```growler
+fn main() {
+    var x: Any = 42
+
+    // Type assertion — panics if wrong type (like Kotlin's `as`)
+    var n = x as Int
+    print(n + 1)    // 43
+
+    // Type check — returns Bool (like Kotlin's `is`)
+    if (x is Int) {
+        print("it's an Int")
+    }
+    if (x is String) {
+        print("it's a String")   // not reached
+    }
+}
+```
+
+Transpiles to Go type assertions:
+
+```go
+n := x.(int)                                            // as
+func() bool { _, ok := x.(int); return ok }()           // is
+```
+
+### Null Safety
+
+Growler enforces Kotlin-style strict null safety. Non-nullable types cannot hold `null`, and nullable types (`Type?`) require safe access:
+
+```growler
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+}
+
+fn main() {
+    var d: Dog = Dog.new("Rex")
+    print(d.name)         // OK — d is non-nullable, use regular dot
+
+    var d2: Dog? = null
+    print(d2?.name)       // OK — d2 is nullable, use ?.
+    // print(d2.name)     // ERROR: "use '?.' for safe access on nullable type"
+    // var d3: Dog = null  // ERROR: "cannot assign null to non-nullable type"
+}
 ```
 
 ### Closures / Lambdas
@@ -742,6 +824,11 @@ fn main() {
 | `map.remove(key)` | `delete(map, key)`          | Removes key from map |
 | `x.size()`        | `len(x)`                    | Works on lists, maps, strings |
 | `list.clone()`    | `append(list[:0:0], list...)`| Deep-copies a list |
+| `list.sort()`     | `sort.Slice(list, ...)`    | Sorts list in-place |
+| `list.join(sep)`  | `strings.Join(list, sep)`  | Join elements into string |
+| `map.keys()`      | *(IIFE collecting keys)*   | Returns list of keys |
+| `map.values()`    | *(IIFE collecting values)* | Returns list of values |
+| `map.containsKey(k)` | `_, ok := map[k]`      | Returns Bool |
 | `List<T>.new()`   | `[]T{}`                    | |
 | `Map<K,V>.new()`  | `map[K]V{}`                | |
 | `Chan<T>.new(n)`  | `make(chan T, n)`           | |
@@ -768,12 +855,6 @@ fn main() {
 | `s.replace(a, b)`  | `strings.ReplaceAll(s, a, b)` |
 | `list.join(sep)`   | `strings.Join(list, sep)`  |
 | `sprintf(fmt, ...)` | `fmt.Sprintf(fmt, ...)`  |
-
-#### Sorting
-
-| Growler            | Go equivalent              |
-|-------------------|----------------------------|
-| `list.sort()`     | `sort.Slice(list, ...)`    |
 
 #### JSON
 
