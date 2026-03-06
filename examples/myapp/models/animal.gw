@@ -4,7 +4,7 @@ class Animal {
     var name: String
     var sound: String
 
-    construct new(name: String, sound: String) {
+    new(name: String, sound: String) {
         this.name = name
         this.sound = sound
     }

@@ -70,7 +70,7 @@ type MethodSig struct {
 	ReturnType TypeExpr // nil = void
 }
 
-// CtorDecl: construct new(params) { body }
+// CtorDecl: new(params) { body }
 type CtorDecl struct {
 	Params    []*ParamDecl
 	Body      *BlockStmt

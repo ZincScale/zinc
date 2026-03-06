@@ -11,7 +11,7 @@ fn mapLen<K, V>(m: Map<K, V>): Int {
 class Box<T> {
     var value: T
 
-    construct new(v: T) {
+    new(v: T) {
         this.value = v
     }
 

@@ -121,7 +121,7 @@ class Dog {
     var name: String
     var age: Int
 
-    construct new(name: String, age: Int = 0) {
+    new(name: String, age: Int = 0) {
         this.name = name
         this.age = age
     }
@@ -165,7 +165,7 @@ class Dog {
     var name: String
     var age: Int
 
-    construct new(name: String, age: Int = 0) {
+    new(name: String, age: Int = 0) {
         this.name = name
         this.age = age
     }
@@ -182,14 +182,14 @@ class Dog {
 
 #### Named Constructors
 
-Every class has one primary constructor declared with `construct new(...)`, called as `ClassName.new(...)`. Additional named constructors are `pub static fn` factory methods that call `new` internally:
+Every class has one primary constructor declared with `new(...)`, called as `ClassName.new(...)`. Additional named constructors are `pub static fn` factory methods that call `new` internally:
 
 ```growler
 class Point {
     var x: Float
     var y: Float
 
-    construct new(x: Float, y: Float) {
+    new(x: Float, y: Float) {
         this.x = x
         this.y = y
     }
@@ -248,7 +248,7 @@ func main() {
 class Box<T> {
     var value: T
 
-    construct new(v: T) {
+    new(v: T) {
         this.value = v
     }
 
@@ -277,12 +277,12 @@ class Cat : Speaker {
 ```growler
 class Animal {
     var name: String
-    construct new(name: String) { this.name = name }
+    new(name: String) { this.name = name }
     pub fn describe(): String { return "Animal: {this.name}" }
 }
 
 class Dog : Animal, Speaker {
-    construct new(name: String) {
+    new(name: String) {
         super(name)
     }
     pub fn speak(): String { return "Woof!" }
@@ -431,7 +431,7 @@ class User {
     var name: String
     var address: Address?
 
-    construct new(name: String, addr: Address?) {
+    new(name: String, addr: Address?) {
         this.name = name
         this.address = addr
     }
@@ -439,7 +439,7 @@ class User {
 
 class Address {
     var city: String
-    construct new(city: String) { this.city = city }
+    new(city: String) { this.city = city }
 }
 
 fn main() {
@@ -523,7 +523,7 @@ Growler enforces Kotlin-style strict null safety. Non-nullable types cannot hold
 ```growler
 class Dog {
     var name: String
-    construct new(name: String) { this.name = name }
+    new(name: String) { this.name = name }
 }
 
 fn main() {

@@ -6,7 +6,7 @@ class Address {
     var city: String
     var zip: String
 
-    construct new(city: String, zip: String) {
+    new(city: String, zip: String) {
         this.city = city
         this.zip = zip
     }
@@ -20,7 +20,7 @@ class User {
     var name: String
     var address: Address?
 
-    construct new(name: String, addr: Address?) {
+    new(name: String, addr: Address?) {
         this.name = name
         this.address = addr
     }

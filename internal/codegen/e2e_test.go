@@ -1136,3 +1136,24 @@ fn main() {
 }`)
 	assertOutput(t, out, "hello world")
 }
+
+func TestE2EConstructorNewSyntax(t *testing.T) {
+	out := e2eRun(t, `
+class Cat {
+    var name: String
+
+    new(name: String) {
+        this.name = name
+    }
+
+    pub fn greet(): String {
+        return "Meow, I'm {this.name}"
+    }
+}
+
+fn main() {
+    var c = Cat.new("Whiskers")
+    print(c.greet())
+}`)
+	assertOutput(t, out, "Meow, I'm Whiskers")
+}

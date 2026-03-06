@@ -936,7 +936,10 @@ func (p *Parser) parseParamList() []*ParamDecl {
 }
 
 func (p *Parser) parseCtorDecl() *CtorDecl {
-	p.expect(lexer.TOKEN_CONSTRUCT)
+	// Accept both "construct new(...)" (legacy) and "new(...)" (preferred)
+	if p.check(lexer.TOKEN_CONSTRUCT) {
+		p.advance()
+	}
 	p.expect(lexer.TOKEN_NEW)
 	params := p.parseParamList()
 	body := p.parseBlock()
@@ -1026,7 +1029,7 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 		switch {
 		case tok.Type == lexer.TOKEN_VAR:
 			fields = append(fields, p.parseFieldDecl())
-		case tok.Type == lexer.TOKEN_CONSTRUCT:
+		case tok.Type == lexer.TOKEN_CONSTRUCT || tok.Type == lexer.TOKEN_NEW:
 			ctor = p.parseCtorDecl()
 		case tok.Type == lexer.TOKEN_PUB || tok.Type == lexer.TOKEN_STATIC || tok.Type == lexer.TOKEN_FN:
 			methods = append(methods, p.parseMethodDecl())

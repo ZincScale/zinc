@@ -3,7 +3,7 @@ package "myapp/models"
 class Dog : Animal {
     var tricks: List<String>
 
-    construct new(name: String) {
+    new(name: String) {
         super(name, "Woof")
     }
 
