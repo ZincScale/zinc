@@ -85,7 +85,10 @@ func (p *Parser) parseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
 	name := tok.Literal
 	var t TypeExpr
-	if p.check(lexer.TOKEN_LT) {
+	if name == "Fn" && p.check(lexer.TOKEN_LT) {
+		// Fn<(ParamTypes...), ReturnType>
+		t = p.parseFnType()
+	} else if p.check(lexer.TOKEN_LT) {
 		p.advance() // <
 		var args []TypeExpr
 		args = append(args, p.parseType())
@@ -104,6 +107,25 @@ func (p *Parser) parseType() TypeExpr {
 		return &OptionalType{Inner: t}
 	}
 	return t
+}
+
+// parseFnType parses Fn<(P1, P2), R> or Fn<(), Void>. Called after "Fn" is consumed.
+func (p *Parser) parseFnType() *FuncTypeExpr {
+	p.advance() // <
+	p.expect(lexer.TOKEN_LPAREN)
+	var params []TypeExpr
+	if !p.check(lexer.TOKEN_RPAREN) {
+		params = append(params, p.parseType())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			params = append(params, p.parseType())
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COMMA)
+	ret := p.parseType()
+	p.expect(lexer.TOKEN_GT)
+	return &FuncTypeExpr{Params: params, ReturnType: ret}
 }
 
 // --- Expressions (Pratt parser) -----------------------------------------------

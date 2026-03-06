@@ -86,6 +86,25 @@ type ChanType struct {
 func (c *ChanType) typeKind() typeKind { return kindChan }
 func (c *ChanType) String() string     { return "Chan<" + c.Elem.String() + ">" }
 
+// FuncType: Fn<(Int, String), Bool> → callable function type
+type FuncType struct {
+	Params []Type
+	Return Type
+}
+
+func (f *FuncType) typeKind() typeKind { return kindFn }
+func (f *FuncType) String() string {
+	params := make([]string, len(f.Params))
+	for i, p := range f.Params {
+		params[i] = p.String()
+	}
+	ret := "Void"
+	if f.Return != nil {
+		ret = f.Return.String()
+	}
+	return "Fn<(" + strings.Join(params, ", ") + "), " + ret + ">"
+}
+
 // TypeParamType: T, K, V — generic escape hatch
 type TypeParamType struct {
 	Name string
@@ -302,6 +321,12 @@ func (c *Checker) resolveTypeExpr(tex parser.TypeExpr) Type {
 		}
 	case *parser.OptionalType:
 		return &OptionalType{Inner: c.resolveTypeExpr(t.Inner)}
+	case *parser.FuncTypeExpr:
+		params := make([]Type, len(t.Params))
+		for i, p := range t.Params {
+			params[i] = c.resolveTypeExpr(p)
+		}
+		return &FuncType{Params: params, Return: c.resolveTypeExpr(t.ReturnType)}
 	}
 	return TypeUnknown
 }

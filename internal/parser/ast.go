@@ -177,6 +177,15 @@ type OptionalType struct {
 func (o *OptionalType) nodeTag() {}
 func (o *OptionalType) typeTag() {}
 
+// FuncTypeExpr: Fn<(Int, String), Bool> → func(int, string) bool
+type FuncTypeExpr struct {
+	Params     []TypeExpr // parameter types
+	ReturnType TypeExpr   // return type (nil = void)
+}
+
+func (f *FuncTypeExpr) nodeTag() {}
+func (f *FuncTypeExpr) typeTag() {}
+
 // --- Statements --------------------------------------------------------------
 
 // Stmt is a statement node.

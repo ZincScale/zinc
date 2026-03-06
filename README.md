@@ -537,6 +537,46 @@ fn main() {
 }
 ```
 
+### Callable Function Types (`Fn<>`)
+
+Use `Fn<(ParamTypes), ReturnType>` to declare typed function parameters — enabling higher-order functions, callbacks, and functional patterns:
+
+```growler
+fn apply(f: Fn<(Int), Int>, x: Int): Int {
+    return f(x)
+}
+
+fn combine(f: Fn<(Int, Int), Int>, a: Int, b: Int): Int {
+    return f(a, b)
+}
+
+fn run(callback: Fn<(), Void>) {
+    callback()
+}
+
+fn main() {
+    var double = (x: Int): Int => x * 2
+    print(apply(double, 7))       // 14
+
+    var add = (a: Int, b: Int): Int => a + b
+    print(combine(add, 3, 4))     // 7
+
+    run((): Void => { print("done") })
+
+    // Also works as variable type annotations
+    var transform: Fn<(String), Int> = (s: String): Int => s.size()
+    print(transform("hello"))     // 5
+}
+```
+
+Transpiles to Go's native function types:
+
+```go
+func apply(f func(int) int, x int) int { return f(x) }
+func combine(f func(int, int) int, a int, b int) int { return f(a, b) }
+func run(callback func()) { callback() }
+```
+
 ### Closures / Lambdas
 
 Lambdas use the `(params): ReturnType => body` syntax. The body is either a

@@ -325,6 +325,16 @@ func (g *Generator) emitType(t parser.TypeExpr) string {
 			return inner
 		}
 		return "*" + inner
+	case *parser.FuncTypeExpr:
+		params := make([]string, len(typ.Params))
+		for i, p := range typ.Params {
+			params[i] = g.emitType(p)
+		}
+		ret := g.emitType(typ.ReturnType)
+		if ret == "" {
+			return "func(" + strings.Join(params, ", ") + ")"
+		}
+		return "func(" + strings.Join(params, ", ") + ") " + ret
 	}
 	return "interface{}"
 }
@@ -397,6 +407,8 @@ func (g *Generator) zeroValue(t parser.TypeExpr) string {
 	case *parser.GenericType:
 		return "nil"
 	case *parser.OptionalType:
+		return "nil"
+	case *parser.FuncTypeExpr:
 		return "nil"
 	}
 	return "nil"

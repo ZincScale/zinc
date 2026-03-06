@@ -8,8 +8,7 @@ Prioritized for shipping a usable language binary people can try out.
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 1 | **Callable function types (`Fn<In, Out>`)** | Can't pass closures through `Any`; blocks higher-order patterns | Medium |
-| 2 | **List/string slicing** (`list[1:3]`, `s[2:]`) | Basic collection operation missing entirely; no `SliceExpr` AST node | Medium |
+| 1 | **List/string slicing** (`list[1:3]`, `s[2:]`) | Basic collection operation missing entirely; no `SliceExpr` AST node | Medium |
 
 ---
 
@@ -42,39 +41,7 @@ Prioritized for shipping a usable language binary people can try out.
 
 ## Language Limitations (discovered via e2e tests)
 
-### 1. Callable Function Types (`Any` parameters can't be invoked)
-
-**The problem:** In Growler, `Any` maps to Go's `interface{}`. In Go, you cannot call a variable of type `interface{}` as a function — the compiler requires a concrete or known function type.
-
-This Growler code looks reasonable:
-```growler
-fn apply(f: Any, x: Int): Int {
-    return f(x)   // intended to call f as a function
-}
-
-fn main() {
-    var double = (x: Int): Int => x * 2
-    print(apply(double, 7))
-}
-```
-
-But it transpiles to invalid Go:
-```go
-func apply(f interface{}, x int) int {
-    return f(x)   // ERROR: cannot call non-function f (variable of type interface{})
-}
-```
-
-**The fix options:**
-- **Generic function types**: `fn apply<F>(f: F, x: Int): Int` -> `func apply[F any](f F, x int) int` — but Go generics don't support calling `f` without a constraint.
-- **Dedicated `Fn` type**: `fn apply(f: Fn<Int, Int>, x: Int): Int` -> `func apply(f func(int) int, x int) int` — explicit function type syntax.
-- **Type casting workaround** (interim): cast `f` to the expected function type using `as`, once `as` is implemented.
-
-**Current workaround:** Don't pass closures through `Any`. Keep the closure in scope and call it directly, or define a proper interface.
-
----
-
-### 2. Go Zero-Value Construction (`Type{}` not supported)
+### 1. Go Zero-Value Construction (`Type{}` not supported)
 
 **The problem:** Growler has no syntax for constructing a zero-value Go struct. The parser sees `sync.Mutex{}` as a selector expression followed by an unrelated empty block, producing invalid Go.
 
@@ -123,6 +90,7 @@ buf    := bytes.Buffer{}
 - OO collection methods (`.add()`, `.remove()`, `.size()`, `.clone()`, `.sort()`, `.join()`)
 - OO string methods (`.upper()`, `.lower()`, `.contains()`, `.startsWith()`, `.endsWith()`, `.trim()`, `.split()`, `.replace()`)
 - Map utility methods (`.keys()`, `.values()`, `.containsKey()`)
+- Callable function types (`Fn<(Params), Return>` → `func(params) return`)
 - Fix `for (k, v) in map` codegen (IndexVar now emitted correctly)
 - Null safety (Kotlin-style strict enforcement)
 - Tuple unpacking, string interpolation, imports, built-ins

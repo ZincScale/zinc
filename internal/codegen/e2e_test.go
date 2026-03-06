@@ -1077,6 +1077,57 @@ fn main() {
 	assertOutput(t, out, "true\nfalse")
 }
 
+// --- Callable function types (Fn<>) ------------------------------------------
+
+func TestE2EFnTypeParam(t *testing.T) {
+	out := e2eRun(t, `
+fn apply(f: Fn<(Int), Int>, x: Int): Int {
+    return f(x)
+}
+
+fn main() {
+    var double = (x: Int): Int => x * 2
+    print(apply(double, 7))
+}`)
+	assertOutput(t, out, "14")
+}
+
+func TestE2EFnTypeMultiParam(t *testing.T) {
+	out := e2eRun(t, `
+fn combine(f: Fn<(Int, Int), Int>, a: Int, b: Int): Int {
+    return f(a, b)
+}
+
+fn main() {
+    var add = (a: Int, b: Int): Int => a + b
+    print(combine(add, 3, 4))
+}`)
+	assertOutput(t, out, "7")
+}
+
+func TestE2EFnTypeVoid(t *testing.T) {
+	out := e2eRun(t, `
+fn run(callback: Fn<(), Void>) {
+    callback()
+}
+
+fn main() {
+    run((): Void => {
+        print("called")
+    })
+}`)
+	assertOutput(t, out, "called")
+}
+
+func TestE2EFnTypeVar(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var transform: Fn<(String), Int> = (s: String): Int => s.size()
+    print(transform("hello"))
+}`)
+	assertOutput(t, out, "5")
+}
+
 func TestE2EStringMethodChaining(t *testing.T) {
 	out := e2eRun(t, `
 fn main() {
