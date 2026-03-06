@@ -298,21 +298,136 @@ fn main() {
 	assertOutput(t, out, "resource open\ndone")
 }
 
-func TestE2EWithMutex(t *testing.T) {
-	// Growler doesn't support Go struct literal syntax (Type{}) yet.
-	// Use a Growler class that wraps the locking pattern instead.
+func TestE2EWithFileOpenClose(t *testing.T) {
 	out := e2eRun(t, `
-class Counter {
-    var value: Int
-    construct new() { this.value = 0 }
-    pub fn increment() { this.value = this.value + 1 }
-    pub fn get(): Int { return this.value }
-}
+import "os"
 fn main() {
-    var c = Counter.new()
-    c.increment()
-    c.increment()
-    print(c.get())
+    var path = "/tmp/growler_with_test.txt"
+    var (f, _) = os.Create(path)
+    with var file = f {
+        file.WriteString("hello from growler")
+    }
+    var (data, _) = os.ReadFile(path)
+    print(string(data))
+    os.Remove(path)
 }`)
-	assertOutput(t, out, "2")
+	assertOutput(t, out, "hello from growler")
+}
+
+func TestE2EWithMutex(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+fn main() {
+    var mu = sync.Mutex.new()
+    var x = 0
+    with var lock = mu {
+        x = x + 1
+    }
+    with var lock2 = mu {
+        x = x + 10
+    }
+    print(x)
+}`)
+	assertOutput(t, out, "11")
+}
+
+// --- Type casting (as / is) --------------------------------------------------
+
+func TestE2EAsCast(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var x: Any = 42
+    var y = x as Int
+    print(y + 1)
+}`)
+	assertOutput(t, out, "43")
+}
+
+func TestE2EIsCheck(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var x: Any = "hello"
+    if (x is String) {
+        print("yes")
+    } else {
+        print("no")
+    }
+}`)
+	assertOutput(t, out, "yes")
+}
+
+func TestE2EIsCheckFalse(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var x: Any = 42
+    if (x is String) {
+        print("string")
+    } else {
+        print("not string")
+    }
+}`)
+	assertOutput(t, out, "not string")
+}
+
+func TestE2EAsCastClassType(t *testing.T) {
+	out := e2eRun(t, `
+class Animal {
+    var name: String
+    construct new(name: String) {
+        this.name = name
+    }
+    fn speak(): String { return this.name }
+}
+
+class Dog : Animal {
+    construct new(name: String) {
+        super(name)
+    }
+    pub fn bark(): String { return this.name + " says woof" }
+}
+
+fn main() {
+    var a: Any = Dog.new("Rex")
+    var d = a as Dog
+    print(d.bark())
+}`)
+	assertOutput(t, out, "Rex says woof")
+}
+
+// --- .new() on Go types ------------------------------------------------------
+
+func TestE2EGoTypeNew(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+fn main() {
+    var mu = sync.Mutex.new()
+    mu.Lock()
+    mu.Unlock()
+    print("ok")
+}`)
+	assertOutput(t, out, "ok")
+}
+
+func TestE2EWithMutexNew(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+fn main() {
+    var x = 0
+    with var mu = sync.Mutex.new() {
+        x = x + 1
+    }
+    print(x)
+}`)
+	assertOutput(t, out, "1")
+}
+
+func TestE2EGoTypeNewBytesBuffer(t *testing.T) {
+	out := e2eRun(t, `
+import "bytes"
+fn main() {
+    var buf = bytes.Buffer.new()
+    buf.WriteString("hello")
+    print(buf.String())
+}`)
+	assertOutput(t, out, "hello")
 }

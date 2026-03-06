@@ -634,6 +634,12 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		c.popScope()
 		c.currentReturnType = savedReturn
 		return TypeUnknown
+	case *parser.TypeAssertExpr:
+		c.inferExpr(e.Object)
+		if e.IsCheck {
+			return TypeBool
+		}
+		return c.resolveSimpleName(e.TypeName)
 	}
 	return TypeUnknown
 }

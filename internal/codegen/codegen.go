@@ -786,12 +786,20 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 
 	if v.Value != nil {
 		valStr := g.emitExpr(v.Value)
-		// For enum types, emit an explicit type cast to preserve the named type.
-		// e.g. var dir: Direction = 0  →  dir := Direction(0)
 		if v.Type != nil {
-			if st, ok := v.Type.(*parser.SimpleType); ok && g.enumNames[st.Name] {
-				g.writeln(fmt.Sprintf("%s := %s(%s)", v.Name, st.Name, valStr))
-				return
+			if st, ok := v.Type.(*parser.SimpleType); ok {
+				// For enum types, emit an explicit type cast to preserve the named type.
+				// e.g. var dir: Direction = 0  →  dir := Direction(0)
+				if g.enumNames[st.Name] {
+					g.writeln(fmt.Sprintf("%s := %s(%s)", v.Name, st.Name, valStr))
+					return
+				}
+				// For Any/interface types, emit explicit var so the variable is interface{}.
+				// e.g. var x: Any = 42  →  var x interface{} = 42
+				if st.Name == "Any" {
+					g.writeln(fmt.Sprintf("var %s interface{} = %s", v.Name, valStr))
+					return
+				}
 			}
 		}
 		g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
@@ -954,7 +962,7 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	for _, r := range w.Resources {
 		g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
 		g.writeln(fmt.Sprintf("if _c, ok := any(%s).(io.Closer); ok { defer _c.Close() }", r.Name))
-		g.writeln(fmt.Sprintf("if _l, ok := any(%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }", r.Name))
+		g.writeln(fmt.Sprintf("if _l, ok := any(&%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() } else if _l, ok := any(%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }", r.Name, r.Name))
 	}
 	g.emitBlock(w.Body)
 	g.pop()
@@ -1207,6 +1215,15 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			pairs = append(pairs, g.emitExpr(k)+": "+g.emitExpr(ex.Values[i]))
 		}
 		return fmt.Sprintf("map[interface{}]interface{}{%s}", strings.Join(pairs, ", "))
+	case *parser.TypeAssertExpr:
+		obj := g.emitExpr(ex.Object)
+		goType := g.emitSimpleType(ex.TypeName)
+		if ex.IsCheck {
+			// x is Type  →  func() bool { _, ok := x.(Type); return ok }()
+			return fmt.Sprintf("func() bool { _, ok := %s.(%s); return ok }()", obj, goType)
+		}
+		// x as Type  →  x.(Type)
+		return fmt.Sprintf("%s.(%s)", obj, goType)
 	}
 	return "/* unknown expr */"
 }
@@ -1338,6 +1355,19 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 				}
 				resolved := g.resolveArgs(ctorParams, call)
 				return fmt.Sprintf("New%s(%s)", ident.Name, strings.Join(resolved, ", "))
+			}
+		}
+		// GoType.new() → GoType{} (for types not known as Growler classes)
+		// Handles both simple: Mutex.new() and dotted: sync.Mutex.new()
+		if callee.Field == "new" && len(call.Args) == 0 && len(call.NamedArgs) == 0 {
+			if ident, ok := callee.Object.(*parser.Ident); ok {
+				if !g.classNames[ident.Name] {
+					return ident.Name + "{}"
+				}
+			} else if sel, ok := callee.Object.(*parser.SelectorExpr); ok {
+				// pkg.Type.new() → pkg.Type{}
+				typeName := g.emitExpr(sel)
+				return typeName + "{}"
 			}
 		}
 		// Could be send/receive (already handled via SendExpr/ReceiveExpr in parser)
