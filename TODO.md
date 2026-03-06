@@ -1,6 +1,6 @@
 # Growler Feature Roadmap
 
-Prioritized by impact (high → low), sub-prioritized by effort (quick → large).
+Prioritized by impact (high -> low), sub-prioritized by effort (quick -> large).
 
 ---
 
@@ -8,13 +8,11 @@ Prioritized by impact (high → low), sub-prioritized by effort (quick → large
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| ~~1~~ | ~~**Type casting (`as`)**~~ | ~~Can't safely work with `Any`, interfaces, or mixed types without it~~ | ~~Done~~ |
-| ~~2~~ | ~~**More std lib built-in aliases**~~ | ~~Expand the built-ins table — `readFile`, `writeFile`, `httpGet`, JSON encode/decode, etc.~~ | ~~Done~~ |
-| 3 | **Callable function types** | `Any` parameters can't be invoked in Go — needs a proper function type or generics | Medium (see Language Limitations below) |
-| ~~4~~ | ~~**Nullable safe-navigation (`?.`)**~~ | ~~`obj?.field`, `obj?.method()` — essential ergonomics with optional types~~ | ~~Done~~ |
-| ~~5~~ | ~~**`.new()` on Go types**~~ | ~~No way to construct raw Go types like `sync.Mutex{}` or `http.Client{}`~~ | ~~Done~~ |
-| 6 | **Growler stdlib wrappers** | A real `io`, `http`, `json` API in Growler idioms so users never hand-write Go imports | Large (design + impl) |
-| 7 | **Source maps** | When Go compiler errors reference a `.go` line, map it back to the `.gw` source | Large (thread line/col through entire pipeline) |
+| 1 | **Callable function types (`Fn<In, Out>`)** | Can't pass closures through `Any`; blocks higher-order patterns | Medium |
+| 2 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern in Java streams, Python, C#, Ruby; currently must use C-style loops | Medium |
+| 3 | **Fix `for (k, v) in map` codegen** | Parser supports it but codegen ignores `IndexVar` — always emits `for _, item` | Quick fix |
+| 4 | **List/string slicing** (`list[1:3]`, `s[2:]`) | Basic collection operation missing entirely; no `SliceExpr` AST node | Medium |
+| 5 | **Map utility methods** (`.keys()`, `.values()`, `.clone()`, `.contains()`) | Common OO map operations; currently no way to get keys/values as lists | Quick-Medium |
 
 ---
 
@@ -22,20 +20,25 @@ Prioritized by impact (high → low), sub-prioritized by effort (quick → large
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| ~~8~~ | ~~**`break`/`continue` with labels**~~ | ~~Needed for nested loop control; Go supports it natively~~ | ~~Done~~ |
-| 9 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium (parser `operator` keyword + method dispatch) |
-| 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; `match` on struct fields | Medium |
-| 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| ~~12~~ | ~~**`with` multi-return support**~~ | ~~`with (var f = os.Create(path))` auto-detects `(val, err)` and throws on error~~ | ~~Done~~ |
+| 6 | **`const` declarations** | AST + lexer token exist but not wired up; needed for immutability | Quick |
+| 7 | **`range(n)` / `range(a, b)` iteration** | Reduces boilerplate for numeric loops; Python/Kotlin idiom | Quick |
+| 8 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| 9 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| 10 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
+| 11 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
 
 ---
 
-## Tier 3 — Lower Impact / Infrastructure
+## Tier 3 — Infrastructure / Polish
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 13 | **REPL completeness** | Good for experimentation; listed in docs but may be partial | Medium |
-| 14 | **Multi-file project completion** | Registry exists; needs proper cross-file type resolution | Medium-large |
+| 12 | **Source maps** | Map Go compiler errors back to `.gw` lines | Large |
+| 13 | **Growler stdlib wrappers** | Real `io`, `http`, `json` API in Growler idioms | Large |
+| 14 | **REPL completeness** | Listed in docs but may be partial | Medium |
+| 15 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
+| 16 | **Better map/list literal type inference** | Maps always emit `map[interface{}]interface{}`; lists infer only from first element | Medium |
+| 17 | **Example coverage** | Many features (string methods, type casting, named args, list methods) have no `.gw` example | Quick |
 
 ---
 
@@ -65,8 +68,8 @@ func apply(f interface{}, x int) int {
 ```
 
 **The fix options:**
-- **Generic function types**: `fn apply<F>(f: F, x: Int): Int` → `func apply[F any](f F, x int) int` — but Go generics don't support calling `f` without a constraint.
-- **Dedicated `Fn` type**: `fn apply(f: Fn<Int, Int>, x: Int): Int` → `func apply(f func(int) int, x int) int` — explicit function type syntax.
+- **Generic function types**: `fn apply<F>(f: F, x: Int): Int` -> `func apply[F any](f F, x int) int` — but Go generics don't support calling `f` without a constraint.
+- **Dedicated `Fn` type**: `fn apply(f: Fn<Int, Int>, x: Int): Int` -> `func apply(f func(int) int, x int) int` — explicit function type syntax.
 - **Type casting workaround** (interim): cast `f` to the expected function type using `as`, once `as` is implemented.
 
 **Current workaround:** Don't pass closures through `Any`. Keep the closure in scope and call it directly, or define a proper interface.
@@ -112,11 +115,14 @@ buf    := bytes.Buffer{}
 - Closures / lambdas (including throwing lambdas)
 - Concurrency (goroutines, channels)
 - Default parameters + named arguments
-- `with` statement (resource management)
+- `with` statement (resource management, parenthesized syntax)
 - Type casting (`as` / `is`) with e2e tests
 - `.new()` on Go types (zero-value construction)
 - Labeled `break`/`continue` (`@label for/while`, `break @label`)
 - Safe navigation `?.` (`obj?.field`, `obj?.method()`)
 - `with` multi-return auto-detection (`with (var f = os.Create(path))`)
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
+- OO collection methods (`.add()`, `.remove()`, `.size()`, `.clone()`, `.sort()`, `.join()`)
+- OO string methods (`.upper()`, `.lower()`, `.contains()`, `.startsWith()`, `.endsWith()`, `.trim()`, `.split()`, `.replace()`)
+- Null safety (Kotlin-style strict enforcement)
 - Tuple unpacking, string interpolation, imports, built-ins
