@@ -1,0 +1,59 @@
+// Safe Navigation (?.) — access fields and call methods on nullable references
+// without manual null checks. If the receiver is nil, the expression returns nil.
+// Inspired by Kotlin, C#, Swift, and TypeScript.
+
+class Address {
+    var city: String
+    var zip: String
+
+    construct new(city: String, zip: String) {
+        this.city = city
+        this.zip = zip
+    }
+
+    pub fn format(): String {
+        return "{this.city} {this.zip}"
+    }
+}
+
+class User {
+    var name: String
+    var address: Address?
+
+    construct new(name: String, addr: Address?) {
+        this.name = name
+        this.address = addr
+    }
+
+    pub fn greet(): String {
+        return "Hi, I'm {this.name}"
+    }
+}
+
+fn main() {
+    // --- Field access on non-nil ---
+    var alice: User? = User.new("Alice", Address.new("NYC", "10001"))
+    print(alice?.name)          // Alice
+
+    // --- Chaining: a?.b?.c ---
+    print(alice?.address?.city) // NYC
+
+    // --- Method call ---
+    print(alice?.greet())       // Hi, I'm Alice
+    print(alice?.address?.format()) // NYC 10001
+
+    // --- Nil receiver: everything short-circuits safely ---
+    var nobody: User? = null
+    print(nobody?.name)              // <nil>
+    print(nobody?.address?.city)     // <nil>
+    nobody?.greet()                  // no-op, nothing happens
+
+    // --- Nil mid-chain: user exists but address is nil ---
+    var bob: User? = User.new("Bob", null)
+    print(bob?.address?.city)   // <nil>
+
+    // --- Void method on nil: safe, no crash ---
+    var ghost: User? = null
+    ghost?.greet()              // skipped entirely
+    print("done")
+}

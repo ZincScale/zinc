@@ -1,0 +1,59 @@
+// with — Resource management (like Java's try-with-resources, Python's with, C#'s using)
+//
+// Automatically handles:
+//   - Files (io.Closer) → defer Close()
+//   - Mutexes (sync.Locker) → Lock() + defer Unlock()
+//
+// Use `try` to auto-unpack (value, error) returns and throw on error.
+
+import "os"
+import "sync"
+
+fn main() {
+    // --- Basic file write with auto-close ---
+    var path = os.TempDir() + "/growler_example.txt"
+
+    with var f = try os.Create(path) {
+        f.WriteString("Hello from Growler!\n")
+        f.WriteString("Resources are managed automatically.\n")
+    }
+    // f is now closed — safe to read
+
+    print(readFile(path))
+
+    // --- Mutex locking (like Java's synchronized) ---
+    var counter = 0
+    with var mu = sync.Mutex.new() {
+        counter += 1
+        counter += 10
+    }
+    // mu is now unlocked
+    print(counter)
+
+    // --- with + try/catch: error handling ---
+    try {
+        with var f2 = try os.Open("/nonexistent/file.txt") {
+            print("should not reach here")
+        }
+    } catch(err) {
+        print("Caught error: {err}")
+    }
+
+    // --- Multiple resources in one with ---
+    var p1 = os.TempDir() + "/growler_multi_a.txt"
+    var p2 = os.TempDir() + "/growler_multi_b.txt"
+
+    with var f1 = try os.Create(p1), var f2 = try os.Create(p2) {
+        f1.WriteString("File A")
+        f2.WriteString("File B")
+    }
+    // Both files closed (f2 first, then f1 — LIFO order)
+
+    print(readFile(p1))
+    print(readFile(p2))
+
+    // Cleanup
+    os.Remove(path)
+    os.Remove(p1)
+    os.Remove(p2)
+}

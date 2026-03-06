@@ -361,6 +361,100 @@ for item in items {
 }
 ```
 
+#### Labeled Loops
+
+Like Java, Growler supports labeled `break` and `continue` for nested loop control. Prefix a loop with `@label` and reference it from inner loops:
+
+```growler
+@outer for (var i = 0; i < 10; i += 1) {
+    for (var j = 0; j < 10; j += 1) {
+        if (j == 5) {
+            break @outer       // exits both loops
+        }
+        if (i == j) {
+            continue @outer    // skips to next i iteration
+        }
+    }
+}
+```
+
+Works with both `for` and `while` loops. Transpiles directly to Go's native labeled loops:
+
+```go
+outer:
+for i := 0; i < 10; i++ {
+    for j := 0; j < 10; j++ {
+        if j == 5 { break outer }
+        if i == j { continue outer }
+    }
+}
+```
+
+### Safe Navigation (`?.`)
+
+Inspired by Kotlin, C#, Swift, and TypeScript. Access fields and call methods on nullable references without manual null checks. If the receiver is `nil`, the entire expression evaluates to `nil` — no crash, no exception:
+
+```growler
+class User {
+    var name: String
+    var address: Address?
+
+    construct new(name: String, addr: Address?) {
+        this.name = name
+        this.address = addr
+    }
+}
+
+class Address {
+    var city: String
+    construct new(city: String) { this.city = city }
+}
+
+fn main() {
+    var user: User? = User.new("Alice", Address.new("NYC"))
+
+    // Field access — returns nil if user is nil
+    var name = user?.name           // "Alice"
+
+    // Chaining — each ?. short-circuits independently (like Kotlin)
+    var city = user?.address?.city   // "NYC"
+
+    // Method call — skipped if receiver is nil
+    user?.doSomething()
+
+    // Nil receiver — no crash
+    var nobody: User? = null
+    var x = nobody?.name             // nil
+    var y = nobody?.address?.city    // nil
+    nobody?.doSomething()            // no-op
+}
+```
+
+**Statement context** — when `?.` is used as a statement (void method call), it generates a clean nil guard:
+
+```go
+// user?.doSomething()  →
+if user != nil { user.DoSomething() }
+```
+
+**Expression context** — when used in an assignment, it generates a nil-safe wrapper:
+
+```go
+// var name = user?.name  →
+name := func() interface{} { if user != nil { return user.Name }; return nil }()
+```
+
+**Chained expressions** — `a?.b?.c` generates a single flat function with sequential nil checks (no nested wrappers):
+
+```go
+// var city = user?.address?.city  →
+city := func() interface{} {
+    _s0 := user; if _s0 == nil { return nil }
+    _s1 := _s0.Address; if _s1 == nil { return nil }
+    return _s1.City
+}()
+```
+
 ### Closures / Lambdas
 
 Lambdas use the `(params): ReturnType => body` syntax. The body is either a
@@ -444,16 +538,37 @@ safeDivide := func(a int, b int) (int, error) {
 
 ### With (Resource Management)
 
-The `with` statement is Growler's equivalent of Java's try-with-resources. It ensures resources are closed automatically when the block exits — even if an error is thrown — without the developer having to remember to call `Close()`.
+The `with` statement is Growler's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`. It ensures resources are cleaned up automatically when the block exits:
+
+- **Files** (anything implementing `io.Closer`) → `defer Close()`
+- **Mutexes** (anything implementing `sync.Locker`) → `Lock()` + `defer Unlock()`
+
+No manual cleanup needed — same OO ergonomics Java/C#/Python developers expect.
 
 ```growler
 import "os"
 
 fn main() {
-    with var f = os.Open("data.txt") {
-        // use f — it is closed automatically when the block exits
+    with var f = os.Stdin {
+        // f is closed automatically when the block exits
         print("reading file")
     }
+}
+```
+
+#### Multi-Return with `try`
+
+Many Go functions return `(value, error)`. The `try` keyword inside `with` auto-unpacks the tuple and throws on error — no manual error handling needed:
+
+```growler
+import "os"
+
+fn main() {
+    // os.Create returns (*File, error) — try unpacks it automatically
+    with var f = try os.Create("output.txt") {
+        f.WriteString("hello from Growler")
+    }
+    // f is closed automatically, error was auto-checked
 }
 ```
 
@@ -462,30 +577,56 @@ Transpiles to:
 ```go
 func main() {
     {
-        f := os.Open("data.txt")
-        defer f.Close()
-        fmt.Println("reading file")
+        f, _err0 := os.Create("output.txt")
+        if _err0 != nil { panic(_err0) }
+        if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }
+        f.WriteString("hello from Growler")
     }
 }
 ```
 
-Multiple resources can be declared in a single `with`, separated by commas. They are closed in reverse declaration order (last-in, first-out), matching Go's `defer` stack behaviour:
+#### `with try` + `try/catch`
 
-```growler
-with var src = os.Open("in.txt"), var dst = os.Create("out.txt") {
-    // src and dst both deferred — dst closes before src
-}
-```
-
-`with` can be nested inside a `try` block for combined error handling and resource safety:
+When `with try` is inside a `try` block, errors propagate correctly to the catch block instead of panicking:
 
 ```growler
 try {
-    with var f = os.Open("missing.txt") {
-        print("opened")
+    with var f = try os.Open("/nonexistent/file") {
+        print("should not reach")
     }
 } catch(err) {
-    print("error: {err}")
+    print("caught: {err}")    // caught: open /nonexistent/file: no such file or directory
+}
+```
+
+#### Mutex Locking
+
+`with` auto-detects `sync.Locker` and locks/unlocks — like Java's `synchronized` or Python's `with lock`:
+
+```growler
+import "sync"
+
+fn main() {
+    var counter = 0
+    with var mu = sync.Mutex.new() {
+        counter += 1    // mutex locked here, unlocked when block exits
+    }
+}
+```
+
+#### Multiple Resources
+
+Comma-separated resources are closed in reverse order (LIFO), matching Go's `defer` stack:
+
+```growler
+import "os"
+
+fn main() {
+    with var f1 = try os.Create("a.txt"), var f2 = try os.Create("b.txt") {
+        f1.WriteString("file A")
+        f2.WriteString("file B")
+    }
+    // f2 closes first, then f1
 }
 ```
 
@@ -573,33 +714,91 @@ fn main() {
 
 ### Built-in Functions
 
+#### I/O
+
+| Growler            | Go equivalent              | Notes |
+|-------------------|----------------------------|-------|
+| `print(x)`        | `fmt.Println(x)`           | |
+| `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`   | |
+| `readLine()`      | `bufio.NewReader(os.Stdin).ReadString('\n')` | |
+| `readFile(path)`  | `os.ReadFile(path)`        | Returns string, panics on error |
+| `writeFile(path, content)` | `os.WriteFile(path, []byte(content), 0644)` | Panics on error |
+
+#### Type Conversions
+
 | Growler            | Go equivalent              |
 |-------------------|----------------------------|
-| `print(x)`        | `fmt.Println(x)`           |
-| `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`   |
-| `len(x)`          | `len(x)`                   |
-| `append(s, x)`    | `append(s, x)`             |
 | `toString(x)`     | `fmt.Sprintf("%v", x)`     |
 | `parseInt(s)`     | `strconv.Atoi(s)`          |
 | `parseFloat(s)`   | `strconv.ParseFloat(s,64)` |
+| `toBool(s)`       | `strconv.ParseBool(s)`     |
+| `typeOf(x)`       | `fmt.Sprintf("%T", x)`     |
+
+#### Collections
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `len(x)`          | `len(x)`                   |
+| `append(s, x)`    | `append(s, x)`             |
+| `make(x)`         | `make(x)`                  |
+| `delete(m, k)`    | `delete(m, k)`             |
+| `copy(dst, src)`  | `copy(dst, src)`           |
+
+#### Math
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `abs(x)`          | `math.Abs(x)`              |
 | `sqrt(x)`         | `math.Sqrt(x)`             |
 | `pow(x, y)`       | `math.Pow(x, y)`           |
-| `abs(x)`          | `math.Abs(x)`              |
-| `floor(x)`        | `math.Floor(x)`            |
-| `ceil(x)`         | `math.Ceil(x)`             |
-| `round(x)`        | `math.Round(x)`            |
-| `max(a, b)`       | `math.Max(a, b)`           |
-| `min(a, b)`       | `math.Min(a, b)`           |
-| `strUpper(s)`     | `strings.ToUpper(s)`       |
-| `strLower(s)`     | `strings.ToLower(s)`       |
+| `floor(x)` / `ceil(x)` / `round(x)` | `math.Floor` / `Ceil` / `Round` |
+| `max(a, b)` / `min(a, b)` | `math.Max` / `math.Min` |
+
+#### Strings
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `strUpper(s)` / `strLower(s)` | `strings.ToUpper` / `ToLower` |
 | `strContains(s,x)`| `strings.Contains(s, x)`  |
+| `strHasPrefix(s,x)` / `strHasSuffix(s,x)` | `strings.HasPrefix` / `HasSuffix` |
 | `strTrim(s)`      | `strings.TrimSpace(s)`     |
-| `strSplit(s, sep)`| `strings.Split(s, sep)`    |
-| `strJoin(a, sep)` | `strings.Join(a, sep)`     |
-| `strReplace(s,a,b)`| `strings.ReplaceAll(s,a,b)` |
-| `sortInts(s)`     | `sort.Ints(s)`             |
-| `sortStrings(s)`  | `sort.Strings(s)`          |
-| `sortFloats(s)`   | `sort.Float64s(s)`         |
+| `strSplit(s, sep)` / `strJoin(a, sep)` | `strings.Split` / `Join` |
+| `strReplace(s,a,b)` | `strings.ReplaceAll(s,a,b)` |
+| `sprintf(fmt, ...)` | `fmt.Sprintf(fmt, ...)`  |
+
+#### Sorting
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `sortInts(s)` / `sortStrings(s)` / `sortFloats(s)` | `sort.Ints` / `Strings` / `Float64s` |
+
+#### JSON
+
+| Growler            | Go equivalent              | Notes |
+|-------------------|----------------------------|-------|
+| `jsonEncode(val)` | `json.Marshal(val)`        | Returns JSON string |
+| `jsonDecode(str)` | `json.Unmarshal(str, &m)`  | Returns `map[string]interface{}` |
+| `jsonDecode(str, &target)` | `json.Unmarshal(str, target)` | Decodes into target |
+
+#### HTTP
+
+| Growler            | Go equivalent              | Notes |
+|-------------------|----------------------------|-------|
+| `httpGet(url)`    | `http.Get(url)` + read body | Returns response body as string |
+
+#### Environment & Time
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
+| `getEnv(key)`     | `os.Getenv(key)`           |
+| `setEnv(key, val)` | `os.Setenv(key, val)`    |
+| `now()`           | `time.Now()`               |
+| `sleep(ms)`       | `time.Sleep(ms * time.Millisecond)` |
+
+#### Control
+
+| Growler            | Go equivalent              |
+|-------------------|----------------------------|
 | `panic(msg)`      | `panic(msg)`               |
 | `exit(code)`      | `os.Exit(code)`            |
 
@@ -631,6 +830,8 @@ See the [`examples/`](examples/) directory:
 - [`generics.gw`](examples/generics.gw) — Generic functions and classes
 - [`fibonacci.gw`](examples/fibonacci.gw) — Recursion
 - [`closures.gw`](examples/closures.gw) — Lambdas, closures, throwing lambdas
+- [`safe_navigation.gw`](examples/safe_navigation.gw) — Safe navigation `?.` with chaining
+- [`with_resources.gw`](examples/with_resources.gw) — Resource management with `with` and `try`
 
 Run any example:
 
