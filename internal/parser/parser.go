@@ -142,7 +142,7 @@ func tokenPrec(t lexer.TokenType) precedence {
 		return precMulDiv
 	case lexer.TOKEN_AS, lexer.TOKEN_IS:
 		return precTypeOp
-	case lexer.TOKEN_DOT, lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+	case lexer.TOKEN_DOT, lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_QUESTION_DOT:
 		return precCall
 	}
 	return precNone
@@ -178,6 +178,16 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 			} else {
 				left = sel
 			}
+		case lexer.TOKEN_QUESTION_DOT:
+			// ?. safe navigation: obj?.field or obj?.method(...)
+			field := p.expect(lexer.TOKEN_IDENT).Literal
+			nav := &SafeNavExpr{Object: left, Field: field}
+			if p.check(lexer.TOKEN_LPAREN) {
+				// obj?.method(args) — build call with placeholder callee
+				sel := &SelectorExpr{Object: left, Field: field}
+				nav.Call = p.finishCall(sel).(*CallExpr)
+			}
+			left = nav
 		case lexer.TOKEN_LPAREN:
 			left = p.finishCallArgs(left)
 		case lexer.TOKEN_LBRACKET:
@@ -503,9 +513,21 @@ func (p *Parser) parseStmt() Stmt {
 	case lexer.TOKEN_IF:
 		return p.parseIfStmt()
 	case lexer.TOKEN_FOR:
-		return p.parseForStmt()
+		return p.parseForStmt("")
 	case lexer.TOKEN_WHILE:
-		return p.parseWhileStmt()
+		return p.parseWhileStmt("")
+	case lexer.TOKEN_AT:
+		// @label for/while — labeled loop
+		p.advance()
+		label := p.expect(lexer.TOKEN_IDENT).Literal
+		if p.check(lexer.TOKEN_FOR) {
+			return p.parseForStmt(label)
+		}
+		if p.check(lexer.TOKEN_WHILE) {
+			return p.parseWhileStmt(label)
+		}
+		p.errorf("expected 'for' or 'while' after @%s", label)
+		return nil
 	case lexer.TOKEN_GO:
 		return p.parseGoStmt()
 	case lexer.TOKEN_TRY:
@@ -518,10 +540,20 @@ func (p *Parser) parseStmt() Stmt {
 		return p.parseMatchStmt()
 	case lexer.TOKEN_BREAK:
 		p.advance()
-		return &BreakStmt{}
+		label := ""
+		if p.check(lexer.TOKEN_AT) {
+			p.advance()
+			label = p.expect(lexer.TOKEN_IDENT).Literal
+		}
+		return &BreakStmt{Label: label}
 	case lexer.TOKEN_CONTINUE:
 		p.advance()
-		return &ContinueStmt{}
+		label := ""
+		if p.check(lexer.TOKEN_AT) {
+			p.advance()
+			label = p.expect(lexer.TOKEN_IDENT).Literal
+		}
+		return &ContinueStmt{Label: label}
 	case lexer.TOKEN_DEFER:
 		p.advance()
 		expr := p.parseExpr()
@@ -592,7 +624,7 @@ func (p *Parser) parseIfStmt() *IfStmt {
 	return &IfStmt{Cond: cond, Then: then, ElseStmt: elseStmt}
 }
 
-func (p *Parser) parseForStmt() Stmt {
+func (p *Parser) parseForStmt(label string) Stmt {
 	p.expect(lexer.TOKEN_FOR)
 
 	// Detect: for item in expr { }
@@ -602,7 +634,7 @@ func (p *Parser) parseForStmt() Stmt {
 		p.advance()                 // consume "in"
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{IsRange: true, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Label: label, IsRange: true, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// Detect: for (i, item) in expr { }
@@ -621,7 +653,7 @@ func (p *Parser) parseForStmt() Stmt {
 		p.advance()                      // in
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// C-style: for (init; cond; post) { }
@@ -642,7 +674,7 @@ func (p *Parser) parseForStmt() Stmt {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
-	return &ForStmt{Init: init, Cond: cond, Post: post, Body: body}
+	return &ForStmt{Label: label, Init: init, Cond: cond, Post: post, Body: body}
 }
 
 // parseVarOrAssign parses a var decl or assignment for use in for-init/post.
@@ -653,13 +685,13 @@ func (p *Parser) parseVarOrAssign() Stmt {
 	return p.parseExprOrAssignStmt()
 }
 
-func (p *Parser) parseWhileStmt() *WhileStmt {
+func (p *Parser) parseWhileStmt(label string) *WhileStmt {
 	p.expect(lexer.TOKEN_WHILE)
 	p.expect(lexer.TOKEN_LPAREN)
 	cond := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
-	return &WhileStmt{Cond: cond, Body: body}
+	return &WhileStmt{Label: label, Cond: cond, Body: body}
 }
 
 func (p *Parser) parseGoStmt() *GoStmt {
@@ -724,8 +756,14 @@ func (p *Parser) parseWithStmt() *WithStmt {
 		p.expect(lexer.TOKEN_VAR)
 		name := p.expect(lexer.TOKEN_IDENT).Literal
 		p.expect(lexer.TOKEN_ASSIGN)
+		// Check for "try" modifier → auto-unpack (val, err) and throw on error
+		autoErr := false
+		if p.check(lexer.TOKEN_TRY) {
+			p.advance()
+			autoErr = true
+		}
 		val := p.parseExpr()
-		resources = append(resources, &WithResource{Name: name, Value: val})
+		resources = append(resources, &WithResource{Name: name, Value: val, AutoErr: autoErr})
 		if !p.check(lexer.TOKEN_COMMA) {
 			break
 		}

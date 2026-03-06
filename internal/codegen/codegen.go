@@ -38,6 +38,8 @@ type Generator struct {
 	fnParams map[string][]*parser.ParamDecl
 	// methodParams: class name → method name → param list
 	methodParams map[string]map[string][]*parser.ParamDecl
+	// tmpCounter: monotonic counter for generating unique temp variable names
+	tmpCounter int
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -735,9 +737,17 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.MatchStmt:
 		g.emitMatchStmt(st)
 	case *parser.BreakStmt:
-		g.writeln("break")
+		if st.Label != "" {
+			g.writeln(fmt.Sprintf("break %s", st.Label))
+		} else {
+			g.writeln("break")
+		}
 	case *parser.ContinueStmt:
-		g.writeln("continue")
+		if st.Label != "" {
+			g.writeln(fmt.Sprintf("continue %s", st.Label))
+		} else {
+			g.writeln("continue")
+		}
 	case *parser.WithStmt:
 		g.emitWithStmt(st)
 	}
@@ -800,6 +810,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 					g.writeln(fmt.Sprintf("var %s interface{} = %s", v.Name, valStr))
 					return
 				}
+			}
+			// For typed null assignments, emit explicit var declaration.
+			// e.g. var d: Dog? = null  →  var d *Dog = nil
+			if _, isNull := v.Value.(*parser.NullLit); isNull {
+				g.writeln(fmt.Sprintf("var %s %s = nil", v.Name, g.emitType(v.Type)))
+				return
 			}
 		}
 		g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
@@ -871,6 +887,9 @@ func (g *Generator) emitIfStmt(i *parser.IfStmt) {
 }
 
 func (g *Generator) emitForStmt(f *parser.ForStmt) {
+	if f.Label != "" {
+		g.writeln(fmt.Sprintf("%s:", f.Label))
+	}
 	if f.IsRange {
 		g.writeIndent()
 		g.write(fmt.Sprintf("for _, %s := range %s ", f.Item, g.emitExpr(f.Range)))
@@ -921,6 +940,9 @@ func (g *Generator) stmtInline(s parser.Stmt) string {
 }
 
 func (g *Generator) emitWhileStmt(w *parser.WhileStmt) {
+	if w.Label != "" {
+		g.writeln(fmt.Sprintf("%s:", w.Label))
+	}
 	g.writeIndent()
 	g.write(fmt.Sprintf("for %s ", g.emitExpr(w.Cond)))
 	g.write("{\n")
@@ -928,6 +950,116 @@ func (g *Generator) emitWhileStmt(w *parser.WhileStmt) {
 	g.emitBlock(w.Body)
 	g.pop()
 	g.writeln("}")
+}
+
+// emitSafeNavStmt emits safe navigation in statement context (no return value needed).
+//   obj?.method(args)  →  if obj != nil { obj.Method(args) }
+//
+// Follows Kotlin/C#/Swift semantics: if receiver is nil, the call is skipped.
+func (g *Generator) emitSafeNavStmt(sn *parser.SafeNavExpr) {
+	obj := g.emitExpr(sn.Object)
+	field := capitalize(sn.Field)
+	if sn.Call != nil {
+		var argStrs []string
+		for _, a := range sn.Call.Args {
+			argStrs = append(argStrs, g.emitExpr(a))
+		}
+		g.writeln(fmt.Sprintf("if %s != nil { %s.%s(%s) }", obj, obj, field, strings.Join(argStrs, ", ")))
+	} else {
+		g.writeln(fmt.Sprintf("_ = %s // safe-nav (no-op)", obj))
+	}
+}
+
+// nextTmp returns a unique temporary variable name.
+func (g *Generator) nextTmp() string {
+	g.tmpCounter++
+	return fmt.Sprintf("_sn%d", g.tmpCounter)
+}
+
+// flattenSafeNavChain walks a chain of SafeNavExpr nodes and returns them
+// in order from outermost receiver to innermost field/method access.
+// e.g. a?.b?.c → [{obj:a, field:b}, {obj:<prev>, field:c}]
+func flattenSafeNavChain(sn *parser.SafeNavExpr) []*parser.SafeNavExpr {
+	var chain []*parser.SafeNavExpr
+	for {
+		chain = append([]*parser.SafeNavExpr{sn}, chain...)
+		inner, ok := sn.Object.(*parser.SafeNavExpr)
+		if !ok {
+			break
+		}
+		sn = inner
+	}
+	return chain
+}
+
+// emitSafeNav emits safe navigation in expression context.
+//
+// Design follows Kotlin/C#/Swift/TypeScript semantics:
+//   - If receiver is nil, the entire expression evaluates to nil (zero value)
+//   - Chaining a?.b?.c produces flat sequential nil checks inside a single IIFE
+//   - No nested IIFEs — one function, sequential guards, clean generated Go
+//
+// Single:  obj?.field  →  func() interface{} { if obj != nil { return obj.Field }; return nil }()
+// Chain:   a?.b?.c     →  func() interface{} { _v := a; if _v == nil { return nil };
+//                            _v2 := _v.B; if _v2 == nil { return nil }; return _v2.C }()
+func (g *Generator) emitSafeNav(sn *parser.SafeNavExpr) string {
+	chain := flattenSafeNavChain(sn)
+
+	if len(chain) == 1 {
+		// Simple case: no chaining — clean single IIFE
+		return g.emitSafeNavSingle(sn)
+	}
+
+	// Chained case: single IIFE with flat sequential nil checks.
+	// Each step gets its own typed variable — no type erasure mid-chain.
+	//
+	// a?.b?.c generates:
+	//   func() interface{} {
+	//     _s0 := a; if _s0 == nil { return nil }
+	//     _s1 := _s0.B; if _s1 == nil { return nil }
+	//     return _s1.C
+	//   }()
+	var body strings.Builder
+	rootObj := g.emitExpr(chain[0].Object)
+
+	prevVar := "_s0"
+	body.WriteString(fmt.Sprintf("%s := %s; if %s == nil { return nil }; ", prevVar, rootObj, prevVar))
+
+	for i, step := range chain {
+		field := capitalize(step.Field)
+		isLast := i == len(chain)-1
+
+		if isLast && step.Call != nil {
+			var argStrs []string
+			for _, a := range step.Call.Args {
+				argStrs = append(argStrs, g.emitExpr(a))
+			}
+			body.WriteString(fmt.Sprintf("return %s.%s(%s)", prevVar, field, strings.Join(argStrs, ", ")))
+		} else if isLast {
+			body.WriteString(fmt.Sprintf("return %s.%s", prevVar, field))
+		} else {
+			nextVar := fmt.Sprintf("_s%d", i+1)
+			body.WriteString(fmt.Sprintf("%s := %s.%s; if %s == nil { return nil }; ", nextVar, prevVar, field, nextVar))
+			prevVar = nextVar
+		}
+	}
+
+	return fmt.Sprintf("func() interface{} { %s }()", body.String())
+}
+
+// emitSafeNavSingle emits a single (non-chained) safe navigation as an IIFE.
+func (g *Generator) emitSafeNavSingle(sn *parser.SafeNavExpr) string {
+	obj := g.emitExpr(sn.Object)
+	field := capitalize(sn.Field)
+	if sn.Call != nil {
+		var argStrs []string
+		for _, a := range sn.Call.Args {
+			argStrs = append(argStrs, g.emitExpr(a))
+		}
+		args := strings.Join(argStrs, ", ")
+		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s(%s) }; return nil }()", obj, obj, field, args)
+	}
+	return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s }; return nil }()", obj, obj, field)
 }
 
 func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
@@ -959,8 +1091,28 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.neededImports["sync"] = true
 	g.writeln("{")
 	g.push()
-	for _, r := range w.Resources {
-		g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
+	for i, r := range w.Resources {
+		if r.AutoErr {
+			// Auto-unpack (val, err) and throw on error.
+			// Uses the same error propagation strategy as throw:
+			//   - Inside try block (canThrow=true): return the error
+			//   - Outside try block: panic with the error
+			g.neededImports["fmt"] = true
+			errVar := fmt.Sprintf("_err%d", i)
+			g.writeln(fmt.Sprintf("%s, %s := %s", r.Name, errVar, g.emitExpr(r.Value)))
+			if g.currentCanThrow {
+				zero := g.zeroValue(g.currentReturnType)
+				if zero != "" {
+					g.writeln(fmt.Sprintf("if %s != nil { return %s, %s }", errVar, zero, errVar))
+				} else {
+					g.writeln(fmt.Sprintf("if %s != nil { return %s }", errVar, errVar))
+				}
+			} else {
+				g.writeln(fmt.Sprintf("if %s != nil { panic(%s) }", errVar, errVar))
+			}
+		} else {
+			g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
+		}
 		g.writeln(fmt.Sprintf("if _c, ok := any(%s).(io.Closer); ok { defer _c.Close() }", r.Name))
 		g.writeln(fmt.Sprintf("if _l, ok := any(&%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() } else if _l, ok := any(%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }", r.Name, r.Name))
 	}
@@ -996,6 +1148,12 @@ func (g *Generator) emitTryStmt(t *parser.TryStmt) {
 }
 
 func (g *Generator) emitTryBody(body *parser.BlockStmt) {
+	// Inside a try body, we're in a func() error closure.
+	// Set currentCanThrow so that 'with try' and 'throw' emit 'return err'.
+	savedCT := g.currentCanThrow
+	savedRT := g.currentReturnType
+	g.currentCanThrow = true
+	g.currentReturnType = nil // func() error has no value return
 	for _, s := range body.Stmts {
 		if g.stmtHasThrowingCall(s) {
 			g.emitStmtWithErrReturn(s)
@@ -1003,6 +1161,8 @@ func (g *Generator) emitTryBody(body *parser.BlockStmt) {
 			g.emitStmt(s)
 		}
 	}
+	g.currentCanThrow = savedCT
+	g.currentReturnType = savedRT
 }
 
 func (g *Generator) stmtHasThrowingCall(s parser.Stmt) bool {
@@ -1133,6 +1293,11 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 		g.writeln(fmt.Sprintf("%s <- %s", g.emitExpr(se.Chan), g.emitExpr(se.Value)))
 		return
 	}
+	// Special: SafeNavExpr as statement — emit clean if-guard, no IIFE
+	if sn, ok := e.Expr.(*parser.SafeNavExpr); ok {
+		g.emitSafeNavStmt(sn)
+		return
+	}
 	g.writeln(g.emitExpr(e.Expr))
 }
 
@@ -1183,6 +1348,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			}
 		}
 		return fmt.Sprintf("%s.%s", g.emitExpr(ex.Object), capitalize(ex.Field))
+	case *parser.SafeNavExpr:
+		return g.emitSafeNav(ex)
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.emitExpr(ex.Object), g.emitExpr(ex.Index))
 	case *parser.SendExpr:
@@ -1502,6 +1669,60 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 	case "sortFloats":
 		g.neededImports["sort"] = true
 		return fmt.Sprintf("sort.Float64s(%s)", argStr)
+
+	// File I/O
+	case "readFile":
+		g.neededImports["os"] = true
+		return fmt.Sprintf("func() string { b, err := os.ReadFile(%s); if err != nil { panic(err) }; return string(b) }()", argStr)
+	case "writeFile":
+		g.neededImports["os"] = true
+		if len(args) == 2 {
+			return fmt.Sprintf("func() { if err := os.WriteFile(%s, []byte(%s), 0644); err != nil { panic(err) } }()", g.emitExpr(args[0]), g.emitExpr(args[1]))
+		}
+		return fmt.Sprintf("os.WriteFile(%s)", argStr)
+
+	// JSON
+	case "jsonEncode":
+		g.neededImports["encoding/json"] = true
+		return fmt.Sprintf("func() string { b, _ := json.Marshal(%s); return string(b) }()", argStr)
+	case "jsonDecode":
+		g.neededImports["encoding/json"] = true
+		if len(args) == 2 {
+			return fmt.Sprintf("json.Unmarshal([]byte(%s), %s)", g.emitExpr(args[0]), g.emitExpr(args[1]))
+		}
+		return fmt.Sprintf("func() map[string]interface{} { var m map[string]interface{}; json.Unmarshal([]byte(%s), &m); return m }()", argStr)
+
+	// HTTP
+	case "httpGet":
+		g.neededImports["net/http"] = true
+		g.neededImports["io"] = true
+		return fmt.Sprintf("func() string { resp, err := http.Get(%s); if err != nil { panic(err) }; defer resp.Body.Close(); b, _ := io.ReadAll(resp.Body); return string(b) }()", argStr)
+
+	// Environment
+	case "getEnv":
+		g.neededImports["os"] = true
+		return fmt.Sprintf("os.Getenv(%s)", argStr)
+	case "setEnv":
+		g.neededImports["os"] = true
+		return fmt.Sprintf("os.Setenv(%s)", argStr)
+
+	// Time
+	case "now":
+		g.neededImports["time"] = true
+		return "time.Now()"
+	case "sleep":
+		g.neededImports["time"] = true
+		return fmt.Sprintf("time.Sleep(time.Duration(%s) * time.Millisecond)", argStr)
+
+	// String formatting
+	case "sprintf":
+		g.neededImports["fmt"] = true
+		return fmt.Sprintf("fmt.Sprintf(%s)", argStr)
+
+	// Type checking
+	case "typeOf":
+		g.neededImports["fmt"] = true
+		return fmt.Sprintf("fmt.Sprintf(\"%%T\", %s)", argStr)
 	}
 	// Default: pass through as-is
 	return fmt.Sprintf("%s(%s)", name, argStr)

@@ -136,11 +136,17 @@ func (l *Lexer) NextToken() Token {
 	case ';':
 		return l.makeToken(TOKEN_SEMICOLON, ";", line, col)
 	case '?':
+		if l.peek() == '.' {
+			l.advance()
+			return l.makeToken(TOKEN_QUESTION_DOT, "?.", line, col)
+		}
 		if l.peek() == '?' {
 			l.advance()
 			return l.makeToken(TOKEN_QUESTION_QUESTION, "??", line, col)
 		}
 		return l.makeToken(TOKEN_QUESTION, "?", line, col)
+	case '@':
+		return l.makeToken(TOKEN_AT, "@", line, col)
 	case '%':
 		return l.makeToken(TOKEN_PERCENT, "%", line, col)
 	case '+':

@@ -596,6 +596,15 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		return c.inferCall(e)
 	case *parser.SelectorExpr:
 		return c.inferSelector(e)
+	case *parser.SafeNavExpr:
+		// Safe navigation returns the same type as regular access, but nullable
+		c.inferExpr(e.Object)
+		if e.Call != nil {
+			for _, arg := range e.Call.Args {
+				c.inferExpr(arg)
+			}
+		}
+		return TypeUnknown
 	case *parser.IndexExpr:
 		return c.inferIndex(e)
 	case *parser.ListLit:

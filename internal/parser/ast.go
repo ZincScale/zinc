@@ -240,8 +240,10 @@ type IfStmt struct {
 func (i *IfStmt) nodeTag() {}
 func (i *IfStmt) stmtTag() {}
 
-// ForStmt: for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
+// ForStmt: [@label] for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
 type ForStmt struct {
+	Label string // optional label (from @label prefix)
+
 	// C-style
 	Init Stmt // VarStmt or AssignStmt
 	Cond Expr
@@ -259,10 +261,11 @@ type ForStmt struct {
 func (f *ForStmt) nodeTag() {}
 func (f *ForStmt) stmtTag() {}
 
-// WhileStmt: while (cond) { }
+// WhileStmt: [@label] while (cond) { }
 type WhileStmt struct {
-	Cond Expr
-	Body *BlockStmt
+	Label string // optional label (from @label prefix)
+	Cond  Expr
+	Body  *BlockStmt
 }
 
 func (w *WhileStmt) nodeTag() {}
@@ -325,14 +328,18 @@ type MatchCase struct {
 	Body    *BlockStmt
 }
 
-// BreakStmt: break
-type BreakStmt struct{}
+// BreakStmt: break [@label]
+type BreakStmt struct {
+	Label string // empty if no label
+}
 
 func (b *BreakStmt) nodeTag() {}
 func (b *BreakStmt) stmtTag() {}
 
-// ContinueStmt: continue
-type ContinueStmt struct{}
+// ContinueStmt: continue [@label]
+type ContinueStmt struct {
+	Label string // empty if no label
+}
 
 func (c *ContinueStmt) nodeTag() {}
 func (c *ContinueStmt) stmtTag() {}
@@ -347,8 +354,9 @@ func (d *DeferStmt) stmtTag() {}
 
 // WithResource is a single resource binding inside a with statement.
 type WithResource struct {
-	Name  string
-	Value Expr
+	Name     string
+	Value    Expr
+	AutoErr  bool // true = auto-unpack (val, err) and throw on error
 }
 
 // WithStmt: with var name = expr [, var name = expr ...] { body }
@@ -406,6 +414,16 @@ type SelectorExpr struct {
 
 func (s *SelectorExpr) nodeTag() {}
 func (s *SelectorExpr) exprTag() {}
+
+// SafeNavExpr: obj?.field or obj?.method(args)
+type SafeNavExpr struct {
+	Object Expr
+	Field  string
+	Call   *CallExpr // non-nil if obj?.method(args)
+}
+
+func (s *SafeNavExpr) nodeTag() {}
+func (s *SafeNavExpr) exprTag() {}
 
 // IndexExpr: obj[index]
 type IndexExpr struct {

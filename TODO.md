@@ -9,9 +9,9 @@ Prioritized by impact (high → low), sub-prioritized by effort (quick → large
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
 | ~~1~~ | ~~**Type casting (`as`)**~~ | ~~Can't safely work with `Any`, interfaces, or mixed types without it~~ | ~~Done~~ |
-| 2 | **More std lib built-in aliases** | Expand the built-ins table — `readFile`, `writeFile`, `httpGet`, JSON encode/decode, etc. | Easy but incremental |
+| ~~2~~ | ~~**More std lib built-in aliases**~~ | ~~Expand the built-ins table — `readFile`, `writeFile`, `httpGet`, JSON encode/decode, etc.~~ | ~~Done~~ |
 | 3 | **Callable function types** | `Any` parameters can't be invoked in Go — needs a proper function type or generics | Medium (see Language Limitations below) |
-| 4 | **Nullable safe-navigation (`?.`)** | `obj?.field`, `obj?.method()` — essential ergonomics with optional types | Medium (parser + nil-guard codegen) |
+| ~~4~~ | ~~**Nullable safe-navigation (`?.`)**~~ | ~~`obj?.field`, `obj?.method()` — essential ergonomics with optional types~~ | ~~Done~~ |
 | ~~5~~ | ~~**`.new()` on Go types**~~ | ~~No way to construct raw Go types like `sync.Mutex{}` or `http.Client{}`~~ | ~~Done~~ |
 | 6 | **Growler stdlib wrappers** | A real `io`, `http`, `json` API in Growler idioms so users never hand-write Go imports | Large (design + impl) |
 | 7 | **Source maps** | When Go compiler errors reference a `.go` line, map it back to the `.gw` source | Large (thread line/col through entire pipeline) |
@@ -22,11 +22,11 @@ Prioritized by impact (high → low), sub-prioritized by effort (quick → large
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 8 | **`break`/`continue` with labels** | Needed for nested loop control; Go supports it natively | Quick (lexer label + codegen passthrough) |
+| ~~8~~ | ~~**`break`/`continue` with labels**~~ | ~~Needed for nested loop control; Go supports it natively~~ | ~~Done~~ |
 | 9 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium (parser `operator` keyword + method dispatch) |
 | 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; `match` on struct fields | Medium |
 | 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| 12 | **`with` multi-return support** | `with var f = os.Create(path)` should auto-unpack `(val, err)`, discarding or throwing on error. Currently requires `var (f, _) = os.Create(path)` then `with var file = f` | Medium (parser + codegen) |
+| ~~12~~ | ~~**`with` multi-return support**~~ | ~~`with var f = try os.Create(path)` auto-unpacks `(val, err)` and throws on error~~ | ~~Done~~ |
 
 ---
 
@@ -115,4 +115,8 @@ buf    := bytes.Buffer{}
 - `with` statement (resource management)
 - Type casting (`as` / `is`) with e2e tests
 - `.new()` on Go types (zero-value construction)
+- Labeled `break`/`continue` (`@label for/while`, `break @label`)
+- Safe navigation `?.` (`obj?.field`, `obj?.method()`)
+- `with` multi-return via `try` (`with var f = try os.Create(path)`)
+- More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
 - Tuple unpacking, string interpolation, imports, built-ins

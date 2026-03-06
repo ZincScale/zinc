@@ -431,3 +431,427 @@ fn main() {
 }`)
 	assertOutput(t, out, "hello")
 }
+
+// --- Labeled break/continue --------------------------------------------------
+
+func TestE2ELabeledBreak(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var result = ""
+    @outer for (var i = 0; i < 3; i += 1) {
+        for (var j = 0; j < 3; j += 1) {
+            if (j == 1) {
+                break @outer
+            }
+            result = result + toString(i) + toString(j) + " "
+        }
+    }
+    print(result)
+}`)
+	assertOutput(t, out, "00")
+}
+
+func TestE2ELabeledContinue(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var result = ""
+    @outer for (var i = 0; i < 3; i += 1) {
+        for (var j = 0; j < 3; j += 1) {
+            if (j == 1) {
+                continue @outer
+            }
+            result = result + toString(i) + toString(j) + " "
+        }
+    }
+    print(result)
+}`)
+	assertOutput(t, out, "00 10 20")
+}
+
+func TestE2ELabeledWhile(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var i = 0
+    var result = ""
+    @outer while (i < 3) {
+        var j = 0
+        while (j < 3) {
+            if (j == 1) {
+                i += 1
+                continue @outer
+            }
+            result = result + toString(i) + toString(j) + " "
+            j += 1
+        }
+        i += 1
+    }
+    print(result)
+}`)
+	assertOutput(t, out, "00 10 20")
+}
+
+// --- Safe navigation ?.  -----------------------------------------------------
+
+// --- Safe navigation ?.  --- field access on non-nil pointer
+func TestE2ESafeNavField(t *testing.T) {
+	out := e2eRun(t, `
+class Dog {
+    var name: String
+    construct new(n: String) {
+        this.name = n
+    }
+}
+fn main() {
+    var d: Dog? = Dog.new("Rex")
+    var result = d?.name
+    print(result)
+}`)
+	assertOutput(t, out, "Rex")
+}
+
+// --- Safe navigation ?.  --- field access on nil → returns nil
+func TestE2ESafeNavNil(t *testing.T) {
+	out := e2eRun(t, `
+class Dog {
+    var name: String
+    construct new(n: String) {
+        this.name = n
+    }
+}
+fn main() {
+    var d: Dog? = null
+    var result = d?.name
+    if (result == null) {
+        print("nil safe")
+    }
+}`)
+	assertOutput(t, out, "nil safe")
+}
+
+// --- Safe navigation ?.  --- method call on non-nil pointer
+func TestE2ESafeNavMethodCall(t *testing.T) {
+	out := e2eRun(t, `
+class Dog {
+    var name: String
+    construct new(n: String) {
+        this.name = n
+    }
+    pub fn speak(): String {
+        return "woof"
+    }
+}
+fn main() {
+    var d: Dog? = Dog.new("Rex")
+    var result = d?.speak()
+    print(result)
+}`)
+	assertOutput(t, out, "woof")
+}
+
+// --- Safe navigation ?.  --- method call on nil → returns nil, method not called
+func TestE2ESafeNavMethodNil(t *testing.T) {
+	out := e2eRun(t, `
+class Dog {
+    var name: String
+    construct new(n: String) {
+        this.name = n
+    }
+    pub fn speak(): String {
+        return "woof"
+    }
+}
+fn main() {
+    var d: Dog? = null
+    var result = d?.speak()
+    if (result == null) {
+        print("method not called")
+    }
+}`)
+	assertOutput(t, out, "method not called")
+}
+
+// --- Safe navigation ?.  --- as statement (void method) on non-nil
+func TestE2ESafeNavVoidMethodNonNil(t *testing.T) {
+	out := e2eRun(t, `
+class Logger {
+    var lastMsg: String
+    construct new() {
+        this.lastMsg = ""
+    }
+    pub fn log(msg: String) {
+        this.lastMsg = msg
+        print(msg)
+    }
+}
+fn main() {
+    var l: Logger? = Logger.new()
+    l?.log("hello")
+}`)
+	assertOutput(t, out, "hello")
+}
+
+// --- Safe navigation ?.  --- as statement (void method) on nil — should not crash
+func TestE2ESafeNavVoidMethodNil(t *testing.T) {
+	out := e2eRun(t, `
+class Logger {
+    var lastMsg: String
+    construct new() {
+        this.lastMsg = ""
+    }
+    pub fn log(msg: String) {
+        this.lastMsg = msg
+        print(msg)
+    }
+}
+fn main() {
+    var l: Logger? = null
+    l?.log("should not print")
+    print("survived")
+}`)
+	assertOutput(t, out, "survived")
+}
+
+// --- Safe navigation ?.  --- chaining a?.b?.c
+func TestE2ESafeNavChaining(t *testing.T) {
+	out := e2eRun(t, `
+class Address {
+    var city: String
+    construct new(c: String) {
+        this.city = c
+    }
+}
+class Person {
+    var name: String
+    var address: Address?
+    construct new(n: String, addr: Address?) {
+        this.name = n
+        this.address = addr
+    }
+}
+fn main() {
+    var p: Person? = Person.new("Alice", Address.new("NYC"))
+    var city = p?.address?.city
+    print(city)
+}`)
+	assertOutput(t, out, "NYC")
+}
+
+// --- Safe navigation ?.  --- chaining where middle is nil
+func TestE2ESafeNavChainingNilMiddle(t *testing.T) {
+	out := e2eRun(t, `
+class Address {
+    var city: String
+    construct new(c: String) {
+        this.city = c
+    }
+}
+class Person {
+    var name: String
+    var address: Address?
+    construct new(n: String, addr: Address?) {
+        this.name = n
+        this.address = addr
+    }
+}
+fn main() {
+    var p: Person? = Person.new("Bob", null)
+    var city = p?.address?.city
+    if (city == null) {
+        print("no city")
+    }
+}`)
+	assertOutput(t, out, "no city")
+}
+
+// --- with multi-return (try) -------------------------------------------------
+
+func TestE2EWithTryMultiReturn(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    with var f = try os.CreateTemp("", "test*.txt") {
+        f.WriteString("hello")
+        print("ok")
+    }
+}`)
+	assertOutput(t, out, "ok")
+}
+
+// with + try: write and read back to verify file actually works
+func TestE2EWithTryFileWriteRead(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    var path = os.TempDir() + "/growler_with_try_test.txt"
+    with var f = try os.Create(path) {
+        f.WriteString("hello from with-try")
+    }
+    var content = readFile(path)
+    print(content)
+    os.Remove(path)
+}`)
+	assertOutput(t, out, "hello from with-try")
+}
+
+// with + try: error causes panic, caught by try/catch
+func TestE2EWithTryErrorPanics(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    try {
+        with var f = try os.Open("/nonexistent/path/that/does/not/exist") {
+            print("should not reach")
+        }
+    } catch(err) {
+        print("caught error")
+    }
+}`)
+	assertOutput(t, out, "caught error")
+}
+
+// with: multiple resources — file + mutex
+func TestE2EWithMultipleResources(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+import "os"
+fn main() {
+    var x = 0
+    with var f = os.Stdin, var mu = sync.Mutex.new() {
+        x = x + 1
+        print("inside with")
+    }
+    print(x)
+}`)
+	assertOutput(t, out, "inside with\n1")
+}
+
+// with + try: multiple try resources
+func TestE2EWithMultipleTryResources(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    var p1 = os.TempDir() + "/growler_multi1.txt"
+    var p2 = os.TempDir() + "/growler_multi2.txt"
+    with var f1 = try os.Create(p1), var f2 = try os.Create(p2) {
+        f1.WriteString("file1")
+        f2.WriteString("file2")
+    }
+    print(readFile(p1))
+    print(readFile(p2))
+    os.Remove(p1)
+    os.Remove(p2)
+}`)
+	assertOutput(t, out, "file1\nfile2")
+}
+
+// with: nested with blocks
+func TestE2EWithNested(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+fn main() {
+    var x = 0
+    with var mu1 = sync.Mutex.new() {
+        x = x + 1
+        with var mu2 = sync.Mutex.new() {
+            x = x + 10
+        }
+    }
+    print(x)
+}`)
+	assertOutput(t, out, "11")
+}
+
+// with: resource that is neither Closer nor Locker — just scoping
+func TestE2EWithPlainValue(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    with var x = 42 {
+        print(x)
+    }
+}`)
+	assertOutput(t, out, "42")
+}
+
+// with + try: using readFile built-in inside with block
+func TestE2EWithTryReadAfterWrite(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    var path = os.TempDir() + "/growler_with_rw.txt"
+    with var f = try os.Create(path) {
+        f.WriteString("growler with-try rocks")
+    }
+    // File is now closed (defer Close() ran), safe to read
+    print(readFile(path))
+    os.Remove(path)
+}`)
+	assertOutput(t, out, "growler with-try rocks")
+}
+
+// with: RWMutex (implements sync.Locker via RLock/Lock)
+func TestE2EWithRWMutex(t *testing.T) {
+	out := e2eRun(t, `
+import "sync"
+fn main() {
+    var mu = sync.RWMutex.new()
+    var x = 0
+    with var lock = mu {
+        x = x + 5
+    }
+    print(x)
+}`)
+	assertOutput(t, out, "5")
+}
+
+// --- New stdlib built-in aliases ---------------------------------------------
+
+func TestE2EJsonEncode(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var data = "hello"
+    var encoded = jsonEncode(data)
+    print(encoded)
+}`)
+	assertOutput(t, out, `"hello"`)
+}
+
+func TestE2ESprintf(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var result = sprintf("Hello, %s! You are %d.", "Alice", 30)
+    print(result)
+}`)
+	assertOutput(t, out, "Hello, Alice! You are 30.")
+}
+
+func TestE2ETypeOf(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var x = 42
+    print(typeOf(x))
+}`)
+	assertOutput(t, out, "int")
+}
+
+func TestE2ESleep(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    sleep(1)
+    print("done")
+}`)
+	assertOutput(t, out, "done")
+}
+
+func TestE2EReadWriteFile(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+fn main() {
+    var dir = os.TempDir()
+    var path = dir + "/growler_test_rw.txt"
+    writeFile(path, "hello growler")
+    var content = readFile(path)
+    print(content)
+    os.Remove(path)
+}`)
+	assertOutput(t, out, "hello growler")
+}
