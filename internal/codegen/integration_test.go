@@ -284,7 +284,7 @@ func TestIntegrationWithAndTryCatch(t *testing.T) {
 	src := `
 fn main() {
     try {
-        with var f = openFile("x") {
+        with (var f = openFile("x")) {
             print("ok")
         }
     } catch(err) {
@@ -307,7 +307,7 @@ func TestIntegrationWithInClassMethod(t *testing.T) {
 class DataProcessor {
     construct new() {}
     pub fn process() {
-        with var handle = openFile("data.txt") {
+        with (var handle = openFile("data.txt")) {
             print("processing")
         }
     }
@@ -334,7 +334,7 @@ import "sync"
 fn main() {
     var mu = sync.Mutex.new()
     go {
-        with var lock = mu {
+        with (var lock = mu) {
             print("critical section")
         }
     }
@@ -377,7 +377,7 @@ func TestIntegrationGoRoutineWith(t *testing.T) {
 	src := `
 fn main() {
     go {
-        with var f = openFile("x") {
+        with (var f = openFile("x")) {
             print("reading")
         }
     }

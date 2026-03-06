@@ -315,7 +315,7 @@ func TestE2EWithFileResource(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    with var f = os.Stdin {
+    with (var f = os.Stdin) {
         print("resource open")
     }
     print("done")
@@ -329,7 +329,7 @@ import "os"
 fn main() {
     var path = "/tmp/growler_with_test.txt"
     var (f, _) = os.Create(path)
-    with var file = f {
+    with (var file = f) {
         file.WriteString("hello from growler")
     }
     var (data, _) = os.ReadFile(path)
@@ -345,10 +345,10 @@ import "sync"
 fn main() {
     var mu = sync.Mutex.new()
     var x = 0
-    with var lock = mu {
+    with (var lock = mu) {
         x = x + 1
     }
-    with var lock2 = mu {
+    with (var lock2 = mu) {
         x = x + 10
     }
     print(x)
@@ -438,7 +438,7 @@ func TestE2EWithMutexNew(t *testing.T) {
 import "sync"
 fn main() {
     var x = 0
-    with var mu = sync.Mutex.new() {
+    with (var mu = sync.Mutex.new()) {
         x = x + 1
     }
     print(x)
@@ -694,7 +694,7 @@ func TestE2EWithTryMultiReturn(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    with var f = os.CreateTemp("", "test*.txt") {
+    with (var f = os.CreateTemp("", "test*.txt")) {
         f.WriteString("hello")
         print("ok")
     }
@@ -708,7 +708,7 @@ func TestE2EWithTryFileWriteRead(t *testing.T) {
 import "os"
 fn main() {
     var path = os.TempDir() + "/growler_with_test.txt"
-    with var f = os.Create(path) {
+    with (var f = os.Create(path)) {
         f.WriteString("hello from with")
     }
     var content = readFile(path)
@@ -724,7 +724,7 @@ func TestE2EWithTryErrorPanics(t *testing.T) {
 import "os"
 fn main() {
     try {
-        with var f = os.Open("/nonexistent/path/that/does/not/exist") {
+        with (var f = os.Open("/nonexistent/path/that/does/not/exist")) {
             print("should not reach")
         }
     } catch(err) {
@@ -741,7 +741,7 @@ import "sync"
 import "os"
 fn main() {
     var x = 0
-    with var f = os.Stdin, var mu = sync.Mutex.new() {
+    with (var f = os.Stdin, var mu = sync.Mutex.new()) {
         x = x + 1
         print("inside with")
     }
@@ -757,7 +757,7 @@ import "os"
 fn main() {
     var p1 = os.TempDir() + "/growler_multi1.txt"
     var p2 = os.TempDir() + "/growler_multi2.txt"
-    with var f1 = os.Create(p1), var f2 = os.Create(p2) {
+    with (var f1 = os.Create(p1), var f2 = os.Create(p2)) {
         f1.WriteString("file1")
         f2.WriteString("file2")
     }
@@ -775,9 +775,9 @@ func TestE2EWithNested(t *testing.T) {
 import "sync"
 fn main() {
     var x = 0
-    with var mu1 = sync.Mutex.new() {
+    with (var mu1 = sync.Mutex.new()) {
         x = x + 1
-        with var mu2 = sync.Mutex.new() {
+        with (var mu2 = sync.Mutex.new()) {
             x = x + 10
         }
     }
@@ -790,7 +790,7 @@ fn main() {
 func TestE2EWithPlainValue(t *testing.T) {
 	out := e2eRun(t, `
 fn main() {
-    with var x = 42 {
+    with (var x = 42) {
         print(x)
     }
 }`)
@@ -803,7 +803,7 @@ func TestE2EWithTryReadAfterWrite(t *testing.T) {
 import "os"
 fn main() {
     var path = os.TempDir() + "/growler_with_rw.txt"
-    with var f = os.Create(path) {
+    with (var f = os.Create(path)) {
         f.WriteString("growler with rocks")
     }
     // File is now closed (defer Close() ran), safe to read
@@ -820,7 +820,7 @@ import "sync"
 fn main() {
     var mu = sync.RWMutex.new()
     var x = 0
-    with var lock = mu {
+    with (var lock = mu) {
         x = x + 5
     }
     print(x)

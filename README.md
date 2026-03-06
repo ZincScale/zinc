@@ -549,7 +549,7 @@ No manual cleanup needed — same OO ergonomics Java/C#/Python developers expect
 import "os"
 
 fn main() {
-    with var f = os.Stdin {
+    with (var f = os.Stdin) {
         // f is closed automatically when the block exits
         print("reading file")
     }
@@ -565,7 +565,7 @@ import "os"
 
 fn main() {
     // os.Create returns (*File, error) — auto-detected and unpacked
-    with var f = os.Create("output.txt") {
+    with (var f = os.Create("output.txt")) {
         f.WriteString("hello from Growler")
     }
     // f is closed automatically, error was auto-checked
@@ -591,7 +591,7 @@ When `with` is inside a `try` block, errors propagate correctly to the catch blo
 
 ```growler
 try {
-    with var f = os.Open("/nonexistent/file") {
+    with (var f = os.Open("/nonexistent/file")) {
         print("should not reach")
     }
 } catch(err) {
@@ -608,7 +608,7 @@ import "sync"
 
 fn main() {
     var counter = 0
-    with var mu = sync.Mutex.new() {
+    with (var mu = sync.Mutex.new()) {
         counter += 1    // mutex locked here, unlocked when block exits
     }
 }
@@ -622,7 +622,7 @@ Comma-separated resources are closed in reverse order (LIFO), matching Go's `def
 import "os"
 
 fn main() {
-    with var f1 = os.Create("a.txt"), var f2 = os.Create("b.txt") {
+    with (var f1 = os.Create("a.txt"), var f2 = os.Create("b.txt")) {
         f1.WriteString("file A")
         f2.WriteString("file B")
     }

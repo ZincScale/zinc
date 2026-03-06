@@ -4,7 +4,7 @@
 //   - Files (io.Closer) → defer Close()
 //   - Mutexes (sync.Locker) → Lock() + defer Unlock()
 //
-// Use `try` to auto-unpack (value, error) returns and throw on error.
+// Multi-return (T, error) functions are auto-detected — no extra syntax needed.
 
 import "os"
 import "sync"
@@ -13,7 +13,7 @@ fn main() {
     // --- Basic file write with auto-close ---
     var path = os.TempDir() + "/growler_example.txt"
 
-    with var f = try os.Create(path) {
+    with (var f = os.Create(path)) {
         f.WriteString("Hello from Growler!\n")
         f.WriteString("Resources are managed automatically.\n")
     }
@@ -23,7 +23,7 @@ fn main() {
 
     // --- Mutex locking (like Java's synchronized) ---
     var counter = 0
-    with var mu = sync.Mutex.new() {
+    with (var mu = sync.Mutex.new()) {
         counter += 1
         counter += 10
     }
@@ -32,7 +32,7 @@ fn main() {
 
     // --- with + try/catch: error handling ---
     try {
-        with var f2 = try os.Open("/nonexistent/file.txt") {
+        with (var f2 = os.Open("/nonexistent/file.txt")) {
             print("should not reach here")
         }
     } catch(err) {
@@ -43,7 +43,7 @@ fn main() {
     var p1 = os.TempDir() + "/growler_multi_a.txt"
     var p2 = os.TempDir() + "/growler_multi_b.txt"
 
-    with var f1 = try os.Create(p1), var f2 = try os.Create(p2) {
+    with (var f1 = os.Create(p1), var f2 = os.Create(p2)) {
         f1.WriteString("File A")
         f2.WriteString("File B")
     }

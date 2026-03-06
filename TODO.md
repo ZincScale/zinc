@@ -26,7 +26,7 @@ Prioritized by impact (high → low), sub-prioritized by effort (quick → large
 | 9 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium (parser `operator` keyword + method dispatch) |
 | 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; `match` on struct fields | Medium |
 | 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| ~~12~~ | ~~**`with` multi-return support**~~ | ~~`with var f = try os.Create(path)` auto-unpacks `(val, err)` and throws on error~~ | ~~Done~~ |
+| ~~12~~ | ~~**`with` multi-return support**~~ | ~~`with (var f = os.Create(path))` auto-detects `(val, err)` and throws on error~~ | ~~Done~~ |
 
 ---
 
@@ -117,6 +117,6 @@ buf    := bytes.Buffer{}
 - `.new()` on Go types (zero-value construction)
 - Labeled `break`/`continue` (`@label for/while`, `break @label`)
 - Safe navigation `?.` (`obj?.field`, `obj?.method()`)
-- `with` multi-return via `try` (`with var f = try os.Create(path)`)
+- `with` multi-return auto-detection (`with (var f = os.Create(path))`)
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
 - Tuple unpacking, string interpolation, imports, built-ins

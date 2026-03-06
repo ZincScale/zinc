@@ -359,7 +359,7 @@ type WithResource struct {
 	AutoErr  bool // set by codegen when multi-return (T, error) is auto-detected
 }
 
-// WithStmt: with var name = expr [, var name = expr ...] { body }
+// WithStmt: with (var name = expr [, var name = expr ...]) { body }
 // Each resource has .Close() deferred automatically.
 type WithStmt struct {
 	Resources []*WithResource

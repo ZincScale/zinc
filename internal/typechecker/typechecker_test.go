@@ -704,7 +704,7 @@ fn main() {
 
 func TestWithStmtTypecheck(t *testing.T) {
 	src := `fn main() {
-    with var f = openFile("data.txt") {
+    with (var f = openFile("data.txt")) {
         print("ok")
     }
 }`
@@ -714,7 +714,7 @@ func TestWithStmtTypecheck(t *testing.T) {
 
 func TestWithStmtResourceInScope(t *testing.T) {
 	src := `fn main() {
-    with var f = openFile("data.txt") {
+    with (var f = openFile("data.txt")) {
         print(f)
     }
 }`
@@ -730,7 +730,7 @@ class NoClose {
     pub fn read(): String { return "data" }
 }
 fn main() {
-    with var f = NoClose.new() {
+    with (var f = NoClose.new()) {
         print("ok")
     }
 }`

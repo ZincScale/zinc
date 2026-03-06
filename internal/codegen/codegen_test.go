@@ -927,7 +927,7 @@ fn main() {
 func TestWithStmt(t *testing.T) {
 	src := `
 fn main() {
-    with var f = openFile("data.txt") {
+    with (var f = openFile("data.txt")) {
         print("reading")
     }
 }
@@ -947,7 +947,7 @@ fn main() {
 func TestWithStmtMultipleResources(t *testing.T) {
 	src := `
 fn main() {
-    with var src = openFile("in.txt"), var dst = createFile("out.txt") {
+    with (var src = openFile("in.txt"), var dst = createFile("out.txt")) {
         print("copying")
     }
 }
@@ -965,7 +965,7 @@ fn main() {
 func TestWithStmtThreeResources(t *testing.T) {
 	src := `
 fn main() {
-    with var a = open("a"), var b = open("b"), var c = open("c") {
+    with (var a = open("a"), var b = open("b"), var c = open("c")) {
         print("ok")
     }
 }
@@ -985,7 +985,7 @@ fn main() {
 func TestWithStmtInsideFunction(t *testing.T) {
 	src := `
 fn process() {
-    with var f = openFile("data.txt") {
+    with (var f = openFile("data.txt")) {
         print("reading")
     }
 }
@@ -1005,7 +1005,7 @@ func TestWithStmtLocker(t *testing.T) {
 import "sync"
 fn main() {
     var mu = sync.Mutex.new()
-    with var locked = mu {
+    with (var locked = mu) {
         print("critical section")
     }
 }
@@ -1022,7 +1022,7 @@ func TestWithStmtNestedInTry(t *testing.T) {
 	src := `
 fn main() {
     try {
-        with var f = openFile("x") {
+        with (var f = openFile("x")) {
             print("ok")
         }
     } catch(err) {

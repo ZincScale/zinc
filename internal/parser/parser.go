@@ -830,6 +830,7 @@ func (p *Parser) parseMatchStmt() *MatchStmt {
 
 func (p *Parser) parseWithStmt() *WithStmt {
 	p.expect(lexer.TOKEN_WITH)
+	p.expect(lexer.TOKEN_LPAREN)
 	var resources []*WithResource
 	for {
 		p.expect(lexer.TOKEN_VAR)
@@ -842,6 +843,7 @@ func (p *Parser) parseWithStmt() *WithStmt {
 		}
 		p.advance()
 	}
+	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
 	return &WithStmt{Resources: resources, Body: body}
 }
