@@ -737,3 +737,177 @@ fn main() {
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
+
+// --- Null safety: strict Kotlin-style enforcement ----------------------------
+
+func TestSafeNavOnNullableOK(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+    pub fn speak(): String { return "woof" }
+}
+fn main() {
+    var d: Dog? = null
+    print(d?.name)
+    d?.speak()
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestSafeNavOnNonNullableError(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+}
+fn main() {
+    var d = Dog.new("Rex")
+    print(d?.name)
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "unnecessary safe call on non-null type") {
+		t.Errorf("expected 'unnecessary safe call' error, got %v", errs)
+	}
+}
+
+func TestDotOnNullableFieldError(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+}
+fn main() {
+    var d: Dog? = null
+    print(d.name)
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "use '?.'") {
+		t.Errorf("expected 'use ?.' error for . on nullable, got %v", errs)
+	}
+}
+
+func TestDotMethodOnNullableError(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+    pub fn speak(): String { return "woof" }
+}
+fn main() {
+    var d: Dog? = null
+    d.speak()
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "use '?.'") {
+		t.Errorf("expected 'use ?.' error for .method() on nullable, got %v", errs)
+	}
+}
+
+func TestNullAssignToNonNullableClassError(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+}
+fn main() {
+    var d: Dog = null
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "cannot assign") {
+		t.Errorf("expected 'cannot assign' error for null to Dog, got %v", errs)
+	}
+}
+
+func TestSafeNavChainConsistency(t *testing.T) {
+	// a?.address returns Address? so subsequent access must use ?.
+	src := `
+class Address {
+    var city: String
+    construct new(city: String) { this.city = city }
+}
+class User {
+    var address: Address?
+    construct new(addr: Address?) { this.address = addr }
+}
+fn main() {
+    var u: User? = null
+    print(u?.address?.city)
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestSafeNavChainDotAfterSafeNavError(t *testing.T) {
+	// u?.address returns Address? so .city should error
+	src := `
+class Address {
+    var city: String
+    construct new(city: String) { this.city = city }
+}
+class User {
+    var address: Address
+    construct new(addr: Address) { this.address = addr }
+}
+fn main() {
+    var u: User? = null
+    print(u?.address.city)
+}`
+	errs := checkSrc(src)
+	if !hasError(errs, "use '?.'") {
+		t.Errorf("expected chain consistency error: . after ?. on nullable result, got %v", errs)
+	}
+}
+
+func TestSafeNavMethodReturnsOptional(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+    pub fn speak(): String { return "woof" }
+}
+fn main() {
+    var d: Dog? = Dog.new("Rex")
+    var result: String = d?.speak()
+}`
+	errs := checkSrc(src)
+	// d?.speak() returns String? which can't assign to String
+	if !hasError(errs, "cannot assign") {
+		t.Errorf("expected type mismatch: ?. result is Optional but target is not, got %v", errs)
+	}
+}
+
+func TestSafeNavMethodResultToOptionalOK(t *testing.T) {
+	src := `
+class Dog {
+    var name: String
+    construct new(name: String) { this.name = name }
+    pub fn speak(): String { return "woof" }
+}
+fn main() {
+    var d: Dog? = Dog.new("Rex")
+    var result: String? = d?.speak()
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestNonNullableFieldNoSafeNavNeeded(t *testing.T) {
+	// Non-nullable fields should use . not ?.
+	src := `
+class Address {
+    var city: String
+    construct new(city: String) { this.city = city }
+}
+class User {
+    var address: Address
+    construct new(addr: Address) { this.address = addr }
+}
+fn main() {
+    var u = User.new(Address.new("NYC"))
+    print(u.address.city)
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}

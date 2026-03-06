@@ -597,14 +597,7 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 	case *parser.SelectorExpr:
 		return c.inferSelector(e)
 	case *parser.SafeNavExpr:
-		// Safe navigation returns the same type as regular access, but nullable
-		c.inferExpr(e.Object)
-		if e.Call != nil {
-			for _, arg := range e.Call.Args {
-				c.inferExpr(arg)
-			}
-		}
-		return TypeUnknown
+		return c.inferSafeNav(e)
 	case *parser.IndexExpr:
 		return c.inferIndex(e)
 	case *parser.ListLit:
@@ -834,6 +827,12 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 		return TypeUnknown
 	}
 
+	// Reject `.method()` on nullable types — must use `?.method()`
+	if opt, ok := objType.(*OptionalType); ok {
+		c.errorf(0, 0, "cannot call method %q on nullable type %s; use '?.' for safe access", sel.Field, opt)
+		return TypeUnknown
+	}
+
 	if ct, ok := objType.(*ClassType); ok {
 		if sig, found := c.findMethod(ct, sel.Field); found {
 			c.validateArgs(sig, ct.Name+"."+sel.Field, args, namedArgs)
@@ -858,6 +857,12 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 func (c *Checker) inferSelector(e *parser.SelectorExpr) Type {
 	objType := c.inferExpr(e.Object)
 	if objType == TypeUnknown {
+		return TypeUnknown
+	}
+
+	// Reject `.` on nullable types — must use `?.`
+	if opt, ok := objType.(*OptionalType); ok {
+		c.errorf(0, 0, "cannot access member %q on nullable type %s; use '?.' for safe access", e.Field, opt)
 		return TypeUnknown
 	}
 
@@ -887,6 +892,77 @@ func (c *Checker) inferSelector(e *parser.SelectorExpr) Type {
 	}
 
 	// Built-in field access on primitives or unknown — permissive
+	return TypeUnknown
+}
+
+// inferSafeNav type-checks a safe navigation expression (e.g. obj?.field, obj?.method()).
+// Rules:
+//   - obj must be a nullable type (T?) — using ?. on non-nullable is an error
+//   - The result is always Optional (T?) to enforce chain consistency
+func (c *Checker) inferSafeNav(e *parser.SafeNavExpr) Type {
+	objType := c.inferExpr(e.Object)
+	if e.Call != nil {
+		for _, arg := range e.Call.Args {
+			c.inferExpr(arg)
+		}
+		for _, na := range e.Call.NamedArgs {
+			c.inferExpr(na.Value)
+		}
+	}
+
+	if objType == TypeUnknown || objType == TypeAny {
+		return TypeUnknown
+	}
+
+	// Unwrap OptionalType to get inner type
+	inner, isOptional := objType.(*OptionalType)
+	if !isOptional {
+		c.errorf(0, 0, "unnecessary safe call on non-null type %s; use '.' instead", objType)
+		// Still resolve the field/method for downstream checking
+		return c.resolveMemberType(objType, e.Field, e.Call)
+	}
+
+	// Resolve the field/method on the inner (unwrapped) type
+	memberType := c.resolveMemberType(inner.Inner, e.Field, e.Call)
+	if memberType == TypeUnknown || memberType == TypeVoid {
+		return memberType
+	}
+
+	// Wrap the result in Optional to enforce chain consistency
+	// (unless it's already optional)
+	if _, alreadyOpt := memberType.(*OptionalType); alreadyOpt {
+		return memberType
+	}
+	return &OptionalType{Inner: memberType}
+}
+
+// resolveMemberType looks up a field or method on a type and returns its type.
+func (c *Checker) resolveMemberType(t Type, field string, call *parser.CallExpr) Type {
+	if ct, ok := t.(*ClassType); ok {
+		if call != nil {
+			// Method call
+			if sig, found := c.findMethod(ct, field); found {
+				return sig.Return
+			}
+			return TypeUnknown
+		}
+		// Field access
+		if ft, found := c.findField(ct, field); found {
+			return ft
+		}
+		if _, found := c.findMethod(ct, field); found {
+			return TypeUnknown
+		}
+		return TypeUnknown
+	}
+	if it, ok := t.(*InterfaceType); ok {
+		if call != nil {
+			if sig, found := it.Methods[field]; found {
+				return sig.Return
+			}
+		}
+		return TypeUnknown
+	}
 	return TypeUnknown
 }
 

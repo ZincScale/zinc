@@ -239,10 +239,14 @@ func Assignable(from, to Type) bool {
 		}
 		return false
 	}
-	// Assigning to an optional: inner type or null
+	// Assigning to an optional: inner type, null, or matching optional
 	if opt, ok := to.(*OptionalType); ok {
 		if from == TypeNull {
 			return true
+		}
+		// Optional<T> is assignable to Optional<T>
+		if fromOpt, ok := from.(*OptionalType); ok {
+			return Assignable(fromOpt.Inner, opt.Inner)
 		}
 		return Assignable(from, opt.Inner)
 	}
