@@ -760,19 +760,20 @@ fn main() {
 
 | Growler            | Go equivalent              |
 |-------------------|----------------------------|
-| `strUpper(s)` / `strLower(s)` | `strings.ToUpper` / `ToLower` |
-| `strContains(s,x)`| `strings.Contains(s, x)`  |
-| `strHasPrefix(s,x)` / `strHasSuffix(s,x)` | `strings.HasPrefix` / `HasSuffix` |
-| `strTrim(s)`      | `strings.TrimSpace(s)`     |
-| `strSplit(s, sep)` / `strJoin(a, sep)` | `strings.Split` / `Join` |
-| `strReplace(s,a,b)` | `strings.ReplaceAll(s,a,b)` |
+| `s.upper()` / `s.lower()` | `strings.ToUpper(s)` / `ToLower(s)` |
+| `s.contains(x)`   | `strings.Contains(s, x)`  |
+| `s.startsWith(x)` / `s.endsWith(x)` | `strings.HasPrefix(s, x)` / `HasSuffix(s, x)` |
+| `s.trim()`         | `strings.TrimSpace(s)`     |
+| `s.split(sep)`     | `strings.Split(s, sep)`    |
+| `s.replace(a, b)`  | `strings.ReplaceAll(s, a, b)` |
+| `list.join(sep)`   | `strings.Join(list, sep)`  |
 | `sprintf(fmt, ...)` | `fmt.Sprintf(fmt, ...)`  |
 
 #### Sorting
 
 | Growler            | Go equivalent              |
 |-------------------|----------------------------|
-| `sortInts(s)` / `sortStrings(s)` / `sortFloats(s)` | `sort.Ints` / `Strings` / `Float64s` |
+| `list.sort()`     | `sort.Slice(list, ...)`    |
 
 #### JSON
 

@@ -208,7 +208,7 @@ func TestIntegrationForInWithBuiltins(t *testing.T) {
 fn main() {
     var words = ["hello", "world", "growler"]
     for w in words {
-        print(strUpper(w))
+        print(w.upper())
     }
     print(words.size())
 }`

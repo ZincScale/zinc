@@ -252,8 +252,8 @@ func TestBuiltinToString(t *testing.T) {
 	assertContains(t, out, `"fmt"`)
 }
 
-func TestBuiltinStrUpper(t *testing.T) {
-	src := `fn main() { var s: String = strUpper("hello") }`
+func TestBuiltinUpper(t *testing.T) {
+	src := `fn main() { var s: String = "hello".upper() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -262,13 +262,13 @@ func TestBuiltinStrUpper(t *testing.T) {
 	assertContains(t, out, `"strings"`)
 }
 
-func TestBuiltinSortInts(t *testing.T) {
-	src := `fn main() { sortInts(nums) }`
+func TestBuiltinSort(t *testing.T) {
+	src := `fn main() { nums.sort() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "sort.Ints(nums)")
+	assertContains(t, out, "sort.Slice(nums")
 	assertContains(t, out, `"sort"`)
 }
 

@@ -432,6 +432,8 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 	case *parser.MapRemoveStmt:
 		c.inferExpr(s.Map)
 		c.inferExpr(s.Key)
+	case *parser.ListSortStmt:
+		c.inferExpr(s.List)
 	case *parser.BreakStmt, *parser.ContinueStmt:
 		// nothing to check
 	}
@@ -660,6 +662,43 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 	case *parser.MapRemoveStmt:
 		c.inferExpr(e.Map)
 		c.inferExpr(e.Key)
+		return TypeVoid
+	case *parser.StringUpperExpr:
+		c.inferExpr(e.Object)
+		return TypeString
+	case *parser.StringLowerExpr:
+		c.inferExpr(e.Object)
+		return TypeString
+	case *parser.StringContainsExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Search)
+		return TypeBool
+	case *parser.StringStartsWithExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Prefix)
+		return TypeBool
+	case *parser.StringEndsWithExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Suffix)
+		return TypeBool
+	case *parser.StringTrimExpr:
+		c.inferExpr(e.Object)
+		return TypeString
+	case *parser.StringSplitExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Sep)
+		return &ListType{Elem: TypeString}
+	case *parser.StringReplaceExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Old)
+		c.inferExpr(e.New)
+		return TypeString
+	case *parser.ListJoinExpr:
+		c.inferExpr(e.Object)
+		c.inferExpr(e.Sep)
+		return TypeString
+	case *parser.ListSortStmt:
+		c.inferExpr(e.List)
 		return TypeVoid
 	}
 	return TypeUnknown

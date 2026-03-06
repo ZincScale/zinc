@@ -775,6 +775,10 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		m := g.emitExpr(st.Map)
 		key := g.emitExpr(st.Key)
 		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
+	case *parser.ListSortStmt:
+		g.neededImports["sort"] = true
+		list := g.emitExpr(st.List)
+		g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] })", list, list, list))
 	}
 }
 
@@ -1363,6 +1367,12 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
 		return
 	}
+	if sl, ok := e.Expr.(*parser.ListSortStmt); ok {
+		g.neededImports["sort"] = true
+		list := g.emitExpr(sl.List)
+		g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] })", list, list, list))
+		return
+	}
 	// Special: SafeNavExpr as statement — emit clean if-guard, no IIFE
 	if sn, ok := e.Expr.(*parser.SafeNavExpr); ok {
 		g.emitSafeNavStmt(sn)
@@ -1466,6 +1476,33 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.CloneExpr:
 		obj := g.emitExpr(ex.Object)
 		return fmt.Sprintf("append(%s[:0:0], %s...)", obj, obj)
+	case *parser.StringUpperExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToUpper(%s)", g.emitExpr(ex.Object))
+	case *parser.StringLowerExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToLower(%s)", g.emitExpr(ex.Object))
+	case *parser.StringContainsExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.Contains(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Search))
+	case *parser.StringStartsWithExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.HasPrefix(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Prefix))
+	case *parser.StringEndsWithExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.HasSuffix(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Suffix))
+	case *parser.StringTrimExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.TrimSpace(%s)", g.emitExpr(ex.Object))
+	case *parser.StringSplitExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.Split(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Sep))
+	case *parser.StringReplaceExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Old), g.emitExpr(ex.New))
+	case *parser.ListJoinExpr:
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.Join(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Sep))
 	}
 	return "/* unknown expr */"
 }
@@ -1684,54 +1721,12 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 		g.neededImports["math"] = true
 		return fmt.Sprintf("math.Min(%s)", argStr)
 
-	// String operations
-	case "strLen":
-		return fmt.Sprintf("len(%s)", argStr)
-	case "strUpper":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ToUpper(%s)", argStr)
-	case "strLower":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ToLower(%s)", argStr)
-	case "strContains":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Contains(%s)", argStr)
-	case "strHasPrefix":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.HasPrefix(%s)", argStr)
-	case "strHasSuffix":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.HasSuffix(%s)", argStr)
-	case "strTrim":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.TrimSpace(%s)", argStr)
-	case "strSplit":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Split(%s)", argStr)
-	case "strJoin":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Join(%s)", argStr)
-	case "strReplace":
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ReplaceAll(%s)", argStr)
-
 	// Panic / exit
 	case "panic":
 		return fmt.Sprintf("panic(%s)", argStr)
 	case "exit":
 		g.neededImports["os"] = true
 		return fmt.Sprintf("os.Exit(%s)", argStr)
-
-	// Sorting
-	case "sortInts":
-		g.neededImports["sort"] = true
-		return fmt.Sprintf("sort.Ints(%s)", argStr)
-	case "sortStrings":
-		g.neededImports["sort"] = true
-		return fmt.Sprintf("sort.Strings(%s)", argStr)
-	case "sortFloats":
-		g.neededImports["sort"] = true
-		return fmt.Sprintf("sort.Float64s(%s)", argStr)
 
 	// File I/O
 	case "readFile":

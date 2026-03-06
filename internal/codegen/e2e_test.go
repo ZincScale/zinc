@@ -936,3 +936,107 @@ fn main() {
 }`)
 	assertOutput(t, out, "5\n1\n5")
 }
+
+// --- OO string methods -------------------------------------------------------
+
+func TestE2EStringUpper(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello"
+    print(s.upper())
+}`)
+	assertOutput(t, out, "HELLO")
+}
+
+func TestE2EStringLower(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "HELLO"
+    print(s.lower())
+}`)
+	assertOutput(t, out, "hello")
+}
+
+func TestE2EStringContains(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello world"
+    if (s.contains("world")) {
+        print("yes")
+    }
+    if (!(s.contains("xyz"))) {
+        print("no")
+    }
+}`)
+	assertOutput(t, out, "yes\nno")
+}
+
+func TestE2EStringStartsEndsWith(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello world"
+    if (s.startsWith("hello")) { print("starts") }
+    if (s.endsWith("world")) { print("ends") }
+}`)
+	assertOutput(t, out, "starts\nends")
+}
+
+func TestE2EStringTrim(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "  hello  "
+    print(s.trim())
+}`)
+	assertOutput(t, out, "hello")
+}
+
+func TestE2EStringSplit(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "a,b,c"
+    var parts = s.split(",")
+    for p in parts {
+        print(p)
+    }
+}`)
+	assertOutput(t, out, "a\nb\nc")
+}
+
+func TestE2EStringReplace(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello world world"
+    print(s.replace("world", "growler"))
+}`)
+	assertOutput(t, out, "hello growler growler")
+}
+
+func TestE2EListJoin(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var parts = ["a", "b", "c"]
+    print(parts.join(", "))
+}`)
+	assertOutput(t, out, "a, b, c")
+}
+
+func TestE2EListSort(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [3, 1, 4, 1, 5]
+    nums.sort()
+    for n in nums {
+        print(n)
+    }
+}`)
+	assertOutput(t, out, "1\n1\n3\n4\n5")
+}
+
+func TestE2EStringMethodChaining(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "  Hello World  "
+    print(s.trim().lower())
+}`)
+	assertOutput(t, out, "hello world")
+}

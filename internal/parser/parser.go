@@ -253,6 +253,54 @@ func (p *Parser) finishCall(callee Expr) Expr {
 			p.expect(lexer.TOKEN_LPAREN)
 			p.expect(lexer.TOKEN_RPAREN)
 			return &CloneExpr{Object: sel.Object}
+		case "upper":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringUpperExpr{Object: sel.Object}
+		case "lower":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringLowerExpr{Object: sel.Object}
+		case "contains":
+			p.expect(lexer.TOKEN_LPAREN)
+			arg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringContainsExpr{Object: sel.Object, Search: arg}
+		case "startsWith":
+			p.expect(lexer.TOKEN_LPAREN)
+			arg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringStartsWithExpr{Object: sel.Object, Prefix: arg}
+		case "endsWith":
+			p.expect(lexer.TOKEN_LPAREN)
+			arg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringEndsWithExpr{Object: sel.Object, Suffix: arg}
+		case "trim":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringTrimExpr{Object: sel.Object}
+		case "split":
+			p.expect(lexer.TOKEN_LPAREN)
+			arg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringSplitExpr{Object: sel.Object, Sep: arg}
+		case "replace":
+			p.expect(lexer.TOKEN_LPAREN)
+			old := p.parseExpr()
+			p.expect(lexer.TOKEN_COMMA)
+			new_ := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &StringReplaceExpr{Object: sel.Object, Old: old, New: new_}
+		case "join":
+			p.expect(lexer.TOKEN_LPAREN)
+			arg := p.parseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &ListJoinExpr{Object: sel.Object, Sep: arg}
+		case "sort":
+			p.expect(lexer.TOKEN_LPAREN)
+			p.expect(lexer.TOKEN_RPAREN)
+			return &ListSortStmt{List: sel.Object}
 		}
 	}
 	// Consume '(' then parse args

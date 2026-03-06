@@ -577,6 +577,57 @@ type CloneExpr struct{ Object Expr }
 func (c *CloneExpr) nodeTag() {}
 func (c *CloneExpr) exprTag() {}
 
+// StringUpperExpr: s.upper() → strings.ToUpper(s)
+type StringUpperExpr struct{ Object Expr }
+func (s *StringUpperExpr) nodeTag() {}
+func (s *StringUpperExpr) exprTag() {}
+
+// StringLowerExpr: s.lower() → strings.ToLower(s)
+type StringLowerExpr struct{ Object Expr }
+func (s *StringLowerExpr) nodeTag() {}
+func (s *StringLowerExpr) exprTag() {}
+
+// StringContainsExpr: s.contains(x) → strings.Contains(s, x)
+type StringContainsExpr struct{ Object Expr; Search Expr }
+func (s *StringContainsExpr) nodeTag() {}
+func (s *StringContainsExpr) exprTag() {}
+
+// StringStartsWithExpr: s.startsWith(x) → strings.HasPrefix(s, x)
+type StringStartsWithExpr struct{ Object Expr; Prefix Expr }
+func (s *StringStartsWithExpr) nodeTag() {}
+func (s *StringStartsWithExpr) exprTag() {}
+
+// StringEndsWithExpr: s.endsWith(x) → strings.HasSuffix(s, x)
+type StringEndsWithExpr struct{ Object Expr; Suffix Expr }
+func (s *StringEndsWithExpr) nodeTag() {}
+func (s *StringEndsWithExpr) exprTag() {}
+
+// StringTrimExpr: s.trim() → strings.TrimSpace(s)
+type StringTrimExpr struct{ Object Expr }
+func (s *StringTrimExpr) nodeTag() {}
+func (s *StringTrimExpr) exprTag() {}
+
+// StringSplitExpr: s.split(sep) → strings.Split(s, sep)
+type StringSplitExpr struct{ Object Expr; Sep Expr }
+func (s *StringSplitExpr) nodeTag() {}
+func (s *StringSplitExpr) exprTag() {}
+
+// StringReplaceExpr: s.replace(old, new) → strings.ReplaceAll(s, old, new)
+type StringReplaceExpr struct{ Object Expr; Old Expr; New Expr }
+func (s *StringReplaceExpr) nodeTag() {}
+func (s *StringReplaceExpr) exprTag() {}
+
+// ListJoinExpr: list.join(sep) → strings.Join(list, sep)
+type ListJoinExpr struct{ Object Expr; Sep Expr }
+func (l *ListJoinExpr) nodeTag() {}
+func (l *ListJoinExpr) exprTag() {}
+
+// ListSortStmt: list.sort() → sort.Ints/Strings/Float64s(list)
+type ListSortStmt struct{ List Expr }
+func (l *ListSortStmt) nodeTag() {}
+func (l *ListSortStmt) stmtTag() {}
+func (l *ListSortStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
+
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {
 	Params     []*ParamDecl
