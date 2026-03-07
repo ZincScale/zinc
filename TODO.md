@@ -18,7 +18,6 @@ Prioritized for shipping a usable language binary people can try out.
 |---|---------|---------------|--------|
 | 2 | **Source maps** | Map Go compiler errors back to `.gw` lines | Large |
 | 3 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
-| 4 | **REPL completeness** | Listed in docs but may be partial | Medium |
 
 ---
 
@@ -76,4 +75,5 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - Better map/list literal type inference (typechecker annotates AST → codegen emits typed literals)
 - `const` declarations (top-level immutable values)
 - Example coverage (17 `.gw` examples covering all major features)
+- REPL completeness (auto-print expressions, var persistence, brace-aware multi-line, help command)
 - Tuple unpacking, string interpolation, imports, built-ins
