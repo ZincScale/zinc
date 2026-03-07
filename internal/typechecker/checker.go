@@ -259,6 +259,8 @@ func (c *Checker) checkProgram(prog *parser.Program) {
 			c.checkClassDecl(d)
 		case *parser.EnumDecl:
 			c.checkEnumDecl(d)
+		case *parser.ConstDecl:
+			c.checkConstDecl(d)
 		}
 	}
 }
@@ -436,6 +438,19 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.inferExpr(s.List)
 	case *parser.BreakStmt, *parser.ContinueStmt:
 		// nothing to check
+	}
+}
+
+func (c *Checker) checkConstDecl(d *parser.ConstDecl) {
+	valType := c.inferExpr(d.Value)
+	if d.Type != nil {
+		declaredType := c.resolveTypeExpr(d.Type)
+		if !Assignable(valType, declaredType) {
+			c.errorf(0, 0, "type mismatch: cannot assign %s to const %s of type %s", valType, d.Name, declaredType)
+		}
+		c.scope.define(d.Name, declaredType)
+	} else {
+		c.scope.define(d.Name, valType)
 	}
 }
 

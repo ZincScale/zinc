@@ -426,7 +426,26 @@ func (g *Generator) emitTopLevel(decl parser.TopLevelDecl) {
 		g.emitFn(d)
 	case *parser.EnumDecl:
 		g.emitEnum(d)
+	case *parser.ConstDecl:
+		g.emitConstDecl(d)
 	}
+}
+
+// --- Const Emission ----------------------------------------------------------
+
+func (g *Generator) emitConstDecl(d *parser.ConstDecl) {
+	name := d.Name
+	if len(name) > 0 {
+		name = strings.ToUpper(name[:1]) + name[1:]
+	}
+	val := g.emitExpr(d.Value)
+	if d.Type != nil {
+		goType := g.emitType(d.Type)
+		g.writeln(fmt.Sprintf("const %s %s = %s", name, goType, val))
+	} else {
+		g.writeln(fmt.Sprintf("const %s = %s", name, val))
+	}
+	g.writeln("")
 }
 
 // --- Enum Emission -----------------------------------------------------------

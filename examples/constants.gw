@@ -1,0 +1,18 @@
+// Constants — immutable top-level values
+
+const PI = 3.14159
+const MAX_RETRIES: Int = 3
+const APP_NAME: String = "Growler"
+const DEBUG: Bool = false
+
+fn circleArea(radius: Float): Float {
+    return PI * radius * radius
+}
+
+fn main() {
+    print("{APP_NAME} v1.0")
+    print("PI = {PI}")
+    print("Area of circle (r=5): {circleArea(5.0)}")
+    print("Max retries: {MAX_RETRIES}")
+    print("Debug mode: {DEBUG}")
+}

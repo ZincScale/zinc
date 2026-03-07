@@ -677,6 +677,19 @@ func (p *Parser) parseStmt() Stmt {
 	return p.parseExprOrAssignStmt()
 }
 
+func (p *Parser) parseConstDecl() *ConstDecl {
+	p.expect(lexer.TOKEN_CONST)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	var typ TypeExpr
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		typ = p.parseType()
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	val := p.parseExpr()
+	return &ConstDecl{Name: name, Type: typ, Value: val}
+}
+
 func (p *Parser) parseVarStmt() Stmt {
 	p.expect(lexer.TOKEN_VAR)
 	// Detect tuple destructuring: var (a, b) = expr
@@ -1143,6 +1156,8 @@ func (p *Parser) Parse() *Program {
 			prog.Decls = append(prog.Decls, p.parseClassDecl())
 		case lexer.TOKEN_INTERFACE:
 			prog.Decls = append(prog.Decls, p.parseInterfaceDecl())
+		case lexer.TOKEN_CONST:
+			prog.Decls = append(prog.Decls, p.parseConstDecl())
 		case lexer.TOKEN_PUB:
 			p.advance()
 			if p.check(lexer.TOKEN_FN) {

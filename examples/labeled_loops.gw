@@ -1,0 +1,25 @@
+// Labeled break and continue for nested loop control
+
+fn main() {
+    // Labeled break — exit outer loop from inner loop
+    print("--- labeled break ---")
+    @outer for (var i = 0; i < 5; i += 1) {
+        for (var j = 0; j < 5; j += 1) {
+            if (i + j == 6) {
+                print("breaking at i={i}, j={j}")
+                break @outer
+            }
+        }
+    }
+
+    // Labeled continue — skip to next outer iteration
+    print("--- labeled continue ---")
+    @search for (var i = 0; i < 4; i += 1) {
+        for (var j = 0; j < 4; j += 1) {
+            if (j == 2) {
+                continue @search
+            }
+            print("i={i}, j={j}")
+        }
+    }
+}

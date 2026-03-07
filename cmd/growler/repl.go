@@ -73,6 +73,7 @@ func isTopLevelDecl(input string) bool {
 		strings.HasPrefix(trimmed, "class ") ||
 		strings.HasPrefix(trimmed, "interface ") ||
 		strings.HasPrefix(trimmed, "enum ") ||
+		strings.HasPrefix(trimmed, "const ") ||
 		strings.HasPrefix(trimmed, "import ")
 }
 

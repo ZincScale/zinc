@@ -1,0 +1,53 @@
+// Collection literals, methods, and iteration
+
+fn main() {
+    // Typed list literals
+    var nums = [10, 20, 30, 40, 50]
+    var names = ["Alice", "Bob", "Charlie"]
+
+    // List methods
+    nums.add(60)
+    print(nums.size())         // 6
+
+    var copy = nums.clone()
+    copy.sort()
+    print(copy)                // [10 20 30 40 50 60]
+
+    // join works on string lists
+    print(names.join(", "))    // Alice, Bob, Charlie
+
+    // Typed map literals
+    var scores = {"math": 95, "science": 88, "english": 92}
+    print(scores["math"])      // 95
+
+    // Map methods
+    print(scores.keys())
+    print(scores.values())
+    print(scores.containsKey("math"))     // true
+    print(scores.containsKey("history"))  // false
+    scores.remove("english")
+    print(scores.size())       // 2
+
+    // for-in iteration
+    for name in names {
+        print("Hello, {name}!")
+    }
+
+    // for-in with index
+    for (i, name) in names {
+        print("{i}: {name}")
+    }
+
+    // for-in over map
+    for (subject, score) in scores {
+        print("{subject} = {score}")
+    }
+
+    // Empty collections with declared types
+    var emptyList: List<Int> = []
+    var emptyMap: Map<String, Bool> = {}
+    emptyList.add(1)
+    emptyMap["yes"] = true
+    print(emptyList.size())    // 1
+    print(emptyMap.size())     // 1
+}

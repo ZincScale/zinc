@@ -1,0 +1,36 @@
+// Callable function types with Fn<(Params), Return>
+
+fn apply(f: Fn<(Int), Int>, x: Int): Int {
+    return f(x)
+}
+
+fn combine(f: Fn<(Int, Int), Int>, a: Int, b: Int): Int {
+    return f(a, b)
+}
+
+fn run(callback: Fn<(), Void>) {
+    callback()
+}
+
+fn main() {
+    // Pass lambdas as typed function arguments
+    var double = (x: Int): Int => x * 2
+    print(apply(double, 7))       // 14
+
+    var add = (a: Int, b: Int): Int => a + b
+    print(combine(add, 3, 4))     // 7
+
+    // Void callback
+    run((): Void => { print("callback executed!") })
+
+    // Function type as variable annotation
+    var transform: Fn<(String), Int> = (s: String): Int => s.size()
+    print(transform("hello"))     // 5
+
+    // Higher-order: function returning a function
+    var multiplier = (factor: Int): Fn<(Int), Int> => {
+        return (x: Int): Int => x * factor
+    }
+    var triple = multiplier(3)
+    print(triple(10))             // 30
+}

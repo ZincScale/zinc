@@ -1221,3 +1221,26 @@ fn main() {
 }`)
 	assertOutput(t, out, "5")
 }
+
+func TestE2EConstDecl(t *testing.T) {
+	out := e2eRun(t, `
+const PI = 3.14
+const GREETING: String = "hello"
+
+fn main() {
+    print(PI)
+    print(GREETING)
+}`)
+	assertOutput(t, out, "3.14\nhello")
+}
+
+func TestE2EConstInExpr(t *testing.T) {
+	out := e2eRun(t, `
+const TAX_RATE = 0.08
+fn main() {
+    var price = 100.0
+    var total = price + price * TAX_RATE
+    print(total)
+}`)
+	assertOutput(t, out, "108")
+}

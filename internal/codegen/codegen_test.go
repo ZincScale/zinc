@@ -1117,3 +1117,15 @@ func TestNestedListLiteral(t *testing.T) {
 	}
 	assertContains(t, out, "[][]int{")
 }
+
+func TestConstDecl(t *testing.T) {
+	out, errs := transpile(`
+const PI: Float = 3.14
+const MAX = 100
+fn main() { print(PI) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "const PI float64 = 3.14")
+	assertContains(t, out, "const MAX = 100")
+}

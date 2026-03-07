@@ -1,0 +1,42 @@
+// Default parameter values and named arguments
+
+fn greet(name: String, greeting: String = "Hello") {
+    print("{greeting}, {name}!")
+}
+
+fn connect(host: String, port: Int = 8080, tls: Bool = false) {
+    print("Connecting to {host}:{port} (tls={tls})")
+}
+
+class Dog {
+    var name: String
+    var age: Int
+
+    new(name: String, age: Int = 0) {
+        this.name = name
+        this.age = age
+    }
+
+    pub fn describe(): String {
+        return "{this.name}, age {this.age}"
+    }
+}
+
+fn main() {
+    // Default parameters
+    greet("Alice")              // Hello, Alice!
+    greet("Bob", "Hi")          // Hi, Bob!
+
+    // Named arguments — any order
+    connect("localhost")
+    connect("example.com", port: 443, tls: true)
+    connect(tls: true, host: "secure.io")
+
+    // Named constructor args
+    var d1 = Dog.new("Rex")
+    var d2 = Dog.new(name: "Buddy", age: 3)
+    var d3 = Dog.new(age: 5, name: "Spot")
+    print(d1.describe())
+    print(d2.describe())
+    print(d3.describe())
+}

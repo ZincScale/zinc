@@ -19,9 +19,6 @@ Prioritized for shipping a usable language binary people can try out.
 | 2 | **Source maps** | Map Go compiler errors back to `.gw` lines | Large |
 | 3 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
 | 4 | **REPL completeness** | Listed in docs but may be partial | Medium |
-| 5 | **Example coverage** | Many features have no `.gw` example | Quick |
-| 6 | **`const` declarations** | AST + lexer token exist but not wired up; needed for immutability | Quick |
-| 7 | **`range(n)` / `range(a, b)` iteration** | Reduces boilerplate for numeric loops; Python/Kotlin idiom | Quick |
 
 ---
 
@@ -77,4 +74,6 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - `for (k, v) in map` codegen fix
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
 - Better map/list literal type inference (typechecker annotates AST → codegen emits typed literals)
+- `const` declarations (top-level immutable values)
+- Example coverage (17 `.gw` examples covering all major features)
 - Tuple unpacking, string interpolation, imports, built-ins

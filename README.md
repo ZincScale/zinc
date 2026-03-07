@@ -365,6 +365,34 @@ func main() {
 }
 ```
 
+### Constants
+
+Top-level immutable values declared with `const`:
+
+```growler
+const PI = 3.14159
+const MAX_RETRIES: Int = 3
+const APP_NAME: String = "Growler"
+
+fn main() {
+    print(APP_NAME)
+    print(PI * 2.0)
+}
+```
+
+Transpiles to:
+
+```go
+const PI = 3.14159
+const MAX_RETRIES int = 3
+const APP_NAME string = "Growler"
+
+func main() {
+    fmt.Println(APP_NAME)
+    fmt.Println(PI * 2.0)
+}
+```
+
 ### Match / Switch
 
 ```growler
@@ -992,6 +1020,13 @@ See the [`examples/`](examples/) directory:
 - [`closures.gw`](examples/closures.gw) — Lambdas, closures, throwing lambdas
 - [`safe_navigation.gw`](examples/safe_navigation.gw) — Safe navigation `?.` with chaining
 - [`with_resources.gw`](examples/with_resources.gw) — Resource management with `with`
+- [`defaults_and_named_args.gw`](examples/defaults_and_named_args.gw) — Default parameters + named arguments
+- [`type_casting.gw`](examples/type_casting.gw) — Type assertions (`as`) and checks (`is`)
+- [`collections.gw`](examples/collections.gw) — Typed literals, collection methods, iteration
+- [`callable_types.gw`](examples/callable_types.gw) — `Fn<>` function types + higher-order functions
+- [`labeled_loops.gw`](examples/labeled_loops.gw) — Labeled `break` and `continue`
+- [`tuple_unpacking.gw`](examples/tuple_unpacking.gw) — Multi-return unpacking + error handling
+- [`constants.gw`](examples/constants.gw) — `const` declarations
 
 Run any example:
 
