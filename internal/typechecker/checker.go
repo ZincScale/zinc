@@ -454,6 +454,13 @@ func (c *Checker) checkVarStmt(s *parser.VarStmt) {
 		if !Assignable(inferredType, declaredType) {
 			c.errorf(0, 0, "type mismatch: cannot assign %s to %s", inferredType, declaredType)
 		}
+		// Propagate declared type to empty literals
+		if ll, ok := s.Value.(*parser.ListLit); ok && ll.ResolvedType == "" {
+			ll.ResolvedType = TypeToGoString(declaredType)
+		}
+		if ml, ok := s.Value.(*parser.MapLit); ok && ml.ResolvedType == "" {
+			ml.ResolvedType = TypeToGoString(declaredType)
+		}
 		c.scope.define(s.Name, declaredType)
 	} else if declaredType != nil {
 		c.scope.define(s.Name, declaredType)
@@ -1054,24 +1061,49 @@ func (c *Checker) inferListLit(e *parser.ListLit) Type {
 	if len(e.Elements) == 0 {
 		return &ListType{Elem: TypeUnknown}
 	}
-	elemType := c.inferExpr(e.Elements[0])
-	for _, el := range e.Elements[1:] {
-		c.inferExpr(el) // check all elements but be permissive
+	types := make([]Type, len(e.Elements))
+	for i, el := range e.Elements {
+		types[i] = c.inferExpr(el)
 	}
-	return &ListType{Elem: elemType}
+	elem := commonType(types)
+	result := &ListType{Elem: elem}
+	e.ResolvedType = TypeToGoString(result)
+	return result
 }
 
 func (c *Checker) inferMapLit(e *parser.MapLit) Type {
 	if len(e.Keys) == 0 {
 		return &MapType{Key: TypeUnknown, Value: TypeUnknown}
 	}
-	keyType := c.inferExpr(e.Keys[0])
-	valType := c.inferExpr(e.Values[0])
-	for i := 1; i < len(e.Keys); i++ {
-		c.inferExpr(e.Keys[i])
-		c.inferExpr(e.Values[i])
+	keyTypes := make([]Type, len(e.Keys))
+	valTypes := make([]Type, len(e.Values))
+	for i := range e.Keys {
+		keyTypes[i] = c.inferExpr(e.Keys[i])
+		valTypes[i] = c.inferExpr(e.Values[i])
 	}
-	return &MapType{Key: keyType, Value: valType}
+	result := &MapType{Key: commonType(keyTypes), Value: commonType(valTypes)}
+	e.ResolvedType = TypeToGoString(result)
+	return result
+}
+
+// commonType returns the unified type from a slice: all same → that type,
+// TypeUnknown skipped, mismatched → TypeAny.
+func commonType(types []Type) Type {
+	var unified Type
+	for _, t := range types {
+		if t == TypeUnknown {
+			continue
+		}
+		if unified == nil {
+			unified = t
+		} else if !TypeEqual(unified, t) {
+			return TypeAny
+		}
+	}
+	if unified == nil {
+		return TypeUnknown
+	}
+	return unified
 }
 
 func (c *Checker) inferThis() Type {

@@ -1157,3 +1157,67 @@ fn main() {
 }`)
 	assertOutput(t, out, "Meow, I'm Whiskers")
 }
+
+func e2eRunTyped(t *testing.T, src string) string {
+	t.Helper()
+	out, errs := transpileWithTypes(src)
+	if errs != nil {
+		t.Fatalf("transpile errors: %v", errs)
+	}
+
+	dir := t.TempDir()
+	goMod := "module e2e\n\ngo 1.21\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(out), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	cmd := exec.Command("go", "run", "main.go")
+	cmd.Dir = dir
+	raw, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("go run failed.\ngenerated Go:\n%s\nstderr:\n%s", out, exitErr.Stderr)
+		}
+		t.Fatalf("go run: %v", err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func TestE2ETypedMapLiteral(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var m = {"a": 1, "b": 2}
+    print(m["a"] + m["b"])
+}`)
+	assertOutput(t, out, "3")
+}
+
+func TestE2ETypedListLiteral(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var nums = [10, 20, 30]
+    print(nums[0] + nums[2])
+}`)
+	assertOutput(t, out, "40")
+}
+
+func TestE2EEmptyMapWithType(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var m: Map<String, Int> = {}
+    m["x"] = 42
+    print(m["x"])
+}`)
+	assertOutput(t, out, "42")
+}
+
+func TestE2ENestedList(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var grid = [[1, 2], [3, 4]]
+    print(grid[0][0] + grid[1][1])
+}`)
+	assertOutput(t, out, "5")
+}

@@ -531,7 +531,8 @@ func (n *NullLit) exprTag() {}
 
 // ListLit: [a, b, c]
 type ListLit struct {
-	Elements []Expr
+	Elements     []Expr
+	ResolvedType string // set by typechecker; Go type string like "[]int"
 }
 
 func (l *ListLit) nodeTag() {}
@@ -539,8 +540,9 @@ func (l *ListLit) exprTag() {}
 
 // MapLit: {"key": value, ...}
 type MapLit struct {
-	Keys   []Expr
-	Values []Expr
+	Keys         []Expr
+	Values       []Expr
+	ResolvedType string // set by typechecker; Go type string like "map[string]int"
 }
 
 func (m *MapLit) nodeTag() {}

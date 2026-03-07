@@ -17,12 +17,11 @@ Prioritized for shipping a usable language binary people can try out.
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
 | 2 | **Source maps** | Map Go compiler errors back to `.gw` lines | Large |
-| 3 | **Better map/list literal type inference** | Maps always emit `map[interface{}]interface{}`; lists infer only from first element | Medium |
-| 4 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
-| 5 | **REPL completeness** | Listed in docs but may be partial | Medium |
-| 6 | **Example coverage** | Many features have no `.gw` example | Quick |
-| 7 | **`const` declarations** | AST + lexer token exist but not wired up; needed for immutability | Quick |
-| 8 | **`range(n)` / `range(a, b)` iteration** | Reduces boilerplate for numeric loops; Python/Kotlin idiom | Quick |
+| 3 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
+| 4 | **REPL completeness** | Listed in docs but may be partial | Medium |
+| 5 | **Example coverage** | Many features have no `.gw` example | Quick |
+| 6 | **`const` declarations** | AST + lexer token exist but not wired up; needed for immutability | Quick |
+| 7 | **`range(n)` / `range(a, b)` iteration** | Reduces boilerplate for numeric loops; Python/Kotlin idiom | Quick |
 
 ---
 
@@ -30,12 +29,12 @@ Prioritized for shipping a usable language binary people can try out.
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 9 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| 10 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| 11 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
-| 12 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| 13 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 14 | **Growler stdlib wrappers** | Real `io`, `http`, `json` API in Growler idioms | Large |
+| 8 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
+| 9 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
+| 12 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| 13 | **Growler stdlib wrappers** | Real `io`, `http`, `json` API in Growler idioms | Large |
 
 ---
 
@@ -58,6 +57,7 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 
 ## Completed
 - Variables, functions, classes, interfaces, inheritance, generics
+- Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match
 - Error handling (try/catch/throw)
 - Closures / lambdas (including throwing lambdas)
@@ -76,4 +76,5 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - Map utility methods (`.keys()`, `.values()`, `.containsKey()`)
 - `for (k, v) in map` codegen fix
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
+- Better map/list literal type inference (typechecker annotates AST → codegen emits typed literals)
 - Tuple unpacking, string interpolation, imports, built-ins

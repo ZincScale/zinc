@@ -6,6 +6,7 @@ import (
 
 	"growler/internal/lexer"
 	"growler/internal/parser"
+	"growler/internal/typechecker"
 )
 
 func transpile(src string) (string, []string) {
@@ -1053,4 +1054,66 @@ fn main() {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "add(5, 10)")
+}
+
+func transpileWithTypes(src string) (string, []string) {
+	l := lexer.New(src)
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	prog := p.Parse()
+	if len(p.Errors) > 0 {
+		return "", p.Errors
+	}
+	typechecker.Check(prog)
+	gen := New()
+	return gen.Generate(prog), nil
+}
+
+func TestTypedMapLiteral(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var m = {"a": 1, "b": 2} }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "map[string]int")
+	assertNotContains(t, out, "interface{}")
+}
+
+func TestTypedListLiteral(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var nums = [1, 2, 3] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "[]int{")
+}
+
+func TestMixedListFallsBackToAny(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var m = [1, "a"] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "[]interface{}{")
+}
+
+func TestEmptyMapWithDeclaredType(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var m: Map<String, Int> = {} }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "map[string]int{")
+}
+
+func TestEmptyListWithDeclaredType(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var l: List<Int> = [] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "[]int{")
+}
+
+func TestNestedListLiteral(t *testing.T) {
+	out, errs := transpileWithTypes(`fn main() { var m = [[1, 2], [3, 4]] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "[][]int{")
 }

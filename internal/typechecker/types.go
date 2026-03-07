@@ -168,6 +168,58 @@ type EnumType struct {
 func (e *EnumType) typeKind() typeKind { return kindEnum }
 func (e *EnumType) String() string     { return e.Name }
 
+// --- Go source string conversion ---------------------------------------------
+
+// TypeToGoString converts a checker Type to a Go source type string.
+func TypeToGoString(t Type) string {
+	if t == nil || t == TypeUnknown || t == TypeAny {
+		return "interface{}"
+	}
+	switch tt := t.(type) {
+	case *primitiveType:
+		switch t {
+		case TypeInt:
+			return "int"
+		case TypeFloat:
+			return "float64"
+		case TypeString:
+			return "string"
+		case TypeBool:
+			return "bool"
+		case TypeVoid:
+			return ""
+		default:
+			return "interface{}"
+		}
+	case *ListType:
+		return "[]" + TypeToGoString(tt.Elem)
+	case *MapType:
+		return "map[" + TypeToGoString(tt.Key) + "]" + TypeToGoString(tt.Value)
+	case *OptionalType:
+		return "*" + TypeToGoString(tt.Inner)
+	case *ClassType:
+		return "*" + tt.Name
+	case *ChanType:
+		return "chan " + TypeToGoString(tt.Elem)
+	case *FuncType:
+		params := make([]string, len(tt.Params))
+		for i, p := range tt.Params {
+			params[i] = TypeToGoString(p)
+		}
+		ret := TypeToGoString(tt.Return)
+		if ret == "" {
+			return "func(" + strings.Join(params, ", ") + ")"
+		}
+		return "func(" + strings.Join(params, ", ") + ") " + ret
+	case *InterfaceType:
+		return tt.Name
+	case *EnumType:
+		return tt.Name
+	default:
+		return "interface{}"
+	}
+}
+
 // --- Type equality and assignability -----------------------------------------
 
 // TypeEqual returns true if from and to are the same type structurally.

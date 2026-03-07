@@ -1443,6 +1443,9 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		for _, el := range ex.Elements {
 			elems = append(elems, g.emitExpr(el))
 		}
+		if ex.ResolvedType != "" {
+			return fmt.Sprintf("%s{%s}", ex.ResolvedType, strings.Join(elems, ", "))
+		}
 		elemType := "interface{}"
 		if len(ex.Elements) > 0 {
 			switch ex.Elements[0].(type) {
@@ -1461,6 +1464,9 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		var pairs []string
 		for i, k := range ex.Keys {
 			pairs = append(pairs, g.emitExpr(k)+": "+g.emitExpr(ex.Values[i]))
+		}
+		if ex.ResolvedType != "" {
+			return fmt.Sprintf("%s{%s}", ex.ResolvedType, strings.Join(pairs, ", "))
 		}
 		return fmt.Sprintf("map[interface{}]interface{}{%s}", strings.Join(pairs, ", "))
 	case *parser.TypeAssertExpr:

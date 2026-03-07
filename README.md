@@ -329,6 +329,42 @@ const (
 )
 ```
 
+### Collection Literals
+
+List and map literals are automatically typed by the typechecker. When all elements share the same type, the output uses that concrete type instead of `interface{}`:
+
+```growler
+fn main() {
+    var nums = [1, 2, 3]             // inferred as []int
+    var names = ["Alice", "Bob"]     // inferred as []string
+    var scores = {"math": 95, "sci": 88}  // inferred as map[string]int
+
+    // Mixed types fall back to interface{}
+    var mixed = [1, "two", 3]        // []interface{}
+
+    // Empty literals use the declared type
+    var m: Map<String, Int> = {}     // map[string]int{}
+    var l: List<Int> = []            // []int{}
+
+    // Nested collections work too
+    var grid = [[1, 2], [3, 4]]      // [][]int
+}
+```
+
+Transpiles to:
+
+```go
+func main() {
+    nums := []int{1, 2, 3}
+    names := []string{"Alice", "Bob"}
+    scores := map[string]int{"math": 95, "sci": 88}
+    mixed := []interface{}{1, "two", 3}
+    m := map[string]int{}
+    l := []int{}
+    grid := [][]int{[]int{1, 2}, []int{3, 4}}
+}
+```
+
 ### Match / Switch
 
 ```growler
