@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"growler/internal/lexer"
-	"growler/internal/parser"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
 )
 
-// checkSrc parses Growler source and runs the type checker, returning errors.
+// checkSrc parses Zinc source and runs the type checker, returning errors.
 func checkSrc(src string) []TypeError {
 	l := lexer.New(src)
 	tokens := l.Tokenize()
@@ -483,72 +483,72 @@ fn main() {
 // --- 14. Valid programs — all examples produce zero errors -------------------
 
 func TestValidHello(t *testing.T) {
-	src, err := os.ReadFile("../../examples/hello.gw")
+	src, err := os.ReadFile("../../examples/hello.zn")
 	if err != nil {
-		t.Skip("examples/hello.gw not found")
+		t.Skip("examples/hello.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidClasses(t *testing.T) {
-	src, err := os.ReadFile("../../examples/classes.gw")
+	src, err := os.ReadFile("../../examples/classes.zn")
 	if err != nil {
-		t.Skip("examples/classes.gw not found")
+		t.Skip("examples/classes.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidGenerics(t *testing.T) {
-	src, err := os.ReadFile("../../examples/generics.gw")
+	src, err := os.ReadFile("../../examples/generics.zn")
 	if err != nil {
-		t.Skip("examples/generics.gw not found")
+		t.Skip("examples/generics.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidErrors(t *testing.T) {
-	src, err := os.ReadFile("../../examples/errors.gw")
+	src, err := os.ReadFile("../../examples/errors.zn")
 	if err != nil {
-		t.Skip("examples/errors.gw not found")
+		t.Skip("examples/errors.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidFibonacci(t *testing.T) {
-	src, err := os.ReadFile("../../examples/fibonacci.gw")
+	src, err := os.ReadFile("../../examples/fibonacci.zn")
 	if err != nil {
-		t.Skip("examples/fibonacci.gw not found")
+		t.Skip("examples/fibonacci.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidEnums(t *testing.T) {
-	src, err := os.ReadFile("../../examples/enums.gw")
+	src, err := os.ReadFile("../../examples/enums.zn")
 	if err != nil {
-		t.Skip("examples/enums.gw not found")
+		t.Skip("examples/enums.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidConcurrency(t *testing.T) {
-	src, err := os.ReadFile("../../examples/concurrency.gw")
+	src, err := os.ReadFile("../../examples/concurrency.zn")
 	if err != nil {
-		t.Skip("examples/concurrency.gw not found")
+		t.Skip("examples/concurrency.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
 }
 
 func TestValidClosures(t *testing.T) {
-	src, err := os.ReadFile("../../examples/closures.gw")
+	src, err := os.ReadFile("../../examples/closures.zn")
 	if err != nil {
-		t.Skip("examples/closures.gw not found")
+		t.Skip("examples/closures.zn not found")
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -708,8 +708,8 @@ func TestWithStmtResourceInScope(t *testing.T) {
 	noErrors(t, errs, src)
 }
 
-func TestWithStmtGrowlerClassNoCloseOK(t *testing.T) {
-	// A Growler class without close() is valid — the runtime type assertion handles it gracefully.
+func TestWithStmtZincClassNoCloseOK(t *testing.T) {
+	// A Zinc class without close() is valid — the runtime type assertion handles it gracefully.
 	src := `
 class NoClose {
     construct new() {}

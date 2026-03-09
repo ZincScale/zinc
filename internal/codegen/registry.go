@@ -1,6 +1,6 @@
 package codegen
 
-import "growler/internal/parser"
+import "zinc/internal/parser"
 
 // TypeRegistry holds cross-file type information for a multi-file package.
 // It is populated from all source files in a package before any file is

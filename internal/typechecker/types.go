@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"growler/internal/parser"
+	"zinc/internal/parser"
 )
 
 // typeKind distinguishes type categories.
@@ -23,7 +23,7 @@ const (
 	kindFn
 )
 
-// Type is the base interface for all Growler types.
+// Type is the base interface for all Zinc types.
 type Type interface {
 	typeKind() typeKind
 	String() string
@@ -137,7 +137,7 @@ func (f *FnSig) String() string {
 	return fmt.Sprintf("fn(%s): %s", strings.Join(params, ", "), ret)
 }
 
-// ClassType represents a Growler class.
+// ClassType represents a Zinc class.
 type ClassType struct {
 	Name       string
 	TypeParams []string
@@ -150,7 +150,7 @@ type ClassType struct {
 func (c *ClassType) typeKind() typeKind { return kindClass }
 func (c *ClassType) String() string     { return c.Name }
 
-// InterfaceType represents a Growler interface.
+// InterfaceType represents a Zinc interface.
 type InterfaceType struct {
 	Name    string
 	Methods map[string]*FnSig
@@ -159,7 +159,7 @@ type InterfaceType struct {
 func (i *InterfaceType) typeKind() typeKind { return kindInterface }
 func (i *InterfaceType) String() string     { return i.Name }
 
-// EnumType represents a Growler enum.
+// EnumType represents a Zinc enum.
 type EnumType struct {
 	Name     string
 	Variants []string
@@ -290,7 +290,7 @@ func Assignable(from, to Type) bool {
 	if from.typeKind() == kindTypeParam || to.typeKind() == kindTypeParam {
 		return true
 	}
-	// Int is assignable to enum types (iota-based enums in Growler)
+	// Int is assignable to enum types (iota-based enums in Zinc)
 	if from == TypeInt {
 		if _, ok := to.(*EnumType); ok {
 			return true

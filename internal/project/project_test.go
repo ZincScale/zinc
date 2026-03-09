@@ -10,8 +10,8 @@ import (
 // --- ParseMod tests ----------------------------------------------------------
 
 func TestParseMod(t *testing.T) {
-	content := "module myapp\ngrowler 0.1\n"
-	path := writeTempFile(t, "growler.mod", content)
+	content := "module myapp\nzinc 0.1\n"
+	path := writeTempFile(t, "zinc.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -26,8 +26,8 @@ func TestParseMod(t *testing.T) {
 }
 
 func TestParseModWithComments(t *testing.T) {
-	content := "# This is a comment\nmodule myproject\n# another comment\ngrowler 0.2\n"
-	path := writeTempFile(t, "growler.mod", content)
+	content := "# This is a comment\nmodule myproject\n# another comment\nzinc 0.2\n"
+	path := writeTempFile(t, "zinc.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -42,8 +42,8 @@ func TestParseModWithComments(t *testing.T) {
 }
 
 func TestParseModMissingModule(t *testing.T) {
-	content := "growler 0.1\n"
-	path := writeTempFile(t, "growler.mod", content)
+	content := "zinc 0.1\n"
+	path := writeTempFile(t, "zinc.mod", content)
 
 	_, err := ParseMod(path)
 	if err == nil {
@@ -52,15 +52,15 @@ func TestParseModMissingModule(t *testing.T) {
 }
 
 func TestParseModNotFound(t *testing.T) {
-	_, err := ParseMod("/nonexistent/path/growler.mod")
+	_, err := ParseMod("/nonexistent/path/zinc.mod")
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
 func TestParseModEmptyLines(t *testing.T) {
-	content := "\n\nmodule   spacious\n\ngrowler 0.3\n\n"
-	path := writeTempFile(t, "growler.mod", content)
+	content := "\n\nmodule   spacious\n\nzinc 0.3\n\n"
+	path := writeTempFile(t, "zinc.mod", content)
 
 	mod, err := ParseMod(path)
 	if err != nil {
@@ -75,8 +75,8 @@ func TestParseModEmptyLines(t *testing.T) {
 
 func TestFindModInSameDir(t *testing.T) {
 	dir := t.TempDir()
-	modPath := filepath.Join(dir, "growler.mod")
-	os.WriteFile(modPath, []byte("module test\ngrowler 0.1\n"), 0644)
+	modPath := filepath.Join(dir, "zinc.mod")
+	os.WriteFile(modPath, []byte("module test\nzinc 0.1\n"), 0644)
 
 	found, root, err := FindMod(dir)
 	if err != nil {
@@ -95,8 +95,8 @@ func TestFindModInParentDir(t *testing.T) {
 	subDir := filepath.Join(dir, "models")
 	os.Mkdir(subDir, 0755)
 
-	modPath := filepath.Join(dir, "growler.mod")
-	os.WriteFile(modPath, []byte("module test\ngrowler 0.1\n"), 0644)
+	modPath := filepath.Join(dir, "zinc.mod")
+	os.WriteFile(modPath, []byte("module test\nzinc 0.1\n"), 0644)
 
 	found, root, err := FindMod(subDir)
 	if err != nil {
@@ -114,9 +114,9 @@ func TestFindModNotFound(t *testing.T) {
 	dir := t.TempDir()
 	_, _, err := FindMod(dir)
 	if err == nil {
-		t.Error("expected error when growler.mod not found")
+		t.Error("expected error when zinc.mod not found")
 	}
-	if !strings.Contains(err.Error(), "growler.mod not found") {
+	if !strings.Contains(err.Error(), "zinc.mod not found") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestTranspileSingleFile(t *testing.T) {
     var x: Int = 42
     print(x)
 }`
-	os.WriteFile(filepath.Join(dir, "main.gw"), []byte(src), 0644)
+	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(src), 0644)
 
 	units, err := Transpile(dir)
 	if err != nil {
@@ -171,7 +171,7 @@ pub fn add(a: Int, b: Int): Int {
     return a + b
 }
 `
-	os.WriteFile(filepath.Join(subDir, "math.gw"), []byte(src), 0644)
+	os.WriteFile(filepath.Join(subDir, "math.zn"), []byte(src), 0644)
 
 	units, err := Transpile(dir)
 	if err != nil {
@@ -197,11 +197,11 @@ pub fn add(a: Int, b: Int): Int {
 func TestTranspileMultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	os.WriteFile(filepath.Join(dir, "main.gw"), []byte(`fn main() { print("hello") }`), 0644)
+	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(`fn main() { print("hello") }`), 0644)
 
 	utilsDir := filepath.Join(dir, "utils")
 	os.Mkdir(utilsDir, 0755)
-	os.WriteFile(filepath.Join(utilsDir, "math.gw"), []byte(`package "myapp/utils"
+	os.WriteFile(filepath.Join(utilsDir, "math.zn"), []byte(`package "myapp/utils"
 pub fn add(a: Int, b: Int): Int { return a }`), 0644)
 
 	units, err := Transpile(dir)
@@ -214,7 +214,7 @@ pub fn add(a: Int, b: Int): Int { return a }`), 0644)
 }
 
 func TestTranspileSharedRegistry(t *testing.T) {
-	// Two files in the same directory: dog.gw defines Dog, animal.gw defines Animal.
+	// Two files in the same directory: dog.zn defines Dog, animal.zn defines Animal.
 	// With shared registry, Dog can reference Animal (cross-file type resolution).
 	dir := t.TempDir()
 
@@ -230,8 +230,8 @@ class Dog : Animal {
     pub fn bark(): String { return "Woof!" }
 }
 `
-	os.WriteFile(filepath.Join(dir, "animal.gw"), []byte(animal), 0644)
-	os.WriteFile(filepath.Join(dir, "dog.gw"), []byte(dog), 0644)
+	os.WriteFile(filepath.Join(dir, "animal.zn"), []byte(animal), 0644)
+	os.WriteFile(filepath.Join(dir, "dog.zn"), []byte(dog), 0644)
 
 	units, err := Transpile(dir)
 	if err != nil {

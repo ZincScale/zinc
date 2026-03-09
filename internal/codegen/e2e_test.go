@@ -60,8 +60,8 @@ func TestE2EArithmetic(t *testing.T) {
 }
 
 func TestE2EStringInterpolation(t *testing.T) {
-	out := e2eRun(t, `fn main() { var name: String = "Growler"; print("Hello, {name}!") }`)
-	assertOutput(t, out, "Hello, Growler!")
+	out := e2eRun(t, `fn main() { var name: String = "Zinc"; print("Hello, {name}!") }`)
+	assertOutput(t, out, "Hello, Zinc!")
 }
 
 func TestE2EIfElse(t *testing.T) {
@@ -322,16 +322,16 @@ func TestE2EWithFileOpenClose(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    var path = "/tmp/growler_with_test.txt"
+    var path = "/tmp/zinc_with_test.txt"
     var (f, _) = os.Create(path)
     with (var file = f) {
-        file.WriteString("hello from growler")
+        file.WriteString("hello from zinc")
     }
     var (data, _) = os.ReadFile(path)
     print(string(data))
     os.Remove(path)
 }`)
-	assertOutput(t, out, "hello from growler")
+	assertOutput(t, out, "hello from zinc")
 }
 
 func TestE2EWithMutex(t *testing.T) {
@@ -702,7 +702,7 @@ func TestE2EWithTryFileWriteRead(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    var path = os.TempDir() + "/growler_with_test.txt"
+    var path = os.TempDir() + "/zinc_with_test.txt"
     with (var f = os.Create(path)) {
         f.WriteString("hello from with")
     }
@@ -749,8 +749,8 @@ func TestE2EWithMultipleTryResources(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    var p1 = os.TempDir() + "/growler_multi1.txt"
-    var p2 = os.TempDir() + "/growler_multi2.txt"
+    var p1 = os.TempDir() + "/zinc_multi1.txt"
+    var p2 = os.TempDir() + "/zinc_multi2.txt"
     with (var f1 = os.Create(p1), var f2 = os.Create(p2)) {
         f1.WriteString("file1")
         f2.WriteString("file2")
@@ -796,15 +796,15 @@ func TestE2EWithTryReadAfterWrite(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    var path = os.TempDir() + "/growler_with_rw.txt"
+    var path = os.TempDir() + "/zinc_with_rw.txt"
     with (var f = os.Create(path)) {
-        f.WriteString("growler with rocks")
+        f.WriteString("zinc with rocks")
     }
     // File is now closed (defer Close() ran), safe to read
     print(readFile(path))
     os.Remove(path)
 }`)
-	assertOutput(t, out, "growler with rocks")
+	assertOutput(t, out, "zinc with rocks")
 }
 
 // with: RWMutex (implements sync.Locker via RLock/Lock)
@@ -866,13 +866,13 @@ func TestE2EReadWriteFile(t *testing.T) {
 import "os"
 fn main() {
     var dir = os.TempDir()
-    var path = dir + "/growler_test_rw.txt"
-    writeFile(path, "hello growler")
+    var path = dir + "/zinc_test_rw.txt"
+    writeFile(path, "hello zinc")
     var content = readFile(path)
     print(content)
     os.Remove(path)
 }`)
-	assertOutput(t, out, "hello growler")
+	assertOutput(t, out, "hello zinc")
 }
 
 // --- OO collection methods ---------------------------------------------------
@@ -1000,9 +1000,9 @@ func TestE2EStringReplace(t *testing.T) {
 	out := e2eRun(t, `
 fn main() {
     var s = "hello world world"
-    print(s.replace("world", "growler"))
+    print(s.replace("world", "zinc"))
 }`)
-	assertOutput(t, out, "hello growler growler")
+	assertOutput(t, out, "hello zinc zinc")
 }
 
 func TestE2EListJoin(t *testing.T) {

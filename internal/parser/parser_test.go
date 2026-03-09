@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"growler/internal/lexer"
+	"zinc/internal/lexer"
 )
 
 func parse(src string) (*Program, *Parser) {

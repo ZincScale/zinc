@@ -1,10 +1,10 @@
 # Built-in Functions
 
-Growler provides a set of built-in functions that map directly to Go standard library calls. No imports needed — the transpiler adds them automatically.
+Zinc provides a set of built-in functions that map directly to Go standard library calls. No imports needed — the transpiler adds them automatically.
 
 ## I/O
 
-| Growler            | Go equivalent              | Notes |
+| Zinc            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
 | `print(x)`        | `fmt.Println(x)`           | |
 | `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`   | |
@@ -14,7 +14,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## Type Conversions
 
-| Growler            | Go equivalent              |
+| Zinc            | Go equivalent              |
 |-------------------|----------------------------|
 | `toString(x)`     | `fmt.Sprintf("%v", x)`     |
 | `parseInt(s)`     | `strconv.Atoi(s)`          |
@@ -24,7 +24,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## Collections
 
-| Growler            | Go equivalent              | Notes |
+| Zinc            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
 | `list.add(item)`  | `list = append(list, item)` | Appends to list in-place |
 | `map.remove(key)` | `delete(map, key)`          | Removes key from map |
@@ -41,7 +41,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## Math
 
-| Growler            | Go equivalent              |
+| Zinc            | Go equivalent              |
 |-------------------|----------------------------|
 | `abs(x)`          | `math.Abs(x)`              |
 | `sqrt(x)`         | `math.Sqrt(x)`             |
@@ -51,7 +51,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## Strings
 
-| Growler            | Go equivalent              |
+| Zinc            | Go equivalent              |
 |-------------------|----------------------------|
 | `s.upper()` / `s.lower()` | `strings.ToUpper(s)` / `ToLower(s)` |
 | `s.contains(x)`   | `strings.Contains(s, x)`  |
@@ -64,7 +64,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## JSON
 
-| Growler            | Go equivalent              | Notes |
+| Zinc            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
 | `jsonEncode(val)` | `json.Marshal(val)`        | Returns `String` |
 | `jsonDecode(str)` | `json.Unmarshal(str, &m)`  | Returns `Map<String, Any>` |
@@ -72,13 +72,13 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## HTTP
 
-| Growler            | Go equivalent              | Notes |
+| Zinc            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
 | `httpGet(url)`    | `http.Get(url)` + read body | **Failable** — errors auto-propagate |
 
 ## Environment & Time
 
-| Growler            | Go equivalent              |
+| Zinc            | Go equivalent              |
 |-------------------|----------------------------|
 | `getEnv(key)`     | `os.Getenv(key)`           |
 | `setEnv(key, val)` | `os.Setenv(key, val)`    |
@@ -87,7 +87,7 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 ## Control
 
-| Growler            | Go equivalent              |
+| Zinc            | Go equivalent              |
 |-------------------|----------------------------|
 | `panic(msg)`      | `panic(msg)`               |
 | `exit(code)`      | `os.Exit(code)`            |

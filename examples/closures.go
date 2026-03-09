@@ -20,7 +20,7 @@ func main() {
 	fmt.Println(describe(42))
 	fmt.Println(describe((-1)))
 	makeMsg := func(name string) string { return fmt.Sprintf("Hello, %v!", name) }
-	fmt.Println(makeMsg("Growler"))
+	fmt.Println(makeMsg("Zinc"))
 	safeDivide := func(a int, b int) (int, error) {
 		if b == 0 {
 			return 0, fmt.Errorf("division by zero")

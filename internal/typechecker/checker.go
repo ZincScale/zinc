@@ -1,4 +1,4 @@
-// Package typechecker performs semantic analysis on Growler ASTs.
+// Package typechecker performs semantic analysis on Zinc ASTs.
 // It reports type errors with source line/column information before
 // code generation, producing better error messages than the Go compiler.
 package typechecker
@@ -6,7 +6,7 @@ package typechecker
 import (
 	"fmt"
 
-	"growler/internal/parser"
+	"zinc/internal/parser"
 )
 
 // TypeError describes a type-checking error with source location.

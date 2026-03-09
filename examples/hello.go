@@ -6,6 +6,6 @@ import (
 
 func main() {
 	fmt.Println("Hello, World!")
-	name := "Growler"
+	name := "Zinc"
 	fmt.Println(name)
 }

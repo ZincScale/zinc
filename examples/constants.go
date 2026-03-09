@@ -8,7 +8,7 @@ const PI = 3.14159
 
 const MAX_RETRIES int = 3
 
-const APP_NAME string = "Growler"
+const APP_NAME string = "Zinc"
 
 const DEBUG bool = false
 

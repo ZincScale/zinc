@@ -3,9 +3,9 @@
 ## Installation
 
 ```bash
-git clone https://github.com/victorybhg/growler
-cd growler
-go build -o growler ./cmd/growler/
+git clone https://github.com/victorybhg/zinc
+cd zinc
+go build -o zinc ./cmd/zinc/
 ```
 
 Requires **Go 1.21+**.
@@ -13,40 +13,40 @@ Requires **Go 1.21+**.
 ## CLI Usage
 
 ```bash
-growler <file.gw>               # transpile to <file>.go
-growler <file.gw> -o out.go     # specify output file
-growler <file.gw> --run         # transpile and run immediately
-growler <file.gw> --watch       # watch for changes, re-transpile automatically
-growler <file.gw> --verbose     # show token/AST debug info
-growler repl                    # launch interactive REPL
+zinc <file.zn>               # transpile to <file>.go
+zinc <file.zn> -o out.go     # specify output file
+zinc <file.zn> --run         # transpile and run immediately
+zinc <file.zn> --watch       # watch for changes, re-transpile automatically
+zinc <file.zn> --verbose     # show token/AST debug info
+zinc repl                    # launch interactive REPL
 ```
 
 ## Running Examples
 
-The [`examples/`](../examples/) directory contains working Growler programs covering every major language feature:
+The [`examples/`](../examples/) directory contains working Zinc programs covering every major language feature:
 
 | Example | Description |
 |---------|-------------|
-| [`hello.gw`](../examples/hello.gw) | Hello World + variables |
-| [`classes.gw`](../examples/classes.gw) | Classes, interfaces, inheritance |
-| [`concurrency.gw`](../examples/concurrency.gw) | Channels + goroutines |
-| [`errors.gw`](../examples/errors.gw) | Errors as values, `or` handler |
-| [`enums.gw`](../examples/enums.gw) | Enums + match |
-| [`generics.gw`](../examples/generics.gw) | Generic functions and classes |
-| [`fibonacci.gw`](../examples/fibonacci.gw) | Recursion |
-| [`closures.gw`](../examples/closures.gw) | Lambdas, closures, failable lambdas |
-| [`safe_navigation.gw`](../examples/safe_navigation.gw) | Safe navigation `?.` with chaining |
-| [`with_resources.gw`](../examples/with_resources.gw) | Resource management with `with` |
-| [`defaults_and_named_args.gw`](../examples/defaults_and_named_args.gw) | Default parameters + named arguments |
-| [`type_casting.gw`](../examples/type_casting.gw) | Type assertions (`as`) and checks (`is`) |
-| [`collections.gw`](../examples/collections.gw) | Typed literals, collection methods, iteration |
-| [`callable_types.gw`](../examples/callable_types.gw) | `Fn<>` function types + higher-order functions |
-| [`labeled_loops.gw`](../examples/labeled_loops.gw) | Labeled `break` and `continue` |
-| [`tuple_unpacking.gw`](../examples/tuple_unpacking.gw) | Multi-return unpacking + error handling |
-| [`constants.gw`](../examples/constants.gw) | `const` declarations |
+| [`hello.zn`](../examples/hello.zn) | Hello World + variables |
+| [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance |
+| [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
+| [`errors.zn`](../examples/errors.zn) | Errors as values, `or` handler |
+| [`enums.zn`](../examples/enums.zn) | Enums + match |
+| [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
+| [`fibonacci.zn`](../examples/fibonacci.zn) | Recursion |
+| [`closures.zn`](../examples/closures.zn) | Lambdas, closures, failable lambdas |
+| [`safe_navigation.zn`](../examples/safe_navigation.zn) | Safe navigation `?.` with chaining |
+| [`with_resources.zn`](../examples/with_resources.zn) | Resource management with `with` |
+| [`defaults_and_named_args.zn`](../examples/defaults_and_named_args.zn) | Default parameters + named arguments |
+| [`type_casting.zn`](../examples/type_casting.zn) | Type assertions (`as`) and checks (`is`) |
+| [`collections.zn`](../examples/collections.zn) | Typed literals, collection methods, iteration |
+| [`callable_types.zn`](../examples/callable_types.zn) | `Fn<>` function types + higher-order functions |
+| [`labeled_loops.zn`](../examples/labeled_loops.zn) | Labeled `break` and `continue` |
+| [`tuple_unpacking.zn`](../examples/tuple_unpacking.zn) | Multi-return unpacking + error handling |
+| [`constants.zn`](../examples/constants.zn) | `const` declarations |
 
 Run any example:
 
 ```bash
-./growler examples/hello.gw --run
+./zinc examples/hello.zn --run
 ```

@@ -1,9 +1,9 @@
-<img alt="Growler logo" src="./logo.jpg" />
+<img alt="Zinc logo" src="./logo.png" />
 
 
-# Growler
+# Zinc
 
-**Growler** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
+**Zinc** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
 
 ```
 fn main() {
@@ -23,17 +23,17 @@ func main() {
 
 ---
 
-## Why Growler?
+## Why Zinc?
 
-Go is fast, simple, and has excellent tooling — but its lack of traditional OO features can feel limiting for developers coming from Java, Kotlin, C#, Python, or TypeScript. Growler bridges that gap:
+Go is fast, simple, and has excellent tooling — but its lack of traditional OO features can feel limiting for developers coming from Java, Kotlin, C#, Python, or TypeScript. Zinc bridges that gap:
 
 - **Familiar OO syntax** — classes, interfaces, inheritance, constructors, and `this`
-- **Modern conveniences** — null safety (`?.`), string interpolation, `try/catch`, `with` resource management, lambdas, enums, generics
+- **Modern conveniences** — null safety (`?.`), string interpolation, errors as values with `or` handlers, `with` resource management, lambdas, enums, generics
 - **Zero runtime overhead** — everything compiles to plain Go; no reflection, no runtime library
 - **Full Go interop** — import any Go package, call any Go function, use any Go type
 - **Transparent output** — the generated `.go` files are readable, idiomatic, and `go vet`-clean
 
-Growler doesn't replace Go — it's a better way to write it.
+Zinc doesn't replace Go — it's a better way to write it.
 
 ---
 
@@ -50,10 +50,10 @@ Growler doesn't replace Go — it's a better way to write it.
 ## Quick Start
 
 ```bash
-git clone https://github.com/victorybhg/growler
-cd growler
-go build -o growler ./cmd/growler/
-./growler examples/hello.gw --run
+git clone https://github.com/victorybhg/zinc
+cd zinc
+go build -o zinc ./cmd/zinc/
+./zinc examples/hello.zn --run
 ```
 
 Requires **Go 1.21+**. See the [Getting Started](docs/getting-started.md) guide for full details.
@@ -65,7 +65,7 @@ Requires **Go 1.21+**. See the [Getting Started](docs/getting-started.md) guide 
 - Classes, interfaces, and inheritance
 - Generic functions and classes
 - Null safety with `?.` safe navigation
-- `try` / `catch` / `throw` error handling
+- Errors as values with auto-propagation and `or` handlers
 - `with` resource management (auto-close, auto-unlock)
 - Closures and higher-order functions (`Fn<>` types)
 - Enums with `match` expressions

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"growler/internal/parser"
+	"zinc/internal/parser"
 )
 
 // goMultiReturnFuncs is the set of known Go stdlib functions that return (T, error).
@@ -25,7 +25,7 @@ var goMultiReturnFuncs = map[string]bool{
 	"tls.Dial":      true,
 }
 
-// failableBuiltins is the set of Growler built-in functions that are failable
+// failableBuiltins is the set of Zinc built-in functions that are failable
 // (their generated Go code returns (T, error) or error).
 var failableBuiltins = map[string]bool{
 	"readFile":  true,
@@ -33,7 +33,7 @@ var failableBuiltins = map[string]bool{
 	"httpGet":   true,
 }
 
-// Generator converts a Growler AST to Go source code.
+// Generator converts a Zinc AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
 	indent         int
@@ -1854,7 +1854,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 				return fmt.Sprintf("New%s(%s)", ident.Name, strings.Join(resolved, ", "))
 			}
 		}
-		// GoType.new() → GoType{} (for types not known as Growler classes)
+		// GoType.new() → GoType{} (for types not known as Zinc classes)
 		// Handles both simple: Mutex.new() and dotted: sync.Mutex.new()
 		if callee.Field == "new" && len(call.Args) == 0 && len(call.NamedArgs) == 0 {
 			if ident, ok := callee.Object.(*parser.Ident); ok {
@@ -1882,7 +1882,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 	}
 }
 
-// emitBuiltinCall maps Growler built-in function names to Go equivalents.
+// emitBuiltinCall maps Zinc built-in function names to Go equivalents.
 func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr, typeArgs []string) string {
 	switch name {
 	// I/O

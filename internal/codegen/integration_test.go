@@ -192,7 +192,7 @@ fn main() {
 func TestIntegrationForInWithBuiltins(t *testing.T) {
 	src := `
 fn main() {
-    var words = ["hello", "world", "growler"]
+    var words = ["hello", "world", "zinc"]
     for w in words {
         print(w.upper())
     }
@@ -208,7 +208,7 @@ fn main() {
 }
 
 func TestIntegrationGoroutineChannel(t *testing.T) {
-	// Growler channel syntax: go { ... }, ch.send(val), ch.receive()
+	// Zinc channel syntax: go { ... }, ch.send(val), ch.receive()
 	src := `
 fn main() {
     var ch: Chan<Int> = Chan.new(1)

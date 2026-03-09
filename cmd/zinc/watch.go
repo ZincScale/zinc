@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"growler/internal/codegen"
-	"growler/internal/lexer"
-	"growler/internal/parser"
-	"growler/internal/typechecker"
+	"zinc/internal/codegen"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
 func runWatch(inFile, outFile string) {

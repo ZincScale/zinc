@@ -2,9 +2,9 @@
 
 ## Variables
 
-```growler
+```zinc
 var x: Int = 42
-var name: String = "Growler"
+var name: String = "Zinc"
 var flag: Bool = true
 var ratio: Float = 3.14
 var maybeNull: String? = null    // optional (nullable) type
@@ -14,10 +14,10 @@ var maybeNull: String? = null    // optional (nullable) type
 
 Top-level immutable values declared with `const`:
 
-```growler
+```zinc
 const PI = 3.14159
 const MAX_RETRIES: Int = 3
-const APP_NAME: String = "Growler"
+const APP_NAME: String = "Zinc"
 
 fn main() {
     print(APP_NAME)
@@ -30,7 +30,7 @@ Transpiles to:
 ```go
 const PI = 3.14159
 const MAX_RETRIES int = 3
-const APP_NAME string = "Growler"
+const APP_NAME string = "Zinc"
 
 func main() {
     fmt.Println(APP_NAME)
@@ -40,7 +40,7 @@ func main() {
 
 ## Functions
 
-```growler
+```zinc
 fn add(a: Int, b: Int): Int {
     return a + b
 }
@@ -54,7 +54,7 @@ pub fn greet(name: String): String {
 
 Parameters may declare a default value with `= expr`. Callers that omit the argument receive the default — inlined by the transpiler into the emitted Go call site (no runtime overhead):
 
-```growler
+```zinc
 fn greet(name: String, greeting: String = "Hello") {
     print("{greeting}, {name}!")
 }
@@ -82,7 +82,7 @@ func main() {
 
 Arguments may be passed by name at any call site using `name: value` syntax. Named arguments may appear in any order and can be mixed with leading positional arguments. Positional arguments must always come first.
 
-```growler
+```zinc
 fn connect(host: String, port: Int = 8080, tls: Bool = false) { }
 
 fn main() {
@@ -94,7 +94,7 @@ fn main() {
 
 Named arguments also work on constructors:
 
-```growler
+```zinc
 class Dog {
     var name: String
     var age: Int
@@ -126,7 +126,7 @@ func main() {
 
 ### Generic Functions
 
-```growler
+```zinc
 fn identity<T>(val: T): T {
     return val
 }
@@ -138,7 +138,7 @@ fn pair<K, V>(key: K, value: V): K {
 
 ## Classes
 
-```growler
+```zinc
 class Dog {
     var name: String
     var age: Int
@@ -162,7 +162,7 @@ class Dog {
 
 Every class has one primary constructor declared with `new(...)`, called as `ClassName.new(...)`. Additional named constructors are `pub static fn` factory methods that call `new` internally:
 
-```growler
+```zinc
 class Point {
     var x: Float
     var y: Float
@@ -222,7 +222,7 @@ func main() {
 
 ### Generic Classes
 
-```growler
+```zinc
 class Box<T> {
     var value: T
 
@@ -238,9 +238,9 @@ class Box<T> {
 
 ### Go Type Construction (`.new()`)
 
-Growler extends its `ClassName.new()` pattern to any Go type — the OO constructor pattern every Java/Python/C#/Ruby developer knows:
+Zinc extends its `ClassName.new()` pattern to any Go type — the OO constructor pattern every Java/Python/C#/Ruby developer knows:
 
-```growler
+```zinc
 import "sync"
 import "bytes"
 
@@ -259,7 +259,7 @@ buf := bytes.Buffer{}
 
 ## Interfaces
 
-```growler
+```zinc
 interface Speaker {
     pub fn speak(): String
 }
@@ -273,7 +273,7 @@ class Cat : Speaker {
 
 ## Inheritance
 
-```growler
+```zinc
 class Animal {
     var name: String
     new(name: String) { this.name = name }
@@ -290,7 +290,7 @@ class Dog : Animal, Speaker {
 
 ## Enums
 
-```growler
+```zinc
 enum Direction { North, South, East, West }
 enum Status { Pending, Active, Closed }
 ```
@@ -311,7 +311,7 @@ const (
 
 List and map literals are automatically typed by the typechecker. When all elements share the same type, the output uses that concrete type instead of `interface{}`:
 
-```growler
+```zinc
 fn main() {
     var nums = [1, 2, 3]             // inferred as []int
     var names = ["Alice", "Bob"]     // inferred as []string
@@ -345,7 +345,7 @@ func main() {
 
 ## Match / Switch
 
-```growler
+```zinc
 enum Direction { North, South, East, West }
 
 fn describe(d: Direction): String {
@@ -361,8 +361,8 @@ fn describe(d: Direction): String {
 
 ## String Interpolation
 
-```growler
-var name: String = "Growler"
+```zinc
+var name: String = "Zinc"
 var version: Int = 1
 print("Welcome to {name} v{version}!")
 // → fmt.Println(fmt.Sprintf("Welcome to %v v%v!", name, version))
@@ -370,7 +370,7 @@ print("Welcome to {name} v{version}!")
 
 ## Control Flow
 
-```growler
+```zinc
 // if / else if / else
 if (x > 0) {
     print("positive")
@@ -409,9 +409,9 @@ for (name, score) in scores {
 
 ### Labeled Loops
 
-Like Java, Growler supports labeled `break` and `continue` for nested loop control. Prefix a loop with `@label` and reference it from inner loops:
+Like Java, Zinc supports labeled `break` and `continue` for nested loop control. Prefix a loop with `@label` and reference it from inner loops:
 
-```growler
+```zinc
 @outer for (var i = 0; i < 10; i += 1) {
     for (var j = 0; j < 10; j += 1) {
         if (j == 5) {
@@ -440,7 +440,7 @@ for i := 0; i < 10; i++ {
 
 Inspired by Kotlin, C#, Swift, and TypeScript. Access fields and call methods on nullable references without manual null checks. If the receiver is `nil`, the entire expression evaluates to `nil` — no crash, no exception:
 
-```growler
+```zinc
 class User {
     var name: String
     var address: Address?
@@ -503,9 +503,9 @@ city := func() interface{} {
 
 ## Type Casting (`as` / `is`)
 
-Growler uses `as` for type assertions and `is` for type checks — familiar from Kotlin, C#, and TypeScript:
+Zinc uses `as` for type assertions and `is` for type checks — familiar from Kotlin, C#, and TypeScript:
 
-```growler
+```zinc
 fn main() {
     var x: Any = 42
 
@@ -532,9 +532,9 @@ func() bool { _, ok := x.(int); return ok }()           // is
 
 ## Null Safety
 
-Growler enforces Kotlin-style strict null safety. Non-nullable types cannot hold `null`, and nullable types (`Type?`) require safe access:
+Zinc enforces Kotlin-style strict null safety. Non-nullable types cannot hold `null`, and nullable types (`Type?`) require safe access:
 
-```growler
+```zinc
 class Dog {
     var name: String
     new(name: String) { this.name = name }
@@ -555,7 +555,7 @@ fn main() {
 
 Use `Fn<(ParamTypes), ReturnType>` to declare typed function parameters — enabling higher-order functions, callbacks, and functional patterns:
 
-```growler
+```zinc
 fn apply(f: Fn<(Int), Int>, x: Int): Int {
     return f(x)
 }
@@ -596,7 +596,7 @@ func run(callback func()) { callback() }
 Lambdas use the `(params): ReturnType => body` syntax. The body is either a
 single expression or a block `{ ... }`.
 
-```growler
+```zinc
 // Single-expression lambda (inferred as a func literal)
 var double = (x: Int): Int => x * 2
 var greet  = (): String => "Hello!"
@@ -633,7 +633,7 @@ makeMsg := func(name string) string { return fmt.Sprintf("Hello, %v!", name) }
 A lambda that contains `return Error(...)` automatically gets an `error` return
 appended to its signature. Calls to failable lambdas auto-propagate errors:
 
-```growler
+```zinc
 var safeDivide = (a: Int, b: Int): Int => {
     if (b == 0) {
         return Error("division by zero")
@@ -672,14 +672,14 @@ if _err1 != nil {
 
 ## With (Resource Management)
 
-The `with` statement is Growler's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`. It ensures resources are cleaned up automatically when the block exits:
+The `with` statement is Zinc's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`. It ensures resources are cleaned up automatically when the block exits:
 
 - **Files** (anything implementing `io.Closer`) → `defer Close()`
 - **Mutexes** (anything implementing `sync.Locker`) → `Lock()` + `defer Unlock()`
 
 No manual cleanup needed — same OO ergonomics Java/C#/Python developers expect.
 
-```growler
+```zinc
 import "os"
 
 fn main() {
@@ -692,15 +692,15 @@ fn main() {
 
 ### Auto-Detected Multi-Return
 
-Many Go functions return `(value, error)`. Growler auto-detects these and unpacks the tuple, throwing on error — no manual error handling needed:
+Many Go functions return `(value, error)`. Zinc auto-detects these and unpacks the tuple, throwing on error — no manual error handling needed:
 
-```growler
+```zinc
 import "os"
 
 fn main() {
     // os.Create returns (*File, error) — auto-detected and unpacked
     with (var f = os.Create("output.txt")) {
-        f.WriteString("hello from Growler")
+        f.WriteString("hello from Zinc")
     }
     // f is closed automatically, error was auto-checked
 }
@@ -714,7 +714,7 @@ func main() {
         f, _err0 := os.Create("output.txt")
         if _err0 != nil { panic(_err0) }
         if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }
-        f.WriteString("hello from Growler")
+        f.WriteString("hello from Zinc")
     }
 }
 ```
@@ -723,7 +723,7 @@ func main() {
 
 When a `with` resource is failable, use an `or` handler to add context or halt:
 
-```growler
+```zinc
 with (var f = os.Open("/nonexistent/file") or {
     print("caught: {err}")
     exit(1)
@@ -736,7 +736,7 @@ with (var f = os.Open("/nonexistent/file") or {
 
 `with` auto-detects `sync.Locker` and locks/unlocks — like Java's `synchronized` or Python's `with lock`:
 
-```growler
+```zinc
 import "sync"
 
 fn main() {
@@ -751,7 +751,7 @@ fn main() {
 
 Comma-separated resources are closed in reverse order (LIFO), matching Go's `defer` stack:
 
-```growler
+```zinc
 import "os"
 
 fn main() {
@@ -765,9 +765,9 @@ fn main() {
 
 ## Error Handling
 
-Growler uses errors as values with auto-propagation — no try/catch needed:
+Zinc uses errors as values with auto-propagation — no try/catch needed:
 
-```growler
+```zinc
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
         return Error("division by zero")
@@ -790,7 +790,7 @@ fn main() {
 
 ## Concurrency
 
-```growler
+```zinc
 fn main() {
     var ch: Chan<Int> = Chan.new(1)
 
@@ -805,9 +805,9 @@ fn main() {
 
 ## Tuple Unpacking
 
-Growler maps directly to Go's multi-return. You can unpack any Go function that returns multiple values via `import`:
+Zinc maps directly to Go's multi-return. You can unpack any Go function that returns multiple values via `import`:
 
-```growler
+```zinc
 import "strconv"
 
 fn main() {
@@ -820,7 +820,7 @@ fn main() {
 
 ## Imports
 
-```growler
+```zinc
 import "os"
 import "math/rand" as rand
 
@@ -831,7 +831,7 @@ fn main() {
 
 ## Type System
 
-| Growler     | Go          |
+| Zinc     | Go          |
 |-------------|-------------|
 | `Int`       | `int`       |
 | `Float`     | `float64`   |

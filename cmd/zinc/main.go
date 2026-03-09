@@ -7,20 +7,20 @@ import (
 	"path/filepath"
 	"strings"
 
-	"growler/internal/codegen"
-	"growler/internal/lexer"
-	"growler/internal/parser"
-	"growler/internal/project"
-	"growler/internal/typechecker"
+	"zinc/internal/codegen"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
+	"zinc/internal/project"
+	"zinc/internal/typechecker"
 )
 
-const usage = `Growler transpiler — compiles .gw files to Go source.
+const usage = `Zinc transpiler — compiles .zn files to Go source.
 
 Usage:
-  growler <file.gw> [flags]   Transpile a single file
-  growler build [dir]         Transpile all .gw files in project and run go build
-  growler run [dir]           Transpile all .gw files and run the project
-  growler repl                Launch interactive REPL
+  zinc <file.zn> [flags]   Transpile a single file
+  zinc build [dir]         Transpile all .zn files in project and run go build
+  zinc run [dir]           Transpile all .zn files and run the project
+  zinc repl                Launch interactive REPL
 
 Flags:
   -o <file>    Output Go file (default: <input>.go)

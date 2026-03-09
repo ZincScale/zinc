@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Lexer tokenizes Growler source code.
+// Lexer tokenizes Zinc source code.
 type Lexer struct {
 	src     []rune
 	pos     int // current position

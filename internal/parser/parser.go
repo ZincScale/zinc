@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"growler/internal/lexer"
+	"zinc/internal/lexer"
 )
 
 // Parser converts a token stream into an AST.

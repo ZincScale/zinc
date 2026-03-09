@@ -7,20 +7,20 @@ import (
 	"path/filepath"
 	"strings"
 
-	"growler/internal/codegen"
-	"growler/internal/lexer"
-	"growler/internal/parser"
-	"growler/internal/typechecker"
+	"zinc/internal/codegen"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
-// FileUnit represents a single .gw → .go transpilation result.
+// FileUnit represents a single .zn → .go transpilation result.
 type FileUnit struct {
-	SrcPath     string // absolute path to .gw source file
+	SrcPath     string // absolute path to .zn source file
 	OutPath     string // absolute path to .go output file
 	PackageName string // Go package name written to the output file
 }
 
-// Build transpiles all .gw files under rootDir and runs `go build ./...`.
+// Build transpiles all .zn files under rootDir and runs `go build ./...`.
 func Build(rootDir string) error {
 	units, err := Transpile(rootDir)
 	if err != nil {
@@ -35,7 +35,7 @@ func Build(rootDir string) error {
 	return cmd.Run()
 }
 
-// Run transpiles all .gw files under rootDir and runs `go run .`.
+// Run transpiles all .zn files under rootDir and runs `go run .`.
 func Run(rootDir string) error {
 	if _, err := Transpile(rootDir); err != nil {
 		return err
@@ -47,7 +47,7 @@ func Run(rootDir string) error {
 	return cmd.Run()
 }
 
-// Transpile walks rootDir, groups .gw files by directory (= Go package),
+// Transpile walks rootDir, groups .zn files by directory (= Go package),
 // builds a shared TypeRegistry per directory, and emits .go files.
 func Transpile(rootDir string) ([]FileUnit, error) {
 	abs, err := filepath.Abs(rootDir)
@@ -56,13 +56,13 @@ func Transpile(rootDir string) ([]FileUnit, error) {
 	}
 	rootDir = abs
 
-	// Collect .gw files grouped by directory
+	// Collect .zn files grouped by directory
 	dirFiles := make(map[string][]string) // dir → []srcPath
 	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".gw") {
+		if !info.IsDir() && strings.HasSuffix(path, ".zn") {
 			dir := filepath.Dir(path)
 			dirFiles[dir] = append(dirFiles[dir], path)
 		}
@@ -83,7 +83,7 @@ func Transpile(rootDir string) ([]FileUnit, error) {
 	return units, nil
 }
 
-// transpileDir handles all .gw files in one directory (one Go package).
+// transpileDir handles all .zn files in one directory (one Go package).
 func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 	// Phase 1: parse all files
 	type parsedFile struct {
@@ -151,7 +151,7 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 		if err != nil {
 			return nil, err
 		}
-		outRel := strings.TrimSuffix(rel, ".gw") + ".go"
+		outRel := strings.TrimSuffix(rel, ".zn") + ".go"
 		outPath := filepath.Join(rootDir, outRel)
 
 		if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {

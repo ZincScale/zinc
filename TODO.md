@@ -1,4 +1,4 @@
-# Growler Feature Roadmap
+# Zinc Feature Roadmap
 
 Prioritized for shipping a usable language binary people can try out.
 
@@ -16,7 +16,7 @@ Prioritized for shipping a usable language binary people can try out.
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 2 | **Source maps** | Map Go compiler errors back to `.gw` lines | Large |
+| 2 | **Source maps** | Map Go compiler errors back to `.zn` lines | Large |
 | 3 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
 
 ---
@@ -30,7 +30,7 @@ Prioritized for shipping a usable language binary people can try out.
 | 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
 | 12 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 13 | **Growler stdlib wrappers** | Real `io`, `http`, `json` API in Growler idioms | Large |
+| 13 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
 
 ---
 
@@ -38,11 +38,11 @@ Prioritized for shipping a usable language binary people can try out.
 
 ### 1. Go Zero-Value Construction (`Type{}` not supported)
 
-**The problem:** Growler has no syntax for constructing a zero-value Go struct. The parser sees `sync.Mutex{}` as a selector expression followed by an unrelated empty block, producing invalid Go.
+**The problem:** Zinc has no syntax for constructing a zero-value Go struct. The parser sees `sync.Mutex{}` as a selector expression followed by an unrelated empty block, producing invalid Go.
 
-**Chosen solution: `.new()` on Go types** — when codegen sees `X.new()` and `X` is not a known Growler class, emit `X{}` instead of `NewX()`.
+**Chosen solution: `.new()` on Go types** — when codegen sees `X.new()` and `X` is not a known Zinc class, emit `X{}` instead of `NewX()`.
 
-```growler
+```zinc
 var mu = sync.Mutex.new()    // → sync.Mutex{}
 var buf = bytes.Buffer.new() // → bytes.Buffer{}
 ```
@@ -55,8 +55,8 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match
-- Error handling (try/catch/throw)
-- Closures / lambdas (including throwing lambdas)
+- Error handling (errors as values with auto-propagation and `or` handlers)
+- Closures / lambdas (including failable lambdas)
 - Concurrency (goroutines, channels)
 - Default parameters + named arguments
 - `with` statement (resource management, parenthesized syntax)
@@ -74,6 +74,6 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
 - Better map/list literal type inference (typechecker annotates AST → codegen emits typed literals)
 - `const` declarations (top-level immutable values)
-- Example coverage (17 `.gw` examples covering all major features)
+- Example coverage (17 `.zn` examples covering all major features)
 - REPL completeness (auto-print expressions, var persistence, brace-aware multi-line, help command)
 - Tuple unpacking, string interpolation, imports, built-ins

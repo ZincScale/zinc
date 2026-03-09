@@ -7,14 +7,14 @@ import (
 	"os/exec"
 	"strings"
 
-	"growler/internal/codegen"
-	"growler/internal/lexer"
-	"growler/internal/parser"
-	"growler/internal/typechecker"
+	"zinc/internal/codegen"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
 func runREPL() {
-	fmt.Println("Growler REPL — type Growler code, press Enter to run.")
+	fmt.Println("Zinc REPL — type Zinc code, press Enter to run.")
 	fmt.Println("Commands: help, clear, exit")
 	fmt.Println()
 
@@ -23,7 +23,7 @@ func runREPL() {
 	var bodyDecls []string // accumulated var/statement history inside main
 
 	for {
-		fmt.Print("growler> ")
+		fmt.Print("zinc> ")
 		var lines []string
 		depth := 0
 
@@ -258,7 +258,7 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	goSrc := gen.Generate(prog)
 
 	// Write to temp file and run
-	tmp, err := os.CreateTemp("", "growler_repl_*.go")
+	tmp, err := os.CreateTemp("", "zinc_repl_*.go")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return

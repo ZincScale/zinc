@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"growler/internal/lexer"
-	"growler/internal/parser"
-	"growler/internal/typechecker"
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
 func transpile(src string) (string, []string) {

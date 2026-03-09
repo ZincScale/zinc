@@ -1,2 +1,2 @@
 module myapp
-growler 0.1
+zinc 0.1
