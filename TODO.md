@@ -32,23 +32,6 @@ Prioritized for shipping a usable language binary people can try out.
 
 ---
 
-## Known Limitations
-
-### 1. Go Zero-Value Construction (`Type{}` not supported)
-
-**The problem:** Zinc has no syntax for constructing a zero-value Go struct. The parser sees `sync.Mutex{}` as a selector expression followed by an unrelated empty block, producing invalid Go.
-
-**Chosen solution: `.new()` on Go types** — when codegen sees `X.new()` and `X` is not a known Zinc class, emit `X{}` instead of `NewX()`.
-
-```zinc
-var mu = sync.Mutex.new()    // → sync.Mutex{}
-var buf = bytes.Buffer.new() // → bytes.Buffer{}
-```
-
-**Named fields** (`http.Client.new(timeout: 30)`) can follow later as a natural extension of named args.
-
----
-
 ## Completed
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
@@ -60,7 +43,7 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - `with` statement (resource management, parenthesized syntax)
 - `with` multi-return auto-detection (`with (var f = os.Create(path))`)
 - Type casting (`as` / `is`)
-- `.new()` on Go types (zero-value construction)
+- `.new()` on Go types (zero-value + named field construction: `url.URL.new(Scheme: "https", Host: "example.com")`)
 - Labeled `break`/`continue` (`@label for/while`, `break @label`)
 - Safe navigation `?.` (`obj?.field`, `obj?.method()`)
 - Null safety (Kotlin-style strict enforcement)

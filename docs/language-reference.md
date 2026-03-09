@@ -243,18 +243,25 @@ Zinc extends its `ClassName.new()` pattern to any Go type — the OO constructor
 ```zinc
 import "sync"
 import "bytes"
+import "net/url"
 
 fn main() {
-    var mu = sync.Mutex.new()       // zero-value construction
+    // Zero-value construction
+    var mu = sync.Mutex.new()
     var buf = bytes.Buffer.new()
+
+    // Named field construction (just like named args)
+    var u = url.URL.new(Scheme: "https", Host: "example.com", Path: "/api")
+    print(u.String())   // https://example.com/api
 }
 ```
 
-Transpiles to idiomatic Go zero-value struct literals:
+Transpiles to idiomatic Go struct literals:
 
 ```go
 mu := sync.Mutex{}
 buf := bytes.Buffer{}
+u := url.URL{Scheme: "https", Host: "example.com", Path: "/api"}
 ```
 
 ## Interfaces

@@ -1924,17 +1924,23 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 				return fmt.Sprintf("New%s(%s)", ident.Name, strings.Join(resolved, ", "))
 			}
 		}
-		// GoType.new() → GoType{} (for types not known as Zinc classes)
+		// GoType.new(...) → GoType{Field: val, ...} (for types not known as Zinc classes)
 		// Handles both simple: Mutex.new() and dotted: sync.Mutex.new()
-		if callee.Field == "new" && len(call.Args) == 0 && len(call.NamedArgs) == 0 {
+		// Named args become struct field initializers, positional args are passed through.
+		if callee.Field == "new" {
+			var typeName string
+			isGoType := false
 			if ident, ok := callee.Object.(*parser.Ident); ok {
 				if !g.classNames[ident.Name] {
-					return ident.Name + "{}"
+					typeName = ident.Name
+					isGoType = true
 				}
 			} else if sel, ok := callee.Object.(*parser.SelectorExpr); ok {
-				// pkg.Type.new() → pkg.Type{}
-				typeName := g.emitExpr(sel)
-				return typeName + "{}"
+				typeName = g.emitExpr(sel)
+				isGoType = true
+			}
+			if isGoType {
+				return g.emitGoTypeNew(typeName, call)
 			}
 		}
 		// Could be send/receive (already handled via SendExpr/ReceiveExpr in parser)
@@ -1962,6 +1968,22 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 }
 
 // emitBuiltinCall maps Zinc built-in function names to Go equivalents.
+// emitGoTypeNew emits a Go struct literal: TypeName{Field: val, ...}.
+// Positional args are emitted as-is (rare for Go structs), named args become field initializers.
+func (g *Generator) emitGoTypeNew(typeName string, call *parser.CallExpr) string {
+	if len(call.Args) == 0 && len(call.NamedArgs) == 0 {
+		return typeName + "{}"
+	}
+	var fields []string
+	for _, arg := range call.Args {
+		fields = append(fields, g.emitExpr(arg))
+	}
+	for _, na := range call.NamedArgs {
+		fields = append(fields, fmt.Sprintf("%s: %s", capitalize(na.Name), g.emitExpr(na.Value)))
+	}
+	return fmt.Sprintf("%s{%s}", typeName, strings.Join(fields, ", "))
+}
+
 func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr, typeArgs []string) string {
 	switch name {
 	// I/O

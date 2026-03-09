@@ -1115,6 +1115,44 @@ fn main() { print(PI) }`)
 	assertContains(t, out, "const MAX = 100")
 }
 
+// --- Go type .new() with named fields ----------------------------------------
+
+func TestGoTypeNewZeroValue(t *testing.T) {
+	out, errs := transpile(`import "sync"
+fn main() { var mu = sync.Mutex.new() }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "sync.Mutex{}")
+}
+
+func TestGoTypeNewNamedFields(t *testing.T) {
+	out, errs := transpile(`import "net/http"
+fn main() { var c = http.Client.new(Timeout: 30) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "http.Client{Timeout: 30}")
+}
+
+func TestGoTypeNewMultipleNamedFields(t *testing.T) {
+	out, errs := transpile(`import "net/http"
+fn main() { var c = http.Client.new(Timeout: 30, MaxIdleConns: 10) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "http.Client{Timeout: 30, MaxIdleConns: 10}")
+}
+
+func TestGoTypeNewSimpleName(t *testing.T) {
+	// Non-Zinc, non-dotted type
+	out, errs := transpile(`fn main() { var x = Config.new(Port: 8080, Host: "localhost") }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `Config{Port: 8080, Host: "localhost"}`)
+}
+
 // --- Index expressions -------------------------------------------------------
 
 func TestIndexExpr(t *testing.T) {

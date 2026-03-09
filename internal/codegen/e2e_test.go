@@ -452,6 +452,29 @@ fn main() {
 	assertOutput(t, out, "hello")
 }
 
+func TestE2EGoTypeNewWithNamedFields(t *testing.T) {
+	out := e2eRun(t, `
+import "bytes"
+fn main() {
+    var buf = bytes.Buffer.new()
+    buf.WriteString("hello")
+    print(buf.String())
+    print(buf.Len())
+}`)
+	assertOutput(t, out, "hello\n5")
+}
+
+func TestE2EGoTypeNewStructFields(t *testing.T) {
+	// Use a Go struct where we can set fields via named construction
+	out := e2eRun(t, `
+import "net/url"
+fn main() {
+    var u = url.URL.new(Scheme: "https", Host: "example.com", Path: "/api")
+    print(u.String())
+}`)
+	assertOutput(t, out, "https://example.com/api")
+}
+
 // --- Labeled break/continue --------------------------------------------------
 
 func TestE2ELabeledBreak(t *testing.T) {
