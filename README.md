@@ -1,4 +1,4 @@
-<img alt="Zinc logo" src="./zinc-logo-light.svg" />
+<img alt="Zinc logo" src="./zinc-geo-light.svg" />
 
 
 # Zinc
