@@ -636,6 +636,8 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		return c.inferSafeNav(e)
 	case *parser.IndexExpr:
 		return c.inferIndex(e)
+	case *parser.SliceExpr:
+		return c.inferSlice(e)
 	case *parser.ListLit:
 		return c.inferListLit(e)
 	case *parser.MapLit:
@@ -1055,6 +1057,24 @@ func (c *Checker) inferIndex(e *parser.IndexExpr) Type {
 	}
 	if mt, ok := objType.(*MapType); ok {
 		return mt.Value
+	}
+	return TypeUnknown
+}
+
+func (c *Checker) inferSlice(e *parser.SliceExpr) Type {
+	objType := c.inferExpr(e.Object)
+	if e.Low != nil {
+		c.inferExpr(e.Low)
+	}
+	if e.High != nil {
+		c.inferExpr(e.High)
+	}
+	// Slicing a list returns the same list type; slicing a string returns string
+	if _, ok := objType.(*ListType); ok {
+		return objType
+	}
+	if objType == TypeString {
+		return TypeString
 	}
 	return TypeUnknown
 }

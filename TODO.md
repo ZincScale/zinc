@@ -6,9 +6,7 @@ Prioritized for shipping a usable language binary people can try out.
 
 ## Tier 1 — Next Up
 
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| 1 | **List/string slicing** (`list[1:3]`, `s[2:]`) | Basic collection operation missing entirely; no `SliceExpr` AST node | Medium |
+*(empty — slicing shipped!)*
 
 ---
 
@@ -77,3 +75,4 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - Example coverage (17 `.zn` examples covering all major features)
 - REPL completeness (auto-print expressions, var persistence, brace-aware multi-line, help command)
 - Tuple unpacking, string interpolation, imports, built-ins
+- List/string slicing (`list[1:3]`, `s[2:]`, `.slice()` method)

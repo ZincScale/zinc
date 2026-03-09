@@ -343,6 +343,43 @@ func main() {
 }
 ```
 
+## Slicing
+
+Extract sub-sequences from lists and strings. Both bracket syntax and an OO `.slice()` method are supported:
+
+```zinc
+var nums = [1, 2, 3, 4, 5]
+
+// Bracket syntax — [low:high], either bound optional
+print(nums[1:3])    // [2 3]
+print(nums[2:])     // [3 4 5]
+print(nums[:3])     // [1 2 3]
+
+// OO method — .slice(start, end) or .slice(start)
+print(nums.slice(1, 3))   // [2 3]
+print(nums.slice(2))      // [3 4 5]
+
+// Assign slices to new variables
+var firstTwo = nums[:2]        // [1 2]
+var middle = nums.slice(1, 4)  // [2 3 4]
+
+// Works on strings too
+var s = "Hello, Zinc!"
+print(s[0:5])          // Hello
+print(s.slice(7))      // Zinc!
+var word = s[7:11]     // Zinc
+```
+
+Transpiles directly to Go slice expressions:
+
+```go
+firstTwo := nums[:2]
+middle := nums[1:4]
+s[0:5]
+s[7:]
+word := s[7:11]
+```
+
 ## Match / Switch
 
 ```zinc

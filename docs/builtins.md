@@ -34,6 +34,8 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 | `list.join(sep)`  | `strings.Join(list, sep)`  | Join elements into string |
 | `map.keys()`      | *(IIFE collecting keys)*   | Returns list of keys |
 | `map.values()`    | *(IIFE collecting values)* | Returns list of values |
+| `x[low:high]`       | `x[low:high]`            | Slice with bracket syntax; either bound optional |
+| `x.slice(start, end)` | `x[start:end]`         | OO slice method; `end` optional |
 | `map.containsKey(k)` | `_, ok := map[k]`      | Returns Bool |
 | `List<T>.new()`   | `[]T{}`                    | |
 | `Map<K,V>.new()`  | `map[K]V{}`                | |

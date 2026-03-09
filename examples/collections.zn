@@ -16,6 +16,28 @@ fn main() {
     // join works on string lists
     print(names.join(", "))    // Alice, Bob, Charlie
 
+    // Slicing — bracket syntax
+    print(nums[1:3])               // [20 30]
+    print(nums[2:])                // [30 40 50 60]
+    print(nums[:3])                // [10 20 30]
+
+    // Slicing — OO method syntax
+    print(names.slice(0, 2))       // [Alice Bob]
+    print(names.slice(1))          // [Bob Charlie]
+
+    // Assign slices to new variables
+    var firstTwo = nums[:2]        // [10 20]
+    var lastThree = names.slice(1) // [Bob Charlie]
+    print(firstTwo)
+    print(lastThree)
+
+    // String slicing
+    var greeting = "Hello, Zinc!"
+    print(greeting[0:5])           // Hello
+    print(greeting.slice(7))       // Zinc!
+    var word = greeting[7:11]      // Zinc
+    print(word)
+
     // Typed map literals
     var scores = {"math": 95, "science": 88, "english": 92}
     print(scores["math"])      // 95

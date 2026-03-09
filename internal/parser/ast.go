@@ -438,6 +438,16 @@ type IndexExpr struct {
 func (i *IndexExpr) nodeTag() {}
 func (i *IndexExpr) exprTag() {}
 
+// SliceExpr: obj[low:high] — low and high are optional
+type SliceExpr struct {
+	Object Expr
+	Low    Expr // nil means from start
+	High   Expr // nil means to end
+}
+
+func (s *SliceExpr) nodeTag() {}
+func (s *SliceExpr) exprTag() {}
+
 // SendExpr: ch.send(val)  → ch <- val
 type SendExpr struct {
 	Chan  Expr

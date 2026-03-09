@@ -17,6 +17,20 @@ func main() {
 	sort.Slice(copy, func(i, j int) bool { return copy[i] < copy[j] })
 	fmt.Println(copy)
 	fmt.Println(strings.Join(names, ", "))
+	fmt.Println(nums[1:3])
+	fmt.Println(nums[2:])
+	fmt.Println(nums[:3])
+	fmt.Println(names[0:2])
+	fmt.Println(names[1:])
+	firstTwo := nums[:2]
+	lastThree := names[1:]
+	fmt.Println(firstTwo)
+	fmt.Println(lastThree)
+	greeting := "Hello, Zinc!"
+	fmt.Println(greeting[0:5])
+	fmt.Println(greeting[7:])
+	word := greeting[7:11]
+	fmt.Println(word)
 	scores := map[string]int{"math": 95, "science": 88, "english": 92}
 	fmt.Println(scores["math"])
 	fmt.Println(func() []interface{} {

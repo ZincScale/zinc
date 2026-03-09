@@ -1634,6 +1634,16 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return g.emitSafeNav(ex)
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.emitExpr(ex.Object), g.emitExpr(ex.Index))
+	case *parser.SliceExpr:
+		low := ""
+		if ex.Low != nil {
+			low = g.emitExpr(ex.Low)
+		}
+		high := ""
+		if ex.High != nil {
+			high = g.emitExpr(ex.High)
+		}
+		return fmt.Sprintf("%s[%s:%s]", g.emitExpr(ex.Object), low, high)
 	case *parser.SendExpr:
 		// As expression (rare) — but send is usually a stmt
 		return fmt.Sprintf("func() { %s <- %s }()", g.emitExpr(ex.Chan), g.emitExpr(ex.Value))

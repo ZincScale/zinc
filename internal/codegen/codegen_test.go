@@ -1114,3 +1114,59 @@ fn main() { print(PI) }`)
 	assertContains(t, out, "const PI float64 = 3.14")
 	assertContains(t, out, "const MAX = 100")
 }
+
+func TestSliceBracketSyntax(t *testing.T) {
+	out, errs := transpile(`fn main() {
+	var nums = [1, 2, 3, 4, 5]
+	print(nums[1:3])
+	print(nums[2:])
+	print(nums[:3])
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "nums[1:3]")
+	assertContains(t, out, "nums[2:]")
+	assertContains(t, out, "nums[:3]")
+}
+
+func TestSliceMethodSyntax(t *testing.T) {
+	out, errs := transpile(`fn main() {
+	var nums = [1, 2, 3, 4, 5]
+	print(nums.slice(1, 3))
+	print(nums.slice(2))
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "nums[1:3]")
+	assertContains(t, out, "nums[2:]")
+}
+
+func TestSliceStringBracket(t *testing.T) {
+	out, errs := transpile(`fn main() {
+	var s: String = "hello"
+	print(s[1:4])
+	print(s[:3])
+	print(s[2:])
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `s[1:4]`)
+	assertContains(t, out, `s[:3]`)
+	assertContains(t, out, `s[2:]`)
+}
+
+func TestSliceStringMethod(t *testing.T) {
+	out, errs := transpile(`fn main() {
+	var s: String = "hello"
+	print(s.slice(1, 4))
+	print(s.slice(2))
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `s[1:4]`)
+	assertContains(t, out, `s[2:]`)
+}

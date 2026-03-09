@@ -239,9 +239,33 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 		case lexer.TOKEN_LPAREN:
 			left = p.finishCallArgsNoLParen(left)
 		case lexer.TOKEN_LBRACKET:
-			idx := p.parseExpr()
-			p.expect(lexer.TOKEN_RBRACKET)
-			left = &IndexExpr{Object: left, Index: idx}
+			// Distinguish slice (a[low:high]) from index (a[idx])
+			if p.check(lexer.TOKEN_COLON) {
+				// [:high] — no low
+				p.advance() // consume ':'
+				var high Expr
+				if !p.check(lexer.TOKEN_RBRACKET) {
+					high = p.parseExpr()
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				left = &SliceExpr{Object: left, Low: nil, High: high}
+			} else {
+				expr := p.parseExpr()
+				if p.check(lexer.TOKEN_COLON) {
+					// [low:high] or [low:]
+					p.advance() // consume ':'
+					var high Expr
+					if !p.check(lexer.TOKEN_RBRACKET) {
+						high = p.parseExpr()
+					}
+					p.expect(lexer.TOKEN_RBRACKET)
+					left = &SliceExpr{Object: left, Low: expr, High: high}
+				} else {
+					// [idx] — plain index
+					p.expect(lexer.TOKEN_RBRACKET)
+					left = &IndexExpr{Object: left, Index: expr}
+				}
+			}
 		case lexer.TOKEN_AS:
 			typeName := p.expect(lexer.TOKEN_IDENT).Literal
 			left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: false}
@@ -349,6 +373,16 @@ func (p *Parser) finishCall(callee Expr) Expr {
 			key := p.parseExpr()
 			p.expect(lexer.TOKEN_RPAREN)
 			return &MapContainsExpr{Object: sel.Object, Key: key}
+		case "slice":
+			p.expect(lexer.TOKEN_LPAREN)
+			low := p.parseExpr()
+			var high Expr
+			if p.check(lexer.TOKEN_COMMA) {
+				p.advance() // consume ','
+				high = p.parseExpr()
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+			return &SliceExpr{Object: sel.Object, Low: low, High: high}
 		}
 	}
 	// Consume '(' then parse args
