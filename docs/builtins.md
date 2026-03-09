@@ -66,9 +66,9 @@ Growler provides a set of built-in functions that map directly to Go standard li
 
 | Growler            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
-| `jsonEncode(val)` | `json.Marshal(val)`        | Returns JSON string |
-| `jsonDecode(str)` | `json.Unmarshal(str, &m)`  | Returns `map[string]interface{}` |
-| `jsonDecode<T>(str)` | `json.Unmarshal(str, &target)` | Decodes into type `T` and returns it |
+| `jsonEncode(val)` | `json.Marshal(val)`        | Returns `String` |
+| `jsonDecode(str)` | `json.Unmarshal(str, &m)`  | Returns `Map<String, Any>` |
+| `jsonDecode<T>(str)` | `json.Unmarshal(str, &target)` | Returns `T` |
 
 ## HTTP
 
