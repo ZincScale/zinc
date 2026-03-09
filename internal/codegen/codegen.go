@@ -1940,7 +1940,16 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 		// Could be send/receive (already handled via SendExpr/ReceiveExpr in parser)
 		obj := g.emitExpr(callee.Object)
 		method := capitalize(callee.Field)
-		resolved := g.resolveArgs(nil, call)
+		// Look up method params for default/named-arg resolution.
+		// Try all classes for a matching method name.
+		var methodParamList []*parser.ParamDecl
+		for _, methods := range g.methodParams {
+			if p, ok := methods[callee.Field]; ok {
+				methodParamList = p
+				break
+			}
+		}
+		resolved := g.resolveArgs(methodParamList, call)
 		return fmt.Sprintf("%s.%s(%s)", obj, method, strings.Join(resolved, ", "))
 	case *parser.Ident:
 		params := g.fnParams[callee.Name]

@@ -1115,6 +1115,52 @@ fn main() { print(PI) }`)
 	assertContains(t, out, "const MAX = 100")
 }
 
+// --- Index expressions -------------------------------------------------------
+
+func TestIndexExpr(t *testing.T) {
+	out, errs := transpile(`fn main() { var x = nums[0] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "nums[0]")
+}
+
+func TestIndexAssign(t *testing.T) {
+	out, errs := transpile(`fn main() { nums[1] = 99 }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "nums[1] = 99")
+}
+
+func TestMapIndexExpr(t *testing.T) {
+	out, errs := transpile(`fn main() { var x = m["key"] }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `m["key"]`)
+}
+
+// --- Break / Continue --------------------------------------------------------
+
+func TestBreakStmt(t *testing.T) {
+	out, errs := transpile(`fn main() { while (true) { break } }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "break")
+}
+
+func TestContinueStmt(t *testing.T) {
+	out, errs := transpile(`fn main() { for item in items { continue } }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "continue")
+}
+
+// --- Slicing -----------------------------------------------------------------
+
 func TestSliceBracketSyntax(t *testing.T) {
 	out, errs := transpile(`fn main() {
 	var nums = [1, 2, 3, 4, 5]

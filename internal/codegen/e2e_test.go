@@ -1238,3 +1238,187 @@ fn main() {
 }`)
 	assertOutput(t, out, "108")
 }
+
+// --- Index access and assignment ---------------------------------------------
+
+func TestE2EListIndexAccess(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30]
+    print(nums[0])
+    print(nums[1])
+    print(nums[2])
+}`)
+	assertOutput(t, out, "10\n20\n30")
+}
+
+func TestE2EListIndexAssignment(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30]
+    nums[1] = 99
+    print(nums[0])
+    print(nums[1])
+    print(nums[2])
+}`)
+	assertOutput(t, out, "10\n99\n30")
+}
+
+func TestE2EMapIndexAccess(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var m = {"a": 1, "b": 2}
+    print(m["a"])
+    print(m["b"])
+}`)
+	assertOutput(t, out, "1\n2")
+}
+
+func TestE2EMapIndexAssignment(t *testing.T) {
+	out := e2eRunTyped(t, `
+fn main() {
+    var m = {"x": 10}
+    m["x"] = 42
+    m["y"] = 99
+    print(m["x"])
+    print(m["y"])
+}`)
+	assertOutput(t, out, "42\n99")
+}
+
+func TestE2EStringIndexAccess(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello"
+    print(string(s[0]))
+    print(string(s[4]))
+}`)
+	assertOutput(t, out, "h\no")
+}
+
+// --- Slicing e2e -------------------------------------------------------------
+
+func TestE2EListSliceBracket(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var a = nums[1:3]
+    print(a.size())
+    print(a[0])
+    print(a[1])
+}`)
+	assertOutput(t, out, "2\n2\n3")
+}
+
+func TestE2EListSliceOpenEnd(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30, 40]
+    var a = nums[2:]
+    print(a.size())
+    print(a[0])
+}`)
+	assertOutput(t, out, "2\n30")
+}
+
+func TestE2EListSliceOpenStart(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30, 40]
+    var a = nums[:2]
+    print(a.size())
+    print(a[1])
+}`)
+	assertOutput(t, out, "2\n20")
+}
+
+func TestE2EStringSliceBracket(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "hello world"
+    print(s[0:5])
+    print(s[6:])
+}`)
+	assertOutput(t, out, "hello\nworld")
+}
+
+func TestE2ESliceMethod(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var a = nums.slice(1, 4)
+    print(a[0])
+    print(a[2])
+}`)
+	assertOutput(t, out, "2\n4")
+}
+
+// --- Break and continue (non-labeled) ----------------------------------------
+
+func TestE2EBreak(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var i = 0
+    while (true) {
+        if (i == 3) { break }
+        i = i + 1
+    }
+    print(i)
+}`)
+	assertOutput(t, out, "3")
+}
+
+func TestE2EContinue(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var sum = 0
+    for (var i = 0; i < 10; i += 1) {
+        if (i % 2 == 0) { continue }
+        sum = sum + i
+    }
+    print(sum)
+}`)
+	assertOutput(t, out, "25")
+}
+
+// --- Generics e2e ------------------------------------------------------------
+
+func TestE2EGenericFunction(t *testing.T) {
+	out := e2eRun(t, `
+fn identity<T>(val: T): T {
+    return val
+}
+fn main() {
+    print(identity(42))
+    print(identity("hello"))
+}`)
+	assertOutput(t, out, "42\nhello")
+}
+
+func TestE2EGenericClass(t *testing.T) {
+	out := e2eRun(t, `
+class Box<T> {
+    var value: T
+    construct new(v: T) { this.value = v }
+    pub fn get(): T { return this.value }
+}
+fn main() {
+    var intBox = Box.new(42)
+    var strBox = Box.new("hello")
+    print(intBox.get())
+    print(strBox.get())
+}`)
+	assertOutput(t, out, "42\nhello")
+}
+
+// --- Method chaining e2e -----------------------------------------------------
+
+func TestE2EMethodChaining(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var s = "  HELLO WORLD  "
+    print(s.trim().lower())
+    print("a,b,c".split(",").join(" "))
+}`)
+	assertOutput(t, out, "hello world\na b c")
+}

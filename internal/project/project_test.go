@@ -1,7 +1,9 @@
 package project
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -383,6 +385,347 @@ func TestCrossFileNamedArgs(t *testing.T) {
 		}
 	}
 	t.Error("b.go not found in transpile output")
+}
+
+// --- Cross-file enum usage ---------------------------------------------------
+
+func TestCrossFileEnumUsage(t *testing.T) {
+	// File A defines an enum, file B uses it in a match statement.
+	// Uses Color.Red syntax (Zinc-style), not ColorRed (Go-style).
+	dir := t.TempDir()
+
+	fileA := `enum Color { Red, Green, Blue }
+`
+	fileB := `fn describe(c: Color): String {
+    match c {
+        case Color.Red => { return "red" }
+        case Color.Green => { return "green" }
+        case _ => { return "other" }
+    }
+}
+
+fn main() {
+    print(describe(Color.Red))
+    print(describe(Color.Blue))
+}
+`
+	os.WriteFile(filepath.Join(dir, "color.zn"), []byte(fileA), 0644)
+	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(fileB), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find main.go and verify enum cases are referenced correctly
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "main.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading main.go: %v", err)
+			}
+			out := string(data)
+			if !strings.Contains(out, "case ColorRed:") {
+				t.Errorf("expected 'case ColorRed:' in main.go, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("main.go not found in transpile output")
+}
+
+// --- Cross-file interface compliance -----------------------------------------
+
+func TestCrossFileInterfaceCompliance(t *testing.T) {
+	// File A defines an interface, file B defines a class implementing it.
+	dir := t.TempDir()
+
+	fileA := `interface Speaker {
+    pub fn speak(): String
+}
+`
+	fileB := `class Dog : Speaker {
+    var name: String
+    new(n: String) { this.name = n }
+    pub fn speak(): String { return "{this.name} says woof" }
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    print(d.speak())
+}
+`
+	os.WriteFile(filepath.Join(dir, "speaker.zn"), []byte(fileA), 0644)
+	os.WriteFile(filepath.Join(dir, "dog.zn"), []byte(fileB), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find dog.go and verify interface compliance check
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "dog.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading dog.go: %v", err)
+			}
+			out := string(data)
+			if !strings.Contains(out, "var _ Speaker = (*Dog)(nil)") {
+				t.Errorf("expected interface compliance check in dog.go, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("dog.go not found in transpile output")
+}
+
+// --- Cross-file method params with defaults ----------------------------------
+
+func TestCrossFileMethodNamedArgs(t *testing.T) {
+	// File A defines a class with a method that has default params.
+	// File B calls that method with named args.
+	dir := t.TempDir()
+
+	fileA := `class Greeter {
+    var prefix: String
+    new(prefix: String) { this.prefix = prefix }
+    pub fn greet(name: String, excited: Bool = false): String {
+        if (excited) {
+            return "{this.prefix} {name}!!!"
+        }
+        return "{this.prefix} {name}"
+    }
+}
+`
+	fileB := `fn main() {
+    var g = Greeter.new("Hello")
+    print(g.greet("Alice"))
+    print(g.greet("Bob", excited: true))
+}
+`
+	os.WriteFile(filepath.Join(dir, "greeter.zn"), []byte(fileA), 0644)
+	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(fileB), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find main.go and verify default arg was inlined
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "main.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading main.go: %v", err)
+			}
+			out := string(data)
+			// Method is pub so emits as Greet; default excited=false should be inlined
+			if !strings.Contains(out, `g.Greet("Alice", false)`) {
+				t.Errorf("expected default arg inlined in main.go, got:\n%s", out)
+			}
+			if !strings.Contains(out, `g.Greet("Bob", true)`) {
+				t.Errorf("expected named arg reordered in main.go, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("main.go not found in transpile output")
+}
+
+// --- Cross-file end-to-end (transpile + compile + run) -----------------------
+
+// crossFileE2ERun transpiles multi-file zinc code, writes a go.mod, and runs
+// the resulting Go code. Returns trimmed stdout.
+func crossFileE2ERun(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	for name, src := range files {
+		os.WriteFile(filepath.Join(dir, name), []byte(src), 0644)
+	}
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) == 0 {
+		t.Fatal("no transpile units produced")
+	}
+
+	// Write go.mod
+	goMod := "module e2e\n\ngo 1.21\n"
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)
+
+	// Collect .go files for go run
+	var goFiles []string
+	for _, u := range units {
+		goFiles = append(goFiles, u.OutPath)
+	}
+
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = dir
+	raw, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Print all generated Go files for debugging
+			var allGo string
+			for _, u := range units {
+				data, _ := os.ReadFile(u.OutPath)
+				allGo += fmt.Sprintf("--- %s ---\n%s\n", u.OutPath, string(data))
+			}
+			t.Fatalf("go run failed.\ngenerated Go:\n%s\nstderr:\n%s", allGo, exitErr.Stderr)
+		}
+		t.Fatalf("go run: %v", err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func TestE2ECrossFileSuperArgs(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"animal.zn": `class Animal {
+    var name: String
+    var sound: String
+    new(name: String, sound: String) {
+        this.name = name
+        this.sound = sound
+    }
+}
+`,
+		"dog.zn": `class Dog : Animal {
+    new(name: String) {
+        super(name, "Woof")
+    }
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    print(d.name)
+    print(d.sound)
+}
+`,
+	})
+	if out != "Rex\nWoof" {
+		t.Errorf("expected 'Rex\\nWoof', got:\n%s", out)
+	}
+}
+
+func TestE2ECrossFileFailableDetection(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"a.zn": `fn risky(): Int {
+    return Error("something went wrong")
+}
+`,
+		"b.zn": `fn main() {
+    var x = risky() or {
+        print("caught error")
+        exit(0)
+    }
+    print(x)
+}
+`,
+	})
+	if out != "caught error" {
+		t.Errorf("expected 'caught error', got:\n%s", out)
+	}
+}
+
+func TestE2ECrossFileNamedArgs(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"a.zn": `fn greet(name: String, greeting: String = "Hello"): String {
+    return "{greeting}, {name}!"
+}
+`,
+		"b.zn": `fn main() {
+    print(greet("Alice"))
+    print(greet("Bob", greeting: "Hi"))
+}
+`,
+	})
+	if out != "Hello, Alice!\nHi, Bob!" {
+		t.Errorf("expected 'Hello, Alice!\\nHi, Bob!', got:\n%s", out)
+	}
+}
+
+func TestE2ECrossFileEnumMatch(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"color.zn": `enum Color { Red, Green, Blue }
+`,
+		"main.zn": `fn describe(c: Color): String {
+    match c {
+        case Color.Red => { return "red" }
+        case Color.Green => { return "green" }
+        case _ => { return "other" }
+    }
+}
+
+fn main() {
+    print(describe(Color.Red))
+    print(describe(Color.Green))
+    print(describe(Color.Blue))
+}
+`,
+	})
+	if out != "red\ngreen\nother" {
+		t.Errorf("expected 'red\\ngreen\\nother', got:\n%s", out)
+	}
+}
+
+func TestE2ECrossFileInterfaceCompliance(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"speaker.zn": `interface Speaker {
+    pub fn speak(): String
+}
+`,
+		"dog.zn": `class Dog : Speaker {
+    var name: String
+    new(n: String) { this.name = n }
+    pub fn speak(): String { return "{this.name} says woof" }
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    print(d.speak())
+}
+`,
+	})
+	if out != "Rex says woof" {
+		t.Errorf("expected 'Rex says woof', got:\n%s", out)
+	}
+}
+
+func TestE2ECrossFileMethodNamedArgs(t *testing.T) {
+	out := crossFileE2ERun(t, map[string]string{
+		"greeter.zn": `class Greeter {
+    var prefix: String
+    new(prefix: String) { this.prefix = prefix }
+    pub fn greet(name: String, excited: Bool = false): String {
+        if (excited) {
+            return "{this.prefix} {name}!!!"
+        }
+        return "{this.prefix} {name}"
+    }
+}
+`,
+		"main.zn": `fn main() {
+    var g = Greeter.new("Hello")
+    print(g.greet("Alice"))
+    print(g.greet("Bob", excited: true))
+}
+`,
+	})
+	if out != "Hello Alice\nHello Bob!!!" {
+		t.Errorf("expected 'Hello Alice\\nHello Bob!!!', got:\n%s", out)
+	}
 }
 
 func TestPkgLastSegment(t *testing.T) {
