@@ -118,6 +118,18 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 	for k, v := range reg.CanThrowFns {
 		g.canThrowFns[k] = v
 	}
+	for k, v := range reg.ClassCtors {
+		g.classCtors[k] = v
+	}
+	for k, v := range reg.FnParams {
+		g.fnParams[k] = v
+	}
+	for k, v := range reg.MethodParams {
+		g.methodParams[k] = make(map[string][]*parser.ParamDecl)
+		for mk, mv := range v {
+			g.methodParams[k][mk] = mv
+		}
+	}
 	return g
 }
 

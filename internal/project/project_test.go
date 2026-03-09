@@ -247,6 +247,144 @@ class Dog : Animal {
 	}
 }
 
+func TestCrossFileSuperArgs(t *testing.T) {
+	// Animal defined in one file, Dog inheriting from Animal in another.
+	// Dog's constructor calls super(name, "Woof") — the registry must share
+	// ClassCtors across files for the super args to codegen correctly.
+	dir := t.TempDir()
+
+	animal := `class Animal {
+    var name: String
+    var sound: String
+    new(name: String, sound: String) {
+        this.name = name
+        this.sound = sound
+    }
+}
+`
+	dog := `class Dog : Animal {
+    new(name: String) {
+        super(name, "Woof")
+    }
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    print(d.name)
+}
+`
+	os.WriteFile(filepath.Join(dir, "animal.zn"), []byte(animal), 0644)
+	os.WriteFile(filepath.Join(dir, "dog.zn"), []byte(dog), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find dog.go and verify super args flow through
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "dog.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading dog.go: %v", err)
+			}
+			out := string(data)
+			if !strings.Contains(out, `*NewAnimal(name, "Woof")`) {
+				t.Errorf("expected super args in Dog constructor, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("dog.go not found in transpile output")
+}
+
+func TestCrossFileFailableDetection(t *testing.T) {
+	// File A defines a failable function, file B calls it.
+	// The registry must share CanThrowFns so B's caller auto-propagates.
+	dir := t.TempDir()
+
+	fileA := `fn risky(): Int {
+    return Error("something went wrong")
+}
+`
+	fileB := `fn main() {
+    var x = risky()
+    print(x)
+}
+`
+	os.WriteFile(filepath.Join(dir, "a.zn"), []byte(fileA), 0644)
+	os.WriteFile(filepath.Join(dir, "b.zn"), []byte(fileB), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find b.go and verify error auto-propagation
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "b.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading b.go: %v", err)
+			}
+			out := string(data)
+			// Should have error handling: _err variable and panic check
+			if !strings.Contains(out, "_err") {
+				t.Errorf("expected error propagation in b.go, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("b.go not found in transpile output")
+}
+
+func TestCrossFileNamedArgs(t *testing.T) {
+	// File A defines a function with defaults, file B calls it with named args.
+	dir := t.TempDir()
+
+	fileA := `fn greet(name: String, greeting: String = "Hello") {
+    print("{greeting}, {name}!")
+}
+`
+	fileB := `fn main() {
+    greet("Alice")
+    greet("Bob", greeting: "Hi")
+}
+`
+	os.WriteFile(filepath.Join(dir, "a.zn"), []byte(fileA), 0644)
+	os.WriteFile(filepath.Join(dir, "b.zn"), []byte(fileB), 0644)
+
+	units, err := Transpile(dir)
+	if err != nil {
+		t.Fatalf("Transpile: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+
+	// Find b.go and verify default arg was inlined
+	for _, u := range units {
+		if strings.HasSuffix(u.OutPath, "b.go") {
+			data, err := os.ReadFile(u.OutPath)
+			if err != nil {
+				t.Fatalf("reading b.go: %v", err)
+			}
+			out := string(data)
+			if !strings.Contains(out, `greet("Alice", "Hello")`) {
+				t.Errorf("expected default arg inlined in b.go, got:\n%s", out)
+			}
+			return
+		}
+	}
+	t.Error("b.go not found in transpile output")
+}
+
 func TestPkgLastSegment(t *testing.T) {
 	cases := []struct{ path, want string }{
 		{"myapp/utils", "utils"},

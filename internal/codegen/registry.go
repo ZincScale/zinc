@@ -10,6 +10,9 @@ type TypeRegistry struct {
 	InterfaceNames map[string]bool
 	EnumNames      map[string]bool
 	CanThrowFns    map[string]bool
+	ClassCtors     map[string]*parser.CtorDecl            // class name → constructor
+	FnParams       map[string][]*parser.ParamDecl         // function name → params
+	MethodParams   map[string]map[string][]*parser.ParamDecl // class → method → params
 }
 
 // NewTypeRegistry creates an empty TypeRegistry.
@@ -19,6 +22,9 @@ func NewTypeRegistry() *TypeRegistry {
 		InterfaceNames: make(map[string]bool),
 		EnumNames:      make(map[string]bool),
 		CanThrowFns:    make(map[string]bool),
+		ClassCtors:     make(map[string]*parser.CtorDecl),
+		FnParams:       make(map[string][]*parser.ParamDecl),
+		MethodParams:   make(map[string]map[string][]*parser.ParamDecl),
 	}
 }
 
@@ -30,16 +36,31 @@ func NewTypeRegistry() *TypeRegistry {
 func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 	reg := NewTypeRegistry()
 
-	// Pass 1: collect type names
+	// Pass 1: collect type names, constructors, and parameter lists
 	for _, prog := range progs {
 		for _, decl := range prog.Decls {
 			switch d := decl.(type) {
 			case *parser.ClassDecl:
 				reg.ClassNames[d.Name] = true
+				if d.Ctor != nil {
+					reg.ClassCtors[d.Name] = d.Ctor
+				}
+				for _, m := range d.Methods {
+					if len(m.Params) > 0 {
+						if reg.MethodParams[d.Name] == nil {
+							reg.MethodParams[d.Name] = make(map[string][]*parser.ParamDecl)
+						}
+						reg.MethodParams[d.Name][m.Name] = m.Params
+					}
+				}
 			case *parser.InterfaceDecl:
 				reg.InterfaceNames[d.Name] = true
 			case *parser.EnumDecl:
 				reg.EnumNames[d.Name] = true
+			case *parser.FnDecl:
+				if len(d.Params) > 0 {
+					reg.FnParams[d.Name] = d.Params
+				}
 			}
 		}
 	}
