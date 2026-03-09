@@ -400,31 +400,38 @@ func TestNonOptionalAssignNull(t *testing.T) {
 	}
 }
 
-// --- 12. Try/catch -----------------------------------------------------------
+// --- 12. Or handler -----------------------------------------------------------
 
-func TestTryCatchErrVarDefined(t *testing.T) {
+func TestOrHandlerErrVarDefined(t *testing.T) {
 	src := `
+fn risky(): Int {
+  if (true) { return Error("oops") }
+  return 1
+}
 fn main() {
-  try {
-    print("ok")
-  } catch(e) {
-    print(e)
+  var x = risky() or {
+    print(err)
+    exit(1)
   }
+  print(x)
 }
 `
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
-func TestTryCatchErrVarIsString(t *testing.T) {
-	// errVar has type String — assigning to String: should be fine
+func TestOrHandlerErrVarIsString(t *testing.T) {
 	src := `
+fn risky(): Int {
+  if (true) { return Error("oops") }
+  return 1
+}
 fn main() {
-  try {
-    print("ok")
-  } catch(e) {
-    var msg: String = e
+  var x = risky() or {
+    var msg: String = err
+    exit(1)
   }
+  print(x)
 }
 `
 	errs := checkSrc(src)
@@ -567,26 +574,9 @@ func TestUndefinedType(t *testing.T) {
 	}
 }
 
-// --- Throwing lambda restrictions --------------------------------------------
+// --- Failable lambda restrictions --------------------------------------------
 
-func TestThrowingLambdaAsArgRejected(t *testing.T) {
-	src := `
-fn apply(callback: Any): Int {
-    return callback(5)
-}
-fn main() {
-    apply((x: Int): Int => {
-        throw Error("bad")
-        return x
-    })
-}`
-	errs := checkSrc(src)
-	if !hasError(errs, "throwing lambda") {
-		t.Fatalf("expected 'throwing lambda' error, got: %v", errs)
-	}
-}
-
-func TestNonThrowingLambdaAsArgAllowed(t *testing.T) {
+func TestFailableLambdaNoFalsePositive(t *testing.T) {
 	src := `
 fn apply(callback: Any): Int {
     return callback(5)
@@ -595,11 +585,7 @@ fn main() {
     apply((x: Int): Int => x * 2)
 }`
 	errs := checkSrc(src)
-	for _, e := range errs {
-		if strings.Contains(e.Msg, "throwing lambda") {
-			t.Fatalf("non-throwing lambda should not trigger error: %v", e)
-		}
-	}
+	noErrors(t, errs, src)
 }
 
 // --- Default parameters and named arguments ----------------------------------

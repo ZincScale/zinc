@@ -628,25 +628,25 @@ addBase := func(x int) int { return (x + base) }
 makeMsg := func(name string) string { return fmt.Sprintf("Hello, %v!", name) }
 ```
 
-### Throwing Lambdas
+### Failable Lambdas
 
-A lambda that contains `throw` automatically gets an `error` return appended to
-its signature. Calls to that lambda inside a `try` block are automatically
-unwrapped — you don't write any error-handling boilerplate:
+A lambda that contains `return Error(...)` automatically gets an `error` return
+appended to its signature. Calls to failable lambdas auto-propagate errors:
 
 ```growler
 var safeDivide = (a: Int, b: Int): Int => {
     if (b == 0) {
-        throw Error("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 
-try {
-    var result = safeDivide(10, 2)   // unwrapped automatically
-    print(result)
-} catch(err) {
+var result = safeDivide(10, 2)   // auto-propagates error
+print(result)
+
+var bad = safeDivide(10, 0) or {
     print("Error: {err}")
+    exit(1)
 }
 ```
 
@@ -659,16 +659,14 @@ safeDivide := func(a int, b int) (int, error) {
     }
     return (a / b), nil
 }
-{
-    err := func() error {
-        result, _err := safeDivide(10, 2)
-        if _err != nil { return _err }
-        fmt.Println(result)
-        return nil
-    }()
-    if err != nil {
-        fmt.Println(fmt.Sprintf("Error: %v", err))
-    }
+result, _err0 := safeDivide(10, 2)
+if _err0 != nil { panic(_err0) }
+fmt.Println(result)
+bad, _err1 := safeDivide(10, 0)
+if _err1 != nil {
+    err := _err1.Error()
+    fmt.Println(fmt.Sprintf("Error: %v", err))
+    os.Exit(1)
 }
 ```
 
@@ -721,17 +719,16 @@ func main() {
 }
 ```
 
-### `with` + `try/catch`
+### `with` + `or` Handler
 
-When `with` is inside a `try` block, errors propagate correctly to the catch block instead of panicking:
+When a `with` resource is failable, use an `or` handler to add context or halt:
 
 ```growler
-try {
-    with (var f = os.Open("/nonexistent/file")) {
-        print("should not reach")
-    }
-} catch(err) {
-    print("caught: {err}")    // caught: open /nonexistent/file: no such file or directory
+with (var f = os.Open("/nonexistent/file") or {
+    print("caught: {err}")
+    exit(1)
+}) {
+    print("should not reach")
 }
 ```
 
@@ -768,19 +765,25 @@ fn main() {
 
 ## Error Handling
 
+Growler uses errors as values with auto-propagation — no try/catch needed:
+
 ```growler
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
-        throw Error("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 
 fn main() {
-    try {
-        var result: Int = divide(10, 0)
-    } catch (err) {
-        print("caught error")
+    // Auto-propagation: panics in main if error occurs
+    var result = divide(10, 2)
+    print(result)
+
+    // Or handler: add context, log, and halt
+    var bad = divide(10, 0) or {
+        print("caught: {err}")
+        exit(0)
     }
 }
 ```
@@ -802,29 +805,7 @@ fn main() {
 
 ## Tuple Unpacking
 
-Growler maps directly to Go's multi-return. The most common use is unpacking a value + error from a `CanThrow` function (which automatically returns `(T, error)` in Go):
-
-```growler
-fn divide(a: Int, b: Int): Int {
-    if (b == 0) {
-        throw Error("division by zero")
-    }
-    return a / b
-}
-
-fn main() {
-    // divide() compiles to func divide(a, b int) (int, error)
-    // so we unpack both the result and the error:
-    var (result, err) = divide(10, 2)
-    if (err != null) {
-        print("error occurred")
-    } else {
-        print(result)   // prints 5
-    }
-}
-```
-
-You can also unpack any Go function that returns multiple values via `import`:
+Growler maps directly to Go's multi-return. You can unpack any Go function that returns multiple values via `import`:
 
 ```growler
 import "strconv"
@@ -835,7 +816,7 @@ fn main() {
 }
 ```
 
-> **Note:** Both names in `var (a, b) = ...` must be used. If you only need one value, assign the other to `_` using a regular `var` and ignore it, or restructure as a `try/catch` instead.
+> **Note:** Both names in `var (a, b) = ...` must be used. If you only need one value, assign the other to `_` using a regular `var`.
 
 ## Imports
 

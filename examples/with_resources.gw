@@ -5,6 +5,7 @@
 //   - Mutexes (sync.Locker) → Lock() + defer Unlock()
 //
 // Multi-return (T, error) functions are auto-detected — no extra syntax needed.
+// Errors auto-propagate (panic in main); use or { } to add context.
 
 import "os"
 import "sync"
@@ -30,13 +31,12 @@ fn main() {
     // mu is now unlocked
     print(counter)
 
-    // --- with + try/catch: error handling ---
-    try {
-        with (var f2 = os.Open("/nonexistent/file.txt")) {
-            print("should not reach here")
-        }
-    } catch(err) {
+    // --- with + or handler: error handling ---
+    with (var f2 = os.Open("/nonexistent/file.txt") or {
         print("Caught error: {err}")
+        exit(0)
+    }) {
+        print("should not reach here")
     }
 
     // --- Multiple resources in one with ---

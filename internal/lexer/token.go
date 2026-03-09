@@ -27,9 +27,7 @@ const (
 	TOKEN_BREAK
 	TOKEN_CONTINUE
 	TOKEN_GO
-	TOKEN_TRY
-	TOKEN_CATCH
-	TOKEN_THROW
+	TOKEN_OR
 	TOKEN_PRINT
 	TOKEN_VAR
 	TOKEN_PUB
@@ -115,9 +113,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_BREAK:     "break",
 	TOKEN_CONTINUE:  "continue",
 	TOKEN_GO:        "go",
-	TOKEN_TRY:       "try",
-	TOKEN_CATCH:     "catch",
-	TOKEN_THROW:     "throw",
+	TOKEN_OR:        "or",
 	TOKEN_PRINT:     "print",
 	TOKEN_VAR:       "var",
 	TOKEN_PUB:       "pub",
@@ -210,9 +206,7 @@ var keywords = map[string]TokenType{
 	"break":     TOKEN_BREAK,
 	"continue":  TOKEN_CONTINUE,
 	"go":        TOKEN_GO,
-	"try":       TOKEN_TRY,
-	"catch":     TOKEN_CATCH,
-	"throw":     TOKEN_THROW,
+	"or":        TOKEN_OR,
 	"print":     TOKEN_PRINT,
 	"var":       TOKEN_VAR,
 	"pub":       TOKEN_PUB,

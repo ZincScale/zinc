@@ -24,20 +24,20 @@ fn main() {
     var makeMsg = (name: String): String => "Hello, {name}!"
     print(makeMsg("Growler"))
 
-    // Throwing lambda caught by parent try block
+    // Failable lambda with return Error()
     var safeDivide = (a: Int, b: Int): Int => {
         if (b == 0) {
-            throw Error("division by zero")
+            return Error("division by zero")
         }
         return a / b
     }
 
-    try {
-        var result = safeDivide(10, 2)
-        print(result)          // 5
-        var bad = safeDivide(10, 0)
-        print(bad)
-    } catch(err) {
-        print("Caught: {err}") // Caught: division by zero
+    var result = safeDivide(10, 2)
+    print(result)          // 5
+
+    var bad = safeDivide(10, 0) or {
+        print("Caught: {err}")
+        exit(0)
     }
+    print(bad)
 }

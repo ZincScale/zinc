@@ -2,33 +2,20 @@
 
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
-        throw Error("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 
 fn main() {
-    // Unpack result + error from a throwing function
-    var (result, err) = divide(10, 2)
-    if (err != null) {
-        print("error: {err}")
-    } else {
-        print("10 / 2 = {result}")    // 10 / 2 = 5
-    }
+    // Auto-propagation: panics on error in main
+    var result = divide(10, 2)
+    print("10 / 2 = {result}")    // 10 / 2 = 5
 
-    // Error case
-    var (result2, err2) = divide(10, 0)
-    if (err2 != null) {
-        print("caught: {err2}")       // caught: division by zero
-    } else {
-        print(result2)
+    // Or handler: catch and handle the error
+    var result2 = divide(10, 0) or {
+        print("caught: {err}")    // caught: division by zero
+        exit(0)
     }
-
-    // Or use try/catch instead
-    try {
-        var answer = divide(100, 4)
-        print("100 / 4 = {answer}")   // 100 / 4 = 25
-    } catch(e) {
-        print("error: {e}")
-    }
+    print(result2)
 }

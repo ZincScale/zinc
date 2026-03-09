@@ -25,6 +25,14 @@ var goMultiReturnFuncs = map[string]bool{
 	"tls.Dial":      true,
 }
 
+// failableBuiltins is the set of Growler built-in functions that are failable
+// (their generated Go code returns (T, error) or error).
+var failableBuiltins = map[string]bool{
+	"readFile":  true,
+	"writeFile": true,
+	"httpGet":   true,
+}
+
 // Generator converts a Growler AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
@@ -32,21 +40,23 @@ type Generator struct {
 	neededImports  map[string]bool
 	classNames     map[string]bool // set of declared class names
 	interfaceNames map[string]bool // set of declared interface names
-	// canThrowFns: set of fn/method names that can throw (have ThrowStmt)
+	// canThrowFns: set of fn/method names that are failable (return errors)
 	canThrowFns map[string]bool
 	// current receiver name for method emission
 	receiver string
-	// current function return type (for zero-value in throw)
+	// current function return type (for zero-value in error returns)
 	currentReturnType parser.TypeExpr
-	// whether current function CanThrow (affects return stmt emission)
+	// whether current function is failable (affects return stmt emission)
 	currentCanThrow bool
+	// whether we are in main() or a goroutine (errors must panic, not return)
+	inMainOrGoroutine bool
 	// map class name → CtorDecl for super-arg resolution
 	classCtors map[string]*parser.CtorDecl
 	// user-specified imports from import decls
 	userImports []*parser.ImportDecl
 	// enumNames: set of declared enum type names
 	enumNames map[string]bool
-	// throwingVars: local variables that hold throwing lambdas (need error unwrap in try blocks)
+	// throwingVars: local variables that hold failable lambdas
 	throwingVars map[string]bool
 	// packageName overrides the emitted package declaration.
 	// Empty means auto-detect from PackageDecl or default to "main".
@@ -57,6 +67,8 @@ type Generator struct {
 	methodParams map[string]map[string][]*parser.ParamDecl
 	// tmpCounter: monotonic counter for generating unique temp variable names
 	tmpCounter int
+	// errCounter: monotonic counter for unique error variable names
+	errCounter int
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -155,6 +167,13 @@ func (g *Generator) Generate(prog *parser.Program) string {
 	return out.String()
 }
 
+// nextErr returns a unique error variable name.
+func (g *Generator) nextErr() string {
+	name := fmt.Sprintf("_err%d", g.errCounter)
+	g.errCounter++
+	return name
+}
+
 // --- First Pass --------------------------------------------------------------
 
 func (g *Generator) firstPass(prog *parser.Program) {
@@ -191,61 +210,127 @@ func (g *Generator) firstPass(prog *parser.Program) {
 		}
 	}
 
-	// Mark canThrow
-	for _, decl := range prog.Decls {
-		switch d := decl.(type) {
-		case *parser.FnDecl:
-			if g.bodyCanThrow(d.Body) {
-				d.CanThrow = true
-				g.canThrowFns[d.Name] = true
-			}
-		case *parser.ClassDecl:
-			for _, m := range d.Methods {
-				if g.bodyCanThrow(m.Body) {
-					m.CanThrow = true
-					g.canThrowFns[d.Name+"."+m.Name] = true
+	// Mark failable functions using fixed-point iteration (transitive detection)
+	for {
+		changed := false
+		for _, decl := range prog.Decls {
+			switch d := decl.(type) {
+			case *parser.FnDecl:
+				if !d.CanThrow && g.bodyIsFailable(d.Body) {
+					d.CanThrow = true
+					g.canThrowFns[d.Name] = true
+					changed = true
+				}
+			case *parser.ClassDecl:
+				for _, m := range d.Methods {
+					if !m.CanThrow && g.bodyIsFailable(m.Body) {
+						m.CanThrow = true
+						g.canThrowFns[d.Name+"."+m.Name] = true
+						changed = true
+					}
 				}
 			}
+		}
+		if !changed {
+			break
 		}
 	}
 }
 
-func (g *Generator) bodyCanThrow(body *parser.BlockStmt) bool {
+func (g *Generator) bodyIsFailable(body *parser.BlockStmt) bool {
 	if body == nil {
 		return false
 	}
 	for _, s := range body.Stmts {
-		if g.stmtCanThrow(s) {
+		if g.stmtIsFailable(s) {
 			return true
 		}
 	}
 	return false
 }
 
-func (g *Generator) stmtCanThrow(s parser.Stmt) bool {
+func (g *Generator) stmtIsFailable(s parser.Stmt) bool {
 	switch st := s.(type) {
-	case *parser.ThrowStmt:
-		return true
+	case *parser.ReturnStmt:
+		// return Error(...) makes a function failable
+		return g.isReturnError(st)
+	case *parser.ExprStmt:
+		return g.exprIsFailable(st.Expr)
+	case *parser.VarStmt:
+		if st.Value != nil {
+			return g.exprIsFailable(st.Value)
+		}
+	case *parser.AssignStmt:
+		return g.exprIsFailable(st.Value)
 	case *parser.BlockStmt:
-		return g.bodyCanThrow(st)
+		return g.bodyIsFailable(st)
 	case *parser.IfStmt:
-		if g.bodyCanThrow(st.Then) {
+		if g.bodyIsFailable(st.Then) {
 			return true
 		}
 		if st.ElseStmt != nil {
 			if b, ok := st.ElseStmt.(*parser.BlockStmt); ok {
-				return g.bodyCanThrow(b)
+				return g.bodyIsFailable(b)
 			}
 			if i, ok := st.ElseStmt.(*parser.IfStmt); ok {
-				return g.stmtCanThrow(i)
+				return g.stmtIsFailable(i)
 			}
 		}
 	case *parser.ForStmt:
-		return g.bodyCanThrow(st.Body)
+		return g.bodyIsFailable(st.Body)
 	case *parser.WhileStmt:
-		return g.bodyCanThrow(st.Body)
+		return g.bodyIsFailable(st.Body)
 	case *parser.GoStmt:
-		return g.bodyCanThrow(st.Body)
+		return g.bodyIsFailable(st.Body)
+	case *parser.WithStmt:
+		for _, r := range st.Resources {
+			if g.exprIsFailable(r.Value) {
+				return true
+			}
+		}
+		return g.bodyIsFailable(st.Body)
+	}
+	return false
+}
+
+// isReturnError checks if a return statement is `return Error(...)`.
+func (g *Generator) isReturnError(r *parser.ReturnStmt) bool {
+	if r.Value == nil {
+		return false
+	}
+	call, ok := r.Value.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Callee.(*parser.Ident)
+	return ok && ident.Name == "Error"
+}
+
+// exprIsFailable checks if an expression contains a failable call.
+func (g *Generator) exprIsFailable(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	return g.callIsFailable(call)
+}
+
+// callIsFailable checks whether a call expression calls a failable function.
+func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
+	switch callee := call.Callee.(type) {
+	case *parser.Ident:
+		return g.canThrowFns[callee.Name] || g.throwingVars[callee.Name] || failableBuiltins[callee.Name]
+	case *parser.SelectorExpr:
+		if ident, ok := callee.Object.(*parser.Ident); ok {
+			key := ident.Name + "." + callee.Field
+			return g.canThrowFns[key] || goMultiReturnFuncs[key]
+		}
+		if _, ok := callee.Object.(*parser.ThisExpr); ok {
+			return g.canThrowFns[callee.Field]
+		}
 	}
 	return false
 }
@@ -728,11 +813,16 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 	g.push()
 	savedRT := g.currentReturnType
 	savedCT := g.currentCanThrow
+	savedMG := g.inMainOrGoroutine
 	g.currentReturnType = fn.ReturnType
 	g.currentCanThrow = fn.CanThrow
+	if fn.Name == "main" {
+		g.inMainOrGoroutine = true
+	}
 	g.emitBlock(fn.Body)
 	g.currentReturnType = savedRT
 	g.currentCanThrow = savedCT
+	g.inMainOrGoroutine = savedMG
 	g.pop()
 	g.writeln("}")
 }
@@ -766,10 +856,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitWhileStmt(st)
 	case *parser.GoStmt:
 		g.emitGoStmt(st)
-	case *parser.TryStmt:
-		g.emitTryStmt(st)
-	case *parser.ThrowStmt:
-		g.emitThrowStmt(st)
 	case *parser.PrintStmt:
 		g.emitPrintStmt(st)
 	case *parser.ExprStmt:
@@ -828,9 +914,9 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 }
 
 func (g *Generator) emitVarStmt(v *parser.VarStmt) {
-	// Track variables that hold throwing lambdas so try blocks can unwrap them
+	// Track variables that hold failable lambdas
 	if lambda, ok := v.Value.(*parser.LambdaExpr); ok && lambda.Body != nil {
-		if g.bodyCanThrow(lambda.Body) {
+		if g.bodyIsFailable(lambda.Body) {
 			g.throwingVars[v.Name] = true
 		}
 	}
@@ -863,25 +949,27 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
+	// Check if value is a failable call — needs error unpacking
+	if v.Value != nil {
+		if call, ok := v.Value.(*parser.CallExpr); ok && g.callIsFailable(call) {
+			g.emitFailableVarStmt(v, call)
+			return
+		}
+	}
+
 	if v.Value != nil {
 		valStr := g.emitExpr(v.Value)
 		if v.Type != nil {
 			if st, ok := v.Type.(*parser.SimpleType); ok {
-				// For enum types, emit an explicit type cast to preserve the named type.
-				// e.g. var dir: Direction = 0  →  dir := Direction(0)
 				if g.enumNames[st.Name] {
 					g.writeln(fmt.Sprintf("%s := %s(%s)", v.Name, st.Name, valStr))
 					return
 				}
-				// For Any/interface types, emit explicit var so the variable is interface{}.
-				// e.g. var x: Any = 42  →  var x interface{} = 42
 				if st.Name == "Any" {
 					g.writeln(fmt.Sprintf("var %s interface{} = %s", v.Name, valStr))
 					return
 				}
 			}
-			// For typed null assignments, emit explicit var declaration.
-			// e.g. var d: Dog? = null  →  var d *Dog = nil
 			if _, isNull := v.Value.(*parser.NullLit); isNull {
 				g.writeln(fmt.Sprintf("var %s %s = nil", v.Name, g.emitType(v.Type)))
 				return
@@ -889,19 +977,222 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 		g.writeln(fmt.Sprintf("%s := %s", v.Name, valStr))
 	} else if v.Type != nil {
-		// no value: var x Type  → var x GoType
 		g.writeln(fmt.Sprintf("var %s %s", v.Name, g.emitType(v.Type)))
 	} else {
 		g.writeln(fmt.Sprintf("var %s interface{}", v.Name))
 	}
 }
 
+// emitFailableVarStmt emits a var statement where the value is a failable call.
+// Generates: name, _errN := call(); if _errN != nil { <handler or auto-propagate> }
+func (g *Generator) emitFailableVarStmt(v *parser.VarStmt, call *parser.CallExpr) {
+	errVar := g.nextErr()
+	callStr := g.emitFailableCallExpr(call)
+	g.writeln(fmt.Sprintf("%s, %s := %s", v.Name, errVar, callStr))
+	g.emitErrorCheck(errVar, v.OrHandler)
+}
+
+// emitFailableCallExpr emits a call expression in failable context, where we
+// need the (T, error) return form. For builtins, this differs from the default
+// expression-position emission which uses must-style (panic on error).
+func (g *Generator) emitFailableCallExpr(call *parser.CallExpr) string {
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		if failableBuiltins[ident.Name] {
+			return g.emitFailableBuiltinCall(ident.Name, call)
+		}
+	}
+	return g.emitCallExpr(call)
+}
+
+// emitFailableBuiltinCall emits a failable builtin in (T, error) form.
+func (g *Generator) emitFailableBuiltinCall(name string, call *parser.CallExpr) string {
+	args := make([]string, len(call.Args))
+	for i, a := range call.Args {
+		args[i] = g.emitExpr(a)
+	}
+	argStr := strings.Join(args, ", ")
+	switch name {
+	case "readFile":
+		g.neededImports["os"] = true
+		return fmt.Sprintf("func() (string, error) { b, err := os.ReadFile(%s); return string(b), err }()", argStr)
+	case "writeFile":
+		g.neededImports["os"] = true
+		if len(call.Args) == 2 {
+			return fmt.Sprintf("func() error { return os.WriteFile(%s, []byte(%s), 0644) }()", args[0], args[1])
+		}
+		return fmt.Sprintf("func() error { return os.WriteFile(%s) }()", argStr)
+	case "httpGet":
+		g.neededImports["net/http"] = true
+		g.neededImports["io"] = true
+		return fmt.Sprintf("func() (string, error) { resp, err := http.Get(%s); if err != nil { return \"\", err }; defer resp.Body.Close(); b, err := io.ReadAll(resp.Body); return string(b), err }()", argStr)
+	}
+	return g.emitCallExpr(call)
+}
+
+// emitErrorCheck emits an if-block that checks errVar and either runs the handler
+// or auto-propagates the error.
+func (g *Generator) emitErrorCheck(errVar string, handler *parser.OrHandler) {
+	if handler != nil {
+		g.emitOrHandlerBlock(errVar, handler)
+		return
+	}
+	// Auto-propagation
+	if g.inMainOrGoroutine {
+		g.writeln(fmt.Sprintf("if %s != nil { panic(%s) }", errVar, errVar))
+	} else if g.currentCanThrow {
+		zero := g.zeroValue(g.currentReturnType)
+		if zero != "" {
+			g.writeln(fmt.Sprintf("if %s != nil { return %s, %s }", errVar, zero, errVar))
+		} else {
+			g.writeln(fmt.Sprintf("if %s != nil { return %s }", errVar, errVar))
+		}
+	} else {
+		g.writeln(fmt.Sprintf("if %s != nil { panic(%s) }", errVar, errVar))
+	}
+}
+
+// emitOrHandlerBlock emits an or { } handler block.
+// Inside the handler, `err` is bound to the error variable.
+func (g *Generator) emitOrHandlerBlock(errVar string, handler *parser.OrHandler) {
+	g.writeIndent()
+	g.write(fmt.Sprintf("if %s != nil {\n", errVar))
+	g.push()
+	// Bind err to the error variable (use .Error() for string representation)
+	g.writeln(fmt.Sprintf("err := %s.Error()", errVar))
+	g.writeln("_ = err")
+	// Check if handler body contains exit/panic calls — if so, no auto-return after
+	hasHalt := g.handlerHasHalt(handler.Body)
+	g.emitBlock(handler.Body)
+	if !hasHalt {
+		// Auto-propagate after handler body (handler adds context but error still propagates)
+		// Find the last statement's error expression if it's an Error(...) call
+		lastErr := g.extractHandlerError(handler.Body)
+		if lastErr != "" {
+			if g.inMainOrGoroutine {
+				g.writeln(fmt.Sprintf("panic(%s)", lastErr))
+			} else if g.currentCanThrow {
+				zero := g.zeroValue(g.currentReturnType)
+				if zero != "" {
+					g.writeln(fmt.Sprintf("return %s, %s", zero, lastErr))
+				} else {
+					g.writeln(fmt.Sprintf("return %s", lastErr))
+				}
+			} else {
+				g.writeln(fmt.Sprintf("panic(%s)", lastErr))
+			}
+		} else {
+			// No explicit Error() in handler, just propagate original error
+			if g.inMainOrGoroutine {
+				g.writeln(fmt.Sprintf("panic(%s)", errVar))
+			} else if g.currentCanThrow {
+				zero := g.zeroValue(g.currentReturnType)
+				if zero != "" {
+					g.writeln(fmt.Sprintf("return %s, %s", zero, errVar))
+				} else {
+					g.writeln(fmt.Sprintf("return %s", errVar))
+				}
+			} else {
+				g.writeln(fmt.Sprintf("panic(%s)", errVar))
+			}
+		}
+	}
+	// Suppress unused variable warning if handler doesn't reference err
+	_ = errVar
+	g.pop()
+	g.writeln("}")
+}
+
+// handlerHasHalt checks if the handler body contains exit() or panic() calls.
+func (g *Generator) handlerHasHalt(body *parser.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if es, ok := s.(*parser.ExprStmt); ok {
+			if call, ok := es.Expr.(*parser.CallExpr); ok {
+				if ident, ok := call.Callee.(*parser.Ident); ok {
+					if ident.Name == "exit" || ident.Name == "panic" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// extractHandlerError extracts the error expression from the last statement
+// of an or handler body, if it's an Error(...) call expression statement.
+func (g *Generator) extractHandlerError(body *parser.BlockStmt) string {
+	if body == nil || len(body.Stmts) == 0 {
+		return ""
+	}
+	last := body.Stmts[len(body.Stmts)-1]
+	if es, ok := last.(*parser.ExprStmt); ok {
+		if call, ok := es.Expr.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+				// Remove this from the body so it's not emitted twice
+				body.Stmts = body.Stmts[:len(body.Stmts)-1]
+				return g.emitErrorExpr(call)
+			}
+		}
+	}
+	return ""
+}
+
+// emitErrorExpr converts Error("msg") or Error("msg", baseErr) to Go fmt.Errorf.
+func (g *Generator) emitErrorExpr(call *parser.CallExpr) string {
+	g.neededImports["fmt"] = true
+	if len(call.Args) == 0 {
+		return `fmt.Errorf("error")`
+	}
+	if len(call.Args) == 1 {
+		return fmt.Sprintf("fmt.Errorf(%s)", g.emitExpr(call.Args[0]))
+	}
+	// Two args: Error("msg", baseErr) → fmt.Errorf("msg: %w", baseErr)
+	msgExpr := g.emitExpr(call.Args[0])
+	baseErr := g.emitExpr(call.Args[1])
+	// Modify the format string to append ": %w"
+	if strings.HasPrefix(msgExpr, "\"") && strings.HasSuffix(msgExpr, "\"") {
+		// Strip quotes, append ": %w", re-quote
+		inner := msgExpr[1 : len(msgExpr)-1]
+		return fmt.Sprintf("fmt.Errorf(\"%s: %%w\", %s)", inner, baseErr)
+	}
+	// Dynamic string — use Sprintf
+	return fmt.Sprintf("fmt.Errorf(\"%%s: %%w\", %s, %s)", msgExpr, baseErr)
+}
+
 func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
+	// Check if value is a failable call — needs error unpacking
+	if call, ok := a.Value.(*parser.CallExpr); ok && g.callIsFailable(call) {
+		errVar := g.nextErr()
+		g.writeln("{")
+		g.push()
+		g.writeln(fmt.Sprintf("_val, %s := %s", errVar, g.emitFailableCallExpr(call)))
+		g.emitErrorCheck(errVar, a.OrHandler)
+		g.writeln(fmt.Sprintf("%s %s _val", g.emitExpr(a.Target), a.Op))
+		g.pop()
+		g.writeln("}")
+		return
+	}
 	g.writeln(fmt.Sprintf("%s %s %s", g.emitExpr(a.Target), a.Op, g.emitExpr(a.Value)))
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	if r.Value != nil {
+		// Check for return Error(...) — leaf error production
+		if call, ok := r.Value.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+				errStr := g.emitErrorExpr(call)
+				zero := g.zeroValue(g.currentReturnType)
+				if zero != "" {
+					g.writeln(fmt.Sprintf("return %s, %s", zero, errStr))
+				} else {
+					g.writeln(fmt.Sprintf("return %s", errStr))
+				}
+				return
+			}
+		}
 		val := g.emitExpr(r.Value)
 		if g.currentCanThrow {
 			g.writeln(fmt.Sprintf("return %s, nil", val))
@@ -1136,11 +1427,12 @@ func (g *Generator) emitSafeNavSingle(sn *parser.SafeNavExpr) string {
 }
 
 func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
-	// Goroutine func has no return type, so throw inside must panic not return.
 	savedCT := g.currentCanThrow
 	savedRT := g.currentReturnType
+	savedMG := g.inMainOrGoroutine
 	g.currentCanThrow = false
 	g.currentReturnType = nil
+	g.inMainOrGoroutine = true // goroutines can't return errors — must panic
 	g.writeIndent()
 	g.write("go func() {\n")
 	g.push()
@@ -1149,6 +1441,7 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 	g.writeln("}()")
 	g.currentCanThrow = savedCT
 	g.currentReturnType = savedRT
+	g.inMainOrGoroutine = savedMG
 }
 
 // emitWithStmt emits a scoped resource block.
@@ -1162,48 +1455,26 @@ func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
 func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.neededImports["io"] = true
 	g.neededImports["sync"] = true
-	// Auto-detect multi-return (T, error) calls for each resource.
+	// Auto-detect failable calls for each resource.
 	for _, r := range w.Resources {
 		if r.AutoErr {
-			continue // already set
+			continue
 		}
-		if call, ok := r.Value.(*parser.CallExpr); ok {
-			switch callee := call.Callee.(type) {
-			case *parser.SelectorExpr:
-				if ident, ok := callee.Object.(*parser.Ident); ok {
-					key := ident.Name + "." + callee.Field
-					if goMultiReturnFuncs[key] {
-						r.AutoErr = true
-					}
-				}
-			case *parser.Ident:
-				if g.canThrowFns[callee.Name] {
-					r.AutoErr = true
-				}
-			}
+		if call, ok := r.Value.(*parser.CallExpr); ok && g.callIsFailable(call) {
+			r.AutoErr = true
 		}
 	}
 	g.writeln("{")
 	g.push()
-	for i, r := range w.Resources {
+	for _, r := range w.Resources {
 		if r.AutoErr {
-			// Auto-unpack (val, err) and throw on error.
-			// Uses the same error propagation strategy as throw:
-			//   - Inside try block (canThrow=true): return the error
-			//   - Outside try block: panic with the error
-			g.neededImports["fmt"] = true
-			errVar := fmt.Sprintf("_err%d", i)
-			g.writeln(fmt.Sprintf("%s, %s := %s", r.Name, errVar, g.emitExpr(r.Value)))
-			if g.currentCanThrow {
-				zero := g.zeroValue(g.currentReturnType)
-				if zero != "" {
-					g.writeln(fmt.Sprintf("if %s != nil { return %s, %s }", errVar, zero, errVar))
-				} else {
-					g.writeln(fmt.Sprintf("if %s != nil { return %s }", errVar, errVar))
-				}
-			} else {
-				g.writeln(fmt.Sprintf("if %s != nil { panic(%s) }", errVar, errVar))
+			errVar := g.nextErr()
+			callStr := g.emitExpr(r.Value)
+			if call, ok := r.Value.(*parser.CallExpr); ok {
+				callStr = g.emitFailableCallExpr(call)
 			}
+			g.writeln(fmt.Sprintf("%s, %s := %s", r.Name, errVar, callStr))
+			g.emitErrorCheck(errVar, r.OrHandler)
 		} else {
 			g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
 		}
@@ -1213,156 +1484,6 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.emitBlock(w.Body)
 	g.pop()
 	g.writeln("}")
-}
-
-// emitTryStmt emits a try/catch block.
-// The try body is wrapped in a func() error closure so that the first
-// throwing call returns immediately and the catch block runs exactly once.
-func (g *Generator) emitTryStmt(t *parser.TryStmt) {
-	g.neededImports["fmt"] = true
-	g.writeln("{")
-	g.push()
-	g.writeIndent()
-	g.write(fmt.Sprintf("%s := func() error {\n", t.ErrVar))
-	g.push()
-	g.emitTryBody(t.Body)
-	g.writeln("return nil")
-	g.pop()
-	g.writeln("}()")
-	// Single catch block — runs at most once
-	g.writeIndent()
-	g.write(fmt.Sprintf("if %s != nil ", t.ErrVar))
-	g.write("{\n")
-	g.push()
-	g.emitBlock(t.CatchBody)
-	g.pop()
-	g.writeln("}")
-	g.pop()
-	g.writeln("}")
-}
-
-func (g *Generator) emitTryBody(body *parser.BlockStmt) {
-	// Inside a try body, we're in a func() error closure.
-	// Set currentCanThrow so that 'with' auto-err and 'throw' emit 'return err'.
-	savedCT := g.currentCanThrow
-	savedRT := g.currentReturnType
-	g.currentCanThrow = true
-	g.currentReturnType = nil // func() error has no value return
-	for _, s := range body.Stmts {
-		if g.stmtHasThrowingCall(s) {
-			g.emitStmtWithErrReturn(s)
-		} else {
-			g.emitStmt(s)
-		}
-	}
-	g.currentCanThrow = savedCT
-	g.currentReturnType = savedRT
-}
-
-func (g *Generator) stmtHasThrowingCall(s parser.Stmt) bool {
-	switch st := s.(type) {
-	case *parser.ExprStmt:
-		return g.exprHasThrowingCall(st.Expr)
-	case *parser.VarStmt:
-		if st.Value != nil {
-			return g.exprHasThrowingCall(st.Value)
-		}
-	case *parser.AssignStmt:
-		return g.exprHasThrowingCall(st.Value)
-	case *parser.ReturnStmt:
-		if st.Value != nil {
-			return g.exprHasThrowingCall(st.Value)
-		}
-	}
-	return false
-}
-
-func (g *Generator) exprHasThrowingCall(e parser.Expr) bool {
-	switch ex := e.(type) {
-	case *parser.CallExpr:
-		return g.callCanThrow(ex)
-	}
-	return false
-}
-
-func (g *Generator) callCanThrow(call *parser.CallExpr) bool {
-	switch callee := call.Callee.(type) {
-	case *parser.Ident:
-		return g.canThrowFns[callee.Name] || g.throwingVars[callee.Name]
-	case *parser.SelectorExpr:
-		if ident, ok := callee.Object.(*parser.Ident); ok {
-			return g.canThrowFns[ident.Name+"."+callee.Field]
-		}
-		if _, ok := callee.Object.(*parser.ThisExpr); ok {
-			return g.canThrowFns[callee.Field]
-		}
-	}
-	return false
-}
-
-// emitStmtWithErrReturn emits a statement inside a try closure body.
-// Throwing calls are unpacked and return the error immediately on failure.
-func (g *Generator) emitStmtWithErrReturn(s parser.Stmt) {
-	switch st := s.(type) {
-	case *parser.ExprStmt:
-		if call, ok := st.Expr.(*parser.CallExpr); ok {
-			g.writeln(fmt.Sprintf("if _err := %s; _err != nil { return _err }", g.emitCallExpr(call)))
-		} else {
-			g.emitExprStmt(st)
-		}
-	case *parser.VarStmt:
-		if st.Value != nil {
-			if call, ok := st.Value.(*parser.CallExpr); ok {
-				g.writeln(fmt.Sprintf("%s, _err := %s", st.Name, g.emitCallExpr(call)))
-				g.writeln("if _err != nil { return _err }")
-				return
-			}
-		}
-		g.emitVarStmt(st)
-	case *parser.AssignStmt:
-		if call, ok := st.Value.(*parser.CallExpr); ok {
-			g.writeln(fmt.Sprintf("%s, _err := %s", g.emitExpr(st.Target), g.emitCallExpr(call)))
-			g.writeln("if _err != nil { return _err }")
-			return
-		}
-		g.emitAssignStmt(st)
-	default:
-		g.emitStmt(s)
-	}
-}
-
-func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
-	g.neededImports["fmt"] = true
-	// The thrown value must be something with a message — typically Error("msg") call
-	var errStr string
-	switch v := t.Value.(type) {
-	case *parser.CallExpr:
-		// Error("msg") → fmt.Errorf("msg")
-		if ident, ok := v.Callee.(*parser.Ident); ok && ident.Name == "Error" {
-			if len(v.Args) > 0 {
-				errStr = fmt.Sprintf("fmt.Errorf(%s)", g.emitExpr(v.Args[0]))
-			} else {
-				errStr = `fmt.Errorf("error")`
-			}
-		} else {
-			errStr = fmt.Sprintf("fmt.Errorf(\"%%v\", %s)", g.emitExpr(t.Value))
-		}
-	default:
-		errStr = fmt.Sprintf("fmt.Errorf(\"%%v\", %s)", g.emitExpr(t.Value))
-	}
-
-	// In a non-throwing context (goroutine, void fn) there is no error return —
-	// panic is the correct Go behavior.
-	if !g.currentCanThrow {
-		g.writeln(fmt.Sprintf("panic(%s)", errStr))
-		return
-	}
-	zero := g.zeroValue(g.currentReturnType)
-	if zero != "" {
-		g.writeln(fmt.Sprintf("return %s, %s", zero, errStr))
-	} else {
-		g.writeln(fmt.Sprintf("return %s", errStr))
-	}
 }
 
 func (g *Generator) emitPrintStmt(p *parser.PrintStmt) {
@@ -1398,7 +1519,68 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 		g.emitSafeNavStmt(sn)
 		return
 	}
+	// Failable standalone call — auto-propagate
+	if call, ok := e.Expr.(*parser.CallExpr); ok && g.callIsFailable(call) {
+		errVar := g.nextErr()
+		callStr := g.emitFailableCallExpr(call)
+		// For void failable calls (writeFile), the call itself returns just error
+		if g.isVoidFailable(call) {
+			g.writeln(fmt.Sprintf("if %s := %s; %s != nil {", errVar, callStr, errVar))
+		} else {
+			g.writeln(fmt.Sprintf("if _, %s := %s; %s != nil {", errVar, callStr, errVar))
+		}
+		g.push()
+		if e.OrHandler != nil {
+			g.writeln(fmt.Sprintf("err := %s.Error()", errVar))
+			g.writeln("_ = err")
+			hasHalt := g.handlerHasHalt(e.OrHandler.Body)
+			lastErr := g.extractHandlerError(e.OrHandler.Body)
+			g.emitBlock(e.OrHandler.Body)
+			if !hasHalt {
+				propagateErr := errVar
+				if lastErr != "" {
+					propagateErr = lastErr
+				}
+				if g.inMainOrGoroutine {
+					g.writeln(fmt.Sprintf("panic(%s)", propagateErr))
+				} else if g.currentCanThrow {
+					zero := g.zeroValue(g.currentReturnType)
+					if zero != "" {
+						g.writeln(fmt.Sprintf("return %s, %s", zero, propagateErr))
+					} else {
+						g.writeln(fmt.Sprintf("return %s", propagateErr))
+					}
+				} else {
+					g.writeln(fmt.Sprintf("panic(%s)", propagateErr))
+				}
+			}
+		} else {
+			if g.inMainOrGoroutine {
+				g.writeln(fmt.Sprintf("panic(%s)", errVar))
+			} else if g.currentCanThrow {
+				zero := g.zeroValue(g.currentReturnType)
+				if zero != "" {
+					g.writeln(fmt.Sprintf("return %s, %s", zero, errVar))
+				} else {
+					g.writeln(fmt.Sprintf("return %s", errVar))
+				}
+			} else {
+				g.writeln(fmt.Sprintf("panic(%s)", errVar))
+			}
+		}
+		g.pop()
+		g.writeln("}")
+		return
+	}
 	g.writeln(g.emitExpr(e.Expr))
+}
+
+// isVoidFailable returns true if a failable call returns just error (no value).
+func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		return ident.Name == "writeFile"
+	}
+	return false
 }
 
 // --- Expression Emission -----------------------------------------------------
@@ -1584,7 +1766,7 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	}
 
 	// Block-body form: detect CanThrow
-	lambdaCanThrow := g.bodyCanThrow(e.Body)
+	lambdaCanThrow := g.bodyIsFailable(e.Body)
 	if lambdaCanThrow {
 		g.neededImports["fmt"] = true
 		if retStr == "" {
@@ -1693,7 +1875,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 	case *parser.Ident:
 		params := g.fnParams[callee.Name]
 		resolved := g.resolveArgs(params, call)
-		return g.emitBuiltinCall(callee.Name, strings.Join(resolved, ", "), call.Args)
+		return g.emitBuiltinCall(callee.Name, strings.Join(resolved, ", "), call.Args, call.TypeArgs)
 	default:
 		resolved := g.resolveArgs(nil, call)
 		return fmt.Sprintf("%s(%s)", g.emitExpr(callee), strings.Join(resolved, ", "))
@@ -1701,7 +1883,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 }
 
 // emitBuiltinCall maps Growler built-in function names to Go equivalents.
-func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) string {
+func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr, typeArgs []string) string {
 	switch name {
 	// I/O
 	case "print":
@@ -1764,7 +1946,7 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 		g.neededImports["os"] = true
 		return fmt.Sprintf("os.Exit(%s)", argStr)
 
-	// File I/O
+	// File I/O (failable — but in expression position, must panic to produce single value)
 	case "readFile":
 		g.neededImports["os"] = true
 		return fmt.Sprintf("func() string { b, err := os.ReadFile(%s); if err != nil { panic(err) }; return string(b) }()", argStr)
@@ -1781,8 +1963,14 @@ func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr) str
 		return fmt.Sprintf("func() string { b, _ := json.Marshal(%s); return string(b) }()", argStr)
 	case "jsonDecode":
 		g.neededImports["encoding/json"] = true
-		if len(args) == 2 {
-			return fmt.Sprintf("json.Unmarshal([]byte(%s), %s)", g.emitExpr(args[0]), g.emitExpr(args[1]))
+		if len(typeArgs) > 0 {
+			goType := g.emitSimpleType(typeArgs[0])
+			if g.classNames[typeArgs[0]] {
+				// Class types are already pointers — allocate with new() and unmarshal directly
+				structType := typeArgs[0] // raw struct name without *
+				return fmt.Sprintf("func() %s { _target := &%s{}; json.Unmarshal([]byte(%s), _target); return _target }()", goType, structType, argStr)
+			}
+			return fmt.Sprintf("func() %s { var _target %s; json.Unmarshal([]byte(%s), &_target); return _target }()", goType, goType, argStr)
 		}
 		return fmt.Sprintf("func() map[string]interface{} { var m map[string]interface{}; json.Unmarshal([]byte(%s), &m); return m }()", argStr)
 

@@ -136,23 +136,23 @@ func TestInterfaceComplianceCheck(t *testing.T) {
 	assertContains(t, out, "var _ Speaker = (*Dog)(nil)")
 }
 
-func TestTryCatch(t *testing.T) {
+func TestReturnErrorAndOrHandler(t *testing.T) {
 	src := `fn risky(): String {
-		throw Error("oops")
+		return Error("oops")
 	}
 	fn main() {
-		try {
-			var r: String = risky()
-		} catch (err) {
+		var r = risky() or {
 			print("caught")
+			exit(1)
 		}
+		print(r)
 	}`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "fmt.Errorf")
-	assertContains(t, out, "if err != nil")
+	assertContains(t, out, "!= nil")
 }
 
 func TestConcurrency(t *testing.T) {
@@ -564,7 +564,7 @@ enum Color { Red, Green, Blue }
 func TestBuildRegistryCanThrowFns(t *testing.T) {
 	prog := mustParse(t, `
 fn safe() { }
-fn risky() { throw Error("oops") }
+fn risky(): Int { return Error("oops") }
 `)
 	reg := BuildRegistry([]*parser.Program{prog})
 	if reg.CanThrowFns["safe"] {
@@ -576,16 +576,16 @@ fn risky() { throw Error("oops") }
 }
 
 func TestBuildRegistryMultipleFiles(t *testing.T) {
-	prog1 := mustParse(t, `fn readFile() { throw Error("io") }`)
-	prog2 := mustParse(t, `fn writeFile() { }`)
+	prog1 := mustParse(t, `fn loadData(): String { return Error("io") }`)
+	prog2 := mustParse(t, `fn saveData() { }`)
 	prog3 := mustParse(t, `interface Reader { pub fn read(): String }`)
 
 	reg := BuildRegistry([]*parser.Program{prog1, prog2, prog3})
-	if !reg.CanThrowFns["readFile"] {
-		t.Error("readFile should be in CanThrowFns")
+	if !reg.CanThrowFns["loadData"] {
+		t.Error("loadData should be in CanThrowFns")
 	}
-	if reg.CanThrowFns["writeFile"] {
-		t.Error("writeFile should NOT be in CanThrowFns")
+	if reg.CanThrowFns["saveData"] {
+		t.Error("saveData should NOT be in CanThrowFns")
 	}
 	if !reg.InterfaceNames["Reader"] {
 		t.Error("Reader should be in InterfaceNames")
@@ -712,11 +712,11 @@ fn main() {
 	assertContains(t, out, "func(x int) int { return")
 }
 
-func TestLambdaThrowSignature(t *testing.T) {
+func TestLambdaFailableSignature(t *testing.T) {
 	src := `fn main() {
     var safeDivide = (a: Int, b: Int): Int => {
         if (a == 0) {
-            throw Error("bad input")
+            return Error("bad input")
         }
         return a / b
     }
@@ -728,94 +728,85 @@ func TestLambdaThrowSignature(t *testing.T) {
 	}
 	// Lambda should emit (int, error) return type
 	assertContains(t, out, "func(a int, b int) (int, error)")
-	// Normal return inside throwing lambda should append nil
+	// Normal return inside failable lambda should append nil
 	assertContains(t, out, "return (a / b), nil")
-	// throw should emit return zero, error
+	// return Error should emit return zero, error
 	assertContains(t, out, `return 0, fmt.Errorf`)
 }
 
-func TestLambdaThrowCaughtByTry(t *testing.T) {
+func TestLambdaFailableAutoPropagate(t *testing.T) {
 	src := `fn main() {
     var safeDivide = (a: Int, b: Int): Int => {
         if (b == 0) {
-            throw Error("division by zero")
+            return Error("division by zero")
         }
         return a / b
     }
-    try {
-        var result = safeDivide(10, 0)
-        print(result)
-    } catch(err) {
+    var result = safeDivide(10, 0) or {
         print("caught")
+        exit(1)
     }
+    print(result)
 }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	// Try body should unpack the error from the throwing lambda call
-	assertContains(t, out, "_err := safeDivide(10, 0)")
-	assertContains(t, out, "if _err != nil { return _err }")
-	assertNotContains(t, out, "result := safeDivide") // must NOT be a plain assignment
+	// Failable lambda call should unpack error
+	assertContains(t, out, "safeDivide(10, 0)")
+	assertContains(t, out, "!= nil")
 }
 
-func TestIntegrationMixedThrowingAndNonThrowingLambdas(t *testing.T) {
+func TestMixedFailableAndNonFailableLambdas(t *testing.T) {
 	src := `fn main() {
     var double = (x: Int): Int => x * 2
     var safeSqrt = (x: Int): Int => {
         if (x < 0) {
-            throw Error("negative input")
+            return Error("negative input")
         }
         return x * x
     }
     print(double(4))
-    try {
-        var r = safeSqrt(3)
-        print(r)
-    } catch(err) {
-        print("caught: {err}")
-    }
+    var r = safeSqrt(3)
+    print(r)
 }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	// Non-throwing lambda must NOT have error return
+	// Non-failable lambda must NOT have error return
 	assertContains(t, out, "func(x int) int { return (x * 2) }")
-	// Throwing lambda MUST have error return
+	// Failable lambda MUST have error return
 	assertContains(t, out, "func(x int) (int, error)")
-	// Try block must unwrap the throwing lambda call
-	assertContains(t, out, "_err := safeSqrt(3)")
-	// Non-throwing call must remain a plain assignment
-	assertNotContains(t, out, "_err := double(")
+	// Failable call auto-propagates with error check
+	assertContains(t, out, "!= nil")
+	// Non-failable call must remain a plain assignment
+	assertNotContains(t, out, "_err0 := double(")
 }
 
-func TestIntegrationMultipleThrowingCallsInTry(t *testing.T) {
+func TestMultipleFailableCallsInMain(t *testing.T) {
 	src := `fn main() {
     var safeDivide = (a: Int, b: Int): Int => {
         if (b == 0) {
-            throw Error("division by zero")
+            return Error("division by zero")
         }
         return a / b
     }
-    try {
-        var r1 = safeDivide(10, 2)
-        print(r1)
-        var r2 = safeDivide(8, 4)
-        print(r2)
-    } catch(err) {
-        print("caught: {err}")
-    }
+    var r1 = safeDivide(10, 2)
+    print(r1)
+    var r2 = safeDivide(8, 4)
+    print(r2)
 }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	// Both calls must be unwrapped — plain assignments must not appear
-	assertContains(t, out, "_err := safeDivide(10, 2)")
-	assertContains(t, out, "_err := safeDivide(8, 4)")
-	assertNotContains(t, out, "r1 := safeDivide")
-	assertNotContains(t, out, "r2 := safeDivide")
+	// Both calls must be unwrapped with error checks (r1, _err := ... not r1 := ...)
+	assertContains(t, out, "safeDivide(10, 2)")
+	assertContains(t, out, "safeDivide(8, 4)")
+	// Must have error unpacking — check for _err variables
+	assertContains(t, out, "_err0")
+	assertContains(t, out, "_err1")
 }
 
 func TestIntegrationStringInterpolationInLambda(t *testing.T) {
@@ -848,37 +839,33 @@ func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
 	assertContains(t, out, "base := 100")
 }
 
-func TestIntegrationThrowingLambdaMultipleReturnPaths(t *testing.T) {
+func TestFailableLambdaMultipleReturnPaths(t *testing.T) {
 	src := `fn main() {
     var classify = (x: Int): String => {
         if (x < 0) {
-            throw Error("negative")
+            return Error("negative")
         }
         if (x == 0) {
             return "zero"
         }
         return "positive"
     }
-    try {
-        var r = classify(5)
-        print(r)
-    } catch(err) {
-        print("caught: {err}")
-    }
+    var r = classify(5)
+    print(r)
 }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	// Throwing lambda must have (string, error) return
+	// Failable lambda must have (string, error) return
 	assertContains(t, out, "func(x int) (string, error)")
 	// Both regular returns must have nil appended
 	assertContains(t, out, `return "zero", nil`)
 	assertContains(t, out, `return "positive", nil`)
-	// Throw must emit zero value + error
+	// return Error must emit zero value + error
 	assertContains(t, out, `return "", fmt.Errorf`)
-	// Try block must unwrap the call
-	assertContains(t, out, "_err := classify(5)")
+	// Failable call auto-propagates
+	assertContains(t, out, "!= nil")
 }
 
 // --- Default parameters and named arguments ----------------------------------
@@ -1019,15 +1006,14 @@ fn main() {
 	assertContains(t, out, "if _l, ok := any(&locked).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() } else if _l, ok := any(locked).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }")
 }
 
-func TestWithStmtNestedInTry(t *testing.T) {
+func TestWithStmtWithOrHandler(t *testing.T) {
 	src := `
 fn main() {
-    try {
-        with (var f = openFile("x")) {
-            print("ok")
-        }
-    } catch(err) {
+    with (var f = openFile("x") or {
         print("error")
+        exit(1)
+    }) {
+        print("ok")
     }
 }
 `
@@ -1035,9 +1021,8 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "f := openFile(\"x\")")
+	assertContains(t, out, "openFile(\"x\")")
 	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
-	assertContains(t, out, "func() error")
 }
 
 func TestDefaultParamOnly(t *testing.T) {

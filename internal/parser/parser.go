@@ -178,6 +178,19 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 	left := p.parseUnary()
 
 	for {
+		// Check for generic call: ident<Type>(args) before precedence check
+		// since '<' would otherwise be parsed as comparison
+		if p.peek().Type == lexer.TOKEN_LT {
+			if ident, ok := left.(*Ident); ok && p.looksLikeTypeArgs() {
+				typeArgs := p.parseCallTypeArgs()
+				p.expect(lexer.TOKEN_LPAREN)
+				call := p.finishCallArgsNoLParen(ident).(*CallExpr)
+				call.TypeArgs = typeArgs
+				left = call
+				continue
+			}
+		}
+
 		prec := tokenPrec(p.peek().Type)
 		if prec <= minPrec {
 			break
@@ -639,10 +652,6 @@ func (p *Parser) parseStmt() Stmt {
 		return nil
 	case lexer.TOKEN_GO:
 		return p.parseGoStmt()
-	case lexer.TOKEN_TRY:
-		return p.parseTryStmt()
-	case lexer.TOKEN_THROW:
-		return p.parseThrowStmt()
 	case lexer.TOKEN_PRINT:
 		return p.parsePrintStmt()
 	case lexer.TOKEN_MATCH:
@@ -717,7 +726,8 @@ func (p *Parser) parseVarStmt() Stmt {
 		p.advance()
 		val = p.parseExpr()
 	}
-	return &VarStmt{Name: name, Type: typ, Value: val}
+	handler := p.parseOrHandler()
+	return &VarStmt{Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
 func (p *Parser) parseReturnStmt() *ReturnStmt {
@@ -822,21 +832,15 @@ func (p *Parser) parseGoStmt() *GoStmt {
 	return &GoStmt{Body: body}
 }
 
-func (p *Parser) parseTryStmt() *TryStmt {
-	p.expect(lexer.TOKEN_TRY)
+// parseOrHandler parses an optional `or { block }` after a failable call.
+// Returns nil if the current token is not TOKEN_OR.
+func (p *Parser) parseOrHandler() *OrHandler {
+	if !p.check(lexer.TOKEN_OR) {
+		return nil
+	}
+	p.advance() // consume 'or'
 	body := p.parseBlock()
-	p.expect(lexer.TOKEN_CATCH)
-	p.expect(lexer.TOKEN_LPAREN)
-	errVar := p.expect(lexer.TOKEN_IDENT).Literal
-	p.expect(lexer.TOKEN_RPAREN)
-	catchBody := p.parseBlock()
-	return &TryStmt{Body: body, ErrVar: errVar, CatchBody: catchBody}
-}
-
-func (p *Parser) parseThrowStmt() *ThrowStmt {
-	p.expect(lexer.TOKEN_THROW)
-	val := p.parseExpr()
-	return &ThrowStmt{Value: val}
+	return &OrHandler{Body: body}
 }
 
 func (p *Parser) parsePrintStmt() *PrintStmt {
@@ -880,7 +884,8 @@ func (p *Parser) parseWithStmt() *WithStmt {
 		name := p.expect(lexer.TOKEN_IDENT).Literal
 		p.expect(lexer.TOKEN_ASSIGN)
 		val := p.parseExpr()
-		resources = append(resources, &WithResource{Name: name, Value: val})
+		handler := p.parseOrHandler()
+		resources = append(resources, &WithResource{Name: name, Value: val, OrHandler: handler})
 		if !p.check(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -901,10 +906,12 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 		lexer.TOKEN_STAR_EQ, lexer.TOKEN_SLASH_EQ:
 		p.advance()
 		val := p.parseExpr()
-		return &AssignStmt{Target: expr, Op: tok.Literal, Value: val}
+		handler := p.parseOrHandler()
+		return &AssignStmt{Target: expr, Op: tok.Literal, Value: val, OrHandler: handler}
 	}
 
-	return &ExprStmt{Expr: expr}
+	handler := p.parseOrHandler()
+	return &ExprStmt{Expr: expr, OrHandler: handler}
 }
 
 // --- Declarations ------------------------------------------------------------
@@ -1084,6 +1091,39 @@ func (p *Parser) parseTypeParams() []string {
 	}
 	p.expect(lexer.TOKEN_GT)
 	return params
+}
+
+// looksLikeTypeArgs peeks ahead to determine if '<' starts type arguments
+// (e.g. <Config>, <K, V>) followed by '(' — not a comparison operator.
+func (p *Parser) looksLikeTypeArgs() bool {
+	off := 1 // skip '<'
+	for {
+		if p.peekAt(off).Type != lexer.TOKEN_IDENT {
+			return false
+		}
+		off++ // skip ident
+		if p.peekAt(off).Type == lexer.TOKEN_GT {
+			// Check that '>' is followed by '(' — confirms call syntax
+			return p.peekAt(off+1).Type == lexer.TOKEN_LPAREN
+		}
+		if p.peekAt(off).Type != lexer.TOKEN_COMMA {
+			return false
+		}
+		off++ // skip comma
+	}
+}
+
+// parseCallTypeArgs parses <Type, Type, ...> at a call site.
+func (p *Parser) parseCallTypeArgs() []string {
+	p.expect(lexer.TOKEN_LT)
+	var args []string
+	args = append(args, p.expect(lexer.TOKEN_IDENT).Literal)
+	for p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		args = append(args, p.expect(lexer.TOKEN_IDENT).Literal)
+	}
+	p.expect(lexer.TOKEN_GT)
+	return args
 }
 
 func (p *Parser) parseFnDecl(isPub bool) *FnDecl {

@@ -36,27 +36,35 @@ fn main() {
 	noErrors(t, errs, src)
 }
 
-func TestTypecheckerNestedTryCatchScopes(t *testing.T) {
+func TestTypecheckerFailableAutoPropagate(t *testing.T) {
 	src := `
 fn risky(x: Int): Int {
-    if (x < 0) { throw Error("bad") }
+    if (x < 0) { return Error("bad") }
     return x
 }
 fn run(): Int {
-    try {
-        var a = risky(1)
-        return a
-    } catch(err) {
-        try {
-            var b = risky(0)
-            return b
-        } catch(innerErr) {
-            return -1
-        }
-    }
+    var a = risky(1)
+    return a
 }
 fn main() {
     print(run())
+}`
+	errs := checkSrc(src)
+	noErrors(t, errs, src)
+}
+
+func TestTypecheckerOrHandlerScope(t *testing.T) {
+	src := `
+fn risky(x: Int): Int {
+    if (x < 0) { return Error("bad") }
+    return x
+}
+fn main() {
+    var a = risky(1) or {
+        print(err)
+        exit(1)
+    }
+    print(a)
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)

@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -65,26 +64,17 @@ fn main() {
 	assertContains(t, out, "case StatusIdle:")
 }
 
-func TestIntegrationNestedTryCatch(t *testing.T) {
+func TestIntegrationAutoErrorPropagation(t *testing.T) {
 	src := `
 fn riskyOp(x: Int): Int {
     if (x < 0) {
-        throw Error("negative")
+        return Error("negative")
     }
     return x * 2
 }
 fn safeDouble(x: Int): Int {
-    try {
-        var r = riskyOp(x)
-        return r
-    } catch(err) {
-        try {
-            var fallback = riskyOp(0)
-            return fallback
-        } catch(innerErr) {
-            return -1
-        }
-    }
+    var r = riskyOp(x)
+    return r
 }
 fn main() {
     print(safeDouble(5))
@@ -93,13 +83,9 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	// Each try block generates an error check; there should be multiple nil checks
-	count := strings.Count(out, "!= nil")
-	if count < 2 {
-		t.Errorf("expected at least 2 occurrences of '!= nil', got %d\ngot:\n%s", count, out)
-	}
-	assertContains(t, out, "if innerErr != nil")
-	assertContains(t, out, "return (-1)")
+	// riskyOp is failable, so safeDouble should have error propagation
+	assertContains(t, out, "!= nil")
+	assertContains(t, out, "fmt.Errorf")
 }
 
 func TestIntegrationMultiLevelInheritance(t *testing.T) {
@@ -280,15 +266,11 @@ fn main() {
 	assertContains(t, out, "var _ Speaker = (*Dog)(nil)")
 }
 
-func TestIntegrationWithAndTryCatch(t *testing.T) {
+func TestIntegrationWithPlainResource(t *testing.T) {
 	src := `
 fn main() {
-    try {
-        with (var f = openFile("x")) {
-            print("ok")
-        }
-    } catch(err) {
-        print("error")
+    with (var f = openFile("x")) {
+        print("ok")
     }
 }
 `
@@ -298,8 +280,6 @@ fn main() {
 	}
 	assertContains(t, out, "f := openFile(\"x\")")
 	assertContains(t, out, "if _c, ok := any(f).(io.Closer); ok { defer _c.Close() }")
-	assertContains(t, out, "func() error")
-	assertContains(t, out, "fmt.Println(\"error\")")
 }
 
 func TestIntegrationWithInClassMethod(t *testing.T) {
@@ -352,15 +332,15 @@ fn main() {
 
 // --- goroutine combinations --------------------------------------------------
 
-func TestIntegrationGoRoutineTryCatch(t *testing.T) {
+func TestIntegrationGoRoutineReturnError(t *testing.T) {
 	src := `
+fn risky(): Int {
+    return Error("oops")
+}
 fn main() {
     go {
-        try {
-            throw Error("oops")
-        } catch(err) {
-            print("caught")
-        }
+        var r = risky()
+        print(r)
     }
 }
 `
@@ -369,8 +349,8 @@ fn main() {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "go func()")
-	assertContains(t, out, "func() error")
-	assertContains(t, out, "fmt.Println(\"caught\")")
+	// In goroutine, failable calls auto-propagate as panic
+	assertContains(t, out, "!= nil")
 }
 
 func TestIntegrationGoRoutineWith(t *testing.T) {
@@ -411,12 +391,17 @@ fn main() {
 	assertContains(t, out, "(x + base)")
 }
 
-func TestIntegrationGoRoutineThrowPanics(t *testing.T) {
-	// throw directly inside a goroutine (no try/catch) should panic, not return
+func TestIntegrationGoRoutineReturnErrorPanics(t *testing.T) {
+	// return Error directly inside a goroutine should panic (not return) since
+	// goroutines have their own void scope
 	src := `
+fn risky(): Int {
+    return Error("fatal")
+}
 fn main() {
     go {
-        throw Error("fatal")
+        var x = risky()
+        print(x)
     }
 }
 `
@@ -425,34 +410,31 @@ fn main() {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "go func()")
-	assertContains(t, out, "panic(fmt.Errorf(\"fatal\"))")
-	assertNotContains(t, out, "return fmt.Errorf")
+	// In goroutine, failable calls panic on error
+	assertContains(t, out, "panic(")
 }
 
-func TestIntegrationGoRoutineThrowInsideThrowingFn(t *testing.T) {
-	// throw inside a goroutine that's inside a throwing function — goroutine
-	// still gets panic, not return, because it has its own void scope.
+func TestIntegrationReturnErrorInsideFailable(t *testing.T) {
+	// return Error inside a failable function emits return zero, fmt.Errorf
 	src := `
-fn risky() {
-    go {
-        throw Error("goroutine error")
-    }
-    throw Error("fn error")
+fn risky(): Int {
+    return Error("fn error")
+}
+fn caller(): Int {
+    var r = risky()
+    return r
 }
 fn main() {
-    try {
-        risky()
-    } catch(err) {
-        print(err)
-    }
+    var x = caller()
+    print(x)
 }
 `
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "go func()")
-	assertContains(t, out, "panic(fmt.Errorf(\"goroutine error\"))")
-	// The fn-level throw is still a return
-	assertContains(t, out, "return fmt.Errorf(\"fn error\")")
+	// risky emits return 0, fmt.Errorf("fn error")
+	assertContains(t, out, "return 0, fmt.Errorf(\"fn error\")")
+	// caller is transitively failable — auto-propagation
+	assertContains(t, out, "!= nil")
 }

@@ -9,8 +9,8 @@ Growler provides a set of built-in functions that map directly to Go standard li
 | `print(x)`        | `fmt.Println(x)`           | |
 | `printf(fmt, ...)` | `fmt.Printf(fmt, ...)`   | |
 | `readLine()`      | `bufio.NewReader(os.Stdin).ReadString('\n')` | |
-| `readFile(path)`  | `os.ReadFile(path)`        | Returns string, panics on error |
-| `writeFile(path, content)` | `os.WriteFile(path, []byte(content), 0644)` | Panics on error |
+| `readFile(path)`  | `os.ReadFile(path)`        | **Failable** — errors auto-propagate |
+| `writeFile(path, content)` | `os.WriteFile(path, []byte(content), 0644)` | **Failable** — errors auto-propagate |
 
 ## Type Conversions
 
@@ -68,13 +68,13 @@ Growler provides a set of built-in functions that map directly to Go standard li
 |-------------------|----------------------------|-------|
 | `jsonEncode(val)` | `json.Marshal(val)`        | Returns JSON string |
 | `jsonDecode(str)` | `json.Unmarshal(str, &m)`  | Returns `map[string]interface{}` |
-| `jsonDecode(str, &target)` | `json.Unmarshal(str, target)` | Decodes into target |
+| `jsonDecode<T>(str)` | `json.Unmarshal(str, &target)` | Decodes into type `T` and returns it |
 
 ## HTTP
 
 | Growler            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
-| `httpGet(url)`    | `http.Get(url)` + read body | Returns response body as string |
+| `httpGet(url)`    | `http.Get(url)` + read body | **Failable** — errors auto-propagate |
 
 ## Environment & Time
 

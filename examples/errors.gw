@@ -1,22 +1,19 @@
 fn divide(a: Int, b: Int): Int {
     if (b == 0) {
-        throw Error("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 
 fn main() {
-    try {
-        var result = divide(10, 2)
-        print(result)
-    } catch(err) {
-        print("caught error")
-    }
+    // Auto-propagation: panics in main if error occurs
+    var result = divide(10, 2)
+    print(result)
 
-    try {
-        var result = divide(5, 0)
-        print(result)
-    } catch(err) {
-        print("caught division by zero")
+    // Or handler: add context, log, and halt
+    var result2 = divide(5, 0) or {
+        print("caught: {err}")
+        exit(0)
     }
+    print(result2)
 }

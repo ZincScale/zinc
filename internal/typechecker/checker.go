@@ -402,10 +402,6 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.checkForStmt(s)
 	case *parser.BlockStmt:
 		c.checkBlock(s)
-	case *parser.ThrowStmt:
-		c.inferExpr(s.Value) // any type is valid to throw
-	case *parser.TryStmt:
-		c.checkTryStmt(s)
 	case *parser.GoStmt:
 		c.pushScope()
 		for _, st := range s.Body.Stmts {
@@ -418,11 +414,13 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.inferExpr(s.Value) // any type is OK
 	case *parser.ExprStmt:
 		c.inferExpr(s.Expr)
+		c.checkOrHandler(s.OrHandler)
 	case *parser.WithStmt:
 		c.pushScope()
 		for _, r := range s.Resources {
 			c.inferExpr(r.Value)
 			c.scope.define(r.Name, TypeAny)
+			c.checkOrHandler(r.OrHandler)
 		}
 		for _, st := range s.Body.Stmts {
 			c.checkStmt(st)
@@ -482,6 +480,7 @@ func (c *Checker) checkVarStmt(s *parser.VarStmt) {
 	} else {
 		c.scope.define(s.Name, inferredType)
 	}
+	c.checkOrHandler(s.OrHandler)
 }
 
 func (c *Checker) checkTupleVarStmt(s *parser.TupleVarStmt) {
@@ -507,6 +506,7 @@ func (c *Checker) checkAssignStmt(s *parser.AssignStmt) {
 	}
 	// For selector/index targets, just check value type
 	c.inferExpr(s.Target)
+	c.checkOrHandler(s.OrHandler)
 }
 
 func (c *Checker) checkReturnStmt(s *parser.ReturnStmt) {
@@ -576,12 +576,15 @@ func (c *Checker) checkForStmt(s *parser.ForStmt) {
 	c.popScope()
 }
 
-func (c *Checker) checkTryStmt(s *parser.TryStmt) {
-	c.checkBlock(s.Body)
-	// Catch block: errVar is defined as String
+// checkOrHandler validates an or { } handler block.
+// The implicit `err` variable is defined as String in the handler scope.
+func (c *Checker) checkOrHandler(h *parser.OrHandler) {
+	if h == nil {
+		return
+	}
 	c.pushScope()
-	c.scope.define(s.ErrVar, TypeString)
-	for _, st := range s.CatchBody.Stmts {
+	c.scope.define("err", TypeString)
+	for _, st := range h.Body.Stmts {
 		c.checkStmt(st)
 	}
 	c.popScope()
@@ -832,22 +835,6 @@ func (c *Checker) inferUnary(e *parser.UnaryExpr) Type {
 }
 
 func (c *Checker) inferCall(e *parser.CallExpr) Type {
-	// Reject throwing lambdas passed as arguments
-	for _, arg := range e.Args {
-		if lambda, ok := arg.(*parser.LambdaExpr); ok && lambda.Body != nil {
-			if c.lambdaBodyCanThrow(lambda.Body) {
-				c.errorf(0, 0, "throwing lambda cannot be passed as argument; assign to a variable and call within try/catch")
-			}
-		}
-	}
-	for _, na := range e.NamedArgs {
-		if lambda, ok := na.Value.(*parser.LambdaExpr); ok && lambda.Body != nil {
-			if c.lambdaBodyCanThrow(lambda.Body) {
-				c.errorf(0, 0, "throwing lambda cannot be passed as argument; assign to a variable and call within try/catch")
-			}
-		}
-	}
-
 	// SelectorExpr callee: obj.method(args) or Dog.new(args)
 	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
 		return c.inferMethodCall(sel, e.Args, e.NamedArgs)
@@ -1279,37 +1266,3 @@ func (c *ClassType) isGeneric() bool {
 	return len(c.TypeParams) > 0
 }
 
-func (c *Checker) lambdaBodyCanThrow(body *parser.BlockStmt) bool {
-	for _, s := range body.Stmts {
-		if c.stmtHasThrow(s) {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *Checker) stmtHasThrow(s parser.Stmt) bool {
-	switch st := s.(type) {
-	case *parser.ThrowStmt:
-		return true
-	case *parser.BlockStmt:
-		return c.lambdaBodyCanThrow(st)
-	case *parser.IfStmt:
-		if c.lambdaBodyCanThrow(st.Then) {
-			return true
-		}
-		if st.ElseStmt != nil {
-			if b, ok := st.ElseStmt.(*parser.BlockStmt); ok {
-				return c.lambdaBodyCanThrow(b)
-			}
-			if i, ok := st.ElseStmt.(*parser.IfStmt); ok {
-				return c.stmtHasThrow(i)
-			}
-		}
-	case *parser.ForStmt:
-		return c.lambdaBodyCanThrow(st.Body)
-	case *parser.WhileStmt:
-		return c.lambdaBodyCanThrow(st.Body)
-	}
-	return false
-}

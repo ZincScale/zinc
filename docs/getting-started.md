@@ -30,11 +30,11 @@ The [`examples/`](../examples/) directory contains working Growler programs cove
 | [`hello.gw`](../examples/hello.gw) | Hello World + variables |
 | [`classes.gw`](../examples/classes.gw) | Classes, interfaces, inheritance |
 | [`concurrency.gw`](../examples/concurrency.gw) | Channels + goroutines |
-| [`errors.gw`](../examples/errors.gw) | try/catch/throw |
+| [`errors.gw`](../examples/errors.gw) | Errors as values, `or` handler |
 | [`enums.gw`](../examples/enums.gw) | Enums + match |
 | [`generics.gw`](../examples/generics.gw) | Generic functions and classes |
 | [`fibonacci.gw`](../examples/fibonacci.gw) | Recursion |
-| [`closures.gw`](../examples/closures.gw) | Lambdas, closures, throwing lambdas |
+| [`closures.gw`](../examples/closures.gw) | Lambdas, closures, failable lambdas |
 | [`safe_navigation.gw`](../examples/safe_navigation.gw) | Safe navigation `?.` with chaining |
 | [`with_resources.gw`](../examples/with_resources.gw) | Resource management with `with` |
 | [`defaults_and_named_args.gw`](../examples/defaults_and_named_args.gw) | Default parameters + named arguments |

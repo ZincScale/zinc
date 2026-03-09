@@ -164,13 +164,63 @@ func TestParseInterface(t *testing.T) {
 	}
 }
 
-func TestParseTryCatch(t *testing.T) {
-	prog, p := parse(`fn main() { try { } catch (err) { } }`)
+func TestParseOrHandler(t *testing.T) {
+	prog, p := parse(`fn main() { var x = risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
-	_, ok := fn.Body.Stmts[0].(*TryStmt)
+	v, ok := fn.Body.Stmts[0].(*VarStmt)
 	if !ok {
-		t.Fatal("expected TryStmt")
+		t.Fatal("expected VarStmt")
+	}
+	if v.OrHandler == nil {
+		t.Fatal("expected OrHandler on VarStmt")
+	}
+	if len(v.OrHandler.Body.Stmts) != 1 {
+		t.Errorf("expected 1 statement in or handler body, got %d", len(v.OrHandler.Body.Stmts))
+	}
+}
+
+func TestParseOrHandlerOnExprStmt(t *testing.T) {
+	prog, p := parse(`fn main() { risky() or { print(err) } }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	es, ok := fn.Body.Stmts[0].(*ExprStmt)
+	if !ok {
+		t.Fatal("expected ExprStmt")
+	}
+	if es.OrHandler == nil {
+		t.Fatal("expected OrHandler on ExprStmt")
+	}
+}
+
+func TestParseOrHandlerOnAssign(t *testing.T) {
+	prog, p := parse(`fn main() { var x: Int = 0; x = risky() or { print(err) } }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	a, ok := fn.Body.Stmts[1].(*AssignStmt)
+	if !ok {
+		t.Fatal("expected AssignStmt")
+	}
+	if a.OrHandler == nil {
+		t.Fatal("expected OrHandler on AssignStmt")
+	}
+}
+
+func TestParseReturnError(t *testing.T) {
+	prog, p := parse(`fn risky(): Int { return Error("oops") }`)
+	assertNoErrors(t, p)
+	fn := prog.Decls[0].(*FnDecl)
+	ret, ok := fn.Body.Stmts[0].(*ReturnStmt)
+	if !ok {
+		t.Fatal("expected ReturnStmt")
+	}
+	call, ok := ret.Value.(*CallExpr)
+	if !ok {
+		t.Fatal("expected CallExpr as return value")
+	}
+	ident, ok := call.Callee.(*Ident)
+	if !ok || ident.Name != "Error" {
+		t.Fatal("expected Error() call")
 	}
 }
 

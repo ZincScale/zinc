@@ -196,25 +196,20 @@ fn main() {
 
 // --- Error handling ----------------------------------------------------------
 
-func TestE2ETryCatch(t *testing.T) {
+func TestE2EReturnErrorAndOrHandler(t *testing.T) {
 	out := e2eRun(t, `
 fn divide(a: Int, b: Int): Int {
-    if (b == 0) { throw Error("division by zero") }
+    if (b == 0) { return Error("division by zero") }
     return a / b
 }
 fn main() {
-    try {
-        var r = divide(10, 2)
-        print(r)
-    } catch(err) {
-        print("error")
-    }
-    try {
-        var r = divide(10, 0)
-        print(r)
-    } catch(err) {
+    var r = divide(10, 2)
+    print(r)
+    var r2 = divide(10, 0) or {
         print("caught: division by zero")
+        exit(0)
     }
+    print(r2)
 }`)
 	assertOutput(t, out, "5\ncaught: division by zero")
 }
@@ -718,17 +713,16 @@ fn main() {
 	assertOutput(t, out, "hello from with")
 }
 
-// with: error causes panic, caught by try/catch
-func TestE2EWithTryErrorPanics(t *testing.T) {
+// with: error handled by or handler
+func TestE2EWithOrHandler(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 fn main() {
-    try {
-        with (var f = os.Open("/nonexistent/path/that/does/not/exist")) {
-            print("should not reach")
-        }
-    } catch(err) {
+    with (var f = os.Open("/nonexistent/path/that/does/not/exist") or {
         print("caught error")
+        exit(0)
+    }) {
+        print("should not reach")
     }
 }`)
 	assertOutput(t, out, "caught error")

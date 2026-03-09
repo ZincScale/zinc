@@ -204,9 +204,10 @@ func (b *BlockStmt) stmtTag() {}
 
 // VarStmt: var name [: Type] = expr  OR  var name: Type
 type VarStmt struct {
-	Name  string
-	Type  TypeExpr // may be nil (inferred)
-	Value Expr     // may be nil
+	Name      string
+	Type      TypeExpr   // may be nil (inferred)
+	Value     Expr       // may be nil
+	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 
 func (v *VarStmt) nodeTag() {}
@@ -223,9 +224,10 @@ func (t *TupleVarStmt) stmtTag() {}
 
 // AssignStmt: target = expr  OR  target op= expr
 type AssignStmt struct {
-	Target Expr
-	Op     string // "=", "+=", "-=", "*=", "/="
-	Value  Expr
+	Target    Expr
+	Op        string // "=", "+=", "-=", "*=", "/="
+	Value     Expr
+	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 
 func (a *AssignStmt) nodeTag() {}
@@ -288,23 +290,12 @@ type GoStmt struct {
 func (g *GoStmt) nodeTag() {}
 func (g *GoStmt) stmtTag() {}
 
-// TryStmt: try { } catch(err) { }
-type TryStmt struct {
-	Body     *BlockStmt
-	ErrVar   string
-	CatchBody *BlockStmt
+// OrHandler: or { body } — inline error handler. `err` is implicitly available.
+type OrHandler struct {
+	Body *BlockStmt // handler body; `err` is implicitly available
 }
 
-func (t *TryStmt) nodeTag() {}
-func (t *TryStmt) stmtTag() {}
-
-// ThrowStmt: throw expr
-type ThrowStmt struct {
-	Value Expr
-}
-
-func (t *ThrowStmt) nodeTag() {}
-func (t *ThrowStmt) stmtTag() {}
+func (o *OrHandler) nodeTag() {}
 
 // PrintStmt: print(expr)
 type PrintStmt struct {
@@ -316,7 +307,8 @@ func (p *PrintStmt) stmtTag() {}
 
 // ExprStmt wraps an expression used as a statement.
 type ExprStmt struct {
-	Expr Expr
+	Expr      Expr
+	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 
 func (e *ExprStmt) nodeTag() {}
@@ -363,9 +355,10 @@ func (d *DeferStmt) stmtTag() {}
 
 // WithResource is a single resource binding inside a with statement.
 type WithResource struct {
-	Name     string
-	Value    Expr
-	AutoErr  bool // set by codegen when multi-return (T, error) is auto-detected
+	Name      string
+	Value     Expr
+	AutoErr   bool       // set by codegen when multi-return (T, error) is auto-detected
+	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 
 // WithStmt: with (var name = expr [, var name = expr ...]) { body }
@@ -406,10 +399,12 @@ func (u *UnaryExpr) nodeTag() {}
 func (u *UnaryExpr) exprTag() {}
 
 // CallExpr: callee(args)  e.g. Dog.new("Rex") or obj.method(x)
+// CallExpr with type args: callee<T>(args)  e.g. jsonDecode<Config>(data)
 type CallExpr struct {
 	Callee    Expr
 	Args      []Expr     // positional args (must come before named args)
 	NamedArgs []NamedArg // named args, may be empty
+	TypeArgs  []string   // type arguments, e.g. ["Config"] in jsonDecode<Config>(data)
 }
 
 func (c *CallExpr) nodeTag() {}

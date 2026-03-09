@@ -44,22 +44,30 @@ func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 		}
 	}
 
-	// Pass 2: mark canThrow fns (uses a minimal generator — bodyCanThrow
-	// only walks for ThrowStmt, it doesn't need Generator state)
+	// Pass 2: mark failable fns using transitive fixed-point iteration
 	g := &Generator{canThrowFns: make(map[string]bool)}
-	for _, prog := range progs {
-		for _, decl := range prog.Decls {
-			switch d := decl.(type) {
-			case *parser.FnDecl:
-				if g.bodyCanThrow(d.Body) {
-					d.CanThrow = true
-					reg.CanThrowFns[d.Name] = true
-				}
-			case *parser.ClassDecl:
-				for _, m := range d.Methods {
-					if g.bodyCanThrow(m.Body) {
-						m.CanThrow = true
-						reg.CanThrowFns[d.Name+"."+m.Name] = true
+	changed := true
+	for changed {
+		changed = false
+		for _, prog := range progs {
+			for _, decl := range prog.Decls {
+				switch d := decl.(type) {
+				case *parser.FnDecl:
+					if !reg.CanThrowFns[d.Name] && g.bodyIsFailable(d.Body) {
+						d.CanThrow = true
+						reg.CanThrowFns[d.Name] = true
+						g.canThrowFns[d.Name] = true
+						changed = true
+					}
+				case *parser.ClassDecl:
+					for _, m := range d.Methods {
+						key := d.Name + "." + m.Name
+						if !reg.CanThrowFns[key] && g.bodyIsFailable(m.Body) {
+							m.CanThrow = true
+							reg.CanThrowFns[key] = true
+							g.canThrowFns[key] = true
+							changed = true
+						}
 					}
 				}
 			}
