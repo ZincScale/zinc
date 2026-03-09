@@ -26,8 +26,8 @@ func main() {
 ## Installation
 
 ```bash
-git clone https://github.com/victorybhg/go-transpiler
-cd go-transpiler
+git clone https://github.com/victorybhg/growler
+cd growler
 go build -o growler ./cmd/growler/
 ```
 
