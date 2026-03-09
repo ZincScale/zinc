@@ -437,14 +437,14 @@ func TestMatch(t *testing.T) {
 }
 
 func TestTypeMapping(t *testing.T) {
-	cases := []struct{ growl, goType string }{
+	cases := []struct{ srcType, goType string }{
 		{"Int", "int"},
 		{"Float", "float64"},
 		{"String", "string"},
 		{"Bool", "bool"},
 	}
 	for _, c := range cases {
-		src := "fn f(x: " + c.growl + ") { }"
+		src := "fn f(x: " + c.srcType + ") { }"
 		out, errs := transpile(src)
 		if errs != nil {
 			t.Fatal(errs)

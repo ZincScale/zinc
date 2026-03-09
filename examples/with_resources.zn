@@ -12,10 +12,10 @@ import "sync"
 
 fn main() {
     // --- Basic file write with auto-close ---
-    var path = os.TempDir() + "/growler_example.txt"
+    var path = os.TempDir() + "/zinc_example.txt"
 
     with (var f = os.Create(path)) {
-        f.WriteString("Hello from Growler!\n")
+        f.WriteString("Hello from Zinc!\n")
         f.WriteString("Resources are managed automatically.\n")
     }
     // f is now closed — safe to read
@@ -40,8 +40,8 @@ fn main() {
     }
 
     // --- Multiple resources in one with ---
-    var p1 = os.TempDir() + "/growler_multi_a.txt"
-    var p2 = os.TempDir() + "/growler_multi_b.txt"
+    var p1 = os.TempDir() + "/zinc_multi_a.txt"
+    var p2 = os.TempDir() + "/zinc_multi_b.txt"
 
     with (var f1 = os.Create(p1), var f2 = os.Create(p2)) {
         f1.WriteString("File A")

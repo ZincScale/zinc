@@ -1,5 +1,5 @@
 fn main() {
     print("Hello, World!")
-    var name: String = "Growler"
+    var name: String = "Zinc"
     print(name)
 }

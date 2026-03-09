@@ -9,7 +9,7 @@ import (
 )
 
 // goMultiReturnFuncs is the set of known Go stdlib functions that return (T, error).
-// Used by emitWithStmt to auto-detect multi-return calls without requiring `try`.
+// Used by emitWithStmt to auto-detect multi-return calls.
 var goMultiReturnFuncs = map[string]bool{
 	"os.Create":     true,
 	"os.Open":       true,

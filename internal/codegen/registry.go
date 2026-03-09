@@ -26,7 +26,7 @@ func NewTypeRegistry() *TypeRegistry {
 // (all files in one package). It performs two passes:
 //
 //  1. Collect class, interface, and enum names.
-//  2. Mark functions/methods that directly contain throw statements as CanThrow.
+//  2. Mark functions/methods that directly return Error(...) as CanThrow.
 func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 	reg := NewTypeRegistry()
 

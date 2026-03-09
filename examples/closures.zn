@@ -22,7 +22,7 @@ fn main() {
 
     // String interpolation in lambda
     var makeMsg = (name: String): String => "Hello, {name}!"
-    print(makeMsg("Growler"))
+    print(makeMsg("Zinc"))
 
     // Failable lambda with return Error()
     var safeDivide = (a: Int, b: Int): Int => {

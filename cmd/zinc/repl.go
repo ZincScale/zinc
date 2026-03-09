@@ -149,7 +149,7 @@ func isBareExpression(input string) bool {
 	trimmed := strings.TrimSpace(input)
 	stmtPrefixes := []string{
 		"var ", "if ", "if(", "for ", "for(", "while ", "while(",
-		"return ", "return\n", "throw ", "try ", "try{",
+		"return ", "return\n",
 		"match ", "with ", "with(", "go ", "go{",
 		"print(", "printf(",
 	}
