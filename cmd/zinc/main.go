@@ -139,6 +139,7 @@ func main() {
 
 	// Code generation
 	gen := codegen.New()
+	gen.SetSourceFile(inFile)
 	goSrc := gen.Generate(prog)
 
 	// Determine output path

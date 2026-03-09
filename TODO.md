@@ -14,7 +14,7 @@ Prioritized for shipping a usable language binary people can try out.
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 2 | **Source maps** | Map Go compiler errors back to `.zn` lines | Large |
+| ~~2~~ | ~~**Source maps**~~ | ~~Map Go compiler errors back to `.zn` lines~~ | ~~Large~~ **Done** |
 | 3 | **Multi-file project completion** | Registry exists; needs cross-file type resolution | Medium-Large |
 
 ---
@@ -76,3 +76,4 @@ var buf = bytes.Buffer.new() // → bytes.Buffer{}
 - REPL completeness (auto-print expressions, var persistence, brace-aware multi-line, help command)
 - Tuple unpacking, string interpolation, imports, built-ins
 - List/string slicing (`list[1:3]`, `s[2:]`, `.slice()` method)
+- Source maps (`//line` directives map Go compiler errors back to `.zn` lines)

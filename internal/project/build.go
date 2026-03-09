@@ -143,14 +143,17 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 	// Phase 2: generate .go files
 	var units []FileUnit
 	for _, pf := range parsed {
-		gen := codegen.NewWithRegistry(reg, pkgName)
-		goSrc := gen.Generate(pf.prog)
-
-		// Mirror directory structure: strip rootDir prefix, change ext
+		// Compute relative path for //line directives
 		rel, err := filepath.Rel(rootDir, pf.srcPath)
 		if err != nil {
 			return nil, err
 		}
+
+		gen := codegen.NewWithRegistry(reg, pkgName)
+		gen.SetSourceFile(rel)
+		goSrc := gen.Generate(pf.prog)
+
+		// Mirror directory structure: change ext
 		outRel := strings.TrimSuffix(rel, ".zn") + ".go"
 		outPath := filepath.Join(rootDir, outRel)
 

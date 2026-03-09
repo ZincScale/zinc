@@ -69,6 +69,10 @@ type Generator struct {
 	tmpCounter int
 	// errCounter: monotonic counter for unique error variable names
 	errCounter int
+	// srcFile: .zn source filename for //line directives (empty = disabled)
+	srcFile string
+	// lastDirectiveLine: last source line emitted in a //line directive (avoids duplicates)
+	lastDirectiveLine int
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -368,6 +372,20 @@ func (g *Generator) buildImports() []string {
 
 // --- Output Helpers ----------------------------------------------------------
 
+// SetSourceFile sets the .zn filename for //line directive emission.
+func (g *Generator) SetSourceFile(path string) {
+	g.srcFile = path
+}
+
+// emitLineDirective writes a //line directive mapping the next Go line to the given Zinc source line.
+func (g *Generator) emitLineDirective(srcLine int) {
+	if g.srcFile == "" || srcLine <= 0 || srcLine == g.lastDirectiveLine {
+		return
+	}
+	g.lastDirectiveLine = srcLine
+	g.buf.WriteString(fmt.Sprintf("//line %s:%d\n", g.srcFile, srcLine))
+}
+
 func (g *Generator) write(s string) {
 	g.buf.WriteString(s)
 }
@@ -504,14 +522,18 @@ func (g *Generator) zeroValue(t parser.TypeExpr) string {
 func (g *Generator) emitTopLevel(decl parser.TopLevelDecl) {
 	switch d := decl.(type) {
 	case *parser.ClassDecl:
+		g.emitLineDirective(d.Line)
 		g.emitClass(d)
 	case *parser.InterfaceDecl:
 		g.emitInterface(d)
 	case *parser.FnDecl:
+		g.emitLineDirective(d.Line)
 		g.emitFn(d)
 	case *parser.EnumDecl:
+		g.emitLineDirective(d.Line)
 		g.emitEnum(d)
 	case *parser.ConstDecl:
+		g.emitLineDirective(d.Line)
 		g.emitConstDecl(d)
 	}
 }
@@ -839,6 +861,32 @@ func (g *Generator) emitBlock(b *parser.BlockStmt) {
 }
 
 func (g *Generator) emitStmt(s parser.Stmt) {
+	// Emit //line directive for statements that carry source position
+	switch st := s.(type) {
+	case *parser.VarStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.TupleVarStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.AssignStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.ReturnStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.IfStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.ForStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.WhileStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.PrintStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.ExprStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.MatchStmt:
+		g.emitLineDirective(st.Line)
+	case *parser.WithStmt:
+		g.emitLineDirective(st.Line)
+	}
+
 	switch st := s.(type) {
 	case *parser.VarStmt:
 		g.emitVarStmt(st)

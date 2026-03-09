@@ -1170,3 +1170,54 @@ func TestSliceStringMethod(t *testing.T) {
 	assertContains(t, out, `s[1:4]`)
 	assertContains(t, out, `s[2:]`)
 }
+
+func transpileWithSourceMap(src, srcFile string) (string, []string) {
+	l := lexer.New(src)
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	prog := p.Parse()
+	if len(p.Errors) > 0 {
+		return "", p.Errors
+	}
+	gen := New()
+	gen.SetSourceFile(srcFile)
+	return gen.Generate(prog), nil
+}
+
+func TestSourceMapDirectives(t *testing.T) {
+	out, errs := transpileWithSourceMap(`fn main() {
+	var x = 42
+	print(x)
+}`, "test.zn")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "//line test.zn:1")
+	assertContains(t, out, "//line test.zn:2")
+	assertContains(t, out, "//line test.zn:3")
+}
+
+func TestSourceMapDisabledByDefault(t *testing.T) {
+	out, errs := transpile(`fn main() {
+	var x = 42
+	print(x)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	if strings.Contains(out, "//line") {
+		t.Errorf("expected no //line directives when source file not set, got:\n%s", out)
+	}
+}
+
+func TestSourceMapTopLevelDecls(t *testing.T) {
+	out, errs := transpileWithSourceMap(`const PI = 3.14
+enum Color { Red, Green }
+fn main() { print(PI) }`, "app.zn")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "//line app.zn:1")
+	assertContains(t, out, "//line app.zn:2")
+	assertContains(t, out, "//line app.zn:3")
+}

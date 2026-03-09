@@ -721,6 +721,7 @@ func (p *Parser) parseStmt() Stmt {
 }
 
 func (p *Parser) parseConstDecl() *ConstDecl {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_CONST)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var typ TypeExpr
@@ -730,10 +731,11 @@ func (p *Parser) parseConstDecl() *ConstDecl {
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
-	return &ConstDecl{Name: name, Type: typ, Value: val}
+	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
 }
 
 func (p *Parser) parseVarStmt() Stmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_VAR)
 	// Detect tuple destructuring: var (a, b) = expr
 	if p.check(lexer.TOKEN_LPAREN) {
@@ -747,7 +749,7 @@ func (p *Parser) parseVarStmt() Stmt {
 		p.expect(lexer.TOKEN_RPAREN)
 		p.expect(lexer.TOKEN_ASSIGN)
 		val := p.parseExpr()
-		return &TupleVarStmt{Names: names, Value: val}
+		return &TupleVarStmt{Line: line, Names: names, Value: val}
 	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var typ TypeExpr
@@ -761,18 +763,20 @@ func (p *Parser) parseVarStmt() Stmt {
 		val = p.parseExpr()
 	}
 	handler := p.parseOrHandler()
-	return &VarStmt{Name: name, Type: typ, Value: val, OrHandler: handler}
+	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
 func (p *Parser) parseReturnStmt() *ReturnStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_RETURN)
 	if p.check(lexer.TOKEN_RBRACE) || p.check(lexer.TOKEN_SEMICOLON) || p.check(lexer.TOKEN_EOF) {
-		return &ReturnStmt{}
+		return &ReturnStmt{Line: line}
 	}
-	return &ReturnStmt{Value: p.parseExpr()}
+	return &ReturnStmt{Line: line, Value: p.parseExpr()}
 }
 
 func (p *Parser) parseIfStmt() *IfStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_IF)
 	p.expect(lexer.TOKEN_LPAREN)
 	cond := p.parseExpr()
@@ -787,10 +791,11 @@ func (p *Parser) parseIfStmt() *IfStmt {
 			elseStmt = p.parseBlock()
 		}
 	}
-	return &IfStmt{Cond: cond, Then: then, ElseStmt: elseStmt}
+	return &IfStmt{Line: line, Cond: cond, Then: then, ElseStmt: elseStmt}
 }
 
 func (p *Parser) parseForStmt(label string) Stmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_FOR)
 
 	// Detect: for item in expr { }
@@ -800,7 +805,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		p.advance()                 // consume "in"
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{Label: label, IsRange: true, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Line: line, Label: label, IsRange: true, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// Detect: for (i, item) in expr { }
@@ -819,7 +824,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		p.advance()                      // in
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Line: line, Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// C-style: for (init; cond; post) { }
@@ -840,7 +845,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
-	return &ForStmt{Label: label, Init: init, Cond: cond, Post: post, Body: body}
+	return &ForStmt{Line: line, Label: label, Init: init, Cond: cond, Post: post, Body: body}
 }
 
 // parseVarOrAssign parses a var decl or assignment for use in for-init/post.
@@ -852,12 +857,13 @@ func (p *Parser) parseVarOrAssign() Stmt {
 }
 
 func (p *Parser) parseWhileStmt(label string) *WhileStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_WHILE)
 	p.expect(lexer.TOKEN_LPAREN)
 	cond := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
-	return &WhileStmt{Label: label, Cond: cond, Body: body}
+	return &WhileStmt{Line: line, Label: label, Cond: cond, Body: body}
 }
 
 func (p *Parser) parseGoStmt() *GoStmt {
@@ -878,14 +884,16 @@ func (p *Parser) parseOrHandler() *OrHandler {
 }
 
 func (p *Parser) parsePrintStmt() *PrintStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_PRINT)
 	p.expect(lexer.TOKEN_LPAREN)
 	val := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
-	return &PrintStmt{Value: val}
+	return &PrintStmt{Line: line, Value: val}
 }
 
 func (p *Parser) parseMatchStmt() *MatchStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_MATCH)
 	subject := p.parseExpr()
 	p.expect(lexer.TOKEN_LBRACE)
@@ -906,10 +914,11 @@ func (p *Parser) parseMatchStmt() *MatchStmt {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &MatchStmt{Subject: subject, Cases: cases}
+	return &MatchStmt{Line: line, Subject: subject, Cases: cases}
 }
 
 func (p *Parser) parseWithStmt() *WithStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_WITH)
 	p.expect(lexer.TOKEN_LPAREN)
 	var resources []*WithResource
@@ -927,10 +936,11 @@ func (p *Parser) parseWithStmt() *WithStmt {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
-	return &WithStmt{Resources: resources, Body: body}
+	return &WithStmt{Line: line, Resources: resources, Body: body}
 }
 
 func (p *Parser) parseExprOrAssignStmt() Stmt {
+	line := p.peek().Line
 	expr := p.parseExpr()
 
 	// Check for assignment operators
@@ -941,11 +951,11 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 		p.advance()
 		val := p.parseExpr()
 		handler := p.parseOrHandler()
-		return &AssignStmt{Target: expr, Op: tok.Literal, Value: val, OrHandler: handler}
+		return &AssignStmt{Line: line, Target: expr, Op: tok.Literal, Value: val, OrHandler: handler}
 	}
 
 	handler := p.parseOrHandler()
-	return &ExprStmt{Expr: expr, OrHandler: handler}
+	return &ExprStmt{Line: line, Expr: expr, OrHandler: handler}
 }
 
 // --- Declarations ------------------------------------------------------------
@@ -1059,6 +1069,7 @@ func (p *Parser) parseMethodSig() *MethodSig {
 }
 
 func (p *Parser) parseClassDecl() *ClassDecl {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_CLASS)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
@@ -1094,7 +1105,7 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ClassDecl{Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods}
+	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods}
 }
 
 func (p *Parser) parseInterfaceDecl() *InterfaceDecl {
@@ -1161,6 +1172,7 @@ func (p *Parser) parseCallTypeArgs() []string {
 }
 
 func (p *Parser) parseFnDecl(isPub bool) *FnDecl {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
@@ -1171,10 +1183,11 @@ func (p *Parser) parseFnDecl(isPub bool) *FnDecl {
 		retType = p.parseType()
 	}
 	body := p.parseBlock()
-	return &FnDecl{Name: name, IsPub: isPub, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+	return &FnDecl{Line: line, Name: name, IsPub: isPub, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseEnumDecl() *EnumDecl {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_ENUM)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.expect(lexer.TOKEN_LBRACE)
@@ -1188,7 +1201,7 @@ func (p *Parser) parseEnumDecl() *EnumDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &EnumDecl{Name: name, Variants: variants}
+	return &EnumDecl{Line: line, Name: name, Variants: variants}
 }
 
 func (p *Parser) parseImportDecl() *ImportDecl {

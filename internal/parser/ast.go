@@ -42,6 +42,7 @@ func (i *ImportDecl) topLevelTag() {}
 
 // ClassDecl: class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
+	Line       int // source line number (1-indexed)
 	Name       string
 	TypeParams []string // generic type parameter names
 	Parents    []string // base class + interfaces
@@ -92,6 +93,7 @@ func (m *MethodDecl) nodeTag() {}
 
 // FnDecl: [pub] fn name[<T, U>](params) [: ReturnType] { body }
 type FnDecl struct {
+	Line       int // source line number (1-indexed)
 	Name       string
 	IsPub      bool
 	TypeParams []string  // generic type parameter names, e.g. ["T", "U"]
@@ -106,6 +108,7 @@ func (f *FnDecl) topLevelTag() {}
 
 // EnumDecl: enum Color { Red, Green, Blue }
 type EnumDecl struct {
+	Line     int // source line number (1-indexed)
 	Name     string
 	Variants []string
 }
@@ -115,6 +118,7 @@ func (e *EnumDecl) topLevelTag() {}
 
 // ConstDecl: const NAME: Type = expr
 type ConstDecl struct {
+	Line  int // source line number (1-indexed)
 	Name  string
 	Type  TypeExpr // may be nil (inferred)
 	Value Expr
@@ -204,6 +208,7 @@ func (b *BlockStmt) stmtTag() {}
 
 // VarStmt: var name [: Type] = expr  OR  var name: Type
 type VarStmt struct {
+	Line      int // source line number (1-indexed)
 	Name      string
 	Type      TypeExpr   // may be nil (inferred)
 	Value     Expr       // may be nil
@@ -215,6 +220,7 @@ func (v *VarStmt) stmtTag() {}
 
 // TupleVarStmt: var (a, b) = expr  — multi-value unpacking
 type TupleVarStmt struct {
+	Line  int // source line number (1-indexed)
 	Names []string
 	Value Expr
 }
@@ -224,6 +230,7 @@ func (t *TupleVarStmt) stmtTag() {}
 
 // AssignStmt: target = expr  OR  target op= expr
 type AssignStmt struct {
+	Line      int // source line number (1-indexed)
 	Target    Expr
 	Op        string // "=", "+=", "-=", "*=", "/="
 	Value     Expr
@@ -235,6 +242,7 @@ func (a *AssignStmt) stmtTag() {}
 
 // ReturnStmt: return [expr]
 type ReturnStmt struct {
+	Line  int  // source line number (1-indexed)
 	Value Expr // nil for bare return
 }
 
@@ -243,6 +251,7 @@ func (r *ReturnStmt) stmtTag() {}
 
 // IfStmt: if (cond) { } [else { }]
 type IfStmt struct {
+	Line     int // source line number (1-indexed)
 	Cond     Expr
 	Then     *BlockStmt
 	ElseStmt Stmt // *BlockStmt or *IfStmt (else if)
@@ -253,6 +262,7 @@ func (i *IfStmt) stmtTag() {}
 
 // ForStmt: [@label] for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
 type ForStmt struct {
+	Line  int    // source line number (1-indexed)
 	Label string // optional label (from @label prefix)
 
 	// C-style
@@ -274,6 +284,7 @@ func (f *ForStmt) stmtTag() {}
 
 // WhileStmt: [@label] while (cond) { }
 type WhileStmt struct {
+	Line  int    // source line number (1-indexed)
 	Label string // optional label (from @label prefix)
 	Cond  Expr
 	Body  *BlockStmt
@@ -299,6 +310,7 @@ func (o *OrHandler) nodeTag() {}
 
 // PrintStmt: print(expr)
 type PrintStmt struct {
+	Line  int // source line number (1-indexed)
 	Value Expr
 }
 
@@ -307,6 +319,7 @@ func (p *PrintStmt) stmtTag() {}
 
 // ExprStmt wraps an expression used as a statement.
 type ExprStmt struct {
+	Line      int // source line number (1-indexed)
 	Expr      Expr
 	OrHandler *OrHandler // optional or { } handler for failable calls
 }
@@ -316,6 +329,7 @@ func (e *ExprStmt) stmtTag() {}
 
 // MatchStmt: match expr { case val => { body } ... _ => { body } }
 type MatchStmt struct {
+	Line    int // source line number (1-indexed)
 	Subject Expr
 	Cases   []*MatchCase
 }
@@ -364,6 +378,7 @@ type WithResource struct {
 // WithStmt: with (var name = expr [, var name = expr ...]) { body }
 // Each resource has .Close() deferred automatically.
 type WithStmt struct {
+	Line      int // source line number (1-indexed)
 	Resources []*WithResource
 	Body      *BlockStmt
 }
