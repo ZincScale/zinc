@@ -26,6 +26,44 @@ jobs:
       - name: Test
         run: go test ./...
 
+  smoke-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: Ubuntu
+            container: ''
+          - name: RHEL 8
+            container: redhat/ubi8:latest
+          - name: RHEL 9
+            container: redhat/ubi9:latest
+          - name: Amazon Linux 2023
+            container: amazonlinux:2023
+    name: smoke-test (${{ matrix.name }})
+    container: ${{ matrix.container || null }}
+    steps:
+      - name: Install system deps (RHEL/AL)
+        if: matrix.container != ''
+        run: |
+          if command -v dnf &>/dev/null; then
+            dnf install -y git tar gzip
+          elif command -v yum &>/dev/null; then
+            yum install -y git tar gzip
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build zinc
+        run: go build -o zinc ./cmd/zinc/
+
+      - name: E2E smoke tests
+        run: scripts/smoke-test.sh ./zinc
+
   govulncheck:
     runs-on: ubuntu-latest
     steps:
