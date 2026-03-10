@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zinc/internal/codegen"
+	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 	"zinc/internal/typechecker"
@@ -134,9 +135,11 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 
 	// Type checking across all files in this directory
 	if tcErrs := typechecker.CheckAll(progs); len(tcErrs) > 0 {
-		for _, e := range tcErrs {
-			fmt.Fprintf(os.Stderr, "%s: type error: %s\n", dir, e)
+		strs := make([]string, len(tcErrs))
+		for i, e := range tcErrs {
+			strs[i] = e.String()
 		}
+		errs.TypeErrors(dir, strs)
 		return nil, fmt.Errorf("%s: %d type error(s) found", dir, len(tcErrs))
 	}
 

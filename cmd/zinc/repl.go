@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zinc/internal/codegen"
+	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 	"zinc/internal/typechecker"
@@ -233,7 +234,7 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
 		for _, e := range l.Errors {
-			fmt.Fprintln(os.Stderr, "lex:", e)
+			errs.ReplError("lex", e)
 		}
 		return
 	}
@@ -242,14 +243,14 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	prog := p.Parse()
 	if len(p.Errors) > 0 {
 		for _, e := range p.Errors {
-			fmt.Fprintln(os.Stderr, "parse:", e)
+			errs.ReplError("parse", e)
 		}
 		return
 	}
 
-	if errs := typechecker.Check(prog); len(errs) > 0 {
-		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, "type error:", e)
+	if tcErrs := typechecker.Check(prog); len(tcErrs) > 0 {
+		for _, e := range tcErrs {
+			errs.ReplError("type error", e.String())
 		}
 		return
 	}
@@ -260,13 +261,13 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	// Write to temp file and run
 	tmp, err := os.CreateTemp("", "zinc_repl_*.go")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		errs.Error(err.Error())
 		return
 	}
 	defer os.Remove(tmp.Name())
 
 	if _, err := tmp.WriteString(goSrc); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		errs.Error(err.Error())
 		return
 	}
 	tmp.Close()

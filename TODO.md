@@ -4,13 +4,19 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 ---
 
-## Tier 1 — Next Up (developer experience polish)
+## Tier 1 — Next Up
+
+*Empty — all items moved to Revisit Later or Completed.*
+
+## Revisit Later
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 1 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| 2 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 3 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
+| - | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| - | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
 
 ---
 
@@ -52,7 +58,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | 8 | **VS Code extension** (syntax highlighting) | Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments | Quick |
 | 9 | **`zinc fmt`** | Format .zn files consistently | Medium |
 | 10 | **`zinc test`** | Run tests without manual `go test` | Quick |
-| 11 | **Color error output** | Colored, well-formatted errors with source context | Quick |
+| ~~11~~ | ~~**Color error output**~~ | ~~Done — `internal/errs/color.go`; ANSI colors with auto-disable for non-TTY~~ | ~~Done~~ |
 | 12 | **Better project-mode error messages** | Show .zn filename (not dir) in multi-file type errors | Quick |
 | 13 | **Error suggestions** | "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes | Medium |
 
@@ -82,6 +88,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 ---
 
 ## Completed
+- Color error output with ANSI colors (auto-disabled in CI/piped output)
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)
 - GitHub Actions CI with matrix testing (Go 1.23–1.26) and `govulncheck`
 - E2e smoke tests in CI (`scripts/smoke-test.sh` — transpile + compile + run all 18 examples)

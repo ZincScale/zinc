@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"zinc/internal/codegen"
+	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 	"zinc/internal/typechecker"
@@ -20,7 +21,7 @@ func runWatch(inFile, outFile string) {
 	// Record initial mod time so we only transpile on actual changes
 	info, err := os.Stat(inFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		errs.Errorf("watch: %v", err)
 		os.Exit(1)
 	}
 	lastMod := info.ModTime()
@@ -30,7 +31,8 @@ func runWatch(inFile, outFile string) {
 
 		info, err := os.Stat(inFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+			ts := time.Now().Format("15:04:05")
+			errs.WatchError(ts, fmt.Sprintf("stat: %v", err))
 			continue
 		}
 
@@ -46,35 +48,30 @@ func watchTranspile(inFile, outFile string) {
 
 	src, err := os.ReadFile(inFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[%s] error reading %s: %v\n", ts, inFile, err)
+		errs.WatchError(ts, fmt.Sprintf("reading %s: %v", inFile, err))
 		return
 	}
 
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
-		fmt.Fprintf(os.Stderr, "[%s] lex errors:\n", ts)
-		for _, e := range l.Errors {
-			fmt.Fprintf(os.Stderr, "  %s:%s\n", inFile, e)
-		}
+		errs.WatchErrors(ts, inFile, "lex", l.Errors)
 		return
 	}
 
 	p := parser.New(tokens)
 	prog := p.Parse()
 	if len(p.Errors) > 0 {
-		fmt.Fprintf(os.Stderr, "[%s] parse errors:\n", ts)
-		for _, e := range p.Errors {
-			fmt.Fprintf(os.Stderr, "  %s:%s\n", inFile, e)
-		}
+		errs.WatchErrors(ts, inFile, "parse", p.Errors)
 		return
 	}
 
-	if errs := typechecker.Check(prog); len(errs) > 0 {
-		fmt.Fprintf(os.Stderr, "[%s] type errors:\n", ts)
-		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "  %s\n", e)
+	if tcErrs := typechecker.Check(prog); len(tcErrs) > 0 {
+		strs := make([]string, len(tcErrs))
+		for i, e := range tcErrs {
+			strs[i] = e.String()
 		}
+		errs.WatchErrors(ts, inFile, "type", strs)
 		return
 	}
 
@@ -89,7 +86,7 @@ func watchTranspile(inFile, outFile string) {
 	}
 
 	if err := os.WriteFile(dest, []byte(goSrc), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "[%s] error writing %s: %v\n", ts, dest, err)
+		errs.WatchError(ts, fmt.Sprintf("writing %s: %v", dest, err))
 		return
 	}
 

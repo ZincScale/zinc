@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zinc/internal/codegen"
+	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 	"zinc/internal/project"
@@ -57,23 +58,23 @@ func main() {
 			if name == "" {
 				dir, err := os.Getwd()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					errs.Error(err.Error())
 					os.Exit(1)
 				}
 				name = filepath.Base(dir)
 			}
 			if _, err := os.Stat("go.mod"); err == nil {
-				fmt.Fprintln(os.Stderr, "error: go.mod already exists")
+				errs.Error("go.mod already exists")
 				os.Exit(1)
 			}
 			gomod := fmt.Sprintf("module %s\n\ngo 1.26\n", name)
 			if err := os.WriteFile("go.mod", []byte(gomod), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "error writing go.mod: %v\n", err)
+				errs.Errorf("writing go.mod: %v", err)
 				os.Exit(1)
 			}
 			mainZn := "fn main() {\n    print(\"Hello from Zinc!\")\n}\n"
 			if err := os.WriteFile("main.zn", []byte(mainZn), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "error writing main.zn: %v\n", err)
+				errs.Errorf("writing main.zn: %v", err)
 				os.Exit(1)
 			}
 			fmt.Printf("initialized project %q\n", name)
@@ -90,7 +91,7 @@ func main() {
 				i++
 			}
 			if err := project.Build(dir); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				errs.Error(err.Error())
 				os.Exit(1)
 			}
 			return
@@ -101,7 +102,7 @@ func main() {
 				i++
 			}
 			if err := project.Run(dir); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				errs.Error(err.Error())
 				os.Exit(1)
 			}
 			return
@@ -137,7 +138,7 @@ func main() {
 
 	src, err := os.ReadFile(inFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", inFile, err)
+		errs.FileError(inFile, err.Error())
 		os.Exit(1)
 	}
 
@@ -145,9 +146,7 @@ func main() {
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
-		for _, e := range l.Errors {
-			fmt.Fprintf(os.Stderr, "%s:%s\n", inFile, e)
-		}
+		errs.FileErrors(inFile, l.Errors)
 		os.Exit(1)
 	}
 
@@ -159,9 +158,7 @@ func main() {
 	p := parser.New(tokens)
 	prog := p.Parse()
 	if len(p.Errors) > 0 {
-		for _, e := range p.Errors {
-			fmt.Fprintf(os.Stderr, "%s:%s\n", inFile, e)
-		}
+		errs.FileErrors(inFile, p.Errors)
 		os.Exit(1)
 	}
 
@@ -170,10 +167,12 @@ func main() {
 	}
 
 	// Type checking
-	if errs := typechecker.Check(prog); len(errs) > 0 {
-		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "%s: type error: %s\n", inFile, e)
+	if tcErrs := typechecker.Check(prog); len(tcErrs) > 0 {
+		strs := make([]string, len(tcErrs))
+		for i, e := range tcErrs {
+			strs[i] = e.String()
 		}
+		errs.TypeErrors(inFile, strs)
 		os.Exit(1)
 	}
 
@@ -191,14 +190,14 @@ func main() {
 
 	// Write output
 	if err := os.WriteFile(outFile, []byte(goSrc), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "error writing %s: %v\n", outFile, err)
+		errs.Errorf("writing %s: %v", outFile, err)
 		os.Exit(1)
 	}
 
 	// Run gofmt
 	cmd := exec.Command("gofmt", "-w", outFile)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "gofmt warning: %v\n%s\n", err, string(out))
+		errs.Warningf("gofmt: %v\n%s", err, string(out))
 	}
 
 	fmt.Printf("transpiled %s → %s\n", inFile, outFile)
