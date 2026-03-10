@@ -4,15 +4,19 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-10
+
 ### Added
 - GitHub Actions CI with Go 1.23–1.26 matrix testing
 - E2E smoke tests on Ubuntu, RHEL 8, RHEL 9, and Amazon Linux 2023
-- `govulncheck` in CI pipeline
+- `govulncheck` vulnerability scanning in CI pipeline
 - Goreleaser for cross-platform binary releases (linux/mac/windows, amd64/arm64)
 - Semantic versioning policy (`VERSIONING.md`)
+- CHANGELOG.md
 
 ### Changed
 - Minimum Go version bumped from 1.21 to 1.26
+- Version is now injected at build time via ldflags
 
 ## [0.1.0] - 2025-01-01
 

@@ -2,7 +2,7 @@
 
 Zinc follows [Semantic Versioning 2.0.0](https://semver.org/).
 
-## Current version: 0.1.0
+## Current version: 0.2.0
 
 ## Pre-1.0 rules (0.x.y)
 
