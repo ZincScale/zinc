@@ -62,6 +62,7 @@ type Checker struct {
 	currentReturnType Type       // TypeVoid outside any fn
 	currentClass      *ClassType // non-nil inside a method body
 	currentTypeParams map[string]bool
+	currentLine       int
 }
 
 func newChecker() *Checker {
@@ -266,6 +267,7 @@ func (c *Checker) checkProgram(prog *parser.Program) {
 }
 
 func (c *Checker) checkFnDecl(d *parser.FnDecl) {
+	c.currentLine = d.Line
 	// Activate type params
 	saved := c.currentTypeParams
 	c.currentTypeParams = make(map[string]bool)
@@ -295,6 +297,7 @@ func (c *Checker) checkFnDecl(d *parser.FnDecl) {
 }
 
 func (c *Checker) checkClassDecl(d *parser.ClassDecl) {
+	c.currentLine = d.Line
 	ct := c.classes[d.Name]
 	if ct == nil {
 		return
@@ -308,7 +311,7 @@ func (c *Checker) checkClassDecl(d *parser.ClassDecl) {
 		if _, ok := c.interfaces[parent]; ok {
 			continue
 		}
-		c.errorf(0, 0, "undefined class/interface %q (used as parent of %s)", parent, d.Name)
+		c.errorf(c.currentLine, 0, "undefined class/interface %q (used as parent of %s)", parent, d.Name)
 	}
 
 	// Activate type params
@@ -385,6 +388,32 @@ func (c *Checker) checkBlock(b *parser.BlockStmt) {
 }
 
 func (c *Checker) checkStmt(stmt parser.Stmt) {
+	// Update current line from statement for error reporting
+	switch s := stmt.(type) {
+	case *parser.VarStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.TupleVarStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.AssignStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.ReturnStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.IfStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.ForStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.WhileStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.PrintStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.ExprStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.MatchStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	case *parser.WithStmt:
+		if s.Line > 0 { c.currentLine = s.Line }
+	}
+
 	switch s := stmt.(type) {
 	case *parser.VarStmt:
 		c.checkVarStmt(s)
@@ -440,11 +469,12 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 }
 
 func (c *Checker) checkConstDecl(d *parser.ConstDecl) {
+	c.currentLine = d.Line
 	valType := c.inferExpr(d.Value)
 	if d.Type != nil {
 		declaredType := c.resolveTypeExpr(d.Type)
 		if !Assignable(valType, declaredType) {
-			c.errorf(0, 0, "type mismatch: cannot assign %s to const %s of type %s", valType, d.Name, declaredType)
+			c.errorf(c.currentLine, 0, "type mismatch: cannot assign %s to const %s of type %s", valType, d.Name, declaredType)
 		}
 		c.scope.define(d.Name, declaredType)
 	} else {
@@ -465,7 +495,7 @@ func (c *Checker) checkVarStmt(s *parser.VarStmt) {
 
 	if declaredType != nil && s.Value != nil {
 		if !Assignable(inferredType, declaredType) {
-			c.errorf(0, 0, "type mismatch: cannot assign %s to %s", inferredType, declaredType)
+			c.errorf(c.currentLine, 0, "type mismatch: cannot assign %s to %s", inferredType, declaredType)
 		}
 		// Propagate declared type to empty literals
 		if ll, ok := s.Value.(*parser.ListLit); ok && ll.ResolvedType == "" {
@@ -498,7 +528,7 @@ func (c *Checker) checkAssignStmt(s *parser.AssignStmt) {
 	if id, ok := s.Target.(*parser.Ident); ok {
 		if targetType, found := c.scope.lookup(id.Name); found {
 			if s.Op == "=" && !Assignable(valType, targetType) {
-				c.errorf(0, 0, "type mismatch: cannot assign %s to %s", valType, targetType)
+				c.errorf(c.currentLine, 0, "type mismatch: cannot assign %s to %s", valType, targetType)
 			}
 		}
 		// If not found in scope, it might be a new assignment — no error
@@ -512,20 +542,20 @@ func (c *Checker) checkAssignStmt(s *parser.AssignStmt) {
 func (c *Checker) checkReturnStmt(s *parser.ReturnStmt) {
 	if s.Value == nil {
 		if c.currentReturnType != TypeVoid && c.currentReturnType != TypeUnknown {
-			c.errorf(0, 0, "return type mismatch: expected %s, got Void", c.currentReturnType)
+			c.errorf(c.currentLine, 0, "return type mismatch: expected %s, got Void", c.currentReturnType)
 		}
 		return
 	}
 	retType := c.inferExpr(s.Value)
 	if !Assignable(retType, c.currentReturnType) {
-		c.errorf(0, 0, "return type mismatch: expected %s, got %s", c.currentReturnType, retType)
+		c.errorf(c.currentLine, 0, "return type mismatch: expected %s, got %s", c.currentReturnType, retType)
 	}
 }
 
 func (c *Checker) checkIfStmt(s *parser.IfStmt) {
 	condType := c.inferExpr(s.Cond)
 	if condType != TypeUnknown && !TypeEqual(condType, TypeBool) {
-		c.errorf(0, 0, "condition must be Bool, got %s", condType)
+		c.errorf(c.currentLine, 0, "condition must be Bool, got %s", condType)
 	}
 	c.checkBlock(s.Then)
 	if s.ElseStmt != nil {
@@ -536,7 +566,7 @@ func (c *Checker) checkIfStmt(s *parser.IfStmt) {
 func (c *Checker) checkWhileStmt(s *parser.WhileStmt) {
 	condType := c.inferExpr(s.Cond)
 	if condType != TypeUnknown && !TypeEqual(condType, TypeBool) {
-		c.errorf(0, 0, "condition must be Bool, got %s", condType)
+		c.errorf(c.currentLine, 0, "condition must be Bool, got %s", condType)
 	}
 	c.checkBlock(s.Body)
 }
@@ -564,7 +594,7 @@ func (c *Checker) checkForStmt(s *parser.ForStmt) {
 	if s.Cond != nil {
 		condType := c.inferExpr(s.Cond)
 		if condType != TypeUnknown && !TypeEqual(condType, TypeBool) {
-			c.errorf(0, 0, "condition must be Bool, got %s", condType)
+			c.errorf(c.currentLine, 0, "condition must be Bool, got %s", condType)
 		}
 	}
 	if s.Post != nil {
@@ -767,7 +797,7 @@ func (c *Checker) inferIdent(e *parser.Ident) Type {
 	if ct, ok := c.classes[e.Name]; ok {
 		return ct
 	}
-	c.errorf(0, 0, "undefined variable %q", e.Name)
+	c.errorf(c.currentLine, 0, "undefined variable %q", e.Name)
 	return TypeUnknown
 }
 
@@ -787,17 +817,17 @@ func (c *Checker) inferBinary(e *parser.BinaryExpr) Type {
 		if isNumeric(leftType) && isNumeric(rightType) {
 			return widerNumeric(leftType, rightType)
 		}
-		c.errorf(0, 0, "type mismatch: operator + not applicable to %s and %s", leftType, rightType)
+		c.errorf(c.currentLine, 0, "type mismatch: operator + not applicable to %s and %s", leftType, rightType)
 		return TypeUnknown
 	case "-", "*", "/", "%":
 		if isNumeric(leftType) && isNumeric(rightType) {
 			return widerNumeric(leftType, rightType)
 		}
-		c.errorf(0, 0, "type mismatch: operator %s not applicable to %s and %s", e.Op, leftType, rightType)
+		c.errorf(c.currentLine, 0, "type mismatch: operator %s not applicable to %s and %s", e.Op, leftType, rightType)
 		return TypeUnknown
 	case "==", "!=":
 		if !TypeEqual(leftType, rightType) {
-			c.errorf(0, 0, "type mismatch: cannot compare %s and %s", leftType, rightType)
+			c.errorf(c.currentLine, 0, "type mismatch: cannot compare %s and %s", leftType, rightType)
 		}
 		return TypeBool
 	case "<", "<=", ">", ">=":
@@ -805,14 +835,14 @@ func (c *Checker) inferBinary(e *parser.BinaryExpr) Type {
 			(leftType == TypeString && rightType == TypeString) {
 			return TypeBool
 		}
-		c.errorf(0, 0, "type mismatch: operator %s not applicable to %s and %s", e.Op, leftType, rightType)
+		c.errorf(c.currentLine, 0, "type mismatch: operator %s not applicable to %s and %s", e.Op, leftType, rightType)
 		return TypeUnknown
 	case "&&", "||":
 		if !TypeEqual(leftType, TypeBool) {
-			c.errorf(0, 0, "type mismatch: operator %s requires Bool, got %s", e.Op, leftType)
+			c.errorf(c.currentLine, 0, "type mismatch: operator %s requires Bool, got %s", e.Op, leftType)
 		}
 		if !TypeEqual(rightType, TypeBool) {
-			c.errorf(0, 0, "type mismatch: operator %s requires Bool, got %s", e.Op, rightType)
+			c.errorf(c.currentLine, 0, "type mismatch: operator %s requires Bool, got %s", e.Op, rightType)
 		}
 		return TypeBool
 	}
@@ -824,12 +854,12 @@ func (c *Checker) inferUnary(e *parser.UnaryExpr) Type {
 	switch e.Op {
 	case "!":
 		if operandType != TypeUnknown && !TypeEqual(operandType, TypeBool) {
-			c.errorf(0, 0, "type mismatch: operator ! requires Bool, got %s", operandType)
+			c.errorf(c.currentLine, 0, "type mismatch: operator ! requires Bool, got %s", operandType)
 		}
 		return TypeBool
 	case "-":
 		if operandType != TypeUnknown && !isNumeric(operandType) {
-			c.errorf(0, 0, "type mismatch: operator - requires numeric type, got %s", operandType)
+			c.errorf(c.currentLine, 0, "type mismatch: operator - requires numeric type, got %s", operandType)
 		}
 		return operandType
 	}
@@ -911,7 +941,7 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 
 	// Reject `.method()` on nullable types — must use `?.method()`
 	if opt, ok := objType.(*OptionalType); ok {
-		c.errorf(0, 0, "cannot call method %q on nullable type %s; use '?.' for safe access", sel.Field, opt)
+		c.errorf(c.currentLine, 0, "cannot call method %q on nullable type %s; use '?.' for safe access", sel.Field, opt)
 		return TypeUnknown
 	}
 
@@ -920,7 +950,7 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 			c.validateArgs(sig, ct.Name+"."+sel.Field, args, namedArgs)
 			return sig.Return
 		}
-		c.errorf(0, 0, "undefined method %q on %s", sel.Field, ct.Name)
+		c.errorf(c.currentLine, 0, "undefined method %q on %s", sel.Field, ct.Name)
 		return TypeUnknown
 	}
 
@@ -928,7 +958,7 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 		if sig, found := it.Methods[sel.Field]; found {
 			return sig.Return
 		}
-		c.errorf(0, 0, "undefined method %q on %s", sel.Field, it.Name)
+		c.errorf(c.currentLine, 0, "undefined method %q on %s", sel.Field, it.Name)
 		return TypeUnknown
 	}
 
@@ -944,7 +974,7 @@ func (c *Checker) inferSelector(e *parser.SelectorExpr) Type {
 
 	// Reject `.` on nullable types — must use `?.`
 	if opt, ok := objType.(*OptionalType); ok {
-		c.errorf(0, 0, "cannot access member %q on nullable type %s; use '?.' for safe access", e.Field, opt)
+		c.errorf(c.currentLine, 0, "cannot access member %q on nullable type %s; use '?.' for safe access", e.Field, opt)
 		return TypeUnknown
 	}
 
@@ -956,7 +986,7 @@ func (c *Checker) inferSelector(e *parser.SelectorExpr) Type {
 					return et
 				}
 			}
-			c.errorf(0, 0, "undefined variant %q on enum %s", e.Field, id.Name)
+			c.errorf(c.currentLine, 0, "undefined variant %q on enum %s", e.Field, id.Name)
 			return TypeUnknown
 		}
 	}
@@ -969,7 +999,7 @@ func (c *Checker) inferSelector(e *parser.SelectorExpr) Type {
 		if _, found := c.findMethod(ct, e.Field); found {
 			return TypeUnknown // method reference, not invoked
 		}
-		c.errorf(0, 0, "undefined field %q on %s", e.Field, ct.Name)
+		c.errorf(c.currentLine, 0, "undefined field %q on %s", e.Field, ct.Name)
 		return TypeUnknown
 	}
 
@@ -999,7 +1029,7 @@ func (c *Checker) inferSafeNav(e *parser.SafeNavExpr) Type {
 	// Unwrap OptionalType to get inner type
 	inner, isOptional := objType.(*OptionalType)
 	if !isOptional {
-		c.errorf(0, 0, "unnecessary safe call on non-null type %s; use '.' instead", objType)
+		c.errorf(c.currentLine, 0, "unnecessary safe call on non-null type %s; use '.' instead", objType)
 		// Still resolve the field/method for downstream checking
 		return c.resolveMemberType(objType, e.Field, e.Call)
 	}
@@ -1130,7 +1160,7 @@ func commonType(types []Type) Type {
 
 func (c *Checker) inferThis() Type {
 	if c.currentClass == nil {
-		c.errorf(0, 0, `"this" used outside of a class method`)
+		c.errorf(c.currentLine, 0, `"this" used outside of a class method`)
 		return TypeUnknown
 	}
 	return c.currentClass
@@ -1149,7 +1179,7 @@ func (c *Checker) inferSend(e *parser.SendExpr) {
 	valType := c.inferExpr(e.Value)
 	if ct, ok := chType.(*ChanType); ok {
 		if !Assignable(valType, ct.Elem) {
-			c.errorf(0, 0, "type mismatch: cannot send %s to Chan<%s>", valType, ct.Elem)
+			c.errorf(c.currentLine, 0, "type mismatch: cannot send %s to Chan<%s>", valType, ct.Elem)
 		}
 	}
 }
@@ -1182,7 +1212,7 @@ func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, 
 	}
 	totalProvided := len(args) + len(namedArgs)
 	if totalProvided > len(sig.Params) {
-		c.errorf(0, 0, "too many arguments to %s: expected at most %d, got %d",
+		c.errorf(c.currentLine, 0, "too many arguments to %s: expected at most %d, got %d",
 			callName, len(sig.Params), totalProvided)
 		return
 	}
@@ -1196,7 +1226,7 @@ func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, 
 			}
 		}
 		if !found {
-			c.errorf(0, 0, "unknown named argument %q to %s", na.Name, callName)
+			c.errorf(c.currentLine, 0, "unknown named argument %q to %s", na.Name, callName)
 		}
 	}
 	// Check all required params are covered
@@ -1222,7 +1252,7 @@ func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, 
 				if i < len(sig.ParamNames) {
 					paramName = sig.ParamNames[i]
 				}
-				c.errorf(0, 0, "missing required argument %q to %s", paramName, callName)
+				c.errorf(c.currentLine, 0, "missing required argument %q to %s", paramName, callName)
 			}
 		}
 	}

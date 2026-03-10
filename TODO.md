@@ -61,3 +61,6 @@ Prioritized for shipping a usable language binary people can try out.
 - List/string slicing (`list[1:3]`, `s[2:]`, `.slice()` method)
 - Source maps (`//line` directives map Go compiler errors back to `.zn` lines)
 - Multi-file project completion (cross-file ctors, failable detection, default/named args via shared registry)
+- `zinc init` project scaffolding (creates `go.mod` + `main.zn`)
+- `--version` flag
+- Type checker error line numbers (all errors now report source line)

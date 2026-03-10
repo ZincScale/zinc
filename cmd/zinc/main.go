@@ -20,6 +20,7 @@ Usage:
   zinc <file.zn> [flags]   Transpile a single file
   zinc build [dir]         Transpile all .zn files in project and run go build
   zinc run [dir]           Transpile all .zn files and run the project
+  zinc init [name]         Initialize a new Zinc project
   zinc repl                Launch interactive REPL
 
 Flags:
@@ -27,6 +28,7 @@ Flags:
   --verbose    Print tokens and AST summary after transpiling
   --run        Transpile and immediately run with 'go run'
   --watch      Watch file for changes and re-transpile automatically
+  --version    Print version and exit
 `
 
 func main() {
@@ -40,6 +42,41 @@ func main() {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--version" || a == "-V":
+			fmt.Println("zinc version 0.1.0")
+			return
+		case a == "init":
+			name := ""
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				name = args[i+1]
+				i++
+			}
+			if name == "" {
+				dir, err := os.Getwd()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				name = filepath.Base(dir)
+			}
+			if _, err := os.Stat("go.mod"); err == nil {
+				fmt.Fprintln(os.Stderr, "error: go.mod already exists")
+				os.Exit(1)
+			}
+			gomod := fmt.Sprintf("module %s\n\ngo 1.21\n", name)
+			if err := os.WriteFile("go.mod", []byte(gomod), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing go.mod: %v\n", err)
+				os.Exit(1)
+			}
+			mainZn := "fn main() {\n    print(\"Hello from Zinc!\")\n}\n"
+			if err := os.WriteFile("main.zn", []byte(mainZn), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing main.zn: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("initialized project %q\n", name)
+			fmt.Println("  created go.mod")
+			fmt.Println("  created main.zn")
+			return
 		case a == "repl":
 			runREPL()
 			return

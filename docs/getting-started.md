@@ -10,6 +10,15 @@ go build -o zinc ./cmd/zinc/
 
 Requires **Go 1.21+**.
 
+## Quick Start
+
+```bash
+mkdir myproject && cd myproject
+zinc init myproject          # creates go.mod + main.zn
+zinc run                     # transpile and run
+zinc build                   # transpile and compile to binary
+```
+
 ## CLI Usage
 
 ```bash
@@ -18,7 +27,11 @@ zinc <file.zn> -o out.go     # specify output file
 zinc <file.zn> --run         # transpile and run immediately
 zinc <file.zn> --watch       # watch for changes, re-transpile automatically
 zinc <file.zn> --verbose     # show token/AST debug info
+zinc init [name]             # initialize a new project (creates go.mod + main.zn)
+zinc build [dir]             # transpile all .zn files and compile with go build
+zinc run [dir]               # transpile all .zn files and run
 zinc repl                    # launch interactive REPL
+zinc --version               # print version
 ```
 
 ## Running Examples

@@ -67,6 +67,29 @@ func TestDeclaredVariableOK(t *testing.T) {
 	noErrors(t, errs, src)
 }
 
+// --- Line numbers in errors ---------------------------------------------------
+
+func TestErrorLineNumbers(t *testing.T) {
+	src := `fn main() {
+    var x: Int = "hello"
+    var y: Bool = 42
+}`
+	errs := checkSrc(src)
+	if len(errs) < 2 {
+		t.Fatalf("expected at least 2 errors, got %d", len(errs))
+	}
+	if errs[0].Line != 2 {
+		t.Errorf("expected first error on line 2, got line %d: %s", errs[0].Line, errs[0].Msg)
+	}
+	if errs[1].Line != 3 {
+		t.Errorf("expected second error on line 3, got line %d: %s", errs[1].Line, errs[1].Msg)
+	}
+	// Verify String() includes line number
+	if !strings.Contains(errs[0].String(), "line 2:") {
+		t.Errorf("expected 'line 2:' in error string, got: %s", errs[0].String())
+	}
+}
+
 // --- 2. Type mismatch in var decl --------------------------------------------
 
 func TestVarTypeMismatch(t *testing.T) {
