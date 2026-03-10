@@ -16,6 +16,8 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
 | - | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
+| - | **Generic empty list literal inference** (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`) | Typechecker needs to propagate field type into list/map literals in generic context | Medium |
+| - | **Generic constructor type inference** (`Container.new(items)` without explicit type param) | Go can infer type params from arguments, but codegen needs to emit `NewContainer(items)` without `[T]` when inferable | Quick |
 
 ---
 
@@ -166,3 +168,4 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Safe navigation works with interface types (`d?.name` → `d.GetName()` for nilable interface-typed vars)
 - Failable method detection through interface-typed params (`v.validate()` correctly detects error returns)
 - Void-failable tracking for class methods (auto `return nil`, correct `err :=` vs `_, err :=`)
+- Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)

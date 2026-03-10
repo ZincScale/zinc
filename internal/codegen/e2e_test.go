@@ -2031,3 +2031,53 @@ fn main() {
 }`)
 	assertOutput(t, out, "84\n3.14")
 }
+
+func TestE2EGenericClassThroughInterface(t *testing.T) {
+	out := e2eRun(t, `
+class Box<T> {
+    var value: T
+
+    new(value: T) {
+        this.value = value
+    }
+
+    pub fn getValue(): T {
+        return this.value
+    }
+}
+
+fn printBox(b: Box<Int>) {
+    print(b.getValue())
+}
+
+fn main() {
+    var b = Box.new(42)
+    printBox(b)
+    print(b.getValue())
+}`)
+	assertOutput(t, out, "42\n42")
+}
+
+func TestE2EGenericClassFieldAccessThroughInterface(t *testing.T) {
+	out := e2eRun(t, `
+class Pair<K, V> {
+    var key: K
+    var val: V
+
+    new(key: K, val: V) {
+        this.key = key
+        this.val = val
+    }
+}
+
+fn printPairKey(p: Pair<String, Int>) {
+    print(p.key)
+}
+
+fn main() {
+    var p = Pair.new("hello", 42)
+    printPairKey(p)
+    print(p.key)
+}`)
+	assertOutput(t, out, "hello\nhello")
+}

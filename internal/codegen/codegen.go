@@ -1073,6 +1073,9 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
 			g.interfaceVars[p.Name] = st.Name
 		}
+		if gt, ok := p.Type.(*parser.GenericType); ok && g.classNames[gt.Name] {
+			g.interfaceVars[p.Name] = gt.Name
+		}
 	}
 	g.emitBlock(m.Body)
 	// Void-failable methods need explicit return nil at end
@@ -1147,6 +1150,9 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 	for _, p := range fn.Params {
 		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
 			g.interfaceVars[p.Name] = st.Name
+		}
+		if gt, ok := p.Type.(*parser.GenericType); ok && g.classNames[gt.Name] {
+			g.interfaceVars[p.Name] = gt.Name
 		}
 	}
 	g.emitBlock(fn.Body)
@@ -2334,6 +2340,9 @@ func (g *Generator) isBuiltinReceiver(sel *parser.SelectorExpr) bool {
 		}
 		if _, ok := g.classVars[ident.Name]; ok {
 			return false // variable holding a Zinc class instance
+		}
+		if _, ok := g.interfaceVars[ident.Name]; ok {
+			return false // interface-typed variable (class param)
 		}
 		// Also check if receiver matches the method receiver name (inside class methods)
 		if g.receiver != "" && ident.Name == g.receiver {

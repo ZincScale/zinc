@@ -396,6 +396,25 @@ fn check(v: Validator) {
 }
 ```
 
+Generic classes also work through interface-typed parameters:
+
+```zinc
+class Pair<K, V> {
+    var key: K
+    var val: V
+    new(key: K, val: V) { this.key = key; this.val = val }
+}
+
+fn printKey(p: Pair<String, Int>) {
+    print(p.key)   // uses p.GetKey() under the hood
+}
+
+fn main() {
+    var p = Pair.new("hello", 42)
+    printKey(p)     // hello
+}
+```
+
 ## Enums
 
 ```zinc
