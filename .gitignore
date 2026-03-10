@@ -1,3 +1,7 @@
 /zinc
 /growl
 /gwen
+
+# Generated .go files from local zinc runs (root dir)
+/*.go
+!/go.mod
