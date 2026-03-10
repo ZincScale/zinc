@@ -59,7 +59,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | 9 | **`zinc fmt`** | Format .zn files consistently | Medium |
 | 10 | **`zinc test`** | Run tests without manual `go test` | Quick |
 | ~~11~~ | ~~**Color error output**~~ | ~~Done — `internal/errs/color.go`; ANSI colors with auto-disable for non-TTY~~ | ~~Done~~ |
-| 12 | **Better project-mode error messages** | Show .zn filename (not dir) in multi-file type errors | Quick |
+| ~~12~~ | ~~**Better project-mode error messages**~~ | ~~Done — errors now show .zn filename instead of directory~~ | ~~Done~~ |
 | 13 | **Error suggestions** | "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes | Medium |
 
 ---
@@ -89,6 +89,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 
 ## Completed
 - Color error output with ANSI colors (auto-disabled in CI/piped output)
+- Project-mode errors now show .zn filename instead of directory path
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)
 - GitHub Actions CI with matrix testing (Go 1.23–1.26) and `govulncheck`
 - E2e smoke tests in CI (`scripts/smoke-test.sh` — transpile + compile + run all 18 examples)

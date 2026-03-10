@@ -4,6 +4,12 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- Colored error output with ANSI terminal detection (auto-disabled in CI/pipes)
+- Project-mode errors now show `.zn` filename instead of directory path
+  - Before: `type error[/home/user/myapp]: line 2: ...`
+  - After: `type error[main.zn]: line 2: ...`
+
 ## [0.2.0] - 2026-03-10
 
 ### Added

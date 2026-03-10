@@ -11,12 +11,16 @@ import (
 
 // TypeError describes a type-checking error with source location.
 type TypeError struct {
+	File string // source file (set in multi-file mode)
 	Line int
 	Col  int
 	Msg  string
 }
 
 func (e TypeError) String() string {
+	if e.File != "" && e.Line > 0 {
+		return fmt.Sprintf("%s line %d: %s", e.File, e.Line, e.Msg)
+	}
 	if e.Line > 0 {
 		return fmt.Sprintf("line %d: %s", e.Line, e.Msg)
 	}
@@ -63,6 +67,7 @@ type Checker struct {
 	currentClass      *ClassType // non-nil inside a method body
 	currentTypeParams map[string]bool
 	currentLine       int
+	currentFile       string // source file being checked (multi-file mode)
 }
 
 func newChecker() *Checker {
@@ -79,6 +84,7 @@ func newChecker() *Checker {
 
 func (c *Checker) errorf(line, col int, format string, args ...any) {
 	c.errors = append(c.errors, TypeError{
+		File: c.currentFile,
 		Line: line,
 		Col:  col,
 		Msg:  fmt.Sprintf(format, args...),
@@ -110,8 +116,10 @@ func CheckAll(progs []*parser.Program) []TypeError {
 	c := newChecker()
 	c.prePass(progs)
 	for _, prog := range progs {
+		c.currentFile = prog.SourceFile
 		c.checkProgram(prog)
 	}
+	c.currentFile = ""
 	return c.errors
 }
 

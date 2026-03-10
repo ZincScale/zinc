@@ -9,9 +9,10 @@ type Node interface {
 
 // Program is the root AST node.
 type Program struct {
-	Package  *PackageDecl   // optional package declaration (nil = package main)
-	Imports  []*ImportDecl
-	Decls    []TopLevelDecl // ClassDecl | InterfaceDecl | FnDecl
+	SourceFile string             // source .zn file (set by project mode)
+	Package    *PackageDecl       // optional package declaration (nil = package main)
+	Imports    []*ImportDecl
+	Decls      []TopLevelDecl // ClassDecl | InterfaceDecl | FnDecl
 }
 
 // PackageDecl: package "path/to/pkg"

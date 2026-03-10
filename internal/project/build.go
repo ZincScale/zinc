@@ -94,20 +94,27 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 	var parsed []parsedFile
 
 	for _, src := range srcPaths {
+		rel, _ := filepath.Rel(rootDir, src)
+		if rel == "" {
+			rel = src
+		}
 		data, err := os.ReadFile(src)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", src, err)
+			return nil, fmt.Errorf("%s: %w", rel, err)
 		}
 		l := lexer.New(string(data))
 		tokens := l.Tokenize()
 		if len(l.Errors) > 0 {
-			return nil, fmt.Errorf("%s: lexer errors: %s", src, strings.Join(l.Errors, "; "))
+			errs.FileErrors(rel, l.Errors)
+			return nil, fmt.Errorf("%s: lexer errors found", rel)
 		}
 		p := parser.New(tokens)
 		prog := p.Parse()
 		if len(p.Errors) > 0 {
-			return nil, fmt.Errorf("%s: parse errors: %s", src, strings.Join(p.Errors, "; "))
+			errs.FileErrors(rel, p.Errors)
+			return nil, fmt.Errorf("%s: parse errors found", rel)
 		}
+		prog.SourceFile = rel
 		parsed = append(parsed, parsedFile{srcPath: src, prog: prog})
 	}
 
@@ -135,12 +142,18 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 
 	// Type checking across all files in this directory
 	if tcErrs := typechecker.CheckAll(progs); len(tcErrs) > 0 {
-		strs := make([]string, len(tcErrs))
-		for i, e := range tcErrs {
-			strs[i] = e.String()
+		for _, e := range tcErrs {
+			file := e.File
+			if file == "" {
+				file = dir
+			}
+			msg := e.Msg
+			if e.Line > 0 {
+				msg = fmt.Sprintf("line %d: %s", e.Line, e.Msg)
+			}
+			errs.TypeErrors(file, []string{msg})
 		}
-		errs.TypeErrors(dir, strs)
-		return nil, fmt.Errorf("%s: %d type error(s) found", dir, len(tcErrs))
+		return nil, fmt.Errorf("%d type error(s) found", len(tcErrs))
 	}
 
 	// Phase 2: generate .go files
