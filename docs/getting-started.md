@@ -8,7 +8,7 @@ cd zinc
 go build -o zinc ./cmd/zinc/
 ```
 
-Requires **Go 1.21+**. After building, move the `zinc` binary somewhere on your `$PATH` (e.g. `/usr/local/bin/`) so you can use it from any directory.
+Requires **Go 1.26+**. After building, move the `zinc` binary somewhere on your `$PATH` (e.g. `/usr/local/bin/`) so you can use it from any directory.
 
 ## Quick Start — Single File
 
@@ -33,7 +33,7 @@ This creates two files:
 
 ```
 myapp/
-  go.mod      # Go module (module myapp, go 1.21)
+  go.mod      # Go module (module myapp, go 1.26)
   main.zn     # Entry point
 ```
 

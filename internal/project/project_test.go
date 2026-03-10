@@ -563,7 +563,7 @@ func crossFileE2ERun(t *testing.T, files map[string]string) string {
 	}
 
 	// Write go.mod
-	goMod := "module e2e\n\ngo 1.21\n"
+	goMod := "module e2e\n\ngo 1.26\n"
 	os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)
 
 	// Collect .go files for go run

@@ -20,7 +20,7 @@ func e2eRun(t *testing.T, src string) string {
 
 	dir := t.TempDir()
 
-	goMod := "module e2e\n\ngo 1.21\n"
+	goMod := "module e2e\n\ngo 1.26\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
@@ -1183,7 +1183,7 @@ func e2eRunTyped(t *testing.T, src string) string {
 	}
 
 	dir := t.TempDir()
-	goMod := "module e2e\n\ngo 1.21\n"
+	goMod := "module e2e\n\ngo 1.26\n"
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}

@@ -64,7 +64,7 @@ mkdir myapp && cd myapp
 ../zinc run
 ```
 
-Requires **Go 1.21+**. See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
+Requires **Go 1.26+**. See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
 
 ---
 

@@ -20,8 +20,8 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| P1 | **GitHub Actions CI** | Run `go test ./...` on every push/PR; catch regressions before merge | Quick |
-| P2 | **CI matrix testing** | Test across Go versions (1.21 → 1.26) and OS (Linux, macOS, Windows) | Quick |
+| ~~P1~~ | ~~**GitHub Actions CI**~~ | ~~Done — `.github/workflows/ci.yml`~~ | ~~Done~~ |
+| ~~P2~~ | ~~**CI matrix testing**~~ | ~~Done — Go 1.23–1.26 matrix~~ | ~~Done~~ |
 | P3 | **E2e smoke tests in CI** | Transpile + compile + run example programs as a CI step, not just unit tests | Quick |
 | P4 | **Semantic versioning policy** | Clear rules for 0.x bumps; tag releases properly | Quick |
 | P5 | **Goreleaser** (cross-platform binaries) | Auto-build linux/mac/windows amd64/arm64 binaries on `git tag`; publish to GitHub Releases | Medium |
@@ -83,6 +83,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 
 ## Completed
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)
+- GitHub Actions CI with matrix testing (Go 1.23–1.26) and `govulncheck`
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match

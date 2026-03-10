@@ -63,7 +63,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "error: go.mod already exists")
 				os.Exit(1)
 			}
-			gomod := fmt.Sprintf("module %s\n\ngo 1.21\n", name)
+			gomod := fmt.Sprintf("module %s\n\ngo 1.26\n", name)
 			if err := os.WriteFile("go.mod", []byte(gomod), 0644); err != nil {
 				fmt.Fprintf(os.Stderr, "error writing go.mod: %v\n", err)
 				os.Exit(1)
