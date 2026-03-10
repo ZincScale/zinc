@@ -8,10 +8,9 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 1 | **Update to Go 1.26.1** | Current minimum is Go 1.21; need latest Go for modern stdlib, performance, and toolchain features | Quick |
-| 2 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| 3 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 4 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| 1 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
+| 2 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| 3 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 
 ---
 
@@ -83,6 +82,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 ---
 
 ## Completed
+- Updated to Go 1.26.1 (minimum Go version bumped from 1.21)
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match
