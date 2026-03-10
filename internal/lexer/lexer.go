@@ -195,10 +195,6 @@ func (l *Lexer) NextToken() Token {
 		}
 		return l.makeToken(TOKEN_ASSIGN, "=", line, col)
 	case '<':
-		if l.peek() == '-' {
-			l.advance()
-			return l.makeToken(TOKEN_ARROW, "<-", line, col)
-		}
 		if l.peek() == '=' {
 			l.advance()
 			return l.makeToken(TOKEN_LTE, "<=", line, col)

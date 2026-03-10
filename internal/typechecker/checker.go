@@ -473,16 +473,6 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 			c.checkStmt(st)
 		}
 		c.popScope()
-	case *parser.ListAddStmt:
-		c.inferExpr(s.List)
-		for _, v := range s.Values {
-			c.inferExpr(v)
-		}
-	case *parser.MapRemoveStmt:
-		c.inferExpr(s.Map)
-		c.inferExpr(s.Key)
-	case *parser.ListSortStmt:
-		c.inferExpr(s.List)
 	case *parser.DeferStmt:
 		c.inferExpr(s.Expr)
 	case *parser.BreakStmt, *parser.ContinueStmt:
@@ -698,11 +688,6 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		return c.inferMapLit(e)
 	case *parser.ThisExpr:
 		return c.inferThis()
-	case *parser.ReceiveExpr:
-		return c.inferReceive(e)
-	case *parser.SendExpr:
-		c.inferSend(e)
-		return TypeVoid
 	case *parser.SuperCallExpr:
 		for _, arg := range e.Args {
 			c.inferExpr(arg)
@@ -734,70 +719,8 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 			return TypeBool
 		}
 		return c.resolveSimpleName(e.TypeName)
-	case *parser.SizeExpr:
-		c.inferExpr(e.Object)
-		return TypeInt
-	case *parser.CloneExpr:
-		return c.inferExpr(e.Object)
 	case *parser.SpreadExpr:
 		return c.inferExpr(e.Expr)
-	case *parser.ListAddStmt:
-		c.inferExpr(e.List)
-		for _, v := range e.Values {
-			c.inferExpr(v)
-		}
-		return TypeVoid
-	case *parser.MapRemoveStmt:
-		c.inferExpr(e.Map)
-		c.inferExpr(e.Key)
-		return TypeVoid
-	case *parser.StringUpperExpr:
-		c.inferExpr(e.Object)
-		return TypeString
-	case *parser.StringLowerExpr:
-		c.inferExpr(e.Object)
-		return TypeString
-	case *parser.StringContainsExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Search)
-		return TypeBool
-	case *parser.StringStartsWithExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Prefix)
-		return TypeBool
-	case *parser.StringEndsWithExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Suffix)
-		return TypeBool
-	case *parser.StringTrimExpr:
-		c.inferExpr(e.Object)
-		return TypeString
-	case *parser.StringSplitExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Sep)
-		return &ListType{Elem: TypeString}
-	case *parser.StringReplaceExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Old)
-		c.inferExpr(e.New)
-		return TypeString
-	case *parser.ListJoinExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Sep)
-		return TypeString
-	case *parser.ListSortStmt:
-		c.inferExpr(e.List)
-		return TypeVoid
-	case *parser.MapKeysExpr:
-		c.inferExpr(e.Object)
-		return TypeUnknown
-	case *parser.MapValuesExpr:
-		c.inferExpr(e.Object)
-		return TypeUnknown
-	case *parser.MapContainsExpr:
-		c.inferExpr(e.Object)
-		c.inferExpr(e.Key)
-		return TypeBool
 	}
 	return TypeUnknown
 }
@@ -990,7 +913,30 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 		return TypeUnknown
 	}
 
-	// Built-in methods on primitives (e.g. string.len(), list.push()) — no errors
+	// Builtin method dispatch for collections/strings/channels
+	switch sel.Field {
+	case "size":
+		return TypeInt
+	case "clone":
+		return objType
+	case "upper", "lower", "trim", "replace":
+		return TypeString
+	case "contains", "startsWith", "endsWith", "containsKey":
+		return TypeBool
+	case "split":
+		return &ListType{Elem: TypeString}
+	case "join":
+		return TypeString
+	case "keys", "values":
+		return TypeUnknown
+	case "add", "remove", "sort", "send":
+		return TypeVoid
+	case "receive":
+		if ct, ok := objType.(*ChanType); ok {
+			return ct.Elem
+		}
+		return TypeUnknown
+	}
 	return TypeUnknown
 }
 
@@ -1192,24 +1138,6 @@ func (c *Checker) inferThis() Type {
 		return TypeUnknown
 	}
 	return c.currentClass
-}
-
-func (c *Checker) inferReceive(e *parser.ReceiveExpr) Type {
-	chType := c.inferExpr(e.Chan)
-	if ct, ok := chType.(*ChanType); ok {
-		return ct.Elem
-	}
-	return TypeUnknown
-}
-
-func (c *Checker) inferSend(e *parser.SendExpr) {
-	chType := c.inferExpr(e.Chan)
-	valType := c.inferExpr(e.Value)
-	if ct, ok := chType.(*ChanType); ok {
-		if !Assignable(valType, ct.Elem) {
-			c.errorf(c.currentLine, 0, "type mismatch: cannot send %s to Chan<%s>", valType, ct.Elem)
-		}
-	}
 }
 
 // --- Helpers -----------------------------------------------------------------

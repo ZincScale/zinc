@@ -222,15 +222,6 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 				result := p.finishCall(sel)
 				if call, ok := result.(*CallExpr); ok {
 					nav.Call = call
-				} else if sz, ok := result.(*SizeExpr); ok {
-					// obj?.size() — wrap safe-nav as the object
-					sz.Object = nav
-					left = sz
-					continue
-				} else if cl, ok := result.(*CloneExpr); ok {
-					cl.Object = nav
-					left = cl
-					continue
 				} else {
 					p.errorf("cannot use ?.%s() in this context", field)
 				}
@@ -281,122 +272,20 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 }
 
 // finishCall is called when '(' has NOT been consumed yet (e.g. from DOT case).
+// All method calls are parsed as regular CallExpr — builtin dispatch happens in codegen.
 func (p *Parser) finishCall(callee Expr) Expr {
-	// Check for send/receive sugar on SelectorExpr
-	if sel, ok := callee.(*SelectorExpr); ok {
-		switch sel.Field {
-		case "send":
-			p.expect(lexer.TOKEN_LPAREN)
-			val := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &SendExpr{Chan: sel.Object, Value: val}
-		case "receive":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &ReceiveExpr{Chan: sel.Object}
-		case "add":
-			p.expect(lexer.TOKEN_LPAREN)
-			var vals []Expr
-			spread := false
-			vals = append(vals, p.parseExpr())
-			// Check if first (or only) arg has spread
-			if p.check(lexer.TOKEN_DOTDOTDOT) {
-				p.advance()
-				spread = true
-			}
-			for p.check(lexer.TOKEN_COMMA) {
-				p.advance()
-				vals = append(vals, p.parseExpr())
-			}
-			p.expect(lexer.TOKEN_RPAREN)
-			return &ListAddStmt{List: sel.Object, Values: vals, Spread: spread}
-		case "remove":
-			p.expect(lexer.TOKEN_LPAREN)
-			key := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &MapRemoveStmt{Map: sel.Object, Key: key}
-		case "size":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &SizeExpr{Object: sel.Object}
-		case "clone":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &CloneExpr{Object: sel.Object}
-		case "upper":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringUpperExpr{Object: sel.Object}
-		case "lower":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringLowerExpr{Object: sel.Object}
-		case "contains":
-			p.expect(lexer.TOKEN_LPAREN)
-			arg := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringContainsExpr{Object: sel.Object, Search: arg}
-		case "startsWith":
-			p.expect(lexer.TOKEN_LPAREN)
-			arg := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringStartsWithExpr{Object: sel.Object, Prefix: arg}
-		case "endsWith":
-			p.expect(lexer.TOKEN_LPAREN)
-			arg := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringEndsWithExpr{Object: sel.Object, Suffix: arg}
-		case "trim":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringTrimExpr{Object: sel.Object}
-		case "split":
-			p.expect(lexer.TOKEN_LPAREN)
-			arg := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringSplitExpr{Object: sel.Object, Sep: arg}
-		case "replace":
-			p.expect(lexer.TOKEN_LPAREN)
-			old := p.parseExpr()
-			p.expect(lexer.TOKEN_COMMA)
-			new_ := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &StringReplaceExpr{Object: sel.Object, Old: old, New: new_}
-		case "join":
-			p.expect(lexer.TOKEN_LPAREN)
-			arg := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &ListJoinExpr{Object: sel.Object, Sep: arg}
-		case "sort":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &ListSortStmt{List: sel.Object}
-		case "keys":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &MapKeysExpr{Object: sel.Object}
-		case "values":
-			p.expect(lexer.TOKEN_LPAREN)
-			p.expect(lexer.TOKEN_RPAREN)
-			return &MapValuesExpr{Object: sel.Object}
-		case "containsKey":
-			p.expect(lexer.TOKEN_LPAREN)
-			key := p.parseExpr()
-			p.expect(lexer.TOKEN_RPAREN)
-			return &MapContainsExpr{Object: sel.Object, Key: key}
-		case "slice":
-			p.expect(lexer.TOKEN_LPAREN)
-			low := p.parseExpr()
-			var high Expr
-			if p.check(lexer.TOKEN_COMMA) {
-				p.advance() // consume ','
-				high = p.parseExpr()
-			}
-			p.expect(lexer.TOKEN_RPAREN)
-			return &SliceExpr{Object: sel.Object, Low: low, High: high}
+	// Special case: .slice(low, high) → SliceExpr (bracket syntax alternative)
+	if sel, ok := callee.(*SelectorExpr); ok && sel.Field == "slice" {
+		p.expect(lexer.TOKEN_LPAREN)
+		low := p.parseExpr()
+		var high Expr
+		if p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			high = p.parseExpr()
 		}
+		p.expect(lexer.TOKEN_RPAREN)
+		return &SliceExpr{Object: sel.Object, Low: low, High: high}
 	}
-	// Consume '(' then parse args
 	p.expect(lexer.TOKEN_LPAREN)
 	return p.finishCallArgsNoLParen(callee)
 }
@@ -884,9 +773,10 @@ func (p *Parser) parseWhileStmt(label string) *WhileStmt {
 }
 
 func (p *Parser) parseGoStmt() *GoStmt {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_GO)
 	body := p.parseBlock()
-	return &GoStmt{Body: body}
+	return &GoStmt{Line: line, Body: body}
 }
 
 // parseOrHandler parses an optional `or { block }` after a failable call.
@@ -1131,6 +1021,7 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 }
 
 func (p *Parser) parseInterfaceDecl() *InterfaceDecl {
+	line := p.peek().Line
 	p.expect(lexer.TOKEN_INTERFACE)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.expect(lexer.TOKEN_LBRACE)
@@ -1141,7 +1032,7 @@ func (p *Parser) parseInterfaceDecl() *InterfaceDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &InterfaceDecl{Name: name, Methods: methods}
+	return &InterfaceDecl{Line: line, Name: name, Methods: methods}
 }
 
 // parseTypeParams parses optional <T, U> type parameter list.

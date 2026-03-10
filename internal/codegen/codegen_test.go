@@ -1498,3 +1498,40 @@ fn classify(x: Int): String {
 	// Function should be detected as failable — returns (string, error)
 	assertContains(t, out, "error")
 }
+
+func TestMethodFailableDetection(t *testing.T) {
+	src := `
+import "os"
+
+fn doWrite(): String {
+    var f = os.Open("test.txt")
+    f.WriteString("hello")
+    return "done"
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// f.WriteString returns (int, error) — should be detected as failable
+	// The function should auto-propagate the error → returns (string, error)
+	assertContains(t, out, "error")
+	assertContains(t, out, "WriteString")
+}
+
+func TestMethodVoidFailableDetection(t *testing.T) {
+	src := `
+import "os"
+
+fn doClose() {
+    var f = os.Open("test.txt")
+    f.Close()
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// f.Close() returns just error — should be detected as void failable
+	assertContains(t, out, "error")
+	// Void failable uses: if _errN := f.Close(); _errN != nil {
+	assertContains(t, out, "f.Close()")
+}

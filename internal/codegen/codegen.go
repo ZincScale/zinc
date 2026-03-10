@@ -33,6 +33,20 @@ var failableBuiltins = map[string]bool{
 	"httpGet":   true,
 }
 
+// voidFailableBuiltins is the subset of failableBuiltins whose generated Go
+// code returns only error (no value). Used by isVoidFailable to decide whether
+// to emit `if err := call; ...` vs `if _, err := call; ...`.
+var voidFailableBuiltins = map[string]bool{
+	"writeFile": true,
+}
+
+// varTypeInfo records the Go type of a local variable for method failable detection.
+type varTypeInfo struct {
+	PkgPath  string // e.g. "os"
+	TypeName string // e.g. "File"
+	Pointer  bool   // true for *os.File
+}
+
 // Generator converts a Zinc AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
@@ -42,6 +56,10 @@ type Generator struct {
 	interfaceNames map[string]bool // set of declared interface names
 	// canThrowFns: set of fn/method names that are failable (return errors)
 	canThrowFns map[string]bool
+	// varTypes: local variable name → Go type info (for method failable detection)
+	varTypes map[string]varTypeInfo
+	// classVars: local variables known to hold Zinc class instances
+	classVars map[string]bool
 	// current receiver name for method emission
 	receiver string
 	// current function return type (for zero-value in error returns)
@@ -86,6 +104,8 @@ func New() *Generator {
 		classNames:     make(map[string]bool),
 		interfaceNames: make(map[string]bool),
 		canThrowFns:    make(map[string]bool),
+		varTypes:       make(map[string]varTypeInfo),
+		classVars:      make(map[string]bool),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
@@ -105,6 +125,8 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		classNames:     make(map[string]bool),
 		interfaceNames: make(map[string]bool),
 		canThrowFns:    make(map[string]bool),
+		varTypes:       make(map[string]varTypeInfo),
+		classVars:      make(map[string]bool),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
@@ -359,7 +381,13 @@ func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
 	case *parser.SelectorExpr:
 		if ident, ok := callee.Object.(*parser.Ident); ok {
 			key := ident.Name + "." + callee.Field
-			return g.canThrowFns[key] || g.goReturnsError(ident.Name, callee.Field)
+			if g.canThrowFns[key] || g.goReturnsError(ident.Name, callee.Field) {
+				return true
+			}
+			// Check method on tracked variable type (e.g. f.Write where f is *os.File)
+			if info, ok := g.varTypes[ident.Name]; ok {
+				return g.goResolver != nil && g.goResolver.MethodReturnsError(info.PkgPath, info.TypeName, callee.Field, info.Pointer)
+			}
 		}
 		if _, ok := callee.Object.(*parser.ThisExpr); ok {
 			return g.canThrowFns[callee.Field]
@@ -584,6 +612,7 @@ func (g *Generator) emitTopLevel(decl parser.TopLevelDecl) {
 		g.emitLineDirective(d.Line)
 		g.emitClass(d)
 	case *parser.InterfaceDecl:
+		g.emitLineDirective(d.Line)
 		g.emitInterface(d)
 	case *parser.FnDecl:
 		g.emitLineDirective(d.Line)
@@ -960,6 +989,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitLineDirective(st.Line)
 	case *parser.WithStmt:
 		g.emitLineDirective(st.Line)
+	case *parser.GoStmt:
+		g.emitLineDirective(st.Line)
 	}
 
 	switch st := s.(type) {
@@ -1007,28 +1038,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln(fmt.Sprintf("defer %s", g.emitExpr(st.Expr)))
 	case *parser.WithStmt:
 		g.emitWithStmt(st)
-	case *parser.ListAddStmt:
-		list := g.emitExpr(st.List)
-		if st.Spread && len(st.Values) == 1 {
-			// list.add(other...) → list = append(list, other...)
-			val := g.emitExpr(st.Values[0])
-			g.writeln(fmt.Sprintf("%s = append(%s, %s...)", list, list, val))
-		} else {
-			// list.add(a, b, c) → list = append(list, a, b, c)
-			var vals []string
-			for _, v := range st.Values {
-				vals = append(vals, g.emitExpr(v))
-			}
-			g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, strings.Join(vals, ", ")))
-		}
-	case *parser.MapRemoveStmt:
-		m := g.emitExpr(st.Map)
-		key := g.emitExpr(st.Key)
-		g.writeln(fmt.Sprintf("delete(%s, %s)", m, key))
-	case *parser.ListSortStmt:
-		g.neededImports["sort"] = true
-		list := g.emitExpr(st.List)
-		g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] })", list, list, list))
 	}
 }
 
@@ -1092,6 +1101,19 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
+	// Track variable type for method dispatch
+	if v.Value != nil {
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			g.recordVarTypeFromCall(v.Name, call)
+			// Track class instance variables (ClassName.new())
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
+				if ident, ok := sel.Object.(*parser.Ident); ok && g.classNames[ident.Name] {
+					g.classVars[v.Name] = true
+				}
+			}
+		}
+	}
+
 	if v.Value != nil {
 		valStr := g.emitExpr(v.Value)
 		if v.Type != nil {
@@ -1125,6 +1147,39 @@ func (g *Generator) emitFailableVarStmt(v *parser.VarStmt, call *parser.CallExpr
 	callStr := g.emitFailableCallExpr(call)
 	g.writeln(fmt.Sprintf("%s, %s := %s", v.Name, errVar, callStr))
 	g.emitErrorCheck(errVar, v.OrHandler)
+	// Track variable type for method failable detection
+	g.recordVarTypeFromCall(v.Name, call)
+}
+
+// recordVarTypeFromCall extracts Go type info from a call expression and
+// records it in varTypes for the given variable name.
+func (g *Generator) recordVarTypeFromCall(varName string, call *parser.CallExpr) {
+	if g.goResolver == nil {
+		return
+	}
+	sel, ok := call.Callee.(*parser.SelectorExpr)
+	if !ok {
+		return
+	}
+	// Case 1: pkg.Func() — package-level function (e.g. os.Open)
+	if ident, ok := sel.Object.(*parser.Ident); ok && sel.Field != "new" {
+		if pkgPath, ok := g.importMap[ident.Name]; ok {
+			if retPkg, retType, ptr, ok := g.goResolver.FuncReturnType(pkgPath, sel.Field); ok {
+				g.varTypes[varName] = varTypeInfo{PkgPath: retPkg, TypeName: retType, Pointer: ptr}
+			}
+		}
+		return
+	}
+	// Case 2: pkg.Type.new() — Go type constructor (e.g. sync.Mutex.new())
+	if sel.Field == "new" {
+		if innerSel, ok := sel.Object.(*parser.SelectorExpr); ok {
+			if ident, ok := innerSel.Object.(*parser.Ident); ok {
+				if pkgPath, ok := g.importMap[ident.Name]; ok {
+					g.varTypes[varName] = varTypeInfo{PkgPath: pkgPath, TypeName: innerSel.Field}
+				}
+			}
+		}
+	}
 }
 
 // emitFailableCallExpr emits a call expression in failable context, where we
@@ -1459,6 +1514,46 @@ func (g *Generator) emitSafeNavStmt(sn *parser.SafeNavExpr) {
 	obj := g.emitExpr(sn.Object)
 	field := capitalize(sn.Field)
 	if sn.Call != nil {
+		// Check for builtin statement methods (add, remove, sort, send)
+		switch sn.Field {
+		case "add":
+			if len(sn.Call.Args) > 0 {
+				if len(sn.Call.Args) == 1 {
+					if sp, ok := sn.Call.Args[0].(*parser.SpreadExpr); ok {
+						val := g.emitExpr(sp.Expr)
+						g.writeln(fmt.Sprintf("if %s != nil { %s = append(%s, %s...) }", obj, obj, obj, val))
+						return
+					}
+				}
+				var vals []string
+				for _, a := range sn.Call.Args {
+					vals = append(vals, g.emitExpr(a))
+				}
+				g.writeln(fmt.Sprintf("if %s != nil { %s = append(%s, %s) }", obj, obj, obj, strings.Join(vals, ", ")))
+				return
+			}
+		case "remove":
+			if len(sn.Call.Args) > 0 {
+				key := g.emitExpr(sn.Call.Args[0])
+				g.writeln(fmt.Sprintf("if %s != nil { delete(%s, %s) }", obj, obj, key))
+				return
+			}
+		case "sort":
+			g.neededImports["sort"] = true
+			g.writeln(fmt.Sprintf("if %s != nil { sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] }) }", obj, obj, obj, obj))
+			return
+		case "send":
+			if len(sn.Call.Args) > 0 {
+				val := g.emitExpr(sn.Call.Args[0])
+				g.writeln(fmt.Sprintf("if %s != nil { %s <- %s }", obj, obj, val))
+				return
+			}
+		}
+		// Check for builtin expression methods
+		if code := g.emitBuiltinMethodOnObj(obj, sn.Field, sn.Call); code != "" {
+			g.writeln(fmt.Sprintf("if %s != nil { _ = %s }", obj, code))
+			return
+		}
 		var argStrs []string
 		for _, a := range sn.Call.Args {
 			argStrs = append(argStrs, g.emitExpr(a))
@@ -1551,6 +1646,10 @@ func (g *Generator) emitSafeNavSingle(sn *parser.SafeNavExpr) string {
 	obj := g.emitExpr(sn.Object)
 	field := capitalize(sn.Field)
 	if sn.Call != nil {
+		// Check if this is a builtin method call
+		if code := g.emitBuiltinMethodOnObj(obj, sn.Field, sn.Call); code != "" {
+			return fmt.Sprintf("func() interface{} { if %s != nil { return %s }; return nil }()", obj, code)
+		}
 		var argStrs []string
 		for _, a := range sn.Call.Args {
 			argStrs = append(argStrs, g.emitExpr(a))
@@ -1559,6 +1658,67 @@ func (g *Generator) emitSafeNavSingle(sn *parser.SafeNavExpr) string {
 		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s(%s) }; return nil }()", obj, obj, field, args)
 	}
 	return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s }; return nil }()", obj, obj, field)
+}
+
+// emitBuiltinMethodOnObj generates Go code for a builtin method call on an already-emitted
+// object expression. Returns empty string if not a builtin.
+func (g *Generator) emitBuiltinMethodOnObj(objCode, methodName string, call *parser.CallExpr) string {
+	switch methodName {
+	case "size":
+		return fmt.Sprintf("len(%s)", objCode)
+	case "clone":
+		return fmt.Sprintf("append(%s[:0:0], %s...)", objCode, objCode)
+	case "upper":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToUpper(%s)", objCode)
+	case "lower":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToLower(%s)", objCode)
+	case "contains":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Contains(%s, %s)", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "startsWith":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.HasPrefix(%s, %s)", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "endsWith":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.HasSuffix(%s, %s)", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "trim":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.TrimSpace(%s)", objCode)
+	case "split":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Split(%s, %s)", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "replace":
+		if len(call.Args) >= 2 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", objCode, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1]))
+		}
+	case "join":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Join(%s, %s)", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "keys":
+		return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", objCode, objCode)
+	case "values":
+		return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", objCode, objCode)
+	case "containsKey":
+		if len(call.Args) > 0 {
+			return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", objCode, g.emitExpr(call.Args[0]))
+		}
+	case "receive":
+		return fmt.Sprintf("<-%s", objCode)
+	}
+	return ""
 }
 
 func (g *Generator) emitGoStmt(gs *parser.GoStmt) {
@@ -1607,11 +1767,17 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 			callStr := g.emitExpr(r.Value)
 			if call, ok := r.Value.(*parser.CallExpr); ok {
 				callStr = g.emitFailableCallExpr(call)
+				// Track variable type for method failable detection
+				g.recordVarTypeFromCall(r.Name, call)
 			}
 			g.writeln(fmt.Sprintf("%s, %s := %s", r.Name, errVar, callStr))
 			g.emitErrorCheck(errVar, r.OrHandler)
 		} else {
 			g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
+			// Track type from non-failable GoType.new() calls
+			if call, ok := r.Value.(*parser.CallExpr); ok {
+				g.recordVarTypeFromCall(r.Name, call)
+			}
 		}
 		g.writeln(fmt.Sprintf("if _c, ok := any(%s).(io.Closer); ok { defer _c.Close() }", r.Name))
 		g.writeln(fmt.Sprintf("if _l, ok := any(&%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() } else if _l, ok := any(%s).(sync.Locker); ok { _l.Lock(); defer _l.Unlock() }", r.Name, r.Name))
@@ -1632,22 +1798,13 @@ func (g *Generator) emitPrintStmt(p *parser.PrintStmt) {
 }
 
 func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
-	// Special: SendExpr as statement
-	if se, ok := e.Expr.(*parser.SendExpr); ok {
-		g.writeln(fmt.Sprintf("%s <- %s", g.emitExpr(se.Chan), g.emitExpr(se.Value)))
-		return
-	}
-	// Dual Stmt+Expr nodes that may flow through ExprStmt — delegate to emitStmt
-	switch st := e.Expr.(type) {
-	case *parser.ListAddStmt:
-		g.emitStmt(st)
-		return
-	case *parser.MapRemoveStmt:
-		g.emitStmt(st)
-		return
-	case *parser.ListSortStmt:
-		g.emitStmt(st)
-		return
+	// Builtin method calls in statement context (add, remove, sort, send)
+	if call, ok := e.Expr.(*parser.CallExpr); ok {
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+			if g.emitBuiltinMethodStmt(sel, call) {
+				return
+			}
+		}
 	}
 	// Special: SafeNavExpr as statement — emit clean if-guard, no IIFE
 	if sn, ok := e.Expr.(*parser.SafeNavExpr); ok {
@@ -1713,15 +1870,19 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 // isVoidFailable returns true if a failable call returns just error (no value).
 func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
-		return ident.Name == "writeFile"
+		return voidFailableBuiltins[ident.Name]
 	}
-	// Check Go functions that return only error (e.g. os.Remove)
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok {
+			// Check Go package-level functions that return only error (e.g. os.Remove)
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
 				if g.goResolver != nil && g.goResolver.ReturnsOnlyError(pkgPath, sel.Field) {
 					return true
 				}
+			}
+			// Check method on tracked variable type (e.g. f.Close where f is *os.File)
+			if info, ok := g.varTypes[ident.Name]; ok {
+				return g.goResolver != nil && g.goResolver.MethodReturnsOnlyError(info.PkgPath, info.TypeName, sel.Field, info.Pointer)
 			}
 		}
 	}
@@ -1793,11 +1954,6 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			high = g.emitExpr(ex.High)
 		}
 		return fmt.Sprintf("%s[%s:%s]", g.emitExpr(ex.Object), low, high)
-	case *parser.SendExpr:
-		// As expression (rare) — but send is usually a stmt
-		return fmt.Sprintf("func() { %s <- %s }()", g.emitExpr(ex.Chan), g.emitExpr(ex.Value))
-	case *parser.ReceiveExpr:
-		return fmt.Sprintf("<-%s", g.emitExpr(ex.Chan))
 	case *parser.ListLit:
 		var elems []string
 		for _, el := range ex.Elements {
@@ -1838,50 +1994,144 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		}
 		// x as Type  →  x.(Type)
 		return fmt.Sprintf("%s.(%s)", obj, goType)
-	case *parser.SizeExpr:
-		return fmt.Sprintf("len(%s)", g.emitExpr(ex.Object))
-	case *parser.CloneExpr:
-		obj := g.emitExpr(ex.Object)
-		return fmt.Sprintf("append(%s[:0:0], %s...)", obj, obj)
-	case *parser.StringUpperExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ToUpper(%s)", g.emitExpr(ex.Object))
-	case *parser.StringLowerExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ToLower(%s)", g.emitExpr(ex.Object))
-	case *parser.StringContainsExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Contains(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Search))
-	case *parser.StringStartsWithExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.HasPrefix(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Prefix))
-	case *parser.StringEndsWithExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.HasSuffix(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Suffix))
-	case *parser.StringTrimExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.TrimSpace(%s)", g.emitExpr(ex.Object))
-	case *parser.StringSplitExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Split(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Sep))
-	case *parser.StringReplaceExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Old), g.emitExpr(ex.New))
-	case *parser.ListJoinExpr:
-		g.neededImports["strings"] = true
-		return fmt.Sprintf("strings.Join(%s, %s)", g.emitExpr(ex.Object), g.emitExpr(ex.Sep))
-	case *parser.MapKeysExpr:
-		obj := g.emitExpr(ex.Object)
-		return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", obj, obj)
-	case *parser.MapValuesExpr:
-		obj := g.emitExpr(ex.Object)
-		return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", obj, obj)
-	case *parser.MapContainsExpr:
-		obj := g.emitExpr(ex.Object)
-		key := g.emitExpr(ex.Key)
-		return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, key)
 	}
 	return "/* unknown expr */"
+}
+
+// isBuiltinReceiver returns true if the receiver should use builtin method dispatch
+// (i.e., it's NOT a known Zinc class, interface, or tracked Go type).
+func (g *Generator) isBuiltinReceiver(sel *parser.SelectorExpr) bool {
+	if _, ok := sel.Object.(*parser.ThisExpr); ok {
+		return false // this.method() is always a real method
+	}
+	if ident, ok := sel.Object.(*parser.Ident); ok {
+		if g.classNames[ident.Name] || g.interfaceNames[ident.Name] {
+			return false // ClassName.staticMethod() or interface reference
+		}
+		if _, ok := g.varTypes[ident.Name]; ok {
+			return false // tracked Go type variable
+		}
+		if g.classVars[ident.Name] {
+			return false // variable holding a Zinc class instance
+		}
+		// Also check if receiver matches the method receiver name (inside class methods)
+		if g.receiver != "" && ident.Name == g.receiver {
+			return false
+		}
+	}
+	return true
+}
+
+// emitBuiltinMethodCall handles builtin method calls in expression context.
+// Returns the Go code and true if it was a builtin; ("", false) otherwise.
+func (g *Generator) emitBuiltinMethodCall(sel *parser.SelectorExpr, call *parser.CallExpr) (string, bool) {
+	if !g.isBuiltinReceiver(sel) {
+		return "", false
+	}
+	obj := g.emitExpr(sel.Object)
+	switch sel.Field {
+	case "size":
+		return fmt.Sprintf("len(%s)", obj), true
+	case "clone":
+		return fmt.Sprintf("append(%s[:0:0], %s...)", obj, obj), true
+	case "upper":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToUpper(%s)", obj), true
+	case "lower":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.ToLower(%s)", obj), true
+	case "contains":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Contains(%s, %s)", obj, g.emitExpr(call.Args[0])), true
+		}
+	case "startsWith":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.HasPrefix(%s, %s)", obj, g.emitExpr(call.Args[0])), true
+		}
+	case "endsWith":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.HasSuffix(%s, %s)", obj, g.emitExpr(call.Args[0])), true
+		}
+	case "trim":
+		g.neededImports["strings"] = true
+		return fmt.Sprintf("strings.TrimSpace(%s)", obj), true
+	case "split":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Split(%s, %s)", obj, g.emitExpr(call.Args[0])), true
+		}
+	case "replace":
+		if len(call.Args) >= 2 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+		}
+	case "join":
+		if len(call.Args) > 0 {
+			g.neededImports["strings"] = true
+			return fmt.Sprintf("strings.Join(%s, %s)", obj, g.emitExpr(call.Args[0])), true
+		}
+	case "keys":
+		return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", obj, obj), true
+	case "values":
+		return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", obj, obj), true
+	case "containsKey":
+		if len(call.Args) > 0 {
+			key := g.emitExpr(call.Args[0])
+			return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, key), true
+		}
+	case "receive":
+		return fmt.Sprintf("<-%s", obj), true
+	case "send":
+		if len(call.Args) > 0 {
+			return fmt.Sprintf("func() { %s <- %s }()", obj, g.emitExpr(call.Args[0])), true
+		}
+	}
+	return "", false
+}
+
+// emitBuiltinMethodStmt handles builtin method calls in statement context.
+// Returns true if it was handled as a builtin.
+func (g *Generator) emitBuiltinMethodStmt(sel *parser.SelectorExpr, call *parser.CallExpr) bool {
+	if !g.isBuiltinReceiver(sel) {
+		return false
+	}
+	obj := g.emitExpr(sel.Object)
+	switch sel.Field {
+	case "add":
+		if len(call.Args) == 1 {
+			if sp, ok := call.Args[0].(*parser.SpreadExpr); ok {
+				val := g.emitExpr(sp.Expr)
+				g.writeln(fmt.Sprintf("%s = append(%s, %s...)", obj, obj, val))
+				return true
+			}
+		}
+		var vals []string
+		for _, a := range call.Args {
+			vals = append(vals, g.emitExpr(a))
+		}
+		g.writeln(fmt.Sprintf("%s = append(%s, %s)", obj, obj, strings.Join(vals, ", ")))
+		return true
+	case "remove":
+		if len(call.Args) > 0 {
+			key := g.emitExpr(call.Args[0])
+			g.writeln(fmt.Sprintf("delete(%s, %s)", obj, key))
+			return true
+		}
+	case "sort":
+		g.neededImports["sort"] = true
+		g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] })", obj, obj, obj))
+		return true
+	case "send":
+		if len(call.Args) > 0 {
+			val := g.emitExpr(call.Args[0])
+			g.writeln(fmt.Sprintf("%s <- %s", obj, val))
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
@@ -1945,11 +2195,15 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		interfaceNames:    g.interfaceNames,
 		enumNames:         g.enumNames,
 		canThrowFns:       g.canThrowFns,
+		varTypes:          g.varTypes, // share so method failable detection works
+		classVars:         g.classVars,
 		classCtors:        g.classCtors,
 		receiver:          g.receiver,
 		throwingVars:      g.throwingVars, // share so nested calls resolve
 		fnParams:          g.fnParams,
 		methodParams:      g.methodParams,
+		goResolver:        g.goResolver,
+		importMap:         g.importMap,
 		currentReturnType: e.ReturnType,
 		currentCanThrow:   lambdaCanThrow, // was hardcoded false
 		indent:            1,
@@ -2049,7 +2303,10 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 				return g.emitGoTypeNew(typeName, call)
 			}
 		}
-		// Could be send/receive (already handled via SendExpr/ReceiveExpr in parser)
+		// Check for builtin method calls (size, upper, etc.)
+		if code, ok := g.emitBuiltinMethodCall(callee, call); ok {
+			return code
+		}
 		obj := g.emitExpr(callee.Object)
 		method := capitalize(callee.Field)
 		// Look up method params for default/named-arg resolution.

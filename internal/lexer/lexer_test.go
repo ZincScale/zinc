@@ -92,7 +92,6 @@ func TestOperators(t *testing.T) {
 		{">=", TOKEN_GTE, ">="},
 		{"&&", TOKEN_AMP_AMP, "&&"},
 		{"||", TOKEN_PIPE_PIPE, "||"},
-		{"<-", TOKEN_ARROW, "<-"},
 		{"+=", TOKEN_PLUS_EQ, "+="},
 		{"-=", TOKEN_MINUS_EQ, "-="},
 		{"*=", TOKEN_STAR_EQ, "*="},

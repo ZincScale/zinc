@@ -46,7 +46,6 @@ const (
 	TOKEN_CONST
 	TOKEN_DEFER
 	TOKEN_IS
-	TOKEN_PRIVATE
 	TOKEN_WITH
 
 	// Symbols
@@ -60,7 +59,6 @@ const (
 	TOKEN_DOT       // .
 	TOKEN_COLON     // :
 	TOKEN_SEMICOLON // ;
-	TOKEN_ARROW     // <-
 	TOKEN_ASSIGN    // =
 	TOKEN_PLUS      // +
 	TOKEN_MINUS     // -
@@ -133,7 +131,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_CONST:     "const",
 	TOKEN_DEFER:     "defer",
 	TOKEN_IS:        "is",
-	TOKEN_PRIVATE:   "private",
 	TOKEN_WITH:      "with",
 
 	TOKEN_LPAREN:    "(",
@@ -146,7 +143,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_DOT:       ".",
 	TOKEN_COLON:     ":",
 	TOKEN_SEMICOLON: ";",
-	TOKEN_ARROW:     "<-",
 	TOKEN_ASSIGN:    "=",
 	TOKEN_PLUS:      "+",
 	TOKEN_MINUS:     "-",
@@ -228,7 +224,6 @@ var keywords = map[string]TokenType{
 	"const":     TOKEN_CONST,
 	"defer":     TOKEN_DEFER,
 	"is":        TOKEN_IS,
-	"private":   TOKEN_PRIVATE,
 	"with":      TOKEN_WITH,
 }
 

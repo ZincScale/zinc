@@ -25,45 +25,84 @@ func NewGoTypeResolver() *GoTypeResolver {
 	}
 }
 
+// loadPkgLocked loads a package using cache. Caller must hold mu.
+func (r *GoTypeResolver) loadPkgLocked(pkgPath string) *types.Package {
+	if r.negative[pkgPath] {
+		return nil
+	}
+	if pkg, ok := r.cache[pkgPath]; ok {
+		return pkg
+	}
+	pkg, err := r.imp.Import(pkgPath)
+	if err != nil {
+		r.negative[pkgPath] = true
+		return nil
+	}
+	r.cache[pkgPath] = pkg
+	return pkg
+}
+
+// lookupFuncLocked finds a package-level function. Caller must hold mu.
+func (r *GoTypeResolver) lookupFuncLocked(pkgPath, funcName string) *types.Signature {
+	pkg := r.loadPkgLocked(pkgPath)
+	if pkg == nil {
+		return nil
+	}
+	obj := pkg.Scope().Lookup(funcName)
+	if obj == nil {
+		return nil
+	}
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return nil
+	}
+	return fn.Type().(*types.Signature)
+}
+
+// lookupMethodLocked finds a method on a named type. Caller must hold mu.
+func (r *GoTypeResolver) lookupMethodLocked(pkgPath, typeName, methodName string, pointer bool) *types.Signature {
+	pkg := r.loadPkgLocked(pkgPath)
+	if pkg == nil {
+		return nil
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil {
+		return nil
+	}
+	named, ok := obj.Type().(*types.Named)
+	if !ok {
+		return nil
+	}
+	var recv types.Type = named
+	if pointer {
+		recv = types.NewPointer(named)
+	}
+	m, _, _ := types.LookupFieldOrMethod(recv, true, pkg, methodName)
+	if m == nil {
+		return nil
+	}
+	fn, ok := m.(*types.Func)
+	if !ok {
+		return nil
+	}
+	return fn.Type().(*types.Signature)
+}
+
 // ReturnsError reports whether pkgPath.funcName has a signature whose last
 // result type is the built-in error interface.
 func (r *GoTypeResolver) ReturnsError(pkgPath, funcName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.negative[pkgPath] {
+	sig := r.lookupFuncLocked(pkgPath, funcName)
+	if sig == nil {
 		return false
 	}
-
-	pkg, ok := r.cache[pkgPath]
-	if !ok {
-		var err error
-		pkg, err = r.imp.Import(pkgPath)
-		if err != nil {
-			r.negative[pkgPath] = true
-			return false
-		}
-		r.cache[pkgPath] = pkg
-	}
-
-	obj := pkg.Scope().Lookup(funcName)
-	if obj == nil {
-		return false
-	}
-
-	fn, ok := obj.(*types.Func)
-	if !ok {
-		return false
-	}
-
-	sig := fn.Type().(*types.Signature)
 	results := sig.Results()
 	if results.Len() == 0 {
 		return false
 	}
-
-	last := results.At(results.Len() - 1).Type()
-	return isErrorType(last)
+	return isErrorType(results.At(results.Len() - 1).Type())
 }
 
 // ReturnsOnlyError reports whether pkgPath.funcName returns just error
@@ -72,32 +111,79 @@ func (r *GoTypeResolver) ReturnsOnlyError(pkgPath, funcName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.negative[pkgPath] {
+	sig := r.lookupFuncLocked(pkgPath, funcName)
+	if sig == nil {
 		return false
 	}
-
-	pkg, ok := r.cache[pkgPath]
-	if !ok {
-		var err error
-		pkg, err = r.imp.Import(pkgPath)
-		if err != nil {
-			r.negative[pkgPath] = true
-			return false
-		}
-		r.cache[pkgPath] = pkg
-	}
-
-	obj := pkg.Scope().Lookup(funcName)
-	if obj == nil {
-		return false
-	}
-	fn, ok := obj.(*types.Func)
-	if !ok {
-		return false
-	}
-	sig := fn.Type().(*types.Signature)
 	results := sig.Results()
 	return results.Len() == 1 && isErrorType(results.At(0).Type())
+}
+
+// FuncReturnType extracts the first non-error return type from pkgPath.funcName.
+// Returns the package path, type name, whether it's a pointer, and whether lookup succeeded.
+func (r *GoTypeResolver) FuncReturnType(pkgPath, funcName string) (retPkgPath, retTypeName string, pointer bool, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sig := r.lookupFuncLocked(pkgPath, funcName)
+	if sig == nil {
+		return "", "", false, false
+	}
+	results := sig.Results()
+	for i := 0; i < results.Len(); i++ {
+		t := results.At(i).Type()
+		if isErrorType(t) {
+			continue
+		}
+		return extractNamedType(t)
+	}
+	return "", "", false, false
+}
+
+// MethodReturnsError checks if typeName.methodName in pkgPath returns error.
+func (r *GoTypeResolver) MethodReturnsError(pkgPath, typeName, methodName string, pointer bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sig := r.lookupMethodLocked(pkgPath, typeName, methodName, pointer)
+	if sig == nil {
+		return false
+	}
+	results := sig.Results()
+	if results.Len() == 0 {
+		return false
+	}
+	return isErrorType(results.At(results.Len() - 1).Type())
+}
+
+// MethodReturnsOnlyError checks if typeName.methodName returns just error.
+func (r *GoTypeResolver) MethodReturnsOnlyError(pkgPath, typeName, methodName string, pointer bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sig := r.lookupMethodLocked(pkgPath, typeName, methodName, pointer)
+	if sig == nil {
+		return false
+	}
+	results := sig.Results()
+	return results.Len() == 1 && isErrorType(results.At(0).Type())
+}
+
+// extractNamedType extracts package path and type name from a types.Type.
+func extractNamedType(t types.Type) (pkgPath, typeName string, pointer bool, ok bool) {
+	if ptr, isPtr := t.(*types.Pointer); isPtr {
+		t = ptr.Elem()
+		pointer = true
+	}
+	named, isNamed := t.(*types.Named)
+	if !isNamed {
+		return "", "", false, false
+	}
+	obj := named.Obj()
+	if obj == nil || obj.Pkg() == nil {
+		return "", "", false, false
+	}
+	return obj.Pkg().Path(), obj.Name(), pointer, true
 }
 
 // isErrorType checks if t is the built-in error interface.

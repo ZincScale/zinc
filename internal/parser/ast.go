@@ -57,6 +57,7 @@ func (c *ClassDecl) topLevelTag() {}
 
 // InterfaceDecl: interface Speaker { ... }
 type InterfaceDecl struct {
+	Line    int
 	Name    string
 	Methods []*MethodSig
 }
@@ -130,10 +131,9 @@ func (c *ConstDecl) topLevelTag() {}
 
 // FieldDecl: var name: Type [= expr]
 type FieldDecl struct {
-	Name      string
-	Type      TypeExpr
-	Default   Expr // may be nil
-	IsPrivate bool // private var → unexported Go field
+	Name    string
+	Type    TypeExpr
+	Default Expr // may be nil
 }
 
 // ParamDecl: name: Type [= expr]  OR  name: ...Type (variadic)
@@ -297,6 +297,7 @@ func (w *WhileStmt) stmtTag() {}
 
 // GoStmt: go { ... }
 type GoStmt struct {
+	Line int
 	Body *BlockStmt
 }
 
@@ -465,22 +466,8 @@ type SliceExpr struct {
 func (s *SliceExpr) nodeTag() {}
 func (s *SliceExpr) exprTag() {}
 
-// SendExpr: ch.send(val)  → ch <- val
-type SendExpr struct {
-	Chan  Expr
-	Value Expr
-}
-
-func (s *SendExpr) nodeTag() {}
-func (s *SendExpr) exprTag() {}
-
-// ReceiveExpr: ch.receive()  → <-ch
-type ReceiveExpr struct {
-	Chan Expr
-}
-
-func (r *ReceiveExpr) nodeTag() {}
-func (r *ReceiveExpr) exprTag() {}
+// SendExpr and ReceiveExpr are no longer created by the parser.
+// Channel send/receive are now parsed as regular CallExpr and handled in codegen.
 
 // ThisExpr: this
 type ThisExpr struct{}
@@ -588,93 +575,11 @@ type RawStringLit struct {
 func (r *RawStringLit) nodeTag() {}
 func (r *RawStringLit) exprTag() {}
 
-// ListAddStmt: list.add(items...) → list = append(list, items...)
-type ListAddStmt struct{ List Expr; Values []Expr; Spread bool }
-func (l *ListAddStmt) nodeTag() {}
-func (l *ListAddStmt) stmtTag() {}
-func (l *ListAddStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
-
-// MapRemoveStmt: map.remove(key) → delete(map, key)
-type MapRemoveStmt struct{ Map Expr; Key Expr }
-func (m *MapRemoveStmt) nodeTag() {}
-func (m *MapRemoveStmt) stmtTag() {}
-func (m *MapRemoveStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
-
-// SizeExpr: x.size() → len(x)
-type SizeExpr struct{ Object Expr }
-func (s *SizeExpr) nodeTag() {}
-func (s *SizeExpr) exprTag() {}
-
-// CloneExpr: list.clone() → append(list[:0:0], list...)
-type CloneExpr struct{ Object Expr }
-func (c *CloneExpr) nodeTag() {}
-func (c *CloneExpr) exprTag() {}
-
-// StringUpperExpr: s.upper() → strings.ToUpper(s)
-type StringUpperExpr struct{ Object Expr }
-func (s *StringUpperExpr) nodeTag() {}
-func (s *StringUpperExpr) exprTag() {}
-
-// StringLowerExpr: s.lower() → strings.ToLower(s)
-type StringLowerExpr struct{ Object Expr }
-func (s *StringLowerExpr) nodeTag() {}
-func (s *StringLowerExpr) exprTag() {}
-
-// StringContainsExpr: s.contains(x) → strings.Contains(s, x)
-type StringContainsExpr struct{ Object Expr; Search Expr }
-func (s *StringContainsExpr) nodeTag() {}
-func (s *StringContainsExpr) exprTag() {}
-
-// StringStartsWithExpr: s.startsWith(x) → strings.HasPrefix(s, x)
-type StringStartsWithExpr struct{ Object Expr; Prefix Expr }
-func (s *StringStartsWithExpr) nodeTag() {}
-func (s *StringStartsWithExpr) exprTag() {}
-
-// StringEndsWithExpr: s.endsWith(x) → strings.HasSuffix(s, x)
-type StringEndsWithExpr struct{ Object Expr; Suffix Expr }
-func (s *StringEndsWithExpr) nodeTag() {}
-func (s *StringEndsWithExpr) exprTag() {}
-
-// StringTrimExpr: s.trim() → strings.TrimSpace(s)
-type StringTrimExpr struct{ Object Expr }
-func (s *StringTrimExpr) nodeTag() {}
-func (s *StringTrimExpr) exprTag() {}
-
-// StringSplitExpr: s.split(sep) → strings.Split(s, sep)
-type StringSplitExpr struct{ Object Expr; Sep Expr }
-func (s *StringSplitExpr) nodeTag() {}
-func (s *StringSplitExpr) exprTag() {}
-
-// StringReplaceExpr: s.replace(old, new) → strings.ReplaceAll(s, old, new)
-type StringReplaceExpr struct{ Object Expr; Old Expr; New Expr }
-func (s *StringReplaceExpr) nodeTag() {}
-func (s *StringReplaceExpr) exprTag() {}
-
-// ListJoinExpr: list.join(sep) → strings.Join(list, sep)
-type ListJoinExpr struct{ Object Expr; Sep Expr }
-func (l *ListJoinExpr) nodeTag() {}
-func (l *ListJoinExpr) exprTag() {}
-
-// MapKeysExpr: m.keys() → collect keys into slice
-type MapKeysExpr struct{ Object Expr }
-func (m *MapKeysExpr) nodeTag() {}
-func (m *MapKeysExpr) exprTag() {}
-
-// MapValuesExpr: m.values() → collect values into slice
-type MapValuesExpr struct{ Object Expr }
-func (m *MapValuesExpr) nodeTag() {}
-func (m *MapValuesExpr) exprTag() {}
-
-// MapContainsExpr: m.containsKey(k) → check if key exists
-type MapContainsExpr struct{ Object Expr; Key Expr }
-func (m *MapContainsExpr) nodeTag() {}
-func (m *MapContainsExpr) exprTag() {}
-
-// ListSortStmt: list.sort() → sort.Ints/Strings/Float64s(list)
-type ListSortStmt struct{ List Expr }
-func (l *ListSortStmt) nodeTag() {}
-func (l *ListSortStmt) stmtTag() {}
-func (l *ListSortStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
+// The following builtin method AST nodes have been removed.
+// All method calls (.add, .remove, .size, .clone, .upper, .lower, .contains,
+// .startsWith, .endsWith, .trim, .split, .replace, .join, .sort, .keys,
+// .values, .containsKey, .send, .receive) are now parsed as regular CallExpr
+// and dispatched to builtin behavior in codegen based on receiver type.
 
 // SpreadExpr: expr... — spread a list into variadic args
 type SpreadExpr struct {

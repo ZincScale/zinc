@@ -1634,6 +1634,125 @@ fn main() {
 	assertOutput(t, out, "caught: zero not allowed")
 }
 
+func TestE2EMethodFailable(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    var f = os.Create("/tmp/zinc_test_method_failable.txt") or {
+        print("create failed")
+        exit(1)
+    }
+    f.WriteString("hello from zinc") or {
+        print("write failed: {err}")
+        exit(1)
+    }
+    f.Close() or {
+        print("close failed")
+        exit(1)
+    }
+    var content = readFile("/tmp/zinc_test_method_failable.txt") or {
+        print("read failed")
+        exit(1)
+    }
+    print(content)
+    os.Remove("/tmp/zinc_test_method_failable.txt")
+}`)
+	assertOutput(t, out, "hello from zinc")
+}
+
+func TestE2EClassWithAddMethod(t *testing.T) {
+	out := e2eRun(t, `
+class Counter {
+    var count: Int
+
+    new() {}
+
+    pub fn add(n: Int) {
+        this.count = this.count + n
+    }
+
+    pub fn getCount(): Int {
+        return this.count
+    }
+}
+
+fn main() {
+    var c = Counter.new()
+    c.add(5)
+    c.add(3)
+    print(c.getCount())
+}`)
+	assertOutput(t, out, "8")
+}
+
+func TestE2EWithMethodFailable(t *testing.T) {
+	// with statement: method calls on resources should detect failable (multi-return)
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    var path = os.TempDir() + "/zinc_with_method_test.txt"
+    with (var f = os.Create(path)) {
+        f.WriteString("with method failable") or {
+            print("write failed")
+            exit(1)
+        }
+    }
+    var content = readFile(path) or {
+        print("read failed")
+        exit(1)
+    }
+    print(content)
+    os.Remove(path)
+}`)
+	assertOutput(t, out, "with method failable")
+}
+
+func TestE2EWithVoidMethodFailable(t *testing.T) {
+	// with statement: void failable method (e.g. f.Sync() returns only error)
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    var path = os.TempDir() + "/zinc_with_sync_test.txt"
+    with (var f = os.Create(path)) {
+        f.WriteString("sync test")
+        f.Sync() or {
+            print("sync failed")
+            exit(1)
+        }
+    }
+    var content = readFile(path) or {
+        print("read failed")
+        exit(1)
+    }
+    print(content)
+    os.Remove(path)
+}`)
+	assertOutput(t, out, "sync test")
+}
+
+func TestE2EWithMultipleResourcesMethodCalls(t *testing.T) {
+	// Multiple resources with method calls on each
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    var p1 = os.TempDir() + "/zinc_multi_method_a.txt"
+    var p2 = os.TempDir() + "/zinc_multi_method_b.txt"
+    with (var f1 = os.Create(p1), var f2 = os.Create(p2)) {
+        f1.WriteString("AAA") or { print("f1 write failed"); exit(1) }
+        f2.WriteString("BBB") or { print("f2 write failed"); exit(1) }
+    }
+    print(readFile(p1))
+    print(readFile(p2))
+    os.Remove(p1)
+    os.Remove(p2)
+}`)
+	assertOutput(t, out, "AAA\nBBB")
+}
+
 func TestE2EOsRemoveVoidFailable(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
