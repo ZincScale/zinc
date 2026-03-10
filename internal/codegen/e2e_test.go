@@ -1766,3 +1766,63 @@ fn main() {
 }`)
 	assertOutput(t, out, "caught")
 }
+
+func TestE2EPolymorphism(t *testing.T) {
+	out := e2eRun(t, `
+interface Speaker {
+    pub fn speak(): String
+}
+
+class Animal {
+    var name: String
+    construct new(n: String) {
+        this.name = n
+    }
+    pub fn speak(): String {
+        return "{this.name} says ..."
+    }
+}
+
+class Dog : Animal, Speaker {
+    construct new(n: String) {
+        super(n)
+    }
+    pub fn speak(): String {
+        return "{this.name} says Woof!"
+    }
+}
+
+fn printSpeak(s: Speaker) {
+    print(s.speak())
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    printSpeak(d)
+    print(d.speak())
+}`)
+	assertOutput(t, out, "Rex says Woof!\nRex says Woof!")
+}
+
+func TestE2EPolymorphismFieldAccess(t *testing.T) {
+	out := e2eRun(t, `
+class Person {
+    var name: String
+    var age: Int
+    construct new(n: String, a: Int) {
+        this.name = n
+        this.age = a
+    }
+}
+
+fn greet(p: Person) {
+    print("Hello, {p.name}, age {p.age}")
+}
+
+fn main() {
+    var p = Person.new("Alice", 30)
+    greet(p)
+    print(p.name)
+}`)
+	assertOutput(t, out, "Hello, Alice, age 30\nAlice")
+}

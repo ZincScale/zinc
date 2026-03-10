@@ -161,3 +161,6 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Class/Go-type-aware builtin dispatch (`.add()` on a class calls the method, not `append`)
 - `.gitignore` cleanup for generated `.go` files
 - Dead code removal (`TOKEN_PRIVATE`, `TOKEN_ARROW`, `FieldDecl.IsPrivate`)
+- Auto-generated interfaces for OO polymorphism (class → struct `Impl` + interface, getters/setters, compile-time satisfaction checks)
+- Polymorphic function parameters (interface-typed params use getters, concrete `*Impl` uses direct field access)
+- Safe navigation works with interface types (`d?.name` → `d.GetName()` for nilable interface-typed vars)

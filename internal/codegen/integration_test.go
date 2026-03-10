@@ -29,7 +29,7 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Container[T any] struct")
+	assertContains(t, out, "type ContainerImpl[T any] struct")
 	assertContains(t, out, "type Showable interface")
 }
 
@@ -59,7 +59,7 @@ fn main() {
 	}
 	assertContains(t, out, "type Status int")
 	assertContains(t, out, "StatusActive Status = iota")
-	assertContains(t, out, "type Task struct")
+	assertContains(t, out, "type TaskImpl struct")
 	assertContains(t, out, "case StatusActive:")
 	assertContains(t, out, "case StatusIdle:")
 }
@@ -124,12 +124,12 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Animal struct")
-	assertContains(t, out, "type Dog struct")
-	assertContains(t, out, "type GoldenRetriever struct")
+	assertContains(t, out, "type AnimalImpl struct")
+	assertContains(t, out, "type DogImpl struct")
+	assertContains(t, out, "type GoldenRetrieverImpl struct")
 	assertContains(t, out, "func NewGoldenRetriever")
 	// Receiver name is first letter of type name
-	assertContains(t, out, "func (g *GoldenRetriever) Fetch()")
+	assertContains(t, out, "func (g *GoldenRetrieverImpl) Fetch()")
 }
 
 func TestIntegrationStringInterpolationInMethod(t *testing.T) {
@@ -182,7 +182,7 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Wrapper[T any] struct")
+	assertContains(t, out, "type WrapperImpl[T any] struct")
 	assertContains(t, out, "Content *T")
 	// Constructor uses obj; methods use receiver initial (w for Wrapper)
 	assertContains(t, out, "obj.Content = nil")
@@ -260,10 +260,10 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Dog struct")
+	assertContains(t, out, "type DogImpl struct")
 	// Receiver name is first letter of class name (d for Dog)
-	assertContains(t, out, "func (d *Dog) Speak() string")
-	assertContains(t, out, "var _ Speaker = (*Dog)(nil)")
+	assertContains(t, out, "func (d *DogImpl) Speak() string")
+	assertContains(t, out, "var _ Speaker = (*DogImpl)(nil)")
 }
 
 func TestIntegrationWithPlainResource(t *testing.T) {
@@ -301,7 +301,7 @@ fn main() {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "func (d *DataProcessor) Process()")
+	assertContains(t, out, "func (d *DataProcessorImpl) Process()")
 	assertContains(t, out, "handle := openFile(\"data.txt\")")
 	assertContains(t, out, "if _c, ok := any(handle).(io.Closer); ok { defer _c.Close() }")
 }

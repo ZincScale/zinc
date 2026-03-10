@@ -16,7 +16,7 @@ import (
 )
 
 // version is set by goreleaser via ldflags at build time.
-var version = "0.3.1"
+var version = "0.3.2"
 
 const usage = `Zinc transpiler — compiles .zn files to Go source.
 

@@ -47,6 +47,12 @@ type varTypeInfo struct {
 	Pointer  bool   // true for *os.File
 }
 
+// classFieldInfo records a class field for getter/setter generation.
+type classFieldInfo struct {
+	Name string         // Zinc field name (e.g. "name")
+	Type parser.TypeExpr // Zinc type expression
+}
+
 // Generator converts a Zinc AST to Go source code.
 type Generator struct {
 	buf            strings.Builder
@@ -60,8 +66,17 @@ type Generator struct {
 	varTypes map[string]varTypeInfo
 	// classVars: local variables known to hold Zinc class instances
 	classVars map[string]bool
+	// classFields: class name → list of field info (for getter/setter generation)
+	classFields map[string][]*classFieldInfo
+	// classParents: class name → parent class/interface names
+	classParents map[string][]string
 	// current receiver name for method emission
 	receiver string
+	// inCtorBody: true when emitting constructor body (use direct field access)
+	inCtorBody bool
+	// interfaceVars: variables that hold interface-typed class values (function params, etc.)
+	// These need getter/setter access instead of direct field access.
+	interfaceVars map[string]bool
 	// current function return type (for zero-value in error returns)
 	currentReturnType parser.TypeExpr
 	// whether current function is failable (affects return stmt emission)
@@ -106,9 +121,12 @@ func New() *Generator {
 		canThrowFns:    make(map[string]bool),
 		varTypes:       make(map[string]varTypeInfo),
 		classVars:      make(map[string]bool),
+		classFields:    make(map[string][]*classFieldInfo),
+		classParents:   make(map[string][]string),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
+		interfaceVars:  make(map[string]bool),
 		fnParams:       make(map[string][]*parser.ParamDecl),
 		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
 		goResolver:     NewGoTypeResolver(),
@@ -127,9 +145,12 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		canThrowFns:    make(map[string]bool),
 		varTypes:       make(map[string]varTypeInfo),
 		classVars:      make(map[string]bool),
+		classFields:    make(map[string][]*classFieldInfo),
+		classParents:   make(map[string][]string),
 		classCtors:     make(map[string]*parser.CtorDecl),
 		enumNames:      make(map[string]bool),
 		throwingVars:   make(map[string]bool),
+		interfaceVars:  make(map[string]bool),
 		packageName:    pkgName,
 		fnParams:       make(map[string][]*parser.ParamDecl),
 		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
@@ -147,6 +168,12 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 	}
 	for k, v := range reg.CanThrowFns {
 		g.canThrowFns[k] = v
+	}
+	for k, v := range reg.ClassFields {
+		g.classFields[k] = v
+	}
+	for k, v := range reg.ClassParents {
+		g.classParents[k] = v
 	}
 	for k, v := range reg.ClassCtors {
 		g.classCtors[k] = v
@@ -231,6 +258,13 @@ func (g *Generator) firstPass(prog *parser.Program) {
 			if d.Ctor != nil {
 				g.classCtors[d.Name] = d.Ctor
 			}
+			// Collect field info for getter/setter and auto-interface generation
+			var fields []*classFieldInfo
+			for _, f := range d.Fields {
+				fields = append(fields, &classFieldInfo{Name: f.Name, Type: f.Type})
+			}
+			g.classFields[d.Name] = fields
+			g.classParents[d.Name] = d.Parents
 		case *parser.InterfaceDecl:
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
@@ -510,8 +544,16 @@ func (g *Generator) emitType(t parser.TypeExpr) string {
 		if inner == "" || inner == "interface{}" {
 			return "interface{}"
 		}
-		// Already a pointer (class type) — don't double-pointer
+		// Already a pointer — don't double-pointer
 		if strings.HasPrefix(inner, "*") {
+			return inner
+		}
+		// Class types are interfaces (already nilable) — don't add pointer
+		if st, ok := typ.Inner.(*parser.SimpleType); ok && g.classNames[st.Name] {
+			return inner
+		}
+		// Interface types are also already nilable
+		if st, ok := typ.Inner.(*parser.SimpleType); ok && g.interfaceNames[st.Name] {
 			return inner
 		}
 		return "*" + inner
@@ -544,9 +586,9 @@ func (g *Generator) emitSimpleType(name string) string {
 	case "Any":
 		return "interface{}"
 	}
-	// Class types become pointer types
+	// Class types use the auto-generated interface (enables polymorphism)
 	if g.classNames[name] {
-		return "*" + name
+		return name
 	}
 	// Interface types remain value types
 	return name
@@ -701,7 +743,9 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 		}
 	}
 
-	// 1. Struct definition
+	implName := cls.Name + "Impl"
+
+	// 1. Struct definition (implementation type)
 	typeParamStr := ""
 	if len(cls.TypeParams) > 0 {
 		constraints := make([]string, len(cls.TypeParams))
@@ -710,11 +754,11 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 		}
 		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
 	}
-	g.writeln(fmt.Sprintf("type %s%s struct {", cls.Name, typeParamStr))
+	g.writeln(fmt.Sprintf("type %s%s struct {", implName, typeParamStr))
 	g.push()
-	// Embed base class
+	// Embed base class (as Impl type)
 	if baseClass != "" {
-		g.writeln(baseClass)
+		g.writeln(baseClass + "Impl")
 	}
 	// Own fields
 	for _, f := range cls.Fields {
@@ -724,25 +768,54 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	g.writeln("}")
 	g.writeln("")
 
+	// 2. Getters and setters for own fields (skip if class already has a method with that name)
+	recv := strings.ToLower(cls.Name[:1])
+	recvImplStr := implName
+	if len(cls.TypeParams) > 0 {
+		recvImplStr = implName + "[" + strings.Join(cls.TypeParams, ", ") + "]"
+	}
+	// Build set of existing method names to avoid getter/setter collisions
+	existingMethods := make(map[string]bool)
+	for _, m := range cls.Methods {
+		existingMethods[capitalize(m.Name)] = true
+	}
+	for _, f := range cls.Fields {
+		goFieldName := capitalize(f.Name)
+		goType := g.emitType(f.Type)
+		getterName := "Get" + goFieldName
+		setterName := "Set" + goFieldName
+		if !existingMethods[getterName] {
+			g.writeln(fmt.Sprintf("func (%s *%s) %s() %s { return %s.%s }", recv, recvImplStr, getterName, goType, recv, goFieldName))
+		}
+		if !existingMethods[setterName] {
+			g.writeln(fmt.Sprintf("func (%s *%s) %s(v %s) { %s.%s = v }", recv, recvImplStr, setterName, goType, recv, goFieldName))
+		}
+	}
+	if len(cls.Fields) > 0 {
+		g.writeln("")
+	}
+
+	// 3. Auto-interface (the public type)
+	g.emitClassInterface(cls, baseClass, ifaces)
+
 	// Verify interface implementation (compile-time check).
 	// Skip for generic classes: can't instantiate without concrete type args.
 	if len(cls.TypeParams) == 0 {
+		g.writeln(fmt.Sprintf("var _ %s = (*%s)(nil)", cls.Name, implName))
 		for _, iface := range ifaces {
-			g.writeln(fmt.Sprintf("var _ %s = (*%s)(nil)", iface, cls.Name))
+			g.writeln(fmt.Sprintf("var _ %s = (*%s)(nil)", iface, implName))
 		}
-		if len(ifaces) > 0 {
-			g.writeln("")
-		}
+		g.writeln("")
 	}
 
-	// 2. Constructor
-	classInstStr := cls.Name
+	// 4. Constructor
+	classInstStr := implName
 	if len(cls.TypeParams) > 0 {
 		typeArgs := make([]string, len(cls.TypeParams))
 		for i, tp := range cls.TypeParams {
 			typeArgs[i] = tp
 		}
-		classInstStr = cls.Name + "[" + strings.Join(typeArgs, ", ") + "]"
+		classInstStr = implName + "[" + strings.Join(typeArgs, ", ") + "]"
 	}
 	if cls.Ctor != nil {
 		g.emitCtor(cls, baseClass)
@@ -756,8 +829,7 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 		g.writeln("")
 	}
 
-	// 3. Methods
-	recv := strings.ToLower(cls.Name[:1])
+	// 5. Methods
 	g.receiver = recv
 	for _, m := range cls.Methods {
 		g.emitMethod(cls.Name, cls.TypeParams, recv, m)
@@ -765,9 +837,90 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	g.receiver = ""
 }
 
+// emitClassInterface generates the auto-interface for a class.
+// The interface includes: getters/setters for all fields (own + inherited)
+// and all public non-static methods.
+func (g *Generator) emitClassInterface(cls *parser.ClassDecl, baseClass string, ifaces []string) {
+	typeParamStr := ""
+	if len(cls.TypeParams) > 0 {
+		constraints := make([]string, len(cls.TypeParams))
+		for i, tp := range cls.TypeParams {
+			constraints[i] = tp + " any"
+		}
+		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
+	}
+
+	g.writeln(fmt.Sprintf("type %s%s interface {", cls.Name, typeParamStr))
+	g.push()
+
+	// Embed parent class interface (gives us inherited getters + methods)
+	if baseClass != "" {
+		if len(cls.TypeParams) > 0 {
+			g.writeln(baseClass + "[" + strings.Join(cls.TypeParams, ", ") + "]")
+		} else {
+			g.writeln(baseClass)
+		}
+	}
+	// Embed declared interfaces
+	for _, iface := range ifaces {
+		g.writeln(iface)
+	}
+
+	// Own field getters and setters (skip if class has matching method)
+	methodNames := make(map[string]bool)
+	for _, m := range cls.Methods {
+		if m.IsPub && !m.IsStatic {
+			methodNames[capitalize(m.Name)] = true
+		}
+	}
+	for _, f := range cls.Fields {
+		goFieldName := capitalize(f.Name)
+		goType := g.emitType(f.Type)
+		if !methodNames["Get"+goFieldName] {
+			g.writeln(fmt.Sprintf("Get%s() %s", goFieldName, goType))
+		}
+		if !methodNames["Set"+goFieldName] {
+			g.writeln(fmt.Sprintf("Set%s(%s)", goFieldName, goType))
+		}
+	}
+
+	// Own public non-static methods
+	for _, m := range cls.Methods {
+		if !m.IsPub || m.IsStatic {
+			continue
+		}
+		name := capitalize(m.Name)
+		var params []string
+		for _, p := range m.Params {
+			if p.Variadic {
+				params = append(params, p.Name+" ..."+g.emitType(p.Type))
+			} else {
+				params = append(params, p.Name+" "+g.emitType(p.Type))
+			}
+		}
+		ret := g.emitType(m.ReturnType)
+		sig := name + "(" + strings.Join(params, ", ") + ")"
+		if m.CanThrow {
+			if ret != "" {
+				sig += " (" + ret + ", error)"
+			} else {
+				sig += " error"
+			}
+		} else if ret != "" {
+			sig += " " + ret
+		}
+		g.writeln(sig)
+	}
+
+	g.pop()
+	g.writeln("}")
+	g.writeln("")
+}
+
 func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	ctor := cls.Ctor
 	name := "New" + cls.Name
+	implName := cls.Name + "Impl"
 
 	// Build params string
 	var params []string
@@ -781,9 +934,9 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	paramStr := strings.Join(params, ", ")
 
 	// Build type parameter string and instantiated type for generic classes.
-	// e.g. class Box<T> → func NewBox[T any](v T) *Box[T]
+	// e.g. class Box<T> → func NewBox[T any](v T) *BoxImpl[T]
 	typeParamStr := ""
-	classInstStr := cls.Name
+	classInstStr := implName
 	if len(cls.TypeParams) > 0 {
 		constraints := make([]string, len(cls.TypeParams))
 		typeArgs := make([]string, len(cls.TypeParams))
@@ -792,7 +945,7 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 			typeArgs[i] = tp
 		}
 		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
-		classInstStr = cls.Name + "[" + strings.Join(typeArgs, ", ") + "]"
+		classInstStr = implName + "[" + strings.Join(typeArgs, ", ") + "]"
 	}
 
 	g.writeln(fmt.Sprintf("func %s%s(%s) *%s {", name, typeParamStr, paramStr, classInstStr))
@@ -805,16 +958,17 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	g.push()
 	// Base class init — call the parent constructor to avoid field-name mismatches.
 	if baseClass != "" {
+		baseImplName := baseClass + "Impl"
 		var superArgStrs []string
 		for _, arg := range ctor.SuperArgs {
 			superArgStrs = append(superArgStrs, g.emitExpr(arg))
 		}
 		if g.classCtors[baseClass] != nil {
 			// Parent has a named constructor: embed via *NewParent(args...)
-			g.writeln(fmt.Sprintf("%s: *New%s(%s),", baseClass, baseClass, strings.Join(superArgStrs, ", ")))
+			g.writeln(fmt.Sprintf("%s: *New%s(%s),", baseImplName, baseClass, strings.Join(superArgStrs, ", ")))
 		} else {
 			// Parent has no registered constructor: zero-value embed
-			g.writeln(fmt.Sprintf("%s: %s{},", baseClass, baseClass))
+			g.writeln(fmt.Sprintf("%s: %s{},", baseImplName, baseImplName))
 		}
 	}
 	// Own fields with defaults
@@ -830,9 +984,11 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	// Body statements (super call already removed)
 	savedRecv := g.receiver
 	g.receiver = "obj"
+	g.inCtorBody = true
 	for _, s := range ctor.Body.Stmts {
 		g.emitStmt(s)
 	}
+	g.inCtorBody = false
 	g.receiver = savedRecv
 
 	g.writeln("return obj")
@@ -868,10 +1024,11 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 	}
 
 	// For generic classes, the receiver type must include type params.
-	// e.g. func (b *Box[T]) Get() T
-	recvTypeStr := className
+	// e.g. func (b *BoxImpl[T]) Get() T
+	implName := className + "Impl"
+	recvTypeStr := implName
 	if len(typeParams) > 0 {
-		recvTypeStr = className + "[" + strings.Join(typeParams, ", ") + "]"
+		recvTypeStr = implName + "[" + strings.Join(typeParams, ", ") + "]"
 	}
 
 	if m.IsStatic {
@@ -883,13 +1040,25 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 	savedRecv := g.receiver
 	savedRT := g.currentReturnType
 	savedCT := g.currentCanThrow
+	savedIV := g.interfaceVars
 	g.receiver = recv
 	g.currentReturnType = m.ReturnType
 	g.currentCanThrow = m.CanThrow
+	// Track params with class types as interface-typed variables (need getters)
+	g.interfaceVars = make(map[string]bool)
+	for k, v := range savedIV {
+		g.interfaceVars[k] = v
+	}
+	for _, p := range m.Params {
+		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
+			g.interfaceVars[p.Name] = true
+		}
+	}
 	g.emitBlock(m.Body)
 	g.receiver = savedRecv
 	g.currentReturnType = savedRT
 	g.currentCanThrow = savedCT
+	g.interfaceVars = savedIV
 	g.pop()
 	g.writeln("}")
 	g.writeln("")
@@ -940,15 +1109,27 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 	savedRT := g.currentReturnType
 	savedCT := g.currentCanThrow
 	savedMG := g.inMainOrGoroutine
+	savedIV := g.interfaceVars
 	g.currentReturnType = fn.ReturnType
 	g.currentCanThrow = fn.CanThrow
 	if fn.Name == "main" {
 		g.inMainOrGoroutine = true
 	}
+	// Track params with class types as interface-typed variables (need getters)
+	g.interfaceVars = make(map[string]bool)
+	for k, v := range savedIV {
+		g.interfaceVars[k] = v
+	}
+	for _, p := range fn.Params {
+		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
+			g.interfaceVars[p.Name] = true
+		}
+	}
 	g.emitBlock(fn.Body)
 	g.currentReturnType = savedRT
 	g.currentCanThrow = savedCT
 	g.inMainOrGoroutine = savedMG
+	g.interfaceVars = savedIV
 	g.pop()
 	g.writeln("}")
 }
@@ -1360,12 +1541,31 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		g.push()
 		g.writeln(fmt.Sprintf("_val, %s := %s", errVar, g.emitFailableCallExpr(call)))
 		g.emitErrorCheck(errVar, a.OrHandler)
-		g.writeln(fmt.Sprintf("%s %s _val", g.emitExpr(a.Target), a.Op))
+		target := g.emitClassFieldAssignTarget(a.Target)
+		if target != "" {
+			g.writeln(fmt.Sprintf("%s(_val)", target))
+		} else {
+			g.writeln(fmt.Sprintf("%s %s _val", g.emitExpr(a.Target), a.Op))
+		}
 		g.pop()
 		g.writeln("}")
 		return
 	}
+	// Check if target is a class field — use setter
+	if sel, ok := a.Target.(*parser.SelectorExpr); ok && a.Op == "=" && g.isClassFieldAccess(sel) {
+		g.writeln(fmt.Sprintf("%s.Set%s(%s)", g.emitExpr(sel.Object), capitalize(sel.Field), g.emitExpr(a.Value)))
+		return
+	}
 	g.writeln(fmt.Sprintf("%s %s %s", g.emitExpr(a.Target), a.Op, g.emitExpr(a.Value)))
+}
+
+// emitClassFieldAssignTarget checks if the target is a class field and returns
+// the setter call prefix (e.g. "obj.SetName") or "" if not a class field.
+func (g *Generator) emitClassFieldAssignTarget(target parser.Expr) string {
+	if sel, ok := target.(*parser.SelectorExpr); ok && g.isClassFieldAccess(sel) {
+		return fmt.Sprintf("%s.Set%s", g.emitExpr(sel.Object), capitalize(sel.Field))
+	}
+	return ""
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
@@ -1623,6 +1823,12 @@ func (g *Generator) emitSafeNav(sn *parser.SafeNavExpr) string {
 		field := capitalize(step.Field)
 		isLast := i == len(chain)-1
 
+		// For class fields, use getter (safe-nav targets may be interface-typed)
+		fieldAccess := fmt.Sprintf("%s.%s", prevVar, field)
+		if g.hasAnyClassField(step.Field) {
+			fieldAccess = fmt.Sprintf("%s.Get%s()", prevVar, field)
+		}
+
 		if isLast && step.Call != nil {
 			var argStrs []string
 			for _, a := range step.Call.Args {
@@ -1630,10 +1836,10 @@ func (g *Generator) emitSafeNav(sn *parser.SafeNavExpr) string {
 			}
 			body.WriteString(fmt.Sprintf("return %s.%s(%s)", prevVar, field, strings.Join(argStrs, ", ")))
 		} else if isLast {
-			body.WriteString(fmt.Sprintf("return %s.%s", prevVar, field))
+			body.WriteString(fmt.Sprintf("return %s", fieldAccess))
 		} else {
 			nextVar := fmt.Sprintf("_s%d", i+1)
-			body.WriteString(fmt.Sprintf("%s := %s.%s; if %s == nil { return nil }; ", nextVar, prevVar, field, nextVar))
+			body.WriteString(fmt.Sprintf("%s := %s; if %s == nil { return nil }; ", nextVar, fieldAccess, nextVar))
 			prevVar = nextVar
 		}
 	}
@@ -1656,6 +1862,11 @@ func (g *Generator) emitSafeNavSingle(sn *parser.SafeNavExpr) string {
 		}
 		args := strings.Join(argStrs, ", ")
 		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s(%s) }; return nil }()", obj, obj, field, args)
+	}
+	// If field is a class field, use getter (safe-nav targets may be interface-typed)
+	if g.hasAnyClassField(sn.Field) {
+		getter := "Get" + capitalize(sn.Field)
+		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s() }; return nil }()", obj, obj, getter)
 	}
 	return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s }; return nil }()", obj, obj, field)
 }
@@ -1939,6 +2150,10 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 				return ident.Name + capitalize(ex.Field)
 			}
 		}
+		// Check if this is a class field access — use getter
+		if g.isClassFieldAccess(ex) {
+			return fmt.Sprintf("%s.Get%s()", g.emitExpr(ex.Object), capitalize(ex.Field))
+		}
 		return fmt.Sprintf("%s.%s", g.emitExpr(ex.Object), capitalize(ex.Field))
 	case *parser.SafeNavExpr:
 		return g.emitSafeNav(ex)
@@ -2000,6 +2215,77 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 
 // isBuiltinReceiver returns true if the receiver should use builtin method dispatch
 // (i.e., it's NOT a known Zinc class, interface, or tracked Go type).
+// isClassFieldAccess checks if a selector expression is a field access on a class instance
+// where getter/setter should be used (i.e., the receiver might be an interface type).
+// Returns false for:
+// - Constructor body (obj is concrete struct)
+// - this.field / receiver.field inside methods (receiver is concrete struct)
+// - Package access, Go type access, enum access
+// Returns true for:
+// - classVar.field (variable from .new() call — it could be typed as interface)
+func (g *Generator) isClassFieldAccess(sel *parser.SelectorExpr) bool {
+	if g.inCtorBody {
+		return false
+	}
+	fieldName := sel.Field
+	// this.field inside methods — receiver is concrete *Impl, use direct access
+	if _, ok := sel.Object.(*parser.ThisExpr); ok {
+		return false
+	}
+	if ident, ok := sel.Object.(*parser.Ident); ok {
+		// Skip package/enum/interface access
+		if g.enumNames[ident.Name] || g.interfaceNames[ident.Name] {
+			return false
+		}
+		if _, ok := g.importMap[ident.Name]; ok {
+			return false // package access like os.Stdin
+		}
+		if _, ok := g.varTypes[ident.Name]; ok {
+			return false // Go type variable
+		}
+		// Method receiver (this) — concrete struct, use direct access
+		if g.receiver != "" && ident.Name == g.receiver {
+			return false
+		}
+		// Class name itself (static access)
+		if g.classNames[ident.Name] {
+			return false
+		}
+		// Interface-typed variables (function params with class type) need getters
+		if g.interfaceVars[ident.Name] {
+			return g.hasAnyClassField(fieldName)
+		}
+		// classVars from .new() are concrete *Impl types — direct field access
+	}
+	return false
+}
+
+// hasClassField checks if a class (including inherited fields) has a field with the given name.
+func (g *Generator) hasClassField(className, fieldName string) bool {
+	for _, f := range g.classFields[className] {
+		if f.Name == fieldName {
+			return true
+		}
+	}
+	// Check parent classes
+	for _, parent := range g.classParents[className] {
+		if g.classNames[parent] && g.hasClassField(parent, fieldName) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAnyClassField checks if any declared class has a field with this name.
+func (g *Generator) hasAnyClassField(fieldName string) bool {
+	for className := range g.classNames {
+		if g.hasClassField(className, fieldName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Generator) isBuiltinReceiver(sel *parser.SelectorExpr) bool {
 	if _, ok := sel.Object.(*parser.ThisExpr); ok {
 		return false // this.method() is always a real method

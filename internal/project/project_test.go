@@ -477,7 +477,7 @@ fn main() {
 				t.Fatalf("reading dog.go: %v", err)
 			}
 			out := string(data)
-			if !strings.Contains(out, "var _ Speaker = (*Dog)(nil)") {
+			if !strings.Contains(out, "var _ Speaker = (*DogImpl)(nil)") {
 				t.Errorf("expected interface compliance check in dog.go, got:\n%s", out)
 			}
 			return

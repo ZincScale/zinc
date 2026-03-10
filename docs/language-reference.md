@@ -229,32 +229,35 @@ fn main() {
 Transpiles to:
 
 ```go
-type Point struct {
+type PointImpl struct {
     X float64
     Y float64
 }
 
-func NewPoint(x float64, y float64) *Point {
-    obj := &Point{}
+type Point interface {
+    GetX() float64
+    SetX(float64)
+    GetY() float64
+    SetY(float64)
+}
+
+func NewPoint(x float64, y float64) *PointImpl {
+    obj := &PointImpl{}
     obj.X = x
     obj.Y = y
     return obj
 }
 
-func Point_Origin() *Point {
+func Point_Origin() *PointImpl {
     return NewPoint(0.0, 0.0)
 }
 
-func Point_Diagonal(v float64) *Point {
+func Point_Diagonal(v float64) *PointImpl {
     return NewPoint(v, v)
 }
-
-func main() {
-    a := NewPoint(3.0, 4.0)
-    b := Point_Origin()
-    c := Point_Diagonal(5.0)
-}
 ```
+
+> **How it works:** Each Zinc class generates a Go struct (`NameImpl`) and a Go interface (`Name`). The interface includes getters, setters, and all public methods. This enables true OO polymorphism — any function that accepts `Animal` can receive a `Dog`, just like in Java or C#.
 
 ### Generic Classes
 
@@ -328,6 +331,47 @@ class Dog : Animal, Speaker {
         super(name)
     }
     pub fn speak(): String { return "Woof!" }
+}
+```
+
+## Polymorphism
+
+Zinc classes support true OO polymorphism. A function that accepts a class or interface type can receive any subclass:
+
+```zinc
+interface Speaker {
+    pub fn speak(): String
+}
+
+class Animal {
+    var name: String
+    new(n: String) { this.name = n }
+}
+
+class Dog : Animal, Speaker {
+    new(n: String) { super(n) }
+    pub fn speak(): String {
+        return "{this.name} says Woof!"
+    }
+}
+
+fn printSpeak(s: Speaker) {
+    print(s.speak())
+}
+
+fn main() {
+    var d = Dog.new("Rex")
+    printSpeak(d)         // Rex says Woof!
+}
+```
+
+This works because each class generates a Go interface. `Dog` satisfies both the `Animal` interface and the `Speaker` interface, so it can be passed to any function expecting either type.
+
+Field access through interface-typed parameters uses auto-generated getters:
+
+```zinc
+fn greet(p: Person) {
+    print("Hello, {p.name}")  // uses p.GetName() under the hood
 }
 ```
 

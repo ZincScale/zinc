@@ -106,10 +106,11 @@ func TestClass(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Dog struct {")
+	assertContains(t, out, "type DogImpl struct {")
 	assertContains(t, out, "Name string")
-	assertContains(t, out, "func NewDog(n string) *Dog {")
-	assertContains(t, out, "func (d *Dog) Bark() string {")
+	assertContains(t, out, "type Dog interface {")
+	assertContains(t, out, "func NewDog(n string) *DogImpl {")
+	assertContains(t, out, "func (d *DogImpl) Bark() string {")
 }
 
 func TestInterface(t *testing.T) {
@@ -133,7 +134,7 @@ func TestInterfaceComplianceCheck(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "var _ Speaker = (*Dog)(nil)")
+	assertContains(t, out, "var _ Speaker = (*DogImpl)(nil)")
 }
 
 func TestReturnErrorAndOrHandler(t *testing.T) {
@@ -325,7 +326,7 @@ func TestGenericClass(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, "type Box[T any] struct {")
+	assertContains(t, out, "type BoxImpl[T any] struct {")
 }
 
 func TestOptionalType(t *testing.T) {
@@ -605,8 +606,10 @@ fn makeDog(): Dog { return Dog.new() }`)
 
 	gen := NewWithRegistry(reg, "models")
 	out := gen.Generate(prog2)
-	// Dog is a class, so return type should be *Dog
-	assertContains(t, out, "*Dog")
+	// Dog is a class; in cross-file mode, file2 sees Dog as the interface type
+	// Return type is Dog (the interface), constructor is NewDog()
+	assertContains(t, out, "Dog")
+	assertContains(t, out, "NewDog()")
 }
 
 // mustParse is a helper that parses src and fails the test on errors.

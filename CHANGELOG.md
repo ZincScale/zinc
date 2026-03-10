@@ -4,11 +4,34 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-03-10
+
+### Added
+- **Auto-generated interfaces for OO polymorphism** — each Zinc class now generates a Go struct (`NameImpl`) and a Go interface (`Name`) with getters, setters, and all public methods
+- True polymorphic dispatch — functions accepting a class/interface type can receive any subclass, just like Java/C#/Kotlin
+- Compile-time interface satisfaction checks (`var _ Interface = (*Impl)(nil)`)
+- Field access through interface-typed parameters uses auto-generated getters/setters
+- Safe navigation (`?.`) works correctly with interface types
+- Polymorphism e2e tests
+
+### Fixed
+- `Optional<ClassName>` no longer generates pointer-to-interface (`*Dog`), which is invalid in Go
+- Safe-nav field access on nullable class types uses getters instead of direct field access
+- Getter/setter collision detection: if a class already defines `getX()`, the auto-generated getter is skipped
+
+## [0.3.1] - 2026-03-10
+
 ### Added
 - Colored error output with ANSI terminal detection (auto-disabled in CI/pipes)
 - Project-mode errors now show `.zn` filename instead of directory path
   - Before: `type error[/home/user/myapp]: line 2: ...`
   - After: `type error[main.zn]: line 2: ...`
+- Variadic functions, spread operator, multi-arg `.add()`
+- Go interop auto-detection via `go/types` for error-returning functions and methods
+- Parser→codegen method dispatch refactor (19 specialized AST nodes removed)
+
+### Fixed
+- Broken codegen for `defer`, raw strings, match failable detection
 
 ## [0.2.0] - 2026-03-10
 
