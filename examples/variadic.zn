@@ -1,0 +1,70 @@
+import "fmt"
+
+// Variadic function — accepts any number of Int args
+fn sum(nums: ...Int) : Int {
+    var total = 0
+    for n in nums {
+        total += n
+    }
+    return total
+}
+
+// Fixed params + variadic
+fn log(level: String, messages: ...String) {
+    for msg in messages {
+        print("[{level}] {msg}")
+    }
+}
+
+// Class with variadic method
+class Builder {
+    var parts: List<String>
+
+    new() {
+        this.parts = ["placeholder"]
+        this.parts = this.parts[0:0]
+    }
+
+    pub fn append(items: ...String) {
+        for item in items {
+            this.parts.add(item)
+        }
+    }
+
+    pub fn build() : String {
+        return this.parts.join(", ")
+    }
+}
+
+fn main() {
+    // Basic variadic calls
+    print(sum(1, 2, 3))
+    print(sum(10, 20, 30, 40))
+    print(sum())
+
+    // Spread a list into variadic args
+    var nums = [5, 10, 15]
+    print(sum(nums...))
+
+    // Fixed + variadic params
+    log("INFO", "server started", "listening on :8080")
+
+    // list.add() with multiple args
+    var items = [1, 2]
+    items.add(3, 4, 5)
+    print(items)
+
+    // list.add() with spread
+    var more = [6, 7, 8]
+    items.add(more...)
+    print(items)
+
+    // Variadic method
+    var b = Builder.new()
+    b.append("alpha", "beta", "gamma")
+    print(b.build())
+
+    // fmt.Sprintf with multiple args (Go variadic)
+    var msg = fmt.Sprintf("Hello %s, age %d", "Alice", 30)
+    print(msg)
+}

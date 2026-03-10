@@ -130,6 +130,11 @@ func (l *Lexer) NextToken() Token {
 	case ',':
 		return l.makeToken(TOKEN_COMMA, ",", line, col)
 	case '.':
+		if l.peek() == '.' && l.peekAt(1) == '.' {
+			l.advance()
+			l.advance()
+			return l.makeToken(TOKEN_DOTDOTDOT, "...", line, col)
+		}
 		return l.makeToken(TOKEN_DOT, ".", line, col)
 	case ':':
 		return l.makeToken(TOKEN_COLON, ":", line, col)

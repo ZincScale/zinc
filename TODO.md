@@ -13,7 +13,7 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
 | - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| - | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| ~~-~~ | ~~**Variadic functions** (`...` params)~~ | ~~Done — `fn log(level: String, msgs: ...String)`, spread `list...`, multi-arg `.add()`~~ | ~~Done~~ |
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
 | - | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
@@ -154,3 +154,4 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - `zinc build` / `zinc run` for multi-file projects
 - `--version` flag
 - Type checker error line numbers (all errors now report source line)
+- Variadic functions (`name: ...Type` params), spread operator (`list...`), multi-arg `.add()`

@@ -594,7 +594,11 @@ func (g *Generator) emitInterface(iface *parser.InterfaceDecl) {
 		name := exportName(m.Name, m.IsPub)
 		var params []string
 		for _, p := range m.Params {
-			params = append(params, p.Name+" "+g.emitType(p.Type))
+			if p.Variadic {
+				params = append(params, p.Name+" ..."+g.emitType(p.Type))
+			} else {
+				params = append(params, p.Name+" "+g.emitType(p.Type))
+			}
 		}
 		ret := g.emitType(m.ReturnType)
 		sig := name + "(" + strings.Join(params, ", ") + ")"
@@ -692,7 +696,11 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	// Build params string
 	var params []string
 	for _, p := range ctor.Params {
-		params = append(params, p.Name+" "+g.emitType(p.Type))
+		if p.Variadic {
+			params = append(params, p.Name+" ..."+g.emitType(p.Type))
+		} else {
+			params = append(params, p.Name+" "+g.emitType(p.Type))
+		}
 	}
 	paramStr := strings.Join(params, ", ")
 
@@ -762,7 +770,11 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 
 	var params []string
 	for _, p := range m.Params {
-		params = append(params, p.Name+" "+g.emitType(p.Type))
+		if p.Variadic {
+			params = append(params, p.Name+" ..."+g.emitType(p.Type))
+		} else {
+			params = append(params, p.Name+" "+g.emitType(p.Type))
+		}
 	}
 	paramStr := strings.Join(params, ", ")
 
@@ -812,7 +824,11 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 
 	var params []string
 	for _, p := range fn.Params {
-		params = append(params, p.Name+" "+g.emitType(p.Type))
+		if p.Variadic {
+			params = append(params, p.Name+" ..."+g.emitType(p.Type))
+		} else {
+			params = append(params, p.Name+" "+g.emitType(p.Type))
+		}
 	}
 	paramStr := strings.Join(params, ", ")
 
@@ -944,8 +960,18 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitWithStmt(st)
 	case *parser.ListAddStmt:
 		list := g.emitExpr(st.List)
-		val := g.emitExpr(st.Value)
-		g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, val))
+		if st.Spread && len(st.Values) == 1 {
+			// list.add(other...) → list = append(list, other...)
+			val := g.emitExpr(st.Values[0])
+			g.writeln(fmt.Sprintf("%s = append(%s, %s...)", list, list, val))
+		} else {
+			// list.add(a, b, c) → list = append(list, a, b, c)
+			var vals []string
+			for _, v := range st.Values {
+				vals = append(vals, g.emitExpr(v))
+			}
+			g.writeln(fmt.Sprintf("%s = append(%s, %s)", list, list, strings.Join(vals, ", ")))
+		}
 	case *parser.MapRemoveStmt:
 		m := g.emitExpr(st.Map)
 		key := g.emitExpr(st.Key)
@@ -1681,6 +1707,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return fmt.Sprintf("(%s%s)", ex.Op, g.emitExpr(ex.Operand))
 	case *parser.CallExpr:
 		return g.emitCallExpr(ex)
+	case *parser.SpreadExpr:
+		return g.emitExpr(ex.Expr) + "..."
 	case *parser.LambdaExpr:
 		return g.emitLambda(ex)
 	case *parser.SelectorExpr:
@@ -1818,7 +1846,11 @@ func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
 func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	var paramParts []string
 	for _, p := range e.Params {
-		paramParts = append(paramParts, p.Name+" "+g.emitType(p.Type))
+		if p.Variadic {
+			paramParts = append(paramParts, p.Name+" ..."+g.emitType(p.Type))
+		} else {
+			paramParts = append(paramParts, p.Name+" "+g.emitType(p.Type))
+		}
 	}
 	paramStr := strings.Join(paramParts, ", ")
 
@@ -1885,26 +1917,39 @@ func (g *Generator) resolveArgs(params []*parser.ParamDecl, call *parser.CallExp
 		return out
 	}
 
-	result := make([]string, len(params))
-	// 1. Fill positional args
+	// Check if the last param is variadic
+	isVariadic := len(params) > 0 && params[len(params)-1].Variadic
+	fixedCount := len(params)
+	if isVariadic {
+		fixedCount = len(params) - 1
+	}
+
+	result := make([]string, fixedCount)
+	// 1. Fill fixed positional args
 	for i, arg := range call.Args {
-		if i < len(result) {
+		if i < fixedCount {
 			result[i] = g.emitExpr(arg)
 		}
 	}
-	// 2. Fill named args (may reorder)
+	// 2. Fill named args (may reorder) — only for fixed params
 	for _, na := range call.NamedArgs {
-		for i, p := range params {
+		for i, p := range params[:fixedCount] {
 			if p.Name == na.Name {
 				result[i] = g.emitExpr(na.Value)
 				break
 			}
 		}
 	}
-	// 3. Fill remaining slots with defaults
-	for i, p := range params {
-		if result[i] == "" && p.Default != nil {
-			result[i] = g.emitExpr(p.Default)
+	// 3. Fill remaining fixed slots with defaults
+	for i := 0; i < fixedCount; i++ {
+		if result[i] == "" && params[i].Default != nil {
+			result[i] = g.emitExpr(params[i].Default)
+		}
+	}
+	// 4. Append variadic args (positional args beyond fixed params)
+	if isVariadic {
+		for i := fixedCount; i < len(call.Args); i++ {
+			result = append(result, g.emitExpr(call.Args[i]))
 		}
 	}
 	return result

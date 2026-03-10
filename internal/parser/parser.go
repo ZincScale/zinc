@@ -296,9 +296,20 @@ func (p *Parser) finishCall(callee Expr) Expr {
 			return &ReceiveExpr{Chan: sel.Object}
 		case "add":
 			p.expect(lexer.TOKEN_LPAREN)
-			val := p.parseExpr()
+			var vals []Expr
+			spread := false
+			vals = append(vals, p.parseExpr())
+			// Check if first (or only) arg has spread
+			if p.check(lexer.TOKEN_DOTDOTDOT) {
+				p.advance()
+				spread = true
+			}
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				vals = append(vals, p.parseExpr())
+			}
 			p.expect(lexer.TOKEN_RPAREN)
-			return &ListAddStmt{List: sel.Object, Value: val}
+			return &ListAddStmt{List: sel.Object, Values: vals, Spread: spread}
 		case "remove":
 			p.expect(lexer.TOKEN_LPAREN)
 			key := p.parseExpr()
@@ -406,7 +417,13 @@ func (p *Parser) finishCallArgsNoLParen(callee Expr) Expr {
 				if seenNamed {
 					p.errorf("positional argument after named argument")
 				}
-				args = append(args, p.parseExpr())
+				expr := p.parseExpr()
+				// Check for spread: expr...
+				if p.check(lexer.TOKEN_DOTDOTDOT) {
+					p.advance()
+					expr = &SpreadExpr{Expr: expr}
+				}
+				args = append(args, expr)
 			}
 			if !p.check(lexer.TOKEN_COMMA) {
 				break
@@ -976,13 +993,18 @@ func (p *Parser) parseFieldDecl() *FieldDecl {
 func (p *Parser) parseParam() *ParamDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.expect(lexer.TOKEN_COLON)
+	variadic := false
+	if p.check(lexer.TOKEN_DOTDOTDOT) {
+		variadic = true
+		p.advance()
+	}
 	typ := p.parseType()
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
 		def = p.parseExpr()
 	}
-	return &ParamDecl{Name: name, Type: typ, Default: def}
+	return &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic}
 }
 
 func (p *Parser) parseParamList() []*ParamDecl {

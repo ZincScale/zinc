@@ -123,6 +123,7 @@ type FnSig struct {
 	Params     []Type
 	Return     Type
 	CanThrow   bool
+	IsVariadic bool // true if last param is variadic (...Type)
 }
 
 func (f *FnSig) String() string {

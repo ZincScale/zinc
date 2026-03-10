@@ -193,6 +193,7 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					ParamNames: paramNamesFrom(d.Ctor.Params),
 					HasDefault: hasDefaultsFrom(d.Ctor.Params),
 					Return:     ct,
+					IsVariadic: isVariadicFrom(d.Ctor.Params),
 				}
 				}
 				// Methods
@@ -211,6 +212,7 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					HasDefault: hasDefaultsFrom(m.Params),
 					Return:     ret,
 					CanThrow:   m.CanThrow,
+					IsVariadic: isVariadicFrom(m.Params),
 				}
 				}
 				c.currentTypeParams = saved
@@ -226,7 +228,7 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					if m.ReturnType != nil {
 						ret = c.resolveTypeExpr(m.ReturnType)
 					}
-					it.Methods[m.Name] = &FnSig{Params: params, Return: ret}
+					it.Methods[m.Name] = &FnSig{Params: params, Return: ret, IsVariadic: isVariadicFrom(m.Params)}
 				}
 
 			case *parser.FnDecl:
@@ -250,6 +252,7 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					HasDefault: hasDefaultsFrom(d.Params),
 					Return:     ret,
 					CanThrow:   d.CanThrow,
+					IsVariadic: isVariadicFrom(d.Params),
 				}
 				c.currentTypeParams = saved
 			}
@@ -281,6 +284,13 @@ func (c *Checker) checkFnDecl(d *parser.FnDecl) {
 	c.currentTypeParams = make(map[string]bool)
 	for _, tp := range d.TypeParams {
 		c.currentTypeParams[tp] = true
+	}
+
+	// Validate variadic param is last
+	for i, p := range d.Params {
+		if p.Variadic && i != len(d.Params)-1 {
+			c.errorf(d.Line, 0, "variadic parameter %q must be the last parameter", p.Name)
+		}
 	}
 
 	// Determine return type
@@ -465,7 +475,9 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.popScope()
 	case *parser.ListAddStmt:
 		c.inferExpr(s.List)
-		c.inferExpr(s.Value)
+		for _, v := range s.Values {
+			c.inferExpr(v)
+		}
 	case *parser.MapRemoveStmt:
 		c.inferExpr(s.Map)
 		c.inferExpr(s.Key)
@@ -723,9 +735,13 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		return TypeInt
 	case *parser.CloneExpr:
 		return c.inferExpr(e.Object)
+	case *parser.SpreadExpr:
+		return c.inferExpr(e.Expr)
 	case *parser.ListAddStmt:
 		c.inferExpr(e.List)
-		c.inferExpr(e.Value)
+		for _, v := range e.Values {
+			c.inferExpr(v)
+		}
 		return TypeVoid
 	case *parser.MapRemoveStmt:
 		c.inferExpr(e.Map)
@@ -1212,6 +1228,11 @@ func hasDefaultsFrom(params []*parser.ParamDecl) []bool {
 	return result
 }
 
+// isVariadicFrom returns true if the last param is variadic.
+func isVariadicFrom(params []*parser.ParamDecl) bool {
+	return len(params) > 0 && params[len(params)-1].Variadic
+}
+
 // validateArgs validates positional and named arguments against a function signature.
 // It reports errors for too many args, unknown named arg names, and missing required args.
 func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, namedArgs []parser.NamedArg) {
@@ -1219,7 +1240,7 @@ func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, 
 		return
 	}
 	totalProvided := len(args) + len(namedArgs)
-	if totalProvided > len(sig.Params) {
+	if !sig.IsVariadic && totalProvided > len(sig.Params) {
 		c.errorf(c.currentLine, 0, "too many arguments to %s: expected at most %d, got %d",
 			callName, len(sig.Params), totalProvided)
 		return
@@ -1255,6 +1276,10 @@ func (c *Checker) validateArgs(sig *FnSig, callName string, args []parser.Expr, 
 	for i := range sig.Params {
 		if !covered[i] {
 			isRequired := i >= len(sig.HasDefault) || !sig.HasDefault[i]
+			// Variadic param (last) is never required — zero args is valid
+			if sig.IsVariadic && i == len(sig.Params)-1 {
+				isRequired = false
+			}
 			if isRequired {
 				paramName := fmt.Sprintf("param %d", i+1)
 				if i < len(sig.ParamNames) {

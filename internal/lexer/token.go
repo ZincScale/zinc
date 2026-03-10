@@ -86,6 +86,7 @@ const (
 	TOKEN_QUESTION_QUESTION  // ??
 	TOKEN_RAW_STRING         // `raw string`
 	TOKEN_AT                 // @
+	TOKEN_DOTDOTDOT          // ...
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -171,6 +172,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_QUESTION_QUESTION: "??",
 	TOKEN_RAW_STRING:        "RAW_STRING",
 	TOKEN_AT:                "@",
+	TOKEN_DOTDOTDOT:         "...",
 
 	TOKEN_EOF:     "EOF",
 	TOKEN_ILLEGAL: "ILLEGAL",

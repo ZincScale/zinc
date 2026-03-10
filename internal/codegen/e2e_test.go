@@ -1445,3 +1445,104 @@ fn main() {
 }`)
 	assertOutput(t, out, "hello world\na b c")
 }
+
+// --- Variadic Functions ------------------------------------------------------
+
+func TestE2EVariadicSum(t *testing.T) {
+	out := e2eRun(t, `
+fn sum(nums: ...Int) : Int {
+    var total = 0
+    for n in nums {
+        total += n
+    }
+    return total
+}
+fn main() {
+    print(sum(1, 2, 3))
+    print(sum(10, 20))
+    print(sum())
+}`)
+	assertOutput(t, out, "6\n30\n0")
+}
+
+func TestE2EVariadicSpread(t *testing.T) {
+	out := e2eRun(t, `
+fn sum(nums: ...Int) : Int {
+    var total = 0
+    for n in nums {
+        total += n
+    }
+    return total
+}
+fn main() {
+    var items = [1, 2, 3, 4]
+    print(sum(items...))
+}`)
+	assertOutput(t, out, "10")
+}
+
+func TestE2EListAddMultiple(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var items = [1, 2]
+    items.add(3, 4, 5)
+    print(items)
+}`)
+	assertOutput(t, out, "[1 2 3 4 5]")
+}
+
+func TestE2EListAddSpread(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var items = [1, 2]
+    var more = [3, 4, 5]
+    items.add(more...)
+    print(items)
+}`)
+	assertOutput(t, out, "[1 2 3 4 5]")
+}
+
+func TestE2EVariadicWithFixedParams(t *testing.T) {
+	out := e2eRun(t, `
+fn log(level: String, messages: ...String) {
+    for msg in messages {
+        print("[{level}] {msg}")
+    }
+}
+fn main() {
+    log("INFO", "server started", "listening on :8080")
+}`)
+	assertOutput(t, out, "[INFO] server started\n[INFO] listening on :8080")
+}
+
+func TestE2EVariadicMethodCall(t *testing.T) {
+	out := e2eRun(t, `
+class Logger {
+    var prefix: String
+
+    new(prefix: String) {
+        this.prefix = prefix
+    }
+
+    pub fn log(messages: ...String) {
+        for msg in messages {
+            print("{this.prefix}: {msg}")
+        }
+    }
+}
+fn main() {
+    var l = Logger.new("APP")
+    l.log("started", "ready")
+}`)
+	assertOutput(t, out, "APP: started\nAPP: ready")
+}
+
+func TestE2EFmtSprintf(t *testing.T) {
+	out := e2eRun(t, `
+import "fmt"
+fn main() {
+    var msg = fmt.Sprintf("Hello %s, age %d", "Alice", 30)
+    print(msg)
+}`)
+	assertOutput(t, out, "Hello Alice, age 30")
+}

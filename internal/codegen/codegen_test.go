@@ -1305,3 +1305,71 @@ fn main() { print(PI) }`, "app.zn")
 	assertContains(t, out, "//line app.zn:2")
 	assertContains(t, out, "//line app.zn:3")
 }
+
+// --- Variadic Functions ------------------------------------------------------
+
+func TestVariadicFnDecl(t *testing.T) {
+	out, errs := transpile(`
+fn greet(prefix: String, names: ...String) {
+    print(prefix)
+}
+fn main() { greet("Hello") }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "names ...string")
+}
+
+func TestVariadicMethodDecl(t *testing.T) {
+	out, errs := transpile(`
+class Logger {
+    pub fn log(parts: ...String) {
+        print("logging")
+    }
+}
+fn main() { var l = Logger.new(); l.log("a", "b") }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "parts ...string")
+}
+
+func TestSpreadExpr(t *testing.T) {
+	out, errs := transpile(`
+fn sum(nums: ...Int) : Int {
+    return 0
+}
+fn main() {
+    var items = [1, 2, 3]
+    sum(items...)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "items...")
+}
+
+func TestListAddMultipleArgs(t *testing.T) {
+	out, errs := transpile(`
+fn main() {
+    var items = [1, 2, 3]
+    items.add(4, 5, 6)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "append(items, 4, 5, 6)")
+}
+
+func TestListAddSpread(t *testing.T) {
+	out, errs := transpile(`
+fn main() {
+    var items = [1, 2, 3]
+    var more = [4, 5, 6]
+    items.add(more...)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "append(items, more...)")
+}

@@ -136,11 +136,12 @@ type FieldDecl struct {
 	IsPrivate bool // private var → unexported Go field
 }
 
-// ParamDecl: name: Type [= expr]
+// ParamDecl: name: Type [= expr]  OR  name: ...Type (variadic)
 type ParamDecl struct {
-	Name    string
-	Type    TypeExpr
-	Default Expr // nil if no default
+	Name     string
+	Type     TypeExpr
+	Default  Expr // nil if no default
+	Variadic bool // true for ...Type params
 }
 
 // NamedArg: name: expr at a call site
@@ -587,8 +588,8 @@ type RawStringLit struct {
 func (r *RawStringLit) nodeTag() {}
 func (r *RawStringLit) exprTag() {}
 
-// ListAddStmt: list.add(item) → list = append(list, item)
-type ListAddStmt struct{ List Expr; Value Expr }
+// ListAddStmt: list.add(items...) → list = append(list, items...)
+type ListAddStmt struct{ List Expr; Values []Expr; Spread bool }
 func (l *ListAddStmt) nodeTag() {}
 func (l *ListAddStmt) stmtTag() {}
 func (l *ListAddStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
@@ -674,6 +675,14 @@ type ListSortStmt struct{ List Expr }
 func (l *ListSortStmt) nodeTag() {}
 func (l *ListSortStmt) stmtTag() {}
 func (l *ListSortStmt) exprTag() {} // dual Stmt+Expr so it flows through finishCall
+
+// SpreadExpr: expr... — spread a list into variadic args
+type SpreadExpr struct {
+	Expr Expr
+}
+
+func (*SpreadExpr) nodeTag() {}
+func (*SpreadExpr) exprTag() {}
 
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {
