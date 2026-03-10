@@ -8,9 +8,31 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 1 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| 2 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 3 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| 1 | **Update to Go 1.26.1** | Current minimum is Go 1.21; need latest Go for modern stdlib, performance, and toolchain features | Quick |
+| 2 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
+| 3 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| 4 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+
+---
+
+## Project Infrastructure (parallel track)
+
+These are about making the Zinc repo itself healthy — CI, releases, contribution workflow.
+
+| # | Feature | Why it matters | Effort |
+|---|---------|---------------|--------|
+| P1 | **GitHub Actions CI** | Run `go test ./...` on every push/PR; catch regressions before merge | Quick |
+| P2 | **CI matrix testing** | Test across Go versions (1.21 → 1.26) and OS (Linux, macOS, Windows) | Quick |
+| P3 | **E2e smoke tests in CI** | Transpile + compile + run example programs as a CI step, not just unit tests | Quick |
+| P4 | **Semantic versioning policy** | Clear rules for 0.x bumps; tag releases properly | Quick |
+| P5 | **Goreleaser** (cross-platform binaries) | Auto-build linux/mac/windows amd64/arm64 binaries on `git tag`; publish to GitHub Releases | Medium |
+| P6 | **CHANGELOG.md** | Track what changed per release; auto-generate from commits or maintain manually | Quick |
+| P7 | **Install script / Homebrew formula** | `brew install zinc` or `curl -sSL \| sh` — lower the barrier vs `git clone && go build` | Medium |
+| P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
+| P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
+| P10 | **`.gitignore` cleanup** | Ignore generated `.go` files in examples, build artifacts, editor configs | Quick |
+| P11 | **License headers / compliance check** | Ensure all source files have Apache 2.0 headers; add CI check | Quick |
+| P12 | **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
 
 ---
 
@@ -18,20 +40,45 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 4 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| 5 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| 6 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
+| 5 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| 6 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
+| 7 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
 
 ---
 
-## Tier 3 — Tooling Improvements
+## Tier 3 — Tooling & Developer Experience
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 7 | **`zinc fmt`** | Format .zn files consistently | Medium |
-| 8 | **`zinc test`** | Run tests without manual `go test` | Quick |
-| 9 | **Better project-mode error messages** | Show .zn filename (not dir) in multi-file type errors | Quick |
-| 10 | **Color error output** | Better developer experience | Quick |
+| 8 | **VS Code extension** (syntax highlighting) | Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments | Quick |
+| 9 | **`zinc fmt`** | Format .zn files consistently | Medium |
+| 10 | **`zinc test`** | Run tests without manual `go test` | Quick |
+| 11 | **Color error output** | Colored, well-formatted errors with source context | Quick |
+| 12 | **Better project-mode error messages** | Show .zn filename (not dir) in multi-file type errors | Quick |
+| 13 | **Error suggestions** | "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes | Medium |
+
+---
+
+## Tier 4 — IDE & Language Intelligence
+
+| # | Feature | Why it matters | Effort |
+|---|---------|---------------|--------|
+| 14 | **LSP server** (basic: diagnostics + go-to-definition) | Real-time errors and navigation in any editor; the #1 thing devs expect from a language | Large |
+| 15 | **LSP: autocomplete + hover types** | Makes writing Zinc feel productive — type info, method suggestions, parameter hints | Large |
+| 16 | **VS Code extension + LSP integration** | Full IDE experience — highlighting + inline errors + autocomplete + go-to-def | Medium (after LSP exists) |
+| 17 | **`zinc debug`** (delve wrapper) | Step-through debugging; `//line` directives already map back to `.zn` source | Medium |
+| 18 | **`zinc doc`** | Generate browsable docs from Zinc source (like `go doc`) | Medium |
+
+---
+
+## Tier 5 — Ecosystem & Adoption
+
+| # | Feature | Why it matters | Effort |
+|---|---------|---------------|--------|
+| 19 | **Zinc package registry / `zinc.mod`** | Share and reuse Zinc libraries beyond copy-paste; currently limited to Go module system | Large |
+| 20 | **Web playground** | Try Zinc in the browser — huge for onboarding, no install needed | Large |
+| 21 | **REPL enhancements** (tab completion, syntax highlighting) | Makes `zinc repl` a productive exploration tool | Medium |
+| 22 | **CI/CD templates** | GitHub Actions / Docker examples for Zinc projects | Quick |
 
 ---
 
