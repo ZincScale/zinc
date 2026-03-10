@@ -72,9 +72,19 @@ func (r *GoTypeResolver) ReturnsOnlyError(pkgPath, funcName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.negative[pkgPath] {
+		return false
+	}
+
 	pkg, ok := r.cache[pkgPath]
 	if !ok {
-		return false // if not cached, we don't know
+		var err error
+		pkg, err = r.imp.Import(pkgPath)
+		if err != nil {
+			r.negative[pkgPath] = true
+			return false
+		}
+		r.cache[pkgPath] = pkg
 	}
 
 	obj := pkg.Scope().Lookup(funcName)

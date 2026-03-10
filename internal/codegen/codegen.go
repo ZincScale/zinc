@@ -307,6 +307,12 @@ func (g *Generator) stmtIsFailable(s parser.Stmt) bool {
 		return g.bodyIsFailable(st.Body)
 	case *parser.GoStmt:
 		return g.bodyIsFailable(st.Body)
+	case *parser.MatchStmt:
+		for _, c := range st.Cases {
+			if g.bodyIsFailable(c.Body) {
+				return true
+			}
+		}
 	case *parser.WithStmt:
 		for _, r := range st.Resources {
 			if g.exprIsFailable(r.Value) {
@@ -314,6 +320,8 @@ func (g *Generator) stmtIsFailable(s parser.Stmt) bool {
 			}
 		}
 		return g.bodyIsFailable(st.Body)
+	case *parser.DeferStmt:
+		return g.exprIsFailable(st.Expr)
 	}
 	return false
 }
@@ -995,6 +1003,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		} else {
 			g.writeln("continue")
 		}
+	case *parser.DeferStmt:
+		g.writeln(fmt.Sprintf("defer %s", g.emitExpr(st.Expr)))
 	case *parser.WithStmt:
 		g.emitWithStmt(st)
 	case *parser.ListAddStmt:
@@ -1731,6 +1741,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return ex.Value
 	case *parser.StringLit:
 		return fmt.Sprintf("%q", ex.Value)
+	case *parser.RawStringLit:
+		return "`" + ex.Value + "`"
 	case *parser.StringInterpLit:
 		return g.emitStringInterp(ex)
 	case *parser.BoolLit:

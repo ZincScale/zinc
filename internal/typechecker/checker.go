@@ -483,6 +483,8 @@ func (c *Checker) checkStmt(stmt parser.Stmt) {
 		c.inferExpr(s.Key)
 	case *parser.ListSortStmt:
 		c.inferExpr(s.List)
+	case *parser.DeferStmt:
+		c.inferExpr(s.Expr)
 	case *parser.BreakStmt, *parser.ContinueStmt:
 		// nothing to check
 	}
@@ -662,6 +664,8 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 	case *parser.FloatLit:
 		return TypeFloat
 	case *parser.StringLit:
+		return TypeString
+	case *parser.RawStringLit:
 		return TypeString
 	case *parser.StringInterpLit:
 		for _, part := range e.Parts {

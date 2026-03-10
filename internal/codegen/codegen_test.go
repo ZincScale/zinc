@@ -1460,3 +1460,41 @@ fn main() {
 	assertContains(t, out, "json.Marshal")
 	assertContains(t, out, "!= nil")
 }
+
+// --- Phase 1 fixes: DeferStmt, RawStringLit, MatchStmt failable detection ---
+
+func TestDeferStmt(t *testing.T) {
+	out, errs := transpile(`
+import "fmt"
+fn main() {
+    defer fmt.Println("goodbye")
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, `defer fmt.Println("goodbye")`)
+}
+
+func TestRawStringLit(t *testing.T) {
+	out, errs := transpile("fn main() { var s = `hello\\nworld` }")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "`hello\\nworld`")
+}
+
+func TestMatchStmtFailable(t *testing.T) {
+	out, errs := transpile(`
+fn classify(x: Int): String {
+    match x {
+        case 1 => { return Error("bad") }
+        case 2 => { return "two" }
+    }
+    return "other"
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Function should be detected as failable — returns (string, error)
+	assertContains(t, out, "error")
+}

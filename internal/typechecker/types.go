@@ -415,6 +415,6 @@ func (c *Checker) resolveSimpleName(name string) Type {
 		return et
 	}
 	// Unknown type — report error
-	c.errorf(0, 0, "undefined type %q", name)
+	c.errorf(c.currentLine, 0, "undefined type %q", name)
 	return TypeUnknown
 }

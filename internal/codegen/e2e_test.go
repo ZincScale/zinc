@@ -1598,3 +1598,52 @@ fn main() {
 }`)
 	assertOutput(t, out, "99")
 }
+
+// --- Phase 1: DeferStmt, RawStringLit ----------------------------------------
+
+func TestE2EDefer(t *testing.T) {
+	out := e2eRun(t, `
+import "fmt"
+fn main() {
+    defer fmt.Println("last")
+    print("first")
+}`)
+	assertOutput(t, out, "first\nlast")
+}
+
+func TestE2ERawString(t *testing.T) {
+	src := "fn main() { var s = `hello\\nworld`; print(s) }"
+	out := e2eRun(t, src)
+	assertOutput(t, out, "hello\\nworld")
+}
+
+func TestE2EMatchFailable(t *testing.T) {
+	out := e2eRun(t, `
+fn check(x: Int): String {
+    match x {
+        case 0 => { return Error("zero not allowed") }
+        case _ => { return "ok" }
+    }
+    return "unreachable"
+}
+
+fn main() {
+    var r = check(0) or { print("caught: {err}"); exit(0) }
+    print(r)
+}`)
+	assertOutput(t, out, "caught: zero not allowed")
+}
+
+func TestE2EOsRemoveVoidFailable(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    os.Remove("/nonexistent/path/should/fail") or {
+        print("caught")
+        exit(0)
+    }
+    print("should not reach")
+}`)
+	assertOutput(t, out, "caught")
+}
