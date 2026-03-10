@@ -14,6 +14,9 @@ import (
 	"zinc/internal/typechecker"
 )
 
+// version is set by goreleaser via ldflags at build time.
+var version = "0.1.0"
+
 const usage = `Zinc transpiler — compiles .zn files to Go source.
 
 Usage:
@@ -43,7 +46,7 @@ func main() {
 		a := args[i]
 		switch {
 		case a == "--version" || a == "-V":
-			fmt.Println("zinc version 0.1.0")
+			fmt.Printf("zinc version %s\n", version)
 			return
 		case a == "init":
 			name := ""

@@ -24,8 +24,8 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | ~~P2~~ | ~~**CI matrix testing**~~ | ~~Done — Go 1.23–1.26 matrix~~ | ~~Done~~ |
 | ~~P3~~ | ~~**E2e smoke tests in CI**~~ | ~~Done — `scripts/smoke-test.sh` runs all 18 examples in CI~~ | ~~Done~~ |
 | ~~P4~~ | ~~**Semantic versioning policy**~~ | ~~Done — `VERSIONING.md`~~ | ~~Done~~ |
-| P5 | **Goreleaser** (cross-platform binaries) | Auto-build linux/mac/windows amd64/arm64 binaries on `git tag`; publish to GitHub Releases | Medium |
-| P6 | **CHANGELOG.md** | Track what changed per release; auto-generate from commits or maintain manually | Quick |
+| ~~P5~~ | ~~**Goreleaser**~~ | ~~Done — `.goreleaser.yml` + release workflow; linux/mac/windows amd64/arm64~~ | ~~Done~~ |
+| ~~P6~~ | ~~**CHANGELOG.md**~~ | ~~Done — `CHANGELOG.md`~~ | ~~Done~~ |
 | P7 | **Install script / Homebrew formula** | `brew install zinc` or `curl -sSL \| sh` — lower the barrier vs `git clone && go build` | Medium |
 | P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
 | P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
@@ -86,6 +86,8 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - GitHub Actions CI with matrix testing (Go 1.23–1.26) and `govulncheck`
 - E2e smoke tests in CI (`scripts/smoke-test.sh` — transpile + compile + run all 18 examples)
 - Semantic versioning policy (`VERSIONING.md`)
+- Goreleaser cross-platform releases (linux/mac/windows, amd64/arm64)
+- CHANGELOG.md
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match
