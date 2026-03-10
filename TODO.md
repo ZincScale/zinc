@@ -45,9 +45,35 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 5 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| 6 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| 7 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
+| 5 | **Annotations / decorators** (`@Json("name")`, `@Column("id")`) | Maps to Go struct tags; familiar to Java/C#/Kotlin devs | Medium |
+| 6 | **Data classes / records** (`data class User(name: String, age: Int)`) | Immutable DTOs with auto-generated toString/equality; Kotlin `data class` / Java `record` pattern | Medium |
+| 7 | **Zinc stdlib wrappers** (codegen-level) | See stdlib plan below | Large |
+
+### Stdlib Wrapper Plan
+
+**Approach: Codegen-level, not a separate library.** Teach the codegen to translate Zinc-idiomatic patterns into Go stdlib calls — same pattern as `.size()` → `len()`, `.upper()` → `strings.ToUpper()`. Zero maintenance burden, no external library to ship.
+
+**Tier A — Must have (covers 80% of microservice code):**
+
+| Go Package | Zinc API (codegen emits Go calls) |
+|---|---|
+| `net/http` | `Http.get(url)`, `Http.post(url, body)`, `Http.serve(port, handler)` |
+| `encoding/json` | `Json.parse<T>(data)` → `json.Unmarshal`, `Json.stringify(obj)` → `json.Marshal` |
+| `context` | `Context.withTimeout(duration)`, `Context.withCancel()` |
+| `log/slog` | `Log.info(msg)`, `Log.error(msg)`, structured key-value logging |
+| `database/sql` | `Db.query(sql, args...)`, `Db.exec(sql, args...)` |
+
+**Tier B — Common, can wait:**
+`io`, `strings`/`strconv`, `time`, `sync`, `crypto/tls`, `errors`, `testing`
+
+**Tier C — Nice to have:**
+`regexp`, `sort`, `path/filepath`, `bufio`, `bytes`, `net/url`, `html/template`
+
+**Why codegen-level?**
+- No wrapper library to maintain or version
+- Go API changes → update codegen once
+- Already proven pattern in Zinc (collection methods, string methods, builtins)
+- No runtime dependency, no import overhead
 
 ---
 
