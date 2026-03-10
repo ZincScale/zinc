@@ -50,13 +50,21 @@ Zinc doesn't replace Go — it's a better way to write it.
 ## Quick Start
 
 ```bash
+# install
 git clone https://github.com/victorybhg/zinc
 cd zinc
 go build -o zinc ./cmd/zinc/
+
+# try it
 ./zinc examples/hello.zn --run
+
+# start a project
+mkdir myapp && cd myapp
+../zinc init myapp
+../zinc run
 ```
 
-Requires **Go 1.21+**. See the [Getting Started](docs/getting-started.md) guide for full details.
+Requires **Go 1.21+**. See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
 
 ---
 

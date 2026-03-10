@@ -1,34 +1,37 @@
 # Zinc Feature Roadmap
 
-Prioritized for shipping a usable language binary people can try out.
+Language is shippable — core features, CLI tooling, multi-file projects, and error reporting all work.
 
 ---
 
-## Tier 1 — Next Up
-
-*(empty — slicing shipped!)*
-
----
-
-## Tier 2 — Infrastructure / Polish (make it shippable)
+## Tier 1 — Next Up (developer experience polish)
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| ~~2~~ | ~~**Source maps**~~ | ~~Map Go compiler errors back to `.zn` lines~~ | ~~Large~~ **Done** |
-| ~~3~~ | ~~**Multi-file project completion**~~ | ~~Registry exists; needs cross-file type resolution~~ | ~~Medium-Large~~ **Done** |
+| 1 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
+| 2 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
+| 3 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 
 ---
 
-## Tier 3 — More Language Features (after shippable)
+## Tier 2 — More Language Features
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| 8 | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| 9 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| 10 | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
-| 11 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
-| 12 | **Variadic functions** (`...` params) | Common pattern, currently not supported | Quick-Medium |
-| 13 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
+| 4 | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| 5 | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
+| 6 | **Zinc stdlib wrappers** | Real `io`, `http`, `json` API in Zinc idioms | Large |
+
+---
+
+## Tier 3 — Tooling Improvements
+
+| # | Feature | Why it matters | Effort |
+|---|---------|---------------|--------|
+| 7 | **`zinc fmt`** | Format .zn files consistently | Medium |
+| 8 | **`zinc test`** | Run tests without manual `go test` | Quick |
+| 9 | **Better project-mode error messages** | Show .zn filename (not dir) in multi-file type errors | Quick |
+| 10 | **Color error output** | Better developer experience | Quick |
 
 ---
 
@@ -62,5 +65,6 @@ Prioritized for shipping a usable language binary people can try out.
 - Source maps (`//line` directives map Go compiler errors back to `.zn` lines)
 - Multi-file project completion (cross-file ctors, failable detection, default/named args via shared registry)
 - `zinc init` project scaffolding (creates `go.mod` + `main.zn`)
+- `zinc build` / `zinc run` for multi-file projects
 - `--version` flag
 - Type checker error line numbers (all errors now report source line)
