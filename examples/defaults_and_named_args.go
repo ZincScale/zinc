@@ -19,13 +19,28 @@ func connect(host string, port int, tls bool) {
 }
 
 //line examples/defaults_and_named_args.zn:11
-type Dog struct {
+type DogImpl struct {
 	Name string
 	Age  int
 }
 
-func NewDog(name string, age int) *Dog {
-	obj := &Dog{}
+func (d *DogImpl) GetName() string  { return d.Name }
+func (d *DogImpl) SetName(v string) { d.Name = v }
+func (d *DogImpl) GetAge() int      { return d.Age }
+func (d *DogImpl) SetAge(v int)     { d.Age = v }
+
+type Dog interface {
+	GetName() string
+	SetName(string)
+	GetAge() int
+	SetAge(int)
+	Describe() string
+}
+
+var _ Dog = (*DogImpl)(nil)
+
+func NewDog(name string, age int) *DogImpl {
+	obj := &DogImpl{}
 //line examples/defaults_and_named_args.zn:16
 	obj.Name = name
 //line examples/defaults_and_named_args.zn:17
@@ -33,7 +48,7 @@ func NewDog(name string, age int) *Dog {
 	return obj
 }
 
-func (d *Dog) Describe() string {
+func (d *DogImpl) Describe() string {
 //line examples/defaults_and_named_args.zn:21
 	return fmt.Sprintf("%v, age %v", d.Name, d.Age)
 }

@@ -164,3 +164,5 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Auto-generated interfaces for OO polymorphism (class → struct `Impl` + interface, getters/setters, compile-time satisfaction checks)
 - Polymorphic function parameters (interface-typed params use getters, concrete `*Impl` uses direct field access)
 - Safe navigation works with interface types (`d?.name` → `d.GetName()` for nilable interface-typed vars)
+- Failable method detection through interface-typed params (`v.validate()` correctly detects error returns)
+- Void-failable tracking for class methods (auto `return nil`, correct `err :=` vs `_, err :=`)

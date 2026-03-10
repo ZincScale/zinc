@@ -19,23 +19,33 @@ func mapLen[K comparable, V any](m map[K]V) int {
 }
 
 //line examples/generics.zn:11
-type Box[T any] struct {
+type BoxImpl[T any] struct {
 	Value T
 }
 
-func NewBox[T any](v T) *Box[T] {
-	obj := &Box[T]{}
+func (b *BoxImpl[T]) GetValue() T  { return b.Value }
+func (b *BoxImpl[T]) SetValue(v T) { b.Value = v }
+
+type Box[T any] interface {
+	GetValue() T
+	SetValue(T)
+	Get() T
+	Set(v T)
+}
+
+func NewBox[T any](v T) *BoxImpl[T] {
+	obj := &BoxImpl[T]{}
 //line examples/generics.zn:15
 	obj.Value = v
 	return obj
 }
 
-func (b *Box[T]) Get() T {
+func (b *BoxImpl[T]) Get() T {
 //line examples/generics.zn:19
 	return b.Value
 }
 
-func (b *Box[T]) Set(v T) {
+func (b *BoxImpl[T]) Set(v T) {
 //line examples/generics.zn:23
 	b.Value = v
 }

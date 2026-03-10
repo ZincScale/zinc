@@ -1826,3 +1826,208 @@ fn main() {
 }`)
 	assertOutput(t, out, "Hello, Alice, age 30\nAlice")
 }
+
+// --- Failable methods through interface-typed parameters ---------------------
+
+func TestE2EFailableMethodViaInterface(t *testing.T) {
+	out := e2eRun(t, `
+class AgeValidator {
+    var age: Int
+    construct new(a: Int) { this.age = a }
+    pub fn validate(): String {
+        if (this.age < 0) {
+            return Error("age cannot be negative")
+        }
+        return "valid"
+    }
+}
+
+fn checkAge(v: AgeValidator) {
+    var result = v.validate() or {
+        print("error: {err}")
+        return
+    }
+    print(result)
+}
+
+fn main() {
+    checkAge(AgeValidator.new(25))
+    checkAge(AgeValidator.new(-1))
+}`)
+	assertOutput(t, out, "valid\nerror: age cannot be negative")
+}
+
+func TestE2EVoidFailableMethodViaInterface(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+
+class Writer {
+    var prefix: String
+    construct new(p: String) { this.prefix = p }
+    pub fn process(path: String) {
+        with (var f = os.Create(path)) {
+            f.WriteString("{this.prefix}: data") or {}
+        }
+    }
+}
+
+fn runWriter(w: Writer, path: String) {
+    w.process(path)
+}
+
+fn main() {
+    var path = "/tmp/zinc_void_failable_e2e.txt"
+    runWriter(Writer.new("LOG"), path)
+    var content = readFile(path) or {
+        print("read error")
+        exit(1)
+    }
+    print(content)
+    os.Remove(path) or {}
+}`)
+	assertOutput(t, out, "LOG: data")
+}
+
+func TestE2EErrorPropagationChain(t *testing.T) {
+	out := e2eRun(t, `
+fn risky(x: Int): Int {
+    if (x < 0) { return Error("negative") }
+    return x * 2
+}
+
+fn middle(x: Int): Int {
+    var r = risky(x)
+    return r + 1
+}
+
+fn main() {
+    var a = middle(5) or {
+        print("err")
+        exit(1)
+    }
+    print(a)
+
+    var b = middle(-1) or {
+        print("caught: {err}")
+        exit(0)
+    }
+    print(b)
+}`)
+	assertOutput(t, out, "11\ncaught: negative")
+}
+
+func TestE2EMultipleOrHandlers(t *testing.T) {
+	out := e2eRun(t, `
+fn risky(x: Int): Int {
+    if (x == 0) { return Error("zero") }
+    return 100 / x
+}
+
+fn main() {
+    var a = risky(5) or { print("err"); exit(1) }
+    print(a)
+    var b = risky(0) or {
+        print("caught: {err}")
+        exit(0)
+    }
+    print(b)
+}`)
+	assertOutput(t, out, "20\ncaught: zero")
+}
+
+func TestE2EPolymorphismMultipleShapes(t *testing.T) {
+	out := e2eRun(t, `
+interface Shape {
+    pub fn area(): Float
+    pub fn name(): String
+}
+
+class Circle : Shape {
+    var radius: Float
+    construct new(r: Float) { this.radius = r }
+    pub fn area(): Float { return 3.14 * this.radius * this.radius }
+    pub fn name(): String { return "Circle" }
+}
+
+class Square : Shape {
+    var side: Float
+    construct new(s: Float) { this.side = s }
+    pub fn area(): Float { return this.side * this.side }
+    pub fn name(): String { return "Square" }
+}
+
+fn describe(s: Shape) {
+    print("{s.name()}: {s.area()}")
+}
+
+fn main() {
+    describe(Circle.new(1.0))
+    describe(Square.new(2.0))
+}`)
+	assertOutput(t, out, "Circle: 3.14\nSquare: 4")
+}
+
+func TestE2EMultipleDefers(t *testing.T) {
+	out := e2eRun(t, `
+import "fmt"
+fn main() {
+    defer fmt.Println("first")
+    defer fmt.Println("second")
+    defer fmt.Println("third")
+    print("body")
+}`)
+	// Go defers execute in LIFO order
+	assertOutput(t, out, "body\nthird\nsecond\nfirst")
+}
+
+func TestE2EGetterCollisionWithExplicitMethod(t *testing.T) {
+	out := e2eRun(t, `
+class Config {
+    var value: Int
+    construct new(v: Int) { this.value = v }
+    pub fn getValue(): Int { return this.value * 2 }
+}
+
+fn main() {
+    var c = Config.new(21)
+    print(c.getValue())
+}`)
+	assertOutput(t, out, "42")
+}
+
+func TestE2EWithNestedResources(t *testing.T) {
+	out := e2eRun(t, `
+import "os"
+
+fn main() {
+    var path = "/tmp/zinc_nested_with_e2e.txt"
+    with (var f = os.Create(path)) {
+        f.WriteString("hello") or {}
+        with (var f2 = os.Open(path)) {
+            print("nested ok")
+        }
+    }
+    os.Remove(path) or {}
+    print("done")
+}`)
+	assertOutput(t, out, "nested ok\ndone")
+}
+
+func TestE2EGoInteropStrconvChain(t *testing.T) {
+	out := e2eRun(t, `
+import "strconv"
+
+fn main() {
+    var n = strconv.Atoi("42") or {
+        print("parse error")
+        exit(1)
+    }
+    print(n * 2)
+    var f = strconv.ParseFloat("3.14", 64) or {
+        print("parse error")
+        exit(1)
+    }
+    print(f)
+}`)
+	assertOutput(t, out, "84\n3.14")
+}

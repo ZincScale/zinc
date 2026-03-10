@@ -7,13 +7,28 @@ import (
 )
 
 //line examples/safe_navigation.zn:5
-type Address struct {
+type AddressImpl struct {
 	City string
 	Zip  string
 }
 
-func NewAddress(city string, zip string) *Address {
-	obj := &Address{}
+func (a *AddressImpl) GetCity() string  { return a.City }
+func (a *AddressImpl) SetCity(v string) { a.City = v }
+func (a *AddressImpl) GetZip() string   { return a.Zip }
+func (a *AddressImpl) SetZip(v string)  { a.Zip = v }
+
+type Address interface {
+	GetCity() string
+	SetCity(string)
+	GetZip() string
+	SetZip(string)
+	Format() string
+}
+
+var _ Address = (*AddressImpl)(nil)
+
+func NewAddress(city string, zip string) *AddressImpl {
+	obj := &AddressImpl{}
 //line examples/safe_navigation.zn:10
 	obj.City = city
 //line examples/safe_navigation.zn:11
@@ -21,19 +36,34 @@ func NewAddress(city string, zip string) *Address {
 	return obj
 }
 
-func (a *Address) Format() string {
+func (a *AddressImpl) Format() string {
 //line examples/safe_navigation.zn:15
 	return fmt.Sprintf("%v %v", a.City, a.Zip)
 }
 
 //line examples/safe_navigation.zn:19
-type User struct {
+type UserImpl struct {
 	Name    string
-	Address *Address
+	Address Address
 }
 
-func NewUser(name string, addr *Address) *User {
-	obj := &User{}
+func (u *UserImpl) GetName() string      { return u.Name }
+func (u *UserImpl) SetName(v string)     { u.Name = v }
+func (u *UserImpl) GetAddress() Address  { return u.Address }
+func (u *UserImpl) SetAddress(v Address) { u.Address = v }
+
+type User interface {
+	GetName() string
+	SetName(string)
+	GetAddress() Address
+	SetAddress(Address)
+	Greet() string
+}
+
+var _ User = (*UserImpl)(nil)
+
+func NewUser(name string, addr Address) *UserImpl {
+	obj := &UserImpl{}
 //line examples/safe_navigation.zn:24
 	obj.Name = name
 //line examples/safe_navigation.zn:25
@@ -41,7 +71,7 @@ func NewUser(name string, addr *Address) *User {
 	return obj
 }
 
-func (u *User) Greet() string {
+func (u *UserImpl) Greet() string {
 //line examples/safe_navigation.zn:29
 	return fmt.Sprintf("Hi, I'm %v", u.Name)
 }
@@ -53,7 +83,7 @@ func main() {
 //line examples/safe_navigation.zn:36
 	fmt.Println(func() interface{} {
 		if alice != nil {
-			return alice.Name
+			return alice.GetName()
 		}
 		return nil
 	}())
@@ -63,11 +93,11 @@ func main() {
 		if _s0 == nil {
 			return nil
 		}
-		_s1 := _s0.Address
+		_s1 := _s0.GetAddress()
 		if _s1 == nil {
 			return nil
 		}
-		return _s1.City
+		return _s1.GetCity()
 	}())
 //line examples/safe_navigation.zn:42
 	fmt.Println(func() interface{} {
@@ -82,18 +112,18 @@ func main() {
 		if _s0 == nil {
 			return nil
 		}
-		_s1 := _s0.Address
+		_s1 := _s0.GetAddress()
 		if _s1 == nil {
 			return nil
 		}
 		return _s1.Format()
 	}())
 //line examples/safe_navigation.zn:46
-	var nobody *User = nil
+	var nobody User = nil
 //line examples/safe_navigation.zn:47
 	fmt.Println(func() interface{} {
 		if nobody != nil {
-			return nobody.Name
+			return nobody.GetName()
 		}
 		return nil
 	}())
@@ -103,11 +133,11 @@ func main() {
 		if _s0 == nil {
 			return nil
 		}
-		_s1 := _s0.Address
+		_s1 := _s0.GetAddress()
 		if _s1 == nil {
 			return nil
 		}
-		return _s1.City
+		return _s1.GetCity()
 	}())
 //line examples/safe_navigation.zn:49
 	if nobody != nil {
@@ -121,14 +151,14 @@ func main() {
 		if _s0 == nil {
 			return nil
 		}
-		_s1 := _s0.Address
+		_s1 := _s0.GetAddress()
 		if _s1 == nil {
 			return nil
 		}
-		return _s1.City
+		return _s1.GetCity()
 	}())
 //line examples/safe_navigation.zn:56
-	var ghost *User = nil
+	var ghost User = nil
 //line examples/safe_navigation.zn:57
 	if ghost != nil {
 		ghost.Greet()

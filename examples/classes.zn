@@ -31,9 +31,19 @@ class Dog : Animal, Speaker {
     }
 }
 
+// Polymorphism: Dog satisfies both Animal and Speaker interfaces
+fn greetAnimal(a: Animal) {
+    print("Hello, {a.getName()}!")
+}
+
+fn makeSpeak(s: Speaker) {
+    print(s.speak())
+}
+
 fn main() {
     var d = Dog.new("Rex", "Labrador")
     print(d.speak())
     print(d.describe())
-    print(d.getName())
+    greetAnimal(d)    // Dog passed as Animal
+    makeSpeak(d)      // Dog passed as Speaker
 }

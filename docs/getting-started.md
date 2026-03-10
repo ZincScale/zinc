@@ -159,7 +159,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs coverin
 | Example | Description |
 |---------|-------------|
 | [`hello.zn`](../examples/hello.zn) | Hello World + variables |
-| [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance |
+| [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance, polymorphism |
 | [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
 | [`errors.zn`](../examples/errors.zn) | Errors as values, `or` handler |
 | [`enums.zn`](../examples/enums.zn) | Enums + match |

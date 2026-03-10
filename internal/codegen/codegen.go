@@ -62,10 +62,12 @@ type Generator struct {
 	interfaceNames map[string]bool // set of declared interface names
 	// canThrowFns: set of fn/method names that are failable (return errors)
 	canThrowFns map[string]bool
+	// voidCanThrowFns: subset of canThrowFns where the function/method has no return type (void)
+	voidCanThrowFns map[string]bool
 	// varTypes: local variable name → Go type info (for method failable detection)
 	varTypes map[string]varTypeInfo
-	// classVars: local variables known to hold Zinc class instances
-	classVars map[string]bool
+	// classVars: local variable name → class name for Zinc class instances
+	classVars map[string]string
 	// classFields: class name → list of field info (for getter/setter generation)
 	classFields map[string][]*classFieldInfo
 	// classParents: class name → parent class/interface names
@@ -74,9 +76,9 @@ type Generator struct {
 	receiver string
 	// inCtorBody: true when emitting constructor body (use direct field access)
 	inCtorBody bool
-	// interfaceVars: variables that hold interface-typed class values (function params, etc.)
+	// interfaceVars: variable name → class name for interface-typed class values (function params, etc.)
 	// These need getter/setter access instead of direct field access.
-	interfaceVars map[string]bool
+	interfaceVars map[string]string
 	// current function return type (for zero-value in error returns)
 	currentReturnType parser.TypeExpr
 	// whether current function is failable (affects return stmt emission)
@@ -118,19 +120,20 @@ func New() *Generator {
 		neededImports:  make(map[string]bool),
 		classNames:     make(map[string]bool),
 		interfaceNames: make(map[string]bool),
-		canThrowFns:    make(map[string]bool),
-		varTypes:       make(map[string]varTypeInfo),
-		classVars:      make(map[string]bool),
-		classFields:    make(map[string][]*classFieldInfo),
-		classParents:   make(map[string][]string),
-		classCtors:     make(map[string]*parser.CtorDecl),
-		enumNames:      make(map[string]bool),
-		throwingVars:   make(map[string]bool),
-		interfaceVars:  make(map[string]bool),
-		fnParams:       make(map[string][]*parser.ParamDecl),
-		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
-		goResolver:     NewGoTypeResolver(),
-		importMap:      make(map[string]string),
+		canThrowFns:     make(map[string]bool),
+		voidCanThrowFns: make(map[string]bool),
+		varTypes:        make(map[string]varTypeInfo),
+		classVars:       make(map[string]string),
+		classFields:     make(map[string][]*classFieldInfo),
+		classParents:    make(map[string][]string),
+		classCtors:      make(map[string]*parser.CtorDecl),
+		enumNames:       make(map[string]bool),
+		throwingVars:    make(map[string]bool),
+		interfaceVars:   make(map[string]string),
+		fnParams:        make(map[string][]*parser.ParamDecl),
+		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
+		goResolver:      NewGoTypeResolver(),
+		importMap:       make(map[string]string),
 	}
 }
 
@@ -142,20 +145,21 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		neededImports:  make(map[string]bool),
 		classNames:     make(map[string]bool),
 		interfaceNames: make(map[string]bool),
-		canThrowFns:    make(map[string]bool),
-		varTypes:       make(map[string]varTypeInfo),
-		classVars:      make(map[string]bool),
-		classFields:    make(map[string][]*classFieldInfo),
-		classParents:   make(map[string][]string),
-		classCtors:     make(map[string]*parser.CtorDecl),
-		enumNames:      make(map[string]bool),
-		throwingVars:   make(map[string]bool),
-		interfaceVars:  make(map[string]bool),
-		packageName:    pkgName,
-		fnParams:       make(map[string][]*parser.ParamDecl),
-		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
-		goResolver:     NewGoTypeResolver(),
-		importMap:      make(map[string]string),
+		canThrowFns:     make(map[string]bool),
+		voidCanThrowFns: make(map[string]bool),
+		varTypes:        make(map[string]varTypeInfo),
+		classVars:       make(map[string]string),
+		classFields:     make(map[string][]*classFieldInfo),
+		classParents:    make(map[string][]string),
+		classCtors:      make(map[string]*parser.CtorDecl),
+		enumNames:       make(map[string]bool),
+		throwingVars:    make(map[string]bool),
+		interfaceVars:   make(map[string]string),
+		packageName:     pkgName,
+		fnParams:        make(map[string][]*parser.ParamDecl),
+		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
+		goResolver:      NewGoTypeResolver(),
+		importMap:       make(map[string]string),
 	}
 	for k, v := range reg.ClassNames {
 		g.classNames[k] = v
@@ -168,6 +172,9 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 	}
 	for k, v := range reg.CanThrowFns {
 		g.canThrowFns[k] = v
+	}
+	for k, v := range reg.VoidCanThrowFns {
+		g.voidCanThrowFns[k] = v
 	}
 	for k, v := range reg.ClassFields {
 		g.classFields[k] = v
@@ -300,6 +307,9 @@ func (g *Generator) firstPass(prog *parser.Program) {
 				if !d.CanThrow && g.bodyIsFailable(d.Body) {
 					d.CanThrow = true
 					g.canThrowFns[d.Name] = true
+					if d.ReturnType == nil {
+						g.voidCanThrowFns[d.Name] = true
+					}
 					changed = true
 				}
 			case *parser.ClassDecl:
@@ -307,6 +317,9 @@ func (g *Generator) firstPass(prog *parser.Program) {
 					if !m.CanThrow && g.bodyIsFailable(m.Body) {
 						m.CanThrow = true
 						g.canThrowFns[d.Name+"."+m.Name] = true
+						if m.ReturnType == nil {
+							g.voidCanThrowFns[d.Name+"."+m.Name] = true
+						}
 						changed = true
 					}
 				}
@@ -421,6 +434,13 @@ func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
 			// Check method on tracked variable type (e.g. f.Write where f is *os.File)
 			if info, ok := g.varTypes[ident.Name]; ok {
 				return g.goResolver != nil && g.goResolver.MethodReturnsError(info.PkgPath, info.TypeName, callee.Field, info.Pointer)
+			}
+			// Check method on Zinc class instance (e.g. v.validate where v is AgeValidator)
+			if className, ok := g.classVars[ident.Name]; ok {
+				return g.canThrowFns[className+"."+callee.Field]
+			}
+			if className, ok := g.interfaceVars[ident.Name]; ok {
+				return g.canThrowFns[className+"."+callee.Field]
 			}
 		}
 		if _, ok := callee.Object.(*parser.ThisExpr); ok {
@@ -1045,16 +1065,20 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 	g.currentReturnType = m.ReturnType
 	g.currentCanThrow = m.CanThrow
 	// Track params with class types as interface-typed variables (need getters)
-	g.interfaceVars = make(map[string]bool)
+	g.interfaceVars = make(map[string]string)
 	for k, v := range savedIV {
 		g.interfaceVars[k] = v
 	}
 	for _, p := range m.Params {
 		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
-			g.interfaceVars[p.Name] = true
+			g.interfaceVars[p.Name] = st.Name
 		}
 	}
 	g.emitBlock(m.Body)
+	// Void-failable methods need explicit return nil at end
+	if m.CanThrow && m.ReturnType == nil {
+		g.writeln("return nil")
+	}
 	g.receiver = savedRecv
 	g.currentReturnType = savedRT
 	g.currentCanThrow = savedCT
@@ -1116,16 +1140,20 @@ func (g *Generator) emitFn(fn *parser.FnDecl) {
 		g.inMainOrGoroutine = true
 	}
 	// Track params with class types as interface-typed variables (need getters)
-	g.interfaceVars = make(map[string]bool)
+	g.interfaceVars = make(map[string]string)
 	for k, v := range savedIV {
 		g.interfaceVars[k] = v
 	}
 	for _, p := range fn.Params {
 		if st, ok := p.Type.(*parser.SimpleType); ok && g.classNames[st.Name] {
-			g.interfaceVars[p.Name] = true
+			g.interfaceVars[p.Name] = st.Name
 		}
 	}
 	g.emitBlock(fn.Body)
+	// Void-failable functions need explicit return nil at end
+	if fn.CanThrow && fn.ReturnType == nil && fn.Name != "main" {
+		g.writeln("return nil")
+	}
 	g.currentReturnType = savedRT
 	g.currentCanThrow = savedCT
 	g.inMainOrGoroutine = savedMG
@@ -1289,7 +1317,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			// Track class instance variables (ClassName.new())
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
 				if ident, ok := sel.Object.(*parser.Ident); ok && g.classNames[ident.Name] {
-					g.classVars[v.Name] = true
+					g.classVars[v.Name] = ident.Name
 				}
 			}
 		}
@@ -2081,7 +2109,7 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 // isVoidFailable returns true if a failable call returns just error (no value).
 func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
-		return voidFailableBuiltins[ident.Name]
+		return voidFailableBuiltins[ident.Name] || g.voidCanThrowFns[ident.Name]
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok {
@@ -2094,6 +2122,13 @@ func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
 			// Check method on tracked variable type (e.g. f.Close where f is *os.File)
 			if info, ok := g.varTypes[ident.Name]; ok {
 				return g.goResolver != nil && g.goResolver.MethodReturnsOnlyError(info.PkgPath, info.TypeName, sel.Field, info.Pointer)
+			}
+			// Check method on Zinc class instance
+			if className, ok := g.classVars[ident.Name]; ok {
+				return g.voidCanThrowFns[className+"."+sel.Field]
+			}
+			if className, ok := g.interfaceVars[ident.Name]; ok {
+				return g.voidCanThrowFns[className+"."+sel.Field]
 			}
 		}
 	}
@@ -2252,7 +2287,7 @@ func (g *Generator) isClassFieldAccess(sel *parser.SelectorExpr) bool {
 			return false
 		}
 		// Interface-typed variables (function params with class type) need getters
-		if g.interfaceVars[ident.Name] {
+		if _, ok := g.interfaceVars[ident.Name]; ok {
 			return g.hasAnyClassField(fieldName)
 		}
 		// classVars from .new() are concrete *Impl types — direct field access
@@ -2297,7 +2332,7 @@ func (g *Generator) isBuiltinReceiver(sel *parser.SelectorExpr) bool {
 		if _, ok := g.varTypes[ident.Name]; ok {
 			return false // tracked Go type variable
 		}
-		if g.classVars[ident.Name] {
+		if _, ok := g.classVars[ident.Name]; ok {
 			return false // variable holding a Zinc class instance
 		}
 		// Also check if receiver matches the method receiver name (inside class methods)
@@ -2481,8 +2516,10 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		interfaceNames:    g.interfaceNames,
 		enumNames:         g.enumNames,
 		canThrowFns:       g.canThrowFns,
+		voidCanThrowFns:   g.voidCanThrowFns,
 		varTypes:          g.varTypes, // share so method failable detection works
 		classVars:         g.classVars,
+		interfaceVars:     g.interfaceVars,
 		classCtors:        g.classCtors,
 		receiver:          g.receiver,
 		throwingVars:      g.throwingVars, // share so nested calls resolve

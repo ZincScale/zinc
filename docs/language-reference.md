@@ -375,6 +375,27 @@ fn greet(p: Person) {
 }
 ```
 
+Error handling works seamlessly through polymorphic dispatch. Failable methods on interface-typed parameters are correctly detected:
+
+```zinc
+class Validator {
+    var value: Int
+    new(v: Int) { this.value = v }
+    pub fn validate(): String {
+        if (this.value < 0) { return Error("negative") }
+        return "ok"
+    }
+}
+
+fn check(v: Validator) {
+    var result = v.validate() or {
+        print("error: {err}")
+        return
+    }
+    print(result)
+}
+```
+
 ## Enums
 
 ```zinc

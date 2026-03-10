@@ -30,12 +30,24 @@ func log(level string, messages ...string) {
 }
 
 //line examples/variadic.zn:20
-type Builder struct {
+type BuilderImpl struct {
 	Parts []string
 }
 
-func NewBuilder() *Builder {
-	obj := &Builder{}
+func (b *BuilderImpl) GetParts() []string  { return b.Parts }
+func (b *BuilderImpl) SetParts(v []string) { b.Parts = v }
+
+type Builder interface {
+	GetParts() []string
+	SetParts([]string)
+	Append(items ...string)
+	Build() string
+}
+
+var _ Builder = (*BuilderImpl)(nil)
+
+func NewBuilder() *BuilderImpl {
+	obj := &BuilderImpl{}
 //line examples/variadic.zn:24
 	obj.Parts = []string{"placeholder"}
 //line examples/variadic.zn:25
@@ -43,7 +55,7 @@ func NewBuilder() *Builder {
 	return obj
 }
 
-func (b *Builder) Append(items ...string) {
+func (b *BuilderImpl) Append(items ...string) {
 //line examples/variadic.zn:29
 	for _, item := range items {
 //line examples/variadic.zn:30
@@ -51,7 +63,7 @@ func (b *Builder) Append(items ...string) {
 	}
 }
 
-func (b *Builder) Build() string {
+func (b *BuilderImpl) Build() string {
 //line examples/variadic.zn:35
 	return strings.Join(b.Parts, ", ")
 }

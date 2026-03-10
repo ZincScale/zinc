@@ -9,8 +9,9 @@ type TypeRegistry struct {
 	ClassNames     map[string]bool
 	InterfaceNames map[string]bool
 	EnumNames      map[string]bool
-	CanThrowFns    map[string]bool
-	ClassCtors     map[string]*parser.CtorDecl            // class name → constructor
+	CanThrowFns     map[string]bool
+	VoidCanThrowFns map[string]bool
+	ClassCtors      map[string]*parser.CtorDecl            // class name → constructor
 	FnParams       map[string][]*parser.ParamDecl         // function name → params
 	MethodParams   map[string]map[string][]*parser.ParamDecl // class → method → params
 	ClassFields    map[string][]*classFieldInfo            // class name → fields
@@ -23,8 +24,9 @@ func NewTypeRegistry() *TypeRegistry {
 		ClassNames:     make(map[string]bool),
 		InterfaceNames: make(map[string]bool),
 		EnumNames:      make(map[string]bool),
-		CanThrowFns:    make(map[string]bool),
-		ClassCtors:     make(map[string]*parser.CtorDecl),
+		CanThrowFns:     make(map[string]bool),
+		VoidCanThrowFns: make(map[string]bool),
+		ClassCtors:      make(map[string]*parser.CtorDecl),
 		FnParams:       make(map[string][]*parser.ParamDecl),
 		MethodParams:   make(map[string]map[string][]*parser.ParamDecl),
 		ClassFields:    make(map[string][]*classFieldInfo),
@@ -88,6 +90,9 @@ func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 						d.CanThrow = true
 						reg.CanThrowFns[d.Name] = true
 						g.canThrowFns[d.Name] = true
+						if d.ReturnType == nil {
+							reg.VoidCanThrowFns[d.Name] = true
+						}
 						changed = true
 					}
 				case *parser.ClassDecl:
@@ -97,6 +102,9 @@ func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 							m.CanThrow = true
 							reg.CanThrowFns[key] = true
 							g.canThrowFns[key] = true
+							if m.ReturnType == nil {
+								reg.VoidCanThrowFns[key] = true
+							}
 							changed = true
 						}
 					}

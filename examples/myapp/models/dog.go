@@ -1,23 +1,37 @@
-//go:build ignore
-
 package models
 
-type Dog struct {
-	Animal
+//line models/dog.zn:3
+type DogImpl struct {
+	AnimalImpl
 	Tricks []string
 }
 
-func NewDog(name string) *Dog {
-	obj := &Dog{
-		Animal: Animal{name, "Woof"},
+func (d *DogImpl) GetTricks() []string  { return d.Tricks }
+func (d *DogImpl) SetTricks(v []string) { d.Tricks = v }
+
+type Dog interface {
+	Animal
+	GetTricks() []string
+	SetTricks([]string)
+	LearnTrick(trick string)
+	TrickCount() int
+}
+
+var _ Dog = (*DogImpl)(nil)
+
+func NewDog(name string) *DogImpl {
+	obj := &DogImpl{
+		AnimalImpl: *NewAnimal(name, "Woof"),
 	}
 	return obj
 }
 
-func (d *Dog) LearnTrick(trick string) {
+func (d *DogImpl) LearnTrick(trick string) {
+//line models/dog.zn:11
 	d.Tricks = append(d.Tricks, trick)
 }
 
-func (d *Dog) TrickCount() int {
+func (d *DogImpl) TrickCount() int {
+//line models/dog.zn:15
 	return len(d.Tricks)
 }

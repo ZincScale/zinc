@@ -12,12 +12,17 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 - Compile-time interface satisfaction checks (`var _ Interface = (*Impl)(nil)`)
 - Field access through interface-typed parameters uses auto-generated getters/setters
 - Safe navigation (`?.`) works correctly with interface types
-- Polymorphism e2e tests
+- Failable method detection through interface-typed parameters — `v.validate()` on an interface-typed class param now correctly detects `(T, error)` and `error` returns
+- Void-failable tracking (`voidCanThrowFns`) — methods returning only `error` (no value) emit `err :=` instead of `_, err :=`
+- Auto `return nil` for void-failable methods/functions (prevents "missing return" in Go)
+- Comprehensive e2e tests: polymorphism, error propagation chains, failable methods via interface, nested with, Go interop, getter collision
 
 ### Fixed
 - `Optional<ClassName>` no longer generates pointer-to-interface (`*Dog`), which is invalid in Go
 - Safe-nav field access on nullable class types uses getters instead of direct field access
 - Getter/setter collision detection: if a class already defines `getX()`, the auto-generated getter is skipped
+- Failable methods called on interface-typed variables were not detected as failable (error silently dropped)
+- Void-failable class methods missing `return nil` at end of body
 
 ## [0.3.1] - 2026-03-10
 
