@@ -1,8 +1,8 @@
 // with — Resource management (like Java's try-with-resources, Python's with, C#'s using)
 //
 // Automatically handles:
-//   - Files (io.Closer) → defer Close()
-//   - Mutexes (sync.Locker) → Lock() + defer Unlock()
+//   - Files (io.Closer) → auto-close at end of block
+//   - Mutexes (sync.Locker) → auto-lock/unlock around block
 //
 // Multi-return (T, error) functions are auto-detected — no extra syntax needed.
 // Errors auto-propagate (panic in main); use or { } to add context.

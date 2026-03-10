@@ -15,7 +15,6 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 | - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| - | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
 | - | **Generic empty list literal inference** (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`) | Typechecker needs to propagate field type into list/map literals in generic context | Medium |
 | - | **Generic constructor type inference** (`Container.new(items)` without explicit type param) | Go can infer type params from arguments, but codegen needs to emit `NewContainer(items)` without `[T]` when inferable | Quick |
 
@@ -48,34 +47,6 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 |---|---------|---------------|--------|
 | 5 | **Annotations / decorators** (`@Json("name")`, `@Column("id")`) | Maps to Go struct tags; familiar to Java/C#/Kotlin devs | Medium |
 | 6 | **Data classes / records** (`data class User(name: String, age: Int)`) | Immutable DTOs with auto-generated toString/equality; Kotlin `data class` / Java `record` pattern | Medium |
-| 7 | **Zinc stdlib wrappers** (codegen-level) | See stdlib plan below | Large |
-
-### Stdlib Wrapper Plan
-
-**Approach: Codegen-level, not a separate library.** Teach the codegen to translate Zinc-idiomatic patterns into Go stdlib calls — same pattern as `.size()` → `len()`, `.upper()` → `strings.ToUpper()`. Zero maintenance burden, no external library to ship.
-
-**Tier A — Must have (covers 80% of microservice code):**
-
-| Go Package | Zinc API (codegen emits Go calls) |
-|---|---|
-| `net/http` | `Http.get(url)`, `Http.post(url, body)`, `Http.serve(port, handler)` |
-| `encoding/json` | `Json.parse<T>(data)` → `json.Unmarshal`, `Json.stringify(obj)` → `json.Marshal` |
-| `context` | `Context.withTimeout(duration)`, `Context.withCancel()` |
-| `log/slog` | `Log.info(msg)`, `Log.error(msg)`, structured key-value logging |
-| `database/sql` | `Db.query(sql, args...)`, `Db.exec(sql, args...)` |
-
-**Tier B — Common, can wait:**
-`io`, `strings`/`strconv`, `time`, `sync`, `crypto/tls`, `errors`, `testing`
-
-**Tier C — Nice to have:**
-`regexp`, `sort`, `path/filepath`, `bufio`, `bytes`, `net/url`, `html/template`
-
-**Why codegen-level?**
-- No wrapper library to maintain or version
-- Go API changes → update codegen once
-- Already proven pattern in Zinc (collection methods, string methods, builtins)
-- No runtime dependency, no import overhead
-- `go/types` infrastructure is now in place (used for error-returning function detection) and can be reused for stdlib type resolution
 
 ---
 

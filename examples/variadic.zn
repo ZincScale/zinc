@@ -1,5 +1,3 @@
-import "fmt"
-
 // Variadic function — accepts any number of Int args
 fn sum(nums: ...Int) : Int {
     var total = 0
@@ -64,7 +62,8 @@ fn main() {
     b.append("alpha", "beta", "gamma")
     print(b.build())
 
-    // fmt.Sprintf with multiple args (Go variadic)
-    var msg = fmt.Sprintf("Hello %s, age %d", "Alice", 30)
-    print(msg)
+    // String interpolation (idiomatic Zinc — no fmt.Sprintf needed)
+    var who = "Alice"
+    var age = 30
+    print("Hello {who}, age {age}")
 }
