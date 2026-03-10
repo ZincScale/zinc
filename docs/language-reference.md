@@ -136,6 +136,42 @@ fn pair<K, V>(key: K, value: V): K {
 }
 ```
 
+### Variadic Functions
+
+Functions can accept a variable number of arguments using `...Type` syntax — the last parameter becomes a variadic parameter:
+
+```zinc
+fn log(level: String, msgs: ...String) {
+    for msg in msgs {
+        print("[{level}] {msg}")
+    }
+}
+
+fn main() {
+    log("INFO", "server started", "listening on :8080")
+
+    // Spread a list into variadic args
+    var errors = ["timeout", "connection refused"]
+    log("ERROR", errors...)
+}
+```
+
+Transpiles directly to Go's variadic syntax:
+
+```go
+func log(level string, msgs ...string) {
+    for _, msg := range msgs {
+        fmt.Println(fmt.Sprintf("[%v] %v", level, msg))
+    }
+}
+
+func main() {
+    log("INFO", "server started", "listening on :8080")
+    errors := []string{"timeout", "connection refused"}
+    log("ERROR", errors...)
+}
+```
+
 ## Classes
 
 ```zinc

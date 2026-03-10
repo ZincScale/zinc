@@ -175,6 +175,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs coverin
 | [`labeled_loops.zn`](../examples/labeled_loops.zn) | Labeled `break` and `continue` |
 | [`tuple_unpacking.zn`](../examples/tuple_unpacking.zn) | Multi-return unpacking + error handling |
 | [`constants.zn`](../examples/constants.zn) | `const` declarations |
+| [`variadic.zn`](../examples/variadic.zn) | Variadic functions, spread operator |
 
 There's also a full [multi-file project example](../examples/myapp/) showing packages, classes with inheritance, and cross-file imports.
 

@@ -13,7 +13,6 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
 | - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
-| ~~-~~ | ~~**Variadic functions** (`...` params)~~ | ~~Done — `fn log(level: String, msgs: ...String)`, spread `list...`, multi-arg `.add()`~~ | ~~Done~~ |
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
 | - | **Interface default methods** | Reduces boilerplate for shared behaviour | Medium |
@@ -35,7 +34,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | P7 | **Install script / Homebrew formula** | `brew install zinc` or `curl -sSL \| sh` — lower the barrier vs `git clone && go build` | Medium |
 | P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
 | P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
-| P10 | **`.gitignore` cleanup** | Ignore generated `.go` files in examples, build artifacts, editor configs | Quick |
+| ~~P10~~ | ~~**`.gitignore` cleanup**~~ | ~~Done — ignore generated `.go` files in examples, build artifacts, editor configs~~ | ~~Done~~ |
 | P11 | **License headers / compliance check** | Ensure all source files have Apache 2.0 headers; add CI check | Quick |
 | P12 | **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
 
@@ -74,6 +73,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Go API changes → update codegen once
 - Already proven pattern in Zinc (collection methods, string methods, builtins)
 - No runtime dependency, no import overhead
+- `go/types` infrastructure is now in place (used for error-returning function detection) and can be reused for stdlib type resolution
 
 ---
 
@@ -155,3 +155,9 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - `--version` flag
 - Type checker error line numbers (all errors now report source line)
 - Variadic functions (`name: ...Type` params), spread operator (`list...`), multi-arg `.add()`
+- Go interop auto-detection via `go/types` for error-returning functions and methods
+- Method-level failable detection (variable type tracking for `f.Write()`, `f.Close()`, etc.)
+- Parser→codegen method dispatch refactor (removed 19 specialized AST nodes; builtin methods handled in codegen)
+- Class/Go-type-aware builtin dispatch (`.add()` on a class calls the method, not `append`)
+- `.gitignore` cleanup for generated `.go` files
+- Dead code removal (`TOKEN_PRIVATE`, `TOKEN_ARROW`, `FieldDecl.IsPrivate`)

@@ -508,7 +508,7 @@ fn main() {
 func TestValidHello(t *testing.T) {
 	src, err := os.ReadFile("../../examples/hello.zn")
 	if err != nil {
-		t.Skip("examples/hello.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -517,7 +517,7 @@ func TestValidHello(t *testing.T) {
 func TestValidClasses(t *testing.T) {
 	src, err := os.ReadFile("../../examples/classes.zn")
 	if err != nil {
-		t.Skip("examples/classes.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -526,7 +526,7 @@ func TestValidClasses(t *testing.T) {
 func TestValidGenerics(t *testing.T) {
 	src, err := os.ReadFile("../../examples/generics.zn")
 	if err != nil {
-		t.Skip("examples/generics.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -535,7 +535,7 @@ func TestValidGenerics(t *testing.T) {
 func TestValidErrors(t *testing.T) {
 	src, err := os.ReadFile("../../examples/errors.zn")
 	if err != nil {
-		t.Skip("examples/errors.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -544,7 +544,7 @@ func TestValidErrors(t *testing.T) {
 func TestValidFibonacci(t *testing.T) {
 	src, err := os.ReadFile("../../examples/fibonacci.zn")
 	if err != nil {
-		t.Skip("examples/fibonacci.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -553,7 +553,7 @@ func TestValidFibonacci(t *testing.T) {
 func TestValidEnums(t *testing.T) {
 	src, err := os.ReadFile("../../examples/enums.zn")
 	if err != nil {
-		t.Skip("examples/enums.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -562,7 +562,7 @@ func TestValidEnums(t *testing.T) {
 func TestValidConcurrency(t *testing.T) {
 	src, err := os.ReadFile("../../examples/concurrency.zn")
 	if err != nil {
-		t.Skip("examples/concurrency.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))
@@ -571,7 +571,7 @@ func TestValidConcurrency(t *testing.T) {
 func TestValidClosures(t *testing.T) {
 	src, err := os.ReadFile("../../examples/closures.zn")
 	if err != nil {
-		t.Skip("examples/closures.zn not found")
+		t.Fatalf("reading example: %v", err)
 	}
 	errs := checkSrc(string(src))
 	noErrors(t, errs, string(src))

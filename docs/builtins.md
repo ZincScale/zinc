@@ -26,7 +26,7 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 
 | Zinc            | Go equivalent              | Notes |
 |-------------------|----------------------------|-------|
-| `list.add(item)`  | `list = append(list, item)` | Appends to list in-place |
+| `list.add(items...)` | `list = append(list, items...)` | Appends one or more items; supports spread (`other...`) |
 | `map.remove(key)` | `delete(map, key)`          | Removes key from map |
 | `x.size()`        | `len(x)`                    | Works on lists, maps, strings |
 | `list.clone()`    | `append(list[:0:0], list...)`| Deep-copies a list |
