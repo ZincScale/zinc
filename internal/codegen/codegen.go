@@ -73,6 +73,10 @@ type Generator struct {
 	srcFile string
 	// lastDirectiveLine: last source line emitted in a //line directive (avoids duplicates)
 	lastDirectiveLine int
+	// goResolver: auto-detects Go function signatures via go/types
+	goResolver *GoTypeResolver
+	// importMap: identifier prefix → full import path (e.g. "sql" → "database/sql")
+	importMap map[string]string
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -87,6 +91,8 @@ func New() *Generator {
 		throwingVars:   make(map[string]bool),
 		fnParams:       make(map[string][]*parser.ParamDecl),
 		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
+		goResolver:     NewGoTypeResolver(),
+		importMap:      make(map[string]string),
 	}
 }
 
@@ -105,6 +111,8 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		packageName:    pkgName,
 		fnParams:       make(map[string][]*parser.ParamDecl),
 		methodParams:   make(map[string]map[string][]*parser.ParamDecl),
+		goResolver:     NewGoTypeResolver(),
+		importMap:      make(map[string]string),
 	}
 	for k, v := range reg.ClassNames {
 		g.classNames[k] = v
@@ -138,8 +146,9 @@ func (g *Generator) Generate(prog *parser.Program) string {
 	// First pass: collect names and mark canThrow
 	g.firstPass(prog)
 
-	// Collect user imports
+	// Collect user imports and build import map for Go type resolution
 	g.userImports = prog.Imports
+	g.buildImportMap()
 
 	// Second pass: emit
 	var body strings.Builder
@@ -342,13 +351,43 @@ func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
 	case *parser.SelectorExpr:
 		if ident, ok := callee.Object.(*parser.Ident); ok {
 			key := ident.Name + "." + callee.Field
-			return g.canThrowFns[key] || goMultiReturnFuncs[key]
+			return g.canThrowFns[key] || g.goReturnsError(ident.Name, callee.Field)
 		}
 		if _, ok := callee.Object.(*parser.ThisExpr); ok {
 			return g.canThrowFns[callee.Field]
 		}
 	}
 	return false
+}
+
+// buildImportMap populates g.importMap from user imports.
+// Maps identifier prefix (alias or last path segment) to full import path.
+func (g *Generator) buildImportMap() {
+	for _, imp := range g.userImports {
+		var prefix string
+		if imp.Alias != "" {
+			prefix = imp.Alias
+		} else {
+			prefix = imp.Path
+			if idx := strings.LastIndex(prefix, "/"); idx >= 0 {
+				prefix = prefix[idx+1:]
+			}
+		}
+		g.importMap[prefix] = imp.Path
+	}
+}
+
+// goReturnsError checks if prefix.funcName is a Go function returning error.
+// Falls back to the hardcoded goMultiReturnFuncs list if resolution fails.
+func (g *Generator) goReturnsError(prefix, funcName string) bool {
+	if pkgPath, ok := g.importMap[prefix]; ok {
+		if g.goResolver != nil && g.goResolver.ReturnsError(pkgPath, funcName) {
+			return true
+		}
+	}
+	// Fallback to hardcoded list
+	key := prefix + "." + funcName
+	return goMultiReturnFuncs[key]
 }
 
 // --- Import Management -------------------------------------------------------
@@ -1665,6 +1704,16 @@ func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
 func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
 		return ident.Name == "writeFile"
+	}
+	// Check Go functions that return only error (e.g. os.Remove)
+	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok {
+			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				if g.goResolver != nil && g.goResolver.ReturnsOnlyError(pkgPath, sel.Field) {
+					return true
+				}
+			}
+		}
 	}
 	return false
 }

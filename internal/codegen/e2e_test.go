@@ -1546,3 +1546,55 @@ fn main() {
 }`)
 	assertOutput(t, out, "Hello Alice, age 30")
 }
+
+// --- Go Interop Auto-Detection E2E ------------------------------------------
+
+func TestE2EAutoDetectStrconvAtoi(t *testing.T) {
+	out := e2eRun(t, `
+import "strconv"
+
+fn main() {
+    var n = strconv.Atoi("42") or { print("error"); exit(1) }
+    print(n)
+}`)
+	assertOutput(t, out, "42")
+}
+
+func TestE2EAutoDetectStrconvAtoiFail(t *testing.T) {
+	out := e2eRun(t, `
+import "strconv"
+
+fn main() {
+    var n = strconv.Atoi("notanumber") or { print("caught"); exit(0) }
+    print(n)
+}`)
+	assertOutput(t, out, "caught")
+}
+
+func TestE2EAutoDetectStrconvParseFloat(t *testing.T) {
+	out := e2eRun(t, `
+import "strconv"
+
+fn main() {
+    var f = strconv.ParseFloat("3.14", 64) or { print("error"); exit(1) }
+    print(f)
+}`)
+	assertOutput(t, out, "3.14")
+}
+
+func TestE2EAutoDetectInFailable(t *testing.T) {
+	out := e2eRun(t, `
+import "strconv"
+
+fn parseNum(s: String): Int {
+    if (s == "") { return Error("empty") }
+    var n = strconv.Atoi(s)
+    return n
+}
+
+fn main() {
+    var x = parseNum("99") or { print("error"); exit(1) }
+    print(x)
+}`)
+	assertOutput(t, out, "99")
+}

@@ -1373,3 +1373,90 @@ fn main() {
 	}
 	assertContains(t, out, "append(items, more...)")
 }
+
+// --- GoTypeResolver unit tests -----------------------------------------------
+
+func TestGoTypeResolverKnownFuncs(t *testing.T) {
+	r := NewGoTypeResolver()
+
+	// os.Open returns (*File, error)
+	if !r.ReturnsError("os", "Open") {
+		t.Error("expected os.Open to return error")
+	}
+	// strconv.Atoi returns (int, error) — not in hardcoded list
+	if !r.ReturnsError("strconv", "Atoi") {
+		t.Error("expected strconv.Atoi to return error")
+	}
+	// fmt.Println returns (int, error)
+	if !r.ReturnsError("fmt", "Println") {
+		t.Error("expected fmt.Println to return error")
+	}
+	// net/http.Get returns (*Response, error)
+	if !r.ReturnsError("net/http", "Get") {
+		t.Error("expected net/http.Get to return error")
+	}
+}
+
+func TestGoTypeResolverNonFailable(t *testing.T) {
+	r := NewGoTypeResolver()
+
+	// fmt.Sprintf does NOT return error
+	if r.ReturnsError("fmt", "Sprintf") {
+		t.Error("expected fmt.Sprintf to NOT return error")
+	}
+	// strings.Contains does NOT return error
+	if r.ReturnsError("strings", "Contains") {
+		t.Error("expected strings.Contains to NOT return error")
+	}
+}
+
+func TestGoTypeResolverBadPackage(t *testing.T) {
+	r := NewGoTypeResolver()
+
+	// non-existent package should return false, not panic
+	if r.ReturnsError("nonexistent/pkg", "Foo") {
+		t.Error("expected false for non-existent package")
+	}
+}
+
+func TestGoTypeResolverBadFunc(t *testing.T) {
+	r := NewGoTypeResolver()
+
+	// non-existent function in valid package
+	if r.ReturnsError("os", "NonExistentFunc") {
+		t.Error("expected false for non-existent function")
+	}
+}
+
+// --- Auto-detection integration in codegen -----------------------------------
+
+func TestAutoDetectStrconvAtoi(t *testing.T) {
+	out, errs := transpile(`
+import "strconv"
+
+fn main() {
+    var n = strconv.Atoi("42") or { print("fail"); halt }
+    print(n)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Should generate multi-return unpacking
+	assertContains(t, out, "strconv.Atoi")
+	assertContains(t, out, "!= nil")
+}
+
+func TestAutoDetectJsonMarshal(t *testing.T) {
+	out, errs := transpile(`
+import "encoding/json"
+
+fn main() {
+    var data = json.Marshal("hello") or { print("fail"); halt }
+    print(data)
+}`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "json.Marshal")
+	assertContains(t, out, "!= nil")
+}
