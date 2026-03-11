@@ -8,7 +8,7 @@
 class Zinc < Formula
   desc "A modern programming language that transpiles to Go"
   homepage "https://github.com/victorybhg/zinc"
-  version "0.3.2"
+  version "0.4.0"
   license "Apache-2.0"
 
   on_macos do

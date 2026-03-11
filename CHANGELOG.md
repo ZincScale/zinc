@@ -4,9 +4,17 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-11
+
 ### Added
+- **LINQ-style collection methods** — `Where`, `Select`, `ForEach`, `Any`, `All`, `First`, `FirstOrDefault`, `Count`, `Take`, `Skip`, `Aggregate`, `ToList` with loop fusion codegen (single fused for-loop, no intermediate allocations)
+- **Lambda shorthand syntax** — `x => expr` (single param, no parens) and `(x, y) => expr` (multi-param) for ergonomic collection method chaining
+- **Failable lambda support in collection chains** — error-returning functions inside collection lambdas auto-propagate errors out of the fused loop, consistent with Zinc's error-as-values model
+- **Loop fusion benchmarks** — fused loops beat range-over-func iterators by 2-7x and naive intermediate slices by up to 11,000x (Filter+Take on 1M elements)
 - Generic class polymorphism — `fn printBox(b: Box<Int>)` correctly detects generic class params as interface-typed, field access uses getters, builtin methods aren't intercepted
 - Generic empty list/map literal inference — `this.items = []` in generic class emits `[]T{}` instead of `[]interface{}{}`
+- Collection methods documentation in language reference and builtins guide
+- 30 new e2e tests and unit tests for collection methods and failable lambdas
 
 ## [0.3.2] - 2026-03-10
 
