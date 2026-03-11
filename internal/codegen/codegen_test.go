@@ -1552,3 +1552,175 @@ fn doClose() {
 	// Void failable uses: if _errN := f.Close(); _errN != nil {
 	assertContains(t, out, "f.Close()")
 }
+
+// --- Lambda shorthand ---
+
+func TestLambdaShorthandSingleParam(t *testing.T) {
+	src := `fn main() {
+	var double = x => x * 2
+	print(double(5))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x interface{})")
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaShorthandParens(t *testing.T) {
+	src := `fn main() {
+	var add = (a, b) => a + b
+	print(add(1, 2))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(a interface{}, b interface{})")
+	assertNotContains(t, out, "=>")
+}
+
+func TestLambdaShorthandMixedTyped(t *testing.T) {
+	// Existing typed syntax still works
+	src := `fn main() {
+	var double = (x: Int): Int => x * 2
+	print(double(5))
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "func(x int) int")
+}
+
+// --- Collection methods ---
+
+func TestWhereSimple(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5, 6]
+	var evens = nums.Where(x => x % 2 == 0)
+	print(evens)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "for _, _v")
+	assertContains(t, out, "% 2) == 0")
+	assertContains(t, out, "append(evens")
+}
+
+func TestSelectSimple(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3]
+	var doubled = nums.Select(x => x * 2)
+	print(doubled)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "for _, _v")
+	assertContains(t, out, "* 2")
+	assertContains(t, out, "append(doubled")
+}
+
+func TestForEachSimple(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3]
+	nums.ForEach((x: Int): Int => x + 1)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "for _, _v")
+}
+
+func TestWhereSelectChain(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5, 6]
+	var result = nums.Where(x => x > 3).Select(x => x * 10)
+	print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Should be a single fused loop, not nested loops
+	assertContains(t, out, "for _, _v")
+	assertContains(t, out, "> 3")
+	assertContains(t, out, "* 10")
+	assertContains(t, out, "append(result")
+}
+
+func TestAnyTerminal(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5]
+	var hasEven = nums.Any(x => x % 2 == 0)
+	print(hasEven)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "hasEven := false")
+	assertContains(t, out, "hasEven = true")
+	assertContains(t, out, "break")
+}
+
+func TestAggregateTerminal(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5]
+	var sum = nums.Aggregate(0, (acc, x) => acc + x)
+	print(sum)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "sum := 0")
+	assertContains(t, out, "sum = (sum")
+}
+
+func TestWhereForEachChain(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5, 6]
+	nums.Where(x => x % 2 == 0).ForEach((x: Int): Int => x + 1)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "for _, _v")
+	assertContains(t, out, "% 2) == 0")
+}
+
+func TestTakeSimple(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+	var first3 = nums.Take(3)
+	print(first3)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "break")
+	assertContains(t, out, "append(first3")
+}
+
+func TestCountTerminal(t *testing.T) {
+	src := `fn main() {
+	var nums = [1, 2, 3, 4, 5, 6]
+	var evenCount = nums.Where(x => x % 2 == 0).Count()
+	print(evenCount)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "evenCount := 0")
+	assertContains(t, out, "evenCount++")
+}

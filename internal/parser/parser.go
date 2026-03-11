@@ -354,8 +354,10 @@ func (p *Parser) parseUnary() Expr {
 // isLambdaStart returns true if the current TOKEN_LPAREN begins a lambda, not a grouping.
 // Heuristics (peekAt is relative to current position = the '('):
 //
-//	() =>         → peek(1)==RPAREN, peek(2)==FAT_ARROW
-//	(name: Type)  → peek(1)==IDENT,  peek(2)==COLON
+//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW or COLON
+//	(name: Type) =>    → peek(1)==IDENT,  peek(2)==COLON (typed param)
+//	(name) =>          → peek(1)==IDENT,  peek(2)==RPAREN, peek(3)==FAT_ARROW (untyped single)
+//	(name, name) =>    → peek(1)==IDENT,  peek(2)==COMMA (untyped multi)
 func (p *Parser) isLambdaStart() bool {
 	ahead1 := p.peekAt(1)
 	switch ahead1.Type {
@@ -364,7 +366,16 @@ func (p *Parser) isLambdaStart() bool {
 		next := p.peekAt(2).Type
 		return next == lexer.TOKEN_FAT_ARROW || next == lexer.TOKEN_COLON
 	case lexer.TOKEN_IDENT:
-		return p.peekAt(2).Type == lexer.TOKEN_COLON
+		ahead2 := p.peekAt(2).Type
+		if ahead2 == lexer.TOKEN_COLON {
+			return true // (name: Type) => ...  (typed param)
+		}
+		if ahead2 == lexer.TOKEN_COMMA {
+			return true // (name, name) => ...  (untyped multi-param)
+		}
+		if ahead2 == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_FAT_ARROW {
+			return true // (name) => ...  (untyped single-param)
+		}
 	}
 	return false
 }
@@ -373,10 +384,10 @@ func (p *Parser) parseLambda() *LambdaExpr {
 	p.expect(lexer.TOKEN_LPAREN)
 	var params []*ParamDecl
 	if !p.check(lexer.TOKEN_RPAREN) {
-		params = append(params, p.parseParam())
+		params = append(params, p.parseLambdaParam())
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			params = append(params, p.parseParam())
+			params = append(params, p.parseLambdaParam())
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
@@ -395,6 +406,31 @@ func (p *Parser) parseLambda() *LambdaExpr {
 	}
 	expr := p.parseExpr()
 	return &LambdaExpr{Params: params, ReturnType: retType, Expr: expr}
+}
+
+// parseLambdaParam parses a lambda parameter, which can be:
+//   - name: Type     (typed, existing syntax)
+//   - name           (untyped shorthand — type inferred from context)
+func (p *Parser) parseLambdaParam() *ParamDecl {
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	if p.check(lexer.TOKEN_COLON) {
+		// Typed param: name: Type [= default]
+		p.advance()
+		variadic := false
+		if p.check(lexer.TOKEN_DOTDOTDOT) {
+			variadic = true
+			p.advance()
+		}
+		typ := p.parseType()
+		var def Expr
+		if p.check(lexer.TOKEN_ASSIGN) {
+			p.advance()
+			def = p.parseExpr()
+		}
+		return &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic}
+	}
+	// Untyped param: just the name (type will be inferred during codegen)
+	return &ParamDecl{Name: name}
 }
 
 func (p *Parser) parsePrimary() Expr {
@@ -451,6 +487,17 @@ func (p *Parser) parsePrimary() Expr {
 	case lexer.TOKEN_LBRACE:
 		return p.parseMapLit()
 	case lexer.TOKEN_IDENT:
+		// Check for shorthand lambda: name => expr
+		if p.peekAt(1).Type == lexer.TOKEN_FAT_ARROW {
+			name := p.advance().Literal
+			p.advance() // consume =>
+			if p.check(lexer.TOKEN_LBRACE) {
+				body := p.parseBlock()
+				return &LambdaExpr{Params: []*ParamDecl{{Name: name}}, Body: body}
+			}
+			expr := p.parseExpr()
+			return &LambdaExpr{Params: []*ParamDecl{{Name: name}}, Expr: expr}
+		}
 		p.advance()
 		return &Ident{Name: tok.Literal}
 	}

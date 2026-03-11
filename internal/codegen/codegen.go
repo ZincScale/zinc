@@ -1302,6 +1302,14 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
+	// Check for collection method chains: var result = list.Where(...).Select(...)
+	if v.Value != nil {
+		if chain := g.unwrapChain(v.Value); chain != nil {
+			g.emitCollectionChainVar(v.Name, chain)
+			return
+		}
+	}
+
 	// Special case: collection .new() constructors — Chan, List, Map
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
@@ -2097,6 +2105,11 @@ func (g *Generator) emitPrintStmt(p *parser.PrintStmt) {
 }
 
 func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
+	// Collection method chains in statement context (ForEach, etc.)
+	if chain := g.unwrapChain(e.Expr); chain != nil {
+		g.emitCollectionChainStmt(chain)
+		return
+	}
 	// Builtin method calls in statement context (add, remove, sort, send)
 	if call, ok := e.Expr.(*parser.CallExpr); ok {
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
@@ -2541,10 +2554,14 @@ func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
 func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	var paramParts []string
 	for _, p := range e.Params {
+		typStr := "interface{}"
+		if p.Type != nil {
+			typStr = g.emitType(p.Type)
+		}
 		if p.Variadic {
-			paramParts = append(paramParts, p.Name+" ..."+g.emitType(p.Type))
+			paramParts = append(paramParts, p.Name+" ..."+typStr)
 		} else {
-			paramParts = append(paramParts, p.Name+" "+g.emitType(p.Type))
+			paramParts = append(paramParts, p.Name+" "+typStr)
 		}
 	}
 	paramStr := strings.Join(paramParts, ", ")

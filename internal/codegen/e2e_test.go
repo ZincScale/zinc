@@ -2123,3 +2123,84 @@ fn main() {
 }`)
 	assertOutput(t, out, "3")
 }
+
+// --- Collection Methods E2E ---
+
+func TestE2EWhereSelect(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    var result = nums.Where(x => x > 5).Select(x => x * 2)
+    print(result)
+}`)
+	assertOutput(t, out, "[12 14 16 18 20]")
+}
+
+func TestE2EWhereAggregate(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var sum = nums.Where(x => x % 2 == 0).Aggregate(0, (acc, x) => acc + x)
+    print(sum)
+}`)
+	assertOutput(t, out, "6")
+}
+
+func TestE2EAny(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 3, 5, 7, 8, 9]
+    var hasEven = nums.Any(x => x % 2 == 0)
+    print(hasEven)
+}`)
+	assertOutput(t, out, "true")
+}
+
+func TestE2EAll(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [2, 4, 6, 8]
+    var allEven = nums.All(x => x % 2 == 0)
+    print(allEven)
+}`)
+	assertOutput(t, out, "true")
+}
+
+func TestE2ETake(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30, 40, 50]
+    var first3 = nums.Take(3)
+    print(first3)
+}`)
+	assertOutput(t, out, "[10 20 30]")
+}
+
+func TestE2ECount(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5, 6]
+    var evenCount = nums.Where(x => x % 2 == 0).Count()
+    print(evenCount)
+}`)
+	assertOutput(t, out, "3")
+}
+
+func TestE2EWhereTake(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    var result = nums.Where(x => x % 2 == 0).Take(3)
+    print(result)
+}`)
+	assertOutput(t, out, "[2 4 6]")
+}
+
+func TestE2ELambdaShorthand(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var double = (x: Int): Int => x * 2
+    print(double(5))
+}`)
+	assertOutput(t, out, "10")
+}

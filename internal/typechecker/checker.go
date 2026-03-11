@@ -717,7 +717,11 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		}
 		c.pushScope()
 		for _, param := range e.Params {
-			c.scope.define(param.Name, c.resolveTypeExpr(param.Type))
+			if param.Type != nil {
+				c.scope.define(param.Name, c.resolveTypeExpr(param.Type))
+			} else {
+				c.scope.define(param.Name, TypeUnknown)
+			}
 		}
 		if e.Body != nil {
 			c.checkBlock(e.Body)
