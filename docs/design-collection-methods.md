@@ -263,6 +263,8 @@ Lambda expressions already exist (`(x: Int): Int => x * 2`, block-body, failable
 
 Steps 1-4 deliver a working v1. Steps 5-7 round it out.
 
+**Current status:** Steps 1-5 implemented. v1 method set (Where, Select, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) is fully functional with loop fusion codegen. Lambda shorthand (`x => expr`, `(x, y) => expr`) works. Failable lambda support complete — errors auto-propagate from within collection chain lambdas via `emitExprLiftFailable`. v1.1 methods (OrderBy, GroupBy, Distinct, etc.) and parallel collections are planned.
+
 ## v1 Method Set
 
 **Must have:**

@@ -97,3 +97,26 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 |-------------------|----------------------------|
 | `panic(msg)`      | `panic(msg)`               |
 | `exit(code)`      | `os.Exit(code)`            |
+
+## Collection Methods (LINQ-style)
+
+Chain these on any `List<T>`. Chains compile to fused Go loops — no intermediate allocations.
+
+| Zinc | Description | Example |
+|------|-------------|---------|
+| `list.Where(x => bool)` | Filter elements matching predicate | `nums.Where(x => x > 5)` |
+| `list.Select(x => expr)` | Transform each element | `nums.Select(x => x * 2)` |
+| `list.Take(n)` | Keep first n elements | `nums.Take(10)` |
+| `list.Skip(n)` | Drop first n elements | `nums.Skip(5)` |
+| `list.ForEach(x => stmt)` | Execute side effect per element | `nums.ForEach(x => print(x))` |
+| `list.Any(x => bool)` | True if any match (short-circuits) | `nums.Any(x => x < 0)` |
+| `list.All(x => bool)` | True if all match (short-circuits) | `nums.All(x => x > 0)` |
+| `list.First(x => bool)` | First match (panics if none) | `nums.First(x => x > 5)` |
+| `list.FirstOrDefault(x => bool)` | First match (zero value if none) | `nums.FirstOrDefault(x => x > 5)` |
+| `list.Count()` | Count elements after chain | `nums.Where(x => x > 5).Count()` |
+| `list.Aggregate(seed, (a, x) => expr)` | Reduce to single value | `nums.Aggregate(0, (a, x) => a + x)` |
+| `list.ToList()` | Materialize chain result | `nums.Where(x => x > 5).ToList()` |
+
+Methods can be chained: `nums.Where(x => x > 5).Select(x => x * 2).Take(10)`
+
+**Error propagation:** Failable functions work inside collection lambdas. If a lambda calls a function that returns `Error(...)`, the error auto-propagates out of the loop — same as regular Zinc error handling.

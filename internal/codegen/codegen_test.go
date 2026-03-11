@@ -1724,3 +1724,45 @@ func TestCountTerminal(t *testing.T) {
 	assertContains(t, out, "evenCount := 0")
 	assertContains(t, out, "evenCount++")
 }
+
+func TestSelectWithFailableLambda(t *testing.T) {
+	src := `
+fn safeDivide(x: Int): Int {
+	if (x == 0) { return Error("zero") }
+	return 100 / x
+}
+fn main() {
+	var nums = [2, 5]
+	var result = nums.Select(x => safeDivide(x))
+	print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Should emit failable call with error check inside the loop
+	assertContains(t, out, "_fv")
+	assertContains(t, out, "_err")
+	assertContains(t, out, "!= nil")
+}
+
+func TestWhereWithFailableLambda(t *testing.T) {
+	src := `
+fn isValid(x: Int): Bool {
+	if (x < 0) { return Error("negative") }
+	return x > 3
+}
+fn main() {
+	var nums = [1, 4, 5]
+	var result = nums.Where(x => isValid(x))
+	print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Should emit failable call with error check, then use result in if
+	assertContains(t, out, "_fv")
+	assertContains(t, out, "_err")
+	assertContains(t, out, "if _fv")
+}

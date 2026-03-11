@@ -23,31 +23,19 @@ import (
 
 // collectionMethods is the set of recognized LINQ-style collection method names.
 var collectionMethods = map[string]bool{
-	"Where":              true,
-	"Select":             true,
-	"SelectMany":         true,
-	"ForEach":            true,
-	"Any":                true,
-	"All":                true,
-	"First":              true,
-	"FirstOrDefault":     true,
-	"Last":               true,
-	"Count":              true,
-	"Sum":                true,
-	"Min":                true,
-	"Max":                true,
-	"Take":               true,
-	"Skip":               true,
-	"TakeWhile":          true,
-	"SkipWhile":          true,
-	"Distinct":           true,
-	"Aggregate":          true,
-	"OrderBy":            true,
-	"OrderByDescending":  true,
-	"GroupBy":             true,
-	"Zip":                true,
-	"ToList":             true,
-	"ToDictionary":       true,
+	"Where":          true,
+	"Select":         true,
+	"SelectMany":     true,
+	"ForEach":        true,
+	"Any":            true,
+	"All":            true,
+	"First":          true,
+	"FirstOrDefault": true,
+	"Count":          true,
+	"Take":           true,
+	"Skip":           true,
+	"Aggregate":      true,
+	"ToList":         true,
 }
 
 // isCollectionMethod returns true if the method name is a LINQ-style collection method.
@@ -109,11 +97,22 @@ func (g *Generator) unwrapChain(expr parser.Expr) *collectionChain {
 // (i.e. not a class instance that would have its own methods).
 func (g *Generator) isBuiltinReceiverExpr(expr parser.Expr) bool {
 	switch e := expr.(type) {
+	case *parser.ThisExpr:
+		return false
 	case *parser.Ident:
+		if g.classNames[e.Name] || g.interfaceNames[e.Name] {
+			return false
+		}
+		if _, ok := g.varTypes[e.Name]; ok {
+			return false
+		}
 		if g.classVars[e.Name] != "" {
 			return false
 		}
 		if g.interfaceVars[e.Name] != "" {
+			return false
+		}
+		if g.receiver != "" && e.Name == g.receiver {
 			return false
 		}
 		return true
@@ -126,16 +125,6 @@ func (g *Generator) isBuiltinReceiverExpr(expr parser.Expr) bool {
 	default:
 		return true
 	}
-}
-
-// terminalMethod returns true if the method is a terminal that doesn't produce a list.
-func terminalMethod(name string) bool {
-	switch name {
-	case "ForEach", "Aggregate", "Any", "All", "First", "FirstOrDefault",
-		"Last", "Count", "Sum", "Min", "Max":
-		return true
-	}
-	return false
 }
 
 // emitCollectionChainVar emits a fused loop for a collection chain assigned to a variable.
@@ -204,7 +193,7 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 			if len(step.args) > 0 {
 				lambda := g.extractLambda(step.args[0])
 				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -216,7 +205,7 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 				if lambda != nil && len(lambda.Params) > 0 {
 					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
 					g.tmpCounter++
-					body := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					body := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
 				}
@@ -281,7 +270,7 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 			if len(step.args) > 0 {
 				lambda := g.extractLambda(step.args[0])
 				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -293,7 +282,7 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 				if lambda != nil && len(lambda.Params) > 0 {
 					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
 					g.tmpCounter++
-					body := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					body := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
 				}
@@ -305,7 +294,7 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 	lambda := g.extractLambda(lastStep.args[0])
 	if lambda != nil && len(lambda.Params) > 0 {
 		if lambda.Expr != nil {
-			body := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+			body := g.emitLambdaExpr(lambda, currentVar)
 			g.writeln(body)
 		} else if lambda.Body != nil {
 			// Block-body ForEach — emit statements with substitution
@@ -355,7 +344,7 @@ func (g *Generator) emitAnyAllChain(varName string, chain *collectionChain) {
 			if len(step.args) > 0 {
 				lambda := g.extractLambda(step.args[0])
 				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -367,7 +356,7 @@ func (g *Generator) emitAnyAllChain(varName string, chain *collectionChain) {
 				if lambda != nil && len(lambda.Params) > 0 {
 					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
 					g.tmpCounter++
-					body := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					body := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
 				}
@@ -378,7 +367,7 @@ func (g *Generator) emitAnyAllChain(varName string, chain *collectionChain) {
 	// Terminal predicate
 	lambda := g.extractLambda(lastStep.args[0])
 	if lambda != nil && len(lambda.Params) > 0 {
-		cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+		cond := g.emitLambdaExpr(lambda, currentVar)
 		if isAny {
 			g.writeln(fmt.Sprintf("if %s {", cond))
 			g.push()
@@ -423,7 +412,7 @@ func (g *Generator) emitCountChain(varName string, chain *collectionChain) {
 			if len(step.args) > 0 {
 				lambda := g.extractLambda(step.args[0])
 				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -473,7 +462,7 @@ func (g *Generator) emitAggregateChain(varName string, chain *collectionChain) {
 			if len(step.args) > 0 {
 				wl := g.extractLambda(step.args[0])
 				if wl != nil && len(wl.Params) > 0 {
-					cond := g.emitExprSubst(wl.Expr, wl.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(wl, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -485,7 +474,7 @@ func (g *Generator) emitAggregateChain(varName string, chain *collectionChain) {
 				if sl != nil && len(sl.Params) > 0 {
 					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
 					g.tmpCounter++
-					body := g.emitExprSubst(sl.Expr, sl.Params[0].Name, currentVar)
+					body := g.emitLambdaExpr(sl, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
 				}
@@ -494,9 +483,7 @@ func (g *Generator) emitAggregateChain(varName string, chain *collectionChain) {
 	}
 
 	// Emit the aggregate: acc = reducer(acc, currentVar)
-	accName := lambda.Params[0].Name
-	elemName := lambda.Params[1].Name
-	reduced := g.emitExprSubst2(lambda.Expr, accName, varName, elemName, currentVar)
+	reduced := g.emitLambdaExpr2(lambda, varName, currentVar)
 	g.writeln(fmt.Sprintf("%s = %s", varName, reduced))
 
 	for i := 0; i < openIfs; i++ {
@@ -521,7 +508,9 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 	g.tmpCounter++
 
 	g.writeln(fmt.Sprintf("var %s interface{}", varName))
-	g.writeln(fmt.Sprintf("%s := false", foundVar))
+	if failable {
+		g.writeln(fmt.Sprintf("%s := false", foundVar))
+	}
 	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
 	g.push()
 
@@ -532,7 +521,7 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 			if len(step.args) > 0 {
 				lambda := g.extractLambda(step.args[0])
 				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
 					openIfs++
@@ -544,7 +533,7 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 				if lambda != nil && len(lambda.Params) > 0 {
 					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
 					g.tmpCounter++
-					body := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+					body := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
 				}
@@ -556,7 +545,7 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 	if len(lastStep.args) > 0 {
 		lambda := g.extractLambda(lastStep.args[0])
 		if lambda != nil && len(lambda.Params) > 0 {
-			cond := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+			cond := g.emitLambdaExpr(lambda, currentVar)
 			g.writeln(fmt.Sprintf("if %s {", cond))
 			g.push()
 			openIfs++
@@ -564,7 +553,9 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 	}
 
 	g.writeln(fmt.Sprintf("%s = %s", varName, currentVar))
-	g.writeln(fmt.Sprintf("%s = true", foundVar))
+	if failable {
+		g.writeln(fmt.Sprintf("%s = true", foundVar))
+	}
 	g.writeln("break")
 
 	for i := 0; i < openIfs; i++ {
@@ -593,6 +584,88 @@ func (g *Generator) extractLambda(expr parser.Expr) *parser.LambdaExpr {
 	return nil
 }
 
+// lambdaContainsFailable recursively checks if an expression tree contains any failable call.
+func (g *Generator) lambdaContainsFailable(expr parser.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *parser.CallExpr:
+		if g.callIsFailable(e) {
+			return true
+		}
+		if g.lambdaContainsFailable(e.Callee) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if g.lambdaContainsFailable(arg) {
+				return true
+			}
+		}
+	case *parser.BinaryExpr:
+		return g.lambdaContainsFailable(e.Left) || g.lambdaContainsFailable(e.Right)
+	case *parser.UnaryExpr:
+		return g.lambdaContainsFailable(e.Operand)
+	case *parser.SelectorExpr:
+		return g.lambdaContainsFailable(e.Object)
+	case *parser.IndexExpr:
+		return g.lambdaContainsFailable(e.Object) || g.lambdaContainsFailable(e.Index)
+	}
+	return false
+}
+
+// emitLambdaExpr emits a single-param lambda expression within a collection chain.
+// If the expression contains failable calls, binds the param as a local variable
+// and lifts failable calls to statements with error propagation. Otherwise uses
+// inline substitution for efficiency.
+func (g *Generator) emitLambdaExpr(lambda *parser.LambdaExpr, currentVar string) string {
+	if g.lambdaContainsFailable(lambda.Expr) {
+		g.writeln(fmt.Sprintf("%s := %s", lambda.Params[0].Name, currentVar))
+		return g.emitExprLiftFailable(lambda.Expr)
+	}
+	return g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, currentVar)
+}
+
+// emitLambdaExpr2 emits a two-param lambda expression (for Aggregate).
+// Handles failable calls within the reducer expression.
+func (g *Generator) emitLambdaExpr2(lambda *parser.LambdaExpr, var1, var2 string) string {
+	if g.lambdaContainsFailable(lambda.Expr) {
+		g.writeln(fmt.Sprintf("%s := %s", lambda.Params[0].Name, var1))
+		g.writeln(fmt.Sprintf("%s := %s", lambda.Params[1].Name, var2))
+		return g.emitExprLiftFailable(lambda.Expr)
+	}
+	return g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, var1, lambda.Params[1].Name, var2)
+}
+
+// emitExprLiftFailable emits an expression, lifting any failable calls into
+// statement-level assignments with error checks. The lambda parameter must
+// already be bound as a local variable before calling this.
+// This is the failable-aware counterpart of emitExprSubst.
+func (g *Generator) emitExprLiftFailable(expr parser.Expr) string {
+	switch e := expr.(type) {
+	case *parser.CallExpr:
+		if g.callIsFailable(e) {
+			tmpVar := fmt.Sprintf("_fv%d", g.tmpCounter)
+			g.tmpCounter++
+			errVar := g.nextErr()
+			callStr := g.emitFailableCallExpr(e)
+			g.writeln(fmt.Sprintf("%s, %s := %s", tmpVar, errVar, callStr))
+			g.emitErrorCheck(errVar, nil)
+			return tmpVar
+		}
+		return g.emitExpr(e)
+	case *parser.BinaryExpr:
+		left := g.emitExprLiftFailable(e.Left)
+		right := g.emitExprLiftFailable(e.Right)
+		return fmt.Sprintf("(%s %s %s)", left, e.Op, right)
+	case *parser.UnaryExpr:
+		operand := g.emitExprLiftFailable(e.Operand)
+		return fmt.Sprintf("(%s%s)", e.Op, operand)
+	default:
+		return g.emitExpr(expr)
+	}
+}
+
 // emitExprSubst emits an expression with a single variable substitution.
 // When the expression contains an Ident matching paramName, it's replaced with replacement.
 func (g *Generator) emitExprSubst(expr parser.Expr, paramName, replacement string) string {
@@ -605,22 +678,13 @@ func (g *Generator) emitExprSubst(expr parser.Expr, paramName, replacement strin
 	case *parser.BinaryExpr:
 		left := g.emitExprSubst(e.Left, paramName, replacement)
 		right := g.emitExprSubst(e.Right, paramName, replacement)
-		op := e.Op
-		if op == "==" {
-			op = "=="
-		}
-		return fmt.Sprintf("(%s %s %s)", left, op, right)
+		return fmt.Sprintf("(%s %s %s)", left, e.Op, right)
 	case *parser.UnaryExpr:
 		operand := g.emitExprSubst(e.Operand, paramName, replacement)
 		return fmt.Sprintf("(%s%s)", e.Op, operand)
 	case *parser.SelectorExpr:
 		obj := g.emitExprSubst(e.Object, paramName, replacement)
 		field := capitalize(e.Field)
-		// Check if the object is a class/interface var — use getter
-		if ident, ok := e.Object.(*parser.Ident); ok && ident.Name == paramName {
-			// The substituted var could be a struct — use capitalized field access
-			return fmt.Sprintf("%s.%s", obj, field)
-		}
 		return fmt.Sprintf("%s.%s", obj, field)
 	case *parser.CallExpr:
 		callee := g.emitExprSubst(e.Callee, paramName, replacement)
@@ -659,6 +723,10 @@ func (g *Generator) emitExprSubst2(expr parser.Expr, name1, repl1, name2, repl2 
 	case *parser.SelectorExpr:
 		obj := g.emitExprSubst2(e.Object, name1, repl1, name2, repl2)
 		return fmt.Sprintf("%s.%s", obj, capitalize(e.Field))
+	case *parser.IndexExpr:
+		obj := g.emitExprSubst2(e.Object, name1, repl1, name2, repl2)
+		idx := g.emitExprSubst2(e.Index, name1, repl1, name2, repl2)
+		return fmt.Sprintf("%s[%s]", obj, idx)
 	case *parser.CallExpr:
 		callee := g.emitExprSubst2(e.Callee, name1, repl1, name2, repl2)
 		var args []string

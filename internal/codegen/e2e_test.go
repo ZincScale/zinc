@@ -2204,3 +2204,295 @@ fn main() {
 }`)
 	assertOutput(t, out, "10")
 }
+
+func TestE2ESelectAlone(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3]
+    var doubled = nums.Select(x => x * 2)
+    for n in doubled { print(n) }
+}`)
+	assertOutput(t, out, "2\n4\n6")
+}
+
+func TestE2ESkip(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var rest = nums.Skip(2)
+    for n in rest { print(n) }
+}`)
+	assertOutput(t, out, "3\n4\n5")
+}
+
+func TestE2EFirst(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var first = nums.First(x => x > 3)
+    print(first)
+}`)
+	assertOutput(t, out, "4")
+}
+
+func TestE2EFirstOrDefault(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3]
+    var first = nums.FirstOrDefault(x => x > 10)
+    print(first)
+}`)
+	assertOutput(t, out, "<nil>")
+}
+
+func TestE2EWhereSelectAggregate(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var sum = nums.Where(x => x > 2).Select(x => x * 10).Aggregate(0, (acc, x) => acc + x)
+    print(sum)
+}`)
+	assertOutput(t, out, "120")
+}
+
+func TestE2EWhereSelectTake(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    var result = nums.Where(x => x > 3).Select(x => x * 2).Take(3)
+    for n in result { print(n) }
+}`)
+	assertOutput(t, out, "8\n10\n12")
+}
+
+func TestE2ESelectAny(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3]
+    var hasNeg = nums.Select(x => x - 2).Any(x => x < 0)
+    print(hasNeg)
+}`)
+	assertOutput(t, out, "true")
+}
+
+func TestE2EEmptyList(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3]
+    var result = nums.Where(x => x > 10)
+    print(result)
+}`)
+	assertOutput(t, out, "[]")
+}
+
+func TestE2EAllFalse(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var allBig = nums.All(x => x > 3)
+    print(allBig)
+}`)
+	assertOutput(t, out, "false")
+}
+
+func TestE2EForEachStmt(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [10, 20, 30]
+    var doubled = nums.Select(x => x * 2)
+    for n in doubled { print(n) }
+}`)
+	assertOutput(t, out, "20\n40\n60")
+}
+
+func TestE2EWhereCount(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var c = nums.Where(x => x > 2).Count()
+    print(c)
+}`)
+	assertOutput(t, out, "3")
+}
+
+func TestE2ESingleElement(t *testing.T) {
+	out := e2eRun(t, `
+fn main() {
+    var nums = [42]
+    var result = nums.Where(x => x > 10)
+    for n in result { print(n) }
+}`)
+	assertOutput(t, out, "42")
+}
+
+// --- Failable lambdas in collection chains ---
+
+func TestE2ESelectWithFailableFunction(t *testing.T) {
+	out := e2eRun(t, `
+fn safeDivide(x: Int): Int {
+    if (x == 0) { return Error("zero") }
+    return 100 / x
+}
+fn main() {
+    var nums = [2, 5, 10]
+    var result = nums.Select(x => safeDivide(x))
+    for n in result { print(n) }
+}`)
+	assertOutput(t, out, "50\n20\n10")
+}
+
+func TestE2EWhereWithFailableFunction(t *testing.T) {
+	out := e2eRun(t, `
+fn isValid(x: Int): Bool {
+    if (x < 0) { return Error("negative") }
+    return x > 3
+}
+fn main() {
+    var nums = [1, 4, 5, 2]
+    var result = nums.Where(x => isValid(x))
+    for n in result { print(n) }
+}`)
+	assertOutput(t, out, "4\n5")
+}
+
+func TestE2EAggregateWithFailableFunction(t *testing.T) {
+	out := e2eRun(t, `
+fn safeAdd(a: Int, b: Int): Int {
+    if (a + b > 1000) { return Error("overflow") }
+    return a + b
+}
+fn main() {
+    var nums = [10, 20, 30]
+    var sum = nums.Aggregate(0, (acc, x) => safeAdd(acc, x))
+    print(sum)
+}`)
+	assertOutput(t, out, "60")
+}
+
+func TestE2ESelectFailableErrorPropagation(t *testing.T) {
+	// When a failable lambda errors, it should panic in main
+	src := `
+fn safeDivide(x: Int): Int {
+    if (x == 0) { return Error("division by zero") }
+    return 100 / x
+}
+fn main() {
+    var nums = [2, 0, 5]
+    var result = nums.Select(x => safeDivide(x))
+    print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatalf("transpile errors: %v", errs)
+	}
+	// The generated code should compile and panic at runtime
+	assertContains(t, out, "_err")
+	assertContains(t, out, "!= nil")
+}
+
+func TestE2EAnyWithFailableFunction(t *testing.T) {
+	src := `
+fn isPositive(x: Int): Bool {
+    if (x == 0) { return Error("zero not allowed") }
+    return x > 0
+}
+fn main() {
+    var nums = [1, 2, 3]
+    var hasPositive = nums.Any(x => isPositive(x))
+    print(hasPositive)
+}`
+	got := e2eRun(t, src)
+	assertOutput(t, got, "true")
+}
+
+func TestE2EAllWithFailableFunction(t *testing.T) {
+	src := `
+fn isPositive(x: Int): Bool {
+    if (x == 0) { return Error("zero not allowed") }
+    return x > 0
+}
+fn main() {
+    var nums = [1, 2, 3]
+    var allPositive = nums.All(x => isPositive(x))
+    print(allPositive)
+}`
+	got := e2eRun(t, src)
+	assertOutput(t, got, "true")
+}
+
+func TestE2EFirstWithFailableFunction(t *testing.T) {
+	src := `
+fn isEven(x: Int): Bool {
+    if (x < 0) { return Error("negative") }
+    return x % 2 == 0
+}
+fn main() {
+    var nums = [1, 3, 4, 6]
+    var first = nums.First(x => isEven(x))
+    print(first)
+}`
+	got := e2eRun(t, src)
+	assertOutput(t, got, "4")
+}
+
+func TestE2EWhereSelectWithFailable(t *testing.T) {
+	src := `
+fn double(x: Int): Int {
+    if (x > 100) { return Error("too large") }
+    return x * 2
+}
+fn main() {
+    var nums = [1, 2, 3, 4, 5]
+    var result = nums.Where(x => x > 2).Select(x => double(x))
+    for n in result { print(n) }
+}`
+	got := e2eRun(t, src)
+	assertOutput(t, got, "6\n8\n10")
+}
+
+func TestE2EFailableErrorPanicsInMain(t *testing.T) {
+	src := `
+fn safeDivide(x: Int): Int {
+    if (x == 0) { return Error("division by zero") }
+    return 100 / x
+}
+fn main() {
+    var nums = [2, 0, 5]
+    var result = nums.Select(x => safeDivide(x))
+    print(result)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatalf("transpile errors: %v", errs)
+	}
+
+	dir := t.TempDir()
+	goMod := "module e2e\n\ngo 1.26\n"
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte(out), 0644)
+
+	cmd := exec.Command("go", "run", "main.go")
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected runtime panic but command succeeded")
+	}
+	if !strings.Contains(string(output), "division by zero") {
+		t.Errorf("expected 'division by zero' in output, got:\n%s", string(output))
+	}
+}
+
+func TestE2ECountWithFailableWhere(t *testing.T) {
+	src := `
+fn isValid(x: Int): Bool {
+    if (x < 0) { return Error("negative") }
+    return x > 3
+}
+fn main() {
+    var nums = [1, 4, 5, 2, 6]
+    var c = nums.Where(x => isValid(x)).Count()
+    print(c)
+}`
+	got := e2eRun(t, src)
+	assertOutput(t, got, "3")
+}

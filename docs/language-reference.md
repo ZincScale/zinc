@@ -1049,6 +1049,109 @@ fn main() {
 }
 ```
 
+## Collection Methods (LINQ-style)
+
+Zinc provides LINQ-style collection methods that compile to fused Go loops — no intermediate allocations, no iterator wrappers.
+
+### Basic Usage
+
+```zinc
+var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Filter
+var evens = nums.Where(x => x % 2 == 0)
+
+// Transform
+var doubled = nums.Select(x => x * 2)
+
+// Chain — compiles to a single fused for-loop
+var result = nums.Where(x => x > 5).Select(x => x * 2).Take(3)
+```
+
+### Lambda Shorthand
+
+Collection methods use a concise lambda syntax — no type annotations needed:
+
+```zinc
+// Single parameter — no parens needed
+nums.Where(x => x > 5)
+nums.Select(x => x * 2)
+
+// Multi-parameter (parens required)
+nums.Aggregate(0, (acc, x) => acc + x)
+```
+
+### Available Methods
+
+| Method | Description | Terminal? |
+|--------|-------------|-----------|
+| `Where(x => bool)` | Filter elements | No |
+| `Select(x => expr)` | Transform elements | No |
+| `Take(n)` | Take first n elements | No |
+| `Skip(n)` | Skip first n elements | No |
+| `ForEach(x => stmt)` | Execute side effect per element | Yes |
+| `Any(x => bool)` | True if any element matches | Yes |
+| `All(x => bool)` | True if all elements match | Yes |
+| `First(x => bool)` | First matching element (panics if none) | Yes |
+| `FirstOrDefault(x => bool)` | First matching element (zero value if none) | Yes |
+| `Count()` | Count elements (after filtering) | Yes |
+| `Aggregate(seed, (acc, x) => expr)` | Reduce to single value | Yes |
+| `ToList()` | Materialize chain to list | Yes |
+
+### Codegen: Loop Fusion
+
+Chains compile to a single fused loop. No intermediate slices are created:
+
+```zinc
+var result = nums.Where(x => x > 5).Select(x => x * 2).Take(3)
+```
+
+Transpiles to:
+
+```go
+var result []interface{}
+_take0 := 0
+for _, _v0 := range nums {
+    if _v0 > 5 {
+        _v1 := _v0 * 2
+        if _take0 >= 3 { break }
+        result = append(result, _v1)
+        _take0++
+    }
+}
+```
+
+### Error Propagation in Lambdas
+
+Failable functions work seamlessly inside collection lambdas. Errors auto-propagate — same as everywhere else in Zinc:
+
+```zinc
+fn safeDivide(x: Int): Int {
+    if (x == 0) { return Error("division by zero") }
+    return 100 / x
+}
+
+fn main() {
+    var nums = [2, 5, 10]
+    var result = nums.Select(x => safeDivide(x))
+    // If any element causes an error, it propagates immediately
+    for n in result { print(n) }
+}
+```
+
+The transpiler detects failable calls inside lambda expressions and lifts them into statement-level error checks within the fused loop:
+
+```go
+for _, _v0 := range nums {
+    x := _v0
+    _fv0, _err0 := safeDivide(x)
+    if _err0 != nil { panic(_err0) }
+    result = append(result, _fv0)
+}
+```
+
+This works with all chain methods — `Where`, `Select`, `Aggregate`, `Any`, `All`, `First`, etc.
+
 ## Type System
 
 | Zinc     | Go          |
