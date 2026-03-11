@@ -18,46 +18,74 @@ Upgrade generated Go code to leverage features added in Go 1.22–1.26. These ar
 - **Free performance wins (no codegen changes):** Swiss Tables maps (1.24), Green Tea GC (1.26), faster `io.ReadAll` (1.26), stack-allocated slices (1.26)
 - **Effort:** Quick
 
-### P2 — Functional Collection Methods
+### P2 — Collection Methods: Codegen Strategy Research
+Before implementing collection methods, benchmark codegen strategies, study how mature languages/frameworks solve this, and design lambda shorthand syntax for ergonomic chaining.
+
+- **Strategy A — Loop fusion (current design):** Compile `.Where().Select().First()` chains into a single fused for-loop. No intermediate allocations. Design doc: `docs/design-collection-methods.md`
+- **Strategy B — Range-over-func iterators (Go 1.23+):** Emit `iter.Seq[T]` iterator functions that compose via `for v := range fn`. First-class language support may mean the Go compiler optimizes these better than when the design was originally written.
+- **Strategy C — Intermediate slices (naive):** Each step materializes a new slice. Simplest to implement, worst for large collections, but possibly fine for small ones.
+- **Benchmark plan:**
+  - Write equivalent Go code for 3–5 representative chains (filter+map, filter+first, filter+map+reduce, filter+orderby+take)
+  - Measure: allocations, throughput, binary size for all three strategies
+  - Test at small (100), medium (10K), and large (1M) collection sizes
+  - Compare compiler inlining/escape analysis output (`go build -gcflags='-m'`)
+- **Idiom comparison — study how other languages do it:**
+  - **C# LINQ:** Lazy `IEnumerable<T>` with deferred execution, materializes on terminal ops (`.ToList()`, `.First()`)
+  - **Kotlin sequences:** `.asSequence()` for lazy, direct chaining for eager. Compiler does not fuse loops.
+  - **Rust iterators:** Zero-cost lazy iterators, compiler inlines + fuses aggressively via monomorphization
+  - **Java streams:** `.stream().filter().map().collect()` — lazy, but allocation-heavy; parallel streams for concurrency
+  - **Swift:** Lazy via `.lazy` prefix, eager by default. Each step allocates.
+  - **Key questions:** Does Go 1.23+ range-over-func get inlined like Rust iterators, or is it more like Java streams with overhead? Is loop fusion worth the codegen complexity, or do iterators perform "close enough"?
+- **Lambda shorthand — current syntax is too verbose for chaining:**
+  - Today: `list.Where((x: Int): Bool => x > 5).Select((x: Int): Int => x * 2)` — unusable
+  - **Level 1 — Type inference:** `list.Where((x) => x > 5)` — infer param types + return type from method signature context
+  - **Level 2 — Single-param shorthand:** `list.Where(x => x > 5)` — drop parens for single param (C#/TypeScript style)
+  - **Level 3 — Implicit `it`:** `list.Where(=> it > 5)` — skip left side of `=>` entirely, implicit `it` parameter (Kotlin style)
+  - Level 2 is the minimum bar for collection methods to feel right. Level 3 is nice-to-have.
+  - **Arrow syntax:** Keep `=>` (consistent with C#/TypeScript, already used throughout Zinc). `->` is Kotlin/Java/Rust convention and could conflict with future return type annotations.
+  - **Design questions:** How does type inference flow from method receiver type through chain? Does `it` conflict with any existing identifiers?
+- **Output:** Update `docs/design-collection-methods.md` with benchmark results, idiom comparison, lambda shorthand design, and final codegen decision
+- **Effort:** Quick-Medium (research only, no Zinc code changes)
+
+### P3 — Functional Collection Methods (Implementation)
 LINQ-style chaining: `.Where()`, `.Select()`, `.SelectMany()`, `.Aggregate()`, `.OrderBy()`, `.GroupBy()`, `.Any()`, `.All()`, `.First()`, `.Take()`, `.Skip()`, `.Distinct()`, `.ToList()`, `.ToDictionary()`, `.ForEach()`
 
-- **Lambda syntax:** `x => expr` and `(a, b) => expr` (expression-body only for v1)
-- **Design doc:** `docs/design-collection-methods.md` — **NEEDS UPDATE**: original design chose loop fusion because "Go can't inline iterators well." Go 1.23 added range-over-func as a first-class language feature, which may change the calculus. Benchmark both approaches (loop fusion vs iterator composition via range-over-func) before committing to implementation.
-- **Implementation order:** lambdas → single-step methods → chain AST → codegen strategy → short-circuit terminals → materialization segmentation
-- **Effort:** Medium-Large — **write design doc update first**
+- **Depends on:** P2 (codegen strategy decision)
+- **Implementation order:** single-step methods → chain AST → codegen (per P2 decision) → short-circuit terminals → materialization segmentation
+- **Effort:** Medium-Large
 
-### P3 — Annotations / Decorators
+### P4 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P4 — Data Classes / Records
+### P5 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P5 — Structured Concurrency
+### P6 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
 
 - **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
 - **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
 - **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
 
-### P6 — VS Code Extension (Syntax Highlighting)
+### P7 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P7 — Project-Wide Watch Mode
+### P8 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P8 — `zinc test`
+### P9 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P9 — `zinc fmt`
+### P10 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P10 — Error Suggestions
+### P11 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
