@@ -50,22 +50,74 @@ func (b *BoxImpl[T]) Set(v T) {
 	b.Value = v
 }
 
-//line examples/generics.zn:27
-func main() {
 //line examples/generics.zn:28
-	n := identity(42)
-//line examples/generics.zn:29
-	fmt.Println(n)
-//line examples/generics.zn:31
-	s := identity("Zinc")
+type StackImpl[T any] struct {
+	Items []T
+}
+
+func (s *StackImpl[T]) GetItems() []T  { return s.Items }
+func (s *StackImpl[T]) SetItems(v []T) { s.Items = v }
+
+type Stack[T any] interface {
+	GetItems() []T
+	SetItems([]T)
+	Push(item T)
+	Count() int
+}
+
+func NewStack[T any](initial T) *StackImpl[T] {
+	obj := &StackImpl[T]{}
 //line examples/generics.zn:32
-	fmt.Println(s)
-//line examples/generics.zn:34
-	box := NewBox(100)
-//line examples/generics.zn:35
-	fmt.Println(box.Get())
+	obj.Items = []T{}
+//line examples/generics.zn:33
+	obj.Items = append(obj.Items, initial)
+	return obj
+}
+
+func (s *StackImpl[T]) Push(item T) {
 //line examples/generics.zn:37
-	box.Set(200)
-//line examples/generics.zn:38
+	s.Items = append(s.Items, item)
+}
+
+func (s *StackImpl[T]) Count() int {
+//line examples/generics.zn:41
+	return len(s.Items)
+}
+
+//line examples/generics.zn:46
+func printBox(b Box[string]) {
+//line examples/generics.zn:47
+	fmt.Println(b.Get())
+}
+
+//line examples/generics.zn:50
+func main() {
+//line examples/generics.zn:52
+	n := identity(42)
+//line examples/generics.zn:53
+	fmt.Println(n)
+//line examples/generics.zn:55
+	s := identity("Zinc")
+//line examples/generics.zn:56
+	fmt.Println(s)
+//line examples/generics.zn:59
+	box := NewBox(100)
+//line examples/generics.zn:60
 	fmt.Println(box.Get())
+//line examples/generics.zn:62
+	box.Set(200)
+//line examples/generics.zn:63
+	fmt.Println(box.Get())
+//line examples/generics.zn:66
+	stack := NewStack(1)
+//line examples/generics.zn:67
+	stack.Push(2)
+//line examples/generics.zn:68
+	stack.Push(3)
+//line examples/generics.zn:69
+	fmt.Println(stack.Count())
+//line examples/generics.zn:72
+	greeting := NewBox("Hello from generics!")
+//line examples/generics.zn:73
+	printBox(greeting)
 }

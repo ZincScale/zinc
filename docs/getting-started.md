@@ -163,7 +163,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs coverin
 | [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
 | [`errors.zn`](../examples/errors.zn) | Errors as values, `or` handler |
 | [`enums.zn`](../examples/enums.zn) | Enums + match |
-| [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
+| [`generics.zn`](../examples/generics.zn) | Generic functions, classes, type inference, polymorphism |
 | [`fibonacci.zn`](../examples/fibonacci.zn) | Recursion |
 | [`closures.zn`](../examples/closures.zn) | Lambdas, closures, failable lambdas |
 | [`safe_navigation.zn`](../examples/safe_navigation.zn) | Safe navigation `?.` with chaining |

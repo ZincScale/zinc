@@ -273,6 +273,62 @@ class Box<T> {
         return this.value
     }
 }
+
+fn main() {
+    // Type inference — Go infers T from the argument
+    var intBox = Box.new(42)        // Box<Int>
+    var strBox = Box.new("hello")   // Box<String>
+    print(intBox.get())             // 42
+    print(strBox.get())             // hello
+}
+```
+
+Generic classes can use empty list/map literals in constructors — the type is inferred from the field declaration:
+
+```zinc
+class Stack<T> {
+    var items: List<T>
+
+    new(initial: T) {
+        this.items = []             // inferred as []T{}, not []interface{}{}
+        this.items.add(initial)
+    }
+
+    pub fn push(item: T) {
+        this.items.add(item)
+    }
+
+    pub fn count(): Int {
+        return this.items.size()
+    }
+}
+
+fn main() {
+    var s = Stack.new(1)
+    s.push(2)
+    s.push(3)
+    print(s.count())    // 3
+}
+```
+
+Multi-type-parameter generic classes:
+
+```zinc
+class Pair<K, V> {
+    var key: K
+    var val: V
+
+    new(key: K, val: V) {
+        this.key = key
+        this.val = val
+    }
+}
+
+fn main() {
+    var p = Pair.new("name", 42)
+    print(p.key)    // name
+    print(p.val)    // 42
+}
 ```
 
 ### Go Type Construction (`.new()`)

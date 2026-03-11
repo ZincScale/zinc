@@ -24,16 +24,51 @@ class Box<T> {
     }
 }
 
+// Generic class with empty list initialization
+class Stack<T> {
+    var items: List<T>
+
+    new(initial: T) {
+        this.items = []
+        this.items.add(initial)
+    }
+
+    pub fn push(item: T) {
+        this.items.add(item)
+    }
+
+    pub fn count(): Int {
+        return this.items.size()
+    }
+}
+
+// Polymorphism: pass generic class to function expecting interface
+fn printBox(b: Box<String>) {
+    print(b.get())
+}
+
 fn main() {
+    // Generic functions — type inferred from args
     var n: Int = identity(42)
     print(n)
 
     var s: String = identity("Zinc")
     print(s)
 
-    var box: Box<Int> = Box.new(100)
+    // Generic class — type inferred from constructor arg
+    var box = Box.new(100)
     print(box.get())
 
     box.set(200)
     print(box.get())
+
+    // Generic class with list field
+    var stack = Stack.new(1)
+    stack.push(2)
+    stack.push(3)
+    print(stack.count())
+
+    // Generic polymorphism — pass to function expecting interface type
+    var greeting = Box.new("Hello from generics!")
+    printBox(greeting)
 }
