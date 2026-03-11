@@ -1,4 +1,4 @@
-<img alt="Zinc mascot" src="./zinc-badger.svg" width="120" /> <img alt="Zinc logo" src="./zinc-wordmark.svg" width="480" />
+<img alt="Zinc mascot" src="./zinc-badger.svg" height="180" /> <img alt="Zinc logo" src="./zinc-wordmark.svg" width="480" />
 
 
 # Zinc
