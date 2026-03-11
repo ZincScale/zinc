@@ -2,44 +2,62 @@
 
 Language is shippable — core features, CLI tooling, multi-file projects, and error reporting all work.
 
+Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpilation upgrades enabled by newer Go features.
+
 ---
 
 ## Priority Order
 
-### P1 — Functional Collection Methods
+### P1 — Go 1.26 Codegen Improvements (Quick Wins)
+Upgrade generated Go code to leverage features added in Go 1.22–1.26. These are small, isolated changes that improve output quality with no new Zinc syntax.
+
+- **Range over integers (Go 1.22):** Emit `for i := range n` instead of `for i := 0; i < n; i++` for `range(n)` loops
+- **`new(expr)` (Go 1.26):** Emit `new(value)` for nullable/pointer field initialization instead of helper closures
+- **`errors.AsType[T]` (Go 1.26):** Use generic type-safe error matching in generated error handling where applicable
+- **Loop variable scoping (Go 1.22):** No codegen change needed — Go now handles per-iteration scoping, removing a class of closure-capture bugs in generated code
+- **Free performance wins (no codegen changes):** Swiss Tables maps (1.24), Green Tea GC (1.26), faster `io.ReadAll` (1.26), stack-allocated slices (1.26)
+- **Effort:** Quick
+
+### P2 — Functional Collection Methods
 LINQ-style chaining: `.Where()`, `.Select()`, `.SelectMany()`, `.Aggregate()`, `.OrderBy()`, `.GroupBy()`, `.Any()`, `.All()`, `.First()`, `.Take()`, `.Skip()`, `.Distinct()`, `.ToList()`, `.ToDictionary()`, `.ForEach()`
 
-- **Codegen strategy:** Loop fusion — compile entire chain into single fused for-loop. No lazy iterators, no intermediate slices.
 - **Lambda syntax:** `x => expr` and `(a, b) => expr` (expression-body only for v1)
-- **Design doc:** `docs/design-collection-methods.md`
-- **Implementation order:** lambdas → single-step methods → chain AST → loop fusion → short-circuit terminals → materialization segmentation
-- **Effort:** Medium-Large
+- **Design doc:** `docs/design-collection-methods.md` — **NEEDS UPDATE**: original design chose loop fusion because "Go can't inline iterators well." Go 1.23 added range-over-func as a first-class language feature, which may change the calculus. Benchmark both approaches (loop fusion vs iterator composition via range-over-func) before committing to implementation.
+- **Implementation order:** lambdas → single-step methods → chain AST → codegen strategy → short-circuit terminals → materialization segmentation
+- **Effort:** Medium-Large — **write design doc update first**
 
-### P2 — Annotations / Decorators
+### P3 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P3 — Data Classes / Records
+### P4 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
-- **Effort:** Medium
+- **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P4 — VS Code Extension (Syntax Highlighting)
+### P5 — Structured Concurrency
+Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
+
+- **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
+- **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
+- **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
+
+### P6 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P5 — Project-Wide Watch Mode
+### P7 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P6 — `zinc test`
+### P8 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P7 — `zinc fmt`
+### P9 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P8 — Error Suggestions
+### P10 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
