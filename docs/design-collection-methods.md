@@ -48,13 +48,33 @@ let allTags = posts.SelectMany(p => p.tags)
 
 ## Lambda Syntax
 
+Zinc already has full lambda support (`(x: Int): Int => x * 2`), but collection methods need shorthand forms for ergonomic chaining. Arrow syntax stays as `=>` (consistent with C#/TypeScript).
+
+### Shorthand Levels
+
 ```zinc
-x => expr                    // single parameter
-(acc, x) => acc + x          // multiple parameters
-(k, v) => v > 100            // map entry destructuring
+// Existing (verbose — works today but unusable for chaining)
+list.Where((x: Int): Bool => x > 5).Select((x: Int): Int => x * 2)
+
+// Level 1: Type inference from context (infer param + return types)
+list.Where((x) => x > 5).Select((x) => x * 2)
+
+// Level 2: Single-param, no parens (C#/TypeScript style) — MINIMUM BAR
+list.Where(x => x > 5).Select(x => x * 2)
+
+// Level 3: Implicit `it` parameter (Kotlin style) — NICE-TO-HAVE
+list.Where(it > 5).Select(it * 2)
+
+// Multi-param always requires parens
+list.Aggregate((acc, x) => acc + x)
 ```
 
-Expression-body only for v1 (single expression, no blocks).
+### Implementation Notes
+
+- Types inferred from the method's expected signature (e.g. `.Where` on `List<Int>` knows the lambda takes `Int` and returns `Bool`)
+- Type flows left-to-right through chains: `.Select(x => x.toString())` on `List<Int>` infers `x: Int`, output becomes `List<String>`
+- `it` is a reserved implicit parameter name for single-param lambdas only
+- Expression-body only for v1 (single expression, no blocks in shorthand)
 
 ## Codegen Strategy: Loop Fusion
 
@@ -231,7 +251,9 @@ Map-specific chaining deferred to after list chaining is solid.
 
 ## Implementation Order
 
-1. **Lambda expressions** — parser + typechecker for `x => expr` and `(a, b) => expr`
+Lambda expressions already exist (`(x: Int): Int => x * 2`, block-body, failable). Shorthand and type inference are incremental additions.
+
+1. **Lambda shorthand** — parser support for `x => expr` (no parens, no types) and `it` implicit param
 2. **Single-step methods** — `Where`, `Select`, `ForEach` (no chaining, just emit a for loop)
 3. **Chain recognition** — parser builds `ChainExpr` for multi-step chains
 4. **Loop fusion codegen** — fuse Where+Select+terminal combinations
@@ -249,13 +271,55 @@ Where, Select, SelectMany, Aggregate, ForEach, Any, All, First, Count, Take, Ski
 **v1.1:**
 OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, TakeWhile, SkipWhile, Last, FirstOrDefault, ToDictionary
 
-## Why Loop Fusion (not lazy iterators)
+## Why Loop Fusion — Benchmark Results (Go 1.26)
 
-Go's compiler doesn't inline through interface method calls reliably. Lazy iterator wrappers (C#/Rust style) would be *slower* in Go than fused loops. Loop fusion gives us the *result* of lazy evaluation (single pass, no intermediates, early exit) without the *mechanism* (iterator wrapper structs). The generated Go is simple, readable, and exactly what a human would write.
+Benchmarked three strategies on AMD EPYC (linux/amd64) at 100, 10K, and 1M element sizes. Source: `benchmarks/collection-strategies/bench_test.go`
+
+### Filter + Map (`.Where().Select().ToList()`)
+
+| Size | Fused | Iterator (range-over-func) | Naive (intermediate slices) |
+|------|-------|---------------------------|----------------------------|
+| 100 | 420 ns | 750 ns (1.8x slower) | 420 ns (1.0x) |
+| 10K | 20 µs | 47 µs (2.3x) | 27 µs (1.3x) |
+| 1M | 3.4 ms | 4.6 ms (1.4x) | 3.7 ms (1.1x) |
+
+### Filter + First (short-circuit — most dramatic difference)
+
+| Size | Fused | Iterator | Naive |
+|------|-------|----------|-------|
+| 100 | 17 ns / 0 alloc | 33 ns / 0 alloc | 318 ns / 960B |
+| 10K | 1.5 µs / 0 alloc | 3.0 µs / 0 alloc | 23 µs / 128KB |
+| 1M | 153 µs / 0 alloc | 299 µs / 0 alloc | **5.1 ms / 21MB** |
+
+### Filter + Map + Reduce (no output allocation needed)
+
+| Size | Fused | Iterator | Naive |
+|------|-------|----------|-------|
+| 100 | **65 ns / 0 alloc** | 493 ns / 56B (7.5x) | 497 ns / 1.4KB |
+| 10K | **7.3 µs / 0 alloc** | 42 µs (5.7x) | 41 µs / 169KB |
+| 1M | **640 µs / 0 alloc** | 4.1 ms (6.4x) | 5.6 ms / 25MB |
+
+### Filter + Take(10) (early termination)
+
+| Size | Fused | Iterator | Naive |
+|------|-------|----------|-------|
+| 100 | 200 ns | 415 ns (2x) | 257 ns |
+| 10K | 210 ns | 415 ns (2x) | 16 µs (76x) |
+| 1M | **191 ns** | 390 ns (2x) | **2.1 ms (11,000x!)** |
+
+### Conclusions
+
+1. **Fused wins everywhere** — 2-7x faster than iterators, especially on reduce/aggregate chains
+2. **Go 1.23+ range-over-func iterators do NOT inline like Rust** — consistent 2x overhead from function call dispatch per element. Closer to Java streams than Rust zero-cost iterators
+3. **Naive is catastrophic for short-circuit + early termination** — Filter+Take on 1M: fused 191ns vs naive 2.1ms (11,000x). Materializes entire filtered list before taking 10
+4. **Naive is OK for simple chains at small sizes** — Filter+Map competitive with fused at 100 elements
+5. **Iterator allocations are minimal** — but per-element function call overhead is the real cost
+
+**Decision: Loop fusion confirmed.** Gives us the results of lazy evaluation (single pass, no intermediates, early exit) without the mechanism (iterator wrappers). Generated Go is simple, readable, and what a human would write.
 
 ## Why Not Intermediate Slices
 
-Eager evaluation (each step creates a new slice) is simplest to implement but wasteful. A chain like `list.Where(...).Select(...).Take(10)` would filter the *entire* list, map the *entire* filtered list, then take 10. Loop fusion does it in one pass, stopping at 10.
+Eager evaluation (each step creates a new slice) is simplest to implement but wasteful. A chain like `list.Where(...).Select(...).Take(10)` would filter the *entire* list, map the *entire* filtered list, then take 10. Loop fusion does it in one pass, stopping at 10. Benchmarks show 11,000x difference at scale.
 
 ## Parallel Collections via `AsParallel()` (PLINQ-style)
 

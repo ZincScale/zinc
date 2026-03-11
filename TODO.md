@@ -8,17 +8,7 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 
 ## Priority Order
 
-### P1 — Go 1.26 Codegen Improvements (Quick Wins)
-Upgrade generated Go code to leverage features added in Go 1.22–1.26. These are small, isolated changes that improve output quality with no new Zinc syntax.
-
-- **Range over integers (Go 1.22):** Emit `for i := range n` instead of `for i := 0; i < n; i++` for `range(n)` loops
-- **`new(expr)` (Go 1.26):** Emit `new(value)` for nullable/pointer field initialization instead of helper closures
-- **`errors.AsType[T]` (Go 1.26):** Use generic type-safe error matching in generated error handling where applicable
-- **Loop variable scoping (Go 1.22):** No codegen change needed — Go now handles per-iteration scoping, removing a class of closure-capture bugs in generated code
-- **Free performance wins (no codegen changes):** Swiss Tables maps (1.24), Green Tea GC (1.26), faster `io.ReadAll` (1.26), stack-allocated slices (1.26)
-- **Effort:** Quick
-
-### P2 — Collection Methods: Codegen Strategy Research
+### P1 — Collection Methods: Codegen Strategy Research
 Before implementing collection methods, benchmark codegen strategies, study how mature languages/frameworks solve this, and design lambda shorthand syntax for ergonomic chaining.
 
 - **Strategy A — Loop fusion (current design):** Compile `.Where().Select().First()` chains into a single fused for-loop. No intermediate allocations. Design doc: `docs/design-collection-methods.md`
@@ -47,20 +37,44 @@ Before implementing collection methods, benchmark codegen strategies, study how 
 - **Output:** Update `docs/design-collection-methods.md` with benchmark results, idiom comparison, lambda shorthand design, and final codegen decision
 - **Effort:** Quick-Medium (research only, no Zinc code changes)
 
-### P3 — Functional Collection Methods (Implementation)
+### P2 — Functional Collection Methods (Implementation)
 LINQ-style chaining: `.Where()`, `.Select()`, `.SelectMany()`, `.Aggregate()`, `.OrderBy()`, `.GroupBy()`, `.Any()`, `.All()`, `.First()`, `.Take()`, `.Skip()`, `.Distinct()`, `.ToList()`, `.ToDictionary()`, `.ForEach()`
 
-- **Depends on:** P2 (codegen strategy decision)
+- **Depends on:** P1 (codegen strategy decision)
 - **Implementation order:** single-step methods → chain AST → codegen (per P2 decision) → short-circuit terminals → materialization segmentation
 - **Effort:** Medium-Large
 
-### P4 — Annotations / Decorators
+### P3 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P5 — Data Classes / Records
+### P4 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
+
+### P5 — Typed Errors
+Extend error handling with typed error classes. `is`/`as` operators and `or {}` handlers already work — this is mostly about error class conventions and codegen.
+
+- **What already works:** `is`/`as` type operators, `or {}` handlers with `err` variable, failable functions, error wrapping
+- **What's needed:**
+  - Convention for error classes (auto-generate `Error() string` method implementing Go's `error` interface)
+  - Codegen: emit `errors.AsType[T]` (Go 1.26) when `err is SomeError` appears in `or {}` blocks
+  - Wire up `err as NotFoundError` to unwrap to the concrete type
+- **Syntax — all existing constructs, no new keywords:**
+  ```
+  class NotFoundError { var path: String }
+
+  // Throwing (already works — failable return)
+  return NotFoundError.new(path: "/users/42")
+
+  // Catching (existing is/as + existing or {})
+  var user = db.findUser(id) or {
+      if err is NotFoundError { return defaultUser() }
+  }
+  ```
+- **Auto-propagation preserves types:** Current codegen passes `return _err` directly (no re-wrapping), so typed errors survive the call chain. `Error("context", baseErr)` wraps with `%w`, and `errors.AsType` walks `%w` chains — types preserved in both cases. Verified in codegen.
+- **Design questions:** Should error classes require a `message` field? Auto-generate `Error()` from class name + fields? Interaction with error wrapping (`Error("context", baseErr)`)?
+- **Effort:** Medium — **write design doc first**
 
 ### P6 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
