@@ -4,74 +4,86 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 ---
 
-## Tier 1 — Next Up
+## Priority Order
 
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| - | **Functional collection methods** (LINQ-style: `.Where()`, `.Select()`, `.Aggregate()`) | Core OO/FP pattern; loops are a workaround for now. Design doc: `docs/design-collection-methods.md` | Medium |
+### P1 — Functional Collection Methods
+LINQ-style chaining: `.Where()`, `.Select()`, `.SelectMany()`, `.Aggregate()`, `.OrderBy()`, `.GroupBy()`, `.Any()`, `.All()`, `.First()`, `.Take()`, `.Skip()`, `.Distinct()`, `.ToList()`, `.ToDictionary()`, `.ForEach()`
+
+- **Codegen strategy:** Loop fusion — compile entire chain into single fused for-loop. No lazy iterators, no intermediate slices.
+- **Lambda syntax:** `x => expr` and `(a, b) => expr` (expression-body only for v1)
+- **Design doc:** `docs/design-collection-methods.md`
+- **Implementation order:** lambdas → single-step methods → chain AST → loop fusion → short-circuit terminals → materialization segmentation
+- **Effort:** Medium-Large
+
+### P2 — Annotations / Decorators
+`@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
+- **Effort:** Medium
+
+### P3 — Data Classes / Records
+`data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
+- **Effort:** Medium
+
+### P4 — VS Code Extension (Syntax Highlighting)
+Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
+- **Effort:** Quick
+
+### P5 — Project-Wide Watch Mode
+`zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
+- **Effort:** Medium
+
+### P6 — `zinc test`
+Run tests without manual `go test`.
+- **Effort:** Quick
+
+### P7 — `zinc fmt`
+Format `.zn` files consistently.
+- **Effort:** Medium
+
+### P8 — Error Suggestions
+"Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
+- **Effort:** Medium
+
+---
 
 ## Revisit Later
 
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
-| - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
+| Feature | Why it matters | Effort |
+|---------|---------------|--------|
+| **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
+| **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
 
 ---
 
 ## Project Infrastructure (parallel track)
 
-These are about making the Zinc repo itself healthy — CI, releases, contribution workflow.
-
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
-| P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
-| P12 | **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
+| Feature | Why it matters | Effort |
+|---------|---------------|--------|
+| **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
+| **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
+| **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
 
 ---
 
-## Tier 2 — More Language Features
+## Future — IDE & Language Intelligence
 
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| 5 | **Annotations / decorators** (`@Json("name")`, `@Column("id")`) | Maps to Go struct tags; familiar to Java/C#/Kotlin devs | Medium |
-| 6 | **Data classes / records** (`data class User(name: String, age: Int)`) | Immutable DTOs with auto-generated toString/equality; Kotlin `data class` / Java `record` pattern | Medium |
-
----
-
-## Tier 3 — Tooling & Developer Experience
-
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| 8 | **VS Code extension** (syntax highlighting) | Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments | Quick |
-| 9 | **`zinc fmt`** | Format .zn files consistently | Medium |
-| 10 | **`zinc test`** | Run tests without manual `go test` | Quick |
-| - | **Project-wide watch mode** (`zinc run --watch` / `zinc build --watch`) | Current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change | Medium |
-| 13 | **Error suggestions** | "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes | Medium |
+| Feature | Why it matters | Effort |
+|---------|---------------|--------|
+| **LSP server** (diagnostics + go-to-definition) | Real-time errors and navigation in any editor | Large |
+| **LSP: autocomplete + hover types** | Type info, method suggestions, parameter hints | Large |
+| **VS Code extension + LSP integration** | Full IDE experience — highlighting + inline errors + autocomplete | Medium (after LSP) |
+| **`zinc debug`** (delve wrapper) | Step-through debugging; `//line` directives map back to `.zn` | Medium |
+| **`zinc doc`** | Generate browsable docs from Zinc source | Medium |
 
 ---
 
-## Tier 4 — IDE & Language Intelligence
+## Future — Ecosystem & Adoption
 
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| 14 | **LSP server** (basic: diagnostics + go-to-definition) | Real-time errors and navigation in any editor; the #1 thing devs expect from a language | Large |
-| 15 | **LSP: autocomplete + hover types** | Makes writing Zinc feel productive — type info, method suggestions, parameter hints | Large |
-| 16 | **VS Code extension + LSP integration** | Full IDE experience — highlighting + inline errors + autocomplete + go-to-def | Medium (after LSP exists) |
-| 17 | **`zinc debug`** (delve wrapper) | Step-through debugging; `//line` directives already map back to `.zn` source | Medium |
-| 18 | **`zinc doc`** | Generate browsable docs from Zinc source (like `go doc`) | Medium |
-
----
-
-## Tier 5 — Ecosystem & Adoption
-
-| # | Feature | Why it matters | Effort |
-|---|---------|---------------|--------|
-| 19 | **Zinc package registry / `zinc.mod`** | Share and reuse Zinc libraries beyond copy-paste; currently limited to Go module system | Large |
-| 20 | **Web playground** | Try Zinc in the browser — huge for onboarding, no install needed | Large |
-| 21 | **REPL enhancements** (tab completion, syntax highlighting) | Makes `zinc repl` a productive exploration tool | Medium |
-| 22 | **CI/CD templates** | GitHub Actions / Docker examples for Zinc projects | Quick |
+| Feature | Why it matters | Effort |
+|---------|---------------|--------|
+| **Zinc package registry / `zinc.mod`** | Share and reuse Zinc libraries | Large |
+| **Web playground** | Try Zinc in the browser — huge for onboarding | Large |
+| **REPL enhancements** (tab completion, highlighting) | Makes `zinc repl` a productive tool | Medium |
+| **CI/CD templates** | GitHub Actions / Docker examples for Zinc projects | Quick |
 
 ---
 

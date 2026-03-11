@@ -14,13 +14,15 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 
 ## Type Conversions
 
-| Zinc            | Go equivalent              |
-|-------------------|----------------------------|
-| `toString(x)`     | `fmt.Sprintf("%v", x)`     |
-| `parseInt(s)`     | `strconv.Atoi(s)`          |
-| `parseFloat(s)`   | `strconv.ParseFloat(s,64)` |
-| `toBool(s)`       | `strconv.ParseBool(s)`     |
-| `typeOf(x)`       | `fmt.Sprintf("%T", x)`     |
+| Zinc            | Go equivalent              | Notes |
+|-------------------|----------------------------|-------|
+| `toString(x)`     | `fmt.Sprintf("%v", x)`     | |
+| `parseInt(s)`     | `strconv.Atoi(s)`          | |
+| `toInt(s)`        | `strconv.Atoi(s)`          | Alias for `parseInt` |
+| `parseFloat(s)`   | `strconv.ParseFloat(s,64)` | |
+| `toFloat(s)`      | `strconv.ParseFloat(s,64)` | Alias for `parseFloat` |
+| `toBool(s)`       | `strconv.ParseBool(s)`     | |
+| `typeOf(x)`       | `fmt.Sprintf("%T", x)`     | |
 
 ## Collections
 
@@ -40,6 +42,8 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 | `List<T>.new()`   | `[]T{}`                    | |
 | `Map<K,V>.new()`  | `map[K]V{}`                | |
 | `Chan<T>.new(n)`  | `make(chan T, n)`           | |
+| `ch.send(val)`    | `ch <- val`                 | Send value to channel |
+| `ch.receive()`    | `<-ch`                      | Receive value from channel |
 
 ## Math
 
