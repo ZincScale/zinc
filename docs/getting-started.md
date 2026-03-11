@@ -137,6 +137,31 @@ zinc run
 | `zinc repl` | Launch the interactive REPL |
 | `zinc --version` | Print version |
 
+## Watch Mode
+
+For rapid iteration on a single file, use `--watch` to automatically re-transpile on every save:
+
+```bash
+zinc hello.zn --watch
+```
+
+Output:
+```
+Watching hello.zn for changes (Ctrl+C to stop)...
+[14:32:05] transpiled hello.zn → hello.go
+[14:32:11] transpiled hello.zn → hello.go
+```
+
+The watcher polls the file every 300ms for modification time changes. On each save it runs the full pipeline (lex → parse → typecheck → codegen → gofmt). Errors are printed with timestamps but don't stop the watcher — fix the error, save again, and it picks up the change.
+
+You can combine it with `-o` to control the output path:
+
+```bash
+zinc hello.zn --watch -o build/hello.go
+```
+
+**Note:** Watch mode currently works with single files only. For multi-file projects, use `zinc run` or `zinc build` after each change. Project-wide watch mode is a planned enhancement.
+
 ## CLI Reference
 
 ```bash
@@ -151,6 +176,34 @@ zinc run [dir]               # transpile all .zn files and run
 zinc repl                    # launch interactive REPL
 zinc --version               # print version
 ```
+
+### Flag Shortcuts
+
+Every flag has a short alias:
+
+| Long | Short | Description |
+|------|-------|-------------|
+| `--run` | `-r` | Transpile and run |
+| `--watch` | `-w` | Watch mode |
+| `--verbose` | `-v` | Debug output (token count, declaration count) |
+| `--version` | `-V` | Print version |
+| `-o <file>` | | Output file path |
+
+### Source Maps
+
+Zinc emits `//line` directives in the generated Go code. This means if the Go compiler reports an error, the file and line number will point back to your `.zn` source — not the generated `.go` file. You debug in Zinc, not in Go.
+
+### Error Output
+
+Errors are printed with color formatting (ANSI colors) when running in a terminal. Colors are automatically disabled when output is piped or in CI environments. Errors include the source file name and line number:
+
+```
+error: hello.zn:12 — undefined variable 'x'
+```
+
+### Prerequisites
+
+Zinc requires **Go 1.26+** installed on your system. The Go toolchain provides `gofmt` (used to format generated code) and `go build`/`go run` (used by `zinc build` and `zinc run`).
 
 ## Running Examples
 

@@ -47,24 +47,49 @@ Zinc doesn't replace Go — it's a better way to write it.
 
 ---
 
+## Installation
+
+**Quick install** (Linux / macOS):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/victorybhg/zinc/master/install.sh | sh
+```
+
+**Homebrew** (macOS / Linux):
+
+```bash
+brew install victorybhg/tap/zinc
+```
+
+**From source** (requires Go 1.26+):
+
+```bash
+go install github.com/victorybhg/zinc/cmd/zinc@latest
+```
+
+**Pre-built binaries**: download from [GitHub Releases](https://github.com/victorybhg/zinc/releases).
+
+You can customize the install directory with `ZINC_INSTALL_DIR`:
+
+```bash
+ZINC_INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/victorybhg/zinc/master/install.sh | sh
+```
+
+---
+
 ## Quick Start
 
 ```bash
-# install
-git clone https://github.com/victorybhg/zinc
-cd zinc
-go build -o zinc ./cmd/zinc/
-
 # try it
-./zinc examples/hello.zn --run
+zinc examples/hello.zn --run
 
 # start a project
 mkdir myapp && cd myapp
-../zinc init myapp
-../zinc run
+zinc init myapp
+zinc run
 ```
 
-Requires **Go 1.26+**. See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
+See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
 
 ---
 

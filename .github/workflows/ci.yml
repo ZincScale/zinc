@@ -7,6 +7,14 @@ on:
     branches: [master]
 
 jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check license headers
+        run: scripts/check-license-headers.sh
+
   test:
     runs-on: ubuntu-latest
     strategy:

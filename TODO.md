@@ -6,13 +6,14 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 
 ## Tier 1 — Next Up
 
-*Empty — all items moved to Revisit Later or Completed.*
+| # | Feature | Why it matters | Effort |
+|---|---------|---------------|--------|
+| - | **Functional collection methods** (LINQ-style: `.Where()`, `.Select()`, `.Aggregate()`) | Core OO/FP pattern; loops are a workaround for now. Design doc: `docs/design-collection-methods.md` | Medium |
 
 ## Revisit Later
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
 
@@ -24,15 +25,6 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 
 | # | Feature | Why it matters | Effort |
 |---|---------|---------------|--------|
-| ~~P1~~ | ~~**GitHub Actions CI**~~ | ~~Done — `.github/workflows/ci.yml`~~ | ~~Done~~ |
-| ~~P2~~ | ~~**CI matrix testing**~~ | ~~Done — Go 1.23–1.26 matrix~~ | ~~Done~~ |
-| ~~P3~~ | ~~**E2e smoke tests in CI**~~ | ~~Done — `scripts/smoke-test.sh` runs all 18 examples in CI~~ | ~~Done~~ |
-| ~~P4~~ | ~~**Semantic versioning policy**~~ | ~~Done — `VERSIONING.md`~~ | ~~Done~~ |
-| ~~P5~~ | ~~**Goreleaser**~~ | ~~Done — `.goreleaser.yml` + release workflow; linux/mac/windows amd64/arm64~~ | ~~Done~~ |
-| ~~P6~~ | ~~**CHANGELOG.md**~~ | ~~Done — `CHANGELOG.md`~~ | ~~Done~~ |
-| P7 | **Install script / Homebrew formula** | `brew install zinc` or `curl -sSL \| sh` — lower the barrier vs `git clone && go build` | Medium |
-| ~~P10~~ | ~~**`.gitignore` cleanup**~~ | ~~Done — ignore generated `.go` files in examples, build artifacts, editor configs~~ | ~~Done~~ |
-| P11 | **License headers / compliance check** | Ensure all source files have Apache 2.0 headers; add CI check | Quick |
 | P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
 | P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
 | P12 | **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
@@ -55,8 +47,7 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | 8 | **VS Code extension** (syntax highlighting) | Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments | Quick |
 | 9 | **`zinc fmt`** | Format .zn files consistently | Medium |
 | 10 | **`zinc test`** | Run tests without manual `go test` | Quick |
-| ~~11~~ | ~~**Color error output**~~ | ~~Done — `internal/errs/color.go`; ANSI colors with auto-disable for non-TTY~~ | ~~Done~~ |
-| ~~12~~ | ~~**Better project-mode error messages**~~ | ~~Done — errors now show .zn filename instead of directory~~ | ~~Done~~ |
+| - | **Project-wide watch mode** (`zinc run --watch` / `zinc build --watch`) | Current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change | Medium |
 | 13 | **Error suggestions** | "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes | Medium |
 
 ---
@@ -93,6 +84,9 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Semantic versioning policy (`VERSIONING.md`)
 - Goreleaser cross-platform releases (linux/mac/windows, amd64/arm64)
 - CHANGELOG.md
+- `.gitignore` cleanup for generated `.go` files
+- License headers + CI compliance check (Apache 2.0 on all source files)
+- Install script (`install.sh`) + Homebrew formula (`Formula/zinc.rb`)
 - Variables, functions, classes, interfaces, inheritance, generics
 - Simplified constructor syntax (`new(...)` — no `construct` keyword needed)
 - Enums + match
@@ -130,7 +124,6 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Method-level failable detection (variable type tracking for `f.Write()`, `f.Close()`, etc.)
 - Parser→codegen method dispatch refactor (removed 19 specialized AST nodes; builtin methods handled in codegen)
 - Class/Go-type-aware builtin dispatch (`.add()` on a class calls the method, not `append`)
-- `.gitignore` cleanup for generated `.go` files
 - Dead code removal (`TOKEN_PRIVATE`, `TOKEN_ARROW`, `FieldDecl.IsPrivate`)
 - Auto-generated interfaces for OO polymorphism (class → struct `Impl` + interface, getters/setters, compile-time satisfaction checks)
 - Polymorphic function parameters (interface-typed params use getters, concrete `*Impl` uses direct field access)
