@@ -15,8 +15,6 @@ Language is shippable — core features, CLI tooling, multi-file projects, and e
 | - | **Functional collection methods** (`.map()`, `.filter()`, `.reduce()`, `.forEach()`) | Core OO/FP pattern; loops are a workaround for now | Medium |
 | - | **Enhanced destructuring** | `var (a, b, c) = ...` beyond 2-tuple; match on struct fields | Medium |
 | - | **Operator overloading** | Natural for numeric classes, vectors, money types | Medium |
-| - | **Generic empty list literal inference** (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`) | Typechecker needs to propagate field type into list/map literals in generic context | Medium |
-| - | **Generic constructor type inference** (`Container.new(items)` without explicit type param) | Go can infer type params from arguments, but codegen needs to emit `NewContainer(items)` without `[T]` when inferable | Quick |
 
 ---
 
@@ -33,10 +31,10 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 | ~~P5~~ | ~~**Goreleaser**~~ | ~~Done — `.goreleaser.yml` + release workflow; linux/mac/windows amd64/arm64~~ | ~~Done~~ |
 | ~~P6~~ | ~~**CHANGELOG.md**~~ | ~~Done — `CHANGELOG.md`~~ | ~~Done~~ |
 | P7 | **Install script / Homebrew formula** | `brew install zinc` or `curl -sSL \| sh` — lower the barrier vs `git clone && go build` | Medium |
-| P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
-| P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
 | ~~P10~~ | ~~**`.gitignore` cleanup**~~ | ~~Done — ignore generated `.go` files in examples, build artifacts, editor configs~~ | ~~Done~~ |
 | P11 | **License headers / compliance check** | Ensure all source files have Apache 2.0 headers; add CI check | Quick |
+| P8 | **CONTRIBUTING.md** | How to set up dev environment, run tests, code style, PR process | Quick |
+| P9 | **Issue & PR templates** | Structured bug reports, feature requests, PR checklists | Quick |
 | P12 | **Code coverage reporting** | Track test coverage %, upload to Codecov or similar, badge in README | Quick-Medium |
 
 ---
@@ -140,3 +138,5 @@ These are about making the Zinc repo itself healthy — CI, releases, contributi
 - Failable method detection through interface-typed params (`v.validate()` correctly detects error returns)
 - Void-failable tracking for class methods (auto `return nil`, correct `err :=` vs `_, err :=`)
 - Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)
+- Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
+- Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)

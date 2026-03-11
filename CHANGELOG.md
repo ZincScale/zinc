@@ -6,6 +6,7 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ### Added
 - Generic class polymorphism — `fn printBox(b: Box<Int>)` correctly detects generic class params as interface-typed, field access uses getters, builtin methods aren't intercepted
+- Generic empty list/map literal inference — `this.items = []` in generic class emits `[]T{}` instead of `[]interface{}{}`
 
 ## [0.3.2] - 2026-03-10
 

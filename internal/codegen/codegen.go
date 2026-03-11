@@ -76,6 +76,8 @@ type Generator struct {
 	receiver string
 	// inCtorBody: true when emitting constructor body (use direct field access)
 	inCtorBody bool
+	// currentClassName: name of the class being emitted (set during ctor/method emission)
+	currentClassName string
 	// interfaceVars: variable name → class name for interface-typed class values (function params, etc.)
 	// These need getter/setter access instead of direct field access.
 	interfaceVars map[string]string
@@ -1003,13 +1005,16 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 
 	// Body statements (super call already removed)
 	savedRecv := g.receiver
+	savedClass := g.currentClassName
 	g.receiver = "obj"
 	g.inCtorBody = true
+	g.currentClassName = cls.Name
 	for _, s := range ctor.Body.Stmts {
 		g.emitStmt(s)
 	}
 	g.inCtorBody = false
 	g.receiver = savedRecv
+	g.currentClassName = savedClass
 
 	g.writeln("return obj")
 	g.pop()
@@ -1061,9 +1066,11 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 	savedRT := g.currentReturnType
 	savedCT := g.currentCanThrow
 	savedIV := g.interfaceVars
+	savedClass := g.currentClassName
 	g.receiver = recv
 	g.currentReturnType = m.ReturnType
 	g.currentCanThrow = m.CanThrow
+	g.currentClassName = className
 	// Track params with class types as interface-typed variables (need getters)
 	g.interfaceVars = make(map[string]string)
 	for k, v := range savedIV {
@@ -1084,6 +1091,7 @@ func (g *Generator) emitMethod(className string, typeParams []string, recv strin
 	}
 	g.receiver = savedRecv
 	g.currentReturnType = savedRT
+	g.currentClassName = savedClass
 	g.currentCanThrow = savedCT
 	g.interfaceVars = savedIV
 	g.pop()
@@ -1568,6 +1576,8 @@ func (g *Generator) emitErrorExpr(call *parser.CallExpr) string {
 }
 
 func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
+	// Resolve empty list/map literal type from class field type (for generics)
+	g.resolveEmptyLiteralFromField(a.Target, a.Value)
 	// Check if value is a failable call — needs error unpacking
 	if call, ok := a.Value.(*parser.CallExpr); ok && g.callIsFailable(call) {
 		errVar := g.nextErr()
@@ -1591,6 +1601,36 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		return
 	}
 	g.writeln(fmt.Sprintf("%s %s %s", g.emitExpr(a.Target), a.Op, g.emitExpr(a.Value)))
+}
+
+// resolveEmptyLiteralFromField resolves the type of an empty list/map literal
+// from the class field type. This handles cases like `this.items = []` in a
+// generic class where the field is `List<T>` — emits `[]T{}` instead of `[]interface{}{}`.
+func (g *Generator) resolveEmptyLiteralFromField(target parser.Expr, value parser.Expr) {
+	sel, ok := target.(*parser.SelectorExpr)
+	if !ok || g.currentClassName == "" {
+		return
+	}
+	// Only handle this.field assignments
+	if _, isThis := sel.Object.(*parser.ThisExpr); !isThis {
+		return
+	}
+	fieldName := sel.Field
+	// Look up field type from class fields
+	for _, f := range g.classFields[g.currentClassName] {
+		if f.Name != fieldName {
+			continue
+		}
+		if gt, ok := f.Type.(*parser.GenericType); ok {
+			if ll, ok := value.(*parser.ListLit); ok && ll.ResolvedType == "" && gt.Name == "List" && len(gt.TypeArgs) == 1 {
+				ll.ResolvedType = "[]" + g.emitType(gt.TypeArgs[0])
+			}
+			if ml, ok := value.(*parser.MapLit); ok && ml.ResolvedType == "" && gt.Name == "Map" && len(gt.TypeArgs) == 2 {
+				ml.ResolvedType = "map[" + g.emitType(gt.TypeArgs[0]) + "]" + g.emitType(gt.TypeArgs[1])
+			}
+		}
+		break
+	}
 }
 
 // emitClassFieldAssignTarget checks if the target is a class field and returns

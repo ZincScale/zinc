@@ -2081,3 +2081,31 @@ fn main() {
 }`)
 	assertOutput(t, out, "hello\nhello")
 }
+
+func TestE2EGenericEmptyListLiteralInference(t *testing.T) {
+	out := e2eRun(t, `
+class Stack<T> {
+    var items: List<T>
+
+    new(initial: T) {
+        this.items = []
+        this.items.add(initial)
+    }
+
+    pub fn push(item: T) {
+        this.items.add(item)
+    }
+
+    pub fn count(): Int {
+        return this.items.size()
+    }
+}
+
+fn main() {
+    var s = Stack.new(1)
+    s.push(2)
+    s.push(3)
+    print(s.count())
+}`)
+	assertOutput(t, out, "3")
+}
