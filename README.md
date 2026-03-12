@@ -6,8 +6,8 @@
 **Zinc** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
 
 ```
-fn main() {
-    var name: String = "World"
+main() {
+    var name String = "World"
     print("Hello, {name}!")
 }
 ```

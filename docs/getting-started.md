@@ -40,7 +40,7 @@ myapp/
 The generated `main.zn` contains:
 
 ```
-fn main() {
+main() {
     print("Hello from Zinc!")
 }
 ```
@@ -77,7 +77,7 @@ myapp/
 ```
 package "myapp/utils"
 
-pub fn add(a: Int, b: Int): Int {
+pub add(a Int, b Int) Int {
     return a + b
 }
 ```
@@ -87,16 +87,16 @@ pub fn add(a: Int, b: Int): Int {
 ```
 package "myapp/models"
 
-class User {
-    var name: String
-    var age: Int
+User {
+    name String
+    age Int
 
-    new(name: String, age: Int) {
+    new(name String, age Int) {
         this.name = name
         this.age = age
     }
 
-    pub fn greet(): String {
+    pub greet() String {
         return "Hi, I'm {this.name}!"
     }
 }
@@ -108,11 +108,11 @@ class User {
 import "myapp/utils"
 import "myapp/models"
 
-fn main() {
-    var sum: Int = utils.Add(2, 3)
+main() {
+    var sum Int = utils.Add(2, 3)
     print(sum)
 
-    var user = models.NewUser("Alice", 30)
+    user := models.NewUser("Alice", 30)
     print(user.Greet())
 }
 ```

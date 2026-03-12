@@ -3,7 +3,7 @@
 const PI = 3.14159
 const MAX_RETRIES Int = 3
 const APP_NAME String = "Zinc"
-const DEBUG: Bool = false
+const DEBUG Bool = false
 
 circleArea(radius Float) Float {
     return PI * radius * radius

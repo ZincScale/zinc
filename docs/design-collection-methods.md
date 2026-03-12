@@ -7,14 +7,14 @@ LINQ-style chaining on collections, transpiled to fused Go loops. No intermediat
 ## Syntax
 
 ```zinc
-let result = nums.Where(x => x > 5).Select(x => x * 2).Take(10)
-let sum = nums.Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
-let hasAdmin = users.Any(u => u.isAdmin)
-let first = users.First(u => u.age > 18) or { return }
-let names = people.Select(p => p.name).ToList()
-let sorted = people.Where(p => p.active).OrderBy(p => p.age).Select(p => p.name)
-let grouped = people.GroupBy(p => p.city)
-let allTags = posts.SelectMany(p => p.tags)
+result := nums.Where(x => x > 5).Select(x => x * 2).Take(10)
+sum := nums.Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
+hasAdmin := users.Any(u => u.isAdmin)
+first := users.First(u => u.age > 18) or { return }
+names := people.Select(p => p.name).ToList()
+sorted := people.Where(p => p.active).OrderBy(p => p.age).Select(p => p.name)
+grouped := people.GroupBy(p => p.city)
+allTags := posts.SelectMany(p => p.tags)
 ```
 
 ## Naming (LINQ-style)
@@ -48,13 +48,13 @@ let allTags = posts.SelectMany(p => p.tags)
 
 ## Lambda Syntax
 
-Zinc already has full lambda support (`(x: Int): Int => x * 2`), but collection methods need shorthand forms for ergonomic chaining. Arrow syntax stays as `=>` (consistent with C#/TypeScript).
+Zinc already has full lambda support (`(x Int) Int => x * 2`), but collection methods need shorthand forms for ergonomic chaining. Arrow syntax stays as `=>` (consistent with C#/TypeScript).
 
 ### Shorthand Levels
 
 ```zinc
 // Existing (verbose — works today but unusable for chaining)
-list.Where((x: Int): Bool => x > 5).Select((x: Int): Int => x * 2)
+list.Where((x Int) Bool => x > 5).Select((x Int) Int => x * 2)
 
 // Level 1: Type inference from context (infer param + return types)
 list.Where((x) => x > 5).Select((x) => x * 2)
@@ -84,7 +84,7 @@ Since Zinc controls the full pipeline (parser → typechecker → codegen), we c
 
 **Zinc:**
 ```zinc
-let result = nums.Where(x => x > 5).Select(x => x * 2).Take(10)
+result := nums.Where(x => x > 5).Select(x => x * 2).Take(10)
 ```
 
 **Emitted Go:**
@@ -105,7 +105,7 @@ for _, _v0 := range nums {
 
 **Zinc:**
 ```zinc
-let sum = nums.Where(x => x > 5).Select(x => x * 2).Aggregate(0, (acc, x) => acc + x)
+sum := nums.Where(x => x > 5).Select(x => x * 2).Aggregate(0, (acc, x) => acc + x)
 ```
 
 **Emitted Go:**
@@ -123,7 +123,7 @@ for _, _v0 := range nums {
 
 **Zinc:**
 ```zinc
-let hasAdmin = users.Any(u => u.isAdmin)
+hasAdmin := users.Any(u => u.isAdmin)
 ```
 
 **Emitted Go:**
@@ -141,7 +141,7 @@ for _, _v0 := range users {
 
 **Zinc:**
 ```zinc
-let admin = users.First(u => u.isAdmin) or { return }
+admin := users.First(u => u.isAdmin) or { return }
 ```
 
 **Emitted Go:**
@@ -175,7 +175,7 @@ When these appear mid-chain, the chain is **segmented** at materialization point
 
 **Zinc:**
 ```zinc
-let result = nums.Where(x => x > 5).OrderBy(x => x).Select(x => x * 2).Take(3)
+result := nums.Where(x => x > 5).OrderBy(x => x).Select(x => x * 2).Take(3)
 ```
 
 **Emitted Go:**
@@ -266,36 +266,36 @@ Map methods follow the **Kotlin/Swift model**: type-preserving where possible. `
 ### Syntax Examples
 
 ```zinc
-let scores = {"Alice": 90, "Bob": 60, "Carol": 85}
+scores := {"Alice": 90, "Bob": 60, "Carol": 85}
 
 // Where — filter entries, returns Map<String, Int>
-let passing = scores.Where((k, v) => v >= 80)
+passing := scores.Where((k, v) => v >= 80)
 // {"Alice": 90, "Carol": 85}
 
 // SelectValues — transform values, returns Map<String, Int>
-let doubled = scores.SelectValues((k, v) => v * 2)
+doubled := scores.SelectValues((k, v) => v * 2)
 // {"Alice": 180, "Bob": 120, "Carol": 170}
 
 // SelectKeys — transform keys, returns Map<String, Int>
-let upper = scores.SelectKeys((k, v) => k.toUpper())
+upper := scores.SelectKeys((k, v) => k.toUpper())
 // {"ALICE": 90, "BOB": 60, "CAROL": 85}
 
 // Select — free transform, returns List<String>
-let labels = scores.Select((k, v) => k + ": " + v.toString())
+labels := scores.Select((k, v) => k + ": " + v.toString())
 // ["Alice: 90", "Bob: 60", "Carol: 85"]
 
 // ForEach
 scores.ForEach((k, v) => print(k + " scored " + v.toString()))
 
 // Any / All
-let hasHigh = scores.Any((k, v) => v > 85)
-let allPass = scores.All((k, v) => v >= 60)
+hasHigh := scores.Any((k, v) => v > 85)
+allPass := scores.All((k, v) => v >= 60)
 
 // Count
-let highCount = scores.Count((k, v) => v > 80)
+highCount := scores.Count((k, v) => v > 80)
 
 // Aggregate
-let total = scores.Aggregate(0, (acc, k, v) => acc + v)
+total := scores.Aggregate(0, (acc, k, v) => acc + v)
 ```
 
 ### Chaining
@@ -304,13 +304,13 @@ Map methods that return maps can be chained. When a method returns `List<T>`, su
 
 ```zinc
 // Map → Map → Map (stays in map-land)
-let result = scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
+result := scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
 
 // Map → Map → List (transitions to list-land)
-let names = scores.Where((k, v) => v > 80).Select((k, v) => k)
+names := scores.Where((k, v) => v > 80).Select((k, v) => k)
 
 // Map → List → terminal
-let hasLongName = scores.Select((k, v) => k).Any(name => name.len() > 5)
+hasLongName := scores.Select((k, v) => k).Any(name => name.len() > 5)
 ```
 
 ### Codegen
@@ -319,7 +319,7 @@ All map methods use `for k, v := range` with loop fusion where possible.
 
 **Where (single step):**
 ```zinc
-let passing = scores.Where((k, v) => v >= 80)
+passing := scores.Where((k, v) => v >= 80)
 ```
 ```go
 passing := make(map[string]int)
@@ -332,7 +332,7 @@ for _k0, _v0 := range scores {
 
 **Where + SelectValues (fused):**
 ```zinc
-let result = scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
+result := scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
 ```
 ```go
 result := make(map[string]int)
@@ -345,7 +345,7 @@ for _k0, _v0 := range scores {
 
 **Where + Select (map → list transition):**
 ```zinc
-let names = scores.Where((k, v) => v >= 80).Select((k, v) => k)
+names := scores.Where((k, v) => v >= 80).Select((k, v) => k)
 ```
 ```go
 var names []string
@@ -358,7 +358,7 @@ for _k0, _v0 := range scores {
 
 **Where + Aggregate (fused, no allocation):**
 ```zinc
-let total = scores.Where((k, v) => v > 50).Aggregate(0, (acc, k, v) => acc + v)
+total := scores.Where((k, v) => v > 50).Aggregate(0, (acc, k, v) => acc + v)
 ```
 ```go
 total := 0
@@ -371,7 +371,7 @@ for _k0, _v0 := range scores {
 
 **Any (short-circuit):**
 ```zinc
-let hasHigh = scores.Any((k, v) => v > 85)
+hasHigh := scores.Any((k, v) => v > 85)
 ```
 ```go
 hasHigh := false
@@ -393,7 +393,7 @@ for _, _v0 := range scores {
 
 ## Implementation Order
 
-Lambda expressions already exist (`(x: Int): Int => x * 2`, block-body, failable). Shorthand and type inference are incremental additions.
+Lambda expressions already exist (`(x Int) Int => x * 2`, block-body, failable). Shorthand and type inference are incremental additions.
 
 1. **Lambda shorthand** — parser support for `x => expr` (no parens, no types) and `it` implicit param
 2. **Single-step methods** — `Where`, `Select`, `ForEach` (no chaining, just emit a for loop)
@@ -473,16 +473,16 @@ Goroutines are cheap (~2KB stack), making Go uniquely suited for parallel collec
 
 ```zinc
 // Sequential (default) — fused single loop
-let result = nums.Where(x => x > 5).Select(x => x * 2).ToList()
+result := nums.Where(x => x > 5).Select(x => x * 2).ToList()
 
 // Parallel — fused loop per chunk, goroutine per chunk
-let result = nums.AsParallel().Where(x => x > 5).Select(x => heavyCompute(x)).ToList()
+result := nums.AsParallel().Where(x => x > 5).Select(x => heavyCompute(x)).ToList()
 
 // Parallel aggregate
-let sum = nums.AsParallel().Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
+sum := nums.AsParallel().Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
 
 // Parallel short-circuit
-let hasNeg = nums.AsParallel().Any(x => x < 0)
+hasNeg := nums.AsParallel().Any(x => x < 0)
 ```
 
 ### Design Decisions
@@ -516,7 +516,7 @@ Non-parallelizable operations in a parallel chain fall back to sequential execut
 
 **Zinc:**
 ```zinc
-let result = nums.AsParallel().Where(x => x > 5).Select(x => x * 2).ToList()
+result := nums.AsParallel().Where(x => x > 5).Select(x => x * 2).ToList()
 ```
 
 **Emitted Go:**
@@ -556,7 +556,7 @@ Each goroutine gets a fused loop — no intermediate allocations within a chunk.
 
 **Zinc:**
 ```zinc
-let sum = nums.AsParallel().Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
+sum := nums.AsParallel().Where(x => x > 5).Aggregate(0, (acc, x) => acc + x)
 ```
 
 **Emitted Go:**
@@ -595,7 +595,7 @@ Note: parallel Aggregate assumes the operation is **associative** (addition, mul
 
 **Zinc:**
 ```zinc
-let hasNeg = nums.AsParallel().Any(x => x < 0)
+hasNeg := nums.AsParallel().Any(x => x < 0)
 ```
 
 **Emitted Go:**

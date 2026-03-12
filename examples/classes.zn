@@ -3,7 +3,7 @@ interface Speaker {
 }
 
 Animal {
-    var name String
+    name String
 
     new(name String) {
         this.name = name
@@ -15,7 +15,7 @@ Animal {
 }
 
 Dog : Animal, Speaker {
-    var breed String
+    breed String
 
     new(name String, breed String) {
         super(name)

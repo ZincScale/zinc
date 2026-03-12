@@ -20,20 +20,20 @@ Follows the **Rust serde / Kotlin kotlinx.serialization** model: annotations des
 
 ```zinc
 @rename_all("snake_case")           // class-level: rename all fields at once
-class UserProfile {
-    var firstName: String            // → "first_name" in serialized output
+UserProfile {
+    firstName String            // → "first_name" in serialized output
 
     @name("uid")                     // field-level override
-    var userId: Int                  // → "uid" (overrides rename_all)
+    userId Int                  // → "uid" (overrides rename_all)
 
     @skip                            // excluded from all serialization
-    var cache: String = ""           // must have default (won't be deserialized)
+    cache String = ""           // must have default (won't be deserialized)
 
     @required                        // deserialize fails if field missing
-    var email: String
+    email String
 
     @omitempty                       // skip zero/null values on serialization
-    var nickname: String?
+    nickname String?
 }
 ```
 
@@ -55,21 +55,21 @@ Most APIs use `snake_case` or `camelCase`. Instead of annotating every field:
 
 ```zinc
 // Without @rename_all — tedious
-class User {
+User {
     @name("first_name")
-    var firstName: String
+    firstName String
     @name("last_name")
-    var lastName: String
+    lastName String
     @name("created_at")
-    var createdAt: String
+    createdAt String
 }
 
 // With @rename_all — one annotation covers all fields
 @rename_all("snake_case")
-class User {
-    var firstName: String       // → "first_name"
-    var lastName: String        // → "last_name"
-    var createdAt: String       // → "created_at"
+User {
+    firstName String       // → "first_name"
+    lastName String        // → "last_name"
+    createdAt String       // → "created_at"
 }
 ```
 
@@ -79,17 +79,17 @@ class User {
 
 ```zinc
 @rename_all("snake_case")
-class User {
-    var firstName: String
+User {
+    firstName String
 
     @name("uid")
-    var userId: Int
+    userId Int
 
     @skip
-    var cache: String = ""
+    cache String = ""
 
     @omitempty
-    var nickname: String?
+    nickname String?
 }
 ```
 
@@ -139,15 +139,15 @@ Both verbs are **failable**. Zinc's error handling auto-propagates errors — no
 
 ```zinc
 // Auto-propagation (most common) — errors propagate to caller automatically
-let json = serialize(user)
-let user = deserialize<User>(jsonStr)
+json := serialize(user)
+user := deserialize<User>(jsonStr)
 
 // With context — log then propagate
-let json = serialize(user) or { print("serialize failed: {err}") }
-let user = deserialize<User>(input) or { print("bad input: {err}") }
+json := serialize(user) or { print("serialize failed: {err}") }
+user := deserialize<User>(input) or { print("bad input: {err}") }
 
 // With recovery — handle error and continue
-let user = deserialize<User>(input) or {
+user := deserialize<User>(input) or {
     print("bad input, using defaults: {err}")
     exit(0)
 }
@@ -163,12 +163,12 @@ let user = deserialize<User>(input) or {
 
 ```zinc
 // JSON (default — no format needed)
-let json = serialize(user)
-let user = deserialize<User>(jsonStr)
+json := serialize(user)
+user := deserialize<User>(jsonStr)
 
 // YAML
-let yaml = serialize(user, Format.Yaml)
-let user = deserialize<User>(yamlStr, Format.Yaml)
+yaml := serialize(user, Format.Yaml)
+user := deserialize<User>(yamlStr, Format.Yaml)
 ```
 
 ```zinc
@@ -187,7 +187,7 @@ For v1, only `Format.Json` ships. Other formats are a codegen extension — when
 
 **Zinc:**
 ```zinc
-let json = serialize(user)
+json := serialize(user)
 ```
 
 **Emitted Go (auto-propagation):**
@@ -201,7 +201,7 @@ json := string(_bytes)
 
 **Zinc with context:**
 ```zinc
-let json = serialize(user) or { print("failed: {err}") }
+json := serialize(user) or { print("failed: {err}") }
 ```
 
 **Emitted Go:**
@@ -218,7 +218,7 @@ json := string(_bytes)
 
 **Zinc:**
 ```zinc
-let user = deserialize<User>(input)
+user := deserialize<User>(input)
 ```
 
 **Emitted Go (auto-propagation):**
@@ -233,17 +233,17 @@ if err := json.Unmarshal([]byte(input), &user); err != nil {
 
 **Zinc:**
 ```zinc
-class Config {
+Config {
     @required
-    var host: String
+    host String
 
     @required
-    var port: Int
+    port Int
 
-    var debug: Bool              // optional, defaults to zero value (false)
+    debug Bool              // optional, defaults to zero value (false)
 }
 
-let cfg = deserialize<Config>(input)
+cfg := deserialize<Config>(input)
 ```
 
 **Emitted Go:**
@@ -265,38 +265,38 @@ The `@required` checks are part of the failable operation — if validation fail
 ### Serializing Classes and Generics
 
 ```zinc
-class Animal {
-    var name: String
-    var sound: String
+Animal {
+    name String
+    sound String
 
-    new(name: String, sound: String) {
+    new(name String, sound String) {
         this.name = name
         this.sound = sound
     }
 }
 
-let dog = Animal.new("Rex", "Woof")
-let json = serialize(dog)           // auto-propagates on error
+dog := Animal("Rex", "Woof")
+json := serialize(dog)           // auto-propagates on error
 // {"name":"Rex","sound":"Woof"}
 
-let dog2 = deserialize<Animal>(json)
+dog2 := deserialize<Animal>(json)
 print(dog2.name)                    // Rex
 ```
 
 Generic classes work the same way:
 
 ```zinc
-class Box<T> {
-    var value: T
+Box<T> {
+    value T
 
-    new(value: T) {
+    new(value T) {
         this.value = value
     }
 }
 
-let box = Box.new(42)
-let json = serialize(box)           // {"value":42}
-let box2 = deserialize<Box<Int>>(json)
+box := Box(42)
+json := serialize(box)           // {"value":42}
+box2 := deserialize<Box<Int>>(json)
 print(box2.value)                   // 42
 ```
 
@@ -334,36 +334,36 @@ Steps 1-4 deliver a working v1. Steps 5-6 add safety and ergonomics. Steps 7-8 a
 import "net/http"
 
 @rename_all("snake_case")
-class ApiRequest {
+ApiRequest {
     @required
-    var action: String
+    action String
 
     @required
-    var userId: Int                 // → "user_id"
+    userId Int                 // → "user_id"
 
     @skip
-    var receivedAt: String = ""
+    receivedAt String = ""
 }
 
 @rename_all("snake_case")
-class ApiResponse {
-    var success: Bool
-    var errorMessage: String        // → "error_message"
+ApiResponse {
+    success Bool
+    errorMessage String        // → "error_message"
 
     @omitempty
-    var data: String?
+    data String?
 }
 
-fn handleRequest(body: String): String {
-    let req = deserialize<ApiRequest>(body) or {
-        var resp = ApiResponse.new()
+handleRequest(body String) String {
+    req := deserialize<ApiRequest>(body) or {
+        resp := ApiResponse()
         resp.success = false
         resp.errorMessage = "invalid request: {err}"
         return serialize(resp)
     }
 
     // Process request...
-    var resp = ApiResponse.new()
+    resp := ApiResponse()
     resp.success = true
     return serialize(resp)
 }

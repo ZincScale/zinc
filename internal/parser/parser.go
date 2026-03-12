@@ -866,8 +866,11 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		return &ForStmt{Line: line, Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
-	// C-style: for (init; cond; post) { }
-	p.expect(lexer.TOKEN_LPAREN)
+	// C-style: for init; cond; post { } (new) or for (init; cond; post) { } (legacy)
+	hasParen := p.check(lexer.TOKEN_LPAREN)
+	if hasParen {
+		p.advance()
+	}
 	var init Stmt
 	if !p.check(lexer.TOKEN_SEMICOLON) {
 		init = p.parseVarOrAssign()
@@ -879,10 +882,16 @@ func (p *Parser) parseForStmt(label string) Stmt {
 	}
 	p.expect(lexer.TOKEN_SEMICOLON)
 	var post Stmt
-	if !p.check(lexer.TOKEN_RPAREN) {
-		post = p.parseVarOrAssign()
+	if hasParen {
+		if !p.check(lexer.TOKEN_RPAREN) {
+			post = p.parseVarOrAssign()
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	} else {
+		if !p.check(lexer.TOKEN_LBRACE) {
+			post = p.parseVarOrAssign()
+		}
 	}
-	p.expect(lexer.TOKEN_RPAREN)
 	body := p.parseBlock()
 	return &ForStmt{Line: line, Label: label, Init: init, Cond: cond, Post: post, Body: body}
 }
