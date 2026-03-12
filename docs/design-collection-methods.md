@@ -237,17 +237,159 @@ LambdaExpr {
 
 The parser recognizes method call chains where method names match known collection methods and arguments are lambdas. Codegen sees the entire chain as one unit.
 
-## Map Operations
+## Map Collection Methods
 
-For `Map<K, V>` types:
+Map methods follow the **Kotlin/Swift model**: type-preserving where possible. `Where` on a map returns a `Map`, not a sequence. This avoids the `.ToDictionary()` ceremony that makes C# map filtering verbose. Cross-language research confirms this is the most ergonomic approach (Kotlin, Swift, Python all return maps from filter).
+
+### Design Decisions
+
+1. **`Where` returns `Map<K,V>`** — type-preserving (Kotlin/Swift style), not a sequence requiring explicit `.ToDictionary()` (C# style)
+2. **`SelectValues` and `SelectKeys`** — dedicated map-to-map transforms. The most-requested missing methods in C#/Rust. Named with LINQ `Select` prefix for consistency.
+3. **Plain `Select` on a map returns `List<T>`** — universal across all languages. Free transform may not produce key-value pairs.
+4. **All map lambdas receive `(k, v)`** — two-param lambda signals map context. Typechecker infers from source collection type.
+5. **`Aggregate` on maps takes `(acc, k, v)`** — three-param lambda for map reduction.
+
+### v1 Map Method Set
+
+| Method | Lambda | Returns | Notes |
+|--------|--------|---------|-------|
+| `Where` | `(k, v) => Bool` | `Map<K,V>` | Type-preserving filter |
+| `SelectValues` | `(k, v) => NewV` | `Map<K, NewV>` | Transform values, keep keys |
+| `SelectKeys` | `(k, v) => NewK` | `Map<NewK, V>` | Transform keys, keep values |
+| `Select` | `(k, v) => T` | `List<T>` | Free transform → list |
+| `ForEach` | `(k, v) => void` | void | Side effects |
+| `Any` | `(k, v) => Bool` | `Bool` | Short-circuit |
+| `All` | `(k, v) => Bool` | `Bool` | Short-circuit |
+| `Count` | `(k, v) => Bool` | `Int` | Count matching entries |
+| `Aggregate` | `(acc, k, v) => T` | `T` | Reduction |
+
+### Syntax Examples
 
 ```zinc
-let expensive = prices.Where((k, v) => v > 100)   // Map → Map
-let names = prices.Keys()                           // already exists
-let vals = prices.Values()                          // already exists
+let scores = {"Alice": 90, "Bob": 60, "Carol": 85}
+
+// Where — filter entries, returns Map<String, Int>
+let passing = scores.Where((k, v) => v >= 80)
+// {"Alice": 90, "Carol": 85}
+
+// SelectValues — transform values, returns Map<String, Int>
+let doubled = scores.SelectValues((k, v) => v * 2)
+// {"Alice": 180, "Bob": 120, "Carol": 170}
+
+// SelectKeys — transform keys, returns Map<String, Int>
+let upper = scores.SelectKeys((k, v) => k.toUpper())
+// {"ALICE": 90, "BOB": 60, "CAROL": 85}
+
+// Select — free transform, returns List<String>
+let labels = scores.Select((k, v) => k + ": " + v.toString())
+// ["Alice: 90", "Bob: 60", "Carol: 85"]
+
+// ForEach
+scores.ForEach((k, v) => print(k + " scored " + v.toString()))
+
+// Any / All
+let hasHigh = scores.Any((k, v) => v > 85)
+let allPass = scores.All((k, v) => v >= 60)
+
+// Count
+let highCount = scores.Count((k, v) => v > 80)
+
+// Aggregate
+let total = scores.Aggregate(0, (acc, k, v) => acc + v)
 ```
 
-Map-specific chaining deferred to after list chaining is solid.
+### Chaining
+
+Map methods that return maps can be chained. When a method returns `List<T>`, subsequent methods use single-param list lambdas:
+
+```zinc
+// Map → Map → Map (stays in map-land)
+let result = scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
+
+// Map → Map → List (transitions to list-land)
+let names = scores.Where((k, v) => v > 80).Select((k, v) => k)
+
+// Map → List → terminal
+let hasLongName = scores.Select((k, v) => k).Any(name => name.len() > 5)
+```
+
+### Codegen
+
+All map methods use `for k, v := range` with loop fusion where possible.
+
+**Where (single step):**
+```zinc
+let passing = scores.Where((k, v) => v >= 80)
+```
+```go
+passing := make(map[string]int)
+for _k0, _v0 := range scores {
+    if _v0 >= 80 {
+        passing[_k0] = _v0
+    }
+}
+```
+
+**Where + SelectValues (fused):**
+```zinc
+let result = scores.Where((k, v) => v > 50).SelectValues((k, v) => v * 2)
+```
+```go
+result := make(map[string]int)
+for _k0, _v0 := range scores {
+    if _v0 > 50 {
+        result[_k0] = _v0 * 2
+    }
+}
+```
+
+**Where + Select (map → list transition):**
+```zinc
+let names = scores.Where((k, v) => v >= 80).Select((k, v) => k)
+```
+```go
+var names []string
+for _k0, _v0 := range scores {
+    if _v0 >= 80 {
+        names = append(names, _k0)
+    }
+}
+```
+
+**Where + Aggregate (fused, no allocation):**
+```zinc
+let total = scores.Where((k, v) => v > 50).Aggregate(0, (acc, k, v) => acc + v)
+```
+```go
+total := 0
+for _k0, _v0 := range scores {
+    if _v0 > 50 {
+        total = total + _v0
+    }
+}
+```
+
+**Any (short-circuit):**
+```zinc
+let hasHigh = scores.Any((k, v) => v > 85)
+```
+```go
+hasHigh := false
+for _, _v0 := range scores {
+    if _v0 > 85 {
+        hasHigh = true
+        break
+    }
+}
+```
+
+### Future Map Methods (deferred)
+
+- `ToDictionary(keySelector, valueSelector)` — list-to-map materialization
+- `GroupBy` on maps
+- `Distinct` on map values
+- `OrderBy` on maps (requires materializing to sorted list of pairs)
+- Set operations (union, intersect, subtract) on maps by key
 
 ## Implementation Order
 

@@ -8,15 +8,19 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 
 ## Priority Order
 
-### P1 — Annotations / Decorators
+### P1 — Map Collection Methods
+Extend collection methods to work on `Map<K,V>` types. Type-preserving `Where` (returns `Map`, Kotlin/Swift style), `SelectValues`/`SelectKeys` for map-to-map transforms, plus `Select`, `ForEach`, `Any`, `All`, `Count`, `Aggregate` with `(k, v)` lambdas. Loop fusion codegen via `for k, v := range`. Design doc: `docs/design-collection-methods.md` (Map Collection Methods section).
+- **Effort:** Medium
+
+### P2 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P2 — Data Classes / Records
+### P3 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P3 — Typed Errors
+### P4 — Typed Errors
 Extend error handling with typed error classes. `is`/`as` operators and `or {}` handlers already work — this is mostly about error class conventions and codegen.
 
 - **What already works:** `is`/`as` type operators, `or {}` handlers with `err` variable, failable functions, error wrapping
@@ -40,30 +44,30 @@ Extend error handling with typed error classes. `is`/`as` operators and `or {}` 
 - **Design questions:** Should error classes require a `message` field? Auto-generate `Error()` from class name + fields? Interaction with error wrapping (`Error("context", baseErr)`)?
 - **Effort:** Medium — **write design doc first**
 
-### P4 — Structured Concurrency
+### P5 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
 
 - **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
 - **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
 - **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
 
-### P5 — VS Code Extension (Syntax Highlighting)
+### P6 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P6 — Project-Wide Watch Mode
+### P7 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P7 — `zinc test`
+### P8 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P8 — `zinc fmt`
+### P9 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P9 — Error Suggestions
+### P10 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
