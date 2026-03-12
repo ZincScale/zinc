@@ -1,15 +1,15 @@
 // Constants — immutable top-level values
 
 const PI = 3.14159
-const MAX_RETRIES: Int = 3
-const APP_NAME: String = "Zinc"
+const MAX_RETRIES Int = 3
+const APP_NAME String = "Zinc"
 const DEBUG: Bool = false
 
-fn circleArea(radius: Float): Float {
+circleArea(radius Float) Float {
     return PI * radius * radius
 }
 
-fn main() {
+main() {
     print("{APP_NAME} v1.0")
     print("PI = {PI}")
     print("Area of circle (r=5): {circleArea(5.0)}")

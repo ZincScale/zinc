@@ -1,15 +1,15 @@
 // Collection literals, methods, and iteration
 
-fn main() {
+main() {
     // Typed list literals
-    var nums = [10, 20, 30, 40, 50]
-    var names = ["Alice", "Bob", "Charlie"]
+    nums := [10, 20, 30, 40, 50]
+    names := ["Alice", "Bob", "Charlie"]
 
     // List methods
     nums.add(60)
     print(nums.size())         // 6
 
-    var copy = nums.clone()
+    copy := nums.clone()
     copy.sort()
     print(copy)                // [10 20 30 40 50 60]
 
@@ -26,20 +26,20 @@ fn main() {
     print(names.slice(1))          // [Bob Charlie]
 
     // Assign slices to new variables
-    var firstTwo = nums[:2]        // [10 20]
-    var lastThree = names.slice(1) // [Bob Charlie]
+    firstTwo := nums[:2]        // [10 20]
+    lastThree := names.slice(1) // [Bob Charlie]
     print(firstTwo)
     print(lastThree)
 
     // String slicing
-    var greeting = "Hello, Zinc!"
+    greeting := "Hello, Zinc!"
     print(greeting[0:5])           // Hello
     print(greeting.slice(7))       // Zinc!
-    var word = greeting[7:11]      // Zinc
+    word := greeting[7:11]      // Zinc
     print(word)
 
     // Typed map literals
-    var scores = {"math": 95, "science": 88, "english": 92}
+    scores := {"math": 95, "science": 88, "english": 92}
     print(scores["math"])      // 95
 
     // Map methods
@@ -56,18 +56,18 @@ fn main() {
     }
 
     // for-in with index
-    for (i, name) in names {
+    for i, name in names {
         print("{i}: {name}")
     }
 
     // for-in over map
-    for (subject, score) in scores {
+    for subject, score in scores {
         print("{subject} = {score}")
     }
 
     // Empty collections with declared types
-    var emptyList: List<Int> = []
-    var emptyMap: Map<String, Bool> = {}
+    var emptyList List<Int> = []
+    var emptyMap Map<String, Bool> = {}
     emptyList.add(1)
     emptyMap["yes"] = true
     print(emptyList.size())    // 1

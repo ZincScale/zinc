@@ -1,47 +1,47 @@
 interface Speaker {
-    pub fn speak(): String
+    pub speak() String
 }
 
-class Animal {
-    var name: String
+Animal {
+    var name String
 
-    new(name: String) {
+    new(name String) {
         this.name = name
     }
 
-    pub fn getName(): String {
+    pub getName() String {
         return this.name
     }
 }
 
-class Dog : Animal, Speaker {
-    var breed: String
+Dog : Animal, Speaker {
+    var breed String
 
-    new(name: String, breed: String) {
+    new(name String, breed String) {
         super(name)
         this.breed = breed
     }
 
-    pub fn speak(): String {
+    pub speak() String {
         return "Woof!"
     }
 
-    pub fn describe(): String {
+    pub describe() String {
         return this.getName()
     }
 }
 
 // Polymorphism: Dog satisfies both Animal and Speaker interfaces
-fn greetAnimal(a: Animal) {
+greetAnimal(a Animal) {
     print("Hello, {a.getName()}!")
 }
 
-fn makeSpeak(s: Speaker) {
+makeSpeak(s Speaker) {
     print(s.speak())
 }
 
-fn main() {
-    var d = Dog.new("Rex", "Labrador")
+main() {
+    d := Dog("Rex", "Labrador")
     print(d.speak())
     print(d.describe())
     greetAnimal(d)    // Dog passed as Animal

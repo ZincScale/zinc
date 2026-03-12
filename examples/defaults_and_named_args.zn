@@ -1,28 +1,28 @@
 // Default parameter values and named arguments
 
-fn greet(name: String, greeting: String = "Hello") {
+greet(name String, greeting String = "Hello") {
     print("{greeting}, {name}!")
 }
 
-fn connect(host: String, port: Int = 8080, tls: Bool = false) {
+connect(host String, port Int = 8080, tls Bool = false) {
     print("Connecting to {host}:{port} (tls={tls})")
 }
 
-class Dog {
-    var name: String
-    var age: Int
+Dog {
+    var name String
+    var age Int
 
-    new(name: String, age: Int = 0) {
+    new(name String, age Int = 0) {
         this.name = name
         this.age = age
     }
 
-    pub fn describe(): String {
+    pub describe() String {
         return "{this.name}, age {this.age}"
     }
 }
 
-fn main() {
+main() {
     // Default parameters
     greet("Alice")              // Hello, Alice!
     greet("Bob", "Hi")          // Hi, Bob!
@@ -33,9 +33,9 @@ fn main() {
     connect(tls: true, host: "secure.io")
 
     // Named constructor args
-    var d1 = Dog.new("Rex")
-    var d2 = Dog.new(name: "Buddy", age: 3)
-    var d3 = Dog.new(age: 5, name: "Spot")
+    d1 := Dog("Rex")
+    d2 := Dog(name: "Buddy", age: 3)
+    d3 := Dog(age: 5, name: "Spot")
     print(d1.describe())
     print(d2.describe())
     print(d3.describe())

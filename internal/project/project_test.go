@@ -141,8 +141,8 @@ func TestFindModNotFound(t *testing.T) {
 
 func TestTranspileSingleFile(t *testing.T) {
 	dir := t.TempDir()
-	src := `fn main() {
-    var x: Int = 42
+	src := `main() {
+    var x Int = 42
     print(x)
 }`
 	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(src), 0644)
@@ -183,7 +183,7 @@ func TestTranspileWithPackageDecl(t *testing.T) {
 
 	src := `package "myapp/utils"
 
-pub fn add(a: Int, b: Int): Int {
+pub add(a Int, b Int) Int {
     return a + b
 }
 `
@@ -213,12 +213,12 @@ pub fn add(a: Int, b: Int): Int {
 func TestTranspileMultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(`fn main() { print("hello") }`), 0644)
+	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(`main() { print("hello") }`), 0644)
 
 	utilsDir := filepath.Join(dir, "utils")
 	os.Mkdir(utilsDir, 0755)
 	os.WriteFile(filepath.Join(utilsDir, "math.zn"), []byte(`package "myapp/utils"
-pub fn add(a: Int, b: Int): Int { return a }`), 0644)
+pub add(a Int, b Int) Int { return a }`), 0644)
 
 	units, err := Transpile(dir)
 	if err != nil {
@@ -235,15 +235,15 @@ func TestTranspileSharedRegistry(t *testing.T) {
 	dir := t.TempDir()
 
 	animal := `package "myapp/models"
-class Animal {
-    var name: String
-    construct new(name: String) { this.name = name }
+Animal {
+    name String
+    new(name String) { this.name = name }
 }
 `
 	dog := `package "myapp/models"
-class Dog : Animal {
-    construct new(name: String) { super(name) }
-    pub fn bark(): String { return "Woof!" }
+Dog : Animal {
+    new(name String) { super(name) }
+    pub bark() String { return "Woof!" }
 }
 `
 	os.WriteFile(filepath.Join(dir, "animal.zn"), []byte(animal), 0644)
@@ -269,23 +269,23 @@ func TestCrossFileSuperArgs(t *testing.T) {
 	// ClassCtors across files for the super args to codegen correctly.
 	dir := t.TempDir()
 
-	animal := `class Animal {
-    var name: String
-    var sound: String
-    new(name: String, sound: String) {
+	animal := `Animal {
+    name String
+    sound String
+    new(name String, sound String) {
         this.name = name
         this.sound = sound
     }
 }
 `
-	dog := `class Dog : Animal {
-    new(name: String) {
+	dog := `Dog : Animal {
+    new(name String) {
         super(name, "Woof")
     }
 }
 
-fn main() {
-    var d = Dog.new("Rex")
+main() {
+    d := Dog("Rex")
     print(d.name)
 }
 `
@@ -322,12 +322,12 @@ func TestCrossFileFailableDetection(t *testing.T) {
 	// The registry must share CanThrowFns so B's caller auto-propagates.
 	dir := t.TempDir()
 
-	fileA := `fn risky(): Int {
+	fileA := `risky() Int {
     return Error("something went wrong")
 }
 `
-	fileB := `fn main() {
-    var x = risky()
+	fileB := `main() {
+    x := risky()
     print(x)
 }
 `
@@ -364,11 +364,11 @@ func TestCrossFileNamedArgs(t *testing.T) {
 	// File A defines a function with defaults, file B calls it with named args.
 	dir := t.TempDir()
 
-	fileA := `fn greet(name: String, greeting: String = "Hello") {
+	fileA := `greet(name String, greeting String = "Hello") {
     print("{greeting}, {name}!")
 }
 `
-	fileB := `fn main() {
+	fileB := `main() {
     greet("Alice")
     greet("Bob", greeting: "Hi")
 }
@@ -410,7 +410,7 @@ func TestCrossFileEnumUsage(t *testing.T) {
 
 	fileA := `enum Color { Red, Green, Blue }
 `
-	fileB := `fn describe(c: Color): String {
+	fileB := `describe(c Color) String {
     match c {
         case Color.Red => { return "red" }
         case Color.Green => { return "green" }
@@ -418,7 +418,7 @@ func TestCrossFileEnumUsage(t *testing.T) {
     }
 }
 
-fn main() {
+main() {
     print(describe(Color.Red))
     print(describe(Color.Blue))
 }
@@ -458,17 +458,17 @@ func TestCrossFileInterfaceCompliance(t *testing.T) {
 	dir := t.TempDir()
 
 	fileA := `interface Speaker {
-    pub fn speak(): String
+    pub speak() String
 }
 `
-	fileB := `class Dog : Speaker {
-    var name: String
-    new(n: String) { this.name = n }
-    pub fn speak(): String { return "{this.name} says woof" }
+	fileB := `Dog : Speaker {
+    name String
+    new(n String) { this.name = n }
+    pub speak() String { return "{this.name} says woof" }
 }
 
-fn main() {
-    var d = Dog.new("Rex")
+main() {
+    d := Dog("Rex")
     print(d.speak())
 }
 `
@@ -507,19 +507,19 @@ func TestCrossFileMethodNamedArgs(t *testing.T) {
 	// File B calls that method with named args.
 	dir := t.TempDir()
 
-	fileA := `class Greeter {
-    var prefix: String
-    new(prefix: String) { this.prefix = prefix }
-    pub fn greet(name: String, excited: Bool = false): String {
-        if (excited) {
+	fileA := `Greeter {
+    prefix String
+    new(prefix String) { this.prefix = prefix }
+    pub greet(name String, excited Bool = false) String {
+        if excited {
             return "{this.prefix} {name}!!!"
         }
         return "{this.prefix} {name}"
     }
 }
 `
-	fileB := `fn main() {
-    var g = Greeter.new("Hello")
+	fileB := `main() {
+    g := Greeter("Hello")
     print(g.greet("Alice"))
     print(g.greet("Bob", excited: true))
 }
@@ -606,23 +606,23 @@ func crossFileE2ERun(t *testing.T, files map[string]string) string {
 
 func TestE2ECrossFileSuperArgs(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
-		"animal.zn": `class Animal {
-    var name: String
-    var sound: String
-    new(name: String, sound: String) {
+		"animal.zn": `Animal {
+    name String
+    sound String
+    new(name String, sound String) {
         this.name = name
         this.sound = sound
     }
 }
 `,
-		"dog.zn": `class Dog : Animal {
-    new(name: String) {
+		"dog.zn": `Dog : Animal {
+    new(name String) {
         super(name, "Woof")
     }
 }
 
-fn main() {
-    var d = Dog.new("Rex")
+main() {
+    d := Dog("Rex")
     print(d.name)
     print(d.sound)
 }
@@ -635,12 +635,12 @@ fn main() {
 
 func TestE2ECrossFileFailableDetection(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
-		"a.zn": `fn risky(): Int {
+		"a.zn": `risky() Int {
     return Error("something went wrong")
 }
 `,
-		"b.zn": `fn main() {
-    var x = risky() or {
+		"b.zn": `main() {
+    x := risky() or {
         print("caught error")
         exit(0)
     }
@@ -655,11 +655,11 @@ func TestE2ECrossFileFailableDetection(t *testing.T) {
 
 func TestE2ECrossFileNamedArgs(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
-		"a.zn": `fn greet(name: String, greeting: String = "Hello"): String {
+		"a.zn": `greet(name String, greeting String = "Hello") String {
     return "{greeting}, {name}!"
 }
 `,
-		"b.zn": `fn main() {
+		"b.zn": `main() {
     print(greet("Alice"))
     print(greet("Bob", greeting: "Hi"))
 }
@@ -674,7 +674,7 @@ func TestE2ECrossFileEnumMatch(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
 		"color.zn": `enum Color { Red, Green, Blue }
 `,
-		"main.zn": `fn describe(c: Color): String {
+		"main.zn": `describe(c Color) String {
     match c {
         case Color.Red => { return "red" }
         case Color.Green => { return "green" }
@@ -682,7 +682,7 @@ func TestE2ECrossFileEnumMatch(t *testing.T) {
     }
 }
 
-fn main() {
+main() {
     print(describe(Color.Red))
     print(describe(Color.Green))
     print(describe(Color.Blue))
@@ -697,17 +697,17 @@ fn main() {
 func TestE2ECrossFileInterfaceCompliance(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
 		"speaker.zn": `interface Speaker {
-    pub fn speak(): String
+    pub speak() String
 }
 `,
-		"dog.zn": `class Dog : Speaker {
-    var name: String
-    new(n: String) { this.name = n }
-    pub fn speak(): String { return "{this.name} says woof" }
+		"dog.zn": `Dog : Speaker {
+    name String
+    new(n String) { this.name = n }
+    pub speak() String { return "{this.name} says woof" }
 }
 
-fn main() {
-    var d = Dog.new("Rex")
+main() {
+    d := Dog("Rex")
     print(d.speak())
 }
 `,
@@ -719,19 +719,19 @@ fn main() {
 
 func TestE2ECrossFileMethodNamedArgs(t *testing.T) {
 	out := crossFileE2ERun(t, map[string]string{
-		"greeter.zn": `class Greeter {
-    var prefix: String
-    new(prefix: String) { this.prefix = prefix }
-    pub fn greet(name: String, excited: Bool = false): String {
-        if (excited) {
+		"greeter.zn": `Greeter {
+    prefix String
+    new(prefix String) { this.prefix = prefix }
+    pub greet(name String, excited Bool = false) String {
+        if excited {
             return "{this.prefix} {name}!!!"
         }
         return "{this.prefix} {name}"
     }
 }
 `,
-		"main.zn": `fn main() {
-    var g = Greeter.new("Hello")
+		"main.zn": `main() {
+    g := Greeter("Hello")
     print(g.greet("Alice"))
     print(g.greet("Bob", excited: true))
 }

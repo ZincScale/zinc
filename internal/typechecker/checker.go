@@ -864,6 +864,13 @@ func (c *Checker) inferFnCall(name string, args []parser.Expr, namedArgs []parse
 	for _, na := range namedArgs {
 		c.inferExpr(na.Value)
 	}
+	// Check for ClassName(args) → constructor call (new syntax, no .new())
+	if ct, found := c.classes[name]; found {
+		if ct.Ctor != nil && !ct.isGeneric() {
+			c.validateArgs(ct.Ctor, name, args, namedArgs)
+		}
+		return ct
+	}
 	if sig, ok := c.fns[name]; ok {
 		c.validateArgs(sig, name, args, namedArgs)
 		return sig.Return

@@ -21,22 +21,22 @@ import (
 func TestIntegrationGenericClassImplementsInterface(t *testing.T) {
 	src := `
 interface Showable {
-    fn show(): String
+    show() String
 }
-class Container<T> : Showable {
-    var item: T
-    construct new(v: T) {
+Container<T> : Showable {
+    item T
+    new(v T) {
         this.item = v
     }
-    fn show(): String {
+    show() String {
         return "Container"
     }
-    fn get(): T {
+    get() T {
         return this.item
     }
 }
-fn main() {
-    var c = Container.new(42)
+main() {
+    c := Container(42)
     print(c.show())
 }`
 	out, errs := transpile(src)
@@ -50,12 +50,12 @@ fn main() {
 func TestIntegrationEnumFieldInClassWithMatch(t *testing.T) {
 	src := `
 enum Status { Active, Idle, Done }
-class Task {
-    var status: Status
-    construct new(s: Status) {
+Task {
+    status Status
+    new(s Status) {
         this.status = s
     }
-    fn describe(): String {
+    describe() String {
         match this.status {
             case Status.Active => { return "active" }
             case Status.Idle   => { return "idle" }
@@ -63,8 +63,8 @@ class Task {
         }
     }
 }
-fn main() {
-    var t = Task.new(StatusActive)
+main() {
+    t := Task(StatusActive)
     print(t.describe())
 }`
 	out, errs := transpile(src)
@@ -80,17 +80,17 @@ fn main() {
 
 func TestIntegrationAutoErrorPropagation(t *testing.T) {
 	src := `
-fn riskyOp(x: Int): Int {
-    if (x < 0) {
+riskyOp(x Int) Int {
+    if x < 0 {
         return Error("negative")
     }
     return x * 2
 }
-fn safeDouble(x: Int): Int {
-    var r = riskyOp(x)
+safeDouble(x Int) Int {
+    r := riskyOp(x)
     return r
 }
-fn main() {
+main() {
     print(safeDouble(5))
 }`
 	out, errs := transpile(src)
@@ -104,33 +104,33 @@ fn main() {
 
 func TestIntegrationMultiLevelInheritance(t *testing.T) {
 	src := `
-class Animal {
-    var name: String
-    construct new(n: String) {
+Animal {
+    name String
+    new(n String) {
         this.name = n
     }
-    pub fn speak(): String {
+    pub speak() String {
         return "..."
     }
 }
-class Dog : Animal {
-    construct new(n: String) {
+Dog : Animal {
+    new(n String) {
         super(n)
     }
-    pub fn speak(): String {
+    pub speak() String {
         return "Woof!"
     }
 }
-class GoldenRetriever : Dog {
-    construct new(n: String) {
+GoldenRetriever : Dog {
+    new(n String) {
         super(n)
     }
-    pub fn fetch(): String {
+    pub fetch() String {
         return "Fetch!"
     }
 }
-fn main() {
-    var g = GoldenRetriever.new("Buddy")
+main() {
+    g := GoldenRetriever("Buddy")
     print(g.speak())
     print(g.fetch())
 }`
@@ -148,19 +148,19 @@ fn main() {
 
 func TestIntegrationStringInterpolationInMethod(t *testing.T) {
 	src := `
-class Person {
-    var name: String
-    var age: Int
-    construct new(n: String, a: Int) {
+Person {
+    name String
+    age Int
+    new(n String, a Int) {
         this.name = n
         this.age = a
     }
-    fn greeting(): String {
+    greeting() String {
         return "Hello, I am {this.name} and I am {this.age} years old!"
     }
 }
-fn main() {
-    var p = Person.new("Alice", 30)
+main() {
+    p := Person("Alice", 30)
     print(p.greeting())
 }`
 	out, errs := transpile(src)
@@ -176,20 +176,20 @@ fn main() {
 
 func TestIntegrationOptionalFieldInGenericClass(t *testing.T) {
 	src := `
-class Wrapper<T> {
-    var content: T?
-    construct new() {
+Wrapper<T> {
+    content T?
+    new() {
         this.content = null
     }
-    fn set(v: T) {
+    set(v T) {
         this.content = v
     }
-    fn hasContent(): Bool {
+    hasContent() Bool {
         return this.content != null
     }
 }
-fn main() {
-    var w = Wrapper.new()
+main() {
+    w := Wrapper()
     print(w.hasContent())
 }`
 	out, errs := transpile(src)
@@ -205,8 +205,8 @@ fn main() {
 
 func TestIntegrationForInWithBuiltins(t *testing.T) {
 	src := `
-fn main() {
-    var words = ["hello", "world", "zinc"]
+main() {
+    words := ["hello", "world", "zinc"]
     for w in words {
         print(w.upper())
     }
@@ -224,12 +224,12 @@ fn main() {
 func TestIntegrationGoroutineChannel(t *testing.T) {
 	// Zinc channel syntax: go { ... }, ch.send(val), ch.receive()
 	src := `
-fn main() {
-    var ch: Chan<Int> = Chan.new(1)
+main() {
+    var ch Chan<Int> = Chan.new(1)
     go {
         ch.send(42)
     }
-    var result = ch.receive()
+    result := ch.receive()
     print(result)
 }`
 	out, errs := transpile(src)
@@ -244,29 +244,29 @@ fn main() {
 func TestIntegrationClassExtendsClassAndInterface(t *testing.T) {
 	src := `
 interface Speaker {
-    pub fn speak(): String
+    pub speak() String
 }
-class Animal {
-    var name: String
-    construct new(n: String) {
+Animal {
+    name String
+    new(n String) {
         this.name = n
     }
-    pub fn getName(): String {
+    pub getName() String {
         return this.name
     }
 }
-class Dog : Animal, Speaker {
-    var breed: String
-    construct new(n: String, b: String) {
+Dog : Animal, Speaker {
+    breed String
+    new(n String, b String) {
         super(n)
         this.breed = b
     }
-    pub fn speak(): String {
+    pub speak() String {
         return "Woof!"
     }
 }
-fn main() {
-    var d = Dog.new("Rex", "Lab")
+main() {
+    d := Dog("Rex", "Lab")
     print(d.speak())
     print(d.getName())
 }`
@@ -282,8 +282,8 @@ fn main() {
 
 func TestIntegrationWithPlainResource(t *testing.T) {
 	src := `
-fn main() {
-    with (var f = openFile("x")) {
+main() {
+    with (f := openFile("x")) {
         print("ok")
     }
 }
@@ -298,16 +298,16 @@ fn main() {
 
 func TestIntegrationWithInClassMethod(t *testing.T) {
 	src := `
-class DataProcessor {
-    construct new() {}
-    pub fn process() {
-        with (var handle = openFile("data.txt")) {
+DataProcessor {
+    new() {}
+    pub process() {
+        with (handle := openFile("data.txt")) {
             print("processing")
         }
     }
 }
-fn main() {
-    var p = DataProcessor.new()
+main() {
+    p := DataProcessor()
     p.process()
 }
 `
@@ -325,10 +325,10 @@ fn main() {
 func TestIntegrationWithMutexInGoroutine(t *testing.T) {
 	src := `
 import "sync"
-fn main() {
-    var mu = sync.Mutex.new()
+main() {
+    mu := sync.Mutex.new()
     go {
-        with (var lock = mu) {
+        with (lock := mu) {
             print("critical section")
         }
     }
@@ -348,12 +348,12 @@ fn main() {
 
 func TestIntegrationGoRoutineReturnError(t *testing.T) {
 	src := `
-fn risky(): Int {
+risky() Int {
     return Error("oops")
 }
-fn main() {
+main() {
     go {
-        var r = risky()
+        r := risky()
         print(r)
     }
 }
@@ -369,9 +369,9 @@ fn main() {
 
 func TestIntegrationGoRoutineWith(t *testing.T) {
 	src := `
-fn main() {
+main() {
     go {
-        with (var f = openFile("x")) {
+        with (f := openFile("x")) {
             print("reading")
         }
     }
@@ -388,10 +388,10 @@ fn main() {
 
 func TestIntegrationGoRoutineClosure(t *testing.T) {
 	src := `
-fn main() {
-    var base = 10
+main() {
+    base := 10
     go {
-        var addBase = (x: Int): Int => x + base
+        addBase := (x Int) Int => x + base
         print(addBase(5))
     }
 }
@@ -409,12 +409,12 @@ func TestIntegrationGoRoutineReturnErrorPanics(t *testing.T) {
 	// return Error directly inside a goroutine should panic (not return) since
 	// goroutines have their own void scope
 	src := `
-fn risky(): Int {
+risky() Int {
     return Error("fatal")
 }
-fn main() {
+main() {
     go {
-        var x = risky()
+        x := risky()
         print(x)
     }
 }
@@ -431,15 +431,15 @@ fn main() {
 func TestIntegrationReturnErrorInsideFailable(t *testing.T) {
 	// return Error inside a failable function emits return zero, fmt.Errorf
 	src := `
-fn risky(): Int {
+risky() Int {
     return Error("fn error")
 }
-fn caller(): Int {
-    var r = risky()
+caller() Int {
+    r := risky()
     return r
 }
-fn main() {
-    var x = caller()
+main() {
+    x := caller()
     print(x)
 }
 `

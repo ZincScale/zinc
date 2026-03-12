@@ -2,37 +2,37 @@
 // without manual null checks. If the receiver is nil, the expression returns nil.
 // Inspired by Kotlin, C#, Swift, and TypeScript.
 
-class Address {
-    var city: String
-    var zip: String
+Address {
+    var city String
+    var zip String
 
-    new(city: String, zip: String) {
+    new(city String, zip String) {
         this.city = city
         this.zip = zip
     }
 
-    pub fn format(): String {
+    pub format() String {
         return "{this.city} {this.zip}"
     }
 }
 
-class User {
-    var name: String
-    var address: Address?
+User {
+    var name String
+    var address Address?
 
-    new(name: String, addr: Address?) {
+    new(name String, addr Address?) {
         this.name = name
         this.address = addr
     }
 
-    pub fn greet(): String {
+    pub greet() String {
         return "Hi, I'm {this.name}"
     }
 }
 
-fn main() {
+main() {
     // --- Field access on non-nil ---
-    var alice: User? = User.new("Alice", Address.new("NYC", "10001"))
+    var alice User? = User("Alice", Address("NYC", "10001"))
     print(alice?.name)          // Alice
 
     // --- Chaining: a?.b?.c ---
@@ -43,17 +43,17 @@ fn main() {
     print(alice?.address?.format()) // NYC 10001
 
     // --- Nil receiver: everything short-circuits safely ---
-    var nobody: User? = null
+    var nobody User? = null
     print(nobody?.name)              // <nil>
     print(nobody?.address?.city)     // <nil>
     nobody?.greet()                  // no-op, nothing happens
 
     // --- Nil mid-chain: user exists but address is nil ---
-    var bob: User? = User.new("Bob", null)
+    var bob User? = User("Bob", null)
     print(bob?.address?.city)   // <nil>
 
     // --- Void method on nil: safe, no crash ---
-    var ghost: User? = null
+    var ghost User? = null
     ghost?.greet()              // skipped entirely
     print("done")
 }

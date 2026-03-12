@@ -1310,30 +1310,35 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
-	// Special case: collection .new() constructors — Chan, List, Map
+	// Special case: collection constructors — Chan, List, Map
+	// Supports both Chan.new(1) (legacy) and Chan(1) (new syntax)
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if ident, ok := sel.Object.(*parser.Ident); ok && sel.Field == "new" {
-					switch ident.Name {
-					case "Chan":
-						chanType := g.emitType(v.Type)
-						bufSize := "0"
-						if len(call.Args) > 0 {
-							bufSize = g.emitExpr(call.Args[0])
-						}
-						g.writeln(fmt.Sprintf("%s := make(%s, %s)", v.Name, chanType, bufSize))
-						return
-					case "List":
-						listType := g.emitType(v.Type)
-						g.writeln(fmt.Sprintf("%s := %s{}", v.Name, listType))
-						return
-					case "Map":
-						mapType := g.emitType(v.Type)
-						g.writeln(fmt.Sprintf("%s := %s{}", v.Name, mapType))
-						return
-					}
+			ctorName := ""
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
+				if ident, ok := sel.Object.(*parser.Ident); ok {
+					ctorName = ident.Name
 				}
+			} else if ident, ok := call.Callee.(*parser.Ident); ok {
+				ctorName = ident.Name
+			}
+			switch ctorName {
+			case "Chan":
+				chanType := g.emitType(v.Type)
+				bufSize := "0"
+				if len(call.Args) > 0 {
+					bufSize = g.emitExpr(call.Args[0])
+				}
+				g.writeln(fmt.Sprintf("%s := make(%s, %s)", v.Name, chanType, bufSize))
+				return
+			case "List":
+				listType := g.emitType(v.Type)
+				g.writeln(fmt.Sprintf("%s := %s{}", v.Name, listType))
+				return
+			case "Map":
+				mapType := g.emitType(v.Type)
+				g.writeln(fmt.Sprintf("%s := %s{}", v.Name, mapType))
+				return
 			}
 		}
 	}
@@ -1350,11 +1355,14 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			g.recordVarTypeFromCall(v.Name, call)
-			// Track class instance variables (ClassName.new())
+			// Track class instance variables (ClassName.new() or ClassName())
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
 				if ident, ok := sel.Object.(*parser.Ident); ok && g.classNames[ident.Name] {
 					g.classVars[v.Name] = ident.Name
 				}
+			}
+			if ident, ok := call.Callee.(*parser.Ident); ok && g.classNames[ident.Name] {
+				g.classVars[v.Name] = ident.Name
 			}
 		}
 	}
@@ -2724,6 +2732,15 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 		resolved := g.resolveArgs(methodParamList, call)
 		return fmt.Sprintf("%s.%s(%s)", obj, method, strings.Join(resolved, ", "))
 	case *parser.Ident:
+		// ClassName(args) → NewClassName(args) — constructor without .new()
+		if g.classNames[callee.Name] {
+			var ctorParams []*parser.ParamDecl
+			if ctor := g.classCtors[callee.Name]; ctor != nil {
+				ctorParams = ctor.Params
+			}
+			resolved := g.resolveArgs(ctorParams, call)
+			return fmt.Sprintf("New%s(%s)", callee.Name, strings.Join(resolved, ", "))
+		}
 		params := g.fnParams[callee.Name]
 		resolved := g.resolveArgs(params, call)
 		return g.emitBuiltinCall(callee.Name, strings.Join(resolved, ", "), call.Args, call.TypeArgs)

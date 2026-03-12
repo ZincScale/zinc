@@ -1,6 +1,6 @@
 enum Direction { North, South, East, West }
 
-fn describe(d: Direction): String {
+describe(d Direction) String {
     match d {
         case Direction.North => { return "Going North" }
         case Direction.South => { return "Going South" }
@@ -10,10 +10,10 @@ fn describe(d: Direction): String {
     }
 }
 
-fn main() {
-    var dir: Direction = Direction.North
+main() {
+    var dir Direction = Direction.North
     print(describe(dir))
 
-    var dir2: Direction = Direction.East
+    var dir2 Direction = Direction.East
     print(describe(dir2))
 }

@@ -151,6 +151,10 @@ func (l *Lexer) NextToken() Token {
 		}
 		return l.makeToken(TOKEN_DOT, ".", line, col)
 	case ':':
+		if l.peek() == '=' {
+			l.advance()
+			return l.makeToken(TOKEN_COLONASSIGN, ":=", line, col)
+		}
 		return l.makeToken(TOKEN_COLON, ":", line, col)
 	case ';':
 		return l.makeToken(TOKEN_SEMICOLON, ";", line, col)

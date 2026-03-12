@@ -1,12 +1,12 @@
 import "myapp/utils"
 import "myapp/models"
 
-fn main() {
-    var sum: Int = utils.Add(10, 32)
-    var product: Int = utils.Multiply(6, 7)
+main() {
+    var sum Int = utils.Add(10, 32)
+    var product Int = utils.Multiply(6, 7)
     print(sum)
     print(product)
 
-    var dog: Any = models.NewDog("Rex")
+    var dog Any = models.NewDog("Rex")
     print(dog)
 }

@@ -1,6 +1,6 @@
 // Variadic function — accepts any number of Int args
-fn sum(nums: ...Int) : Int {
-    var total = 0
+sum(nums ...Int) : Int {
+    total := 0
     for n in nums {
         total += n
     }
@@ -8,62 +8,62 @@ fn sum(nums: ...Int) : Int {
 }
 
 // Fixed params + variadic
-fn log(level: String, messages: ...String) {
+log(level String, messages ...String) {
     for msg in messages {
         print("[{level}] {msg}")
     }
 }
 
 // Class with variadic method
-class Builder {
-    var parts: List<String>
+Builder {
+    var parts List<String>
 
     new() {
         this.parts = ["placeholder"]
         this.parts = this.parts[0:0]
     }
 
-    pub fn append(items: ...String) {
+    pub append(items ...String) {
         for item in items {
             this.parts.add(item)
         }
     }
 
-    pub fn build() : String {
+    pub build() : String {
         return this.parts.join(", ")
     }
 }
 
-fn main() {
+main() {
     // Basic variadic calls
     print(sum(1, 2, 3))
     print(sum(10, 20, 30, 40))
     print(sum())
 
     // Spread a list into variadic args
-    var nums = [5, 10, 15]
+    nums := [5, 10, 15]
     print(sum(nums...))
 
     // Fixed + variadic params
     log("INFO", "server started", "listening on :8080")
 
     // list.add() with multiple args
-    var items = [1, 2]
+    items := [1, 2]
     items.add(3, 4, 5)
     print(items)
 
     // list.add() with spread
-    var more = [6, 7, 8]
+    more := [6, 7, 8]
     items.add(more...)
     print(items)
 
     // Variadic method
-    var b = Builder.new()
+    b := Builder()
     b.append("alpha", "beta", "gamma")
     print(b.build())
 
     // String interpolation (idiomatic Zinc — no fmt.Sprintf needed)
-    var who = "Alice"
-    var age = 30
+    who := "Alice"
+    age := 30
     print("Hello {who}, age {age}")
 }

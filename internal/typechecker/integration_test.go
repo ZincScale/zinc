@@ -21,29 +21,29 @@ import (
 func TestTypecheckerKitchenSink(t *testing.T) {
 	src := `
 interface Describable {
-    fn describe(): String
+    describe() String
 }
 enum Level { Low, Mid, High }
-class Score<T> : Describable {
-    var value: T
-    var level: Level
-    construct new(v: T, l: Level) {
+Score<T> : Describable {
+    value T
+    level Level
+    new(v T, l Level) {
         this.value = v
         this.level = l
     }
-    fn describe(): String {
+    describe() String {
         return "Score"
     }
 }
-fn getLevel(s: Int): Level {
-    if (s > 80) {
+getLevel(s Int) Level {
+    if s > 80 {
         return Level.High
     }
     return Level.Low
 }
-fn main() {
-    var lvl = getLevel(90)
-    var sc = Score.new(42, lvl)
+main() {
+    lvl := getLevel(90)
+    sc := Score(42, lvl)
     print(sc.describe())
 }`
 	errs := checkSrc(src)
@@ -52,15 +52,15 @@ fn main() {
 
 func TestTypecheckerFailableAutoPropagate(t *testing.T) {
 	src := `
-fn risky(x: Int): Int {
-    if (x < 0) { return Error("bad") }
+risky(x Int) Int {
+    if x < 0 { return Error("bad") }
     return x
 }
-fn run(): Int {
-    var a = risky(1)
+run() Int {
+    a := risky(1)
     return a
 }
-fn main() {
+main() {
     print(run())
 }`
 	errs := checkSrc(src)
@@ -69,12 +69,12 @@ fn main() {
 
 func TestTypecheckerOrHandlerScope(t *testing.T) {
 	src := `
-fn risky(x: Int): Int {
-    if (x < 0) { return Error("bad") }
+risky(x Int) Int {
+    if x < 0 { return Error("bad") }
     return x
 }
-fn main() {
-    var a = risky(1) or {
+main() {
+    a := risky(1) or {
         print(err)
         exit(1)
     }
@@ -86,33 +86,33 @@ fn main() {
 
 func TestTypecheckerMultiLevelInheritance(t *testing.T) {
 	src := `
-class Base {
-    var id: Int
-    construct new(i: Int) {
+Base {
+    id Int
+    new(i Int) {
         this.id = i
     }
-    pub fn getId(): Int {
+    pub getId() Int {
         return this.id
     }
 }
-class Middle : Base {
-    construct new(i: Int) {
+Middle : Base {
+    new(i Int) {
         super(i)
     }
-    pub fn doubled(): Int {
+    pub doubled() Int {
         return this.id * 2
     }
 }
-class Leaf : Middle {
-    construct new(i: Int) {
+Leaf : Middle {
+    new(i Int) {
         super(i)
     }
-    pub fn label(): String {
+    pub label() String {
         return "leaf"
     }
 }
-fn main() {
-    var l = Leaf.new(5)
+main() {
+    l := Leaf(5)
     print(l.label())
 }`
 	errs := checkSrc(src)
@@ -121,13 +121,13 @@ fn main() {
 
 func TestTypecheckerReturnTypeMismatchInMethod(t *testing.T) {
 	src := `
-class Calc {
-    fn double(x: Int): Int {
+Calc {
+    double(x Int) Int {
         return "oops"
     }
 }
-fn main() {
-    var c = Calc.new()
+main() {
+    c := Calc()
 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "return") {
@@ -138,27 +138,27 @@ fn main() {
 func TestTypecheckerClassPlusInterfaceNoFalsePositives(t *testing.T) {
 	src := `
 interface Speaker {
-    pub fn speak(): String
+    pub speak() String
 }
-class Animal {
-    var name: String
-    construct new(n: String) {
+Animal {
+    name String
+    new(n String) {
         this.name = n
     }
-    pub fn getName(): String {
+    pub getName() String {
         return this.name
     }
 }
-class Dog : Animal, Speaker {
-    construct new(n: String) {
+Dog : Animal, Speaker {
+    new(n String) {
         super(n)
     }
-    pub fn speak(): String {
+    pub speak() String {
         return "Woof!"
     }
 }
-fn main() {
-    var d = Dog.new("Rex")
+main() {
+    d := Dog("Rex")
     print(d.speak())
     print(d.getName())
 }`

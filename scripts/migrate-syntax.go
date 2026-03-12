@@ -24,9 +24,9 @@ var (
 	reFuncDecl = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*\s*[<(]`)
 	// field heuristic: starts with lowercase identifier + space + CapitalType
 	reFieldDecl = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*\s+[A-Z]`)
-	// mid-line var with explicit type: var name: Type = ... → name Type = ...
+	// mid-line var with explicit type: var name: Type = ... → var name Type = ... (keep var, drop colon)
 	reVarTyped = regexp.MustCompile(`\bvar ([a-z_][a-zA-Z0-9_]*):\s*([A-Z][a-zA-Z0-9_<>\[\]?]*)(\s*=)`)
-	// mid-line var with explicit type (no init): var name: Type → name Type
+	// mid-line var with explicit type (no init): var name: Type → var name Type (keep var, drop colon)
 	reVarTypedNoInit = regexp.MustCompile(`\bvar ([a-z_][a-zA-Z0-9_]*):\s*([A-Z][a-zA-Z0-9_<>\[\]?]*)`)
 	// mid-line var inferred: var name = ... → name := ...
 	reVarInferred = regexp.MustCompile(`\bvar ([a-z_][a-zA-Z0-9_]*) = `)
@@ -95,10 +95,11 @@ func migrateLine(line string) string {
 	return indent + trimmed
 }
 
-// migrateVar handles var declarations:
-//   - var name: Type [= expr]  → name Type [= expr]     (field or typed local)
-//   - var name = expr           → name := expr            (inferred local)
+// migrateVar handles var declarations at line start:
+//   - var name: Type [= expr]  → name Type [= expr]     (field — drop var and colon)
+//   - var name = expr           → name := expr            (inferred local — drop var)
 //   - var (a, b) = ...          → unchanged (tuple)
+// Note: mid-line var with explicit type is handled by migrateVarMidLine (keeps var).
 func migrateVar(trimmed string) string {
 	if !strings.HasPrefix(trimmed, "var ") {
 		return trimmed
@@ -121,11 +122,10 @@ func migrateVar(trimmed string) string {
 
 	// Has type annotation: "var name: Type ..." or "var name:Type ..."
 	if after[0] == ':' {
-		// Strip ": " or ":" before type
+		// Strip ": " or ":" before type, keep var
 		after = strings.TrimLeft(after, ":")
 		after = strings.TrimLeft(after, " ")
-		// Result: name Type [= expr]
-		return name + " " + after
+		return "var " + name + " " + after
 	}
 
 	// "var name = expr" (space after name, next is = or something else)
@@ -135,10 +135,9 @@ func migrateVar(trimmed string) string {
 		return name + " := " + after[2:]
 	}
 
-	// "var name Type ..." (no colon — already new-style, or explicit type without colon)
-	// Check if next word starts with capital (type name)
+	// "var name Type ..." (no colon — already new-style, keep var)
 	if len(after) > 0 && after[0] >= 'A' && after[0] <= 'Z' {
-		return name + " " + after
+		return "var " + name + " " + after
 	}
 
 	// Unknown pattern, keep as-is
@@ -148,10 +147,10 @@ func migrateVar(trimmed string) string {
 // migrateVarMidLine handles var declarations that appear mid-line
 // (e.g. inside "main() { var x: Int = 42 }").
 func migrateVarMidLine(line string) string {
-	// var name: Type = expr → name Type = expr
-	line = reVarTyped.ReplaceAllString(line, "${1} ${2}${3}")
-	// var name: Type (no init) → name Type
-	line = reVarTypedNoInit.ReplaceAllString(line, "${1} ${2}")
+	// var name: Type = expr → var name Type = expr (keep var, drop colon)
+	line = reVarTyped.ReplaceAllString(line, "var ${1} ${2}${3}")
+	// var name: Type (no init) → var name Type (keep var, drop colon)
+	line = reVarTypedNoInit.ReplaceAllString(line, "var ${1} ${2}")
 	// var name = expr → name := expr
 	line = reVarInferred.ReplaceAllString(line, "${1} := ")
 	return line

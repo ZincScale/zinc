@@ -1,26 +1,26 @@
 // Type casting with `as` and type checking with `is`
 
-fn describe(x: Any): String {
-    if (x is Int) {
-        var n = x as Int
+describe(x Any) String {
+    if x is Int {
+        n := x as Int
         return "Int: {n}"
     }
-    if (x is String) {
-        var s = x as String
+    if x is String {
+        s := x as String
         return "String: {s}"
     }
     return "Unknown type"
 }
 
-fn main() {
-    var a: Any = 42
-    var b: Any = "hello"
+main() {
+    var a Any = 42
+    var b Any = "hello"
 
     print(describe(a))     // Int: 42
     print(describe(b))     // String: hello
 
     // Direct type assertion
-    var n = a as Int
+    n := a as Int
     print(n + 1)            // 43
 
     // Type check returns Bool

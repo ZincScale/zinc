@@ -1,19 +1,19 @@
 package "myapp/models"
 
-class Animal {
-    var name: String
-    var sound: String
+Animal {
+    var name String
+    var sound String
 
-    new(name: String, sound: String) {
+    new(name String, sound String) {
         this.name = name
         this.sound = sound
     }
 
-    pub fn speak(): String {
+    pub speak() String {
         return "{this.name} says {this.sound}!"
     }
 
-    pub fn getName(): String {
+    pub getName() String {
         return this.name
     }
 }

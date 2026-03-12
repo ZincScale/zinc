@@ -464,7 +464,7 @@ func TestParseMixedPositionalAndNamedArgs(t *testing.T) {
 }
 
 func TestParseWithStmtSingle(t *testing.T) {
-	prog, p := parse(`fn main() { with (var f = openFile("x")) { } }`)
+	prog, p := parse(`main() { with (f := openFile("x")) { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ws, ok := fn.Body.Stmts[0].(*WithStmt)
@@ -483,7 +483,7 @@ func TestParseWithStmtSingle(t *testing.T) {
 }
 
 func TestParseWithStmtMultiple(t *testing.T) {
-	prog, p := parse(`fn main() { with (var a = foo(), var b = bar()) { } }`)
+	prog, p := parse(`main() { with (a := foo(), b := bar()) { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ws, ok := fn.Body.Stmts[0].(*WithStmt)
