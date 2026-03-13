@@ -713,7 +713,8 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		if e.ReturnType != nil {
 			c.currentReturnType = c.resolveTypeExpr(e.ReturnType)
 		} else {
-			c.currentReturnType = TypeVoid
+			// Lambda return type is always inferred — skip return type validation
+			c.currentReturnType = TypeUnknown
 		}
 		c.pushScope()
 		for _, param := range e.Params {

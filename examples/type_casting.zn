@@ -1,6 +1,6 @@
 // Type casting with `as` and type checking with `is`
 
-describe(x Any) String {
+String describe(Any x) {
     if x is Int {
         n := x as Int
         return "Int: {n}"
@@ -13,8 +13,8 @@ describe(x Any) String {
 }
 
 main() {
-    a Any = 42
-    b Any = "hello"
+    Any a = 42
+    Any b = "hello"
 
     print(describe(a))     // Int: 42
     print(describe(b))     // String: hello

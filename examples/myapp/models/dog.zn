@@ -1,17 +1,17 @@
 package "myapp/models"
 
 Dog : Animal {
-    tricks List<String>
+    List<String> tricks
 
-    new(name String) {
+    new(String name) {
         super(name, "Woof")
     }
 
-    pub learnTrick(trick String) {
+    pub learnTrick(String trick) {
         this.tricks.add(trick)
     }
 
-    pub trickCount() Int {
+    pub Int trickCount() {
         return this.tricks.size()
     }
 }

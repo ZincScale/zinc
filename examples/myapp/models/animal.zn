@@ -1,19 +1,19 @@
 package "myapp/models"
 
 Animal {
-    name String
-    sound String
+    String name
+    String sound
 
-    new(name String, sound String) {
+    new(String name, String sound) {
         this.name = name
         this.sound = sound
     }
 
-    pub speak() String {
+    pub String speak() {
         return "{this.name} says {this.sound}!"
     }
 
-    pub getName() String {
+    pub String getName() {
         return this.name
     }
 }

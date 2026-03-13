@@ -1,5 +1,5 @@
 // Variadic function — accepts any number of Int args
-sum(nums ...Int) Int {
+Int sum(Int... nums) {
     total := 0
     for n in nums {
         total += n
@@ -8,7 +8,7 @@ sum(nums ...Int) Int {
 }
 
 // Fixed params + variadic
-log(level String, messages ...String) {
+log(String level, String... messages) {
     for msg in messages {
         print("[{level}] {msg}")
     }
@@ -16,20 +16,20 @@ log(level String, messages ...String) {
 
 // Class with variadic method
 Builder {
-    parts List<String>
+    List<String> parts
 
     new() {
         this.parts = ["placeholder"]
         this.parts = this.parts[0:0]
     }
 
-    pub append(items ...String) {
+    pub append(String... items) {
         for item in items {
             this.parts.add(item)
         }
     }
 
-    pub build() String {
+    pub String build() {
         return this.parts.join(", ")
     }
 }

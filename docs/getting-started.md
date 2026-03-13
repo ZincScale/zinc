@@ -77,7 +77,7 @@ myapp/
 ```
 package "myapp/utils"
 
-pub add(a Int, b Int) Int {
+pub Int add(Int a, Int b) {
     return a + b
 }
 ```
@@ -88,15 +88,15 @@ pub add(a Int, b Int) Int {
 package "myapp/models"
 
 User {
-    name String
-    age Int
+    String name
+    Int age
 
-    new(name String, age Int) {
+    new(String name, Int age) {
         this.name = name
         this.age = age
     }
 
-    pub greet() String {
+    pub String greet() {
         return "Hi, I'm {this.name}!"
     }
 }
@@ -224,7 +224,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs coverin
 | [`defaults_and_named_args.zn`](../examples/defaults_and_named_args.zn) | Default parameters + named arguments |
 | [`type_casting.zn`](../examples/type_casting.zn) | Type assertions (`as`) and checks (`is`) |
 | [`collections.zn`](../examples/collections.zn) | Typed literals, collection methods, slicing, iteration |
-| [`callable_types.zn`](../examples/callable_types.zn) | `Fn<>` function types + higher-order functions |
+| [`callable_types.zn`](../examples/callable_types.zn) | `Fn` function types + higher-order functions |
 | [`labeled_loops.zn`](../examples/labeled_loops.zn) | Labeled `break` and `continue` |
 | [`tuple_unpacking.zn`](../examples/tuple_unpacking.zn) | Multi-return unpacking + error handling |
 | [`constants.zn`](../examples/constants.zn) | `const` declarations |

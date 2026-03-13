@@ -7,7 +7,7 @@ x := 42
 name := "Zinc"
 flag := true
 ratio := 3.14
-maybeNull String? = null    // optional (nullable) type
+String? maybeNull = null    // optional (nullable) type
 ```
 
 ## Constants
@@ -16,8 +16,8 @@ Top-level immutable values declared with `const`:
 
 ```zinc
 const PI = 3.14159
-const MAX_RETRIES Int = 3
-const APP_NAME String = "Zinc"
+const Int MAX_RETRIES = 3
+const String APP_NAME = "Zinc"
 
 main() {
     print(APP_NAME)
@@ -41,11 +41,11 @@ func main() {
 ## Functions
 
 ```zinc
-add(a Int, b Int) Int {
+Int add(Int a, Int b) {
     return a + b
 }
 
-pub greet(name String) String {
+pub String greet(String name) {
     return "Hello, {name}!"
 }
 ```
@@ -55,7 +55,7 @@ pub greet(name String) String {
 Parameters may declare a default value with `= expr`. Callers that omit the argument receive the default — inlined by the transpiler into the emitted Go call site (no runtime overhead):
 
 ```zinc
-greet(name String, greeting String = "Hello") {
+greet(String name, String greeting = "Hello") {
     print("{greeting}, {name}!")
 }
 
@@ -83,7 +83,7 @@ func main() {
 Arguments may be passed by name at any call site using `name: value` syntax. Named arguments may appear in any order and can be mixed with leading positional arguments. Positional arguments must always come first.
 
 ```zinc
-connect(host String, port Int = 8080, tls Bool = false) { }
+connect(String host, Int port = 8080, Bool tls = false) { }
 
 main() {
     connect("localhost")                       // both defaults used
@@ -96,10 +96,10 @@ Named arguments also work on constructors:
 
 ```zinc
 Dog {
-    name String
-    age Int
+    String name
+    Int age
 
-    new(name String, age Int = 0) {
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
@@ -127,21 +127,21 @@ func main() {
 ### Generic Functions
 
 ```zinc
-identity<T>(val T) T {
+T identity<T>(T val) {
     return val
 }
 
-pair<K, V>(key K, value V) K {
+K pair<K, V>(K key, V value) {
     return key
 }
 ```
 
 ### Variadic Functions
 
-Functions can accept a variable number of arguments using `...Type` syntax — the last parameter becomes a variadic parameter:
+Functions can accept a variable number of arguments using `Type...` syntax — the last parameter becomes a variadic parameter:
 
 ```zinc
-log(level String, msgs ...String) {
+log(String level, String... msgs) {
     for msg in msgs {
         print("[{level}] {msg}")
     }
@@ -176,19 +176,19 @@ func main() {
 
 ```zinc
 Dog {
-    name String
-    age Int
+    String name
+    Int age
 
-    new(name String, age Int = 0) {
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
 
-    pub bark() String {
+    pub String bark() {
         return "{this.name} says: Woof!"
     }
 
-    pub static create(name String) Dog {
+    pub static Dog create(String name) {
         return Dog(name)
     }
 }
@@ -200,21 +200,21 @@ Every class has one primary constructor declared with `new(...)`, called as `Cla
 
 ```zinc
 Point {
-    x Float
-    y Float
+    Float x
+    Float y
 
-    new(x Float, y Float) {
+    new(Float x, Float y) {
         this.x = x
         this.y = y
     }
 
     // Named constructor — origin
-    pub static origin() Point {
+    pub static Point origin() {
         return Point(0.0, 0.0)
     }
 
     // Named constructor — from a single value
-    pub static diagonal(v Float) Point {
+    pub static Point diagonal(Float v) {
         return Point(v, v)
     }
 }
@@ -263,13 +263,13 @@ func Point_Diagonal(v float64) *PointImpl {
 
 ```zinc
 Box<T> {
-    value T
+    T value
 
-    new(v T) {
+    new(T v) {
         this.value = v
     }
 
-    pub get() T {
+    pub T get() {
         return this.value
     }
 }
@@ -287,18 +287,18 @@ Generic classes can use empty list/map literals in constructors — the type is 
 
 ```zinc
 Stack<T> {
-    items List<T>
+    List<T> items
 
-    new(initial T) {
+    new(T initial) {
         this.items = []             // inferred as []T{}, not []interface{}{}
         this.items.add(initial)
     }
 
-    pub push(item T) {
+    pub push(T item) {
         this.items.add(item)
     }
 
-    pub count() Int {
+    pub Int count() {
         return this.items.size()
     }
 }
@@ -315,10 +315,10 @@ Multi-type-parameter generic classes:
 
 ```zinc
 Pair<K, V> {
-    key K
-    val V
+    K key
+    V val
 
-    new(key K, val V) {
+    new(K key, V val) {
         this.key = key
         this.val = val
     }
@@ -363,11 +363,11 @@ u := url.URL{Scheme: "https", Host: "example.com", Path: "/api"}
 
 ```zinc
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 
 Cat : Speaker {
-    pub speak() String {
+    pub String speak() {
         return "Meow!"
     }
 }
@@ -377,16 +377,16 @@ Cat : Speaker {
 
 ```zinc
 Animal {
-    name String
-    new(name String) { this.name = name }
-    pub describe() String { return "Animal: {this.name}" }
+    String name
+    new(String name) { this.name = name }
+    pub String describe() { return "Animal: {this.name}" }
 }
 
 Dog : Animal, Speaker {
-    new(name String) {
+    new(String name) {
         super(name)
     }
-    pub speak() String { return "Woof!" }
+    pub String speak() { return "Woof!" }
 }
 ```
 
@@ -396,22 +396,22 @@ Zinc classes support true OO polymorphism. A function that accepts a class or in
 
 ```zinc
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 
 Animal {
-    name String
-    new(n String) { this.name = n }
+    String name
+    new(String n) { this.name = n }
 }
 
 Dog : Animal, Speaker {
-    new(n String) { super(n) }
-    pub speak() String {
+    new(String n) { super(n) }
+    pub String speak() {
         return "{this.name} says Woof!"
     }
 }
 
-printSpeak(s Speaker) {
+printSpeak(Speaker s) {
     print(s.speak())
 }
 
@@ -426,7 +426,7 @@ This works because each class generates a Go interface. `Dog` satisfies both the
 Field access through interface-typed parameters uses auto-generated getters:
 
 ```zinc
-greet(p Person) {
+greet(Person p) {
     print("Hello, {p.name}")  // uses p.GetName() under the hood
 }
 ```
@@ -435,15 +435,15 @@ Error handling works seamlessly through polymorphic dispatch. Failable methods o
 
 ```zinc
 Validator {
-    value Int
-    new(v Int) { this.value = v }
-    pub validate() String {
+    Int value
+    new(Int v) { this.value = v }
+    pub String validate() {
         if this.value < 0 { return Error("negative") }
         return "ok"
     }
 }
 
-check(v Validator) {
+check(Validator v) {
     result := v.validate() or {
         print("error: {err}")
         return
@@ -456,12 +456,12 @@ Generic classes also work through interface-typed parameters:
 
 ```zinc
 Pair<K, V> {
-    key K
-    val V
-    new(key K, val V) { this.key = key; this.val = val }
+    K key
+    V val
+    new(K key, V val) { this.key = key; this.val = val }
 }
 
-printKey(p Pair<String, Int>) {
+printKey(Pair<String, Int> p) {
     print(p.key)   // uses p.GetKey() under the hood
 }
 
@@ -504,8 +504,8 @@ main() {
     mixed := [1, "two", 3]        // []interface{}
 
     // Empty literals use the declared type
-    m Map<String, Int> = {}     // map[string]int{}
-    l List<Int> = []            // []int{}
+    Map<String, Int> m = {}     // map[string]int{}
+    List<Int> l = []            // []int{}
 
     // Nested collections work too
     grid := [[1, 2], [3, 4]]      // [][]int
@@ -568,7 +568,7 @@ word := s[7:11]
 ```zinc
 enum Direction { North, South, East, West }
 
-describe(d Direction) String {
+String describe(Direction d) {
     match d {
         case Direction.North => { return "Going North" }
         case Direction.South => { return "Going South" }
@@ -662,22 +662,22 @@ Inspired by Kotlin, C#, Swift, and TypeScript. Access fields and call methods on
 
 ```zinc
 User {
-    name String
-    address Address?
+    String name
+    Address? address
 
-    new(name String, addr Address?) {
+    new(String name, Address? addr) {
         this.name = name
         this.address = addr
     }
 }
 
 Address {
-    city String
-    new(city String) { this.city = city }
+    String city
+    new(String city) { this.city = city }
 }
 
 main() {
-    user User? = User("Alice", Address("NYC"))
+    User? user = User("Alice", Address("NYC"))
 
     // Field access — returns nil if user is nil
     name := user?.name           // "Alice"
@@ -689,7 +689,7 @@ main() {
     user?.doSomething()
 
     // Nil receiver — no crash
-    nobody User? = null
+    User? nobody = null
     x := nobody?.name             // nil
     y := nobody?.address?.city    // nil
     nobody?.doSomething()            // no-op
@@ -727,7 +727,7 @@ Zinc uses `as` for type assertions and `is` for type checks — familiar from Ko
 
 ```zinc
 main() {
-    x Any = 42
+    Any x = 42
 
     // Type assertion — panics if wrong type (like Kotlin's `as`)
     n := x as Int
@@ -756,49 +756,49 @@ Zinc enforces Kotlin-style strict null safety. Non-nullable types cannot hold `n
 
 ```zinc
 Dog {
-    name String
-    new(name String) { this.name = name }
+    String name
+    new(String name) { this.name = name }
 }
 
 main() {
     d := Dog("Rex")
     print(d.name)         // OK — d is non-nullable, use regular dot
 
-    d2 Dog? = null
+    Dog? d2 = null
     print(d2?.name)       // OK — d2 is nullable, use ?.
     // print(d2.name)     // ERROR: "use '?.' for safe access on nullable type"
-    // d3 Dog = null      // ERROR: "cannot assign null to non-nullable type"
+    // Dog d3 = null      // ERROR: "cannot assign null to non-nullable type"
 }
 ```
 
-## Callable Function Types (`Fn<>`)
+## Callable Function Types (`Fn`)
 
-Use `Fn<(ParamTypes), ReturnType>` to declare typed function parameters — enabling higher-order functions, callbacks, and functional patterns:
+Use `ReturnType Fn(ParamTypes)` to declare typed function parameters — enabling higher-order functions, callbacks, and functional patterns:
 
 ```zinc
-apply(f Fn<(Int), Int>, x Int) Int {
+Int apply(Int Fn(Int) f, Int x) {
     return f(x)
 }
 
-combine(f Fn<(Int, Int), Int>, a Int, b Int) Int {
+Int combine(Int Fn(Int, Int) f, Int a, Int b) {
     return f(a, b)
 }
 
-run(callback Fn<(), Void>) {
+run(Fn() callback) {
     callback()
 }
 
 main() {
-    double := (x Int) Int => x * 2
+    double := (Int x) => x * 2
     print(apply(double, 7))       // 14
 
-    add := (a Int, b Int) Int => a + b
+    add := (Int a, Int b) => a + b
     print(combine(add, 3, 4))     // 7
 
-    run(() Void => { print("done") })
+    run(() => { print("done") })
 
     // Also works as variable type annotations
-    transform Fn<(String), Int> = (s String) Int => s.size()
+    Int Fn(String) transform = (String s) => s.size()
     print(transform("hello"))     // 5
 }
 ```
@@ -813,16 +813,16 @@ func run(callback func()) { callback() }
 
 ## Closures / Lambdas
 
-Lambdas use the `(params) ReturnType => body` syntax. The body is either a
+Lambdas use the `(Type param) => body` syntax. The body is either a
 single expression or a block `{ ... }`.
 
 ```zinc
 // Single-expression lambda (inferred as a func literal)
-double := (x Int) Int => x * 2
-greet  := () String => "Hello!"
+double := (Int x) => x * 2
+greet  := () => "Hello!"
 
 // Block-body lambda
-describe := (x Int) String => {
+describe := (Int x) => {
     if x > 0 {
         return "positive"
     }
@@ -831,10 +831,10 @@ describe := (x Int) String => {
 
 // Closure capture — lambda body may reference outer variables
 base   := 100
-addBase := (x Int) Int => x + base
+addBase := (Int x) => x + base
 
 // String interpolation works inside lambda bodies
-makeMsg := (name String) String => "Hello, {name}!"
+makeMsg := (String name) => "Hello, {name}!"
 ```
 
 Transpiles to idiomatic Go `func` literals:
@@ -854,7 +854,7 @@ A lambda that contains `return Error(...)` automatically gets an `error` return
 appended to its signature. Calls to failable lambdas auto-propagate errors:
 
 ```zinc
-safeDivide := (a Int, b Int) Int => {
+safeDivide := (Int a, Int b) => {
     if b == 0 {
         return Error("division by zero")
     }
@@ -988,7 +988,7 @@ main() {
 Zinc uses errors as values with auto-propagation — no try/catch needed:
 
 ```zinc
-divide(a Int, b Int) Int {
+Int divide(Int a, Int b) {
     if b == 0 {
         return Error("division by zero")
     }
@@ -1012,7 +1012,7 @@ main() {
 
 ```zinc
 main() {
-    ch Chan<Int> = Chan.new(1)
+    Chan<Int> ch = Chan.new(1)
 
     go {
         ch.send(42)
@@ -1045,7 +1045,7 @@ import "os"
 import "math/rand" as rand
 
 main() {
-    args Any = os.Args
+    Any args = os.Args
 }
 ```
 
@@ -1126,7 +1126,7 @@ for _, _v0 := range nums {
 Failable functions work seamlessly inside collection lambdas. Errors auto-propagate — same as everywhere else in Zinc:
 
 ```zinc
-safeDivide(x Int) Int {
+Int safeDivide(Int x) {
     if x == 0 { return Error("division by zero") }
     return 100 / x
 }

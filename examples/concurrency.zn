@@ -1,5 +1,5 @@
 main() {
-    ch Chan<String> = Chan(2)
+    Chan<String> ch = Chan(2)
 
     go {
         ch.send("hello from goroutine")

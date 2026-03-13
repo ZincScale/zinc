@@ -1,4 +1,4 @@
-divide(a Int, b Int) Int {
+Int divide(Int a, Int b) {
     if b == 0 {
         return Error("division by zero")
     }

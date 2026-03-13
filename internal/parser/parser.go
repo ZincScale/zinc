@@ -116,9 +116,10 @@ func (p *Parser) parseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
 	name := tok.Literal
 	var t TypeExpr
-	if name == "Fn" && p.check(lexer.TOKEN_LT) {
-		// Fn<(ParamTypes...), ReturnType>
-		t = p.parseFnType()
+	if name == "Fn" && p.check(lexer.TOKEN_LPAREN) {
+		// Fn(ParamTypes) — void function type
+		params := p.parseFnTypeParams()
+		t = &FuncTypeExpr{Params: params, ReturnType: nil}
 	} else if p.check(lexer.TOKEN_LT) {
 		p.advance() // <
 		var args []TypeExpr
@@ -132,6 +133,19 @@ func (p *Parser) parseType() TypeExpr {
 	} else {
 		t = &SimpleType{Name: name}
 	}
+	// Check for ReturnType Fn(Params) — non-void function type
+	if p.check(lexer.TOKEN_IDENT) && p.peek().Literal == "Fn" && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+		p.advance() // consume "Fn"
+		params := p.parseFnTypeParams()
+		// t is the return type
+		fnType := &FuncTypeExpr{Params: params, ReturnType: t}
+		// Optional suffix: Fn(...)?
+		if p.check(lexer.TOKEN_QUESTION) {
+			p.advance()
+			return &OptionalType{Inner: fnType}
+		}
+		return fnType
+	}
 	// Optional suffix: Type?
 	if p.check(lexer.TOKEN_QUESTION) {
 		p.advance()
@@ -140,9 +154,9 @@ func (p *Parser) parseType() TypeExpr {
 	return t
 }
 
-// parseFnType parses Fn<(P1, P2), R> or Fn<(), Void>. Called after "Fn" is consumed.
-func (p *Parser) parseFnType() *FuncTypeExpr {
-	p.advance() // <
+// parseFnTypeParams parses Fn(P1, P2) parameter types. Called after "Fn" is consumed.
+// Returns the list of parameter types.
+func (p *Parser) parseFnTypeParams() []TypeExpr {
 	p.expect(lexer.TOKEN_LPAREN)
 	var params []TypeExpr
 	if !p.check(lexer.TOKEN_RPAREN) {
@@ -153,10 +167,7 @@ func (p *Parser) parseFnType() *FuncTypeExpr {
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
-	p.expect(lexer.TOKEN_COMMA)
-	ret := p.parseType()
-	p.expect(lexer.TOKEN_GT)
-	return &FuncTypeExpr{Params: params, ReturnType: ret}
+	return params
 }
 
 // --- Expressions (Pratt parser) -----------------------------------------------
@@ -371,34 +382,61 @@ func (p *Parser) parseUnary() Expr {
 // isLambdaStart returns true if the current TOKEN_LPAREN begins a lambda, not a grouping.
 // Heuristics (peekAt is relative to current position = the '('):
 //
-//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW or uppercase IDENT
-//	(name Type) =>     → peek(1)==IDENT(lower), peek(2)==IDENT(upper) (typed param)
-//	(name) =>          → peek(1)==IDENT,  peek(2)==RPAREN, peek(3)==FAT_ARROW (untyped single)
-//	(name, name) =>    → peek(1)==IDENT,  peek(2)==COMMA (untyped multi)
+//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW
+//	(Type name) =>     → peek(1)==IDENT(upper), peek(2)==IDENT(lower) (typed param)
+//	(Type... name) =>  → peek(1)==IDENT(upper), peek(2)==DOTDOTDOT (variadic typed)
+//	(name) =>          → peek(1)==IDENT(lower),  peek(2)==RPAREN, peek(3)==FAT_ARROW (untyped single)
+//	(name, name) =>    → peek(1)==IDENT(lower),  peek(2)==COMMA (untyped multi)
 func (p *Parser) isLambdaStart() bool {
 	ahead1 := p.peekAt(1)
 	switch ahead1.Type {
 	case lexer.TOKEN_RPAREN:
-		// () => or () ReturnType =>
+		// () =>
 		next := p.peekAt(2)
 		if next.Type == lexer.TOKEN_FAT_ARROW {
 			return true
 		}
-		// () Type => — uppercase ident after ) means return type
-		if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'A' && next.Literal[0] <= 'Z' {
-			return true
-		}
 	case lexer.TOKEN_IDENT:
-		ahead2 := p.peekAt(2)
-		if ahead2.Type == lexer.TOKEN_COMMA {
-			return true // (name, name) => ...  (untyped multi-param)
-		}
-		if ahead2.Type == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_FAT_ARROW {
-			return true // (name) => ...  (untyped single-param)
-		}
-		// (name Type) => ... — typed param
-		if ahead2.Type == lexer.TOKEN_IDENT && len(ahead2.Literal) > 0 && ahead2.Literal[0] >= 'A' && ahead2.Literal[0] <= 'Z' {
-			return true
+		isUpper := len(ahead1.Literal) > 0 && ahead1.Literal[0] >= 'A' && ahead1.Literal[0] <= 'Z'
+		if isUpper {
+			// (Type name) => ... — typed param (type-before-name)
+			// Need to scan past the type (which may be generic: List<Int>) to find the name
+			i := 2
+			// Skip generic type args <...>
+			if p.peekAt(i).Type == lexer.TOKEN_LT {
+				depth := 1
+				i++
+				for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+					if p.peekAt(i).Type == lexer.TOKEN_LT {
+						depth++
+					} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+						depth--
+					}
+					i++
+				}
+			}
+			// Skip optional ?
+			if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+				i++
+			}
+			// Skip optional ... (variadic)
+			if p.peekAt(i).Type == lexer.TOKEN_DOTDOTDOT {
+				i++
+			}
+			// Next should be lowercase ident (the param name)
+			next := p.peekAt(i)
+			if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'a' && next.Literal[0] <= 'z' {
+				return true
+			}
+		} else {
+			// lowercase ident — untyped param
+			ahead2 := p.peekAt(2)
+			if ahead2.Type == lexer.TOKEN_COMMA {
+				return true // (name, name) => ...
+			}
+			if ahead2.Type == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_FAT_ARROW {
+				return true // (name) => ...
+			}
 		}
 	}
 	return false
@@ -416,32 +454,32 @@ func (p *Parser) parseLambda() *LambdaExpr {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
-	retType := p.parseOptionalReturnType()
-
+	// Lambda return types are always inferred (no explicit return type)
 	p.expect(lexer.TOKEN_FAT_ARROW)
 
 	if p.check(lexer.TOKEN_LBRACE) {
 		body := p.parseBlock()
-		return &LambdaExpr{Params: params, ReturnType: retType, Body: body}
+		return &LambdaExpr{Params: params, Body: body}
 	}
 	expr := p.parseExpr()
-	return &LambdaExpr{Params: params, ReturnType: retType, Expr: expr}
+	return &LambdaExpr{Params: params, Expr: expr}
 }
 
 // parseLambdaParam parses a lambda parameter, which can be:
-//   - name Type      (typed, new syntax — no colon)
-//   - name: Type     (typed, legacy syntax)
+//   - Type name      (typed, type-before-name)
+//   - Type... name   (typed variadic)
 //   - name           (untyped shorthand — type inferred from context)
 func (p *Parser) parseLambdaParam() *ParamDecl {
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	// Check if next token looks like a type (uppercase ident or ...)
-	if p.check(lexer.TOKEN_DOTDOTDOT) || (p.check(lexer.TOKEN_IDENT) && len(p.peek().Literal) > 0 && p.peek().Literal[0] >= 'A' && p.peek().Literal[0] <= 'Z') {
+	tok := p.peek()
+	// If current token is uppercase, it's a typed param (type-before-name)
+	if tok.Type == lexer.TOKEN_IDENT && len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
+		typ := p.parseType()
 		variadic := false
 		if p.check(lexer.TOKEN_DOTDOTDOT) {
 			variadic = true
 			p.advance()
 		}
-		typ := p.parseType()
+		name := p.expect(lexer.TOKEN_IDENT).Literal
 		var def Expr
 		if p.check(lexer.TOKEN_ASSIGN) {
 			p.advance()
@@ -450,6 +488,7 @@ func (p *Parser) parseLambdaParam() *ParamDecl {
 		return &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic}
 	}
 	// Untyped param: just the name (type will be inferred during codegen)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
 	return &ParamDecl{Name: name}
 }
 
@@ -654,7 +693,7 @@ func (p *Parser) parseStmt() Stmt {
 		if p.peekAt(1).Type == lexer.TOKEN_COLONASSIGN {
 			return p.parseShortVarStmt()
 		}
-		// name Type = expr → typed variable declaration (e.g. x Int? = null)
+		// Type name = expr → typed variable declaration (e.g. Int x = 5)
 		if p.isTypedVarDecl() {
 			return p.parseTypedVarStmt()
 		}
@@ -722,10 +761,17 @@ func (p *Parser) parseStmt() Stmt {
 func (p *Parser) parseConstDecl() *ConstDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_CONST)
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	// Type-before-name: const Type NAME = expr  or  const NAME = expr
+	// Disambiguate: if first IDENT is followed by another IDENT, first is type
 	var typ TypeExpr
-	if p.looksLikeReturnType() {
+	var name string
+	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_IDENT {
+		// const Type NAME = expr
 		typ = p.parseType()
+		name = p.expect(lexer.TOKEN_IDENT).Literal
+	} else {
+		// const NAME = expr (no type)
+		name = p.expect(lexer.TOKEN_IDENT).Literal
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
@@ -778,20 +824,15 @@ func (p *Parser) parseTupleDestructure() *TupleVarStmt {
 }
 
 // isTypedVarDecl checks if the current position starts a typed variable declaration:
-// name Type = expr  or  name Type? = expr  or  name Type?  (no value)
-// Requires: current is lowercase IDENT, next is uppercase IDENT (type name)
+// Type name = expr  or  Type? name = expr  or  Type name  (no value)
+// Requires: current is uppercase IDENT (type name), followed by lowercase ident (var name)
 func (p *Parser) isTypedVarDecl() bool {
-	next := p.peekAt(1)
-	if next.Type != lexer.TOKEN_IDENT || len(next.Literal) == 0 || next.Literal[0] < 'A' || next.Literal[0] > 'Z' {
+	tok := p.peek()
+	if tok.Type != lexer.TOKEN_IDENT || len(tok.Literal) == 0 || tok.Literal[0] < 'A' || tok.Literal[0] > 'Z' {
 		return false
 	}
-	// Look past the type (which may include ?, <...>, etc.) for = or end-of-statement
-	// Simple heuristic: lowercase ident followed by uppercase ident that isn't a function call
-	i := 2
-	// Skip ? after type
-	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
-		i++
-	}
+	// Scan past the type (which may include ?, <...>, etc.) to find the variable name
+	i := 1
 	// Skip generic type params <...>
 	if p.peekAt(i).Type == lexer.TOKEN_LT {
 		depth := 1
@@ -804,21 +845,27 @@ func (p *Parser) isTypedVarDecl() bool {
 			}
 			i++
 		}
-		// Skip ? after generic type
-		if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
-			i++
-		}
 	}
+	// Skip ? after type
+	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+		i++
+	}
+	// Next must be lowercase ident (the variable name)
+	nameToken := p.peekAt(i)
+	if nameToken.Type != lexer.TOKEN_IDENT || len(nameToken.Literal) == 0 || nameToken.Literal[0] < 'a' || nameToken.Literal[0] > 'z' {
+		return false
+	}
+	i++
 	// Must be followed by = or end-of-statement (no value)
 	t := p.peekAt(i).Type
 	return t == lexer.TOKEN_ASSIGN || t == lexer.TOKEN_SEMICOLON || t == lexer.TOKEN_RBRACE || t == lexer.TOKEN_EOF
 }
 
-// parseTypedVarStmt parses: name Type = expr  or  name Type  (no value)
+// parseTypedVarStmt parses: Type name = expr  or  Type name  (no value)
 func (p *Parser) parseTypedVarStmt() *VarStmt {
 	line := p.peek().Line
+	typ := p.parseType()       // consume type
 	name := p.advance().Literal // consume name
-	typ := p.parseType()
 	var val Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
@@ -1056,8 +1103,9 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 // --- Declarations ------------------------------------------------------------
 
 func (p *Parser) parseFieldDecl() *FieldDecl {
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	// Type-before-name: Type name [= default]
 	typ := p.parseType()
+	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
@@ -1067,13 +1115,14 @@ func (p *Parser) parseFieldDecl() *FieldDecl {
 }
 
 func (p *Parser) parseParam() *ParamDecl {
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	// Type-before-name: Type name  or  Type... name
+	typ := p.parseType()
 	variadic := false
 	if p.check(lexer.TOKEN_DOTDOTDOT) {
 		variadic = true
 		p.advance()
 	}
-	typ := p.parseType()
+	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
@@ -1129,9 +1178,25 @@ func (p *Parser) parseMethodDecl() *MethodDecl {
 		isStatic = true
 		p.advance()
 	}
+	// Type-before-name: [pub] [static] ReturnType name(params) { }
+	// If current token is uppercase and next is lowercase ident followed by ( or <,
+	// then it's a return type. Otherwise it's the method name (void return).
+	var retType TypeExpr
+	if p.looksLikeReturnType() {
+		// Could be return type or void method name — disambiguate:
+		// uppercase followed by lowercase+( = return type
+		// uppercase followed by ( or < = void method name (e.g. MyMethod(...))
+		// But method names are lowercase by convention in Zinc, so uppercase = return type
+		// unless followed directly by ( or <
+		next := p.peekAt(1)
+		if next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT {
+			// It's the method name (void return), don't parse as type
+		} else {
+			retType = p.parseType()
+		}
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.parseParamList()
-	retType := p.parseOptionalReturnType()
 	body := p.parseBlock()
 	return &MethodDecl{
 		Name: name, IsPub: isPub, IsStatic: isStatic,
@@ -1145,10 +1210,55 @@ func (p *Parser) parseMethodSig() *MethodSig {
 		isPub = true
 		p.advance()
 	}
+	// Type-before-name: [pub] ReturnType name(params) or [pub] name(params)
+	var retType TypeExpr
+	if p.looksLikeReturnType() {
+		next := p.peekAt(1)
+		if next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT {
+			// void method sig — the ident is the method name
+		} else {
+			retType = p.parseType()
+		}
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.parseParamList()
-	retType := p.parseOptionalReturnType()
 	return &MethodSig{Name: name, IsPub: isPub, Params: params, ReturnType: retType}
+}
+
+// isClassMethodDecl determines if the current uppercase IDENT in a class body
+// starts a method declaration (with return type) rather than a field declaration.
+// In type-before-name syntax:
+//   - Field:  Type name [= default]     → after type+name, we see =, ;, }, EOF, or newline
+//   - Method: ReturnType name(params)   → after type+name, we see ( or <
+func (p *Parser) isClassMethodDecl() bool {
+	// Scan past the type (which may be generic, optional, etc.)
+	i := 1
+	// Skip generic type args <...>
+	if p.peekAt(i).Type == lexer.TOKEN_LT {
+		depth := 1
+		i++
+		for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+			if p.peekAt(i).Type == lexer.TOKEN_LT {
+				depth++
+			} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+				depth--
+			}
+			i++
+		}
+	}
+	// Skip ? after type
+	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+		i++
+	}
+	// Now we should be at the name (lowercase ident)
+	nameToken := p.peekAt(i)
+	if nameToken.Type != lexer.TOKEN_IDENT {
+		return false
+	}
+	i++
+	// Check what follows the name
+	next := p.peekAt(i)
+	return next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT
 }
 
 func (p *Parser) parseClassDecl() *ClassDecl {
@@ -1179,14 +1289,27 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 		case tok.Type == lexer.TOKEN_PUB || tok.Type == lexer.TOKEN_STATIC:
 			methods = append(methods, p.parseMethodDecl())
 		case tok.Type == lexer.TOKEN_IDENT:
-			// Disambiguate: field (name Type) vs method (name(...))
-			next := p.peekAt(1)
-			if next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT {
-				// Method declaration (without fn keyword)
-				methods = append(methods, p.parseMethodDecl())
+			// Type-before-name disambiguation in class body:
+			// Uppercase ident could be: field (Type name), method with return type (Type methodName(...))
+			// Lowercase ident: void method (name(...))
+			isUpper := len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z'
+			if !isUpper {
+				// Lowercase: must be a void method
+				next := p.peekAt(1)
+				if next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT {
+					methods = append(methods, p.parseMethodDecl())
+				} else {
+					p.errorf("unexpected token %s after method name %q in class body", next.Type, tok.Literal)
+					p.advance()
+				}
 			} else {
-				// Field declaration (without var keyword)
-				fields = append(fields, p.parseFieldDecl())
+				// Uppercase: field or method with return type
+				// Scan past the type to find what follows the name
+				if p.isClassMethodDecl() {
+					methods = append(methods, p.parseMethodDecl())
+				} else {
+					fields = append(fields, p.parseFieldDecl())
+				}
 			}
 		default:
 			p.errorf("unexpected token %s in class body", tok.Type)
@@ -1264,10 +1387,20 @@ func (p *Parser) parseCallTypeArgs() []string {
 
 func (p *Parser) parseFnDecl(isPub bool) *FnDecl {
 	line := p.peek().Line
+	// Type-before-name: ReturnType name<T>(params) { } or name(params) { }
+	var retType TypeExpr
+	if p.looksLikeReturnType() {
+		// Could be return type or function name — disambiguate:
+		// uppercase followed by lowercase ident = return type (e.g. Int add(...))
+		// uppercase followed by ( or < = function name (unlikely since fn names are lowercase)
+		next := p.peekAt(1)
+		if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'a' && next.Literal[0] <= 'z' {
+			retType = p.parseType()
+		}
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
 	params := p.parseParamList()
-	retType := p.parseOptionalReturnType()
 	body := p.parseBlock()
 	return &FnDecl{Line: line, Name: name, IsPub: isPub, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
 }
@@ -1333,9 +1466,17 @@ func (p *Parser) Parse() *Program {
 			p.advance()
 			prog.Decls = append(prog.Decls, p.parseFnDecl(true))
 		case lexer.TOKEN_IDENT:
-			// Disambiguate: CapitalName → class, lowercase → function
 			if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
-				prog.Decls = append(prog.Decls, p.parseClassDecl())
+				// Uppercase: could be class or function with return type
+				// Function with return type: UpperType lowerName(...)
+				// Class: UpperName { or UpperName : or UpperName<T> {
+				next := p.peekAt(1)
+				if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'a' && next.Literal[0] <= 'z' {
+					// ReturnType functionName — parse as function with return type
+					prog.Decls = append(prog.Decls, p.parseFnDecl(false))
+				} else {
+					prog.Decls = append(prog.Decls, p.parseClassDecl())
+				}
 			} else {
 				prog.Decls = append(prog.Decls, p.parseFnDecl(false))
 			}

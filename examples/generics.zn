@@ -1,58 +1,58 @@
 // Generic functions and classes in Zinc
 
-identity<T>(val T) T {
+T identity<T>(T val) {
     return val
 }
 
-mapLen<K, V>(m Map<K, V>) Int {
+Int mapLen<K, V>(Map<K, V> m) {
     return m.size()
 }
 
 Box<T> {
-    value T
+    T value
 
-    new(v T) {
+    new(T v) {
         this.value = v
     }
 
-    pub get() T {
+    pub T get() {
         return this.value
     }
 
-    pub set(v T) {
+    pub set(T v) {
         this.value = v
     }
 }
 
 // Generic class with empty list initialization
 Stack<T> {
-    items List<T>
+    List<T> items
 
-    new(initial T) {
+    new(T initial) {
         this.items = []
         this.items.add(initial)
     }
 
-    pub push(item T) {
+    pub push(T item) {
         this.items.add(item)
     }
 
-    pub count() Int {
+    pub Int count() {
         return this.items.size()
     }
 }
 
 // Polymorphism: pass generic class to function expecting interface
-printBox(b Box<String>) {
+printBox(Box<String> b) {
     print(b.get())
 }
 
 main() {
     // Generic functions — type inferred from args
-    n Int = identity(42)
+    Int n = identity(42)
     print(n)
 
-    s String = identity("Zinc")
+    String s = identity("Zinc")
     print(s)
 
     // Generic class — type inferred from constructor arg

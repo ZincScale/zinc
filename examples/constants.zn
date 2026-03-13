@@ -1,11 +1,11 @@
 // Constants — immutable top-level values
 
 const PI = 3.14159
-const MAX_RETRIES Int = 3
-const APP_NAME String = "Zinc"
-const DEBUG Bool = false
+const Int MAX_RETRIES = 3
+const String APP_NAME = "Zinc"
+const Bool DEBUG = false
 
-circleArea(radius Float) Float {
+Float circleArea(Float radius) {
     return PI * radius * radius
 }
 

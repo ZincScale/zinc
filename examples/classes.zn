@@ -1,42 +1,42 @@
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 
 Animal {
-    name String
+    String name
 
-    new(name String) {
+    new(String name) {
         this.name = name
     }
 
-    pub getName() String {
+    pub String getName() {
         return this.name
     }
 }
 
 Dog : Animal, Speaker {
-    breed String
+    String breed
 
-    new(name String, breed String) {
+    new(String name, String breed) {
         super(name)
         this.breed = breed
     }
 
-    pub speak() String {
+    pub String speak() {
         return "Woof!"
     }
 
-    pub describe() String {
+    pub String describe() {
         return this.getName()
     }
 }
 
 // Polymorphism: Dog satisfies both Animal and Speaker interfaces
-greetAnimal(a Animal) {
+greetAnimal(Animal a) {
     print("Hello, {a.getName()}!")
 }
 
-makeSpeak(s Speaker) {
+makeSpeak(Speaker s) {
     print(s.speak())
 }
 

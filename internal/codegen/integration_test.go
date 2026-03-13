@@ -21,17 +21,17 @@ import (
 func TestIntegrationGenericClassImplementsInterface(t *testing.T) {
 	src := `
 interface Showable {
-    show() String
+    String show()
 }
 Container<T> : Showable {
-    item T
-    new(v T) {
+    T item
+    new(T v) {
         this.item = v
     }
-    show() String {
+    String show() {
         return "Container"
     }
-    get() T {
+    T get() {
         return this.item
     }
 }
@@ -51,11 +51,11 @@ func TestIntegrationEnumFieldInClassWithMatch(t *testing.T) {
 	src := `
 enum Status { Active, Idle, Done }
 Task {
-    status Status
-    new(s Status) {
+    Status status
+    new(Status s) {
         this.status = s
     }
-    describe() String {
+    String describe() {
         match this.status {
             case Status.Active => { return "active" }
             case Status.Idle   => { return "idle" }
@@ -80,13 +80,13 @@ main() {
 
 func TestIntegrationAutoErrorPropagation(t *testing.T) {
 	src := `
-riskyOp(x Int) Int {
+Int riskyOp(Int x) {
     if x < 0 {
         return Error("negative")
     }
     return x * 2
 }
-safeDouble(x Int) Int {
+Int safeDouble(Int x) {
     r := riskyOp(x)
     return r
 }
@@ -105,27 +105,27 @@ main() {
 func TestIntegrationMultiLevelInheritance(t *testing.T) {
 	src := `
 Animal {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub speak() String {
+    pub String speak() {
         return "..."
     }
 }
 Dog : Animal {
-    new(n String) {
+    new(String n) {
         super(n)
     }
-    pub speak() String {
+    pub String speak() {
         return "Woof!"
     }
 }
 GoldenRetriever : Dog {
-    new(n String) {
+    new(String n) {
         super(n)
     }
-    pub fetch() String {
+    pub String fetch() {
         return "Fetch!"
     }
 }
@@ -149,13 +149,13 @@ main() {
 func TestIntegrationStringInterpolationInMethod(t *testing.T) {
 	src := `
 Person {
-    name String
-    age Int
-    new(n String, a Int) {
+    String name
+    Int age
+    new(String n, Int a) {
         this.name = n
         this.age = a
     }
-    greeting() String {
+    String greeting() {
         return "Hello, I am {this.name} and I am {this.age} years old!"
     }
 }
@@ -177,14 +177,14 @@ main() {
 func TestIntegrationOptionalFieldInGenericClass(t *testing.T) {
 	src := `
 Wrapper<T> {
-    content T?
+    T? content
     new() {
         this.content = null
     }
-    set(v T) {
+    set(T v) {
         this.content = v
     }
-    hasContent() Bool {
+    Bool hasContent() {
         return this.content != null
     }
 }
@@ -225,7 +225,7 @@ func TestIntegrationGoroutineChannel(t *testing.T) {
 	// Zinc channel syntax: go { ... }, ch.send(val), ch.receive()
 	src := `
 main() {
-    ch Chan<Int> = Chan.new(1)
+    Chan<Int> ch = Chan.new(1)
     go {
         ch.send(42)
     }
@@ -244,24 +244,24 @@ main() {
 func TestIntegrationClassExtendsClassAndInterface(t *testing.T) {
 	src := `
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 Animal {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub getName() String {
+    pub String getName() {
         return this.name
     }
 }
 Dog : Animal, Speaker {
-    breed String
-    new(n String, b String) {
+    String breed
+    new(String n, String b) {
         super(n)
         this.breed = b
     }
-    pub speak() String {
+    pub String speak() {
         return "Woof!"
     }
 }
@@ -348,7 +348,7 @@ main() {
 
 func TestIntegrationGoRoutineReturnError(t *testing.T) {
 	src := `
-risky() Int {
+Int risky() {
     return Error("oops")
 }
 main() {
@@ -391,7 +391,7 @@ func TestIntegrationGoRoutineClosure(t *testing.T) {
 main() {
     base := 10
     go {
-        addBase := (x Int) Int => x + base
+        addBase := (Int x) => x + base
         print(addBase(5))
     }
 }
@@ -409,7 +409,7 @@ func TestIntegrationGoRoutineReturnErrorPanics(t *testing.T) {
 	// return Error directly inside a goroutine should panic (not return) since
 	// goroutines have their own void scope
 	src := `
-risky() Int {
+Int risky() {
     return Error("fatal")
 }
 main() {
@@ -431,10 +431,10 @@ main() {
 func TestIntegrationReturnErrorInsideFailable(t *testing.T) {
 	// return Error inside a failable function emits return zero, fmt.Errorf
 	src := `
-risky() Int {
+Int risky() {
     return Error("fn error")
 }
-caller() Int {
+Int caller() {
     r := risky()
     return r
 }

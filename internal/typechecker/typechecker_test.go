@@ -85,8 +85,8 @@ func TestDeclaredVariableOK(t *testing.T) {
 
 func TestErrorLineNumbers(t *testing.T) {
 	src := `main() {
-    x Int = "hello"
-    y Bool = 42
+    Int x = "hello"
+    Bool y = 42
 }`
 	errs := checkSrc(src)
 	if len(errs) < 2 {
@@ -107,7 +107,7 @@ func TestErrorLineNumbers(t *testing.T) {
 // --- 2. Type mismatch in var decl --------------------------------------------
 
 func TestVarTypeMismatch(t *testing.T) {
-	src := `main() { x Int = "hello" }`
+	src := `main() { Int x = "hello" }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error, got %v", errs)
@@ -127,13 +127,13 @@ func TestVarInferred(t *testing.T) {
 }
 
 func TestVarOptionalNull(t *testing.T) {
-	src := `main() { x String? = null }`
+	src := `main() { String? x = null }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestVarNonOptionalNull(t *testing.T) {
-	src := `main() { x Int = null }`
+	src := `main() { Int x = null }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error for null to Int, got %v", errs)
@@ -159,7 +159,7 @@ func TestAssignTypeMatch(t *testing.T) {
 // --- 4. Return type mismatch -------------------------------------------------
 
 func TestReturnTypeMismatch(t *testing.T) {
-	src := `add(a Int, b Int) Int { return "oops" }`
+	src := `Int add(Int a, Int b) { return "oops" }`
 	errs := checkSrc(src)
 	if !hasError(errs, "return type mismatch") {
 		t.Errorf("expected 'return type mismatch' error, got %v", errs)
@@ -167,7 +167,7 @@ func TestReturnTypeMismatch(t *testing.T) {
 }
 
 func TestReturnTypeMatch(t *testing.T) {
-	src := `add(a Int, b Int) Int { return 42 }`
+	src := `Int add(Int a, Int b) { return 42 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -279,7 +279,7 @@ func TestLogicalOperatorNonBool(t *testing.T) {
 func TestUndefinedField(t *testing.T) {
 	src := `
 Dog {
-  name String = "Rex"
+  String name = "Rex"
 }
 main() {
   d := Dog()
@@ -295,7 +295,7 @@ main() {
 func TestDefinedField(t *testing.T) {
 	src := `
 Dog {
-  name String = "Rex"
+  String name = "Rex"
 }
 main() {
   d := Dog()
@@ -311,7 +311,7 @@ main() {
 func TestUndefinedMethod(t *testing.T) {
 	src := `
 Dog {
-  name String = "Rex"
+  String name = "Rex"
 }
 main() {
   d := Dog()
@@ -327,8 +327,8 @@ main() {
 func TestDefinedMethod(t *testing.T) {
 	src := `
 Dog {
-  name String = "Rex"
-  speak() String { return "woof" }
+  String name = "Rex"
+  String speak() { return "woof" }
 }
 main() {
   d := Dog()
@@ -341,7 +341,7 @@ main() {
 
 func TestArgCountMismatch(t *testing.T) {
 	src := `
-add(a Int, b Int) Int { return a + b }
+Int add(Int a, Int b) { return a + b }
 main() { add(1) }
 `
 	errs := checkSrc(src)
@@ -352,7 +352,7 @@ main() { add(1) }
 
 func TestArgCountMatch(t *testing.T) {
 	src := `
-add(a Int, b Int) Int { return a + b }
+Int add(Int a, Int b) { return a + b }
 main() { add(1, 2) }
 `
 	errs := checkSrc(src)
@@ -362,7 +362,7 @@ main() { add(1, 2) }
 // --- 9. Class checks ---------------------------------------------------------
 
 func TestUndeclaredParent(t *testing.T) {
-	src := `Dog : Animal { name String = "Rex" }`
+	src := `Dog : Animal { String name = "Rex" }`
 	errs := checkSrc(src)
 	if !hasError(errs, `undefined class/interface "Animal"`) {
 		t.Errorf("expected 'undefined class/interface' error, got %v", errs)
@@ -371,8 +371,8 @@ func TestUndeclaredParent(t *testing.T) {
 
 func TestDeclaredParentClass(t *testing.T) {
 	src := `
-Animal { alive Bool = true }
-Dog : Animal { name String = "Rex" }
+Animal { Bool alive = true }
+Dog : Animal { String name = "Rex" }
 `
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -380,9 +380,9 @@ Dog : Animal { name String = "Rex" }
 
 func TestDeclaredParentInterface(t *testing.T) {
 	src := `
-interface Speaker { speak() String }
+interface Speaker { String speak() }
 Dog : Speaker {
-  speak() String { return "woof" }
+  String speak() { return "woof" }
 }
 `
 	errs := checkSrc(src)
@@ -393,7 +393,7 @@ Dog : Speaker {
 
 func TestGenericFunctionNoFalsePositives(t *testing.T) {
 	src := `
-identity<T>(x T) T { return x }
+T identity<T>(T x) { return x }
 main() { y := identity(42) }
 `
 	errs := checkSrc(src)
@@ -403,8 +403,8 @@ main() { y := identity(42) }
 func TestGenericClassNoFalsePositives(t *testing.T) {
 	src := `
 Box<T> {
-  value T
-  get() T { return value }
+  T value
+  T get() { return value }
 }
 main() {
   b := Box()
@@ -418,19 +418,19 @@ main() {
 // --- 11. Optionals -----------------------------------------------------------
 
 func TestOptionalAssignNull(t *testing.T) {
-	src := `main() { name String? = null }`
+	src := `main() { String? name = null }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestOptionalAssignValue(t *testing.T) {
-	src := `main() { name String? = "hello" }`
+	src := `main() { String? name = "hello" }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestNonOptionalAssignNull(t *testing.T) {
-	src := `main() { count Int = null }`
+	src := `main() { Int count = null }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' for null to Int, got %v", errs)
@@ -441,7 +441,7 @@ func TestNonOptionalAssignNull(t *testing.T) {
 
 func TestOrHandlerErrVarDefined(t *testing.T) {
 	src := `
-risky() Int {
+Int risky() {
   if true { return Error("oops") }
   return 1
 }
@@ -459,7 +459,7 @@ main() {
 
 func TestOrHandlerErrVarIsString(t *testing.T) {
 	src := `
-risky() Int {
+Int risky() {
   if true { return Error("oops") }
   return 1
 }
@@ -604,7 +604,7 @@ func TestThisOutsideClass(t *testing.T) {
 // --- Extra: undefined type ---------------------------------------------------
 
 func TestUndefinedType(t *testing.T) {
-	src := `foo(x Baz) Baz { return x }`
+	src := `Baz foo(Baz x) { return x }`
 	errs := checkSrc(src)
 	if !hasError(errs, `undefined type "Baz"`) {
 		t.Errorf("expected 'undefined type Baz' error, got %v", errs)
@@ -615,11 +615,11 @@ func TestUndefinedType(t *testing.T) {
 
 func TestFailableLambdaNoFalsePositive(t *testing.T) {
 	src := `
-apply(callback Any) Int {
+Int apply(Any callback) {
     return callback(5)
 }
 main() {
-    apply((x Int) Int => x * 2)
+    apply((Int x) => x * 2)
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -628,28 +628,28 @@ main() {
 // --- Default parameters and named arguments ----------------------------------
 
 func TestDefaultParamNoError(t *testing.T) {
-	src := `greet(name String, greeting String = "Hello") {}
+	src := `greet(String name, String greeting = "Hello") {}
 main() { greet("Alice") }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestNamedArgsAllValid(t *testing.T) {
-	src := `greet(name String, greeting String = "Hello") {}
+	src := `greet(String name, String greeting = "Hello") {}
 main() { greet(greeting: "Hi", name: "Bob") }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestMixedPositionalAndNamedArgs(t *testing.T) {
-	src := `greet(name String, greeting String = "Hello") {}
+	src := `greet(String name, String greeting = "Hello") {}
 main() { greet("Bob", greeting: "Hi") }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestMissingRequiredArg(t *testing.T) {
-	src := `greet(name String, greeting String = "Hello") {}
+	src := `greet(String name, String greeting = "Hello") {}
 main() { greet() }`
 	errs := checkSrc(src)
 	if !hasError(errs, "missing required argument") {
@@ -658,7 +658,7 @@ main() { greet() }`
 }
 
 func TestUnknownNamedArg(t *testing.T) {
-	src := `greet(name String) {}
+	src := `greet(String name) {}
 main() { greet(badParam: "hi") }`
 	errs := checkSrc(src)
 	if !hasError(errs, "unknown named argument") {
@@ -667,7 +667,7 @@ main() { greet(badParam: "hi") }`
 }
 
 func TestTooManyArgs(t *testing.T) {
-	src := `add(x Int, y Int) Int { return x }
+	src := `Int add(Int x, Int y) { return x }
 main() { add(1, 2, 3) }`
 	errs := checkSrc(src)
 	if !hasError(errs, "too many arguments") {
@@ -677,9 +677,9 @@ main() { add(1, 2, 3) }`
 
 func TestCtorDefaultParam(t *testing.T) {
 	src := `Dog {
-    name String
-    age Int
-    new(name String, age Int = 0) {
+    String name
+    Int age
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
@@ -693,9 +693,9 @@ main() {
 
 func TestCtorNamedArg(t *testing.T) {
 	src := `Dog {
-    name String
-    age Int
-    new(name String, age Int = 0) {
+    String name
+    Int age
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
@@ -709,8 +709,8 @@ main() {
 
 func TestCtorUnknownNamedArg(t *testing.T) {
 	src := `Dog {
-    name String
-    new(name String) {
+    String name
+    new(String name) {
         this.name = name
     }
 }
@@ -750,7 +750,7 @@ func TestWithStmtZincClassNoCloseOK(t *testing.T) {
 	src := `
 NoClose {
     new() {}
-    pub read() String { return "data" }
+    pub String read() { return "data" }
 }
 main() {
     with (f := NoClose()) {
@@ -766,12 +766,12 @@ main() {
 func TestSafeNavOnNullableOK(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
-    pub speak() String { return "woof" }
+    String name
+    new(String name) { this.name = name }
+    pub String speak() { return "woof" }
 }
 main() {
-    d Dog? = null
+    Dog? d = null
     print(d?.name)
     d?.speak()
 }`
@@ -782,8 +782,8 @@ main() {
 func TestSafeNavOnNonNullableError(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
+    String name
+    new(String name) { this.name = name }
 }
 main() {
     d := Dog("Rex")
@@ -798,11 +798,11 @@ main() {
 func TestDotOnNullableFieldError(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
+    String name
+    new(String name) { this.name = name }
 }
 main() {
-    d Dog? = null
+    Dog? d = null
     print(d.name)
 }`
 	errs := checkSrc(src)
@@ -814,12 +814,12 @@ main() {
 func TestDotMethodOnNullableError(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
-    pub speak() String { return "woof" }
+    String name
+    new(String name) { this.name = name }
+    pub String speak() { return "woof" }
 }
 main() {
-    d Dog? = null
+    Dog? d = null
     d.speak()
 }`
 	errs := checkSrc(src)
@@ -831,11 +831,11 @@ main() {
 func TestNullAssignToNonNullableClassError(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
+    String name
+    new(String name) { this.name = name }
 }
 main() {
-    d Dog = null
+    Dog d = null
 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
@@ -847,15 +847,15 @@ func TestSafeNavChainConsistency(t *testing.T) {
 	// a?.address returns Address? so subsequent access must use ?.
 	src := `
 Address {
-    city String
-    new(city String) { this.city = city }
+    String city
+    new(String city) { this.city = city }
 }
 User {
-    address Address?
-    new(addr Address?) { this.address = addr }
+    Address? address
+    new(Address? addr) { this.address = addr }
 }
 main() {
-    u User? = null
+    User? u = null
     print(u?.address?.city)
 }`
 	errs := checkSrc(src)
@@ -866,15 +866,15 @@ func TestSafeNavChainDotAfterSafeNavError(t *testing.T) {
 	// u?.address returns Address? so .city should error
 	src := `
 Address {
-    city String
-    new(city String) { this.city = city }
+    String city
+    new(String city) { this.city = city }
 }
 User {
-    address Address
-    new(addr Address) { this.address = addr }
+    Address address
+    new(Address addr) { this.address = addr }
 }
 main() {
-    u User? = null
+    User? u = null
     print(u?.address.city)
 }`
 	errs := checkSrc(src)
@@ -886,13 +886,13 @@ main() {
 func TestSafeNavMethodReturnsOptional(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
-    pub speak() String { return "woof" }
+    String name
+    new(String name) { this.name = name }
+    pub String speak() { return "woof" }
 }
 main() {
-    d Dog? = Dog("Rex")
-    result String = d?.speak()
+    Dog? d = Dog("Rex")
+    String result = d?.speak()
 }`
 	errs := checkSrc(src)
 	// d?.speak() returns String? which can't assign to String
@@ -904,13 +904,13 @@ main() {
 func TestSafeNavMethodResultToOptionalOK(t *testing.T) {
 	src := `
 Dog {
-    name String
-    new(name String) { this.name = name }
-    pub speak() String { return "woof" }
+    String name
+    new(String name) { this.name = name }
+    pub String speak() { return "woof" }
 }
 main() {
-    d Dog? = Dog("Rex")
-    result String? = d?.speak()
+    Dog? d = Dog("Rex")
+    String? result = d?.speak()
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -920,12 +920,12 @@ func TestNonNullableFieldNoSafeNavNeeded(t *testing.T) {
 	// Non-nullable fields should use . not ?.
 	src := `
 Address {
-    city String
-    new(city String) { this.city = city }
+    String city
+    new(String city) { this.city = city }
 }
 User {
-    address Address
-    new(addr Address) { this.address = addr }
+    Address address
+    new(Address addr) { this.address = addr }
 }
 main() {
     u := User(Address("NYC"))

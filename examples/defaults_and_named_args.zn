@@ -1,23 +1,23 @@
 // Default parameter values and named arguments
 
-greet(name String, greeting String = "Hello") {
+greet(String name, String greeting = "Hello") {
     print("{greeting}, {name}!")
 }
 
-connect(host String, port Int = 8080, tls Bool = false) {
+connect(String host, Int port = 8080, Bool tls = false) {
     print("Connecting to {host}:{port} (tls={tls})")
 }
 
 Dog {
-    name String
-    age Int
+    String name
+    Int age
 
-    new(name String, age Int = 0) {
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
 
-    pub describe() String {
+    pub String describe() {
         return "{this.name}, age {this.age}"
     }
 }

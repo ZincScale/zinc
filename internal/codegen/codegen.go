@@ -2576,6 +2576,174 @@ func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
 	return fmt.Sprintf("fmt.Sprintf(%q, %s)", format, strings.Join(args, ", "))
 }
 
+// inferExprType attempts to infer the Go return type of a lambda expression
+// from its body expression and parameter types. Falls back to "interface{}" if
+// the type cannot be determined.
+func (g *Generator) inferExprType(expr parser.Expr, params []*parser.ParamDecl) string {
+	// Build a map of param name → Go type for lookups
+	paramTypes := make(map[string]string)
+	for _, p := range params {
+		if p.Type != nil {
+			paramTypes[p.Name] = g.emitType(p.Type)
+		}
+	}
+	return g.inferExprTypeWithParams(expr, paramTypes)
+}
+
+// inferExprTypeWithParams returns a Zinc-level type name (e.g. "Int", "String", "Bool")
+// for the expression, or "interface{}" if unable to determine.
+// paramTypes maps param names to Go-level type strings (e.g. "int", "string").
+func (g *Generator) inferExprTypeWithParams(expr parser.Expr, paramTypes map[string]string) string {
+	switch e := expr.(type) {
+	case *parser.IntLit:
+		return "Int"
+	case *parser.FloatLit:
+		return "Float"
+	case *parser.StringLit, *parser.RawStringLit, *parser.StringInterpLit:
+		return "String"
+	case *parser.BoolLit:
+		return "Bool"
+	case *parser.Ident:
+		if t, ok := paramTypes[e.Name]; ok {
+			return goTypeToZincType(t)
+		}
+		return "interface{}"
+	case *parser.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "<", ">", "<=", ">=", "&&", "||":
+			return "Bool"
+		case "+":
+			lt := g.inferExprTypeWithParams(e.Left, paramTypes)
+			if lt == "String" {
+				return "String"
+			}
+			return lt
+		case "-", "*", "/", "%":
+			return g.inferExprTypeWithParams(e.Left, paramTypes)
+		}
+	case *parser.UnaryExpr:
+		if e.Op == "!" {
+			return "Bool"
+		}
+		return g.inferExprTypeWithParams(e.Operand, paramTypes)
+	case *parser.CallExpr:
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
+			switch sel.Field {
+			case "upper", "lower", "trim", "replace", "join":
+				return "String"
+			case "size", "len":
+				return "Int"
+			case "contains", "startsWith", "endsWith":
+				return "Bool"
+			}
+		}
+		return "interface{}"
+	case *parser.SelectorExpr:
+		return "interface{}"
+	}
+	return "interface{}"
+}
+
+// goTypeToZincType converts a Go type name to a Zinc type name.
+func goTypeToZincType(goType string) string {
+	switch goType {
+	case "int":
+		return "Int"
+	case "float64":
+		return "Float"
+	case "string":
+		return "String"
+	case "bool":
+		return "Bool"
+	default:
+		return goType // pass through for custom types
+	}
+}
+
+// effectiveLambdaReturnType returns the explicit return type if present,
+// otherwise creates a synthetic SimpleType from the inferred block return type.
+func (g *Generator) effectiveLambdaReturnType(e *parser.LambdaExpr) parser.TypeExpr {
+	if e.ReturnType != nil {
+		return e.ReturnType
+	}
+	if e.Body != nil {
+		if inferred := g.inferBlockReturnType(e.Body, e.Params); inferred != "" && inferred != "interface{}" {
+			return &parser.SimpleType{Name: inferred}
+		}
+	}
+	return nil
+}
+
+// isErrorReturn checks if an expression is an error-creating call (Error(...), fmt.Errorf(...))
+// used to skip error-path returns when inferring lambda return types.
+func (g *Generator) isErrorReturn(expr parser.Expr) bool {
+	call, ok := expr.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		return ident.Name == "Error"
+	}
+	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+		return sel.Field == "Errorf" || sel.Field == "Error"
+	}
+	return false
+}
+
+// inferBlockReturnType infers the return type of a block-body lambda by looking
+// at the return statements in the body. Returns "" if unable to infer.
+func (g *Generator) inferBlockReturnType(body *parser.BlockStmt, params []*parser.ParamDecl) string {
+	paramTypes := make(map[string]string)
+	for _, p := range params {
+		if p.Type != nil {
+			paramTypes[p.Name] = g.emitType(p.Type)
+		}
+	}
+	// Walk top-level and if/else return statements
+	var returnTypes []string
+	g.collectReturnTypes(body.Stmts, paramTypes, &returnTypes)
+	if len(returnTypes) == 0 {
+		return ""
+	}
+	// All return types should agree
+	first := returnTypes[0]
+	for _, t := range returnTypes[1:] {
+		if t != first {
+			return "interface{}" // conflicting types
+		}
+	}
+	return first
+}
+
+func (g *Generator) collectReturnTypes(stmts []parser.Stmt, paramTypes map[string]string, types *[]string) {
+	for _, s := range stmts {
+		switch stmt := s.(type) {
+		case *parser.ReturnStmt:
+			if stmt.Value != nil {
+				// Skip error-path returns (return Error(...), return fmt.Errorf(...))
+				if g.isErrorReturn(stmt.Value) {
+					continue
+				}
+				*types = append(*types, g.inferExprTypeWithParams(stmt.Value, paramTypes))
+			}
+		case *parser.IfStmt:
+			g.collectReturnTypes(stmt.Then.Stmts, paramTypes, types)
+			if stmt.ElseStmt != nil {
+				if block, ok := stmt.ElseStmt.(*parser.BlockStmt); ok {
+					g.collectReturnTypes(block.Stmts, paramTypes, types)
+				} else if elseIf, ok := stmt.ElseStmt.(*parser.IfStmt); ok {
+					g.collectReturnTypes(elseIf.Then.Stmts, paramTypes, types)
+					if elseIf.ElseStmt != nil {
+						if block, ok := elseIf.ElseStmt.(*parser.BlockStmt); ok {
+							g.collectReturnTypes(block.Stmts, paramTypes, types)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	var paramParts []string
 	for _, p := range e.Params {
@@ -2597,14 +2765,22 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	}
 
 	if e.Expr != nil {
-		// Single-expression form
+		// Single-expression form — infer return type from expression if not explicit
 		if retStr == "" {
-			retStr = " interface{}"
+			inferred := g.inferExprType(e.Expr, e.Params)
+			retStr = " " + g.emitType(&parser.SimpleType{Name: inferred})
 		}
 		return fmt.Sprintf("func(%s)%s { return %s }", paramStr, retStr, g.emitExpr(e.Expr))
 	}
 
-	// Block-body form: detect CanThrow
+	// Block-body form: infer return type from return statements if not explicit
+	if retStr == "" {
+		if inferred := g.inferBlockReturnType(e.Body, e.Params); inferred != "" {
+			retStr = " " + g.emitType(&parser.SimpleType{Name: inferred})
+		}
+	}
+
+	// Detect CanThrow
 	lambdaCanThrow := g.bodyIsFailable(e.Body)
 	if lambdaCanThrow {
 		g.neededImports["fmt"] = true
@@ -2632,7 +2808,7 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		methodParams:      g.methodParams,
 		goResolver:        g.goResolver,
 		importMap:         g.importMap,
-		currentReturnType: e.ReturnType,
+		currentReturnType: g.effectiveLambdaReturnType(e),
 		currentCanThrow:   lambdaCanThrow, // was hardcoded false
 		indent:            1,
 	}

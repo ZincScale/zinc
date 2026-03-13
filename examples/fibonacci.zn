@@ -1,21 +1,21 @@
 // Fibonacci — demonstrates recursion and basic arithmetic
 
-fib(n Int) Int {
+Int fib(Int n) {
     if n <= 1 {
         return n
     }
     return fib(n - 1) + fib(n - 2)
 }
 
-fibIterative(n Int) Int {
+Int fibIterative(Int n) {
     if n <= 1 {
         return n
     }
-    a Int = 0
-    b Int = 1
-    i Int = 2
+    Int a = 0
+    Int b = 1
+    Int i = 2
     while i <= n {
-        tmp Int = a + b
+        Int tmp = a + b
         a = b
         b = tmp
         i += 1
@@ -25,14 +25,14 @@ fibIterative(n Int) Int {
 
 main() {
     print("Fibonacci (recursive):")
-    i Int = 0
+    Int i = 0
     while i <= 10 {
         print(fib(i))
         i += 1
     }
 
     print("Fibonacci (iterative):")
-    j Int = 0
+    Int j = 0
     while j <= 10 {
         print(fibIterative(j))
         j += 1

@@ -1,6 +1,6 @@
 enum Direction { North, South, East, West }
 
-describe(d Direction) String {
+String describe(Direction d) {
     match d {
         case Direction.North => { return "Going North" }
         case Direction.South => { return "Going South" }
@@ -11,9 +11,9 @@ describe(d Direction) String {
 }
 
 main() {
-    dir Direction = Direction.North
+    Direction dir = Direction.North
     print(describe(dir))
 
-    dir2 Direction = Direction.East
+    Direction dir2 = Direction.East
     print(describe(dir2))
 }

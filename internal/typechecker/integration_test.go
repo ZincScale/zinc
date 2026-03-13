@@ -21,21 +21,21 @@ import (
 func TestTypecheckerKitchenSink(t *testing.T) {
 	src := `
 interface Describable {
-    describe() String
+    String describe()
 }
 enum Level { Low, Mid, High }
 Score<T> : Describable {
-    value T
-    level Level
-    new(v T, l Level) {
+    T value
+    Level level
+    new(T v, Level l) {
         this.value = v
         this.level = l
     }
-    describe() String {
+    String describe() {
         return "Score"
     }
 }
-getLevel(s Int) Level {
+Level getLevel(Int s) {
     if s > 80 {
         return Level.High
     }
@@ -52,11 +52,11 @@ main() {
 
 func TestTypecheckerFailableAutoPropagate(t *testing.T) {
 	src := `
-risky(x Int) Int {
+Int risky(Int x) {
     if x < 0 { return Error("bad") }
     return x
 }
-run() Int {
+Int run() {
     a := risky(1)
     return a
 }
@@ -69,7 +69,7 @@ main() {
 
 func TestTypecheckerOrHandlerScope(t *testing.T) {
 	src := `
-risky(x Int) Int {
+Int risky(Int x) {
     if x < 0 { return Error("bad") }
     return x
 }
@@ -87,27 +87,27 @@ main() {
 func TestTypecheckerMultiLevelInheritance(t *testing.T) {
 	src := `
 Base {
-    id Int
-    new(i Int) {
+    Int id
+    new(Int i) {
         this.id = i
     }
-    pub getId() Int {
+    pub Int getId() {
         return this.id
     }
 }
 Middle : Base {
-    new(i Int) {
+    new(Int i) {
         super(i)
     }
-    pub doubled() Int {
+    pub Int doubled() {
         return this.id * 2
     }
 }
 Leaf : Middle {
-    new(i Int) {
+    new(Int i) {
         super(i)
     }
-    pub label() String {
+    pub String label() {
         return "leaf"
     }
 }
@@ -122,7 +122,7 @@ main() {
 func TestTypecheckerReturnTypeMismatchInMethod(t *testing.T) {
 	src := `
 Calc {
-    double(x Int) Int {
+    Int double(Int x) {
         return "oops"
     }
 }
@@ -138,22 +138,22 @@ main() {
 func TestTypecheckerClassPlusInterfaceNoFalsePositives(t *testing.T) {
 	src := `
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 Animal {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub getName() String {
+    pub String getName() {
         return this.name
     }
 }
 Dog : Animal, Speaker {
-    new(n String) {
+    new(String n) {
         super(n)
     }
-    pub speak() String {
+    pub String speak() {
         return "Woof!"
     }
 }

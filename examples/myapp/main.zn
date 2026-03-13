@@ -2,11 +2,11 @@ import "myapp/utils"
 import "myapp/models"
 
 main() {
-    sum Int = utils.Add(10, 32)
-    product Int = utils.Multiply(6, 7)
+    Int sum = utils.Add(10, 32)
+    Int product = utils.Multiply(6, 7)
     print(sum)
     print(product)
 
-    dog Any = models.NewDog("Rex")
+    Any dog = models.NewDog("Rex")
     print(dog)
 }

@@ -8,23 +8,19 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 
 ## Priority Order
 
-### P1 — Syntax Simplification
-Reduce ceremony and boilerplate. Drop `class`, `fn`, `var` (for fields) keywords. Switch to `name Type` (no colon) for declarations. Return type after parens. Drop `.new()` at call site. Drop `if`/`while`/`for` parens. `:=` for inferred locals. Breaking change — all examples, tests, docs need updating. Design doc: `docs/design-syntax-simplification.md`
-- **Effort:** Large
-
-### P2 — Map Collection Methods
+### P1 — Map Collection Methods
 Extend collection methods to work on `Map<K,V>` types. Type-preserving `Where` (returns `Map`, Kotlin/Swift style), `SelectValues`/`SelectKeys` for map-to-map transforms, plus `Select`, `ForEach`, `Any`, `All`, `Count`, `Aggregate` with `(k, v)` lambdas. Loop fusion codegen via `for k, v := range`. Design doc: `docs/design-collection-methods.md` (Map Collection Methods section).
 - **Effort:** Medium
 
-### P3 — Annotations / Decorators
+### P2 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P4 — Data Classes / Records
+### P3 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P5 — Typed Errors
+### P4 — Typed Errors
 Extend error handling with typed error classes. `is`/`as` operators and `or {}` handlers already work — this is mostly about error class conventions and codegen.
 
 - **What already works:** `is`/`as` type operators, `or {}` handlers with `err` variable, failable functions, error wrapping
@@ -48,30 +44,30 @@ Extend error handling with typed error classes. `is`/`as` operators and `or {}` 
 - **Design questions:** Should error classes require a `message` field? Auto-generate `Error()` from class name + fields? Interaction with error wrapping (`Error("context", baseErr)`)?
 - **Effort:** Medium — **write design doc first**
 
-### P6 — Structured Concurrency
+### P5 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
 
 - **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
 - **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
 - **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
 
-### P7 — VS Code Extension (Syntax Highlighting)
+### P6 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P8 — Project-Wide Watch Mode
+### P7 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P9 — `zinc test`
+### P8 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P10 — `zinc fmt`
+### P9 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P11 — Error Suggestions
+### P10 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
@@ -120,6 +116,10 @@ Format `.zn` files consistently.
 ---
 
 ## Completed
+- Type-before-name syntax migration — C-style `Type name` declarations, `ReturnType Fn(Params)` function types, `Type... name` variadic, lambda return types always inferred (design doc: `docs/design-type-before-name.md`)
+- Syntax simplification — dropped `class`/`fn`/`construct`/`var` keywords, parens-free `if`/`while`/`for`, `:=` inference, `name Type` declarations (design doc: `docs/design-syntax-simplification.md`)
+- Failable tuple destructuring (`(val, err) := fn()` with auto-propagation)
+- Python backend prototype — benchmarked Comprehension/NumPy/Numba strategies vs Go fused loops (design doc: `docs/design-python-codegen-strategy.md`, code: `internal/codegen_python/`, benchmarks: `benchmarks/python-strategies/`)
 - Color error output with ANSI colors (auto-disabled in CI/piped output)
 - Project-mode errors now show .zn filename instead of directory path
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)

@@ -122,7 +122,7 @@ main() {
 
 func TestE2ERecursion(t *testing.T) {
 	out := e2eRun(t, `
-fib(n Int) Int {
+Int fib(Int n) {
     if n <= 1 { return n }
     return fib(n - 1) + fib(n - 2)
 }
@@ -132,7 +132,7 @@ main() { print(fib(10)) }`)
 
 func TestE2EDefaultParams(t *testing.T) {
 	out := e2eRun(t, `
-greet(name String, greeting String = "Hello") String {
+String greet(String name, String greeting = "Hello") {
     return "{greeting}, {name}!"
 }
 main() {
@@ -144,7 +144,7 @@ main() {
 
 func TestE2ENamedArgs(t *testing.T) {
 	out := e2eRun(t, `
-connect(host String, port Int = 8080) String {
+String connect(String host, Int port = 8080) {
     return "{host}:{port}"
 }
 main() {
@@ -159,9 +159,9 @@ main() {
 func TestE2EClass(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    name String
-    new(n String) { this.name = n }
-    pub bark() String { return "{this.name} says: Woof!" }
+    String name
+    new(String n) { this.name = n }
+    pub String bark() { return "{this.name} says: Woof!" }
 }
 main() {
     d := Dog("Rex")
@@ -173,13 +173,13 @@ main() {
 func TestE2EInheritance(t *testing.T) {
 	out := e2eRun(t, `
 Animal {
-    name String
-    new(n String) { this.name = n }
-    pub speak() String { return "{this.name}: ..." }
+    String name
+    new(String n) { this.name = n }
+    pub String speak() { return "{this.name}: ..." }
 }
 Dog : Animal {
-    new(n String) { super(n) }
-    pub speak() String { return "{this.name}: Woof!" }
+    new(String n) { super(n) }
+    pub String speak() { return "{this.name}: Woof!" }
 }
 main() {
     d := Dog("Buddy")
@@ -191,13 +191,13 @@ main() {
 func TestE2EInterface(t *testing.T) {
 	out := e2eRun(t, `
 interface Greeter {
-    pub greet() String
+    pub String greet()
 }
 English : Greeter {
-    pub greet() String { return "Hello" }
+    pub String greet() { return "Hello" }
 }
 Spanish : Greeter {
-    pub greet() String { return "Hola" }
+    pub String greet() { return "Hola" }
 }
 main() {
     e := English()
@@ -212,7 +212,7 @@ main() {
 
 func TestE2EReturnErrorAndOrHandler(t *testing.T) {
 	out := e2eRun(t, `
-divide(a Int, b Int) Int {
+Int divide(Int a, Int b) {
     if b == 0 { return Error("division by zero") }
     return a / b
 }
@@ -234,7 +234,7 @@ func TestE2EClosure(t *testing.T) {
 	out := e2eRun(t, `
 main() {
     base := 10
-    addBase := (x Int) Int => x + base
+    addBase := (Int x) => x + base
     print(addBase(5))
     print(addBase(20))
 }`)
@@ -245,8 +245,8 @@ func TestE2EHigherOrder(t *testing.T) {
 	// Pass a closure directly without going through Any — Any parameters
 	// become interface{} in Go which cannot be called. Use a concrete fn type.
 	out := e2eRun(t, `
-applyDouble(x Int) Int {
-    double := (n Int) Int => n * 2
+Int applyDouble(Int x) {
+    double := (Int n) => n * 2
     return double(x)
 }
 main() {
@@ -260,7 +260,7 @@ main() {
 func TestE2EGoroutineChannel(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    ch Chan<Int> = Chan.new(1)
+    Chan<Int> ch = Chan.new(1)
     go {
         ch.send(42)
     }
@@ -275,7 +275,7 @@ main() {
 func TestE2EListNew(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums List<Int> = List()
+    List<Int> nums = List()
     nums.add(1)
     nums.add(2)
     nums.add(3)
@@ -287,7 +287,7 @@ main() {
 func TestE2EMapNew(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m Map<String, Int> = Map()
+    Map<String, Int> m = Map()
     m["a"] = 1
     m["b"] = 2
     print(m.size())
@@ -300,7 +300,7 @@ main() {
 func TestE2EEnumMatch(t *testing.T) {
 	out := e2eRun(t, `
 enum Direction { North, South, East, West }
-describe(d Direction) String {
+String describe(Direction d) {
     match d {
         case Direction.North => { return "north" }
         case Direction.South => { return "south" }
@@ -384,7 +384,7 @@ main() {
 func TestE2EAsCast(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x Any = 42
+    Any x = 42
     y := x as Int
     print(y + 1)
 }`)
@@ -394,7 +394,7 @@ main() {
 func TestE2EIsCheck(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x Any = "hello"
+    Any x = "hello"
     if x is String {
         print("yes")
     } else {
@@ -407,7 +407,7 @@ main() {
 func TestE2EIsCheckFalse(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x Any = 42
+    Any x = 42
     if x is String {
         print("string")
     } else {
@@ -420,22 +420,22 @@ main() {
 func TestE2EAsCastClassType(t *testing.T) {
 	out := e2eRun(t, `
 Animal {
-    name String
-    new(name String) {
+    String name
+    new(String name) {
         this.name = name
     }
-    speak() String { return this.name }
+    String speak() { return this.name }
 }
 
 Dog : Animal {
-    new(name String) {
+    new(String name) {
         super(name)
     }
-    pub bark() String { return this.name + " says woof" }
+    pub String bark() { return this.name + " says woof" }
 }
 
 main() {
-    a Any = Dog("Rex")
+    Any a = Dog("Rex")
     d := a as Dog
     print(d.bark())
 }`)
@@ -567,13 +567,13 @@ main() {
 func TestE2ESafeNavField(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
 }
 main() {
-    d Dog? = Dog("Rex")
+    Dog? d = Dog("Rex")
     result := d?.name
     print(result)
 }`)
@@ -584,13 +584,13 @@ main() {
 func TestE2ESafeNavNil(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
 }
 main() {
-    d Dog? = null
+    Dog? d = null
     result := d?.name
     if result == null {
         print("nil safe")
@@ -603,16 +603,16 @@ main() {
 func TestE2ESafeNavMethodCall(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub speak() String {
+    pub String speak() {
         return "woof"
     }
 }
 main() {
-    d Dog? = Dog("Rex")
+    Dog? d = Dog("Rex")
     result := d?.speak()
     print(result)
 }`)
@@ -623,16 +623,16 @@ main() {
 func TestE2ESafeNavMethodNil(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub speak() String {
+    pub String speak() {
         return "woof"
     }
 }
 main() {
-    d Dog? = null
+    Dog? d = null
     result := d?.speak()
     if result == null {
         print("method not called")
@@ -645,17 +645,17 @@ main() {
 func TestE2ESafeNavVoidMethodNonNil(t *testing.T) {
 	out := e2eRun(t, `
 Logger {
-    lastMsg String
+    String lastMsg
     new() {
         this.lastMsg = ""
     }
-    pub log(msg String) {
+    pub log(String msg) {
         this.lastMsg = msg
         print(msg)
     }
 }
 main() {
-    l Logger? = Logger()
+    Logger? l = Logger()
     l?.log("hello")
 }`)
 	assertOutput(t, out, "hello")
@@ -665,17 +665,17 @@ main() {
 func TestE2ESafeNavVoidMethodNil(t *testing.T) {
 	out := e2eRun(t, `
 Logger {
-    lastMsg String
+    String lastMsg
     new() {
         this.lastMsg = ""
     }
-    pub log(msg String) {
+    pub log(String msg) {
         this.lastMsg = msg
         print(msg)
     }
 }
 main() {
-    l Logger? = null
+    Logger? l = null
     l?.log("should not print")
     print("survived")
 }`)
@@ -686,21 +686,21 @@ main() {
 func TestE2ESafeNavChaining(t *testing.T) {
 	out := e2eRun(t, `
 Address {
-    city String
-    new(c String) {
+    String city
+    new(String c) {
         this.city = c
     }
 }
 Person {
-    name String
-    address Address?
-    new(n String, addr Address?) {
+    String name
+    Address? address
+    new(String n, Address? addr) {
         this.name = n
         this.address = addr
     }
 }
 main() {
-    p Person? = Person("Alice", Address("NYC"))
+    Person? p = Person("Alice", Address("NYC"))
     city := p?.address?.city
     print(city)
 }`)
@@ -711,21 +711,21 @@ main() {
 func TestE2ESafeNavChainingNilMiddle(t *testing.T) {
 	out := e2eRun(t, `
 Address {
-    city String
-    new(c String) {
+    String city
+    new(String c) {
         this.city = c
     }
 }
 Person {
-    name String
-    address Address?
-    new(n String, addr Address?) {
+    String name
+    Address? address
+    new(String n, Address? addr) {
         this.name = n
         this.address = addr
     }
 }
 main() {
-    p Person? = Person("Bob", null)
+    Person? p = Person("Bob", null)
     city := p?.address?.city
     if city == null {
         print("no city")
@@ -931,7 +931,7 @@ main() {
 func TestE2EListAdd(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums List<Int> = List()
+    List<Int> nums = List()
     nums.add(10)
     nums.add(20)
     nums.add(30)
@@ -946,7 +946,7 @@ main() {
 func TestE2EMapRemove(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m Map<String, Int> = Map()
+    Map<String, Int> m = Map()
     m["a"] = 1
     m["b"] = 2
     m["c"] = 3
@@ -973,7 +973,7 @@ func TestE2ECollectionSize(t *testing.T) {
 main() {
     list := [1, 2, 3, 4, 5]
     print(list.size())
-    m Map<String, Int> = Map()
+    Map<String, Int> m = Map()
     m["x"] = 1
     print(m.size())
     s := "hello"
@@ -1126,12 +1126,12 @@ main() {
 
 func TestE2EFnTypeParam(t *testing.T) {
 	out := e2eRun(t, `
-apply(f Fn<(Int), Int>, x Int) Int {
+Int apply(Int Fn(Int) f, Int x) {
     return f(x)
 }
 
 main() {
-    double := (x Int) Int => x * 2
+    double := (Int x) => x * 2
     print(apply(double, 7))
 }`)
 	assertOutput(t, out, "14")
@@ -1139,12 +1139,12 @@ main() {
 
 func TestE2EFnTypeMultiParam(t *testing.T) {
 	out := e2eRun(t, `
-combine(f Fn<(Int, Int), Int>, a Int, b Int) Int {
+Int combine(Int Fn(Int, Int) f, Int a, Int b) {
     return f(a, b)
 }
 
 main() {
-    add := (a Int, b Int) Int => a + b
+    add := (Int a, Int b) => a + b
     print(combine(add, 3, 4))
 }`)
 	assertOutput(t, out, "7")
@@ -1152,12 +1152,12 @@ main() {
 
 func TestE2EFnTypeVoid(t *testing.T) {
 	out := e2eRun(t, `
-run(callback Fn<(), Void>) {
+run(Fn() callback) {
     callback()
 }
 
 main() {
-    run(() Void => {
+    run(() => {
         print("called")
     })
 }`)
@@ -1167,7 +1167,7 @@ main() {
 func TestE2EFnTypeVar(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    transform := (s String) Int => s.size()
+    transform := (String s) => s.size()
     print(transform("hello"))
 }`)
 	assertOutput(t, out, "5")
@@ -1185,13 +1185,13 @@ main() {
 func TestE2EConstructorNewSyntax(t *testing.T) {
 	out := e2eRun(t, `
 Cat {
-    name String
+    String name
 
-    new(name String) {
+    new(String name) {
         this.name = name
     }
 
-    pub greet() String {
+    pub String greet() {
         return "Meow, I'm {this.name}"
     }
 }
@@ -1251,7 +1251,7 @@ main() {
 func TestE2EEmptyMapWithType(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    m Map<String, Int> = {}
+    Map<String, Int> m = {}
     m["x"] = 42
     print(m["x"])
 }`)
@@ -1270,7 +1270,7 @@ main() {
 func TestE2EConstDecl(t *testing.T) {
 	out := e2eRun(t, `
 const PI = 3.14
-const GREETING String = "hello"
+const String GREETING = "hello"
 
 main() {
     print(PI)
@@ -1436,7 +1436,7 @@ main() {
 
 func TestE2EGenericFunction(t *testing.T) {
 	out := e2eRun(t, `
-identity<T>(val T) T {
+T identity<T>(T val) {
     return val
 }
 main() {
@@ -1449,9 +1449,9 @@ main() {
 func TestE2EGenericClass(t *testing.T) {
 	out := e2eRun(t, `
 Box<T> {
-    value T
-    new(v T) { this.value = v }
-    pub get() T { return this.value }
+    T value
+    new(T v) { this.value = v }
+    pub T get() { return this.value }
 }
 main() {
     intBox := Box(42)
@@ -1478,7 +1478,7 @@ main() {
 
 func TestE2EVariadicSum(t *testing.T) {
 	out := e2eRun(t, `
-sum(nums ...Int) Int {
+Int sum(Int... nums) {
     total := 0
     for n in nums {
         total += n
@@ -1495,7 +1495,7 @@ main() {
 
 func TestE2EVariadicSpread(t *testing.T) {
 	out := e2eRun(t, `
-sum(nums ...Int) Int {
+Int sum(Int... nums) {
     total := 0
     for n in nums {
         total += n
@@ -1532,7 +1532,7 @@ main() {
 
 func TestE2EVariadicWithFixedParams(t *testing.T) {
 	out := e2eRun(t, `
-log(level String, messages ...String) {
+log(String level, String... messages) {
     for msg in messages {
         print("[{level}] {msg}")
     }
@@ -1546,13 +1546,13 @@ main() {
 func TestE2EVariadicMethodCall(t *testing.T) {
 	out := e2eRun(t, `
 Logger {
-    prefix String
+    String prefix
 
-    new(prefix String) {
+    new(String prefix) {
         this.prefix = prefix
     }
 
-    pub log(messages ...String) {
+    pub log(String... messages) {
         for msg in messages {
             print("{this.prefix}: {msg}")
         }
@@ -1614,7 +1614,7 @@ func TestE2EAutoDetectInFailable(t *testing.T) {
 	out := e2eRun(t, `
 import "strconv"
 
-parseNum(s String) Int {
+Int parseNum(String s) {
     if s == "" { return Error("empty") }
     n := strconv.Atoi(s)
     return n
@@ -1647,7 +1647,7 @@ func TestE2ERawString(t *testing.T) {
 
 func TestE2EMatchFailable(t *testing.T) {
 	out := e2eRun(t, `
-check(x Int) String {
+String check(Int x) {
     match x {
         case 0 => { return Error("zero not allowed") }
         case _ => { return "ok" }
@@ -1692,15 +1692,15 @@ main() {
 func TestE2EClassWithAddMethod(t *testing.T) {
 	out := e2eRun(t, `
 Counter {
-    count Int
+    Int count
 
     new() {}
 
-    pub add(n Int) {
+    pub add(Int n) {
         this.count = this.count + n
     }
 
-    pub getCount() Int {
+    pub Int getCount() {
         return this.count
     }
 }
@@ -1798,29 +1798,29 @@ main() {
 func TestE2EPolymorphism(t *testing.T) {
 	out := e2eRun(t, `
 interface Speaker {
-    pub speak() String
+    pub String speak()
 }
 
 Animal {
-    name String
-    new(n String) {
+    String name
+    new(String n) {
         this.name = n
     }
-    pub speak() String {
+    pub String speak() {
         return "{this.name} says ..."
     }
 }
 
 Dog : Animal, Speaker {
-    new(n String) {
+    new(String n) {
         super(n)
     }
-    pub speak() String {
+    pub String speak() {
         return "{this.name} says Woof!"
     }
 }
 
-printSpeak(s Speaker) {
+printSpeak(Speaker s) {
     print(s.speak())
 }
 
@@ -1835,15 +1835,15 @@ main() {
 func TestE2EPolymorphismFieldAccess(t *testing.T) {
 	out := e2eRun(t, `
 Person {
-    name String
-    age Int
-    new(n String, a Int) {
+    String name
+    Int age
+    new(String n, Int a) {
         this.name = n
         this.age = a
     }
 }
 
-greet(p Person) {
+greet(Person p) {
     print("Hello, {p.name}, age {p.age}")
 }
 
@@ -1860,9 +1860,9 @@ main() {
 func TestE2EFailableMethodViaInterface(t *testing.T) {
 	out := e2eRun(t, `
 AgeValidator {
-    age Int
-    new(a Int) { this.age = a }
-    pub validate() String {
+    Int age
+    new(Int a) { this.age = a }
+    pub String validate() {
         if this.age < 0 {
             return Error("age cannot be negative")
         }
@@ -1870,7 +1870,7 @@ AgeValidator {
     }
 }
 
-checkAge(v AgeValidator) {
+checkAge(AgeValidator v) {
     result := v.validate() or {
         print("error: {err}")
         return
@@ -1890,16 +1890,16 @@ func TestE2EVoidFailableMethodViaInterface(t *testing.T) {
 import "os"
 
 Writer {
-    prefix String
-    new(p String) { this.prefix = p }
-    pub process(path String) {
+    String prefix
+    new(String p) { this.prefix = p }
+    pub process(String path) {
         with (f := os.Create(path)) {
             f.WriteString("{this.prefix}: data") or {}
         }
     }
 }
 
-runWriter(w Writer, path String) {
+runWriter(Writer w, String path) {
     w.process(path)
 }
 
@@ -1918,12 +1918,12 @@ main() {
 
 func TestE2EErrorPropagationChain(t *testing.T) {
 	out := e2eRun(t, `
-risky(x Int) Int {
+Int risky(Int x) {
     if x < 0 { return Error("negative") }
     return x * 2
 }
 
-middle(x Int) Int {
+Int middle(Int x) {
     r := risky(x)
     return r + 1
 }
@@ -1946,7 +1946,7 @@ main() {
 
 func TestE2EMultipleOrHandlers(t *testing.T) {
 	out := e2eRun(t, `
-risky(x Int) Int {
+Int risky(Int x) {
     if x == 0 { return Error("zero") }
     return 100 / x
 }
@@ -1966,25 +1966,25 @@ main() {
 func TestE2EPolymorphismMultipleShapes(t *testing.T) {
 	out := e2eRun(t, `
 interface Shape {
-    pub area() Float
-    pub name() String
+    pub Float area()
+    pub String name()
 }
 
 Circle : Shape {
-    radius Float
-    new(r Float) { this.radius = r }
-    pub area() Float { return 3.14 * this.radius * this.radius }
-    pub name() String { return "Circle" }
+    Float radius
+    new(Float r) { this.radius = r }
+    pub Float area() { return 3.14 * this.radius * this.radius }
+    pub String name() { return "Circle" }
 }
 
 Square : Shape {
-    side Float
-    new(s Float) { this.side = s }
-    pub area() Float { return this.side * this.side }
-    pub name() String { return "Square" }
+    Float side
+    new(Float s) { this.side = s }
+    pub Float area() { return this.side * this.side }
+    pub String name() { return "Square" }
 }
 
-describe(s Shape) {
+describe(Shape s) {
     print("{s.name()}: {s.area()}")
 }
 
@@ -2011,9 +2011,9 @@ main() {
 func TestE2EGetterCollisionWithExplicitMethod(t *testing.T) {
 	out := e2eRun(t, `
 Config {
-    value Int
-    new(v Int) { this.value = v }
-    pub getValue() Int { return this.value * 2 }
+    Int value
+    new(Int v) { this.value = v }
+    pub Int getValue() { return this.value * 2 }
 }
 
 main() {
@@ -2063,18 +2063,18 @@ main() {
 func TestE2EGenericClassThroughInterface(t *testing.T) {
 	out := e2eRun(t, `
 Box<T> {
-    value T
+    T value
 
-    new(value T) {
+    new(T value) {
         this.value = value
     }
 
-    pub getValue() T {
+    pub T getValue() {
         return this.value
     }
 }
 
-printBox(b Box<Int>) {
+printBox(Box<Int> b) {
     print(b.getValue())
 }
 
@@ -2089,16 +2089,16 @@ main() {
 func TestE2EGenericClassFieldAccessThroughInterface(t *testing.T) {
 	out := e2eRun(t, `
 Pair<K, V> {
-    key K
-    val V
+    K key
+    V val
 
-    new(key K, val V) {
+    new(K key, V val) {
         this.key = key
         this.val = val
     }
 }
 
-printPairKey(p Pair<String, Int>) {
+printPairKey(Pair<String, Int> p) {
     print(p.key)
 }
 
@@ -2113,18 +2113,18 @@ main() {
 func TestE2EGenericEmptyListLiteralInference(t *testing.T) {
 	out := e2eRun(t, `
 Stack<T> {
-    items List<T>
+    List<T> items
 
-    new(initial T) {
+    new(T initial) {
         this.items = []
         this.items.add(initial)
     }
 
-    pub push(item T) {
+    pub push(T item) {
         this.items.add(item)
     }
 
-    pub count() Int {
+    pub Int count() {
         return this.items.size()
     }
 }
@@ -2213,7 +2213,7 @@ main() {
 func TestE2ELambdaShorthand(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    double := (x Int) Int => x * 2
+    double := (Int x) => x * 2
     print(double(5))
 }`)
 	assertOutput(t, out, "10")
@@ -2343,7 +2343,7 @@ main() {
 
 func TestE2ESelectWithFailableFunction(t *testing.T) {
 	out := e2eRun(t, `
-safeDivide(x Int) Int {
+Int safeDivide(Int x) {
     if x == 0 { return Error("zero") }
     return 100 / x
 }
@@ -2357,7 +2357,7 @@ main() {
 
 func TestE2EWhereWithFailableFunction(t *testing.T) {
 	out := e2eRun(t, `
-isValid(x Int) Bool {
+Bool isValid(Int x) {
     if x < 0 { return Error("negative") }
     return x > 3
 }
@@ -2371,7 +2371,7 @@ main() {
 
 func TestE2EAggregateWithFailableFunction(t *testing.T) {
 	out := e2eRun(t, `
-safeAdd(a Int, b Int) Int {
+Int safeAdd(Int a, Int b) {
     if a + b > 1000 { return Error("overflow") }
     return a + b
 }
@@ -2386,7 +2386,7 @@ main() {
 func TestE2ESelectFailableErrorPropagation(t *testing.T) {
 	// When a failable lambda errors, it should panic in main
 	src := `
-safeDivide(x Int) Int {
+Int safeDivide(Int x) {
     if x == 0 { return Error("division by zero") }
     return 100 / x
 }
@@ -2406,7 +2406,7 @@ main() {
 
 func TestE2EAnyWithFailableFunction(t *testing.T) {
 	src := `
-isPositive(x Int) Bool {
+Bool isPositive(Int x) {
     if x == 0 { return Error("zero not allowed") }
     return x > 0
 }
@@ -2421,7 +2421,7 @@ main() {
 
 func TestE2EAllWithFailableFunction(t *testing.T) {
 	src := `
-isPositive(x Int) Bool {
+Bool isPositive(Int x) {
     if x == 0 { return Error("zero not allowed") }
     return x > 0
 }
@@ -2436,7 +2436,7 @@ main() {
 
 func TestE2EFirstWithFailableFunction(t *testing.T) {
 	src := `
-isEven(x Int) Bool {
+Bool isEven(Int x) {
     if x < 0 { return Error("negative") }
     return x % 2 == 0
 }
@@ -2451,7 +2451,7 @@ main() {
 
 func TestE2EWhereSelectWithFailable(t *testing.T) {
 	src := `
-double(x Int) Int {
+Int double(Int x) {
     if x > 100 { return Error("too large") }
     return x * 2
 }
@@ -2466,7 +2466,7 @@ main() {
 
 func TestE2EFailableErrorPanicsInMain(t *testing.T) {
 	src := `
-safeDivide(x Int) Int {
+Int safeDivide(Int x) {
     if x == 0 { return Error("division by zero") }
     return 100 / x
 }
@@ -2498,7 +2498,7 @@ main() {
 
 func TestE2ECountWithFailableWhere(t *testing.T) {
 	src := `
-isValid(x Int) Bool {
+Bool isValid(Int x) {
     if x < 0 { return Error("negative") }
     return x > 3
 }

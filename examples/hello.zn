@@ -1,5 +1,5 @@
 main() {
     print("Hello, World!")
-    name String = "Zinc"
+    String name = "Zinc"
     print(name)
 }

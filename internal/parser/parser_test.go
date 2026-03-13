@@ -51,7 +51,7 @@ func TestParseFnDecl(t *testing.T) {
 }
 
 func TestParseFnWithParams(t *testing.T) {
-	prog, p := parse(`add(a Int, b Int) Int { return a }`)
+	prog, p := parse(`Int add(Int a, Int b) { return a }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if len(fn.Params) != 2 {
@@ -139,9 +139,9 @@ func TestParseForIn(t *testing.T) {
 
 func TestParseClass(t *testing.T) {
 	src := `Dog {
-		name String
-		new(n String) { }
-		pub bark() String { return name }
+		String name
+		new(String n) { }
+		pub String bark() { return name }
 	}`
 	prog, p := parse(src)
 	assertNoErrors(t, p)
@@ -164,7 +164,7 @@ func TestParseClass(t *testing.T) {
 }
 
 func TestParseInterface(t *testing.T) {
-	prog, p := parse(`interface Speaker { pub speak() String }`)
+	prog, p := parse(`interface Speaker { pub String speak() }`)
 	assertNoErrors(t, p)
 	iface, ok := prog.Decls[0].(*InterfaceDecl)
 	if !ok {
@@ -221,7 +221,7 @@ func TestParseOrHandlerOnAssign(t *testing.T) {
 }
 
 func TestParseReturnError(t *testing.T) {
-	prog, p := parse(`risky() Int { return Error("oops") }`)
+	prog, p := parse(`Int risky() { return Error("oops") }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ret, ok := fn.Body.Stmts[0].(*ReturnStmt)
@@ -319,7 +319,7 @@ func TestParseConstructorNew(t *testing.T) {
 }
 
 func TestParsePubFn(t *testing.T) {
-	prog, p := parse(`pub greet() String { return "hi" }`)
+	prog, p := parse(`pub String greet() { return "hi" }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if !fn.IsPub {
@@ -329,7 +329,7 @@ func TestParsePubFn(t *testing.T) {
 
 func TestParsePackageDecl(t *testing.T) {
 	prog, p := parse(`package "myapp/utils"
-add(a Int, b Int) Int { return a }`)
+Int add(Int a, Int b) { return a }`)
 	assertNoErrors(t, p)
 	if prog.Package == nil {
 		t.Fatal("expected Package to be non-nil")
@@ -353,7 +353,7 @@ func TestParseNoPackageDecl(t *testing.T) {
 func TestParsePackageDeclWithImports(t *testing.T) {
 	prog, p := parse(`package "myapp/models"
 import "fmt"
-Dog { name String }`)
+Dog { String name }`)
 	assertNoErrors(t, p)
 	if prog.Package == nil {
 		t.Fatal("expected Package to be non-nil")
@@ -372,7 +372,7 @@ Dog { name String }`)
 // --- Default parameter values ------------------------------------------------
 
 func TestParseParamWithDefault(t *testing.T) {
-	prog, p := parse(`greet(name String, greeting String = "Hello") {}`)
+	prog, p := parse(`greet(String name, String greeting = "Hello") {}`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if len(fn.Params) != 2 {
@@ -395,9 +395,9 @@ func TestParseParamWithDefault(t *testing.T) {
 
 func TestParseCtorParamWithDefault(t *testing.T) {
 	prog, p := parse(`Dog {
-		name String
-		age Int
-		new(name String, age Int = 0) {}
+		String name
+		Int age
+		new(String name, Int age = 0) {}
 	}`)
 	assertNoErrors(t, p)
 	cls := prog.Decls[0].(*ClassDecl)

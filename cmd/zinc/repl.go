@@ -141,10 +141,10 @@ func countBraceDepth(line string) int {
 }
 
 // isTopLevelDecl returns true if input looks like a top-level declaration.
-// In the simplified syntax:
+// In type-before-name syntax:
 //   - Classes: CapitalName { ... } or CapitalName : Parent { ... }
-//   - Functions: name(params) [ReturnType] { ... }
-//   - pub name(params) ... (public functions)
+//   - Functions: name(params) { ... } or ReturnType name(params) { ... }
+//   - pub ReturnType name(params) ... (public functions)
 //   - interface, enum, const, import keep their keywords
 func isTopLevelDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
@@ -162,9 +162,9 @@ func isTopLevelDecl(input string) bool {
 	if len(check) == 0 {
 		return false
 	}
-	// Class: starts with uppercase letter, next meaningful token is '{' or ':'
+	// Class or function-with-return-type: starts with uppercase letter
 	if check[0] >= 'A' && check[0] <= 'Z' {
-		// Find end of identifier
+		// Find end of first identifier
 		i := 0
 		for i < len(check) && (check[i] >= 'A' && check[i] <= 'Z' || check[i] >= 'a' && check[i] <= 'z' || check[i] >= '0' && check[i] <= '9' || check[i] == '_') {
 			i++
@@ -174,30 +174,42 @@ func isTopLevelDecl(input string) bool {
 		if strings.HasPrefix(rest, "{") || strings.HasPrefix(rest, ":") || strings.HasPrefix(rest, "<") {
 			return true
 		}
+		// Function with return type: ReturnType name(params) { — next token is lowercase
+		if len(rest) > 0 && rest[0] >= 'a' && rest[0] <= 'z' || len(rest) > 0 && rest[0] == '_' {
+			return isFuncShape(rest)
+		}
 		return false
 	}
-	// Function: starts with lowercase, has '(' — e.g. main() { or add(a Int) Int {
+	// Function without return type: starts with lowercase, e.g. main() { or add(Int a) {
 	if check[0] >= 'a' && check[0] <= 'z' || check[0] == '_' {
-		if strings.Contains(check, "(") && strings.Contains(check, "{") {
-			// Make sure '(' comes before '{' — it's a function definition
-			parenIdx := strings.Index(check, "(")
-			braceIdx := strings.Index(check, "{")
-			if parenIdx < braceIdx {
-				return true
-			}
-		}
+		return isFuncShape(check)
+	}
+	return false
+}
+
+// isFuncShape returns true if s looks like name(...)...{ (function definition shape).
+func isFuncShape(s string) bool {
+	if strings.Contains(s, "(") && strings.Contains(s, "{") {
+		parenIdx := strings.Index(s, "(")
+		braceIdx := strings.Index(s, "{")
+		return parenIdx < braceIdx
 	}
 	return false
 }
 
 // isVarDecl returns true if input is a variable declaration.
-// In the simplified syntax, variable declarations use:
+// In type-before-name syntax, variable declarations use:
 //   - name := expr (inferred type)
-//   - name Type = expr (explicit typed, e.g. nullable)
+//   - Type name = expr (explicit typed, e.g. String? name = null)
 func isVarDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
 	// Inferred: name := expr
 	if strings.Contains(trimmed, ":=") {
+		return true
+	}
+	// Typed: Type name = expr — starts with uppercase, has ' = ' but not ':='
+	if len(trimmed) > 0 && trimmed[0] >= 'A' && trimmed[0] <= 'Z' &&
+		strings.Contains(trimmed, " = ") && !isTopLevelDecl(trimmed) {
 		return true
 	}
 	return false
@@ -221,8 +233,11 @@ func isBareExpression(input string) bool {
 	if isTopLevelDecl(trimmed) {
 		return false
 	}
-	// Declaration with :=
+	// Declaration with := or typed var decl
 	if strings.Contains(trimmed, ":=") {
+		return false
+	}
+	if isVarDecl(trimmed) {
 		return false
 	}
 	// Assignment operators
@@ -345,7 +360,7 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 }
 
 // extractVarName pulls the variable name from a declaration.
-// Handles: name := expr, name Type = expr
+// Handles: name := expr, Type name = expr
 func extractVarName(decl string) string {
 	trimmed := strings.TrimSpace(decl)
 	// name := expr
@@ -357,11 +372,11 @@ func extractVarName(decl string) string {
 		}
 		return name
 	}
-	// name Type = expr — extract first word
-	for i, ch := range trimmed {
-		if ch == ' ' || ch == '=' {
-			return trimmed[:i]
-		}
+	// Type name = expr — skip first word (type), extract second word (name)
+	// e.g. "String name = ..." or "String? name = ..."
+	parts := strings.Fields(trimmed)
+	if len(parts) >= 3 && parts[2] == "=" {
+		return parts[1]
 	}
 	return ""
 }

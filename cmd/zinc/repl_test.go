@@ -53,7 +53,8 @@ func TestIsTopLevelDecl(t *testing.T) {
 	trueCases := []string{
 		"main() { }",
 		"pub greet() { }",
-		"add(a Int, b Int) Int { return a + b }",
+		"Int add(Int a, Int b) { return a + b }",
+		"String greet(String name) { return name }",
 		"Dog { }",
 		"Dog : Animal { }",
 		"Puppy { }",
@@ -85,6 +86,9 @@ func TestIsVarDecl(t *testing.T) {
 	trueCases := []string{
 		"x := 1",
 		"name := \"hello\"",
+		`String name = "hello"`,
+		"Int x = 42",
+		"String? name = null",
 	}
 	for _, s := range trueCases {
 		if !isVarDecl(s) {
@@ -135,6 +139,8 @@ func TestIsBareExpression(t *testing.T) {
 		"main() { }",
 		"Dog { }",
 		"const PI = 3.14",
+		`String name = "hello"`,
+		"Int x = 42",
 	}
 	for _, s := range falseCases {
 		if isBareExpression(s) {
@@ -152,6 +158,9 @@ func TestExtractVarName(t *testing.T) {
 		{"name := \"hello\"", "name"},
 		{"  spaced := 42  ", "spaced"},
 		{"(a, b) := divide(10, 2)", ""},
+		{`String name = "hello"`, "name"},
+		{"Int x = 42", "x"},
+		{"String? name = null", "name"},
 		{"print(x)", ""},
 		{"", ""},
 	}

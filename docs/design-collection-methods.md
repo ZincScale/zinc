@@ -48,13 +48,13 @@ allTags := posts.SelectMany(p => p.tags)
 
 ## Lambda Syntax
 
-Zinc already has full lambda support (`(x Int) Int => x * 2`), but collection methods need shorthand forms for ergonomic chaining. Arrow syntax stays as `=>` (consistent with C#/TypeScript).
+Zinc already has full lambda support (`(Int x) => x * 2`), but collection methods need shorthand forms for ergonomic chaining. Arrow syntax stays as `=>` (consistent with C#/TypeScript).
 
 ### Shorthand Levels
 
 ```zinc
 // Existing (verbose — works today but unusable for chaining)
-list.Where((x Int) Bool => x > 5).Select((x Int) Int => x * 2)
+list.Where((Int x) => x > 5).Select((Int x) => x * 2)
 
 // Level 1: Type inference from context (infer param + return types)
 list.Where((x) => x > 5).Select((x) => x * 2)
@@ -393,7 +393,7 @@ for _, _v0 := range scores {
 
 ## Implementation Order
 
-Lambda expressions already exist (`(x Int) Int => x * 2`, block-body, failable). Shorthand and type inference are incremental additions.
+Lambda expressions already exist (`(Int x) => x * 2`, block-body, failable). Shorthand and type inference are incremental additions.
 
 1. **Lambda shorthand** — parser support for `x => expr` (no parens, no types) and `it` implicit param
 2. **Single-step methods** — `Where`, `Select`, `ForEach` (no chaining, just emit a for loop)

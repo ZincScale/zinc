@@ -1,13 +1,13 @@
 package "myapp/utils"
 
-pub add(a Int, b Int) Int {
+pub Int add(Int a, Int b) {
     return a + b
 }
 
-pub multiply(a Int, b Int) Int {
+pub Int multiply(Int a, Int b) {
     return a * b
 }
 
-pub square(n Int) Int {
+pub Int square(Int n) {
     return n * n
 }
