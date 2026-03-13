@@ -2510,3 +2510,241 @@ main() {
 	got := e2eRun(t, src)
 	assertOutput(t, got, "3")
 }
+
+// --- New collection method e2e tests ---
+
+func TestE2ESum(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5]
+    s := nums.Sum()
+    print(s)
+}`
+	assertOutput(t, e2eRun(t, src), "15")
+}
+
+func TestE2ESumWithSelector(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5]
+    s := nums.Where(x => x > 2).Sum()
+    print(s)
+}`
+	assertOutput(t, e2eRun(t, src), "12")
+}
+
+func TestE2EMinMax(t *testing.T) {
+	src := `
+main() {
+    nums := [5, 2, 8, 1, 9, 3]
+    lo := nums.Min()
+    print(lo)
+}`
+	assertOutput(t, e2eRun(t, src), "1")
+}
+
+func TestE2ELast(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5]
+    l := nums.Last(x => x < 4)
+    print(l)
+}`
+	assertOutput(t, e2eRun(t, src), "3")
+}
+
+func TestE2ETakeWhile(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5, 1, 2]
+    r := nums.TakeWhile(x => x < 4)
+    for item in r { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "1\n2\n3")
+}
+
+func TestE2ESkipWhile(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5, 1, 2]
+    r := nums.SkipWhile(x => x < 4)
+    for item in r { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "4\n5\n1\n2")
+}
+
+func TestE2EDistinct(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 2, 3, 1, 4, 3]
+    r := nums.Distinct()
+    for item in r { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "1\n2\n3\n4")
+}
+
+func TestE2ESelectMany(t *testing.T) {
+	src := `
+main() {
+    lists := [[1, 2], [3, 4], [5]]
+    flat := lists.SelectMany(x => x)
+    for item in flat { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "1\n2\n3\n4\n5")
+}
+
+func TestE2EOrderBy(t *testing.T) {
+	src := `
+main() {
+    nums := [3, 1, 4, 1, 5, 9, 2, 6]
+    sorted := nums.OrderBy(x => x)
+    for item in sorted { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "1\n1\n2\n3\n4\n5\n6\n9")
+}
+
+func TestE2EOrderByDescending(t *testing.T) {
+	src := `
+main() {
+    nums := [3, 1, 4, 1, 5]
+    sorted := nums.OrderByDescending(x => x)
+    for item in sorted { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "5\n4\n3\n1\n1")
+}
+
+func TestE2EWhereOrderBySelectTake(t *testing.T) {
+	src := `
+main() {
+    nums := [5, 3, 8, 1, 9, 2, 7]
+    r := nums.Where(x => x > 2).OrderBy(x => x).Select(x => x * 10).Take(3)
+    for item in r { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "30\n50\n70")
+}
+
+func TestE2EGroupBy(t *testing.T) {
+	src := `
+main() {
+    nums := [1, 2, 3, 4, 5, 6]
+    groups := nums.GroupBy(x => x % 2)
+    // Print counts for even and odd groups
+    print(len(groups))
+}`
+	assertOutput(t, e2eRun(t, src), "2")
+}
+
+func TestE2EToDictionary(t *testing.T) {
+	src := `
+main() {
+    names := ["Alice", "Bob", "Carol"]
+    dict := names.ToDictionary(x => x, x => len(x))
+    print(dict["Alice"])
+    print(dict["Bob"])
+}`
+	assertOutput(t, e2eRun(t, src), "5\n3")
+}
+
+func TestE2EZip(t *testing.T) {
+	src := `
+main() {
+    a := [1, 2, 3]
+    b := [10, 20, 30]
+    r := a.Zip(b, (x, y) => x + y)
+    for item in r { print(item) }
+}`
+	assertOutput(t, e2eRun(t, src), "11\n22\n33")
+}
+
+// --- Map collection method e2e tests ---
+
+func TestE2EMapWhere(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60, "Carol": 85}
+    passing := scores.Where((k, v) => v >= 80)
+    print(len(passing))
+}`
+	assertOutput(t, e2eRun(t, src), "2")
+}
+
+func TestE2EMapForEach(t *testing.T) {
+	src := `
+main() {
+    scores := {"a": 1, "b": 2}
+    count := 0
+    scores.ForEach((k, v) => { count += v })
+    print(count)
+}`
+	assertOutput(t, e2eRun(t, src), "3")
+}
+
+func TestE2EMapAny(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60}
+    hasHigh := scores.Any((k, v) => v > 85)
+    print(hasHigh)
+}`
+	assertOutput(t, e2eRun(t, src), "true")
+}
+
+func TestE2EMapAll(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60}
+    allPass := scores.All((k, v) => v >= 60)
+    print(allPass)
+}`
+	assertOutput(t, e2eRun(t, src), "true")
+}
+
+func TestE2EMapCount(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60, "Carol": 85}
+    c := scores.Where((k, v) => v >= 80).Count()
+    print(c)
+}`
+	assertOutput(t, e2eRun(t, src), "2")
+}
+
+func TestE2EMapAggregate(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60, "Carol": 85}
+    total := scores.Aggregate(0, (acc, k, v) => acc + v)
+    print(total)
+}`
+	assertOutput(t, e2eRun(t, src), "235")
+}
+
+func TestE2EMapSelect(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60}
+    names := scores.Select((k, v) => k)
+    print(len(names))
+}`
+	assertOutput(t, e2eRun(t, src), "2")
+}
+
+func TestE2EMapSelectValues(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60}
+    doubled := scores.SelectValues((k, v) => v * 2)
+    print(len(doubled))
+}`
+	assertOutput(t, e2eRun(t, src), "2")
+}
+
+func TestE2EMapWhereAggregate(t *testing.T) {
+	src := `
+main() {
+    scores := {"Alice": 90, "Bob": 60, "Carol": 85}
+    total := scores.Where((k, v) => v >= 80).Aggregate(0, (acc, k, v) => acc + v)
+    print(total)
+}`
+	assertOutput(t, e2eRun(t, src), "175")
+}

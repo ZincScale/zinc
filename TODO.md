@@ -8,19 +8,15 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 
 ## Priority Order
 
-### P1 — Map Collection Methods
-Extend collection methods to work on `Map<K,V>` types. Type-preserving `Where` (returns `Map`, Kotlin/Swift style), `SelectValues`/`SelectKeys` for map-to-map transforms, plus `Select`, `ForEach`, `Any`, `All`, `Count`, `Aggregate` with `(k, v)` lambdas. Loop fusion codegen via `for k, v := range`. Design doc: `docs/design-collection-methods.md` (Map Collection Methods section).
-- **Effort:** Medium
-
-### P2 — Annotations / Decorators
+### P1 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P3 — Data Classes / Records
+### P2 — Data Classes / Records
 `data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P4 — Typed Errors
+### P3 — Typed Errors
 Extend error handling with typed error classes. `is`/`as` operators and `or {}` handlers already work — this is mostly about error class conventions and codegen.
 
 - **What already works:** `is`/`as` type operators, `or {}` handlers with `err` variable, failable functions, error wrapping
@@ -44,30 +40,30 @@ Extend error handling with typed error classes. `is`/`as` operators and `or {}` 
 - **Design questions:** Should error classes require a `message` field? Auto-generate `Error()` from class name + fields? Interaction with error wrapping (`Error("context", baseErr)`)?
 - **Effort:** Medium — **write design doc first**
 
-### P5 — Structured Concurrency
+### P4 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
 
 - **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
 - **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
 - **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
 
-### P6 — VS Code Extension (Syntax Highlighting)
+### P5 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P7 — Project-Wide Watch Mode
+### P6 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P8 — `zinc test`
+### P7 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P9 — `zinc fmt`
+### P8 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P10 — Error Suggestions
+### P9 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
@@ -177,7 +173,10 @@ Format `.zn` files consistently.
 - Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)
 - Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
 - Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)
-- LINQ-style collection methods (Where, Select, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) with loop fusion codegen
-- Lambda shorthand (`x => expr`, `(x, y) => expr`) for collection method chaining
+- Full LINQ-style collection methods — 27 list methods (Where, Select, SelectMany, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, Last, TakeWhile, SkipWhile, ToDictionary, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) + 9 map methods (Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate) with loop fusion codegen
+- Chain segmentation for OrderBy/OrderByDescending (materialization points split chains, each segment fused independently)
+- Map literal type inference (concrete Go types like `map[string]int` instead of `map[interface{}]interface{}`)
+- Nested list literal type inference (`[][]int` for list-of-lists)
+- Lambda shorthand (`x => expr`, `(x, y) => expr`, `(k, v) => expr`) for collection method chaining
 - Failable lambda support in collection chains (error auto-propagation within fused loops)
 - Collection methods benchmarked: loop fusion vs range-over-func iterators vs naive slices (loop fusion wins 2-11,000x)

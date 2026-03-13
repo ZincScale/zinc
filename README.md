@@ -101,7 +101,7 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 - Errors as values with auto-propagation and `or` handlers
 - `with` resource management (auto-close, auto-unlock)
 - Closures and higher-order functions (`Fn` types)
-- LINQ-style collection methods (`.Where()`, `.Select()`, `.Aggregate()`) with loop fusion
+- LINQ-style collection methods on lists and maps (`.Where()`, `.Select()`, `.OrderBy()`, `.GroupBy()`, `.Aggregate()`, 27 methods) with loop fusion codegen
 - Enums with `match` expressions
 - String interpolation
 - Default parameters and named arguments

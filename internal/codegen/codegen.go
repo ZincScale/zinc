@@ -2312,7 +2312,7 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		}
 		elemType := "interface{}"
 		if len(ex.Elements) > 0 {
-			switch ex.Elements[0].(type) {
+			switch inner := ex.Elements[0].(type) {
 			case *parser.IntLit:
 				elemType = "int"
 			case *parser.FloatLit:
@@ -2321,6 +2321,22 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 				elemType = "string"
 			case *parser.BoolLit:
 				elemType = "bool"
+			case *parser.ListLit:
+				// Nested list — infer inner element type
+				innerType := "interface{}"
+				if len(inner.Elements) > 0 {
+					switch inner.Elements[0].(type) {
+					case *parser.IntLit:
+						innerType = "int"
+					case *parser.FloatLit:
+						innerType = "float64"
+					case *parser.StringLit:
+						innerType = "string"
+					case *parser.BoolLit:
+						innerType = "bool"
+					}
+				}
+				elemType = "[]" + innerType
 			}
 		}
 		return fmt.Sprintf("[]%s{%s}", elemType, strings.Join(elems, ", "))
@@ -2332,7 +2348,31 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		if ex.ResolvedType != "" {
 			return fmt.Sprintf("%s{%s}", ex.ResolvedType, strings.Join(pairs, ", "))
 		}
-		return fmt.Sprintf("map[interface{}]interface{}{%s}", strings.Join(pairs, ", "))
+		keyType := "interface{}"
+		valType := "interface{}"
+		if len(ex.Keys) > 0 {
+			switch ex.Keys[0].(type) {
+			case *parser.IntLit:
+				keyType = "int"
+			case *parser.FloatLit:
+				keyType = "float64"
+			case *parser.StringLit:
+				keyType = "string"
+			case *parser.BoolLit:
+				keyType = "bool"
+			}
+			switch ex.Values[0].(type) {
+			case *parser.IntLit:
+				valType = "int"
+			case *parser.FloatLit:
+				valType = "float64"
+			case *parser.StringLit:
+				valType = "string"
+			case *parser.BoolLit:
+				valType = "bool"
+			}
+		}
+		return fmt.Sprintf("map[%s]%s{%s}", keyType, valType, strings.Join(pairs, ", "))
 	case *parser.TypeAssertExpr:
 		obj := g.emitExpr(ex.Object)
 		goType := g.emitSimpleType(ex.TypeName)

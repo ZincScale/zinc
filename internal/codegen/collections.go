@@ -23,6 +23,7 @@ import (
 
 // collectionMethods is the set of recognized LINQ-style collection method names.
 var collectionMethods = map[string]bool{
+	// List methods (v1)
 	"Where":          true,
 	"Select":         true,
 	"SelectMany":     true,
@@ -31,11 +32,100 @@ var collectionMethods = map[string]bool{
 	"All":            true,
 	"First":          true,
 	"FirstOrDefault": true,
+	"Last":           true,
 	"Count":          true,
+	"Sum":            true,
+	"Min":            true,
+	"Max":            true,
 	"Take":           true,
 	"Skip":           true,
+	"TakeWhile":      true,
+	"SkipWhile":      true,
 	"Aggregate":      true,
 	"ToList":         true,
+	"ToDictionary":   true,
+	"Zip":            true,
+	"Distinct":       true,
+	"OrderBy":        true,
+	"OrderByDescending": true,
+	"GroupBy":        true,
+	// Map-specific methods
+	"SelectValues":   true,
+	"SelectKeys":     true,
+}
+
+// materializationMethods require seeing all elements before downstream steps can proceed.
+var materializationMethods = map[string]bool{
+	"OrderBy":           true,
+	"OrderByDescending": true,
+}
+
+// inferElemType infers the Go element type of a list source expression.
+// Returns "interface{}" if the type cannot be determined.
+func (g *Generator) inferElemType(source parser.Expr) string {
+	switch s := source.(type) {
+	case *parser.ListLit:
+		if s.ResolvedType != "" {
+			// e.g. "[]int" -> "int"
+			if strings.HasPrefix(s.ResolvedType, "[]") {
+				return s.ResolvedType[2:]
+			}
+		}
+		if len(s.Elements) > 0 {
+			return g.inferLitType(s.Elements[0])
+		}
+	case *parser.Ident:
+		// Check known variable types if we track them
+		// For now, fall through
+	}
+	return "interface{}"
+}
+
+// inferMapKeyValTypes infers the Go key and value types of a map source expression.
+func (g *Generator) inferMapKeyValTypes(source parser.Expr) (string, string) {
+	switch s := source.(type) {
+	case *parser.MapLit:
+		if s.ResolvedType != "" {
+			// e.g. "map[string]int" -> "string", "int"
+			if strings.HasPrefix(s.ResolvedType, "map[") {
+				inner := s.ResolvedType[4:]
+				depth := 0
+				for i, ch := range inner {
+					if ch == '[' {
+						depth++
+					} else if ch == ']' {
+						if depth == 0 {
+							return inner[:i], inner[i+1:]
+						}
+						depth--
+					}
+				}
+			}
+		}
+		keyType := "interface{}"
+		valType := "interface{}"
+		if len(s.Keys) > 0 {
+			keyType = g.inferLitType(s.Keys[0])
+			valType = g.inferLitType(s.Values[0])
+		}
+		return keyType, valType
+	}
+	return "interface{}", "interface{}"
+}
+
+// inferLitType returns the Go type of a literal expression.
+func (g *Generator) inferLitType(expr parser.Expr) string {
+	switch expr.(type) {
+	case *parser.IntLit:
+		return "int"
+	case *parser.FloatLit:
+		return "float64"
+	case *parser.StringLit:
+		return "string"
+	case *parser.BoolLit:
+		return "bool"
+	}
+	return "interface{}"
 }
 
 // isCollectionMethod returns true if the method name is a LINQ-style collection method.
@@ -127,10 +217,151 @@ func (g *Generator) isBuiltinReceiverExpr(expr parser.Expr) bool {
 	}
 }
 
+// isMapChain detects if a chain operates on a map by checking for map-only methods
+// or 2-param lambdas on the first step.
+func (g *Generator) isMapChain(chain *collectionChain) bool {
+	for _, step := range chain.steps {
+		switch step.method {
+		case "SelectValues", "SelectKeys":
+			return true
+		}
+		// Check for 2-param lambdas (map iteration: (k, v) => ...)
+		if len(step.args) > 0 {
+			if lambda := g.extractLambda(step.args[0]); lambda != nil && len(lambda.Params) == 2 {
+				// Aggregate also uses 2 params (acc, x) — skip it
+				if step.method != "Aggregate" && step.method != "Zip" {
+					return true
+				}
+			}
+		}
+		// Aggregate with 3-param lambda (acc, k, v) => ... indicates map
+		if step.method == "Aggregate" && len(step.args) >= 2 {
+			if lambda := g.extractLambda(step.args[1]); lambda != nil && len(lambda.Params) == 3 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasMaterializationPoint returns true if the chain contains any materialization step.
+func hasMaterializationPoint(chain *collectionChain) bool {
+	for _, step := range chain.steps {
+		if materializationMethods[step.method] {
+			return true
+		}
+	}
+	return false
+}
+
+// segmentChain splits a chain at materialization points.
+// Each segment is a sub-chain; the last step of non-final segments is the materializer.
+func segmentChain(chain *collectionChain) []collectionChain {
+	var segments []collectionChain
+	current := collectionChain{source: chain.source}
+	for _, step := range chain.steps {
+		current.steps = append(current.steps, step)
+		if materializationMethods[step.method] {
+			segments = append(segments, current)
+			current = collectionChain{} // source set later
+		}
+	}
+	if len(current.steps) > 0 {
+		segments = append(segments, current)
+	}
+	return segments
+}
+
+// emitIntermediateSteps processes Where/Select/Take/Skip/TakeWhile/SkipWhile/SelectMany/Distinct
+// steps, returning the current variable name and the number of open if-blocks/for-blocks.
+// The caller must close these blocks after emitting the terminal.
+type openBlock struct {
+	kind string // "if" or "for"
+}
+
+func (g *Generator) emitIntermediateSteps(steps []chainStep, elemVar string) (currentVar string, blocks []openBlock) {
+	currentVar = elemVar
+	for _, step := range steps {
+		switch step.method {
+		case "Where":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					cond := g.emitLambdaExpr(lambda, currentVar)
+					g.writeln(fmt.Sprintf("if %s {", cond))
+					g.push()
+					blocks = append(blocks, openBlock{"if"})
+				}
+			}
+		case "Select":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
+					g.tmpCounter++
+					body := g.emitLambdaExpr(lambda, currentVar)
+					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
+					currentVar = newVar
+				}
+			}
+		case "SelectMany":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					subList := g.emitLambdaExpr(lambda, currentVar)
+					smVar := fmt.Sprintf("_v%d", g.tmpCounter)
+					g.tmpCounter++
+					g.writeln(fmt.Sprintf("for _, %s := range %s {", smVar, subList))
+					g.push()
+					blocks = append(blocks, openBlock{"for"})
+					currentVar = smVar
+				}
+			}
+		case "Take":
+			// handled by pre-allocated takeVar in caller
+		case "Skip":
+			// handled by pre-allocated skipVar in caller
+		case "TakeWhile":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					cond := g.emitLambdaExpr(lambda, currentVar)
+					g.writeln(fmt.Sprintf("if !(%s) { break }", cond))
+				}
+			}
+		case "SkipWhile":
+			// handled by pre-allocated skipWhileVar in caller
+		case "Distinct":
+			// handled by pre-allocated seenVar in caller
+		case "ToList":
+			// no-op
+		}
+	}
+	return currentVar, blocks
+}
+
+func (g *Generator) closeBlocks(blocks []openBlock) {
+	for i := len(blocks) - 1; i >= 0; i-- {
+		g.pop()
+		g.writeln("}")
+	}
+}
+
 // emitCollectionChainVar emits a fused loop for a collection chain assigned to a variable.
 // e.g. var result = nums.Where(x => x > 5).Select(x => x * 2)
 func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChain) {
-	source := g.emitExpr(chain.source)
+	// Handle materialization segmentation (OrderBy/OrderByDescending in mid-chain)
+	if hasMaterializationPoint(chain) {
+		g.emitSegmentedChain(varName, chain)
+		return
+	}
+
+	// Detect map vs list chains
+	if g.isMapChain(chain) {
+		g.emitMapCollectionChainVar(varName, chain)
+		return
+	}
+
 	lastStep := chain.steps[len(chain.steps)-1]
 
 	switch lastStep.method {
@@ -149,15 +380,41 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 	case "FirstOrDefault":
 		g.emitFirstChain(varName, chain, false)
 		return
+	case "Last":
+		g.emitLastChain(varName, chain)
+		return
+	case "Sum":
+		g.emitSumChain(varName, chain)
+		return
+	case "Min":
+		g.emitMinMaxChain(varName, chain, "<")
+		return
+	case "Max":
+		g.emitMinMaxChain(varName, chain, ">")
+		return
+	case "ToDictionary":
+		g.emitToDictionaryChain(varName, chain)
+		return
+	case "GroupBy":
+		g.emitGroupByChain(varName, chain)
+		return
+	case "Zip":
+		g.emitZipChain(varName, chain)
+		return
 	}
 
-	// List-producing chain (Where, Select, Take, Skip, ToList, etc.)
+	// List-producing chain (Where, Select, Take, Skip, TakeWhile, SkipWhile, Distinct, SelectMany, ToList)
+	g.emitListProducingChain(varName, chain)
+}
+
+// emitListProducingChain emits a fused loop for chains that produce a list.
+func (g *Generator) emitListProducingChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
 	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
 	g.tmpCounter++
-	currentVar := elemVar
 
-	// Check for Take/Skip in chain
-	var takeVar, skipVar string
+	// Check for Take/Skip/TakeWhile/SkipWhile/Distinct in chain
+	var takeVar, skipVar, skipWhileVar, seenVar string
 	for _, step := range chain.steps {
 		if step.method == "Take" && len(step.args) > 0 {
 			takeVar = fmt.Sprintf("_take%d", g.tmpCounter)
@@ -167,25 +424,61 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 			skipVar = fmt.Sprintf("_skip%d", g.tmpCounter)
 			g.tmpCounter++
 		}
+		if step.method == "SkipWhile" {
+			skipWhileVar = fmt.Sprintf("_skipping%d", g.tmpCounter)
+			g.tmpCounter++
+		}
+		if step.method == "Distinct" {
+			seenVar = fmt.Sprintf("_seen%d", g.tmpCounter)
+			g.tmpCounter++
+		}
 	}
 
-	// Declare result variable
-	g.writeln(fmt.Sprintf("var %s []interface{}", varName))
+	// Declare result variable with inferred element type
+	hasSelectMany := false
+	for _, step := range chain.steps {
+		if step.method == "SelectMany" {
+			hasSelectMany = true
+			break
+		}
+	}
+	elemType := g.inferElemType(chain.source)
+	if hasSelectMany {
+		// SelectMany flattens: if source is [][]T, result is []T
+		if elemType != "interface{}" && strings.HasPrefix(elemType, "[]") {
+			g.writeln(fmt.Sprintf("var %s %s", varName, elemType))
+		} else {
+			// Use type inference: declare var after first element
+			g.writeln(fmt.Sprintf("var %s []interface{}", varName))
+		}
+	} else if elemType != "interface{}" {
+		g.writeln(fmt.Sprintf("var %s []%s", varName, elemType))
+	} else {
+		// Use source slice trick to preserve concrete type
+		g.writeln(fmt.Sprintf("%s := %s[:0:0]", varName, source))
+	}
 
-	// Pre-loop counter variables
+	// Pre-loop variables
 	if takeVar != "" {
 		g.writeln(fmt.Sprintf("%s := 0", takeVar))
 	}
 	if skipVar != "" {
 		g.writeln(fmt.Sprintf("%s := 0", skipVar))
 	}
+	if skipWhileVar != "" {
+		g.writeln(fmt.Sprintf("%s := true", skipWhileVar))
+	}
+	if seenVar != "" {
+		g.writeln(fmt.Sprintf("%s := make(map[%s]bool)", seenVar, elemType))
+	}
 
 	// Loop header
 	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
 	g.push()
 
-	// Track how many if-blocks we opened (for closing)
-	openIfs := 0
+	// Process steps
+	currentVar := elemVar
+	var blocks []openBlock
 
 	for _, step := range chain.steps {
 		switch step.method {
@@ -196,7 +489,7 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 					cond := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("if %s {", cond))
 					g.push()
-					openIfs++
+					blocks = append(blocks, openBlock{"if"})
 				}
 			}
 		case "Select":
@@ -208,6 +501,19 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 					body := g.emitLambdaExpr(lambda, currentVar)
 					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
 					currentVar = newVar
+				}
+			}
+		case "SelectMany":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					subList := g.emitLambdaExpr(lambda, currentVar)
+					smVar := fmt.Sprintf("_v%d", g.tmpCounter)
+					g.tmpCounter++
+					g.writeln(fmt.Sprintf("for _, %s := range %s {", smVar, subList))
+					g.push()
+					blocks = append(blocks, openBlock{"for"})
+					currentVar = smVar
 				}
 			}
 		case "Take":
@@ -220,8 +526,32 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 				limit := g.emitExpr(step.args[0])
 				g.writeln(fmt.Sprintf("if %s < %s { %s++; continue }", skipVar, limit, skipVar))
 			}
+		case "TakeWhile":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					cond := g.emitLambdaExpr(lambda, currentVar)
+					g.writeln(fmt.Sprintf("if !(%s) { break }", cond))
+				}
+			}
+		case "SkipWhile":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) > 0 {
+					cond := g.emitLambdaExpr(lambda, currentVar)
+					g.writeln(fmt.Sprintf("if %s {", skipWhileVar))
+					g.push()
+					g.writeln(fmt.Sprintf("if %s { continue }", cond))
+					g.writeln(fmt.Sprintf("%s = false", skipWhileVar))
+					g.pop()
+					g.writeln("}")
+				}
+			}
+		case "Distinct":
+			g.writeln(fmt.Sprintf("if %s[%s] { continue }", seenVar, currentVar))
+			g.writeln(fmt.Sprintf("%s[%s] = true", seenVar, currentVar))
 		case "ToList":
-			// no-op terminal — just means collect into result
+			// no-op
 		}
 	}
 
@@ -233,11 +563,8 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 		g.writeln(fmt.Sprintf("%s++", takeVar))
 	}
 
-	// Close Where if-blocks
-	for i := 0; i < openIfs; i++ {
-		g.pop()
-		g.writeln("}")
-	}
+	// Close blocks
+	g.closeBlocks(blocks)
 
 	g.pop()
 	g.writeln("}")
@@ -246,7 +573,6 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 // emitCollectionChainStmt emits a fused loop for a collection chain used as a statement.
 // e.g. nums.Where(x => x > 5).ForEach(x => print(x))
 func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
-	source := g.emitExpr(chain.source)
 	lastStep := chain.steps[len(chain.steps)-1]
 
 	if lastStep.method != "ForEach" {
@@ -254,41 +580,20 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 		return
 	}
 
+	// Detect map chain
+	if g.isMapChain(chain) {
+		g.emitMapCollectionChainStmt(chain)
+		return
+	}
+
+	source := g.emitExpr(chain.source)
 	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
 	g.tmpCounter++
-	currentVar := elemVar
 
 	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
 	g.push()
 
-	openIfs := 0
-
-	// Process all steps except the last (ForEach)
-	for _, step := range chain.steps[:len(chain.steps)-1] {
-		switch step.method {
-		case "Where":
-			if len(step.args) > 0 {
-				lambda := g.extractLambda(step.args[0])
-				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitLambdaExpr(lambda, currentVar)
-					g.writeln(fmt.Sprintf("if %s {", cond))
-					g.push()
-					openIfs++
-				}
-			}
-		case "Select":
-			if len(step.args) > 0 {
-				lambda := g.extractLambda(step.args[0])
-				if lambda != nil && len(lambda.Params) > 0 {
-					newVar := fmt.Sprintf("_v%d", g.tmpCounter)
-					g.tmpCounter++
-					body := g.emitLambdaExpr(lambda, currentVar)
-					g.writeln(fmt.Sprintf("%s := %s", newVar, body))
-					currentVar = newVar
-				}
-			}
-		}
-	}
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
 
 	// Emit ForEach body
 	lambda := g.extractLambda(lastStep.args[0])
@@ -297,9 +602,6 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 			body := g.emitLambdaExpr(lambda, currentVar)
 			g.writeln(body)
 		} else if lambda.Body != nil {
-			// Block-body ForEach — emit statements with substitution
-			// For now, use the lambda param name as-is since it matches the loop var
-			// We alias the loop var to the lambda param name
 			if lambda.Params[0].Name != currentVar {
 				g.writeln(fmt.Sprintf("%s := %s", lambda.Params[0].Name, currentVar))
 			}
@@ -307,11 +609,7 @@ func (g *Generator) emitCollectionChainStmt(chain *collectionChain) {
 		}
 	}
 
-	for i := 0; i < openIfs; i++ {
-		g.pop()
-		g.writeln("}")
-	}
-
+	g.closeBlocks(blocks)
 	g.pop()
 	g.writeln("}")
 }
@@ -573,6 +871,673 @@ func (g *Generator) emitFirstChain(varName string, chain *collectionChain, faila
 		g.writeln(fmt.Sprintf("panic(fmt.Errorf(\"no matching element found\"))"))
 		g.pop()
 		g.writeln("}")
+	}
+}
+
+// emitLastChain emits a fused loop for Last terminal (scans all, takes last match).
+func (g *Generator) emitLastChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	foundVar := fmt.Sprintf("_found%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("var %s interface{}", varName))
+	g.writeln(fmt.Sprintf("%s := false", foundVar))
+	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
+	g.push()
+
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
+
+	// Apply Last's own predicate if present
+	if len(lastStep.args) > 0 {
+		lambda := g.extractLambda(lastStep.args[0])
+		if lambda != nil && len(lambda.Params) > 0 {
+			cond := g.emitLambdaExpr(lambda, currentVar)
+			g.writeln(fmt.Sprintf("if %s {", cond))
+			g.push()
+			blocks = append(blocks, openBlock{"if"})
+		}
+	}
+
+	g.writeln(fmt.Sprintf("%s = %s", varName, currentVar))
+	g.writeln(fmt.Sprintf("%s = true", foundVar))
+	// No break — Last must scan all elements
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+
+	g.neededImports["fmt"] = true
+	g.writeln(fmt.Sprintf("if !%s {", foundVar))
+	g.push()
+	g.writeln(fmt.Sprintf("panic(fmt.Errorf(\"no matching element found\"))"))
+	g.pop()
+	g.writeln("}")
+}
+
+// emitSumChain emits a fused loop for Sum terminal.
+func (g *Generator) emitSumChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := 0", varName))
+	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
+	g.push()
+
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
+
+	// Sum with optional selector: .Sum(x => x.age) or .Sum()
+	if len(lastStep.args) > 0 {
+		lambda := g.extractLambda(lastStep.args[0])
+		if lambda != nil && len(lambda.Params) > 0 {
+			newVar := fmt.Sprintf("_v%d", g.tmpCounter)
+			g.tmpCounter++
+			body := g.emitLambdaExpr(lambda, currentVar)
+			g.writeln(fmt.Sprintf("%s := %s", newVar, body))
+			currentVar = newVar
+		}
+	}
+
+	g.writeln(fmt.Sprintf("%s += %s", varName, currentVar))
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMinMaxChain emits a fused loop for Min/Max terminal.
+// Uses source[0] to initialize the result with the correct type.
+func (g *Generator) emitMinMaxChain(varName string, chain *collectionChain, op string) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+	firstVar := fmt.Sprintf("_first%d", g.tmpCounter)
+	g.tmpCounter++
+
+	// Initialize with first element to get correct type
+	g.writeln(fmt.Sprintf("%s := %s[0]", varName, source))
+	g.writeln(fmt.Sprintf("%s := true", firstVar))
+	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
+	g.push()
+
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
+
+	// Min/Max with optional selector
+	valVar := currentVar
+	if len(lastStep.args) > 0 {
+		lambda := g.extractLambda(lastStep.args[0])
+		if lambda != nil && len(lambda.Params) > 0 {
+			newVar := fmt.Sprintf("_v%d", g.tmpCounter)
+			g.tmpCounter++
+			body := g.emitLambdaExpr(lambda, currentVar)
+			g.writeln(fmt.Sprintf("%s := %s", newVar, body))
+			valVar = newVar
+		}
+	}
+
+	g.writeln(fmt.Sprintf("if %s || %s %s %s {", firstVar, valVar, op, varName))
+	g.push()
+	g.writeln(fmt.Sprintf("%s = %s", varName, valVar))
+	g.writeln(fmt.Sprintf("%s = false", firstVar))
+	g.pop()
+	g.writeln("}")
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitToDictionaryChain emits a fused loop for ToDictionary terminal.
+// ToDictionary(keySelector) or ToDictionary(keySelector, valueSelector)
+func (g *Generator) emitToDictionaryChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := make(map[interface{}]interface{})", varName))
+	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
+	g.push()
+
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
+
+	if len(lastStep.args) >= 1 {
+		keyLambda := g.extractLambda(lastStep.args[0])
+		if keyLambda != nil && len(keyLambda.Params) > 0 {
+			keyExpr := g.emitLambdaExpr(keyLambda, currentVar)
+			if len(lastStep.args) >= 2 {
+				valLambda := g.extractLambda(lastStep.args[1])
+				if valLambda != nil && len(valLambda.Params) > 0 {
+					valExpr := g.emitLambdaExpr(valLambda, currentVar)
+					g.writeln(fmt.Sprintf("%s[%s] = %s", varName, keyExpr, valExpr))
+				}
+			} else {
+				g.writeln(fmt.Sprintf("%s[%s] = %s", varName, keyExpr, currentVar))
+			}
+		}
+	}
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitGroupByChain emits a fused loop for GroupBy terminal.
+func (g *Generator) emitGroupByChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := make(map[interface{}][]interface{})", varName))
+	g.writeln(fmt.Sprintf("for _, %s := range %s {", elemVar, source))
+	g.push()
+
+	currentVar, blocks := g.emitIntermediateSteps(chain.steps[:len(chain.steps)-1], elemVar)
+
+	if len(lastStep.args) > 0 {
+		lambda := g.extractLambda(lastStep.args[0])
+		if lambda != nil && len(lambda.Params) > 0 {
+			keyExpr := g.emitLambdaExpr(lambda, currentVar)
+			keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+			g.tmpCounter++
+			g.writeln(fmt.Sprintf("%s := %s", keyVar, keyExpr))
+			g.writeln(fmt.Sprintf("%s[%s] = append(%s[%s], %s)", varName, keyVar, varName, keyVar, currentVar))
+		}
+	}
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitZipChain emits a Zip operation combining two lists.
+// list1.Zip(list2, (a, b) => expr)
+func (g *Generator) emitZipChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	if len(lastStep.args) < 2 {
+		return
+	}
+
+	otherList := g.emitExpr(lastStep.args[0])
+	lambda := g.extractLambda(lastStep.args[1])
+	if lambda == nil || len(lambda.Params) < 2 {
+		return
+	}
+
+	idxVar := fmt.Sprintf("_i%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("var %s []interface{}", varName))
+	g.writeln(fmt.Sprintf("for %s := 0; %s < len(%s) && %s < len(%s); %s++ {",
+		idxVar, idxVar, source, idxVar, otherList, idxVar))
+	g.push()
+
+	aVar := fmt.Sprintf("%s[%s]", source, idxVar)
+	bVar := fmt.Sprintf("%s[%s]", otherList, idxVar)
+	body := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, aVar, lambda.Params[1].Name, bVar)
+	g.writeln(fmt.Sprintf("%s = append(%s, %s)", varName, varName, body))
+
+	g.pop()
+	g.writeln("}")
+}
+
+// emitSegmentedChain handles chains with materialization points (OrderBy).
+func (g *Generator) emitSegmentedChain(varName string, chain *collectionChain) {
+	segments := segmentChain(chain)
+
+	// Track the current source for each segment
+	currentSource := chain.source
+
+	for i, seg := range segments {
+		isLast := i == len(segments)-1
+		lastIdx := len(seg.steps) - 1
+		lastMethod := seg.steps[lastIdx].method
+
+		if materializationMethods[lastMethod] {
+			// This segment ends with a materializer (OrderBy etc.)
+			// If this is the last segment, use the user's variable name
+			segVar := varName
+			if !isLast {
+				segVar = fmt.Sprintf("_seg%d", g.tmpCounter)
+				g.tmpCounter++
+			}
+
+			// Emit the fusible steps before the materializer as a list-producing chain
+			preSteps := seg.steps[:lastIdx]
+			if len(preSteps) > 0 {
+				// Create a new slice to avoid overwriting the materializer step
+				steps := make([]chainStep, len(preSteps)+1)
+				copy(steps, preSteps)
+				steps[len(preSteps)] = chainStep{method: "ToList"}
+				preChain := &collectionChain{source: currentSource, steps: steps}
+				g.emitListProducingChain(segVar, preChain)
+			} else {
+				// No pre-steps, copy source into mutable slice (preserves concrete type)
+				sourceExpr := g.emitExpr(currentSource)
+				g.writeln(fmt.Sprintf("%s := append(%s[:0:0], %s...)", segVar, sourceExpr, sourceExpr))
+			}
+
+			// Emit the materializer
+			g.emitMaterializer(segVar, seg.steps[lastIdx])
+
+			// Next segment's source is this segment's result
+			currentSource = &parser.Ident{Name: segVar}
+		} else {
+			// Final (or only non-materializer) segment
+			targetVar := varName
+			if !isLast {
+				targetVar = fmt.Sprintf("_seg%d", g.tmpCounter)
+				g.tmpCounter++
+			}
+			subChain := &collectionChain{source: currentSource, steps: seg.steps}
+			g.emitCollectionChainVar(targetVar, subChain)
+			currentSource = &parser.Ident{Name: targetVar}
+		}
+	}
+}
+
+// emitMaterializer emits the materialization operation in-place on a variable.
+func (g *Generator) emitMaterializer(varName string, step chainStep) {
+	switch step.method {
+	case "OrderBy", "OrderByDescending":
+		g.neededImports["sort"] = true
+		if len(step.args) > 0 {
+			lambda := g.extractLambda(step.args[0])
+			if lambda != nil && len(lambda.Params) > 0 {
+				iKey := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, fmt.Sprintf("%s[i]", varName))
+				jKey := g.emitExprSubst(lambda.Expr, lambda.Params[0].Name, fmt.Sprintf("%s[j]", varName))
+				op := "<"
+				if step.method == "OrderByDescending" {
+					op = ">"
+				}
+				g.writeln(fmt.Sprintf("sort.Slice(%s, func(i, j int) bool {", varName))
+				g.push()
+				g.writeln(fmt.Sprintf("return %s %s %s", iKey, op, jKey))
+				g.pop()
+				g.writeln("})")
+			}
+		}
+	}
+}
+
+// --- Map Collection Methods ---
+
+// emitMapCollectionChainVar emits a fused loop for a map collection chain.
+func (g *Generator) emitMapCollectionChainVar(varName string, chain *collectionChain) {
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	switch lastStep.method {
+	case "Any", "All":
+		g.emitMapAnyAllChain(varName, chain)
+		return
+	case "Count":
+		g.emitMapCountChain(varName, chain)
+		return
+	case "Aggregate":
+		g.emitMapAggregateChain(varName, chain)
+		return
+	case "Select":
+		// Map Select returns List — use list accumulation
+		g.emitMapSelectToListChain(varName, chain)
+		return
+	}
+
+	// Map-producing chain: Where, SelectValues, SelectKeys
+	source := g.emitExpr(chain.source)
+	keyType, valType := g.inferMapKeyValTypes(chain.source)
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := make(map[%s]%s)", varName, keyType, valType))
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+	g.writeln(fmt.Sprintf("_ = %s", valVar))
+
+	currentKey := keyVar
+	currentVal := valVar
+	var blocks []openBlock
+
+	for _, step := range chain.steps {
+		switch step.method {
+		case "Where":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) >= 2 {
+					cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, currentKey, lambda.Params[1].Name, currentVal)
+					g.writeln(fmt.Sprintf("if %s {", cond))
+					g.push()
+					blocks = append(blocks, openBlock{"if"})
+				}
+			}
+		case "SelectValues":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) >= 2 {
+					newVal := fmt.Sprintf("_v%d", g.tmpCounter)
+					g.tmpCounter++
+					body := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, currentKey, lambda.Params[1].Name, currentVal)
+					g.writeln(fmt.Sprintf("%s := %s", newVal, body))
+					currentVal = newVal
+				}
+			}
+		case "SelectKeys":
+			if len(step.args) > 0 {
+				lambda := g.extractLambda(step.args[0])
+				if lambda != nil && len(lambda.Params) >= 2 {
+					newKey := fmt.Sprintf("_k%d", g.tmpCounter)
+					g.tmpCounter++
+					body := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, currentKey, lambda.Params[1].Name, currentVal)
+					g.writeln(fmt.Sprintf("%s := %s", newKey, body))
+					currentKey = newKey
+				}
+			}
+		}
+	}
+
+	g.writeln(fmt.Sprintf("%s[%s] = %s", varName, currentKey, currentVal))
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMapCollectionChainStmt emits a map ForEach chain.
+func (g *Generator) emitMapCollectionChainStmt(chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+	g.writeln(fmt.Sprintf("_ = %s", valVar))
+
+	currentKey := keyVar
+	currentVal := valVar
+	var blocks []openBlock
+
+	// Process intermediate Where steps
+	for _, step := range chain.steps[:len(chain.steps)-1] {
+		if step.method == "Where" && len(step.args) > 0 {
+			lambda := g.extractLambda(step.args[0])
+			if lambda != nil && len(lambda.Params) >= 2 {
+				cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, currentKey, lambda.Params[1].Name, currentVal)
+				g.writeln(fmt.Sprintf("if %s {", cond))
+				g.push()
+				blocks = append(blocks, openBlock{"if"})
+			}
+		}
+	}
+
+	// ForEach body
+	lambda := g.extractLambda(lastStep.args[0])
+	if lambda != nil && len(lambda.Params) >= 2 {
+		if lambda.Expr != nil {
+			body := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, currentKey, lambda.Params[1].Name, currentVal)
+			g.writeln(body)
+		} else if lambda.Body != nil {
+			g.writeln(fmt.Sprintf("%s := %s", lambda.Params[0].Name, currentKey))
+			g.writeln(fmt.Sprintf("_ = %s", lambda.Params[0].Name))
+			g.writeln(fmt.Sprintf("%s := %s", lambda.Params[1].Name, currentVal))
+			g.writeln(fmt.Sprintf("_ = %s", lambda.Params[1].Name))
+			g.emitBlock(lambda.Body)
+		}
+	}
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMapAnyAllChain emits Any/All for map chains.
+func (g *Generator) emitMapAnyAllChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+	isAny := lastStep.method == "Any"
+
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	if isAny {
+		g.writeln(fmt.Sprintf("%s := false", varName))
+	} else {
+		g.writeln(fmt.Sprintf("%s := true", varName))
+	}
+
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+
+	// Process intermediate Where
+	var blocks []openBlock
+	for _, step := range chain.steps[:len(chain.steps)-1] {
+		if step.method == "Where" && len(step.args) > 0 {
+			lambda := g.extractLambda(step.args[0])
+			if lambda != nil && len(lambda.Params) >= 2 {
+				cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, keyVar, lambda.Params[1].Name, valVar)
+				g.writeln(fmt.Sprintf("if %s {", cond))
+				g.push()
+				blocks = append(blocks, openBlock{"if"})
+			}
+		}
+	}
+
+	// Terminal
+	lambda := g.extractLambda(lastStep.args[0])
+	if lambda != nil && len(lambda.Params) >= 2 {
+		cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, keyVar, lambda.Params[1].Name, valVar)
+		if isAny {
+			g.writeln(fmt.Sprintf("if %s {", cond))
+			g.push()
+			g.writeln(fmt.Sprintf("%s = true", varName))
+			g.writeln("break")
+			g.pop()
+			g.writeln("}")
+		} else {
+			g.writeln(fmt.Sprintf("if !(%s) {", cond))
+			g.push()
+			g.writeln(fmt.Sprintf("%s = false", varName))
+			g.writeln("break")
+			g.pop()
+			g.writeln("}")
+		}
+	}
+
+	// suppress unused var warning for key in Any/All
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMapCountChain emits Count for map chains.
+func (g *Generator) emitMapCountChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := 0", varName))
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+
+	var blocks []openBlock
+	for _, step := range chain.steps[:len(chain.steps)-1] {
+		if step.method == "Where" && len(step.args) > 0 {
+			lambda := g.extractLambda(step.args[0])
+			if lambda != nil && len(lambda.Params) >= 2 {
+				cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, keyVar, lambda.Params[1].Name, valVar)
+				g.writeln(fmt.Sprintf("if %s {", cond))
+				g.push()
+				blocks = append(blocks, openBlock{"if"})
+			}
+		}
+	}
+
+	g.writeln(fmt.Sprintf("%s++", varName))
+
+	// suppress unused var warnings
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+	g.writeln(fmt.Sprintf("_ = %s", valVar))
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMapAggregateChain emits Aggregate for map chains with (acc, k, v) lambda.
+func (g *Generator) emitMapAggregateChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	if len(lastStep.args) < 2 {
+		return
+	}
+	seed := g.emitExpr(lastStep.args[0])
+	lambda := g.extractLambda(lastStep.args[1])
+	if lambda == nil || len(lambda.Params) < 3 {
+		return
+	}
+
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("%s := %s", varName, seed))
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+	g.writeln(fmt.Sprintf("_ = %s", valVar))
+
+	// Process intermediate Where
+	var blocks []openBlock
+	for _, step := range chain.steps[:len(chain.steps)-1] {
+		if step.method == "Where" && len(step.args) > 0 {
+			wl := g.extractLambda(step.args[0])
+			if wl != nil && len(wl.Params) >= 2 {
+				cond := g.emitExprSubst2(wl.Expr, wl.Params[0].Name, keyVar, wl.Params[1].Name, valVar)
+				g.writeln(fmt.Sprintf("if %s {", cond))
+				g.push()
+				blocks = append(blocks, openBlock{"if"})
+			}
+		}
+	}
+
+	// 3-param substitution: (acc, k, v)
+	reduced := g.emitExprSubst3(lambda.Expr,
+		lambda.Params[0].Name, varName,
+		lambda.Params[1].Name, keyVar,
+		lambda.Params[2].Name, valVar)
+	g.writeln(fmt.Sprintf("%s = %s", varName, reduced))
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitMapSelectToListChain emits Select on a map that returns a List.
+func (g *Generator) emitMapSelectToListChain(varName string, chain *collectionChain) {
+	source := g.emitExpr(chain.source)
+	lastStep := chain.steps[len(chain.steps)-1]
+
+	keyVar := fmt.Sprintf("_k%d", g.tmpCounter)
+	g.tmpCounter++
+	valVar := fmt.Sprintf("_v%d", g.tmpCounter)
+	g.tmpCounter++
+
+	g.writeln(fmt.Sprintf("var %s []interface{}", varName))
+	g.writeln(fmt.Sprintf("for %s, %s := range %s {", keyVar, valVar, source))
+	g.push()
+	g.writeln(fmt.Sprintf("_ = %s", keyVar))
+	g.writeln(fmt.Sprintf("_ = %s", valVar))
+
+	var blocks []openBlock
+	for _, step := range chain.steps[:len(chain.steps)-1] {
+		if step.method == "Where" && len(step.args) > 0 {
+			lambda := g.extractLambda(step.args[0])
+			if lambda != nil && len(lambda.Params) >= 2 {
+				cond := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, keyVar, lambda.Params[1].Name, valVar)
+				g.writeln(fmt.Sprintf("if %s {", cond))
+				g.push()
+				blocks = append(blocks, openBlock{"if"})
+			}
+		}
+	}
+
+	lambda := g.extractLambda(lastStep.args[0])
+	if lambda != nil && len(lambda.Params) >= 2 {
+		body := g.emitExprSubst2(lambda.Expr, lambda.Params[0].Name, keyVar, lambda.Params[1].Name, valVar)
+		g.writeln(fmt.Sprintf("%s = append(%s, %s)", varName, varName, body))
+	}
+
+	g.closeBlocks(blocks)
+	g.pop()
+	g.writeln("}")
+}
+
+// emitExprSubst3 emits an expression with three variable substitutions.
+func (g *Generator) emitExprSubst3(expr parser.Expr, n1, r1, n2, r2, n3, r3 string) string {
+	switch e := expr.(type) {
+	case *parser.Ident:
+		if e.Name == n1 {
+			return r1
+		}
+		if e.Name == n2 {
+			return r2
+		}
+		if e.Name == n3 {
+			return r3
+		}
+		return g.emitExpr(expr)
+	case *parser.BinaryExpr:
+		left := g.emitExprSubst3(e.Left, n1, r1, n2, r2, n3, r3)
+		right := g.emitExprSubst3(e.Right, n1, r1, n2, r2, n3, r3)
+		return fmt.Sprintf("(%s %s %s)", left, e.Op, right)
+	case *parser.UnaryExpr:
+		operand := g.emitExprSubst3(e.Operand, n1, r1, n2, r2, n3, r3)
+		return fmt.Sprintf("(%s%s)", e.Op, operand)
+	case *parser.SelectorExpr:
+		obj := g.emitExprSubst3(e.Object, n1, r1, n2, r2, n3, r3)
+		return fmt.Sprintf("%s.%s", obj, capitalize(e.Field))
+	case *parser.CallExpr:
+		callee := g.emitExprSubst3(e.Callee, n1, r1, n2, r2, n3, r3)
+		var args []string
+		for _, arg := range e.Args {
+			args = append(args, g.emitExprSubst3(arg, n1, r1, n2, r2, n3, r3))
+		}
+		return fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", "))
+	case *parser.IndexExpr:
+		obj := g.emitExprSubst3(e.Object, n1, r1, n2, r2, n3, r3)
+		idx := g.emitExprSubst3(e.Index, n1, r1, n2, r2, n3, r3)
+		return fmt.Sprintf("%s[%s]", obj, idx)
+	default:
+		return g.emitExpr(expr)
 	}
 }
 

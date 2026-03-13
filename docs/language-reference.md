@@ -1081,22 +1081,50 @@ nums.Select(x => x * 2)
 nums.Aggregate(0, (acc, x) => acc + x)
 ```
 
-### Available Methods
+### Available Methods — Lists
 
 | Method | Description | Terminal? |
 |--------|-------------|-----------|
 | `Where(x => bool)` | Filter elements | No |
 | `Select(x => expr)` | Transform elements | No |
+| `SelectMany(x => list)` | Flatten nested lists | No |
 | `Take(n)` | Take first n elements | No |
 | `Skip(n)` | Skip first n elements | No |
+| `TakeWhile(x => bool)` | Take while predicate holds | No |
+| `SkipWhile(x => bool)` | Skip while predicate holds | No |
+| `Distinct()` | Remove duplicates | No |
+| `OrderBy(x => key)` | Sort ascending by key | No (materializes) |
+| `OrderByDescending(x => key)` | Sort descending by key | No (materializes) |
 | `ForEach(x => stmt)` | Execute side effect per element | Yes |
 | `Any(x => bool)` | True if any element matches | Yes |
 | `All(x => bool)` | True if all elements match | Yes |
-| `First(x => bool)` | First matching element (panics if none) | Yes |
+| `First(x => bool)` | First matching element (failable) | Yes |
 | `FirstOrDefault(x => bool)` | First matching element (zero value if none) | Yes |
+| `Last(x => bool)` | Last matching element (failable) | Yes |
 | `Count()` | Count elements (after filtering) | Yes |
+| `Sum()` / `Sum(x => num)` | Sum elements or projected values | Yes |
+| `Min()` / `Max()` | Minimum / maximum element | Yes |
 | `Aggregate(seed, (acc, x) => expr)` | Reduce to single value | Yes |
 | `ToList()` | Materialize chain to list | Yes |
+| `ToDictionary((x => key), (x => val))` | Materialize to map | Yes |
+| `GroupBy(x => key)` | Group elements by key | Yes |
+| `Zip(other, (a, b) => expr)` | Combine two lists element-wise | Yes |
+
+### Available Methods — Maps
+
+Map methods use two-parameter lambdas `(k, v) =>`:
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `Where((k, v) => bool)` | Filter entries | Map |
+| `SelectValues((k, v) => newV)` | Transform values, keep keys | Map |
+| `SelectKeys((k, v) => newK)` | Transform keys, keep values | Map |
+| `Select((k, v) => expr)` | Free transform | List |
+| `ForEach((k, v) => stmt)` | Side effects | void |
+| `Any((k, v) => bool)` | True if any entry matches | Bool |
+| `All((k, v) => bool)` | True if all entries match | Bool |
+| `Count((k, v) => bool)` | Count matching entries | Int |
+| `Aggregate(seed, (acc, k, v) => expr)` | Reduce over entries | T |
 
 ### Codegen: Loop Fusion
 
@@ -1109,7 +1137,7 @@ result := nums.Where(x => x > 5).Select(x => x * 2).Take(3)
 Transpiles to:
 
 ```go
-var result []interface{}
+var result []int
 _take0 := 0
 for _, _v0 := range nums {
     if _v0 > 5 {
@@ -1118,6 +1146,37 @@ for _, _v0 := range nums {
         result = append(result, _v1)
         _take0++
     }
+}
+```
+
+### Chain Segmentation
+
+`OrderBy` and `OrderByDescending` require seeing all elements before downstream steps proceed. The chain is split at these points and each segment is fused independently:
+
+```zinc
+sorted := nums.Where(x => x > 2).OrderBy(x => x).Select(x => x * 10).Take(3)
+```
+
+Transpiles to:
+
+```go
+// Segment 1: Where → sort
+sorted := nums[:0:0]
+for _, _v0 := range nums {
+    if _v0 > 2 {
+        sorted = append(sorted, _v0)
+    }
+}
+sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+// Segment 2: Select → Take (fused from sorted result)
+var r []int
+_take := 0
+for _, _v1 := range sorted {
+    _v2 := _v1 * 10
+    if _take >= 3 { break }
+    r = append(r, _v2)
+    _take++
 }
 ```
 

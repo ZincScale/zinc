@@ -100,22 +100,53 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 
 ## Collection Methods (LINQ-style)
 
-Chain these on any `List<T>`. Chains compile to fused Go loops — no intermediate allocations.
+Chain these on any list or map. Chains compile to fused Go loops — no intermediate allocations.
+
+### List Methods
 
 | Zinc | Description | Example |
 |------|-------------|---------|
-| `list.Where(x => bool)` | Filter elements matching predicate | `nums.Where(x => x > 5)` |
-| `list.Select(x => expr)` | Transform each element | `nums.Select(x => x * 2)` |
+| `list.Where(x => bool)` | Filter elements | `nums.Where(x => x > 5)` |
+| `list.Select(x => expr)` | Transform elements | `nums.Select(x => x * 2)` |
+| `list.SelectMany(x => list)` | Flatten nested lists | `lists.SelectMany(x => x)` |
 | `list.Take(n)` | Keep first n elements | `nums.Take(10)` |
 | `list.Skip(n)` | Drop first n elements | `nums.Skip(5)` |
-| `list.ForEach(x => stmt)` | Execute side effect per element | `nums.ForEach(x => print(x))` |
+| `list.TakeWhile(x => bool)` | Take while predicate holds | `nums.TakeWhile(x => x < 10)` |
+| `list.SkipWhile(x => bool)` | Skip while predicate holds | `nums.SkipWhile(x => x < 5)` |
+| `list.Distinct()` | Remove duplicates | `nums.Distinct()` |
+| `list.OrderBy(x => key)` | Sort ascending | `nums.OrderBy(x => x)` |
+| `list.OrderByDescending(x => key)` | Sort descending | `nums.OrderByDescending(x => x)` |
+| `list.ForEach(x => stmt)` | Side effect per element | `nums.ForEach(x => print(x))` |
 | `list.Any(x => bool)` | True if any match (short-circuits) | `nums.Any(x => x < 0)` |
 | `list.All(x => bool)` | True if all match (short-circuits) | `nums.All(x => x > 0)` |
-| `list.First(x => bool)` | First match (panics if none) | `nums.First(x => x > 5)` |
+| `list.First(x => bool)` | First match (failable) | `nums.First(x => x > 5)` |
 | `list.FirstOrDefault(x => bool)` | First match (zero value if none) | `nums.FirstOrDefault(x => x > 5)` |
-| `list.Count()` | Count elements after chain | `nums.Where(x => x > 5).Count()` |
+| `list.Last(x => bool)` | Last match (failable) | `nums.Last(x => x > 5)` |
+| `list.Count()` | Count elements | `nums.Where(x => x > 5).Count()` |
+| `list.Sum()` | Sum elements | `nums.Sum()` |
+| `list.Sum(x => num)` | Sum projected values | `items.Sum(x => x.price)` |
+| `list.Min()` / `list.Max()` | Minimum / maximum | `nums.Min()` |
 | `list.Aggregate(seed, (a, x) => expr)` | Reduce to single value | `nums.Aggregate(0, (a, x) => a + x)` |
 | `list.ToList()` | Materialize chain result | `nums.Where(x => x > 5).ToList()` |
+| `list.ToDictionary(x => k, x => v)` | Materialize to map | `users.ToDictionary(u => u.id, u => u)` |
+| `list.GroupBy(x => key)` | Group by key | `nums.GroupBy(x => x % 2)` |
+| `list.Zip(other, (a, b) => expr)` | Combine two lists | `a.Zip(b, (x, y) => x + y)` |
+
+### Map Methods
+
+Map methods use `(k, v)` lambda parameters:
+
+| Zinc | Description | Returns |
+|------|-------------|---------|
+| `map.Where((k, v) => bool)` | Filter entries | Map |
+| `map.SelectValues((k, v) => newV)` | Transform values | Map |
+| `map.SelectKeys((k, v) => newK)` | Transform keys | Map |
+| `map.Select((k, v) => expr)` | Free transform | List |
+| `map.ForEach((k, v) => stmt)` | Side effects | void |
+| `map.Any((k, v) => bool)` | True if any match | Bool |
+| `map.All((k, v) => bool)` | True if all match | Bool |
+| `map.Count((k, v) => bool)` | Count matching entries | Int |
+| `map.Aggregate(seed, (acc, k, v) => expr)` | Reduce over entries | T |
 
 Methods can be chained: `nums.Where(x => x > 5).Select(x => x * 2).Take(10)`
 

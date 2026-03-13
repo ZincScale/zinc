@@ -385,9 +385,6 @@ for _, _v0 := range scores {
 
 ### Future Map Methods (deferred)
 
-- `ToDictionary(keySelector, valueSelector)` — list-to-map materialization
-- `GroupBy` on maps
-- `Distinct` on map values
 - `OrderBy` on maps (requires materializing to sorted list of pairs)
 - Set operations (union, intersect, subtract) on maps by key
 
@@ -405,15 +402,15 @@ Lambda expressions already exist (`(Int x) => x * 2`, block-body, failable). Sho
 
 Steps 1-4 deliver a working v1. Steps 5-7 round it out.
 
-**Current status:** Steps 1-5 implemented. v1 method set (Where, Select, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) is fully functional with loop fusion codegen. Lambda shorthand (`x => expr`, `(x, y) => expr`) works. Failable lambda support complete — errors auto-propagate from within collection chain lambdas via `emitExprLiftFailable`. v1.1 methods (OrderBy, GroupBy, Distinct, etc.) and parallel collections are planned.
+**Current status:** Steps 1-7 implemented. Both the v1 and v1.1 method sets are fully functional with loop fusion codegen. All 27 list methods and 9 map methods work with chaining. Lambda shorthand (`x => expr`, `(x, y) => expr`) works. Failable lambda support complete — errors auto-propagate from within collection chain lambdas via `emitExprLiftFailable`. Chain segmentation handles OrderBy/OrderByDescending materialization points. Map literal type inference emits concrete Go types (e.g. `map[string]int`). Parallel collections (`AsParallel()`) are planned for v2.
 
-## v1 Method Set
+## v1 Method Set (all implemented)
 
-**Must have:**
-Where, Select, SelectMany, Aggregate, ForEach, Any, All, First, Count, Take, Skip, ToList
+**List methods (27):**
+Where, Select, SelectMany, Aggregate, ForEach, Any, All, First, FirstOrDefault, Last, Count, Sum, Min, Max, Take, Skip, TakeWhile, SkipWhile, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, ToList, ToDictionary
 
-**v1.1:**
-OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, TakeWhile, SkipWhile, Last, FirstOrDefault, ToDictionary
+**Map methods (9):**
+Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate
 
 ## Why Loop Fusion — Benchmark Results (Go 1.26)
 

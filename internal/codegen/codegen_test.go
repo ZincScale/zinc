@@ -226,7 +226,7 @@ func TestMapLiteral(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	assertContains(t, out, `map[interface{}]interface{}`)
+	assertContains(t, out, `map[string]int`)
 }
 
 func TestPubFnExported(t *testing.T) {
