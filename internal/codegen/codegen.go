@@ -2640,6 +2640,30 @@ func (g *Generator) inferExprTypeWithParams(expr parser.Expr, paramTypes map[str
 		return "interface{}"
 	case *parser.SelectorExpr:
 		return "interface{}"
+	case *parser.LambdaExpr:
+		// Build Go function type signature for returned lambdas
+		var paramTypes []string
+		for _, param := range e.Params {
+			if param.Type != nil {
+				paramTypes = append(paramTypes, g.emitType(param.Type))
+			} else {
+				paramTypes = append(paramTypes, "interface{}")
+			}
+		}
+		retType := ""
+		if e.ReturnType != nil {
+			retType = " " + g.emitType(e.ReturnType)
+		} else if e.Expr != nil {
+			inferred := g.inferExprType(e.Expr, e.Params)
+			if inferred != "" && inferred != "interface{}" {
+				retType = " " + g.emitType(&parser.SimpleType{Name: inferred})
+			}
+		} else if e.Body != nil {
+			if inferred := g.inferBlockReturnType(e.Body, e.Params); inferred != "" && inferred != "interface{}" {
+				retType = " " + g.emitType(&parser.SimpleType{Name: inferred})
+			}
+		}
+		return "func(" + strings.Join(paramTypes, ", ") + ")" + retType
 	}
 	return "interface{}"
 }

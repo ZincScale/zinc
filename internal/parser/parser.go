@@ -825,25 +825,36 @@ func (p *Parser) parseTupleDestructure() *TupleVarStmt {
 
 // isTypedVarDecl checks if the current position starts a typed variable declaration:
 // Type name = expr  or  Type? name = expr  or  Type name  (no value)
+// Also handles Fn types: Fn() name, ReturnType Fn(Params) name
 // Requires: current is uppercase IDENT (type name), followed by lowercase ident (var name)
 func (p *Parser) isTypedVarDecl() bool {
 	tok := p.peek()
 	if tok.Type != lexer.TOKEN_IDENT || len(tok.Literal) == 0 || tok.Literal[0] < 'A' || tok.Literal[0] > 'Z' {
 		return false
 	}
-	// Scan past the type (which may include ?, <...>, etc.) to find the variable name
+	// Scan past the type (which may include ?, <...>, Fn(...), etc.) to find the variable name
 	i := 1
-	// Skip generic type params <...>
-	if p.peekAt(i).Type == lexer.TOKEN_LT {
-		depth := 1
-		i++
-		for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
-			if p.peekAt(i).Type == lexer.TOKEN_LT {
-				depth++
-			} else if p.peekAt(i).Type == lexer.TOKEN_GT {
-				depth--
-			}
+	// Handle Fn(...) at start position — void function type
+	if tok.Literal == "Fn" && p.peekAt(i).Type == lexer.TOKEN_LPAREN {
+		i = p.skipParens(i)
+	} else {
+		// Skip generic type params <...>
+		if p.peekAt(i).Type == lexer.TOKEN_LT {
+			depth := 1
 			i++
+			for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+				if p.peekAt(i).Type == lexer.TOKEN_LT {
+					depth++
+				} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+					depth--
+				}
+				i++
+			}
+		}
+		// Check for ReturnType Fn(Params) — non-void function type
+		if p.peekAt(i).Type == lexer.TOKEN_IDENT && p.peekAt(i).Literal == "Fn" && p.peekAt(i+1).Type == lexer.TOKEN_LPAREN {
+			i++ // skip "Fn"
+			i = p.skipParens(i)
 		}
 	}
 	// Skip ? after type
@@ -859,6 +870,22 @@ func (p *Parser) isTypedVarDecl() bool {
 	// Must be followed by = or end-of-statement (no value)
 	t := p.peekAt(i).Type
 	return t == lexer.TOKEN_ASSIGN || t == lexer.TOKEN_SEMICOLON || t == lexer.TOKEN_RBRACE || t == lexer.TOKEN_EOF
+}
+
+// skipParens skips past a balanced (...) starting at position i (which should be TOKEN_LPAREN).
+// Returns the position after the closing paren.
+func (p *Parser) skipParens(i int) int {
+	depth := 1
+	i++ // skip (
+	for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+		if p.peekAt(i).Type == lexer.TOKEN_LPAREN {
+			depth++
+		} else if p.peekAt(i).Type == lexer.TOKEN_RPAREN {
+			depth--
+		}
+		i++
+	}
+	return i
 }
 
 // parseTypedVarStmt parses: Type name = expr  or  Type name  (no value)
