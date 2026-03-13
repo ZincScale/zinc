@@ -174,7 +174,7 @@ Format `.zn` files consistently.
 - Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)
 - Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
 - Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)
-- Full LINQ-style collection methods — 27 list methods (Where, Select, SelectMany, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, Last, TakeWhile, SkipWhile, ToDictionary, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) + 9 map methods (Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate) with loop fusion codegen
+- Full LINQ-style collection methods — 25 list methods (Where, Select, SelectMany, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, Last, ToDictionary, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) + 9 map methods (Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate) with loop fusion codegen
 - Chain segmentation for OrderBy/OrderByDescending (materialization points split chains, each segment fused independently)
 - Map literal type inference (concrete Go types like `map[string]int` instead of `map[interface{}]interface{}`)
 - Nested list literal type inference (`[][]int` for list-of-lists)

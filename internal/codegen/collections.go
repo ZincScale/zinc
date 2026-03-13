@@ -39,8 +39,6 @@ var collectionMethods = map[string]bool{
 	"Max":            true,
 	"Take":           true,
 	"Skip":           true,
-	"TakeWhile":      true,
-	"SkipWhile":      true,
 	"Aggregate":      true,
 	"ToList":         true,
 	"ToDictionary":   true,
@@ -272,7 +270,7 @@ func segmentChain(chain *collectionChain) []collectionChain {
 	return segments
 }
 
-// emitIntermediateSteps processes Where/Select/Take/Skip/TakeWhile/SkipWhile/SelectMany/Distinct
+// emitIntermediateSteps processes Where/Select/Take/Skip/SelectMany/Distinct
 // steps, returning the current variable name and the number of open if-blocks/for-blocks.
 // The caller must close these blocks after emitting the terminal.
 type openBlock struct {
@@ -321,16 +319,6 @@ func (g *Generator) emitIntermediateSteps(steps []chainStep, elemVar string) (cu
 			// handled by pre-allocated takeVar in caller
 		case "Skip":
 			// handled by pre-allocated skipVar in caller
-		case "TakeWhile":
-			if len(step.args) > 0 {
-				lambda := g.extractLambda(step.args[0])
-				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitLambdaExpr(lambda, currentVar)
-					g.writeln(fmt.Sprintf("if !(%s) { break }", cond))
-				}
-			}
-		case "SkipWhile":
-			// handled by pre-allocated skipWhileVar in caller
 		case "Distinct":
 			// handled by pre-allocated seenVar in caller
 		case "ToList":
@@ -403,7 +391,7 @@ func (g *Generator) emitCollectionChainVar(varName string, chain *collectionChai
 		return
 	}
 
-	// List-producing chain (Where, Select, Take, Skip, TakeWhile, SkipWhile, Distinct, SelectMany, ToList)
+	// List-producing chain (Where, Select, Take, Skip, Distinct, SelectMany, ToList)
 	g.emitListProducingChain(varName, chain)
 }
 
@@ -413,8 +401,8 @@ func (g *Generator) emitListProducingChain(varName string, chain *collectionChai
 	elemVar := fmt.Sprintf("_v%d", g.tmpCounter)
 	g.tmpCounter++
 
-	// Check for Take/Skip/TakeWhile/SkipWhile/Distinct in chain
-	var takeVar, skipVar, skipWhileVar, seenVar string
+	// Check for Take/Skip/Distinct in chain
+	var takeVar, skipVar, seenVar string
 	for _, step := range chain.steps {
 		if step.method == "Take" && len(step.args) > 0 {
 			takeVar = fmt.Sprintf("_take%d", g.tmpCounter)
@@ -422,10 +410,6 @@ func (g *Generator) emitListProducingChain(varName string, chain *collectionChai
 		}
 		if step.method == "Skip" && len(step.args) > 0 {
 			skipVar = fmt.Sprintf("_skip%d", g.tmpCounter)
-			g.tmpCounter++
-		}
-		if step.method == "SkipWhile" {
-			skipWhileVar = fmt.Sprintf("_skipping%d", g.tmpCounter)
 			g.tmpCounter++
 		}
 		if step.method == "Distinct" {
@@ -464,9 +448,6 @@ func (g *Generator) emitListProducingChain(varName string, chain *collectionChai
 	}
 	if skipVar != "" {
 		g.writeln(fmt.Sprintf("%s := 0", skipVar))
-	}
-	if skipWhileVar != "" {
-		g.writeln(fmt.Sprintf("%s := true", skipWhileVar))
 	}
 	if seenVar != "" {
 		g.writeln(fmt.Sprintf("%s := make(map[%s]bool)", seenVar, elemType))
@@ -525,27 +506,6 @@ func (g *Generator) emitListProducingChain(varName string, chain *collectionChai
 			if len(step.args) > 0 {
 				limit := g.emitExpr(step.args[0])
 				g.writeln(fmt.Sprintf("if %s < %s { %s++; continue }", skipVar, limit, skipVar))
-			}
-		case "TakeWhile":
-			if len(step.args) > 0 {
-				lambda := g.extractLambda(step.args[0])
-				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitLambdaExpr(lambda, currentVar)
-					g.writeln(fmt.Sprintf("if !(%s) { break }", cond))
-				}
-			}
-		case "SkipWhile":
-			if len(step.args) > 0 {
-				lambda := g.extractLambda(step.args[0])
-				if lambda != nil && len(lambda.Params) > 0 {
-					cond := g.emitLambdaExpr(lambda, currentVar)
-					g.writeln(fmt.Sprintf("if %s {", skipWhileVar))
-					g.push()
-					g.writeln(fmt.Sprintf("if %s { continue }", cond))
-					g.writeln(fmt.Sprintf("%s = false", skipWhileVar))
-					g.pop()
-					g.writeln("}")
-				}
 			}
 		case "Distinct":
 			g.writeln(fmt.Sprintf("if %s[%s] { continue }", seenVar, currentVar))

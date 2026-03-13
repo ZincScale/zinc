@@ -2553,26 +2553,6 @@ main() {
 	assertOutput(t, e2eRun(t, src), "3")
 }
 
-func TestE2ETakeWhile(t *testing.T) {
-	src := `
-main() {
-    nums := [1, 2, 3, 4, 5, 1, 2]
-    r := nums.TakeWhile(x => x < 4)
-    for item in r { print(item) }
-}`
-	assertOutput(t, e2eRun(t, src), "1\n2\n3")
-}
-
-func TestE2ESkipWhile(t *testing.T) {
-	src := `
-main() {
-    nums := [1, 2, 3, 4, 5, 1, 2]
-    r := nums.SkipWhile(x => x < 4)
-    for item in r { print(item) }
-}`
-	assertOutput(t, e2eRun(t, src), "4\n5\n1\n2")
-}
-
 func TestE2EDistinct(t *testing.T) {
 	src := `
 main() {

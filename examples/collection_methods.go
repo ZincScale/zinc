@@ -7,28 +7,28 @@ import (
 	"sort"
 )
 
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:4
+//line examples/collection_methods.zn:4
 func main() {
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:7
+//line examples/collection_methods.zn:7
 	nums := []int{5, 3, 8, 1, 9, 2, 7, 4, 6}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:10
+//line examples/collection_methods.zn:10
 	big := nums[:0:0]
 	for _, _v0 := range nums {
 		if _v0 > 5 {
 			big = append(big, _v0)
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:11
+//line examples/collection_methods.zn:11
 	fmt.Println(big)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:14
+//line examples/collection_methods.zn:14
 	doubled := nums[:0:0]
 	for _, _v1 := range nums {
 		_v2 := (_v1 * 2)
 		doubled = append(doubled, _v2)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:15
+//line examples/collection_methods.zn:15
 	fmt.Println(doubled)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:18
+//line examples/collection_methods.zn:18
 	result := nums[:0:0]
 	for _, _v3 := range nums {
 		if _v3 > 3 {
@@ -36,9 +36,9 @@ func main() {
 			result = append(result, _v4)
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:19
+//line examples/collection_methods.zn:19
 	fmt.Println(result)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:22
+//line examples/collection_methods.zn:22
 	first3 := nums[:0:0]
 	_take6 := 0
 	for _, _v5 := range nums {
@@ -48,9 +48,9 @@ func main() {
 		first3 = append(first3, _v5)
 		_take6++
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:23
+//line examples/collection_methods.zn:23
 	fmt.Println(first3)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:24
+//line examples/collection_methods.zn:24
 	rest := nums[:0:0]
 	_skip8 := 0
 	for _, _v7 := range nums {
@@ -60,318 +60,292 @@ func main() {
 		}
 		rest = append(rest, _v7)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:25
+//line examples/collection_methods.zn:25
 	fmt.Println(rest)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:28
-	ascending := []int{1, 2, 3, 5, 4, 3}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:29
-	taken := ascending[:0:0]
-	for _, _v9 := range ascending {
-		if !(_v9 <= 3) {
-			break
-		}
-		taken = append(taken, _v9)
-	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:30
-	fmt.Println(taken)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:31
-	skipped := ascending[:0:0]
-	_skipping11 := true
-	for _, _v10 := range ascending {
-		if _skipping11 {
-			if _v10 <= 3 {
-				continue
-			}
-			_skipping11 = false
-		}
-		skipped = append(skipped, _v10)
-	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:32
-	fmt.Println(skipped)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:35
+//line examples/collection_methods.zn:28
 	hasNeg := false
-	for _, _v12 := range nums {
-		if _v12 < 0 {
+	for _, _v9 := range nums {
+		if _v9 < 0 {
 			hasNeg = true
 			break
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:36
+//line examples/collection_methods.zn:29
 	fmt.Println(hasNeg)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:37
+//line examples/collection_methods.zn:30
 	allPos := true
-	for _, _v13 := range nums {
-		if !(_v13 > 0) {
+	for _, _v10 := range nums {
+		if !(_v10 > 0) {
 			allPos = false
 			break
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:38
+//line examples/collection_methods.zn:31
 	fmt.Println(allPos)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:41
+//line examples/collection_methods.zn:34
 	bigCount := 0
-	for _, _v14 := range nums {
-		if _v14 > 5 {
+	for _, _v11 := range nums {
+		if _v11 > 5 {
 			bigCount++
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:42
+//line examples/collection_methods.zn:35
 	fmt.Println(bigCount)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:45
+//line examples/collection_methods.zn:38
 	total := 0
-	for _, _v15 := range nums {
-		total += _v15
+	for _, _v12 := range nums {
+		total += _v12
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:46
+//line examples/collection_methods.zn:39
 	fmt.Println(total)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:49
+//line examples/collection_methods.zn:42
 	prices := []int{10, 25, 15}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:50
+//line examples/collection_methods.zn:43
 	totalDouble := 0
-	for _, _v16 := range prices {
-		_v17 := (_v16 * 2)
-		totalDouble += _v17
+	for _, _v13 := range prices {
+		_v14 := (_v13 * 2)
+		totalDouble += _v14
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:51
+//line examples/collection_methods.zn:44
 	fmt.Println(totalDouble)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:54
+//line examples/collection_methods.zn:47
 	lo := nums[0]
-	_first19 := true
-	for _, _v18 := range nums {
-		if _first19 || _v18 < lo {
-			lo = _v18
-			_first19 = false
+	_first16 := true
+	for _, _v15 := range nums {
+		if _first16 || _v15 < lo {
+			lo = _v15
+			_first16 = false
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:55
+//line examples/collection_methods.zn:48
 	hi := nums[0]
-	_first21 := true
-	for _, _v20 := range nums {
-		if _first21 || _v20 > hi {
-			hi = _v20
-			_first21 = false
+	_first18 := true
+	for _, _v17 := range nums {
+		if _first18 || _v17 > hi {
+			hi = _v17
+			_first18 = false
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:56
+//line examples/collection_methods.zn:49
 	fmt.Println(lo)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:57
+//line examples/collection_methods.zn:50
 	fmt.Println(hi)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:60
+//line examples/collection_methods.zn:53
 	sum := 0
-	for _, _v22 := range nums {
-		sum = (sum + _v22)
+	for _, _v19 := range nums {
+		sum = (sum + _v19)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:61
+//line examples/collection_methods.zn:54
 	fmt.Println(sum)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:64
+//line examples/collection_methods.zn:57
 	dupes := []int{1, 2, 3, 2, 1, 4, 3}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:65
+//line examples/collection_methods.zn:58
 	unique := dupes[:0:0]
-	_seen24 := make(map[interface{}]bool)
-	for _, _v23 := range dupes {
-		if _seen24[_v23] {
+	_seen21 := make(map[interface{}]bool)
+	for _, _v20 := range dupes {
+		if _seen21[_v20] {
 			continue
 		}
-		_seen24[_v23] = true
-		unique = append(unique, _v23)
+		_seen21[_v20] = true
+		unique = append(unique, _v20)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:66
+//line examples/collection_methods.zn:59
 	fmt.Println(unique)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:69
+//line examples/collection_methods.zn:62
 	var lastBig interface{}
-	_found26 := false
-	for _, _v25 := range nums {
-		if _v25 > 5 {
-			lastBig = _v25
-			_found26 = true
+	_found23 := false
+	for _, _v22 := range nums {
+		if _v22 > 5 {
+			lastBig = _v22
+			_found23 = true
 		}
 	}
-	if !_found26 {
+	if !_found23 {
 		panic(fmt.Errorf("no matching element found"))
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:70
+//line examples/collection_methods.zn:63
 	fmt.Println(lastBig)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:73
+//line examples/collection_methods.zn:66
 	nested := [][]int{[]int{1, 2}, []int{3, 4}, []int{5}}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:74
+//line examples/collection_methods.zn:67
 	var flat []interface{}
-	for _, _v27 := range nested {
-		for _, _v28 := range _v27 {
-			flat = append(flat, _v28)
+	for _, _v24 := range nested {
+		for _, _v25 := range _v24 {
+			flat = append(flat, _v25)
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:75
+//line examples/collection_methods.zn:68
 	fmt.Println(flat)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:78
+//line examples/collection_methods.zn:71
 	sorted := append(nums[:0:0], nums...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i] < sorted[j]
 	})
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:79
+//line examples/collection_methods.zn:72
 	fmt.Println(sorted)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:81
+//line examples/collection_methods.zn:74
 	sortedDesc := append(nums[:0:0], nums...)
 	sort.Slice(sortedDesc, func(i, j int) bool {
 		return sortedDesc[i] > sortedDesc[j]
 	})
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:82
+//line examples/collection_methods.zn:75
 	fmt.Println(sortedDesc)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:85
-	_seg29 := nums[:0:0]
-	for _, _v30 := range nums {
-		if _v30 > 2 {
-			_seg29 = append(_seg29, _v30)
+//line examples/collection_methods.zn:78
+	_seg26 := nums[:0:0]
+	for _, _v27 := range nums {
+		if _v27 > 2 {
+			_seg26 = append(_seg26, _v27)
 		}
 	}
-	sort.Slice(_seg29, func(i, j int) bool {
-		return _seg29[i] < _seg29[j]
+	sort.Slice(_seg26, func(i, j int) bool {
+		return _seg26[i] < _seg26[j]
 	})
-	top3 := _seg29[:0:0]
-	_take32 := 0
-	for _, _v31 := range _seg29 {
-		_v33 := (_v31 * 10)
-		if _take32 >= 3 {
+	top3 := _seg26[:0:0]
+	_take29 := 0
+	for _, _v28 := range _seg26 {
+		_v30 := (_v28 * 10)
+		if _take29 >= 3 {
 			break
 		}
-		top3 = append(top3, _v33)
-		_take32++
+		top3 = append(top3, _v30)
+		_take29++
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:86
+//line examples/collection_methods.zn:79
 	fmt.Println(top3)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:89
+//line examples/collection_methods.zn:82
 	numbers := []int{1, 2, 3, 4, 5, 6}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:90
+//line examples/collection_methods.zn:83
 	groups := make(map[interface{}][]interface{})
-	for _, _v34 := range numbers {
-		_k35 := (_v34 % 2)
-		groups[_k35] = append(groups[_k35], _v34)
+	for _, _v31 := range numbers {
+		_k32 := (_v31 % 2)
+		groups[_k32] = append(groups[_k32], _v31)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:91
+//line examples/collection_methods.zn:84
 	fmt.Println(len(groups))
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:94
+//line examples/collection_methods.zn:87
 	items := []int{1, 2, 3}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:95
+//line examples/collection_methods.zn:88
 	dict := make(map[interface{}]interface{})
-	for _, _v36 := range items {
-		dict[_v36] = (_v36 * _v36)
+	for _, _v33 := range items {
+		dict[_v33] = (_v33 * _v33)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:96
+//line examples/collection_methods.zn:89
 	fmt.Println(dict[2])
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:99
+//line examples/collection_methods.zn:92
 	a := []int{1, 2, 3}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:100
+//line examples/collection_methods.zn:93
 	b := []int{10, 20, 30}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:101
+//line examples/collection_methods.zn:94
 	var zipped []interface{}
-	for _i37 := 0; _i37 < len(a) && _i37 < len(b); _i37++ {
-		zipped = append(zipped, (a[_i37] + b[_i37]))
+	for _i34 := 0; _i34 < len(a) && _i34 < len(b); _i34++ {
+		zipped = append(zipped, (a[_i34] + b[_i34]))
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:102
+//line examples/collection_methods.zn:95
 	fmt.Println(zipped)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:105
+//line examples/collection_methods.zn:98
 	fmt.Println("--- ForEach ---")
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:106
-	for _, _v38 := range nums {
-		if _v38 > 7 {
-			x := _v38
+//line examples/collection_methods.zn:99
+	for _, _v35 := range nums {
+		if _v35 > 7 {
+			x := _v35
 			fmt.Println(x)
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:110
+//line examples/collection_methods.zn:103
 	scores := map[string]int{"Alice": 90, "Bob": 60, "Carol": 85}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:113
+//line examples/collection_methods.zn:106
 	passing := make(map[interface{}]interface{})
-	for _k39, _v40 := range scores {
-		_ = _k39
-		_ = _v40
-		if _v40 >= 80 {
-			passing[_k39] = _v40
+	for _k36, _v37 := range scores {
+		_ = _k36
+		_ = _v37
+		if _v37 >= 80 {
+			passing[_k36] = _v37
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:114
+//line examples/collection_methods.zn:107
 	fmt.Println(len(passing))
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:117
+//line examples/collection_methods.zn:110
 	curved := make(map[interface{}]interface{})
+	for _k38, _v39 := range scores {
+		_ = _k38
+		_ = _v39
+		_v40 := (_v39 + 10)
+		curved[_k38] = _v40
+	}
+//line examples/collection_methods.zn:111
+	fmt.Println(curved["Bob"])
+//line examples/collection_methods.zn:114
+	var names []interface{}
 	for _k41, _v42 := range scores {
 		_ = _k41
 		_ = _v42
-		_v43 := (_v42 + 10)
-		curved[_k41] = _v43
+		names = append(names, _k41)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:118
-	fmt.Println(curved["Bob"])
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:121
-	var names []interface{}
-	for _k44, _v45 := range scores {
-		_ = _k44
-		_ = _v45
-		names = append(names, _k44)
-	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:122
+//line examples/collection_methods.zn:115
 	fmt.Println(len(names))
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:125
+//line examples/collection_methods.zn:118
 	hasHigh := false
-	for _k46, _v47 := range scores {
-		if _v47 > 85 {
+	for _k43, _v44 := range scores {
+		if _v44 > 85 {
 			hasHigh = true
 			break
 		}
-		_ = _k46
+		_ = _k43
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:126
+//line examples/collection_methods.zn:119
 	fmt.Println(hasHigh)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:127
+//line examples/collection_methods.zn:120
 	allPass := true
-	for _k48, _v49 := range scores {
-		if !(_v49 >= 60) {
+	for _k45, _v46 := range scores {
+		if !(_v46 >= 60) {
 			allPass = false
 			break
 		}
-		_ = _k48
+		_ = _k45
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:128
+//line examples/collection_methods.zn:121
 	fmt.Println(allPass)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:131
+//line examples/collection_methods.zn:124
 	highCount := 0
-	for _k50, _v51 := range scores {
-		if _v51 >= 80 {
+	for _k47, _v48 := range scores {
+		if _v48 >= 80 {
 			highCount++
-			_ = _k50
-			_ = _v51
+			_ = _k47
+			_ = _v48
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:132
+//line examples/collection_methods.zn:125
 	fmt.Println(highCount)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:135
+//line examples/collection_methods.zn:128
 	totalScore := 0
-	for _k52, _v53 := range scores {
-		_ = _k52
-		_ = _v53
-		totalScore = (totalScore + _v53)
+	for _k49, _v50 := range scores {
+		_ = _k49
+		_ = _v50
+		totalScore = (totalScore + _v50)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:136
+//line examples/collection_methods.zn:129
 	fmt.Println(totalScore)
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:139
+//line examples/collection_methods.zn:132
 	fmt.Println("--- Map ForEach ---")
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:140
-	for _k54, _v55 := range scores {
-		_ = _k54
-		_ = _v55
-		k := _k54
+//line examples/collection_methods.zn:133
+	for _k51, _v52 := range scores {
+		_ = _k51
+		_ = _v52
+		k := _k51
 		_ = k
-		v := _v55
+		v := _v52
 		_ = v
 		fmt.Println(k)
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:143
+//line examples/collection_methods.zn:136
 	passingTotal := 0
-	for _k56, _v57 := range scores {
-		_ = _k56
-		_ = _v57
-		if _v57 >= 80 {
-			passingTotal = (passingTotal + _v57)
+	for _k53, _v54 := range scores {
+		_ = _k53
+		_ = _v54
+		if _v54 >= 80 {
+			passingTotal = (passingTotal + _v54)
 		}
 	}
-//line /home/vrjoshi/proj/zinc/examples/collection_methods.zn:144
+//line examples/collection_methods.zn:137
 	fmt.Println(passingTotal)
 }

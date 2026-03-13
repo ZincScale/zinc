@@ -38,8 +38,6 @@ allTags := posts.SelectMany(p => p.tags)
 | `Min` / `Max` | Min / Max | Aggregation |
 | `Take` | Take | Partitioning (early exit) |
 | `Skip` | Skip | Partitioning |
-| `TakeWhile` | TakeWhile | Partitioning |
-| `SkipWhile` | SkipWhile | Partitioning |
 | `Distinct` | Distinct | Filtering (streaming with set) |
 | `Zip` | Zip | Combining |
 | `ForEach` | — | Side effect terminal |
@@ -407,7 +405,7 @@ Steps 1-4 deliver a working v1. Steps 5-7 round it out.
 ## v1 Method Set (all implemented)
 
 **List methods (27):**
-Where, Select, SelectMany, Aggregate, ForEach, Any, All, First, FirstOrDefault, Last, Count, Sum, Min, Max, Take, Skip, TakeWhile, SkipWhile, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, ToList, ToDictionary
+Where, Select, SelectMany, Aggregate, ForEach, Any, All, First, FirstOrDefault, Last, Count, Sum, Min, Max, Take, Skip, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, ToList, ToDictionary
 
 **Map methods (9):**
 Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate

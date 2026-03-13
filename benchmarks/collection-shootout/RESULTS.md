@@ -25,8 +25,6 @@
 | SelectMany (flatten) | **22 us** | 5.51 ms | 185 ns | — | 72 us | 2.39 ms | 119x faster† |
 | **Partition** |
 | Take(10) | **165 ns** | 155 ns | 205 ns | — | 660 ns | 280 us | ~tied |
-| TakeWhile(x < 800) | **52 ns** | 320 ns | 178 us | 804 ns | — | — | 6.2x faster |
-| SkipWhile(x < 800) | 8.62 ms | 27.38 ms | **178 us** | 325 us | — | — | 48.5x slower |
 | **Quantifier** |
 | Any(x > 999) | 366 us | 24.71 ms | 189 us | 293 us | **167 us** | 745 us | 2.2x slower |
 | All(x >= 0) | 687 us | 23.13 ms | 201 us | 297 us | **165 us** | 706 us | 4.2x slower |
@@ -57,21 +55,21 @@
 
 ## Analysis
 
-### Where Go Loop Fusion Wins (6 benchmarks)
+### Where Go Loop Fusion Wins (4 benchmarks)
 
 | Category | Why Go wins |
 |----------|------------|
-| **Short-circuit** (First, TakeWhile) | Breaks on first match — O(1) in best case. Python libraries scan full arrays. |
+| **Short-circuit** (First) | Breaks on first match — O(1) in best case. Python libraries scan full arrays. |
 | **Map-like structures** (ToDictionary, Map.SelectValues) | Go maps are native; Python libraries model maps as columnar tables — mismatch. |
 | **Tiny inputs / early exit** (Take) | No framework overhead. 165 ns vs 155 ns is noise. |
 
-### Where Python Libraries Win (16 benchmarks)
+### Where Python Libraries Win (16 benchmarks out of 24)
 
 | Strategy | Best at | Why |
 |----------|---------|-----|
 | **Polars** (10 wins) | Filter, quantifiers, aggregate, sort | Lazy evaluation + Apache Arrow columnar format + Rust engine. Column-at-a-time SIMD processing. |
 | **Numba** (5 wins) | Element-wise compute (Select, Sum(x²), Distinct, complex chains) | JIT to native LLVM — tight scalar loops rival C. No framework overhead for simple ops. |
-| **NumPy** (4 wins) | Reduction (Min/Max, Aggregate), SkipWhile, GroupBy | Vectorized C loops over contiguous float64 arrays. |
+| **NumPy** (3 wins) | Reduction (Min/Max, Aggregate), GroupBy | Vectorized C loops over contiguous float64 arrays. |
 | **DuckDB** (1 win) | Complex chains with ORDER BY + LIMIT | Full query optimizer — pushes predicates, limits, projections down. |
 | **Comprehension** (2 wins) | ToDictionary, Map.SelectValues | Only option when libraries don't support the operation. |
 
@@ -91,10 +89,10 @@
 
 ```
 Go wins by >10x:   2 benchmarks (First, ToDictionary)
-Go wins by 1-10x:  4 benchmarks (TakeWhile, Take, Map.SelectValues, SelectMany)
+Go wins by 1-10x:  2 benchmarks (Take, Map.SelectValues)
 Python wins 1-5x:  9 benchmarks (Last, Any, MinMax, Aggregate, Sum(x²), Zip, Select, Distinct, GroupBy)
 Python wins 5-20x: 5 benchmarks (Where, Where+Select, All, OrderBy, Where+Count)
-Python wins >20x:  6 benchmarks (Where+OrderBy, SkipWhile, Map.Where, Map.Aggregate, Sum, ComplexChain)
+Python wins >20x:  6 benchmarks (Where+OrderBy, Map.Where, Map.Aggregate, Sum, ComplexChain, SelectMany)
 ```
 
 ## Implications for Zinc Python Codegen
@@ -111,7 +109,7 @@ Python wins >20x:  6 benchmarks (Where+OrderBy, SkipWhile, Map.Where, Map.Aggreg
    - Worth the compilation overhead for large N
 
 3. **Pure Python** for:
-   - Short-circuit operations (First, TakeWhile, Take) — framework overhead exceeds computation
+   - Short-circuit operations (First, Take) — framework overhead exceeds computation
    - Map operations (ToDictionary, Map.SelectValues) — libraries don't model dicts well
    - Small collections (N < 1000) — framework overhead dominates
 
@@ -124,7 +122,7 @@ Python wins >20x:  6 benchmarks (Where+OrderBy, SkipWhile, Map.Where, Map.Aggreg
 Is N known to be small (< 1000)?
   → Pure Python comprehension
 
-Is the chain short-circuit? (First, Take, TakeWhile, Any on sparse data)
+Is the chain short-circuit? (First, Take, Any on sparse data)
   → Pure Python loop with break
 
 Is it a map operation? (Map.Where, Map.Select, Map.Aggregate)

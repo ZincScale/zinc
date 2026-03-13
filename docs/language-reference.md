@@ -1090,8 +1090,6 @@ nums.Aggregate(0, (acc, x) => acc + x)
 | `SelectMany(x => list)` | Flatten nested lists | No |
 | `Take(n)` | Take first n elements | No |
 | `Skip(n)` | Skip first n elements | No |
-| `TakeWhile(x => bool)` | Take while predicate holds | No |
-| `SkipWhile(x => bool)` | Skip while predicate holds | No |
 | `Distinct()` | Remove duplicates | No |
 | `OrderBy(x => key)` | Sort ascending by key | No (materializes) |
 | `OrderByDescending(x => key)` | Sort descending by key | No (materializes) |

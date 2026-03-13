@@ -124,38 +124,6 @@ func BenchmarkTake(b *testing.B) {
 	}
 }
 
-// TakeWhile(x < 800)
-func BenchmarkTakeWhile(b *testing.B) {
-	for b.Loop() {
-		result := data[:0:0]
-		for _, v := range data {
-			if !(v < 800) {
-				break
-			}
-			result = append(result, v)
-		}
-		_ = result
-	}
-}
-
-// SkipWhile(x < 800)
-func BenchmarkSkipWhile(b *testing.B) {
-	for b.Loop() {
-		result := data[:0:0]
-		skipping := true
-		for _, v := range data {
-			if skipping {
-				if v < 800 {
-					continue
-				}
-				skipping = false
-			}
-			result = append(result, v)
-		}
-		_ = result
-	}
-}
-
 // ─── Quantifier Benchmarks ──────────────────────────────────────────────────
 
 // Any(x > 999)

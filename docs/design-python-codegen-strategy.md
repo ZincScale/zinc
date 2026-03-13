@@ -182,17 +182,17 @@ After implementing all 27 list + 9 map collection methods in the Go backend, we 
 
 | Winner | Count | Examples |
 |--------|-------|----------|
-| Go loop fusion | 6 | First (14ns), TakeWhile (52ns), ToDictionary, Take, Map.SelectValues, SelectMany |
+| Go loop fusion | 5 | First (14ns), ToDictionary, Take, Map.SelectValues, SelectMany |
 | Polars | 10 | Where (582us), Sum (138us), OrderBy (6ms), Any/All (167us), Map.Where |
 | Numba | 5 | Select (319us), Sum(x²) (228us), Distinct, ComplexChain, First early-exit |
-| NumPy | 4 | MinMax (280us), Aggregate (179us), SkipWhile, GroupBy |
+| NumPy | 3 | MinMax (280us), Aggregate (179us), GroupBy |
 | DuckDB | 1 | Where+OrderBy+Select+Take (1.87ms) |
 | Comprehension | 2 | ToDictionary, Map.SelectValues |
 
 ### Recommended Hybrid Strategy for Python Codegen
 
 ```
-Short-circuit ops (First, Take, TakeWhile):     → Pure Python (framework overhead > computation)
+Short-circuit ops (First, Take):                 → Pure Python (framework overhead > computation)
 Map/dict ops (ToDictionary, Map.SelectValues):   → Pure Python dict comprehension
 Element-wise compute (Select, Sum with math):    → Numba JIT
 Complex chains with ORDER BY:                    → Polars lazy frame (or DuckDB)

@@ -230,78 +230,6 @@ def bench_take(data):
 
     return "Take(10)", results
 
-def bench_take_while(data):
-    """TakeWhile(x => x < 800) — takes elements until predicate fails"""
-    lst, arr = data["list"], data["np"]
-
-    results = {}
-    def comp_tw():
-        out = []
-        for x in lst:
-            if x >= 800: break
-            out.append(x)
-        return out
-    results["comprehension"], _ = bench(comp_tw)
-
-    # NumPy: find first index where condition fails
-    def np_tw():
-        mask = arr >= 800
-        idx = np.argmax(mask) if np.any(mask) else len(arr)
-        return arr[:idx]
-    results["numpy"], _ = bench(np_tw)
-
-    @numba.jit(nopython=True, cache=True)
-    def nb_tw(src):
-        n = 0
-        for x in src:
-            if x >= 800: break
-            n += 1
-        return src[:n].copy()
-    nb_tw(arr)
-    results["numba"], _ = bench(lambda: nb_tw(arr))
-
-    results["polars"] = None  # no direct TakeWhile
-    results["duckdb"] = None
-
-    return "TakeWhile(x < 800)", results
-
-def bench_skip_while(data):
-    """SkipWhile(x => x < 800)"""
-    lst, arr = data["list"], data["np"]
-
-    results = {}
-    def comp_sw():
-        skipping = True
-        out = []
-        for x in lst:
-            if skipping and x < 800: continue
-            skipping = False
-            out.append(x)
-        return out
-    results["comprehension"], _ = bench(comp_sw)
-
-    def np_sw():
-        mask = arr >= 800
-        idx = np.argmax(mask) if np.any(mask) else len(arr)
-        return arr[idx:]
-    results["numpy"], _ = bench(np_sw)
-
-    @numba.jit(nopython=True, cache=True)
-    def nb_sw(src):
-        start = 0
-        for i in range(len(src)):
-            if src[i] >= 800:
-                start = i
-                break
-        return src[start:].copy()
-    nb_sw(arr)
-    results["numba"], _ = bench(lambda: nb_sw(arr))
-
-    results["polars"] = None
-    results["duckdb"] = None
-
-    return "SkipWhile(x < 800)", results
-
 # ─── Category: Quantifiers ────────────────────────────────────────────────────
 
 def bench_any(data):
@@ -741,7 +669,7 @@ def bench_complex_chain(data):
 CATEGORIES = {
     "filter": [bench_where, bench_where_select, bench_distinct],
     "transform": [bench_select, bench_select_many],
-    "partition": [bench_take, bench_take_while, bench_skip_while],
+    "partition": [bench_take],
     "quantifier": [bench_any, bench_all, bench_count, bench_first, bench_last],
     "aggregate": [bench_sum, bench_min_max, bench_aggregate, bench_sum_with_selector],
     "sort": [bench_order_by, bench_where_orderby_select_take],

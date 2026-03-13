@@ -24,13 +24,6 @@ main() {
     rest := nums.Skip(3)
     print(rest)                        // [1 9 2 7 4 6]
 
-    // TakeWhile / SkipWhile — conditional partitioning
-    ascending := [1, 2, 3, 5, 4, 3]
-    taken := ascending.TakeWhile(x => x <= 3)
-    print(taken)                       // [1 2 3]
-    skipped := ascending.SkipWhile(x => x <= 3)
-    print(skipped)                     // [5 4 3]
-
     // Any / All — quantifiers (short-circuit)
     hasNeg := nums.Any(x => x < 0)
     print(hasNeg)                      // false

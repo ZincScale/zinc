@@ -111,8 +111,6 @@ Chain these on any list or map. Chains compile to fused Go loops — no intermed
 | `list.SelectMany(x => list)` | Flatten nested lists | `lists.SelectMany(x => x)` |
 | `list.Take(n)` | Keep first n elements | `nums.Take(10)` |
 | `list.Skip(n)` | Drop first n elements | `nums.Skip(5)` |
-| `list.TakeWhile(x => bool)` | Take while predicate holds | `nums.TakeWhile(x => x < 10)` |
-| `list.SkipWhile(x => bool)` | Skip while predicate holds | `nums.SkipWhile(x => x < 5)` |
 | `list.Distinct()` | Remove duplicates | `nums.Distinct()` |
 | `list.OrderBy(x => key)` | Sort ascending | `nums.OrderBy(x => x)` |
 | `list.OrderByDescending(x => key)` | Sort descending | `nums.OrderByDescending(x => x)` |
