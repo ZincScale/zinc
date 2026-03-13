@@ -116,6 +116,7 @@ Format `.zn` files consistently.
 - Syntax simplification — dropped `class`/`fn`/`construct`/`var` keywords, parens-free `if`/`while`/`for`, `:=` inference, `name Type` declarations (design doc: `docs/design-syntax-simplification.md`)
 - Failable tuple destructuring (`(val, err) := fn()` with auto-propagation)
 - Python backend prototype — benchmarked Comprehension/NumPy/Numba strategies vs Go fused loops (design doc: `docs/design-python-codegen-strategy.md`, code: `internal/codegen_python/`, benchmarks: `benchmarks/python-strategies/`)
+- Comprehensive Python codegen benchmark — 5 strategies (Comprehension/NumPy/Numba/Polars/DuckDB) across 26 benchmarks covering all collection methods. Go loop fusion wins short-circuit ops; Polars/Numba win bulk data. Hybrid strategy recommended. (benchmarks: `benchmarks/collection-shootout/`)
 - Color error output with ANSI colors (auto-disabled in CI/piped output)
 - Project-mode errors now show .zn filename instead of directory path
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)

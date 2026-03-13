@@ -163,13 +163,54 @@ When NumPy/Numba are unavailable (no dependencies), all operations fall back to 
 
 6. **Numba has ~600-800ns call overhead.** This is irrelevant for bulk operations but makes Numba lose to simpler strategies for trivial early-exit patterns.
 
+## Comprehensive Benchmark: 5 Python Strategies (March 2026)
+
+After implementing all 27 list + 9 map collection methods in the Go backend, we ran a full shootout comparing Go loop fusion against 5 Python strategies across 26 benchmarks. See `benchmarks/collection-shootout/` for full code and `RESULTS.md` for detailed tables.
+
+### Environment
+- Python 3.14.3 (PGO) / NumPy 2.4.3 / Numba 0.64.0 / Polars 1.39.0 / DuckDB 1.5.0
+- Go 1.26.1 (loop fusion — actual Zinc codegen output)
+
+### New Strategies Tested
+
+| Strategy | Mechanism | Best at |
+|----------|-----------|---------|
+| **Polars** | Lazy dataframes, Apache Arrow, Rust engine | Filter, quantifiers, aggregate, sort (10 wins) |
+| **DuckDB** | SQL analytics engine | Complex multi-stage chains with ORDER BY + LIMIT (1 win) |
+
+### Score (26 benchmarks)
+
+| Winner | Count | Examples |
+|--------|-------|----------|
+| Go loop fusion | 6 | First (14ns), TakeWhile (52ns), ToDictionary, Take, Map.SelectValues, SelectMany |
+| Polars | 10 | Where (582us), Sum (138us), OrderBy (6ms), Any/All (167us), Map.Where |
+| Numba | 5 | Select (319us), Sum(x²) (228us), Distinct, ComplexChain, First early-exit |
+| NumPy | 4 | MinMax (280us), Aggregate (179us), SkipWhile, GroupBy |
+| DuckDB | 1 | Where+OrderBy+Select+Take (1.87ms) |
+| Comprehension | 2 | ToDictionary, Map.SelectValues |
+
+### Recommended Hybrid Strategy for Python Codegen
+
+```
+Short-circuit ops (First, Take, TakeWhile):     → Pure Python (framework overhead > computation)
+Map/dict ops (ToDictionary, Map.SelectValues):   → Pure Python dict comprehension
+Element-wise compute (Select, Sum with math):    → Numba JIT
+Complex chains with ORDER BY:                    → Polars lazy frame (or DuckDB)
+Everything else:                                 → Polars lazy frame
+```
+
+Minimum deps for v1: **Polars only** (covers 80% of use cases). Add Numba for math-heavy transforms. DuckDB optional.
+
 ## Decision
 
-**Defer Python backend implementation.** The benchmarks prove the concept is viable — Python+Numba can match or beat Go for bulk numeric processing. However:
+**Defer Python backend implementation.** The benchmarks prove the concept is viable — Python+Numba/Polars can match or beat Go for bulk numeric processing. However:
 
 - Go remains the right default backend for services, APIs, and general-purpose code
 - Python backend adds value primarily for ML/data pipeline workloads
-- Collection methods should be implemented in the Go backend first (design is ready, codegen is proven)
+- Collection methods are now fully implemented in the Go backend (27 list + 9 map methods with loop fusion)
 - Python backend can be revisited when there's concrete demand for ML/data pipeline use cases
 
-The benchmark code and prototype codegen are preserved in `benchmarks/python-strategies/` and `internal/codegen_python/` for future reference.
+The benchmark code is preserved in:
+- `benchmarks/python-strategies/` — original 3-strategy prototype
+- `benchmarks/collection-shootout/` — comprehensive 5-strategy shootout (Go + Python)
+- `internal/codegen_python/` — prototype Python codegen
