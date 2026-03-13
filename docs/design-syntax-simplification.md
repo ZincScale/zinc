@@ -2,6 +2,8 @@
 
 **Status: COMPLETE** — The simplified syntax is now the only supported syntax. Old syntax is no longer accepted by the parser.
 
+> **Note:** This document was written during the initial simplification pass. A subsequent migration changed all type annotations from `name Type` to `Type name` (C-style). See [`design-type-before-name.md`](design-type-before-name.md) for that migration. All examples below reflect the current syntax.
+
 ## Goal
 
 Reduce ceremony and boilerplate in Zinc. When intent is clear from context, don't require keywords or punctuation that add nothing. Make Zinc feel like writing pseudocode that compiles.
@@ -22,29 +24,29 @@ Methods inside classes and top-level functions don't need `fn`. The pattern `nam
 
 ```zinc
 main() { }
-add(a Int, b Int) Int { return a + b }
+Int add(Int a, Int b) { return a + b }
 Dog {
-    pub bark() String { return "Woof!" }
+    pub String bark() { return "Woof!" }
 }
 ```
 
 ### 3. Drop `var` for class fields
 
-Inside a class body, `name Type` is unambiguously a field declaration.
+Inside a class body, `Type name` is unambiguously a field declaration.
 
 ```zinc
 Dog {
-    name String
-    age Int = 0
+    String name
+    Int age = 0
 }
 ```
 
-### 4. `name Type` order, no colon
+### 4. `Type name` order, no colon
 
-Parameters and fields use `name Type` (Go style) with no colon separator. The parser distinguishes names from types.
+Parameters and fields use `Type name` (C-style, like Java/C#/Dart) with no colon separator. The parser distinguishes names from types.
 
 ```zinc
-greet(name String, greeting String = "Hello") { }
+greet(String name, String greeting = "Hello") { }
 ```
 
 **Local variable shorthand — `:=` for inferred declarations:**
@@ -54,8 +56,8 @@ x := 42              // inferred Int
 name := "hello"      // inferred String
 items := [1, 2, 3]   // inferred List<Int>
 
-count Int = 0         // explicit type when needed
-label String? = null  // nullable with explicit type
+Int count = 0         // explicit type when needed
+String? label = null  // nullable with explicit type
 ```
 
 ### 5. Keep `new` for constructors
@@ -64,10 +66,10 @@ Constructor stays as `new(params) { }` inside the class body. Avoids coupling co
 
 ```zinc
 Dog {
-    name String
-    age Int = 0
+    String name
+    Int age = 0
 
-    new(name String, age Int = 0) {
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
@@ -82,13 +84,13 @@ Construction uses `ClassName(args)` directly — like Python, Kotlin, Swift, Dar
 d := Dog(name: "Rex", age: 5)
 ```
 
-### 7. Return type after parens, no colon
+### 7. Return type before name
 
-Return type follows the parameter list, no colon separator. Consistent with `name Type` order — the function "name" is the whole `methodName(params)` part, and the type follows.
+Return type precedes the function/method name — C-style, like Java/C#/Dart. If a function returns nothing, omit the return type.
 
 ```zinc
-add(a Int, b Int) Int { return a + b }
-pub bark() String { return "Woof!" }
+Int add(Int a, Int b) { return a + b }
+pub String bark() { return "Woof!" }
 ```
 
 ### 8. No return type = void
@@ -106,10 +108,10 @@ Every function that returns a value uses explicit `return`. No special case for 
 
 ```zinc
 // Always explicit
-double(x Int) Int { return x * 2 }
+Int double(Int x) { return x * 2 }
 
 // Not this
-double(x Int) Int { x * 2 }   // NO — always use return
+Int double(Int x) { x * 2 }   // NO — always use return
 ```
 
 ### 10. Drop parentheses on `if`/`while`/`for`
@@ -135,19 +137,19 @@ Colon has exactly two uses, one meaning each:
 
 ```zinc
 Dog {
-    name String
-    age Int = 0
+    String name
+    Int age = 0
 
-    new(name String, age Int = 0) {
+    new(String name, Int age = 0) {
         this.name = name
         this.age = age
     }
 
-    pub bark() String {
+    pub String bark() {
         return "Woof, I'm {name}!"
     }
 
-    pub isOld() Bool {
+    pub Bool isOld() {
         return age > 10
     }
 
@@ -157,14 +159,14 @@ Dog {
 }
 
 Puppy : Dog {
-    toy String
+    String toy
 
-    new(name String, toy String) {
+    new(String name, String toy) {
         super(name: name, age: 0)
         this.toy = toy
     }
 
-    pub play() String {
+    pub String play() {
         return "{name} plays with {toy}"
     }
 }
@@ -174,10 +176,10 @@ enum Color {
 }
 
 interface Drawable {
-    pub draw() String
+    pub String draw()
 }
 
-classify(x Int) String {
+String classify(Int x) {
     if x > 100 {
         return "big"
     } else if x > 10 {
@@ -202,7 +204,7 @@ main() {
         print("{name}: {score}")
     }
 
-    items List<Int> = [1, 2, 3, 4, 5]
+    List<Int> items = [1, 2, 3, 4, 5]
     big := items.Where(x => x > 3).Select(x => x * 2).ToList()
     print(big.join(", "))
 
@@ -234,10 +236,10 @@ This was a breaking change to all existing `.zn` files. The migration was comple
 1. **Drop `if`/`while`/`for` parens** — parser change only, lowest risk
 2. **Drop `fn` keyword** — parser change, update function/method parsing
 3. **Drop `class` keyword** — parser change for top-level declarations
-4. **`name Type` (no colon)** — parser change for params, fields, variables
-5. **Return type after parens (no colon)** — parser change for function signatures
+4. **`Type name` (no colon)** — parser change for params, fields, variables
+5. **Return type before name** — parser change for function signatures
 6. **Drop `.new()` at call site** — parser + codegen change
 7. **Drop `var` for fields** — parser change for class body
 8. **Update all examples, tests, docs**
 
-All examples, tests, and documentation have been updated to use the simplified syntax. The old syntax is no longer supported.
+All examples, tests, and documentation have been updated to use the simplified syntax. The old syntax is no longer supported. See [`design-type-before-name.md`](design-type-before-name.md) for the subsequent type-before-name migration.

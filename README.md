@@ -7,7 +7,7 @@
 
 ```
 main() {
-    var name String = "World"
+    String name = "World"
     print("Hello, {name}!")
 }
 ```
@@ -100,7 +100,7 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 - Null safety with `?.` safe navigation
 - Errors as values with auto-propagation and `or` handlers
 - `with` resource management (auto-close, auto-unlock)
-- Closures and higher-order functions (`Fn<>` types)
+- Closures and higher-order functions (`Fn` types)
 - LINQ-style collection methods (`.Where()`, `.Select()`, `.Aggregate()`) with loop fusion
 - Enums with `match` expressions
 - String interpolation

@@ -21,19 +21,19 @@ Follows the **Rust serde / Kotlin kotlinx.serialization** model: annotations des
 ```zinc
 @rename_all("snake_case")           // class-level: rename all fields at once
 UserProfile {
-    firstName String            // → "first_name" in serialized output
+    String firstName            // → "first_name" in serialized output
 
     @name("uid")                     // field-level override
-    userId Int                  // → "uid" (overrides rename_all)
+    Int userId                  // → "uid" (overrides rename_all)
 
     @skip                            // excluded from all serialization
-    cache String = ""           // must have default (won't be deserialized)
+    String cache = ""           // must have default (won't be deserialized)
 
     @required                        // deserialize fails if field missing
-    email String
+    String email
 
     @omitempty                       // skip zero/null values on serialization
-    nickname String?
+    String? nickname
 }
 ```
 
@@ -57,19 +57,19 @@ Most APIs use `snake_case` or `camelCase`. Instead of annotating every field:
 // Without @rename_all — tedious
 User {
     @name("first_name")
-    firstName String
+    String firstName
     @name("last_name")
-    lastName String
+    String lastName
     @name("created_at")
-    createdAt String
+    String createdAt
 }
 
 // With @rename_all — one annotation covers all fields
 @rename_all("snake_case")
 User {
-    firstName String       // → "first_name"
-    lastName String        // → "last_name"
-    createdAt String       // → "created_at"
+    String firstName       // → "first_name"
+    String lastName        // → "last_name"
+    String createdAt       // → "created_at"
 }
 ```
 
@@ -80,16 +80,16 @@ User {
 ```zinc
 @rename_all("snake_case")
 User {
-    firstName String
+    String firstName
 
     @name("uid")
-    userId Int
+    Int userId
 
     @skip
-    cache String = ""
+    String cache = ""
 
     @omitempty
-    nickname String?
+    String? nickname
 }
 ```
 
@@ -235,12 +235,12 @@ if err := json.Unmarshal([]byte(input), &user); err != nil {
 ```zinc
 Config {
     @required
-    host String
+    String host
 
     @required
-    port Int
+    Int port
 
-    debug Bool              // optional, defaults to zero value (false)
+    Bool debug              // optional, defaults to zero value (false)
 }
 
 cfg := deserialize<Config>(input)
@@ -266,10 +266,10 @@ The `@required` checks are part of the failable operation — if validation fail
 
 ```zinc
 Animal {
-    name String
-    sound String
+    String name
+    String sound
 
-    new(name String, sound String) {
+    new(String name, String sound) {
         this.name = name
         this.sound = sound
     }
@@ -287,9 +287,9 @@ Generic classes work the same way:
 
 ```zinc
 Box<T> {
-    value T
+    T value
 
-    new(value T) {
+    new(T value) {
         this.value = value
     }
 }
@@ -336,25 +336,25 @@ import "net/http"
 @rename_all("snake_case")
 ApiRequest {
     @required
-    action String
+    String action
 
     @required
-    userId Int                 // → "user_id"
+    Int userId                 // → "user_id"
 
     @skip
-    receivedAt String = ""
+    String receivedAt = ""
 }
 
 @rename_all("snake_case")
 ApiResponse {
-    success Bool
-    errorMessage String        // → "error_message"
+    Bool success
+    String errorMessage        // → "error_message"
 
     @omitempty
-    data String?
+    String? data
 }
 
-handleRequest(body String) String {
+String handleRequest(String body) {
     req := deserialize<ApiRequest>(body) or {
         resp := ApiResponse()
         resp.success = false
