@@ -60,7 +60,7 @@ func TestHelloWorld(t *testing.T) {
 }
 
 func TestVarDecl(t *testing.T) {
-	out, errs := transpile(`main() { var x Int = 42 }`)
+	out, errs := transpile(`main() { x := 42 }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -68,7 +68,7 @@ func TestVarDecl(t *testing.T) {
 }
 
 func TestBinaryExpr(t *testing.T) {
-	out, errs := transpile(`main() { var x Int = 1 + 2 }`)
+	out, errs := transpile(`main() { x := 1 + 2 }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -172,7 +172,7 @@ func TestReturnErrorAndOrHandler(t *testing.T) {
 
 func TestConcurrency(t *testing.T) {
 	src := `main() {
-		var ch Chan<Int> = Chan(1)
+		ch Chan<Int> = Chan(1)
 		go {
 			ch.send(42)
 		}
@@ -197,7 +197,7 @@ func TestImport(t *testing.T) {
 }
 
 func TestListLiteral(t *testing.T) {
-	out, errs := transpile(`main() { var x Any = [1, 2, 3] }`)
+	out, errs := transpile(`main() { x := [1, 2, 3] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -205,7 +205,7 @@ func TestListLiteral(t *testing.T) {
 }
 
 func TestListLiteralStrings(t *testing.T) {
-	out, errs := transpile(`main() { var x Any = ["a", "b"] }`)
+	out, errs := transpile(`main() { x := ["a", "b"] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -213,7 +213,7 @@ func TestListLiteralStrings(t *testing.T) {
 }
 
 func TestListLiteralEmpty(t *testing.T) {
-	out, errs := transpile(`main() { var x Any = [] }`)
+	out, errs := transpile(`main() { x := [] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -221,7 +221,7 @@ func TestListLiteralEmpty(t *testing.T) {
 }
 
 func TestMapLiteral(t *testing.T) {
-	src := `main() { var m Any = {"a": 1} }`
+	src := `main() { m := {"a": 1} }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -250,7 +250,7 @@ func TestStaticMethod(t *testing.T) {
 }
 
 func TestBuiltinSize(t *testing.T) {
-	src := `main() { var n Int = items.size() }`
+	src := `main() { n := items.size() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -259,7 +259,7 @@ func TestBuiltinSize(t *testing.T) {
 }
 
 func TestBuiltinToString(t *testing.T) {
-	src := `main() { var s String = toString(42) }`
+	src := `main() { s := toString(42) }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -269,7 +269,7 @@ func TestBuiltinToString(t *testing.T) {
 }
 
 func TestBuiltinUpper(t *testing.T) {
-	src := `main() { var s String = "hello".upper() }`
+	src := `main() { s := "hello".upper() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -289,7 +289,7 @@ func TestBuiltinSort(t *testing.T) {
 }
 
 func TestBuiltinSqrt(t *testing.T) {
-	src := `main() { var r Float = sqrt(9.0) }`
+	src := `main() { r := sqrt(9.0) }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -299,7 +299,7 @@ func TestBuiltinSqrt(t *testing.T) {
 }
 
 func TestTupleUnpack(t *testing.T) {
-	src := `main() { var (a, b) = getPair() }`
+	src := `main() { (a, b) := getPair() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -308,12 +308,30 @@ func TestTupleUnpack(t *testing.T) {
 }
 
 func TestTupleUnpackThree(t *testing.T) {
-	src := `main() { var (x, y, z) = getTriple() }`
+	src := `main() { (x, y, z) := getTriple() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "x, y, z := getTriple()")
+}
+
+func TestTupleUnpackFailable(t *testing.T) {
+	src := `import "os"
+main() {
+    (r, w) := os.Pipe()
+    print(r)
+    print(w)
+}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Should emit: r, w, _err1 := os.Pipe()  (error auto-appended)
+	assertContains(t, out, "r, w, _err")
+	assertContains(t, out, ":= os.Pipe()")
+	// Should emit error check
+	assertContains(t, out, "!= nil")
 }
 
 func TestGenericFn(t *testing.T) {
@@ -353,7 +371,7 @@ func TestOptionalType(t *testing.T) {
 }
 
 func TestOptionalTypeVar(t *testing.T) {
-	src := `main() { var x Int? }`
+	src := `main() { x Int? }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -362,7 +380,7 @@ func TestOptionalTypeVar(t *testing.T) {
 }
 
 func TestStringInterpolation(t *testing.T) {
-	src := `main() { var name String = "World"
+	src := `main() { name := "World"
 		print("Hello, {name}!")
 	}`
 	out, errs := transpile(src)
@@ -373,8 +391,8 @@ func TestStringInterpolation(t *testing.T) {
 }
 
 func TestStringInterpolationMultiple(t *testing.T) {
-	src := `main() { var a Int = 1
-		var b Int = 2
+	src := `main() { a := 1
+		b := 2
 		print("Sum of {a} and {b}")
 	}`
 	out, errs := transpile(src)
@@ -400,7 +418,7 @@ func TestEnumMemberExpr(t *testing.T) {
 	src := `
 enum Color { Red, Green, Blue }
 main() {
-    var c Color = Color.Red
+    c := Color.Red
     print(c)
 }`
 	out, errs := transpile(src)
@@ -434,7 +452,7 @@ describe(s Status) String {
 
 func TestMatch(t *testing.T) {
 	src := `main() {
-		var x Int = 1
+		x := 1
 		match x {
 			case 1 => { print("one") }
 			case 2 => { print("two") }
@@ -1097,7 +1115,7 @@ func TestMixedListFallsBackToAny(t *testing.T) {
 }
 
 func TestEmptyMapWithDeclaredType(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { var m Map<String, Int> = {} }`)
+	out, errs := transpileWithTypes(`main() { m Map<String, Int> = {} }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1105,7 +1123,7 @@ func TestEmptyMapWithDeclaredType(t *testing.T) {
 }
 
 func TestEmptyListWithDeclaredType(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { var l List<Int> = [] }`)
+	out, errs := transpileWithTypes(`main() { l List<Int> = [] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1246,7 +1264,7 @@ func TestSliceMethodSyntax(t *testing.T) {
 
 func TestSliceStringBracket(t *testing.T) {
 	out, errs := transpile(`main() {
-	var s String = "hello"
+	s := "hello"
 	print(s[1:4])
 	print(s[:3])
 	print(s[2:])
@@ -1261,7 +1279,7 @@ func TestSliceStringBracket(t *testing.T) {
 
 func TestSliceStringMethod(t *testing.T) {
 	out, errs := transpile(`main() {
-	var s String = "hello"
+	s := "hello"
 	print(s.slice(1, 4))
 	print(s.slice(2))
 }`)

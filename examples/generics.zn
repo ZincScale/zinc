@@ -49,10 +49,10 @@ printBox(b Box<String>) {
 
 main() {
     // Generic functions — type inferred from args
-    var n Int = identity(42)
+    n Int = identity(42)
     print(n)
 
-    var s String = identity("Zinc")
+    s String = identity("Zinc")
     print(s)
 
     // Generic class — type inferred from constructor arg

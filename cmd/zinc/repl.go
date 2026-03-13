@@ -34,8 +34,8 @@ func runREPL() {
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	var topDecls []string // accumulated top-level decls (fn, class, enum, const, import)
-	var bodyDecls []string // accumulated var/statement history inside main
+	var topDecls []string // accumulated top-level decls (functions, classes, enum, const, import)
+	var bodyDecls []string // accumulated variable declarations inside main
 
 	for {
 		fmt.Print("zinc> ")
@@ -141,21 +141,66 @@ func countBraceDepth(line string) int {
 }
 
 // isTopLevelDecl returns true if input looks like a top-level declaration.
+// In the simplified syntax:
+//   - Classes: CapitalName { ... } or CapitalName : Parent { ... }
+//   - Functions: name(params) [ReturnType] { ... }
+//   - pub name(params) ... (public functions)
+//   - interface, enum, const, import keep their keywords
 func isTopLevelDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
-	return strings.HasPrefix(trimmed, "fn ") ||
-		strings.HasPrefix(trimmed, "pub fn ") ||
-		strings.HasPrefix(trimmed, "class ") ||
-		strings.HasPrefix(trimmed, "interface ") ||
+	if strings.HasPrefix(trimmed, "interface ") ||
 		strings.HasPrefix(trimmed, "enum ") ||
 		strings.HasPrefix(trimmed, "const ") ||
-		strings.HasPrefix(trimmed, "import ")
+		strings.HasPrefix(trimmed, "import ") {
+		return true
+	}
+	// Strip "pub " prefix for visibility modifier
+	check := trimmed
+	if strings.HasPrefix(check, "pub ") {
+		check = strings.TrimSpace(check[4:])
+	}
+	if len(check) == 0 {
+		return false
+	}
+	// Class: starts with uppercase letter, next meaningful token is '{' or ':'
+	if check[0] >= 'A' && check[0] <= 'Z' {
+		// Find end of identifier
+		i := 0
+		for i < len(check) && (check[i] >= 'A' && check[i] <= 'Z' || check[i] >= 'a' && check[i] <= 'z' || check[i] >= '0' && check[i] <= '9' || check[i] == '_') {
+			i++
+		}
+		rest := strings.TrimSpace(check[i:])
+		// Class decl: Name { or Name : Parent { or Name<T> {
+		if strings.HasPrefix(rest, "{") || strings.HasPrefix(rest, ":") || strings.HasPrefix(rest, "<") {
+			return true
+		}
+		return false
+	}
+	// Function: starts with lowercase, has '(' — e.g. main() { or add(a Int) Int {
+	if check[0] >= 'a' && check[0] <= 'z' || check[0] == '_' {
+		if strings.Contains(check, "(") && strings.Contains(check, "{") {
+			// Make sure '(' comes before '{' — it's a function definition
+			parenIdx := strings.Index(check, "(")
+			braceIdx := strings.Index(check, "{")
+			if parenIdx < braceIdx {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isVarDecl returns true if input is a variable declaration.
+// In the simplified syntax, variable declarations use:
+//   - name := expr (inferred type)
+//   - name Type = expr (explicit typed, e.g. nullable)
 func isVarDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
-	return strings.HasPrefix(trimmed, "var ")
+	// Inferred: name := expr
+	if strings.Contains(trimmed, ":=") {
+		return true
+	}
+	return false
 }
 
 // isBareExpression returns true if the input looks like a standalone expression
@@ -163,9 +208,9 @@ func isVarDecl(input string) bool {
 func isBareExpression(input string) bool {
 	trimmed := strings.TrimSpace(input)
 	stmtPrefixes := []string{
-		"var ", "if ", "if(", "for ", "for(", "while ", "while(",
+		"if ", "for ", "while ",
 		"return ", "return\n",
-		"match ", "with ", "with(", "go ", "go{",
+		"match ", "with ", "go ", "go{",
 		"print(", "printf(",
 	}
 	for _, p := range stmtPrefixes {
@@ -174,6 +219,10 @@ func isBareExpression(input string) bool {
 		}
 	}
 	if isTopLevelDecl(trimmed) {
+		return false
+	}
+	// Declaration with :=
+	if strings.Contains(trimmed, ":=") {
 		return false
 	}
 	// Assignment operators
@@ -190,7 +239,7 @@ func isBareExpression(input string) bool {
 func replEval(input string, topDecls []string, bodyDecls []string) {
 	var src strings.Builder
 
-	// Top-level declarations (fn, class, enum, const, import)
+	// Top-level declarations (functions, classes, enum, const, import)
 	for _, h := range topDecls {
 		src.WriteString(h)
 		src.WriteString("\n")
@@ -199,7 +248,7 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	if isTopLevelDecl(input) {
 		src.WriteString(input)
 		src.WriteString("\n")
-		src.WriteString("fn main() {\n")
+		src.WriteString("main() {\n")
 		// Include body vars so they're "used" (avoids Go compile errors on re-eval)
 		for _, b := range bodyDecls {
 			src.WriteString(b)
@@ -214,7 +263,7 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 		}
 		src.WriteString("}\n")
 	} else {
-		src.WriteString("fn main() {\n")
+		src.WriteString("main() {\n")
 		// Replay accumulated body vars
 		for _, b := range bodyDecls {
 			src.WriteString(b)
@@ -295,22 +344,24 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 	cmd.Run() //nolint
 }
 
-// extractVarName pulls the variable name from a "var NAME ..." declaration.
+// extractVarName pulls the variable name from a declaration.
+// Handles: name := expr, name Type = expr
 func extractVarName(decl string) string {
 	trimmed := strings.TrimSpace(decl)
-	if !strings.HasPrefix(trimmed, "var ") {
-		return ""
+	// name := expr
+	if idx := strings.Index(trimmed, ":="); idx > 0 {
+		name := strings.TrimSpace(trimmed[:idx])
+		// Skip tuple destructuring like (a, b) := ...
+		if strings.HasPrefix(name, "(") {
+			return ""
+		}
+		return name
 	}
-	rest := strings.TrimSpace(trimmed[4:])
-	// Handle tuple: var (a, b) = ...
-	if strings.HasPrefix(rest, "(") {
-		return ""
-	}
-	// var name[: Type][ = expr]
-	for i, ch := range rest {
-		if ch == ' ' || ch == ':' || ch == '=' {
-			return rest[:i]
+	// name Type = expr — extract first word
+	for i, ch := range trimmed {
+		if ch == ' ' || ch == '=' {
+			return trimmed[:i]
 		}
 	}
-	return rest
+	return ""
 }

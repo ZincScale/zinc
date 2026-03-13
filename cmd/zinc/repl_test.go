@@ -21,23 +21,23 @@ func TestCountBraceDepth(t *testing.T) {
 		line string
 		want int
 	}{
-		{`fn main() {`, 1},
+		{`main() {`, 1},
 		{`}`, -1},
-		{`if (x > 0) { return 1 }`, 0},
+		{`if x > 0 { return 1 }`, 0},
 		// Braces inside strings should be ignored
-		{`var s = "hello {world}"`, 0},
-		{`var s = "a{b}c"`, 0},
+		{`s := "hello {world}"`, 0},
+		{`s := "a{b}c"`, 0},
 		{`print("{name}")`, 0},
 		// Braces inside raw strings
-		{"var s = `raw {brace}`", 0},
+		{"s := `raw {brace}`", 0},
 		// Braces after line comment
 		{`// this { doesn't count`, 0},
-		{`var x = 1 // trailing { comment`, 0},
+		{`x := 1 // trailing { comment`, 0},
 		// Escaped quote in string
-		{`var s = "escaped \" { quote"`, 0},
+		{`s := "escaped \" { quote"`, 0},
 		// Normal nesting
-		{`class Dog {`, 1},
-		{`fn foo() { if (true) {`, 2},
+		{`Dog {`, 1},
+		{`foo() { if true {`, 2},
 		{`} }`, -2},
 	}
 
@@ -51,9 +51,12 @@ func TestCountBraceDepth(t *testing.T) {
 
 func TestIsTopLevelDecl(t *testing.T) {
 	trueCases := []string{
-		"fn main() { }",
-		"pub fn greet() { }",
-		"class Dog { }",
+		"main() { }",
+		"pub greet() { }",
+		"add(a Int, b Int) Int { return a + b }",
+		"Dog { }",
+		"Dog : Animal { }",
+		"Puppy { }",
 		"interface Speaker { }",
 		"enum Color { Red, Blue }",
 		"const PI = 3.14",
@@ -66,7 +69,7 @@ func TestIsTopLevelDecl(t *testing.T) {
 	}
 
 	falseCases := []string{
-		"var x = 1",
+		"x := 1",
 		"print(42)",
 		"1 + 2",
 		"x = 5",
@@ -79,11 +82,25 @@ func TestIsTopLevelDecl(t *testing.T) {
 }
 
 func TestIsVarDecl(t *testing.T) {
-	if !isVarDecl("var x = 1") {
-		t.Error("expected var x = 1 to be a var decl")
+	trueCases := []string{
+		"x := 1",
+		"name := \"hello\"",
 	}
-	if isVarDecl("print(x)") {
-		t.Error("expected print(x) to not be a var decl")
+	for _, s := range trueCases {
+		if !isVarDecl(s) {
+			t.Errorf("isVarDecl(%q) = false, want true", s)
+		}
+	}
+
+	falseCases := []string{
+		"print(x)",
+		"1 + 2",
+		"x = 5",
+	}
+	for _, s := range falseCases {
+		if isVarDecl(s) {
+			t.Errorf("isVarDecl(%q) = true, want false", s)
+		}
 	}
 }
 
@@ -106,17 +123,17 @@ func TestIsBareExpression(t *testing.T) {
 	}
 
 	falseCases := []string{
-		"var x = 1",
-		"if (true) { }",
-		"for (var i = 0; i < 5; i += 1) { }",
-		"while (true) { }",
+		"x := 1",
+		"if true { }",
+		"for i in items { }",
+		"while true { }",
 		"return 42",
 		"match x { }",
 		"print(42)",
 		"x = 5",
 		"x += 1",
-		"fn foo() { }",
-		"class Dog { }",
+		"main() { }",
+		"Dog { }",
 		"const PI = 3.14",
 	}
 	for _, s := range falseCases {
@@ -131,11 +148,10 @@ func TestExtractVarName(t *testing.T) {
 		decl string
 		want string
 	}{
-		{"var x = 1", "x"},
-		{"var name: String = \"hello\"", "name"},
-		{"var count: Int", "count"},
-		{"  var spaced = 42  ", "spaced"},
-		{"var (a, b) = divide(10, 2)", ""},
+		{"x := 1", "x"},
+		{"name := \"hello\"", "name"},
+		{"  spaced := 42  ", "spaced"},
+		{"(a, b) := divide(10, 2)", ""},
 		{"print(x)", ""},
 		{"", ""},
 	}

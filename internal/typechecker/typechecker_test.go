@@ -76,7 +76,7 @@ func TestUndeclaredFunction(t *testing.T) {
 }
 
 func TestDeclaredVariableOK(t *testing.T) {
-	src := `main() { var x Int = 1; print(x) }`
+	src := `main() { x := 1; print(x) }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -85,8 +85,8 @@ func TestDeclaredVariableOK(t *testing.T) {
 
 func TestErrorLineNumbers(t *testing.T) {
 	src := `main() {
-    var x Int = "hello"
-    var y Bool = 42
+    x Int = "hello"
+    y Bool = 42
 }`
 	errs := checkSrc(src)
 	if len(errs) < 2 {
@@ -107,7 +107,7 @@ func TestErrorLineNumbers(t *testing.T) {
 // --- 2. Type mismatch in var decl --------------------------------------------
 
 func TestVarTypeMismatch(t *testing.T) {
-	src := `main() { var x Int = "hello" }`
+	src := `main() { x Int = "hello" }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error, got %v", errs)
@@ -115,7 +115,7 @@ func TestVarTypeMismatch(t *testing.T) {
 }
 
 func TestVarTypeMatch(t *testing.T) {
-	src := `main() { var x Int = 42 }`
+	src := `main() { x := 42 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -127,13 +127,13 @@ func TestVarInferred(t *testing.T) {
 }
 
 func TestVarOptionalNull(t *testing.T) {
-	src := `main() { var x String? = null }`
+	src := `main() { x String? = null }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestVarNonOptionalNull(t *testing.T) {
-	src := `main() { var x Int = null }`
+	src := `main() { x Int = null }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error for null to Int, got %v", errs)
@@ -143,7 +143,7 @@ func TestVarNonOptionalNull(t *testing.T) {
 // --- 3. Assignment type mismatch ---------------------------------------------
 
 func TestAssignTypeMismatch(t *testing.T) {
-	src := `main() { var x Int = 1; x = "hello" }`
+	src := `main() { x := 1; x = "hello" }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error on reassign, got %v", errs)
@@ -151,7 +151,7 @@ func TestAssignTypeMismatch(t *testing.T) {
 }
 
 func TestAssignTypeMatch(t *testing.T) {
-	src := `main() { var x Int = 1; x = 2 }`
+	src := `main() { x := 1; x = 2 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -418,19 +418,19 @@ main() {
 // --- 11. Optionals -----------------------------------------------------------
 
 func TestOptionalAssignNull(t *testing.T) {
-	src := `main() { var name String? = null }`
+	src := `main() { name String? = null }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestOptionalAssignValue(t *testing.T) {
-	src := `main() { var name String? = "hello" }`
+	src := `main() { name String? = "hello" }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestNonOptionalAssignNull(t *testing.T) {
-	src := `main() { var count Int = null }`
+	src := `main() { count Int = null }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' for null to Int, got %v", errs)
@@ -465,7 +465,7 @@ risky() Int {
 }
 main() {
   x := risky() or {
-    var msg String = err
+    msg := err
     exit(1)
   }
   print(x)
@@ -771,7 +771,7 @@ Dog {
     pub speak() String { return "woof" }
 }
 main() {
-    var d Dog? = null
+    d Dog? = null
     print(d?.name)
     d?.speak()
 }`
@@ -802,7 +802,7 @@ Dog {
     new(name String) { this.name = name }
 }
 main() {
-    var d Dog? = null
+    d Dog? = null
     print(d.name)
 }`
 	errs := checkSrc(src)
@@ -819,7 +819,7 @@ Dog {
     pub speak() String { return "woof" }
 }
 main() {
-    var d Dog? = null
+    d Dog? = null
     d.speak()
 }`
 	errs := checkSrc(src)
@@ -835,7 +835,7 @@ Dog {
     new(name String) { this.name = name }
 }
 main() {
-    var d Dog = null
+    d Dog = null
 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
@@ -855,7 +855,7 @@ User {
     new(addr Address?) { this.address = addr }
 }
 main() {
-    var u User? = null
+    u User? = null
     print(u?.address?.city)
 }`
 	errs := checkSrc(src)
@@ -874,7 +874,7 @@ User {
     new(addr Address) { this.address = addr }
 }
 main() {
-    var u User? = null
+    u User? = null
     print(u?.address.city)
 }`
 	errs := checkSrc(src)
@@ -891,8 +891,8 @@ Dog {
     pub speak() String { return "woof" }
 }
 main() {
-    var d Dog? = Dog("Rex")
-    var result String = d?.speak()
+    d Dog? = Dog("Rex")
+    result String = d?.speak()
 }`
 	errs := checkSrc(src)
 	// d?.speak() returns String? which can't assign to String
@@ -909,8 +909,8 @@ Dog {
     pub speak() String { return "woof" }
 }
 main() {
-    var d Dog? = Dog("Rex")
-    var result String? = d?.speak()
+    d Dog? = Dog("Rex")
+    result String? = d?.speak()
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)

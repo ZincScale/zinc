@@ -14,21 +14,21 @@ run(callback Fn<(), Void>) {
 
 main() {
     // Pass lambdas as typed function arguments
-    double := (x: Int) Int => x * 2
+    double := (x Int) Int => x * 2
     print(apply(double, 7))       // 14
 
-    add := (a: Int, b: Int) Int => a + b
+    add := (a Int, b Int) Int => a + b
     print(combine(add, 3, 4))     // 7
 
     // Void callback
     run(() Void => { print("callback executed!") })
 
     // Function type as variable annotation
-    var transform Fn<(String), Int> = (s String) Int => s.size()
+    transform Fn<(String), Int> = (s String) Int => s.size()
     print(transform("hello"))     // 5
 
     // Higher-order: function returning a function
-    multiplier := (factor: Int) Fn<(Int), Int> => {
+    multiplier := (factor Int) Fn<(Int), Int> => {
         return (x Int) Int => x * factor
     }
     triple := multiplier(3)

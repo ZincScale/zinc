@@ -225,7 +225,7 @@ func TestIntegrationGoroutineChannel(t *testing.T) {
 	// Zinc channel syntax: go { ... }, ch.send(val), ch.receive()
 	src := `
 main() {
-    var ch Chan<Int> = Chan.new(1)
+    ch Chan<Int> = Chan.new(1)
     go {
         ch.send(42)
     }

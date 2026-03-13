@@ -109,7 +109,7 @@ import "myapp/utils"
 import "myapp/models"
 
 main() {
-    var sum Int = utils.Add(2, 3)
+    sum := utils.Add(2, 3)
     print(sum)
 
     user := models.NewUser("Alice", 30)

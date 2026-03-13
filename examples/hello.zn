@@ -1,5 +1,5 @@
 main() {
     print("Hello, World!")
-    var name String = "Zinc"
+    name String = "Zinc"
     print(name)
 }

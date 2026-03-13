@@ -11,9 +11,9 @@ describe(d Direction) String {
 }
 
 main() {
-    var dir Direction = Direction.North
+    dir Direction = Direction.North
     print(describe(dir))
 
-    var dir2 Direction = Direction.East
+    dir2 Direction = Direction.East
     print(describe(dir2))
 }

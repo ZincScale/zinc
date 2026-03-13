@@ -9,8 +9,8 @@ connect(host String, port Int = 8080, tls Bool = false) {
 }
 
 Dog {
-    var name String
-    var age Int
+    name String
+    age Int
 
     new(name String, age Int = 0) {
         this.name = name

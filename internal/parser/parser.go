@@ -102,12 +102,8 @@ func (p *Parser) looksLikeReturnType() bool {
 }
 
 // parseOptionalReturnType parses an optional return type after a param list.
-// Accepts both ): Type (legacy, with colon) and ) Type (new, no colon).
+// Uses `name Type` syntax (no colon).
 func (p *Parser) parseOptionalReturnType() TypeExpr {
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-		return p.parseType()
-	}
 	if p.looksLikeReturnType() {
 		return p.parseType()
 	}
@@ -375,18 +371,17 @@ func (p *Parser) parseUnary() Expr {
 // isLambdaStart returns true if the current TOKEN_LPAREN begins a lambda, not a grouping.
 // Heuristics (peekAt is relative to current position = the '('):
 //
-//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW or COLON or uppercase IDENT
-//	(name: Type) =>    → peek(1)==IDENT,  peek(2)==COLON (typed param, legacy)
-//	(name Type) =>     → peek(1)==IDENT(lower), peek(2)==IDENT(upper) (typed param, new)
+//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW or uppercase IDENT
+//	(name Type) =>     → peek(1)==IDENT(lower), peek(2)==IDENT(upper) (typed param)
 //	(name) =>          → peek(1)==IDENT,  peek(2)==RPAREN, peek(3)==FAT_ARROW (untyped single)
 //	(name, name) =>    → peek(1)==IDENT,  peek(2)==COMMA (untyped multi)
 func (p *Parser) isLambdaStart() bool {
 	ahead1 := p.peekAt(1)
 	switch ahead1.Type {
 	case lexer.TOKEN_RPAREN:
-		// () => or (): ReturnType => or () ReturnType =>
+		// () => or () ReturnType =>
 		next := p.peekAt(2)
-		if next.Type == lexer.TOKEN_FAT_ARROW || next.Type == lexer.TOKEN_COLON {
+		if next.Type == lexer.TOKEN_FAT_ARROW {
 			return true
 		}
 		// () Type => — uppercase ident after ) means return type
@@ -395,16 +390,13 @@ func (p *Parser) isLambdaStart() bool {
 		}
 	case lexer.TOKEN_IDENT:
 		ahead2 := p.peekAt(2)
-		if ahead2.Type == lexer.TOKEN_COLON {
-			return true // (name: Type) => ...  (typed param, legacy)
-		}
 		if ahead2.Type == lexer.TOKEN_COMMA {
 			return true // (name, name) => ...  (untyped multi-param)
 		}
 		if ahead2.Type == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_FAT_ARROW {
 			return true // (name) => ...  (untyped single-param)
 		}
-		// (name Type) => ... — typed param without colon (new syntax)
+		// (name Type) => ... — typed param
 		if ahead2.Type == lexer.TOKEN_IDENT && len(ahead2.Literal) > 0 && ahead2.Literal[0] >= 'A' && ahead2.Literal[0] <= 'Z' {
 			return true
 		}
@@ -442,10 +434,6 @@ func (p *Parser) parseLambda() *LambdaExpr {
 //   - name           (untyped shorthand — type inferred from context)
 func (p *Parser) parseLambdaParam() *ParamDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
-	// Colon between name and type is optional (new: name Type, legacy: name: Type)
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-	}
 	// Check if next token looks like a type (uppercase ident or ...)
 	if p.check(lexer.TOKEN_DOTDOTDOT) || (p.check(lexer.TOKEN_IDENT) && len(p.peek().Literal) > 0 && p.peek().Literal[0] >= 'A' && p.peek().Literal[0] <= 'Z') {
 		variadic := false
@@ -661,14 +649,21 @@ func (p *Parser) parseStmt() Stmt {
 	tok := p.peek()
 
 	switch tok.Type {
-	case lexer.TOKEN_VAR:
-		return p.parseVarStmt()
 	case lexer.TOKEN_IDENT:
 		// name := expr → inferred variable declaration
 		if p.peekAt(1).Type == lexer.TOKEN_COLONASSIGN {
 			return p.parseShortVarStmt()
 		}
-	case lexer.TOKEN_RETURN: // parseVarStmt now returns Stmt (VarStmt or TupleVarStmt)
+		// name Type = expr → typed variable declaration (e.g. x Int? = null)
+		if p.isTypedVarDecl() {
+			return p.parseTypedVarStmt()
+		}
+	case lexer.TOKEN_LPAREN:
+		// (a, b) := expr → tuple destructuring
+		if p.isTupleDestructure() {
+			return p.parseTupleDestructure()
+		}
+	case lexer.TOKEN_RETURN:
 		return p.parseReturnStmt()
 	case lexer.TOKEN_IF:
 		return p.parseIfStmt()
@@ -729,52 +724,12 @@ func (p *Parser) parseConstDecl() *ConstDecl {
 	p.expect(lexer.TOKEN_CONST)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var typ TypeExpr
-	// Accept both: const NAME Type = val (new) and const NAME: Type = val (legacy)
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-		typ = p.parseType()
-	} else if p.looksLikeReturnType() {
+	if p.looksLikeReturnType() {
 		typ = p.parseType()
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
 	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
-}
-
-func (p *Parser) parseVarStmt() Stmt {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_VAR)
-	// Detect tuple destructuring: var (a, b) = expr
-	if p.check(lexer.TOKEN_LPAREN) {
-		p.advance() // (
-		var names []string
-		names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
-		for p.check(lexer.TOKEN_COMMA) {
-			p.advance()
-			names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
-		}
-		p.expect(lexer.TOKEN_RPAREN)
-		p.expect(lexer.TOKEN_ASSIGN)
-		val := p.parseExpr()
-		return &TupleVarStmt{Line: line, Names: names, Value: val}
-	}
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	var typ TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		// Legacy: var name: Type
-		p.advance()
-		typ = p.parseType()
-	} else if p.looksLikeReturnType() {
-		// New: var name Type (no colon, type starts with capital letter)
-		typ = p.parseType()
-	}
-	var val Expr
-	if p.check(lexer.TOKEN_ASSIGN) {
-		p.advance()
-		val = p.parseExpr()
-	}
-	handler := p.parseOrHandler()
-	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
 // parseShortVarStmt parses: name := expr [or { handler }]
@@ -785,6 +740,92 @@ func (p *Parser) parseShortVarStmt() Stmt {
 	val := p.parseExpr()
 	handler := p.parseOrHandler()
 	return &VarStmt{Line: line, Name: name, Value: val, OrHandler: handler}
+}
+
+// isTupleDestructure checks if ( starts a tuple destructuring: (a, b) := expr
+func (p *Parser) isTupleDestructure() bool {
+	// Walk past ( ident , ident ... ) :=
+	i := 1 // skip (
+	if p.peekAt(i).Type != lexer.TOKEN_IDENT {
+		return false
+	}
+	i++
+	for p.peekAt(i).Type == lexer.TOKEN_COMMA {
+		i++
+		if p.peekAt(i).Type != lexer.TOKEN_IDENT {
+			return false
+		}
+		i++
+	}
+	return p.peekAt(i).Type == lexer.TOKEN_RPAREN && p.peekAt(i+1).Type == lexer.TOKEN_COLONASSIGN
+}
+
+// parseTupleDestructure parses: (a, b) := expr [or { handler }]
+func (p *Parser) parseTupleDestructure() *TupleVarStmt {
+	line := p.peek().Line
+	p.advance() // (
+	var names []string
+	names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
+	for p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COLONASSIGN)
+	val := p.parseExpr()
+	handler := p.parseOrHandler()
+	return &TupleVarStmt{Line: line, Names: names, Value: val, OrHandler: handler}
+}
+
+// isTypedVarDecl checks if the current position starts a typed variable declaration:
+// name Type = expr  or  name Type? = expr  or  name Type?  (no value)
+// Requires: current is lowercase IDENT, next is uppercase IDENT (type name)
+func (p *Parser) isTypedVarDecl() bool {
+	next := p.peekAt(1)
+	if next.Type != lexer.TOKEN_IDENT || len(next.Literal) == 0 || next.Literal[0] < 'A' || next.Literal[0] > 'Z' {
+		return false
+	}
+	// Look past the type (which may include ?, <...>, etc.) for = or end-of-statement
+	// Simple heuristic: lowercase ident followed by uppercase ident that isn't a function call
+	i := 2
+	// Skip ? after type
+	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+		i++
+	}
+	// Skip generic type params <...>
+	if p.peekAt(i).Type == lexer.TOKEN_LT {
+		depth := 1
+		i++
+		for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+			if p.peekAt(i).Type == lexer.TOKEN_LT {
+				depth++
+			} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+				depth--
+			}
+			i++
+		}
+		// Skip ? after generic type
+		if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+			i++
+		}
+	}
+	// Must be followed by = or end-of-statement (no value)
+	t := p.peekAt(i).Type
+	return t == lexer.TOKEN_ASSIGN || t == lexer.TOKEN_SEMICOLON || t == lexer.TOKEN_RBRACE || t == lexer.TOKEN_EOF
+}
+
+// parseTypedVarStmt parses: name Type = expr  or  name Type  (no value)
+func (p *Parser) parseTypedVarStmt() *VarStmt {
+	line := p.peek().Line
+	name := p.advance().Literal // consume name
+	typ := p.parseType()
+	var val Expr
+	if p.check(lexer.TOKEN_ASSIGN) {
+		p.advance()
+		val = p.parseExpr()
+	}
+	handler := p.parseOrHandler()
+	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
 func (p *Parser) parseReturnStmt() *ReturnStmt {
@@ -896,11 +937,8 @@ func (p *Parser) parseForStmt(label string) Stmt {
 	return &ForStmt{Line: line, Label: label, Init: init, Cond: cond, Post: post, Body: body}
 }
 
-// parseVarOrAssign parses a var decl, short var decl, or assignment for use in for-init/post.
+// parseVarOrAssign parses a short var decl or assignment for use in for-init/post.
 func (p *Parser) parseVarOrAssign() Stmt {
-	if p.check(lexer.TOKEN_VAR) {
-		return p.parseVarStmt()
-	}
 	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_COLONASSIGN {
 		return p.parseShortVarStmt()
 	}
@@ -1018,15 +1056,7 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 // --- Declarations ------------------------------------------------------------
 
 func (p *Parser) parseFieldDecl() *FieldDecl {
-	// 'var' keyword is optional
-	if p.check(lexer.TOKEN_VAR) {
-		p.advance()
-	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
-	// Colon between name and type is optional
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-	}
 	typ := p.parseType()
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
@@ -1038,10 +1068,6 @@ func (p *Parser) parseFieldDecl() *FieldDecl {
 
 func (p *Parser) parseParam() *ParamDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
-	// Colon between name and type is optional (new: name Type, legacy: name: Type)
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-	}
 	variadic := false
 	if p.check(lexer.TOKEN_DOTDOTDOT) {
 		variadic = true
@@ -1071,10 +1097,6 @@ func (p *Parser) parseParamList() []*ParamDecl {
 }
 
 func (p *Parser) parseCtorDecl() *CtorDecl {
-	// Accept both "construct new(...)" (legacy) and "new(...)" (preferred)
-	if p.check(lexer.TOKEN_CONSTRUCT) {
-		p.advance()
-	}
 	p.expect(lexer.TOKEN_NEW)
 	params := p.parseParamList()
 	body := p.parseBlock()
@@ -1107,10 +1129,6 @@ func (p *Parser) parseMethodDecl() *MethodDecl {
 		isStatic = true
 		p.advance()
 	}
-	// 'fn' keyword is optional
-	if p.check(lexer.TOKEN_FN) {
-		p.advance()
-	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.parseParamList()
 	retType := p.parseOptionalReturnType()
@@ -1127,10 +1145,6 @@ func (p *Parser) parseMethodSig() *MethodSig {
 		isPub = true
 		p.advance()
 	}
-	// 'fn' keyword is optional
-	if p.check(lexer.TOKEN_FN) {
-		p.advance()
-	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.parseParamList()
 	retType := p.parseOptionalReturnType()
@@ -1139,10 +1153,6 @@ func (p *Parser) parseMethodSig() *MethodSig {
 
 func (p *Parser) parseClassDecl() *ClassDecl {
 	line := p.peek().Line
-	// 'class' keyword is optional
-	if p.check(lexer.TOKEN_CLASS) {
-		p.advance()
-	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
 	var parents []string
@@ -1164,11 +1174,9 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 		switch {
-		case tok.Type == lexer.TOKEN_VAR:
-			fields = append(fields, p.parseFieldDecl())
-		case tok.Type == lexer.TOKEN_CONSTRUCT || tok.Type == lexer.TOKEN_NEW:
+		case tok.Type == lexer.TOKEN_NEW:
 			ctor = p.parseCtorDecl()
-		case tok.Type == lexer.TOKEN_PUB || tok.Type == lexer.TOKEN_STATIC || tok.Type == lexer.TOKEN_FN:
+		case tok.Type == lexer.TOKEN_PUB || tok.Type == lexer.TOKEN_STATIC:
 			methods = append(methods, p.parseMethodDecl())
 		case tok.Type == lexer.TOKEN_IDENT:
 			// Disambiguate: field (name Type) vs method (name(...))
@@ -1256,10 +1264,6 @@ func (p *Parser) parseCallTypeArgs() []string {
 
 func (p *Parser) parseFnDecl(isPub bool) *FnDecl {
 	line := p.peek().Line
-	// 'fn' keyword is optional
-	if p.check(lexer.TOKEN_FN) {
-		p.advance()
-	}
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
 	params := p.parseParamList()
@@ -1321,18 +1325,13 @@ func (p *Parser) Parse() *Program {
 			prog.Imports = append(prog.Imports, p.parseImportDecl())
 		case lexer.TOKEN_ENUM:
 			prog.Decls = append(prog.Decls, p.parseEnumDecl())
-		case lexer.TOKEN_CLASS:
-			prog.Decls = append(prog.Decls, p.parseClassDecl())
 		case lexer.TOKEN_INTERFACE:
 			prog.Decls = append(prog.Decls, p.parseInterfaceDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.parseConstDecl())
 		case lexer.TOKEN_PUB:
 			p.advance()
-			// pub fn name(...) or pub name(...) — both accepted
 			prog.Decls = append(prog.Decls, p.parseFnDecl(true))
-		case lexer.TOKEN_FN:
-			prog.Decls = append(prog.Decls, p.parseFnDecl(false))
 		case lexer.TOKEN_IDENT:
 			// Disambiguate: CapitalName → class, lowercase → function
 			if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {

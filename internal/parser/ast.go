@@ -222,7 +222,7 @@ type BlockStmt struct {
 func (b *BlockStmt) nodeTag() {}
 func (b *BlockStmt) stmtTag() {}
 
-// VarStmt: var name [: Type] = expr  OR  var name: Type
+// VarStmt: name := expr — short variable declaration
 type VarStmt struct {
 	Line      int // source line number (1-indexed)
 	Name      string
@@ -234,11 +234,12 @@ type VarStmt struct {
 func (v *VarStmt) nodeTag() {}
 func (v *VarStmt) stmtTag() {}
 
-// TupleVarStmt: var (a, b) = expr  — multi-value unpacking
+// TupleVarStmt: (a, b) := expr — multi-value unpacking (error auto-propagates)
 type TupleVarStmt struct {
-	Line  int // source line number (1-indexed)
-	Names []string
-	Value Expr
+	Line      int // source line number (1-indexed)
+	Names     []string
+	Value     Expr
+	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 
 func (t *TupleVarStmt) nodeTag() {}

@@ -142,7 +142,7 @@ func TestFindModNotFound(t *testing.T) {
 func TestTranspileSingleFile(t *testing.T) {
 	dir := t.TempDir()
 	src := `main() {
-    var x Int = 42
+    x := 42
     print(x)
 }`
 	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(src), 0644)

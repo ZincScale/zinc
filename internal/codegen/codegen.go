@@ -370,6 +370,8 @@ func (g *Generator) stmtIsFailable(s parser.Stmt) bool {
 		if st.Value != nil {
 			return g.exprIsFailable(st.Value)
 		}
+	case *parser.TupleVarStmt:
+		return g.exprIsFailable(st.Value)
 	case *parser.AssignStmt:
 		return g.exprIsFailable(st.Value)
 	case *parser.BlockStmt:
@@ -1234,7 +1236,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.VarStmt:
 		g.emitVarStmt(st)
 	case *parser.TupleVarStmt:
-		g.writeln(fmt.Sprintf("%s := %s", strings.Join(st.Names, ", "), g.emitExpr(st.Value)))
+		g.emitTupleVarStmt(st)
 	case *parser.AssignStmt:
 		g.emitAssignStmt(st)
 	case *parser.ReturnStmt:
@@ -1402,6 +1404,21 @@ func (g *Generator) emitFailableVarStmt(v *parser.VarStmt, call *parser.CallExpr
 	g.emitErrorCheck(errVar, v.OrHandler)
 	// Track variable type for method failable detection
 	g.recordVarTypeFromCall(v.Name, call)
+}
+
+// emitTupleVarStmt emits a tuple destructuring statement.
+// If the call is failable (returns error as last value), the error is
+// auto-captured and propagated — Zinc code never sees the error value.
+// (a, b) := goFunc()  →  a, b, _err1 := goFunc(); if _err1 != nil { return ... }
+func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
+	if call, ok := t.Value.(*parser.CallExpr); ok && g.callIsFailable(call) {
+		errVar := g.nextErr()
+		callStr := g.emitFailableCallExpr(call)
+		g.writeln(fmt.Sprintf("%s, %s := %s", strings.Join(t.Names, ", "), errVar, callStr))
+		g.emitErrorCheck(errVar, t.OrHandler)
+		return
+	}
+	g.writeln(fmt.Sprintf("%s := %s", strings.Join(t.Names, ", "), g.emitExpr(t.Value)))
 }
 
 // recordVarTypeFromCall extracts Go type info from a call expression and

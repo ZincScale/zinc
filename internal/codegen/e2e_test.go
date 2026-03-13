@@ -69,19 +69,19 @@ func TestE2EHelloWorld(t *testing.T) {
 }
 
 func TestE2EArithmetic(t *testing.T) {
-	out := e2eRun(t, `main() { var x Int = 3 + 4 * 2; print(x) }`)
+	out := e2eRun(t, `main() { x := 3 + 4 * 2; print(x) }`)
 	assertOutput(t, out, "11")
 }
 
 func TestE2EStringInterpolation(t *testing.T) {
-	out := e2eRun(t, `main() { var name String = "Zinc"; print("Hello, {name}!") }`)
+	out := e2eRun(t, `main() { name := "Zinc"; print("Hello, {name}!") }`)
 	assertOutput(t, out, "Hello, Zinc!")
 }
 
 func TestE2EIfElse(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var x Int = 5
+    x := 5
     if x > 3 {
         print("big")
     } else {
@@ -94,8 +94,8 @@ main() {
 func TestE2EWhileLoop(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var i Int = 0
-    var sum Int = 0
+    i := 0
+    sum := 0
     while i < 5 {
         sum = sum + i
         i = i + 1
@@ -109,7 +109,7 @@ func TestE2EForIn(t *testing.T) {
 	out := e2eRun(t, `
 main() {
     nums := [1, 2, 3]
-    var sum Int = 0
+    sum := 0
     for n in nums {
         sum = sum + n
     }
@@ -233,7 +233,7 @@ main() {
 func TestE2EClosure(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var base Int = 10
+    base := 10
     addBase := (x Int) Int => x + base
     print(addBase(5))
     print(addBase(20))
@@ -260,7 +260,7 @@ main() {
 func TestE2EGoroutineChannel(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var ch Chan<Int> = Chan.new(1)
+    ch Chan<Int> = Chan.new(1)
     go {
         ch.send(42)
     }
@@ -275,7 +275,7 @@ main() {
 func TestE2EListNew(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var nums List<Int> = List()
+    nums List<Int> = List()
     nums.add(1)
     nums.add(2)
     nums.add(3)
@@ -287,7 +287,7 @@ main() {
 func TestE2EMapNew(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var m Map<String, Int> = Map()
+    m Map<String, Int> = Map()
     m["a"] = 1
     m["b"] = 2
     print(m.size())
@@ -337,15 +337,29 @@ func TestE2EWithFileOpenClose(t *testing.T) {
 import "os"
 main() {
     path := "/tmp/zinc_with_test.txt"
-    var (f, _) = os.Create(path)
-    with (file := f) {
-        file.WriteString("hello from zinc")
+    with (f := os.Create(path)) {
+        f.WriteString("hello from zinc")
     }
-    var (data, _) = os.ReadFile(path)
-    print(string(data))
+    content := readFile(path)
+    print(content)
     os.Remove(path)
 }`)
 	assertOutput(t, out, "hello from zinc")
+}
+
+func TestE2ETupleDestructureWithErrorPropagation(t *testing.T) {
+	// os.Pipe() returns (*File, *File, error) — Zinc strips the error automatically
+	// The two names in the tuple capture the non-error return values
+	src := `import "os"
+main() {
+    (r, w) := os.Pipe()
+    w.WriteString("pipe works")
+    w.Close()
+    r.Close()
+    print("ok")
+}`
+	out := e2eRun(t, src)
+	assertOutput(t, out, "ok")
 }
 
 func TestE2EWithMutex(t *testing.T) {
@@ -370,7 +384,7 @@ main() {
 func TestE2EAsCast(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var x Any = 42
+    x Any = 42
     y := x as Int
     print(y + 1)
 }`)
@@ -380,7 +394,7 @@ main() {
 func TestE2EIsCheck(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var x Any = "hello"
+    x Any = "hello"
     if x is String {
         print("yes")
     } else {
@@ -393,7 +407,7 @@ main() {
 func TestE2EIsCheckFalse(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var x Any = 42
+    x Any = 42
     if x is String {
         print("string")
     } else {
@@ -421,7 +435,7 @@ Dog : Animal {
 }
 
 main() {
-    var a Any = Dog("Rex")
+    a Any = Dog("Rex")
     d := a as Dog
     print(d.bark())
 }`)
@@ -559,7 +573,7 @@ Dog {
     }
 }
 main() {
-    var d Dog? = Dog("Rex")
+    d Dog? = Dog("Rex")
     result := d?.name
     print(result)
 }`)
@@ -576,7 +590,7 @@ Dog {
     }
 }
 main() {
-    var d Dog? = null
+    d Dog? = null
     result := d?.name
     if result == null {
         print("nil safe")
@@ -598,7 +612,7 @@ Dog {
     }
 }
 main() {
-    var d Dog? = Dog("Rex")
+    d Dog? = Dog("Rex")
     result := d?.speak()
     print(result)
 }`)
@@ -618,7 +632,7 @@ Dog {
     }
 }
 main() {
-    var d Dog? = null
+    d Dog? = null
     result := d?.speak()
     if result == null {
         print("method not called")
@@ -641,7 +655,7 @@ Logger {
     }
 }
 main() {
-    var l Logger? = Logger()
+    l Logger? = Logger()
     l?.log("hello")
 }`)
 	assertOutput(t, out, "hello")
@@ -661,7 +675,7 @@ Logger {
     }
 }
 main() {
-    var l Logger? = null
+    l Logger? = null
     l?.log("should not print")
     print("survived")
 }`)
@@ -686,7 +700,7 @@ Person {
     }
 }
 main() {
-    var p Person? = Person("Alice", Address("NYC"))
+    p Person? = Person("Alice", Address("NYC"))
     city := p?.address?.city
     print(city)
 }`)
@@ -711,7 +725,7 @@ Person {
     }
 }
 main() {
-    var p Person? = Person("Bob", null)
+    p Person? = Person("Bob", null)
     city := p?.address?.city
     if city == null {
         print("no city")
@@ -917,7 +931,7 @@ main() {
 func TestE2EListAdd(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var nums List<Int> = List()
+    nums List<Int> = List()
     nums.add(10)
     nums.add(20)
     nums.add(30)
@@ -932,7 +946,7 @@ main() {
 func TestE2EMapRemove(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var m Map<String, Int> = Map()
+    m Map<String, Int> = Map()
     m["a"] = 1
     m["b"] = 2
     m["c"] = 3
@@ -959,7 +973,7 @@ func TestE2ECollectionSize(t *testing.T) {
 main() {
     list := [1, 2, 3, 4, 5]
     print(list.size())
-    var m Map<String, Int> = Map()
+    m Map<String, Int> = Map()
     m["x"] = 1
     print(m.size())
     s := "hello"
@@ -1153,7 +1167,7 @@ main() {
 func TestE2EFnTypeVar(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    var transform Fn<(String), Int> = (s String) Int => s.size()
+    transform := (s String) Int => s.size()
     print(transform("hello"))
 }`)
 	assertOutput(t, out, "5")
@@ -1237,7 +1251,7 @@ main() {
 func TestE2EEmptyMapWithType(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    var m Map<String, Int> = {}
+    m Map<String, Int> = {}
     m["x"] = 42
     print(m["x"])
 }`)

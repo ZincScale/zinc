@@ -3,11 +3,11 @@
 ## Variables
 
 ```zinc
-var x Int = 42
-var name String = "Zinc"
-var flag Bool = true
-var ratio Float = 3.14
-var maybeNull String? = null    // optional (nullable) type
+x := 42
+name := "Zinc"
+flag := true
+ratio := 3.14
+maybeNull String? = null    // optional (nullable) type
 ```
 
 ## Constants
@@ -504,8 +504,8 @@ main() {
     mixed := [1, "two", 3]        // []interface{}
 
     // Empty literals use the declared type
-    var m Map<String, Int> = {}     // map[string]int{}
-    var l List<Int> = []            // []int{}
+    m Map<String, Int> = {}     // map[string]int{}
+    l List<Int> = []            // []int{}
 
     // Nested collections work too
     grid := [[1, 2], [3, 4]]      // [][]int
@@ -582,7 +582,7 @@ describe(d Direction) String {
 ## String Interpolation
 
 ```zinc
-var name String = "Zinc"
+name := "Zinc"
 version := 1
 print("Welcome to {name} v{version}!")
 // → fmt.Println(fmt.Sprintf("Welcome to %v v%v!", name, version))
@@ -606,7 +606,7 @@ while x > 0 {
 }
 
 // C-style for
-for (var i Int = 0; i < 10; i += 1) {
+for (i := 0; i < 10; i += 1) {
     print(i)
 }
 
@@ -677,7 +677,7 @@ Address {
 }
 
 main() {
-    var user User? = User("Alice", Address("NYC"))
+    user User? = User("Alice", Address("NYC"))
 
     // Field access — returns nil if user is nil
     name := user?.name           // "Alice"
@@ -689,7 +689,7 @@ main() {
     user?.doSomething()
 
     // Nil receiver — no crash
-    var nobody User? = null
+    nobody User? = null
     x := nobody?.name             // nil
     y := nobody?.address?.city    // nil
     nobody?.doSomething()            // no-op
@@ -706,14 +706,14 @@ if user != nil { user.DoSomething() }
 **Expression context** — when used in an assignment, it generates a nil-safe wrapper:
 
 ```go
-// var name = user?.name  →
+// name := user?.name  →
 name := func() interface{} { if user != nil { return user.Name }; return nil }()
 ```
 
 **Chained expressions** — `a?.b?.c` generates a single flat function with sequential nil checks (no nested wrappers):
 
 ```go
-// var city = user?.address?.city  →
+// city := user?.address?.city  →
 city := func() interface{} {
     _s0 := user; if _s0 == nil { return nil }
     _s1 := _s0.Address; if _s1 == nil { return nil }
@@ -727,7 +727,7 @@ Zinc uses `as` for type assertions and `is` for type checks — familiar from Ko
 
 ```zinc
 main() {
-    var x Any = 42
+    x Any = 42
 
     // Type assertion — panics if wrong type (like Kotlin's `as`)
     n := x as Int
@@ -761,13 +761,13 @@ Dog {
 }
 
 main() {
-    var d Dog = Dog("Rex")
+    d := Dog("Rex")
     print(d.name)         // OK — d is non-nullable, use regular dot
 
-    var d2 Dog? = null
+    d2 Dog? = null
     print(d2?.name)       // OK — d2 is nullable, use ?.
     // print(d2.name)     // ERROR: "use '?.' for safe access on nullable type"
-    // var d3 Dog = null  // ERROR: "cannot assign null to non-nullable type"
+    // d3 Dog = null      // ERROR: "cannot assign null to non-nullable type"
 }
 ```
 
@@ -798,7 +798,7 @@ main() {
     run(() Void => { print("done") })
 
     // Also works as variable type annotations
-    var transform Fn<(String), Int> = (s String) Int => s.size()
+    transform Fn<(String), Int> = (s String) Int => s.size()
     print(transform("hello"))     // 5
 }
 ```
@@ -1012,13 +1012,13 @@ main() {
 
 ```zinc
 main() {
-    var ch Chan<Int> = Chan.new(1)
+    ch Chan<Int> = Chan.new(1)
 
     go {
         ch.send(42)
     }
 
-    var val Int = ch.receive()
+    val := ch.receive()
     print(val)
 }
 ```
@@ -1032,11 +1032,11 @@ import "strconv"
 
 main() {
     // strconv.Atoi returns (int, error)
-    var (n, err) = strconv.Atoi("42")
+    (n, err) := strconv.Atoi("42")
 }
 ```
 
-> **Note:** Both names in `var (a, b) = ...` must be used. If you only need one value, assign the other to `_` using a regular `var`.
+> **Note:** Both names in `(a, b) := ...` must be used. If you only need one value, assign the other to `_`.
 
 ## Imports
 
@@ -1045,7 +1045,7 @@ import "os"
 import "math/rand" as rand
 
 main() {
-    var args Any = os.Args
+    args Any = os.Args
 }
 ```
 

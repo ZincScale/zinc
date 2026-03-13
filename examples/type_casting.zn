@@ -13,8 +13,8 @@ describe(x Any) String {
 }
 
 main() {
-    var a Any = 42
-    var b Any = "hello"
+    a Any = 42
+    b Any = "hello"
 
     print(describe(a))     // Int: 42
     print(describe(b))     // String: hello

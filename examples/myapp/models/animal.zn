@@ -1,8 +1,8 @@
 package "myapp/models"
 
 Animal {
-    var name String
-    var sound String
+    name String
+    sound String
 
     new(name String, sound String) {
         this.name = name

@@ -36,7 +36,7 @@ func assertNoErrors(t *testing.T, p *Parser) {
 }
 
 func TestParseFnDecl(t *testing.T) {
-	prog, p := parse(`fn main() { }`)
+	prog, p := parse(`main() { }`)
 	assertNoErrors(t, p)
 	if len(prog.Decls) != 1 {
 		t.Fatalf("expected 1 decl, got %d", len(prog.Decls))
@@ -51,7 +51,7 @@ func TestParseFnDecl(t *testing.T) {
 }
 
 func TestParseFnWithParams(t *testing.T) {
-	prog, p := parse(`fn add(a: Int, b: Int): Int { return a }`)
+	prog, p := parse(`add(a Int, b Int) Int { return a }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if len(fn.Params) != 2 {
@@ -66,7 +66,7 @@ func TestParseFnWithParams(t *testing.T) {
 }
 
 func TestParseVarStmt(t *testing.T) {
-	prog, p := parse(`fn main() { var x: Int = 42 }`)
+	prog, p := parse(`main() { x := 42 }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v, ok := fn.Body.Stmts[0].(*VarStmt)
@@ -79,7 +79,7 @@ func TestParseVarStmt(t *testing.T) {
 }
 
 func TestParseIfStmt(t *testing.T) {
-	prog, p := parse(`fn main() { if (x) { } }`)
+	prog, p := parse(`main() { if x { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	_, ok := fn.Body.Stmts[0].(*IfStmt)
@@ -89,7 +89,7 @@ func TestParseIfStmt(t *testing.T) {
 }
 
 func TestParseIfElse(t *testing.T) {
-	prog, p := parse(`fn main() { if (x) { } else { } }`)
+	prog, p := parse(`main() { if x { } else { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	stmt := fn.Body.Stmts[0].(*IfStmt)
@@ -99,7 +99,7 @@ func TestParseIfElse(t *testing.T) {
 }
 
 func TestParseWhile(t *testing.T) {
-	prog, p := parse(`fn main() { while (true) { } }`)
+	prog, p := parse(`main() { while true { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	_, ok := fn.Body.Stmts[0].(*WhileStmt)
@@ -109,7 +109,7 @@ func TestParseWhile(t *testing.T) {
 }
 
 func TestParseForCStyle(t *testing.T) {
-	prog, p := parse(`fn main() { for (var i: Int = 0; i; i) { } }`)
+	prog, p := parse(`main() { for i := 0; i; i { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	f, ok := fn.Body.Stmts[0].(*ForStmt)
@@ -122,7 +122,7 @@ func TestParseForCStyle(t *testing.T) {
 }
 
 func TestParseForIn(t *testing.T) {
-	prog, p := parse(`fn main() { for item in items { } }`)
+	prog, p := parse(`main() { for item in items { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	f, ok := fn.Body.Stmts[0].(*ForStmt)
@@ -138,10 +138,10 @@ func TestParseForIn(t *testing.T) {
 }
 
 func TestParseClass(t *testing.T) {
-	src := `class Dog {
-		var name: String
-		construct new(n: String) { }
-		pub fn bark(): String { return name }
+	src := `Dog {
+		name String
+		new(n String) { }
+		pub bark() String { return name }
 	}`
 	prog, p := parse(src)
 	assertNoErrors(t, p)
@@ -164,7 +164,7 @@ func TestParseClass(t *testing.T) {
 }
 
 func TestParseInterface(t *testing.T) {
-	prog, p := parse(`interface Speaker { pub fn speak(): String }`)
+	prog, p := parse(`interface Speaker { pub speak() String }`)
 	assertNoErrors(t, p)
 	iface, ok := prog.Decls[0].(*InterfaceDecl)
 	if !ok {
@@ -179,7 +179,7 @@ func TestParseInterface(t *testing.T) {
 }
 
 func TestParseOrHandler(t *testing.T) {
-	prog, p := parse(`fn main() { var x = risky() or { print(err) } }`)
+	prog, p := parse(`main() { x := risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v, ok := fn.Body.Stmts[0].(*VarStmt)
@@ -195,7 +195,7 @@ func TestParseOrHandler(t *testing.T) {
 }
 
 func TestParseOrHandlerOnExprStmt(t *testing.T) {
-	prog, p := parse(`fn main() { risky() or { print(err) } }`)
+	prog, p := parse(`main() { risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	es, ok := fn.Body.Stmts[0].(*ExprStmt)
@@ -208,7 +208,7 @@ func TestParseOrHandlerOnExprStmt(t *testing.T) {
 }
 
 func TestParseOrHandlerOnAssign(t *testing.T) {
-	prog, p := parse(`fn main() { var x: Int = 0; x = risky() or { print(err) } }`)
+	prog, p := parse(`main() { x := 0; x = risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	a, ok := fn.Body.Stmts[1].(*AssignStmt)
@@ -221,7 +221,7 @@ func TestParseOrHandlerOnAssign(t *testing.T) {
 }
 
 func TestParseReturnError(t *testing.T) {
-	prog, p := parse(`fn risky(): Int { return Error("oops") }`)
+	prog, p := parse(`risky() Int { return Error("oops") }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ret, ok := fn.Body.Stmts[0].(*ReturnStmt)
@@ -258,7 +258,7 @@ func TestParseImportAlias(t *testing.T) {
 }
 
 func TestParseBinaryExpr(t *testing.T) {
-	prog, p := parse(`fn main() { var x: Int = 1 + 2 }`)
+	prog, p := parse(`main() { x := 1 + 2 }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -269,7 +269,7 @@ func TestParseBinaryExpr(t *testing.T) {
 }
 
 func TestParseCallExpr(t *testing.T) {
-	prog, p := parse(`fn main() { foo(1, 2) }`)
+	prog, p := parse(`main() { foo(1, 2) }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	es := fn.Body.Stmts[0].(*ExprStmt)
@@ -283,7 +283,7 @@ func TestParseCallExpr(t *testing.T) {
 }
 
 func TestParseListLit(t *testing.T) {
-	prog, p := parse(`fn main() { var x: Any = [1, 2, 3] }`)
+	prog, p := parse(`main() { x := [1, 2, 3] }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -297,7 +297,7 @@ func TestParseListLit(t *testing.T) {
 }
 
 func TestParseMapLit(t *testing.T) {
-	prog, p := parse(`fn main() { var m: Any = {"key": 1} }`)
+	prog, p := parse(`main() { m := {"key": 1} }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -308,22 +308,18 @@ func TestParseMapLit(t *testing.T) {
 }
 
 func TestParseConstructorNew(t *testing.T) {
-	prog, p := parse(`fn main() { var d: Dog = Dog.new("rex") }`)
+	prog, p := parse(`main() { d := Dog("rex") }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
-	call, ok := v.Value.(*CallExpr)
+	_, ok := v.Value.(*CallExpr)
 	if !ok {
-		t.Fatal("expected CallExpr for Dog.new()")
-	}
-	sel, ok := call.Callee.(*SelectorExpr)
-	if !ok || sel.Field != "new" {
-		t.Fatal("expected SelectorExpr with field 'new'")
+		t.Fatal("expected CallExpr for Dog()")
 	}
 }
 
 func TestParsePubFn(t *testing.T) {
-	prog, p := parse(`pub fn greet(): String { return "hi" }`)
+	prog, p := parse(`pub greet() String { return "hi" }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if !fn.IsPub {
@@ -333,7 +329,7 @@ func TestParsePubFn(t *testing.T) {
 
 func TestParsePackageDecl(t *testing.T) {
 	prog, p := parse(`package "myapp/utils"
-fn add(a: Int, b: Int): Int { return a }`)
+add(a Int, b Int) Int { return a }`)
 	assertNoErrors(t, p)
 	if prog.Package == nil {
 		t.Fatal("expected Package to be non-nil")
@@ -347,7 +343,7 @@ fn add(a: Int, b: Int): Int { return a }`)
 }
 
 func TestParseNoPackageDecl(t *testing.T) {
-	prog, p := parse(`fn main() { }`)
+	prog, p := parse(`main() { }`)
 	assertNoErrors(t, p)
 	if prog.Package != nil {
 		t.Error("expected Package to be nil when not declared")
@@ -357,7 +353,7 @@ func TestParseNoPackageDecl(t *testing.T) {
 func TestParsePackageDeclWithImports(t *testing.T) {
 	prog, p := parse(`package "myapp/models"
 import "fmt"
-class Dog { var name: String }`)
+Dog { name String }`)
 	assertNoErrors(t, p)
 	if prog.Package == nil {
 		t.Fatal("expected Package to be non-nil")
@@ -376,7 +372,7 @@ class Dog { var name: String }`)
 // --- Default parameter values ------------------------------------------------
 
 func TestParseParamWithDefault(t *testing.T) {
-	prog, p := parse(`fn greet(name: String, greeting: String = "Hello") {}`)
+	prog, p := parse(`greet(name String, greeting String = "Hello") {}`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	if len(fn.Params) != 2 {
@@ -398,10 +394,10 @@ func TestParseParamWithDefault(t *testing.T) {
 }
 
 func TestParseCtorParamWithDefault(t *testing.T) {
-	prog, p := parse(`class Dog {
-		var name: String
-		var age: Int
-		construct new(name: String, age: Int = 0) {}
+	prog, p := parse(`Dog {
+		name String
+		age Int
+		new(name String, age Int = 0) {}
 	}`)
 	assertNoErrors(t, p)
 	cls := prog.Decls[0].(*ClassDecl)
@@ -429,7 +425,7 @@ func TestParseCtorParamWithDefault(t *testing.T) {
 // --- Named arguments at call sites -------------------------------------------
 
 func TestParseNamedArgs(t *testing.T) {
-	prog, p := parse(`fn main() { foo(x: 5, y: 10) }`)
+	prog, p := parse(`main() { foo(x: 5, y: 10) }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	call := fn.Body.Stmts[0].(*ExprStmt).Expr.(*CallExpr)
@@ -448,7 +444,7 @@ func TestParseNamedArgs(t *testing.T) {
 }
 
 func TestParseMixedPositionalAndNamedArgs(t *testing.T) {
-	prog, p := parse(`fn main() { greet("Bob", greeting: "Hi") }`)
+	prog, p := parse(`main() { greet("Bob", greeting: "Hi") }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	call := fn.Body.Stmts[0].(*ExprStmt).Expr.(*CallExpr)

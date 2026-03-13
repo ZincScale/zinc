@@ -66,8 +66,8 @@ main() {
     }
 
     // Empty collections with declared types
-    var emptyList List<Int> = []
-    var emptyMap Map<String, Bool> = {}
+    emptyList List<Int> = []
+    emptyMap Map<String, Bool> = {}
     emptyList.add(1)
     emptyMap["yes"] = true
     print(emptyList.size())    // 1
