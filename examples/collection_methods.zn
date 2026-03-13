@@ -1,0 +1,145 @@
+// LINQ-style collection methods with loop fusion codegen
+// All chains compile to single fused Go loops — no intermediate allocations
+
+main() {
+    // === List Methods ===
+
+    nums := [5, 3, 8, 1, 9, 2, 7, 4, 6]
+
+    // Where — filter elements
+    big := nums.Where(x => x > 5)
+    print(big)                         // [8 9 7 6]
+
+    // Select — transform elements
+    doubled := nums.Select(x => x * 2)
+    print(doubled)                     // [10 6 16 2 18 4 14 8 12]
+
+    // Where + Select chain (fused into single loop)
+    result := nums.Where(x => x > 3).Select(x => x * 10)
+    print(result)                      // [50 80 90 70 40 60]
+
+    // Take / Skip — partitioning
+    first3 := nums.Take(3)
+    print(first3)                      // [5 3 8]
+    rest := nums.Skip(3)
+    print(rest)                        // [1 9 2 7 4 6]
+
+    // TakeWhile / SkipWhile — conditional partitioning
+    ascending := [1, 2, 3, 5, 4, 3]
+    taken := ascending.TakeWhile(x => x <= 3)
+    print(taken)                       // [1 2 3]
+    skipped := ascending.SkipWhile(x => x <= 3)
+    print(skipped)                     // [5 4 3]
+
+    // Any / All — quantifiers (short-circuit)
+    hasNeg := nums.Any(x => x < 0)
+    print(hasNeg)                      // false
+    allPos := nums.All(x => x > 0)
+    print(allPos)                      // true
+
+    // Count
+    bigCount := nums.Where(x => x > 5).Count()
+    print(bigCount)                    // 4
+
+    // Sum
+    total := nums.Sum()
+    print(total)                       // 45
+
+    // Sum with selector
+    prices := [10, 25, 15]
+    totalDouble := prices.Sum(x => x * 2)
+    print(totalDouble)                 // 100
+
+    // Min / Max
+    lo := nums.Min()
+    hi := nums.Max()
+    print(lo)                          // 1
+    print(hi)                          // 9
+
+    // Aggregate — reduce to single value
+    sum := nums.Aggregate(0, (acc, x) => acc + x)
+    print(sum)                         // 45
+
+    // Distinct — remove duplicates
+    dupes := [1, 2, 3, 2, 1, 4, 3]
+    unique := dupes.Distinct()
+    print(unique)                      // [1 2 3 4]
+
+    // Last
+    lastBig := nums.Last(x => x > 5)
+    print(lastBig)                     // 6
+
+    // SelectMany — flatten nested lists
+    nested := [[1, 2], [3, 4], [5]]
+    flat := nested.SelectMany(x => x)
+    print(flat)                        // [1 2 3 4 5]
+
+    // OrderBy / OrderByDescending (materializes, then downstream steps fuse)
+    sorted := nums.OrderBy(x => x)
+    print(sorted)                      // [1 2 3 4 5 6 7 8 9]
+
+    sortedDesc := nums.OrderByDescending(x => x)
+    print(sortedDesc)                  // [9 8 7 6 5 4 3 2 1]
+
+    // Chain with OrderBy: Where → OrderBy → Select → Take
+    top3 := nums.Where(x => x > 2).OrderBy(x => x).Select(x => x * 10).Take(3)
+    print(top3)                        // [30 40 50]
+
+    // GroupBy — group elements by key
+    numbers := [1, 2, 3, 4, 5, 6]
+    groups := numbers.GroupBy(x => x % 2)
+    print(len(groups))                 // 2
+
+    // ToDictionary — materialize to map
+    items := [1, 2, 3]
+    dict := items.ToDictionary(x => x, x => x * x)
+    print(dict[2])                     // 4
+
+    // Zip — combine two lists element-wise
+    a := [1, 2, 3]
+    b := [10, 20, 30]
+    zipped := a.Zip(b, (x, y) => x + y)
+    print(zipped)                      // [11 22 33]
+
+    // ForEach — side effect terminal
+    print("--- ForEach ---")
+    nums.Where(x => x > 7).ForEach(x => { print(x) })
+
+    // === Map Methods ===
+
+    scores := {"Alice": 90, "Bob": 60, "Carol": 85}
+
+    // Map Where — filter entries (returns Map)
+    passing := scores.Where((k, v) => v >= 80)
+    print(len(passing))                // 2
+
+    // Map SelectValues — transform values, keep keys
+    curved := scores.SelectValues((k, v) => v + 10)
+    print(curved["Bob"])               // 70
+
+    // Map Select — free transform (returns List)
+    names := scores.Select((k, v) => k)
+    print(len(names))                  // 3
+
+    // Map Any / All
+    hasHigh := scores.Any((k, v) => v > 85)
+    print(hasHigh)                     // true
+    allPass := scores.All((k, v) => v >= 60)
+    print(allPass)                     // true
+
+    // Map Count
+    highCount := scores.Where((k, v) => v >= 80).Count()
+    print(highCount)                   // 2
+
+    // Map Aggregate — reduce over entries
+    totalScore := scores.Aggregate(0, (acc, k, v) => acc + v)
+    print(totalScore)                  // 235
+
+    // Map ForEach
+    print("--- Map ForEach ---")
+    scores.ForEach((k, v) => { print(k) })
+
+    // Map chaining: Where → Aggregate
+    passingTotal := scores.Where((k, v) => v >= 80).Aggregate(0, (acc, k, v) => acc + v)
+    print(passingTotal)                // 175
+}
