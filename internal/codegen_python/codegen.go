@@ -28,10 +28,8 @@ import (
 type Generator struct {
 	buf           strings.Builder
 	indent        int
-	neededImports map[string]bool // e.g. "functools", "numpy"
+	neededImports map[string]bool // e.g. "functools"
 	classNames    map[string]bool
-	tmpCounter    int
-	Strategy      CollectionStrategy // which backend for collection chains
 }
 
 // New creates a Python Generator.
@@ -282,11 +280,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.PrintStmt:
 		g.writeln(fmt.Sprintf("print(%s)", g.emitExpr(s.Value)))
 	case *parser.ExprStmt:
-		// Check for collection chain used as statement (ForEach)
-		if chain := g.unwrapChain(s.Expr); chain != nil {
-			g.emitCollectionChainStmt(chain)
-			return
-		}
 		g.writeln(g.emitExpr(s.Expr))
 	case *parser.BreakStmt:
 		g.writeln("break")
@@ -319,14 +312,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 }
 
 func (g *Generator) emitVarStmt(s *parser.VarStmt) {
-	// Check for collection chain
-	if s.Value != nil {
-		if chain := g.unwrapChain(s.Value); chain != nil {
-			g.emitCollectionChainVar(s.Name, chain)
-			return
-		}
-	}
-
 	if s.Value != nil {
 		val := g.emitExpr(s.Value)
 		if s.OrHandler != nil {

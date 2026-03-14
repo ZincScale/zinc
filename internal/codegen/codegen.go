@@ -1309,14 +1309,6 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
-	// Check for collection method chains: var result = list.Where(...).Select(...)
-	if v.Value != nil {
-		if chain := g.unwrapChain(v.Value); chain != nil {
-			g.emitCollectionChainVar(v.Name, chain)
-			return
-		}
-	}
-
 	// Special case: collection constructors — Chan, List, Map
 	// Supports both Chan.new(1) (legacy) and Chan(1) (new syntax)
 	if v.Value != nil {
@@ -2135,11 +2127,6 @@ func (g *Generator) emitPrintStmt(p *parser.PrintStmt) {
 }
 
 func (g *Generator) emitExprStmt(e *parser.ExprStmt) {
-	// Collection method chains in statement context (ForEach, etc.)
-	if chain := g.unwrapChain(e.Expr); chain != nil {
-		g.emitCollectionChainStmt(chain)
-		return
-	}
 	// Builtin method calls in statement context (add, remove, sort, send)
 	if call, ok := e.Expr.(*parser.CallExpr); ok {
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {

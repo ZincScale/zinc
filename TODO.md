@@ -116,7 +116,7 @@ Format `.zn` files consistently.
 - Syntax simplification — dropped `class`/`fn`/`construct`/`var` keywords, parens-free `if`/`while`/`for`, `:=` inference, `name Type` declarations (design doc: `docs/design-syntax-simplification.md`)
 - Failable tuple destructuring (`(val, err) := fn()` with auto-propagation)
 - Python backend prototype — benchmarked Comprehension/NumPy/Numba strategies vs Go fused loops (design doc: `docs/design-python-codegen-strategy.md`, code: `internal/codegen_python/`, benchmarks: `benchmarks/python-strategies/`)
-- Comprehensive Python codegen benchmark — 5 strategies (Comprehension/NumPy/Numba/Polars/DuckDB) across 26 benchmarks covering all collection methods. Go loop fusion wins short-circuit ops; Polars/Numba win bulk data. Hybrid strategy recommended. (benchmarks: `benchmarks/collection-shootout/`)
+- Comprehensive Python codegen benchmark — 5 strategies (Comprehension/NumPy/Numba/Polars/DuckDB) across 26 benchmarks. (benchmarks: `benchmarks/collection-shootout/`)
 - Color error output with ANSI colors (auto-disabled in CI/piped output)
 - Project-mode errors now show .zn filename instead of directory path
 - Updated to Go 1.26.1 (minimum Go version bumped from 1.21)
@@ -174,10 +174,5 @@ Format `.zn` files consistently.
 - Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)
 - Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
 - Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)
-- Full LINQ-style collection methods — 25 list methods (Where, Select, SelectMany, OrderBy, OrderByDescending, GroupBy, Distinct, Zip, Sum, Min, Max, Last, ToDictionary, ForEach, Any, All, First, FirstOrDefault, Count, Take, Skip, Aggregate, ToList) + 9 map methods (Where, SelectValues, SelectKeys, Select, ForEach, Any, All, Count, Aggregate) with loop fusion codegen
-- Chain segmentation for OrderBy/OrderByDescending (materialization points split chains, each segment fused independently)
 - Map literal type inference (concrete Go types like `map[string]int` instead of `map[interface{}]interface{}`)
 - Nested list literal type inference (`[][]int` for list-of-lists)
-- Lambda shorthand (`x => expr`, `(x, y) => expr`, `(k, v) => expr`) for collection method chaining
-- Failable lambda support in collection chains (error auto-propagation within fused loops)
-- Collection methods benchmarked: loop fusion vs range-over-func iterators vs naive slices (loop fusion wins 2-11,000x)
