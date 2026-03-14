@@ -1,8 +1,8 @@
 package "myapp/models"
 
 Animal {
-    String name
-    String sound
+    pub String name
+    pub String sound
 
     new(String name, String sound) {
         this.name = name

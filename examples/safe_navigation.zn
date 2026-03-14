@@ -3,8 +3,8 @@
 // Inspired by Kotlin, C#, Swift, and TypeScript.
 
 Address {
-    String city
-    String zip
+    pub String city
+    pub String zip
 
     new(String city, String zip) {
         this.city = city
@@ -17,8 +17,8 @@ Address {
 }
 
 User {
-    String name
-    Address? address
+    pub String name
+    pub Address? address
 
     new(String name, Address? addr) {
         this.name = name

@@ -16,7 +16,7 @@ log(String level, String... messages) {
 
 // Class with variadic method
 Builder {
-    List<String> parts
+    pub List<String> parts
 
     new() {
         this.parts = ["placeholder"]

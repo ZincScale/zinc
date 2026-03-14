@@ -110,7 +110,7 @@ func TestForCStyle(t *testing.T) {
 
 func TestClass(t *testing.T) {
 	src := `Dog {
-		String name
+		pub String name
 		new(String n) {
 			this.name = n
 		}
@@ -125,6 +125,43 @@ func TestClass(t *testing.T) {
 	assertContains(t, out, "type Dog interface {")
 	assertContains(t, out, "func NewDog(n string) *DogImpl {")
 	assertContains(t, out, "func (d *DogImpl) Bark() string {")
+}
+
+func TestPrivateField(t *testing.T) {
+	src := `Dog {
+		String secret
+		pub String name
+		new(String n, String s) {
+			this.name = n
+			this.secret = s
+		}
+		pub String greet() { return this.name + this.secret }
+	}`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Private field: lowercase in struct, no getter/setter
+	assertContains(t, out, "secret string")
+	assertNotContains(t, out, "GetSecret()")
+	assertNotContains(t, out, "SetSecret(")
+	// Pub field: capitalized in struct, with getter/setter
+	assertContains(t, out, "Name string")
+	assertContains(t, out, "GetName()")
+	assertContains(t, out, "SetName(")
+}
+
+func TestPrivateConst(t *testing.T) {
+	src := `const rate = 0.05
+	pub const MAX = 100`
+	out, errs := transpile(src)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	// Private const: uncapitalized
+	assertContains(t, out, "const rate = 0.05")
+	// Pub const: capitalized
+	assertContains(t, out, "const MAX = 100")
 }
 
 func TestInterface(t *testing.T) {
@@ -1140,8 +1177,8 @@ func TestNestedListLiteral(t *testing.T) {
 
 func TestConstDecl(t *testing.T) {
 	out, errs := transpile(`
-const Float PI = 3.14
-const MAX = 100
+pub const Float PI = 3.14
+pub const MAX = 100
 main() { print(PI) }`)
 	if errs != nil {
 		t.Fatal(errs)

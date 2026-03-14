@@ -758,10 +758,10 @@ func (p *Parser) parseStmt() Stmt {
 	return p.parseExprOrAssignStmt()
 }
 
-func (p *Parser) parseConstDecl() *ConstDecl {
+func (p *Parser) parseConstDecl(isPub bool) *ConstDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_CONST)
-	// Type-before-name: const Type NAME = expr  or  const NAME = expr
+	// [pub] const Type NAME = expr  or  [pub] const NAME = expr
 	// Disambiguate: if first IDENT is followed by another IDENT, first is type
 	var typ TypeExpr
 	var name string
@@ -775,7 +775,7 @@ func (p *Parser) parseConstDecl() *ConstDecl {
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
-	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
+	return &ConstDecl{Line: line, Name: name, IsPub: isPub, Type: typ, Value: val}
 }
 
 // parseShortVarStmt parses: name := expr [or { handler }]
@@ -1129,8 +1129,8 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 
 // --- Declarations ------------------------------------------------------------
 
-func (p *Parser) parseFieldDecl() *FieldDecl {
-	// Type-before-name: Type name [= default]
+func (p *Parser) parseFieldDecl(isPub bool) *FieldDecl {
+	// [pub] Type name [= default]
 	typ := p.parseType()
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var def Expr
@@ -1138,7 +1138,7 @@ func (p *Parser) parseFieldDecl() *FieldDecl {
 		p.advance()
 		def = p.parseExpr()
 	}
-	return &FieldDecl{Name: name, Type: typ, Default: def}
+	return &FieldDecl{Name: name, IsPub: isPub, Type: typ, Default: def}
 }
 
 func (p *Parser) parseParam() *ParamDecl {
@@ -1258,8 +1258,12 @@ func (p *Parser) parseMethodSig() *MethodSig {
 //   - Field:  Type name [= default]     → after type+name, we see =, ;, }, EOF, or newline
 //   - Method: ReturnType name(params)   → after type+name, we see ( or <
 func (p *Parser) isClassMethodDecl() bool {
+	return p.isClassMethodDeclAt(0)
+}
+
+func (p *Parser) isClassMethodDeclAt(offset int) bool {
 	// Scan past the type (which may be generic, optional, etc.)
-	i := 1
+	i := offset + 1
 	// Skip generic type args <...>
 	if p.peekAt(i).Type == lexer.TOKEN_LT {
 		depth := 1
@@ -1313,8 +1317,33 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 		switch {
 		case tok.Type == lexer.TOKEN_NEW:
 			ctor = p.parseCtorDecl()
-		case tok.Type == lexer.TOKEN_PUB || tok.Type == lexer.TOKEN_STATIC:
+		case tok.Type == lexer.TOKEN_STATIC:
 			methods = append(methods, p.parseMethodDecl())
+		case tok.Type == lexer.TOKEN_PUB:
+			// pub can prefix methods or fields
+			// Peek past pub to disambiguate
+			next := p.peekAt(1)
+			if next.Type == lexer.TOKEN_STATIC {
+				// pub static — always a method
+				methods = append(methods, p.parseMethodDecl())
+			} else if next.Type == lexer.TOKEN_IDENT {
+				nextIsUpper := len(next.Literal) > 0 && next.Literal[0] >= 'A' && next.Literal[0] <= 'Z'
+				if !nextIsUpper {
+					// pub lowercaseName( — void method
+					methods = append(methods, p.parseMethodDecl())
+				} else {
+					// pub UpperType — could be field or method with return type
+					// Use offset-based lookahead (skip past pub) to disambiguate
+					if p.isClassMethodDeclAt(1) {
+						methods = append(methods, p.parseMethodDecl())
+					} else {
+						p.advance() // consume pub
+						fields = append(fields, p.parseFieldDecl(true))
+					}
+				}
+			} else {
+				methods = append(methods, p.parseMethodDecl())
+			}
 		case tok.Type == lexer.TOKEN_IDENT:
 			// Type-before-name disambiguation in class body:
 			// Uppercase ident could be: field (Type name), method with return type (Type methodName(...))
@@ -1335,7 +1364,7 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 				if p.isClassMethodDecl() {
 					methods = append(methods, p.parseMethodDecl())
 				} else {
-					fields = append(fields, p.parseFieldDecl())
+					fields = append(fields, p.parseFieldDecl(false))
 				}
 			}
 		default:
@@ -1488,10 +1517,14 @@ func (p *Parser) Parse() *Program {
 		case lexer.TOKEN_INTERFACE:
 			prog.Decls = append(prog.Decls, p.parseInterfaceDecl())
 		case lexer.TOKEN_CONST:
-			prog.Decls = append(prog.Decls, p.parseConstDecl())
+			prog.Decls = append(prog.Decls, p.parseConstDecl(false))
 		case lexer.TOKEN_PUB:
 			p.advance()
-			prog.Decls = append(prog.Decls, p.parseFnDecl(true))
+			if p.check(lexer.TOKEN_CONST) {
+				prog.Decls = append(prog.Decls, p.parseConstDecl(true))
+			} else {
+				prog.Decls = append(prog.Decls, p.parseFnDecl(true))
+			}
 		case lexer.TOKEN_IDENT:
 			if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
 				// Uppercase: could be class or function with return type

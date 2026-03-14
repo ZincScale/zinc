@@ -75,7 +75,7 @@ func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 				}
 				var fields []*classFieldInfo
 				for _, f := range d.Fields {
-					fields = append(fields, &classFieldInfo{Name: f.Name, Type: f.Type})
+					fields = append(fields, &classFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
 				}
 				reg.ClassFields[d.Name] = fields
 				reg.ClassParents[d.Name] = d.Parents

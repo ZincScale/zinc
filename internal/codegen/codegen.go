@@ -63,8 +63,9 @@ type varTypeInfo struct {
 
 // classFieldInfo records a class field for getter/setter generation.
 type classFieldInfo struct {
-	Name string         // Zinc field name (e.g. "name")
-	Type parser.TypeExpr // Zinc type expression
+	Name  string         // Zinc field name (e.g. "name")
+	IsPub bool           // whether the field is pub
+	Type  parser.TypeExpr // Zinc type expression
 }
 
 // Generator converts a Zinc AST to Go source code.
@@ -284,7 +285,7 @@ func (g *Generator) firstPass(prog *parser.Program) {
 			// Collect field info for getter/setter and auto-interface generation
 			var fields []*classFieldInfo
 			for _, f := range d.Fields {
-				fields = append(fields, &classFieldInfo{Name: f.Name, Type: f.Type})
+				fields = append(fields, &classFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
 			}
 			g.classFields[d.Name] = fields
 			g.classParents[d.Name] = d.Parents
@@ -709,10 +710,7 @@ func (g *Generator) emitTopLevel(decl parser.TopLevelDecl) {
 // --- Const Emission ----------------------------------------------------------
 
 func (g *Generator) emitConstDecl(d *parser.ConstDecl) {
-	name := d.Name
-	if len(name) > 0 {
-		name = strings.ToUpper(name[:1]) + name[1:]
-	}
+	name := exportName(d.Name, d.IsPub)
 	val := g.emitExpr(d.Value)
 	if d.Type != nil {
 		goType := g.emitType(d.Type)
@@ -800,7 +798,8 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	}
 	// Own fields
 	for _, f := range cls.Fields {
-		g.writeln(fmt.Sprintf("%s %s", capitalize(f.Name), g.emitType(f.Type)))
+		fieldName := exportName(f.Name, f.IsPub)
+		g.writeln(fmt.Sprintf("%s %s", fieldName, g.emitType(f.Type)))
 	}
 	g.pop()
 	g.writeln("}")
@@ -818,6 +817,9 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 		existingMethods[capitalize(m.Name)] = true
 	}
 	for _, f := range cls.Fields {
+		if !f.IsPub {
+			continue
+		}
 		goFieldName := capitalize(f.Name)
 		goType := g.emitType(f.Type)
 		getterName := "Get" + goFieldName
@@ -912,6 +914,9 @@ func (g *Generator) emitClassInterface(cls *parser.ClassDecl, baseClass string, 
 		}
 	}
 	for _, f := range cls.Fields {
+		if !f.IsPub {
+			continue
+		}
 		goFieldName := capitalize(f.Name)
 		goType := g.emitType(f.Type)
 		if !methodNames["Get"+goFieldName] {
@@ -1012,7 +1017,7 @@ func (g *Generator) emitCtor(cls *parser.ClassDecl, baseClass string) {
 	// Own fields with defaults
 	for _, f := range cls.Fields {
 		if f.Default != nil {
-			g.writeln(fmt.Sprintf("%s: %s,", capitalize(f.Name), g.emitExpr(f.Default)))
+			g.writeln(fmt.Sprintf("%s: %s,", exportName(f.Name, f.IsPub), g.emitExpr(f.Default)))
 		}
 	}
 	g.pop()
@@ -2287,7 +2292,7 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		if g.isClassFieldAccess(ex) {
 			return fmt.Sprintf("%s.Get%s()", g.emitExpr(ex.Object), capitalize(ex.Field))
 		}
-		return fmt.Sprintf("%s.%s", g.emitExpr(ex.Object), capitalize(ex.Field))
+		return fmt.Sprintf("%s.%s", g.emitExpr(ex.Object), g.resolveGoFieldName(ex))
 	case *parser.SafeNavExpr:
 		return g.emitSafeNav(ex)
 	case *parser.IndexExpr:
@@ -2447,6 +2452,48 @@ func (g *Generator) hasClassField(className, fieldName string) bool {
 		}
 	}
 	return false
+}
+
+// goFieldName returns the Go struct field name for a Zinc field.
+// Pub fields are capitalized; private fields are uncapitalized.
+func (g *Generator) goFieldName(className, fieldName string) string {
+	for _, f := range g.classFields[className] {
+		if f.Name == fieldName {
+			return exportName(f.Name, f.IsPub)
+		}
+	}
+	// Check parent classes
+	for _, parent := range g.classParents[className] {
+		if g.classNames[parent] {
+			if name := g.goFieldName(parent, fieldName); name != "" {
+				return name
+			}
+		}
+	}
+	// Fallback: capitalize (for Go interop / unknown types)
+	return capitalize(fieldName)
+}
+
+// resolveGoFieldName resolves the Go field name for a selector expression
+// by determining the class from context (this, receiver, classVars, interfaceVars).
+func (g *Generator) resolveGoFieldName(sel *parser.SelectorExpr) string {
+	// Determine class name from context
+	className := ""
+	if _, ok := sel.Object.(*parser.ThisExpr); ok {
+		className = g.currentClassName
+	} else if ident, ok := sel.Object.(*parser.Ident); ok {
+		if g.receiver != "" && ident.Name == g.receiver {
+			className = g.currentClassName
+		} else if cn, ok := g.classVars[ident.Name]; ok {
+			className = cn
+		} else if cn, ok := g.interfaceVars[ident.Name]; ok {
+			className = cn
+		}
+	}
+	if className != "" {
+		return g.goFieldName(className, sel.Field)
+	}
+	return capitalize(sel.Field)
 }
 
 // hasAnyClassField checks if any declared class has a field with this name.

@@ -12,12 +12,13 @@ String? maybeNull = null    // optional (nullable) type
 
 ## Constants
 
-Top-level immutable values declared with `const`:
+Top-level immutable values declared with `const`. By default, constants are package-private. Use `pub const` to export them:
 
 ```zinc
-const PI = 3.14159
-const Int MAX_RETRIES = 3
-const String APP_NAME = "Zinc"
+const Float INTERNAL_RATE = 0.05        // private — only visible within the package
+pub const PI = 3.14159                  // exported
+pub const Int MAX_RETRIES = 3           // exported, with explicit type
+pub const String APP_NAME = "Zinc"      // exported, with explicit type
 
 main() {
     print(APP_NAME)
@@ -28,6 +29,7 @@ main() {
 Transpiles to:
 
 ```go
+const internalRate = 0.05
 const PI = 3.14159
 const MAX_RETRIES int = 3
 const APP_NAME string = "Zinc"
@@ -37,6 +39,8 @@ func main() {
     fmt.Println(PI * 2.0)
 }
 ```
+
+> **Visibility rule:** `const` → unexported (lowercase in Go). `pub const` → exported (uppercase in Go).
 
 ## Functions
 
@@ -96,8 +100,8 @@ Named arguments also work on constructors:
 
 ```zinc
 Dog {
-    String name
-    Int age
+    pub String name
+    pub Int age
 
     new(String name, Int age = 0) {
         this.name = name
@@ -174,14 +178,18 @@ func main() {
 
 ## Classes
 
+Fields are **private by default** — accessible only within the class. Prefix with `pub` to make a field public. Public fields generate getter/setter methods in the auto-generated interface, enabling access through polymorphic (interface-typed) references.
+
 ```zinc
 Dog {
-    String name
-    Int age
+    pub String name       // public — generates GetName()/SetName() in the Dog interface
+    pub Int age           // public
+    String secret         // private — no getter/setter, only accessible inside Dog
 
     new(String name, Int age = 0) {
         this.name = name
         this.age = age
+        this.secret = "shhh"
     }
 
     pub String bark() {
@@ -200,8 +208,8 @@ Every class has one primary constructor declared with `new(...)`, called as `Cla
 
 ```zinc
 Point {
-    Float x
-    Float y
+    pub Float x
+    pub Float y
 
     new(Float x, Float y) {
         this.x = x
@@ -263,7 +271,7 @@ func Point_Diagonal(v float64) *PointImpl {
 
 ```zinc
 Box<T> {
-    T value
+    pub T value
 
     new(T v) {
         this.value = v
@@ -287,7 +295,7 @@ Generic classes can use empty list/map literals in constructors — the type is 
 
 ```zinc
 Stack<T> {
-    List<T> items
+    pub List<T> items
 
     new(T initial) {
         this.items = []             // inferred as []T{}, not []interface{}{}
@@ -315,8 +323,8 @@ Multi-type-parameter generic classes:
 
 ```zinc
 Pair<K, V> {
-    K key
-    V val
+    pub K key
+    pub V val
 
     new(K key, V val) {
         this.key = key
@@ -377,7 +385,7 @@ Cat : Speaker {
 
 ```zinc
 Animal {
-    String name
+    pub String name
     new(String name) { this.name = name }
     pub String describe() { return "Animal: {this.name}" }
 }
@@ -400,7 +408,7 @@ interface Speaker {
 }
 
 Animal {
-    String name
+    pub String name
     new(String n) { this.name = n }
 }
 
@@ -435,7 +443,7 @@ Error handling works seamlessly through polymorphic dispatch. Failable methods o
 
 ```zinc
 Validator {
-    Int value
+    pub Int value
     new(Int v) { this.value = v }
     pub String validate() {
         if this.value < 0 { return Error("negative") }
@@ -456,8 +464,8 @@ Generic classes also work through interface-typed parameters:
 
 ```zinc
 Pair<K, V> {
-    K key
-    V val
+    pub K key
+    pub V val
     new(K key, V val) { this.key = key; this.val = val }
 }
 
@@ -662,8 +670,8 @@ Inspired by Kotlin, C#, Swift, and TypeScript. Access fields and call methods on
 
 ```zinc
 User {
-    String name
-    Address? address
+    pub String name
+    pub Address? address
 
     new(String name, Address? addr) {
         this.name = name
@@ -672,7 +680,7 @@ User {
 }
 
 Address {
-    String city
+    pub String city
     new(String city) { this.city = city }
 }
 
@@ -756,7 +764,7 @@ Zinc enforces Kotlin-style strict null safety. Non-nullable types cannot hold `n
 
 ```zinc
 Dog {
-    String name
+    pub String name
     new(String name) { this.name = name }
 }
 

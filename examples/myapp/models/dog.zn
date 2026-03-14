@@ -1,7 +1,7 @@
 package "myapp/models"
 
 Dog : Animal {
-    List<String> tricks
+    pub List<String> tricks
 
     new(String name) {
         super(name, "Woof")

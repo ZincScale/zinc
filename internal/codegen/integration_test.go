@@ -149,8 +149,8 @@ main() {
 func TestIntegrationStringInterpolationInMethod(t *testing.T) {
 	src := `
 Person {
-    String name
-    Int age
+    pub String name
+    pub Int age
     new(String n, Int a) {
         this.name = n
         this.age = a
@@ -177,7 +177,7 @@ main() {
 func TestIntegrationOptionalFieldInGenericClass(t *testing.T) {
 	src := `
 Wrapper<T> {
-    T? content
+    pub T? content
     new() {
         this.content = null
     }

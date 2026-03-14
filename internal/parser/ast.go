@@ -132,10 +132,11 @@ type EnumDecl struct {
 func (e *EnumDecl) nodeTag()      {}
 func (e *EnumDecl) topLevelTag() {}
 
-// ConstDecl: const NAME: Type = expr
+// ConstDecl: [pub] const NAME: Type = expr
 type ConstDecl struct {
 	Line  int // source line number (1-indexed)
 	Name  string
+	IsPub bool
 	Type  TypeExpr // may be nil (inferred)
 	Value Expr
 }
@@ -143,9 +144,10 @@ type ConstDecl struct {
 func (c *ConstDecl) nodeTag()      {}
 func (c *ConstDecl) topLevelTag() {}
 
-// FieldDecl: var name: Type [= expr]
+// FieldDecl: [pub] Type name [= expr]
 type FieldDecl struct {
 	Name    string
+	IsPub   bool
 	Type    TypeExpr
 	Default Expr // may be nil
 }

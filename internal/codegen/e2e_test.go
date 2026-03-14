@@ -567,7 +567,7 @@ main() {
 func TestE2ESafeNavField(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    String name
+    pub String name
     new(String n) {
         this.name = n
     }
@@ -584,7 +584,7 @@ main() {
 func TestE2ESafeNavNil(t *testing.T) {
 	out := e2eRun(t, `
 Dog {
-    String name
+    pub String name
     new(String n) {
         this.name = n
     }
@@ -686,14 +686,14 @@ main() {
 func TestE2ESafeNavChaining(t *testing.T) {
 	out := e2eRun(t, `
 Address {
-    String city
+    pub String city
     new(String c) {
         this.city = c
     }
 }
 Person {
-    String name
-    Address? address
+    pub String name
+    pub Address? address
     new(String n, Address? addr) {
         this.name = n
         this.address = addr
@@ -711,14 +711,14 @@ main() {
 func TestE2ESafeNavChainingNilMiddle(t *testing.T) {
 	out := e2eRun(t, `
 Address {
-    String city
+    pub String city
     new(String c) {
         this.city = c
     }
 }
 Person {
-    String name
-    Address? address
+    pub String name
+    pub Address? address
     new(String n, Address? addr) {
         this.name = n
         this.address = addr
@@ -1269,8 +1269,8 @@ main() {
 
 func TestE2EConstDecl(t *testing.T) {
 	out := e2eRun(t, `
-const PI = 3.14
-const String GREETING = "hello"
+pub const PI = 3.14
+pub const String GREETING = "hello"
 
 main() {
     print(PI)
@@ -1281,7 +1281,7 @@ main() {
 
 func TestE2EConstInExpr(t *testing.T) {
 	out := e2eRun(t, `
-const TAX_RATE = 0.08
+pub const TAX_RATE = 0.08
 main() {
     price := 100.0
     total := price + price * TAX_RATE
@@ -1835,8 +1835,8 @@ main() {
 func TestE2EPolymorphismFieldAccess(t *testing.T) {
 	out := e2eRun(t, `
 Person {
-    String name
-    Int age
+    pub String name
+    pub Int age
     new(String n, Int a) {
         this.name = n
         this.age = a
@@ -1853,6 +1853,40 @@ main() {
     print(p.name)
 }`)
 	assertOutput(t, out, "Hello, Alice, age 30\nAlice")
+}
+
+// --- Private field visibility ------------------------------------------------
+
+func TestE2EPrivateFieldAccess(t *testing.T) {
+	out := e2eRun(t, `
+Account {
+    pub String owner
+    String password
+    new(String o, String p) {
+        this.owner = o
+        this.password = p
+    }
+    pub String masked() { return "***" }
+}
+
+main() {
+    a := Account("Alice", "secret123")
+    print(a.owner)
+    print(a.masked())
+}`)
+	assertOutput(t, out, "Alice\n***")
+}
+
+func TestE2EPrivateConst(t *testing.T) {
+	out := e2eRun(t, `
+pub const GREETING = "Hello"
+const secret = "hidden"
+
+main() {
+    print(GREETING)
+    print(secret)
+}`)
+	assertOutput(t, out, "Hello\nhidden")
 }
 
 // --- Failable methods through interface-typed parameters ---------------------
@@ -2089,8 +2123,8 @@ main() {
 func TestE2EGenericClassFieldAccessThroughInterface(t *testing.T) {
 	out := e2eRun(t, `
 Pair<K, V> {
-    K key
-    V val
+    pub K key
+    pub V val
 
     new(K key, V val) {
         this.key = key

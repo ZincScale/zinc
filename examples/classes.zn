@@ -3,7 +3,7 @@ interface Speaker {
 }
 
 Animal {
-    String name
+    pub String name
 
     new(String name) {
         this.name = name
@@ -15,7 +15,7 @@ Animal {
 }
 
 Dog : Animal, Speaker {
-    String breed
+    pub String breed
 
     new(String name, String breed) {
         super(name)

@@ -9,7 +9,7 @@ Int mapLen<K, V>(Map<K, V> m) {
 }
 
 Box<T> {
-    T value
+    pub T value
 
     new(T v) {
         this.value = v
@@ -26,7 +26,7 @@ Box<T> {
 
 // Generic class with empty list initialization
 Stack<T> {
-    List<T> items
+    pub List<T> items
 
     new(T initial) {
         this.items = []

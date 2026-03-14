@@ -9,8 +9,8 @@ connect(String host, Int port = 8080, Bool tls = false) {
 }
 
 Dog {
-    String name
-    Int age
+    pub String name
+    pub Int age
 
     new(String name, Int age = 0) {
         this.name = name
