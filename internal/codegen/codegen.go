@@ -129,6 +129,12 @@ type Generator struct {
 	goResolver *GoTypeResolver
 	// importMap: identifier prefix → full import path (e.g. "sql" → "database/sql")
 	importMap map[string]string
+	// constGoNames: Zinc const name → Go const name (for visibility transformation)
+	constGoNames map[string]string
+	// fnGoNames: Zinc function name → Go function name (for visibility transformation)
+	fnGoNames map[string]string
+	// methodGoNames: Zinc method name → Go method name (for visibility transformation)
+	methodGoNames map[string]string
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -151,6 +157,9 @@ func New() *Generator {
 		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
 		goResolver:      NewGoTypeResolver(),
 		importMap:       make(map[string]string),
+		constGoNames:    make(map[string]string),
+		fnGoNames:       make(map[string]string),
+		methodGoNames:   make(map[string]string),
 	}
 }
 
@@ -177,6 +186,9 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
 		goResolver:      NewGoTypeResolver(),
 		importMap:       make(map[string]string),
+		constGoNames:    make(map[string]string),
+		fnGoNames:       make(map[string]string),
+		methodGoNames:   make(map[string]string),
 	}
 	for k, v := range reg.ClassNames {
 		g.classNames[k] = v
@@ -293,6 +305,22 @@ func (g *Generator) firstPass(prog *parser.Program) {
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
 			g.enumNames[d.Name] = true
+		case *parser.ConstDecl:
+			g.constGoNames[d.Name] = exportName(d.Name, d.IsPub)
+		case *parser.FnDecl:
+			goName := exportName(d.Name, d.IsPub)
+			if goName != d.Name {
+				g.fnGoNames[d.Name] = goName
+			}
+		}
+	}
+	// Collect method name mappings for visibility
+	for _, decl := range prog.Decls {
+		if cls, ok := decl.(*parser.ClassDecl); ok {
+			for _, m := range cls.Methods {
+				goName := exportName(m.Name, m.IsPub)
+				g.methodGoNames[m.Name] = goName
+			}
 		}
 	}
 
@@ -2250,6 +2278,12 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.NullLit:
 		return "nil"
 	case *parser.Ident:
+		if goName, ok := g.constGoNames[ex.Name]; ok {
+			return goName
+		}
+		if goName, ok := g.fnGoNames[ex.Name]; ok {
+			return goName
+		}
 		return ex.Name
 	case *parser.ThisExpr:
 		if g.receiver != "" {
@@ -3010,7 +3044,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 			return code
 		}
 		obj := g.emitExpr(callee.Object)
-		method := capitalize(callee.Field)
+		method := g.resolveMethodName(callee.Field)
 		// Look up method params for default/named-arg resolution.
 		// Try all classes for a matching method name.
 		var methodParamList []*parser.ParamDecl
@@ -3034,7 +3068,11 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 		}
 		params := g.fnParams[callee.Name]
 		resolved := g.resolveArgs(params, call)
-		return g.emitBuiltinCall(callee.Name, strings.Join(resolved, ", "), call.Args, call.TypeArgs)
+		fnName := callee.Name
+		if goName, ok := g.fnGoNames[fnName]; ok {
+			fnName = goName
+		}
+		return g.emitBuiltinCall(fnName, strings.Join(resolved, ", "), call.Args, call.TypeArgs)
 	default:
 		resolved := g.resolveArgs(nil, call)
 		return fmt.Sprintf("%s(%s)", g.emitExpr(callee), strings.Join(resolved, ", "))
@@ -3233,6 +3271,15 @@ func exportName(name string, pub bool) string {
 		return capitalize(name)
 	}
 	return uncapitalize(name)
+}
+
+// resolveMethodName returns the Go name for a Zinc method.
+// Uses the methodGoNames map if available, otherwise capitalizes (for Go interop methods).
+func (g *Generator) resolveMethodName(name string) string {
+	if goName, ok := g.methodGoNames[name]; ok {
+		return goName
+	}
+	return capitalize(name)
 }
 
 func capitalize(s string) string {
