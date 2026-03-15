@@ -13,7 +13,7 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 - **Effort:** Medium
 
 ### P2 — Data Classes / Records
-`data class User(name: String, age: Int)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
+`data User(String name, Int age)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
 ### P3 — Typed Errors
@@ -26,13 +26,16 @@ Extend error handling with typed error classes. `is`/`as` operators and `or {}` 
   - Wire up `err as NotFoundError` to unwrap to the concrete type
 - **Syntax — all existing constructs, no new keywords:**
   ```
-  class NotFoundError { var path: String }
+  NotFoundError {
+      String path
+      new(String path) { this.path = path }
+  }
 
   // Throwing (already works — failable return)
-  return NotFoundError.new(path: "/users/42")
+  return NotFoundError(path: "/users/42")
 
   // Catching (existing is/as + existing or {})
-  var user = db.findUser(id) or {
+  user := db.findUser(id) or {
       if err is NotFoundError { return defaultUser() }
   }
   ```
@@ -136,13 +139,13 @@ Format `.zn` files consistently.
 - Concurrency (goroutines, channels)
 - Default parameters + named arguments
 - `with` statement (resource management, parenthesized syntax)
-- `with` multi-return auto-detection (`with (var f = os.Create(path))`)
+- `with` multi-return auto-detection (`with (f := os.Create(path))`)
 - Type casting (`as` / `is`)
 - `.new()` on Go types (zero-value + named field construction: `url.URL.new(Scheme: "https", Host: "example.com")`)
 - Labeled `break`/`continue` (`@label for/while`, `break @label`)
 - Safe navigation `?.` (`obj?.field`, `obj?.method()`)
 - Null safety (Kotlin-style strict enforcement)
-- Callable function types (`Fn<(Params), Return>` → `func(params) return`)
+- Callable function types (`ReturnType Fn(Params)` → `func(params) return`)
 - OO collection methods (`.add()`, `.remove()`, `.size()`, `.clone()`, `.sort()`, `.join()`)
 - OO string methods (`.upper()`, `.lower()`, `.contains()`, `.startsWith()`, `.endsWith()`, `.trim()`, `.split()`, `.replace()`)
 - Map utility methods (`.keys()`, `.values()`, `.containsKey()`)
@@ -150,7 +153,7 @@ Format `.zn` files consistently.
 - More stdlib aliases (`readFile`, `writeFile`, `httpGet`, `jsonEncode`, `jsonDecode`, `sprintf`, `typeOf`, `sleep`, `getEnv`, `setEnv`, `now`)
 - Better map/list literal type inference (typechecker annotates AST → codegen emits typed literals)
 - `const` declarations (top-level immutable values)
-- Example coverage (17 `.zn` examples covering all major features)
+- Example coverage (18 `.zn` examples covering all major features)
 - REPL completeness (auto-print expressions, var persistence, brace-aware multi-line, help command)
 - Tuple unpacking, string interpolation, imports, built-ins
 - List/string slicing (`list[1:3]`, `s[2:]`, `.slice()` method)
@@ -160,7 +163,7 @@ Format `.zn` files consistently.
 - `zinc build` / `zinc run` for multi-file projects
 - `--version` flag
 - Type checker error line numbers (all errors now report source line)
-- Variadic functions (`name: ...Type` params), spread operator (`list...`), multi-arg `.add()`
+- Variadic functions (`Type... name` params), spread operator (`list...`), multi-arg `.add()`
 - Go interop auto-detection via `go/types` for error-returning functions and methods
 - Method-level failable detection (variable type tracking for `f.Write()`, `f.Close()`, etc.)
 - Parser→codegen method dispatch refactor (removed 19 specialized AST nodes; builtin methods handled in codegen)
@@ -171,8 +174,10 @@ Format `.zn` files consistently.
 - Safe navigation works with interface types (`d?.name` → `d.GetName()` for nilable interface-typed vars)
 - Failable method detection through interface-typed params (`v.validate()` correctly detects error returns)
 - Void-failable tracking for class methods (auto `return nil`, correct `err :=` vs `_, err :=`)
-- Generic class polymorphism (`fn printBox(b: Box<Int>)` — generic class params detected as interface-typed, field access uses getters)
+- Generic class polymorphism (`printBox(Box<Int> b)` — generic class params detected as interface-typed, field access uses getters)
 - Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
 - Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)
 - Map literal type inference (concrete Go types like `map[string]int` instead of `map[interface{}]interface{}`)
 - Nested list literal type inference (`[][]int` for list-of-lists)
+- Field and constant visibility (`pub` modifier, private by default — pub fields generate getters/setters, pub constants export as capitalized)
+- Collection methods simplification — removed LINQ-style functional methods (filter/map/reduce); prefer for loops

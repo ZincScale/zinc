@@ -97,6 +97,7 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 
 - Classes, interfaces, and inheritance
 - Generic functions and classes
+- Field and constant visibility (`pub` / private by default)
 - Null safety with `?.` safe navigation
 - Errors as values with auto-propagation and `or` handlers
 - `with` resource management (auto-close, auto-unlock)
@@ -104,6 +105,8 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 - Enums with `match` expressions
 - String interpolation
 - Default parameters and named arguments
+- Variadic functions and spread operator
+- Go type construction (`.new()` on any Go struct)
 - Labeled loops
 - Tuple unpacking for multi-return functions
 - Constants
