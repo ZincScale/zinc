@@ -1,0 +1,27 @@
+// Go interop — constructing Go types and calling Go APIs
+//
+// Zinc uses the same constructor syntax for Go types as for Zinc classes.
+// Pointer inference is automatic: when a Go API expects *Type, Zinc emits &Type{}.
+
+import "net/url"
+import "net/http"
+import "crypto/tls"
+import "strings"
+
+main() {
+    // --- Go type construction with named fields ---
+    u := url.URL(Scheme: "https", Host: "example.com", Path: "/api")
+    print(u.String())
+
+    // --- Pointer inference: http.Server.TLSConfig is *tls.Config ---
+    // Zinc auto-emits &tls.Config{...} because the field expects a pointer
+    s := http.Server(
+        Addr: ":8443",
+        TLSConfig: tls.Config(MinVersion: 3)
+    )
+    print(s.Addr)
+
+    // --- Using Go methods directly ---
+    r := strings.NewReplacer("hello", "hi", "world", "earth")
+    print(r.Replace("hello world"))
+}

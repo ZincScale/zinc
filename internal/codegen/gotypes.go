@@ -217,6 +217,81 @@ func (r *GoTypeResolver) IsType(pkgPath, name string) bool {
 	return ok
 }
 
+// ParamIsPointer reports whether the i-th parameter of pkgPath.funcName is a pointer type.
+// For variadic params (...T), checks the element type.
+func (r *GoTypeResolver) ParamIsPointer(pkgPath, funcName string, paramIndex int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sig := r.lookupFuncLocked(pkgPath, funcName)
+	if sig == nil {
+		return false
+	}
+	return paramIsPointerLocked(sig, paramIndex)
+}
+
+// MethodParamIsPointer reports whether the i-th parameter of a method is a pointer type.
+func (r *GoTypeResolver) MethodParamIsPointer(pkgPath, typeName, methodName string, pointer bool, paramIndex int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sig := r.lookupMethodLocked(pkgPath, typeName, methodName, pointer)
+	if sig == nil {
+		return false
+	}
+	return paramIsPointerLocked(sig, paramIndex)
+}
+
+// FieldIsPointer reports whether a struct field is a pointer type.
+func (r *GoTypeResolver) FieldIsPointer(pkgPath, typeName, fieldName string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	pkg := r.loadPkgLocked(pkgPath)
+	if pkg == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil {
+		return false
+	}
+	structType, ok := obj.Type().Underlying().(*types.Struct)
+	if !ok {
+		return false
+	}
+	for i := 0; i < structType.NumFields(); i++ {
+		f := structType.Field(i)
+		if f.Name() == fieldName {
+			_, isPtr := f.Type().(*types.Pointer)
+			return isPtr
+		}
+	}
+	return false
+}
+
+// paramIsPointerLocked checks if the i-th parameter of a signature is a pointer.
+// Handles variadic params by checking the element type.
+func paramIsPointerLocked(sig *types.Signature, paramIndex int) bool {
+	params := sig.Params()
+	if params.Len() == 0 {
+		return false
+	}
+	// For variadic functions, if paramIndex >= len(fixed params), use the variadic element type
+	if sig.Variadic() && paramIndex >= params.Len()-1 {
+		lastParam := params.At(params.Len() - 1).Type()
+		if sl, ok := lastParam.(*types.Slice); ok {
+			_, isPtr := sl.Elem().(*types.Pointer)
+			return isPtr
+		}
+		return false
+	}
+	if paramIndex >= params.Len() {
+		return false
+	}
+	_, isPtr := params.At(paramIndex).Type().(*types.Pointer)
+	return isPtr
+}
+
 // isErrorType checks if t is the built-in error interface.
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)

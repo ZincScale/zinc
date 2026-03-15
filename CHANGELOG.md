@@ -75,7 +75,7 @@ Initial release of Zinc.
 - Default parameters and named arguments
 - `with` statement for resource management (auto-close, auto-unlock)
 - Type casting (`as` / `is`)
-- Go type construction with named fields (`sync.Mutex()`, `url.URL(Scheme: "https")`)
+- Go type construction with named fields and automatic pointer inference
 - Labeled `break`/`continue`
 - Safe navigation `?.`
 - Null safety (Kotlin-style)

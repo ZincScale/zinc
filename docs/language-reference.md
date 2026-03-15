@@ -367,6 +367,31 @@ buf := bytes.Buffer{}
 u := url.URL{Scheme: "https", Host: "example.com", Path: "/api"}
 ```
 
+#### Pointer Inference
+
+Many Go APIs expect pointer-to-struct parameters (`*tls.Config`, `*http.Server`, etc.). Zinc automatically infers when `&` is needed — you never write pointer syntax:
+
+```zinc
+import "net/http"
+import "crypto/tls"
+
+main() {
+    // http.Server.TLSConfig is *tls.Config — Zinc auto-emits &tls.Config{...}
+    s := http.Server(TLSConfig: tls.Config(MinVersion: 3))
+
+    // tls.Dial's 3rd param is *tls.Config — auto-emits &tls.Config{}
+    conn := tls.Dial("tcp", "example.com:443", tls.Config())
+
+    // No pointer context — emits value (tls.Config{})
+    cfg := tls.Config(MinVersion: 3)
+}
+```
+
+The transpiler uses `go/types` to inspect Go function signatures and struct field types at transpile time. When a Go type construction appears as:
+- A **function argument** where the parameter is a pointer type → emits `&Type{}`
+- A **struct field value** where the field is a pointer type → emits `&Type{}`
+- A **variable assignment** with no type context → emits `Type{}` (safe default)
+
 ## Interfaces
 
 ```zinc

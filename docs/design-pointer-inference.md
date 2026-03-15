@@ -1,5 +1,7 @@
 # Pointer Inference for Go Type Construction — Design Document
 
+**Status:** Implemented (2026-03-15) — Phase 1 (function args) + Phase 2 (nested struct fields)
+
 ## Overview
 
 When Zinc developers write `tls.Config(Port: 8080)`, they think "create an object" — they don't think about Go's distinction between value types (`Config{}`) and pointer types (`&Config{}`). But many Go APIs expect pointer arguments (`*Config`, `*Options`, `*Settings`). Today, Go type construction always emits a value literal. This design adds context-aware pointer inference: construction emits `&` when the receiving context expects a pointer, and a value otherwise.

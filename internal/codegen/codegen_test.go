@@ -1216,6 +1216,60 @@ main() { c := http.Client(Timeout: 30, MaxIdleConns: 10) }`)
 	assertContains(t, out, "http.Client{Timeout: 30, MaxIdleConns: 10}")
 }
 
+// --- Pointer inference for Go type construction ------------------------------
+
+func TestGoTypePointerInferenceParam(t *testing.T) {
+	// tls.Dial's 3rd param is *tls.Config — should emit &tls.Config{}
+	out, errs := transpile(`import "crypto/tls"
+main() { tls.Dial("tcp", "example.com:443", tls.Config()) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "&tls.Config{}")
+}
+
+func TestGoTypePointerInferenceParamWithNamedArgs(t *testing.T) {
+	out, errs := transpile(`import "crypto/tls"
+main() { tls.Dial("tcp", "example.com:443", tls.Config(MinVersion: 3)) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "&tls.Config{MinVersion: 3}")
+}
+
+func TestGoTypePointerInferenceNoContext(t *testing.T) {
+	// := assignment — no pointer context, emit value (no &)
+	out, errs := transpile(`import "crypto/tls"
+main() { cfg := tls.Config() }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "tls.Config{}")
+	assertNotContains(t, out, "&tls.Config{}")
+}
+
+func TestGoTypePointerInferenceNestedField(t *testing.T) {
+	// http.Server.TLSConfig field is *tls.Config — nested pointer inference
+	out, errs := transpile(`import "net/http"
+import "crypto/tls"
+main() { s := http.Server(TLSConfig: tls.Config(MinVersion: 3)) }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "&tls.Config{MinVersion: 3}")
+}
+
+func TestGoTypePointerInferenceValueParam(t *testing.T) {
+	// Non-pointer param should NOT get &
+	out, errs := transpile(`import "sync"
+main() { mu := sync.Mutex() }`)
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	assertContains(t, out, "sync.Mutex{}")
+	assertNotContains(t, out, "&sync.Mutex{}")
+}
+
 // --- Index expressions -------------------------------------------------------
 
 func TestIndexExpr(t *testing.T) {

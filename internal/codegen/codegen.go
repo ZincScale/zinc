@@ -135,6 +135,9 @@ type Generator struct {
 	fnGoNames map[string]string
 	// methodGoNames: Zinc method name → Go method name (for visibility transformation)
 	methodGoNames map[string]string
+	// expectPointer: set by parent context to signal that the next Go type construction
+	// should emit &Type{} instead of Type{} (pointer inference for Go APIs)
+	expectPointer bool
 }
 
 // New creates a Generator for single-file mode (package = auto-detected).
@@ -3000,13 +3003,29 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
 				if g.goResolver != nil && g.goResolver.IsType(pkgPath, callee.Field) {
 					typeName := ident.Name + "." + callee.Field
-					return g.emitGoTypeNew(typeName, call)
+					return g.emitGoTypeNew(typeName, call, pkgPath, callee.Field)
 				}
 			}
 		}
 		// Check for builtin method calls (size, upper, etc.)
 		if code, ok := g.emitBuiltinMethodCall(callee, call); ok {
 			return code
+		}
+		// Go package function call: pkg.Func(args) — emit with pointer inference
+		if ident, ok := callee.Object.(*parser.Ident); ok {
+			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				method := g.resolveMethodName(callee.Field)
+				resolved := g.emitArgsWithPointerCtx(pkgPath, callee.Field, "", false, call)
+				return fmt.Sprintf("%s.%s(%s)", ident.Name, method, strings.Join(resolved, ", "))
+			}
+		}
+		// Method call on Go type variable: check varTypes for pointer inference
+		if ident, ok := callee.Object.(*parser.Ident); ok {
+			if vt, ok := g.varTypes[ident.Name]; ok && vt.PkgPath != "" {
+				method := g.resolveMethodName(callee.Field)
+				resolved := g.emitArgsWithPointerCtx(vt.PkgPath, callee.Field, vt.TypeName, vt.Pointer, call)
+				return fmt.Sprintf("%s.%s(%s)", ident.Name, method, strings.Join(resolved, ", "))
+			}
 		}
 		obj := g.emitExpr(callee.Object)
 		method := g.resolveMethodName(callee.Field)
@@ -3047,18 +3066,59 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 // emitBuiltinCall maps Zinc built-in function names to Go equivalents.
 // emitGoTypeNew emits a Go struct literal: TypeName{Field: val, ...}.
 // Positional args are emitted as-is (rare for Go structs), named args become field initializers.
-func (g *Generator) emitGoTypeNew(typeName string, call *parser.CallExpr) string {
+// When g.expectPointer is true, emits &TypeName{...} (pointer inference).
+// pkgPath and bareType enable Phase 2 nested pointer inference for struct fields.
+func (g *Generator) emitGoTypeNew(typeName string, call *parser.CallExpr, pkgPath, bareType string) string {
+	prefix := ""
+	if g.expectPointer {
+		prefix = "&"
+		g.expectPointer = false
+	}
 	if len(call.Args) == 0 && len(call.NamedArgs) == 0 {
-		return typeName + "{}"
+		return prefix + typeName + "{}"
 	}
 	var fields []string
 	for _, arg := range call.Args {
 		fields = append(fields, g.emitExpr(arg))
 	}
 	for _, na := range call.NamedArgs {
-		fields = append(fields, fmt.Sprintf("%s: %s", capitalize(na.Name), g.emitExpr(na.Value)))
+		// Phase 2: nested pointer inference — check if field expects a pointer
+		if pkgPath != "" && bareType != "" && g.goResolver != nil {
+			if g.goResolver.FieldIsPointer(pkgPath, bareType, capitalize(na.Name)) {
+				g.expectPointer = true
+			}
+		}
+		val := g.emitExpr(na.Value)
+		g.expectPointer = false
+		fields = append(fields, fmt.Sprintf("%s: %s", capitalize(na.Name), val))
 	}
-	return fmt.Sprintf("%s{%s}", typeName, strings.Join(fields, ", "))
+	return fmt.Sprintf("%s%s{%s}", prefix, typeName, strings.Join(fields, ", "))
+}
+
+// emitArgsWithPointerCtx emits call arguments with pointer inference.
+// For each arg, checks if the Go function/method expects a pointer at that position.
+// If so, sets expectPointer=true so that any Go type construction arg emits &Type{}.
+func (g *Generator) emitArgsWithPointerCtx(pkgPath, funcOrMethod, typeName string, pointer bool, call *parser.CallExpr) []string {
+	result := make([]string, 0, len(call.Args)+len(call.NamedArgs))
+	for i, arg := range call.Args {
+		if g.goResolver != nil {
+			var isPtr bool
+			if typeName != "" {
+				isPtr = g.goResolver.MethodParamIsPointer(pkgPath, typeName, funcOrMethod, pointer, i)
+			} else {
+				isPtr = g.goResolver.ParamIsPointer(pkgPath, funcOrMethod, i)
+			}
+			if isPtr {
+				g.expectPointer = true
+			}
+		}
+		result = append(result, g.emitExpr(arg))
+		g.expectPointer = false
+	}
+	for _, na := range call.NamedArgs {
+		result = append(result, fmt.Sprintf("%s: %s", na.Name, g.emitExpr(na.Value)))
+	}
+	return result
 }
 
 func (g *Generator) emitBuiltinCall(name, argStr string, args []parser.Expr, typeArgs []string) string {

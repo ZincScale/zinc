@@ -17,9 +17,9 @@ Reduce ceremony for quick scripts. Add thin builtin wrappers over Go stdlib:
 - `pathJoin(parts...)` — maps to `filepath.Join`
 - **Effort:** Quick — just new builtins in codegen, no parser/typechecker changes
 
-### P2 — Pointer Inference for Go Type Construction
+### P2 — Pointer Inference for Go Type Construction ✅
 Go type construction (e.g., `sync.Mutex()`) auto-emits `&Type{}` when the receiving API expects a pointer. Context-aware: function argument and nested struct field contexts. Invisible to user — no pointer syntax in Zinc. Design doc: `docs/design-pointer-inference.md`
-- **Effort:** Medium
+- **Status:** Done — Phase 1 (function args) + Phase 2 (nested struct fields) implemented
 
 ### P3 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`

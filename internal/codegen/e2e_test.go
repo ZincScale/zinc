@@ -442,6 +442,22 @@ main() {
 	assertOutput(t, out, "Rex says woof")
 }
 
+// --- Pointer inference for Go type construction ------------------------------
+
+func TestE2EPointerInferenceNestedField(t *testing.T) {
+	// http.Server.TLSConfig is *tls.Config — without pointer inference this won't compile
+	out := e2eRun(t, `
+import "net/http"
+import "crypto/tls"
+main() {
+    s := http.Server(TLSConfig: tls.Config(MinVersion: 3))
+    if s.TLSConfig != null {
+        print("pointer inferred")
+    }
+}`)
+	assertOutput(t, out, "pointer inferred")
+}
+
 // --- Go type construction ----------------------------------------------------
 
 func TestE2EGoTypeNew(t *testing.T) {
