@@ -8,15 +8,28 @@ Now targeting Go 1.26 — see "Go 1.26 Codegen Improvements" section for transpi
 
 ## Priority Order
 
-### P1 — Annotations / Decorators
+### P1 — Scripting Builtins
+Reduce ceremony for quick scripts. Add thin builtin wrappers over Go stdlib:
+- `args` — built-in `List<String>`, maps to `os.Args[1:]`
+- `exec(cmd)` — run a shell command, return output as `String`, failable
+- `fileExists(path)` — returns `Bool`, maps to `os.Stat` check
+- `listDir(path)` — returns `List<String>`, failable, maps to `os.ReadDir`
+- `pathJoin(parts...)` — maps to `filepath.Join`
+- **Effort:** Quick — just new builtins in codegen, no parser/typechecker changes
+
+### P2 — Pointer Inference for `.new()`
+`.new()` on Go types auto-emits `&Type{}` when the receiving API expects a pointer. Context-aware: function argument and nested struct field contexts. Invisible to user — no pointer syntax in Zinc. Design doc: `docs/design-pointer-inference.md`
+- **Effort:** Medium
+
+### P3 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate`, `@Optional` — maps to Go struct tags. Familiar to Java/C#/Kotlin devs. Design doc: `docs/design-annotations-serialization.md`
 - **Effort:** Medium
 
-### P2 — Data Classes / Records
+### P4 — Data Classes / Records
 `data User(String name, Int age)` — immutable DTOs with auto-generated toString/equality. Kotlin `data class` / Java `record` pattern.
 - **Effort:** Medium — **write design doc first** (interaction with annotations, serialization, and auto-generated interfaces needs careful thought)
 
-### P3 — Typed Errors
+### P5 — Typed Errors
 Extend error handling with typed error classes. `is`/`as` operators and `or {}` handlers already work — this is mostly about error class conventions and codegen.
 
 - **What already works:** `is`/`as` type operators, `or {}` handlers with `err` variable, failable functions, error wrapping
@@ -43,30 +56,30 @@ Extend error handling with typed error classes. `is`/`as` operators and `or {}` 
 - **Design questions:** Should error classes require a `message` field? Auto-generate `Error()` from class name + fields? Interaction with error wrapping (`Error("context", baseErr)`)?
 - **Effort:** Medium — **write design doc first**
 
-### P4 — Structured Concurrency
+### P6 — Structured Concurrency
 Current `go { }` is fire-and-forget. Add a grouped concurrency construct that launches goroutines and waits for completion, leveraging `sync.WaitGroup.Go()` (Go 1.25).
 
 - **Possible syntax:** `await { go { task1() } go { task2() } }` — transpiles to `WaitGroup.Go()` + `Wait()`
 - **Needs design:** Error propagation from child goroutines, cancellation via context, result collection
 - **Effort:** Medium — **write design doc first** (touches error handling, panic recovery, context propagation)
 
-### P5 — VS Code Extension (Syntax Highlighting)
+### P7 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar for keywords, strings, types, comments.
 - **Effort:** Quick
 
-### P6 — Project-Wide Watch Mode
+### P8 — Project-Wide Watch Mode
 `zinc run --watch` / `zinc build --watch` — current `--watch` is single-file only; projects need auto-retranspile on any `.zn` change.
 - **Effort:** Medium
 
-### P7 — `zinc test`
+### P9 — `zinc test`
 Run tests without manual `go test`.
 - **Effort:** Quick
 
-### P8 — `zinc fmt`
+### P10 — `zinc fmt`
 Format `.zn` files consistently.
 - **Effort:** Medium
 
-### P9 — Error Suggestions
+### P11 — Error Suggestions
 "Did you mean X?" on undefined variables/types, suggest fixes for common mistakes.
 - **Effort:** Medium
 
