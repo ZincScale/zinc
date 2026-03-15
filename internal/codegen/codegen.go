@@ -888,7 +888,7 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	if cls.Ctor != nil {
 		g.emitCtor(cls, baseClass)
 	} else {
-		// No explicit constructor — emit a default no-arg one so ClassName.new() works.
+		// No explicit constructor — emit a default no-arg one so ClassName() works.
 		g.writeln(fmt.Sprintf("func New%s%s() *%s {", cls.Name, typeParamStr, classInstStr))
 		g.push()
 		g.writeln(fmt.Sprintf("return &%s{}", classInstStr))
@@ -1337,16 +1337,11 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
-	// Special case: collection constructors — Chan, List, Map
-	// Supports both Chan.new(1) (legacy) and Chan(1) (new syntax)
+	// Special case: collection constructors — Chan(n), List(), Map()
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			ctorName := ""
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
-				if ident, ok := sel.Object.(*parser.Ident); ok {
-					ctorName = ident.Name
-				}
-			} else if ident, ok := call.Callee.(*parser.Ident); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
 				ctorName = ident.Name
 			}
 			switch ctorName {
@@ -1382,12 +1377,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	if v.Value != nil {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			g.recordVarTypeFromCall(v.Name, call)
-			// Track class instance variables (ClassName.new() or ClassName())
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "new" {
-				if ident, ok := sel.Object.(*parser.Ident); ok && g.classNames[ident.Name] {
-					g.classVars[v.Name] = ident.Name
-				}
-			}
+			// Track class instance variables: ClassName(args) → classVars[name] = ClassName
 			if ident, ok := call.Callee.(*parser.Ident); ok && g.classNames[ident.Name] {
 				g.classVars[v.Name] = ident.Name
 			}
@@ -1456,22 +1446,17 @@ func (g *Generator) recordVarTypeFromCall(varName string, call *parser.CallExpr)
 	if !ok {
 		return
 	}
-	// Case 1: pkg.Func() — package-level function (e.g. os.Open)
-	if ident, ok := sel.Object.(*parser.Ident); ok && sel.Field != "new" {
+	// pkg.Name() — could be a function call (os.Open) or Go type construction (sync.Mutex)
+	if ident, ok := sel.Object.(*parser.Ident); ok {
 		if pkgPath, ok := g.importMap[ident.Name]; ok {
+			// Check if it's a Go type construction
+			if g.goResolver != nil && g.goResolver.IsType(pkgPath, sel.Field) {
+				g.varTypes[varName] = varTypeInfo{PkgPath: pkgPath, TypeName: sel.Field}
+				return
+			}
+			// Otherwise it's a function call — track return type
 			if retPkg, retType, ptr, ok := g.goResolver.FuncReturnType(pkgPath, sel.Field); ok {
 				g.varTypes[varName] = varTypeInfo{PkgPath: retPkg, TypeName: retType, Pointer: ptr}
-			}
-		}
-		return
-	}
-	// Case 2: pkg.Type.new() — Go type constructor (e.g. sync.Mutex.new())
-	if sel.Field == "new" {
-		if innerSel, ok := sel.Object.(*parser.SelectorExpr); ok {
-			if ident, ok := innerSel.Object.(*parser.Ident); ok {
-				if pkgPath, ok := g.importMap[ident.Name]; ok {
-					g.varTypes[varName] = varTypeInfo{PkgPath: pkgPath, TypeName: innerSel.Field}
-				}
 			}
 		}
 	}
@@ -2131,7 +2116,7 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 			g.emitErrorCheck(errVar, r.OrHandler)
 		} else {
 			g.writeln(fmt.Sprintf("%s := %s", r.Name, g.emitExpr(r.Value)))
-			// Track type from non-failable GoType.new() calls
+			// Track type from non-failable Go type construction calls
 			if call, ok := r.Value.(*parser.CallExpr); ok {
 				g.recordVarTypeFromCall(r.Name, call)
 			}
@@ -2421,7 +2406,7 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 // - this.field / receiver.field inside methods (receiver is concrete struct)
 // - Package access, Go type access, enum access
 // Returns true for:
-// - classVar.field (variable from .new() call — it could be typed as interface)
+// - classVar.field (variable from constructor call — it could be typed as interface)
 func (g *Generator) isClassFieldAccess(sel *parser.SelectorExpr) bool {
 	if g.inCtorBody {
 		return false
@@ -2454,7 +2439,7 @@ func (g *Generator) isClassFieldAccess(sel *parser.SelectorExpr) bool {
 		if _, ok := g.interfaceVars[ident.Name]; ok {
 			return g.hasAnyClassField(fieldName)
 		}
-		// classVars from .new() are concrete *Impl types — direct field access
+		// classVars from constructor calls are concrete *Impl types — direct field access
 	}
 	return false
 }
@@ -3009,34 +2994,14 @@ func (g *Generator) resolveArgs(params []*parser.ParamDecl, call *parser.CallExp
 func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 	switch callee := call.Callee.(type) {
 	case *parser.SelectorExpr:
-		// Could be ClassName.new(...) → NewClassName(...)
+		// Go type construction: pkg.Type(...) → pkg.Type{Field: val, ...}
+		// Detected via GoTypeResolver when the callee matches an imported Go type.
 		if ident, ok := callee.Object.(*parser.Ident); ok {
-			if g.classNames[ident.Name] && callee.Field == "new" {
-				var ctorParams []*parser.ParamDecl
-				if ctor := g.classCtors[ident.Name]; ctor != nil {
-					ctorParams = ctor.Params
+			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				if g.goResolver != nil && g.goResolver.IsType(pkgPath, callee.Field) {
+					typeName := ident.Name + "." + callee.Field
+					return g.emitGoTypeNew(typeName, call)
 				}
-				resolved := g.resolveArgs(ctorParams, call)
-				return fmt.Sprintf("New%s(%s)", ident.Name, strings.Join(resolved, ", "))
-			}
-		}
-		// GoType.new(...) → GoType{Field: val, ...} (for types not known as Zinc classes)
-		// Handles both simple: Mutex.new() and dotted: sync.Mutex.new()
-		// Named args become struct field initializers, positional args are passed through.
-		if callee.Field == "new" {
-			var typeName string
-			isGoType := false
-			if ident, ok := callee.Object.(*parser.Ident); ok {
-				if !g.classNames[ident.Name] {
-					typeName = ident.Name
-					isGoType = true
-				}
-			} else if sel, ok := callee.Object.(*parser.SelectorExpr); ok {
-				typeName = g.emitExpr(sel)
-				isGoType = true
-			}
-			if isGoType {
-				return g.emitGoTypeNew(typeName, call)
 			}
 		}
 		// Check for builtin method calls (size, upper, etc.)
@@ -3057,7 +3022,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 		resolved := g.resolveArgs(methodParamList, call)
 		return fmt.Sprintf("%s.%s(%s)", obj, method, strings.Join(resolved, ", "))
 	case *parser.Ident:
-		// ClassName(args) → NewClassName(args) — constructor without .new()
+		// ClassName(args) → NewClassName(args) — constructor call
 		if g.classNames[callee.Name] {
 			var ctorParams []*parser.ParamDecl
 			if ctor := g.classCtors[callee.Name]; ctor != nil {

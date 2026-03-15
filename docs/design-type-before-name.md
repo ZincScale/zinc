@@ -47,7 +47,7 @@ Same principle — methods have parentheses, fields don't. Scan forward:
 
 ### Statement level: typed var decl vs expression
 - `Int x = 5` → typed var (uppercase + lowercase + `=`/`;`/`}`)
-- `SomeClass.new()` → expression (uppercase + `.`)
+- `SomeClass()` → expression (uppercase + `(`)
 
 ### Const declarations
 - `const Int MAX = 5` → typed (after `const`, uppercase IDENT followed by another IDENT)

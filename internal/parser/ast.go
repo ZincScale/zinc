@@ -433,7 +433,7 @@ type UnaryExpr struct {
 func (u *UnaryExpr) nodeTag() {}
 func (u *UnaryExpr) exprTag() {}
 
-// CallExpr: callee(args)  e.g. Dog.new("Rex") or obj.method(x)
+// CallExpr: callee(args)  e.g. Dog("Rex") or obj.method(x)
 // CallExpr with type args: callee<T>(args)  e.g. jsonDecode<Config>(data)
 type CallExpr struct {
 	Callee    Expr

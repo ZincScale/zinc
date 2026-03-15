@@ -241,13 +241,7 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 		tok := p.advance()
 		switch tok.Type {
 		case lexer.TOKEN_DOT:
-			// Allow keyword 'new' as a field name (e.g. Dog.new(...))
-			var field string
-			if p.peek().Type == lexer.TOKEN_NEW {
-				field = p.advance().Literal
-			} else {
-				field = p.expect(lexer.TOKEN_IDENT).Literal
-			}
+			field := p.expect(lexer.TOKEN_IDENT).Literal
 			sel := &SelectorExpr{Object: left, Field: field}
 			// Check for call: obj.method(...)
 			if p.check(lexer.TOKEN_LPAREN) {

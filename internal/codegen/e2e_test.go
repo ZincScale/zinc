@@ -260,7 +260,7 @@ main() {
 func TestE2EGoroutineChannel(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    Chan<Int> ch = Chan.new(1)
+    Chan<Int> ch = Chan(1)
     go {
         ch.send(42)
     }
@@ -366,7 +366,7 @@ func TestE2EWithMutex(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.Mutex.new()
+    mu := sync.Mutex()
     x := 0
     with (lock := mu) {
         x = x + 1
@@ -442,13 +442,13 @@ main() {
 	assertOutput(t, out, "Rex says woof")
 }
 
-// --- .new() on Go types ------------------------------------------------------
+// --- Go type construction ----------------------------------------------------
 
 func TestE2EGoTypeNew(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.Mutex.new()
+    mu := sync.Mutex()
     mu.Lock()
     mu.Unlock()
     print("ok")
@@ -461,7 +461,7 @@ func TestE2EWithMutexNew(t *testing.T) {
 import "sync"
 main() {
     x := 0
-    with (mu := sync.Mutex.new()) {
+    with (mu := sync.Mutex()) {
         x = x + 1
     }
     print(x)
@@ -473,7 +473,7 @@ func TestE2EGoTypeNewBytesBuffer(t *testing.T) {
 	out := e2eRun(t, `
 import "bytes"
 main() {
-    buf := bytes.Buffer.new()
+    buf := bytes.Buffer()
     buf.WriteString("hello")
     print(buf.String())
 }`)
@@ -484,7 +484,7 @@ func TestE2EGoTypeNewWithNamedFields(t *testing.T) {
 	out := e2eRun(t, `
 import "bytes"
 main() {
-    buf := bytes.Buffer.new()
+    buf := bytes.Buffer()
     buf.WriteString("hello")
     print(buf.String())
     print(buf.Len())
@@ -497,7 +497,7 @@ func TestE2EGoTypeNewStructFields(t *testing.T) {
 	out := e2eRun(t, `
 import "net/url"
 main() {
-    u := url.URL.new(Scheme: "https", Host: "example.com", Path: "/api")
+    u := url.URL(Scheme: "https", Host: "example.com", Path: "/api")
     print(u.String())
 }`)
 	assertOutput(t, out, "https://example.com/api")
@@ -786,7 +786,7 @@ import "sync"
 import "os"
 main() {
     x := 0
-    with (f := os.Stdin, mu := sync.Mutex.new()) {
+    with (f := os.Stdin, mu := sync.Mutex()) {
         x = x + 1
         print("inside with")
     }
@@ -820,9 +820,9 @@ func TestE2EWithNested(t *testing.T) {
 import "sync"
 main() {
     x := 0
-    with (mu1 := sync.Mutex.new()) {
+    with (mu1 := sync.Mutex()) {
         x = x + 1
-        with (mu2 := sync.Mutex.new()) {
+        with (mu2 := sync.Mutex()) {
             x = x + 10
         }
     }
@@ -863,7 +863,7 @@ func TestE2EWithRWMutex(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.RWMutex.new()
+    mu := sync.RWMutex()
     x := 0
     with (lock := mu) {
         x = x + 5

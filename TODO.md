@@ -17,8 +17,8 @@ Reduce ceremony for quick scripts. Add thin builtin wrappers over Go stdlib:
 - `pathJoin(parts...)` — maps to `filepath.Join`
 - **Effort:** Quick — just new builtins in codegen, no parser/typechecker changes
 
-### P2 — Pointer Inference for `.new()`
-`.new()` on Go types auto-emits `&Type{}` when the receiving API expects a pointer. Context-aware: function argument and nested struct field contexts. Invisible to user — no pointer syntax in Zinc. Design doc: `docs/design-pointer-inference.md`
+### P2 — Pointer Inference for Go Type Construction
+Go type construction (e.g., `sync.Mutex()`) auto-emits `&Type{}` when the receiving API expects a pointer. Context-aware: function argument and nested struct field contexts. Invisible to user — no pointer syntax in Zinc. Design doc: `docs/design-pointer-inference.md`
 - **Effort:** Medium
 
 ### P3 — Annotations / Decorators
@@ -154,7 +154,7 @@ Format `.zn` files consistently.
 - `with` statement (resource management, parenthesized syntax)
 - `with` multi-return auto-detection (`with (f := os.Create(path))`)
 - Type casting (`as` / `is`)
-- `.new()` on Go types (zero-value + named field construction: `url.URL.new(Scheme: "https", Host: "example.com")`)
+- Go type construction (zero-value + named field construction: `url.URL(Scheme: "https", Host: "example.com")`)
 - Labeled `break`/`continue` (`@label for/while`, `break @label`)
 - Safe navigation `?.` (`obj?.field`, `obj?.method()`)
 - Null safety (Kotlin-style strict enforcement)
@@ -189,7 +189,7 @@ Format `.zn` files consistently.
 - Void-failable tracking for class methods (auto `return nil`, correct `err :=` vs `_, err :=`)
 - Generic class polymorphism (`printBox(Box<Int> b)` — generic class params detected as interface-typed, field access uses getters)
 - Generic empty list/map literal inference (`this.items = []` in generic class → `[]T{}` not `[]interface{}{}`)
-- Generic constructor type inference (Go infers type params from arguments — `Box.new(42)` → `NewBox(42)`)
+- Generic constructor type inference (Go infers type params from arguments — `Box(42)` → `NewBox(42)`)
 - Map literal type inference (concrete Go types like `map[string]int` instead of `map[interface{}]interface{}`)
 - Nested list literal type inference (`[][]int` for list-of-lists)
 - Field and constant visibility (`pub` modifier, private by default — pub fields generate getters/setters, pub constants export as capitalized)

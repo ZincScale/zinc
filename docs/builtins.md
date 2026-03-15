@@ -39,9 +39,9 @@ Zinc provides a set of built-in functions that map directly to Go standard libra
 | `x[low:high]`       | `x[low:high]`            | Slice with bracket syntax; either bound optional |
 | `x.slice(start, end)` | `x[start:end]`         | OO slice method; `end` optional |
 | `map.containsKey(k)` | `_, ok := map[k]`      | Returns Bool |
-| `List<T>.new()`   | `[]T{}`                    | |
-| `Map<K,V>.new()`  | `map[K]V{}`                | |
-| `Chan<T>.new(n)`  | `make(chan T, n)`           | |
+| `List<T>()`       | `[]T{}`                    | |
+| `Map<K,V>()`      | `map[K]V{}`                | |
+| `Chan<T>(n)`      | `make(chan T, n)`           | |
 | `ch.send(val)`    | `ch <- val`                 | Send value to channel |
 | `ch.receive()`    | `<-ch`                      | Receive value from channel |
 

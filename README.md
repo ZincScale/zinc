@@ -106,7 +106,7 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 - String interpolation
 - Default parameters and named arguments
 - Variadic functions and spread operator
-- Go type construction (`.new()` on any Go struct)
+- Go type construction (`sync.Mutex()`, `url.URL(Scheme: "https")`)
 - Labeled loops
 - Tuple unpacking for multi-return functions
 - Constants

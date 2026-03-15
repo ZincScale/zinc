@@ -1064,7 +1064,7 @@ func TestWithStmtLocker(t *testing.T) {
 	src := `
 import "sync"
 main() {
-    mu := sync.Mutex.new()
+    mu := sync.Mutex()
     with (locked := mu) {
         print("critical section")
     }
@@ -1187,11 +1187,11 @@ main() { print(PI) }`)
 	assertContains(t, out, "const MAX = 100")
 }
 
-// --- Go type .new() with named fields ----------------------------------------
+// --- Go type construction with named fields ----------------------------------
 
 func TestGoTypeNewZeroValue(t *testing.T) {
 	out, errs := transpile(`import "sync"
-main() { mu := sync.Mutex.new() }`)
+main() { mu := sync.Mutex() }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1200,7 +1200,7 @@ main() { mu := sync.Mutex.new() }`)
 
 func TestGoTypeNewNamedFields(t *testing.T) {
 	out, errs := transpile(`import "net/http"
-main() { c := http.Client.new(Timeout: 30) }`)
+main() { c := http.Client(Timeout: 30) }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1209,20 +1209,11 @@ main() { c := http.Client.new(Timeout: 30) }`)
 
 func TestGoTypeNewMultipleNamedFields(t *testing.T) {
 	out, errs := transpile(`import "net/http"
-main() { c := http.Client.new(Timeout: 30, MaxIdleConns: 10) }`)
+main() { c := http.Client(Timeout: 30, MaxIdleConns: 10) }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "http.Client{Timeout: 30, MaxIdleConns: 10}")
-}
-
-func TestGoTypeNewSimpleName(t *testing.T) {
-	// Non-Zinc, non-dotted type
-	out, errs := transpile(`main() { x := Config.new(Port: 8080, Host: "localhost") }`)
-	if errs != nil {
-		t.Fatal(errs)
-	}
-	assertContains(t, out, `Config{Port: 8080, Host: "localhost"}`)
 }
 
 // --- Index expressions -------------------------------------------------------

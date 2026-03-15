@@ -24,7 +24,7 @@ main() {
 
     // --- Mutex locking (like Java's synchronized) ---
     counter := 0
-    with (mu := sync.Mutex.new()) {
+    with (mu := sync.Mutex()) {
         counter += 1
         counter += 10
     }

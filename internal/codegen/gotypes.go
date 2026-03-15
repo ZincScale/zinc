@@ -200,6 +200,23 @@ func extractNamedType(t types.Type) (pkgPath, typeName string, pointer bool, ok 
 	return obj.Pkg().Path(), obj.Name(), pointer, true
 }
 
+// IsType reports whether name is a type (not a function/variable) in pkgPath.
+func (r *GoTypeResolver) IsType(pkgPath, name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	pkg := r.loadPkgLocked(pkgPath)
+	if pkg == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(name)
+	if obj == nil {
+		return false
+	}
+	_, ok := obj.(*types.TypeName)
+	return ok
+}
+
 // isErrorType checks if t is the built-in error interface.
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)

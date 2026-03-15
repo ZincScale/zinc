@@ -1,10 +1,10 @@
-# Pointer Inference for `.new()` — Design Document
+# Pointer Inference for Go Type Construction — Design Document
 
 ## Overview
 
-When Zinc developers write `Config.new(Port: 8080)`, they think "create an object" — they don't think about Go's distinction between value types (`Config{}`) and pointer types (`&Config{}`). But many Go APIs expect pointer arguments (`*Config`, `*Options`, `*Settings`). Today, `.new()` always emits a value literal. This design adds context-aware pointer inference: `.new()` emits `&` when the receiving context expects a pointer, and a value otherwise.
+When Zinc developers write `tls.Config(Port: 8080)`, they think "create an object" — they don't think about Go's distinction between value types (`Config{}`) and pointer types (`&Config{}`). But many Go APIs expect pointer arguments (`*Config`, `*Options`, `*Settings`). Today, Go type construction always emits a value literal. This design adds context-aware pointer inference: construction emits `&` when the receiving context expects a pointer, and a value otherwise.
 
-The user-facing model stays simple: `.new()` creates an object. The complexity is entirely in the transpiler.
+The user-facing model stays simple: `Type()` creates an object. The complexity is entirely in the transpiler.
 
 ## Design Principles
 
@@ -28,17 +28,17 @@ grpc.NewServer(grpc.Creds(&tls.Config{MinVersion: tls.VersionTLS12}))
 http.ListenAndServeTLS(addr, cert, key, &http.Server{ReadTimeout: 5 * time.Second})
 ```
 
-Today in Zinc, `.new()` always emits `TypeName{}` (value), which causes a compile error when the Go function expects a pointer. Users have no way to get `&TypeName{}`.
+Today in Zinc, Go type construction always emits `TypeName{}` (value), which causes a compile error when the Go function expects a pointer. Users have no way to get `&TypeName{}`.
 
 ## Proposed Behavior
 
-`.new()` emits `&TypeName{}` or `TypeName{}` depending on what the surrounding context expects:
+Go type construction emits `&TypeName{}` or `TypeName{}` depending on what the surrounding context expects:
 
 | Context | Example (Zinc) | Inference | Emitted Go |
 |---------|---------------|-----------|------------|
-| Function argument | `grpc.Creds(tls.Config.new(...))` | Check param type via `go/types` | `&tls.Config{...}` if param is `*tls.Config` |
-| `:=` with no context | `c := tls.Config.new(...)` | No type info — default | `tls.Config{}` (value) |
-| Nested in another `.new()` | `Outer.new(Inner: Inner.new())` | Check field type of `Outer` | `&Inner{}` if field is `*Inner` |
+| Function argument | `grpc.Creds(tls.Config(...))` | Check param type via `go/types` | `&tls.Config{...}` if param is `*tls.Config` |
+| `:=` with no context | `c := tls.Config(...)` | No type info — default | `tls.Config{}` (value) |
+| Nested construction | `http.Server(TLSConfig: tls.Config(...))` | Check field type of `http.Server` | `&tls.Config{}` if field is `*tls.Config` |
 
 ### Zinc Syntax — No Change
 
@@ -47,10 +47,10 @@ import "crypto/tls"
 
 main() {
     // Argument context — go/types says grpc.Creds wants *tls.Config
-    creds := grpc.Creds(tls.Config.new(MinVersion: tls.VersionTLS12))
+    creds := grpc.Creds(tls.Config(MinVersion: tls.VersionTLS12))
 
     // No context — value (current behavior preserved)
-    cfg := tls.Config.new(MinVersion: tls.VersionTLS12)
+    cfg := tls.Config(MinVersion: tls.VersionTLS12)
 }
 ```
 
@@ -60,10 +60,10 @@ Users never write `&`, `*`, or any pointer syntax. The transpiler handles it ent
 
 ### Context 1: Function/Method Argument
 
-The most common case. `.new()` appears as an argument to a Go function:
+The most common case. Go type construction appears as an argument to a Go function:
 
 ```zinc
-grpc.Creds(tls.Config.new(MinVersion: tls.VersionTLS12))
+grpc.Creds(tls.Config(MinVersion: tls.VersionTLS12))
 ```
 
 **Resolution:**
@@ -78,16 +78,16 @@ grpc.Creds(tls.Config.new(MinVersion: tls.VersionTLS12))
 func (r *GoTypeResolver) ParamType(pkgPath, funcName string, paramIndex int) (string, string, bool, bool)
 ```
 
-### Context 2: Nested `.new()` (Struct Field)
+### Context 2: Nested Construction (Struct Field)
 
 ```zinc
-http.Server.new(TLSConfig: tls.Config.new(MinVersion: 3))
+http.Server(TLSConfig: tls.Config(MinVersion: 3))
 ```
 
 **Resolution:**
-1. Outer `.new()` is on `http.Server`
+1. Outer construction is on `http.Server`
 2. Look up `http.Server.TLSConfig` field type via `go/types` — it's `*tls.Config`
-3. Inner `.new()` emits `&tls.Config{MinVersion: 3}`
+3. Inner construction emits `&tls.Config{MinVersion: 3}`
 
 **New GoTypeResolver method needed:**
 ```go
@@ -99,10 +99,10 @@ func (r *GoTypeResolver) FieldType(pkgPath, typeName, fieldName string) (string,
 ### Context 3: No Context (`:=`)
 
 ```zinc
-cfg := tls.Config.new(MinVersion: tls.VersionTLS12)
+cfg := tls.Config(MinVersion: tls.VersionTLS12)
 ```
 
-**Resolution:** No type context available. Emit value literal `tls.Config{...}` (current behavior). This is safe — if the user later passes `cfg` to a function that wants `*tls.Config`, Go's compiler will report the type mismatch, and the user can restructure (pass `.new()` inline as argument).
+**Resolution:** No type context available. Emit value literal `tls.Config{...}` (current behavior). This is safe — if the user later passes `cfg` to a function that wants `*tls.Config`, Go's compiler will report the type mismatch, and the user can restructure (pass the construction inline as argument).
 
 ## Implementation Plan
 
@@ -139,7 +139,7 @@ func (r *GoTypeResolver) MethodParamType(pkgPath, typeName, methodName string, p
 
 **Step 2: Add `FieldType()` to GoTypeResolver**
 
-For nested `.new()` resolution (struct fields):
+For nested construction resolution (struct fields):
 
 ```go
 func (r *GoTypeResolver) FieldType(pkgPath, typeName, fieldName string) (string, string, bool, bool) {
@@ -164,7 +164,7 @@ func (r *GoTypeResolver) FieldType(pkgPath, typeName, fieldName string) (string,
 
 **Step 3: Thread context through `emitCallExpr`**
 
-The core change. When `emitCallExpr` encounters `.new()` inside a function call, it checks the expected parameter type:
+The core change. When `emitCallExpr` encounters a Go type construction inside a function call, it checks the expected parameter type:
 
 ```go
 func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
@@ -173,7 +173,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
     // When emitting args for a function call, check param types
     for i, arg := range call.Args {
         if innerCall, ok := arg.(*parser.CallExpr); ok {
-            if isGoTypeNew(innerCall) {
+            if isGoTypeConstruction(innerCall) {
                 // Check if param i expects a pointer
                 if needsPointer(outerFuncPkg, outerFuncName, i) {
                     // Emit &Type{} instead of Type{}
@@ -189,7 +189,7 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 ```go
 type Generator struct {
     // ... existing fields ...
-    expectPointer bool  // set by parent context before emitting .new()
+    expectPointer bool  // set by parent context before emitting Go type construction
 }
 ```
 
@@ -212,34 +212,34 @@ func (g *Generator) emitGoTypeNew(typeName string, call *parser.CallExpr) string
 }
 ```
 
-### Phase 2: Nested `.new()` (Struct Field Context)
+### Phase 2: Nested Construction (Struct Field Context)
 
 After Phase 1 lands, extend to detect pointer fields within struct literals:
 
 ```zinc
-http.Server.new(TLSConfig: tls.Config.new(...))
+http.Server(TLSConfig: tls.Config(...))
 ```
 
-When emitting named args of a `.new()` call, look up each field's type via `FieldType()`. If the field is a pointer type and the value is another `.new()`, set `expectPointer = true`.
+When emitting named args of a Go type construction, look up each field's type via `FieldType()`. If the field is a pointer type and the value is another construction, set `expectPointer = true`.
 
 Phase 1 + Phase 2 cover the vast majority of real-world use cases. No pointer syntax is ever exposed to users.
 
 ## Edge Cases
 
-### Zinc Class `.new()` — No Change
+### Zinc Class Constructors — No Change
 
-Zinc class constructors already return `*Impl` (pointer). This feature only affects Go type `.new()`:
+Zinc class constructors already return `*Impl` (pointer). This feature only affects Go type construction:
 
 ```zinc
-Dog.new("Rex")        // Already emits NewDog("Rex") which returns *DogImpl
-sync.Mutex.new()      // This is what we're changing — value vs &
+Dog("Rex")            // Already emits NewDog("Rex") which returns *DogImpl
+sync.Mutex()          // This is what we're changing — value vs &
 ```
 
 ### Variadic Parameters
 
 ```zinc
-foo(configs...)  // spread — not a .new() call, no inference needed
-foo(Config.new(), Config.new())  // multiple .new() — check each param index
+foo(configs...)  // spread — not a construction, no inference needed
+foo(tls.Config(), tls.Config())  // multiple constructions — check each param index
 ```
 
 For variadic params, the element type determines pointer-ness. `ParamType` should handle `...T` by returning the element type.
@@ -247,10 +247,10 @@ For variadic params, the element type determines pointer-ness. `ParamType` shoul
 ### Interface Parameters
 
 ```zinc
-foo(sync.Mutex.new())  // foo expects sync.Locker (interface)
+foo(sync.Mutex())  // foo expects sync.Locker (interface)
 ```
 
-If the param type is an interface, `.new()` should emit value (or pointer, depending on which satisfies the interface). `go/types` can check method sets. In practice, most Go interfaces are satisfied by pointer receivers, so `&` is usually correct — but we should verify via `types.Implements()`.
+If the param type is an interface, construction should emit value (or pointer, depending on which satisfies the interface). `go/types` can check method sets. In practice, most Go interfaces are satisfied by pointer receivers, so `&` is usually correct — but we should verify via `types.Implements()`.
 
 ### `nil`-able Parameters
 
@@ -260,7 +260,7 @@ Some APIs accept `*Config` where `nil` means "use defaults":
 http.ListenAndServe(":8080", null)  // handler is http.Handler (interface), nil OK
 ```
 
-This doesn't involve `.new()` — `null` → `nil` is a separate concern.
+This doesn't involve construction — `null` → `nil` is a separate concern.
 
 ## Testing Strategy
 
@@ -268,30 +268,30 @@ This doesn't involve `.new()` — `null` → `nil` is a separate concern.
 
 ```go
 // Phase 1: function argument context
-TestGoTypeNewPointerParam()
+TestGoTypePointerParam()
 // http.ListenAndServe expects *http.Server → &http.Server{}
-// input:  http.ListenAndServe(":8080", http.Server.new())
+// input:  http.ListenAndServe(":8080", http.Server())
 // expect: http.ListenAndServe(":8080", &http.Server{})
 
-TestGoTypeNewValueParam()
+TestGoTypeValueParam()
 // Function expects value type → no &
-// input:  time.NewTimer(time.Duration.new())
+// input:  time.NewTimer(time.Duration())
 // expect: stays as value
 
-TestGoTypeNewPointerWithNamedArgs()
-// input:  grpc.Creds(tls.Config.new(MinVersion: 3))
+TestGoTypePointerWithNamedArgs()
+// input:  grpc.Creds(tls.Config(MinVersion: 3))
 // expect: &tls.Config{MinVersion: 3}
 
-TestGoTypeNewNoContext()
+TestGoTypeNoContext()
 // := assignment — no change
-// input:  cfg := tls.Config.new()
+// input:  cfg := tls.Config()
 // expect: tls.Config{} (value, as before)
 ```
 
 ### E2E Tests (e2e_test.go)
 
 ```go
-TestE2EGoTypeNewPointerInference()
+TestE2EGoTypePointerInference()
 // Real Go API call with pointer parameter
 // Transpile → compile → run → verify no compile errors
 ```
@@ -306,13 +306,13 @@ All existing tests must continue to pass unchanged. The `:=` default (value) pre
 - **Pointer arithmetic** — not applicable (Go doesn't have it either)
 - **Dereferencing** — not needed; Go handles this transparently for method calls
 
-Pointers are a Go implementation detail. Zinc developers work with objects — the transpiler decides whether the Go output needs `&` or not. The goal is strictly: make `.new()` on Go types work correctly when passed to APIs expecting pointers, without the user knowing about pointers at all.
+Pointers are a Go implementation detail. Zinc developers work with objects — the transpiler decides whether the Go output needs `&` or not. The goal is strictly: make Go type construction work correctly when passed to APIs expecting pointers, without the user knowing about pointers at all.
 
 ## Alternatives Considered
 
 | Alternative | Decision | Reason |
 |------------|----------|--------|
-| Always emit `&` for `.new()` | Rejected | Breaks APIs expecting value types; some Go APIs return value types intentionally (e.g., `time.Time`) |
+| Always emit `&` for construction | Rejected | Breaks APIs expecting value types; some Go APIs return value types intentionally (e.g., `time.Time`) |
 | New syntax like `.ref()` or `.ptr()` | Rejected | Exposes pointer semantics — violates the OO mental model |
 | Let users write `&Config{}` directly | Rejected | Go-ism, not OO. Zinc should abstract this away |
 | Only infer for known stdlib packages | Rejected | Would miss third-party APIs (AWS, gRPC, etc.) which are the primary use case |

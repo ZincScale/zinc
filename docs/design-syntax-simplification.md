@@ -76,7 +76,7 @@ Dog {
 }
 ```
 
-### 6. Drop `.new()` at call site
+### 6. Drop `.new()` at call site (DONE)
 
 Construction uses `ClassName(args)` directly — like Python, Kotlin, Swift, Dart.
 
@@ -238,7 +238,7 @@ This was a breaking change to all existing `.zn` files. The migration was comple
 3. **Drop `class` keyword** — parser change for top-level declarations
 4. **`Type name` (no colon)** — parser change for params, fields, variables
 5. **Return type before name** — parser change for function signatures
-6. **Drop `.new()` at call site** — parser + codegen change
+6. **Drop `.new()` at call site** — parser + codegen change (DONE)
 7. **Drop `var` for fields** — parser change for class body
 8. **Update all examples, tests, docs**
 

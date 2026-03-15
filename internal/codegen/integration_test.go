@@ -225,7 +225,7 @@ func TestIntegrationGoroutineChannel(t *testing.T) {
 	// Zinc channel syntax: go { ... }, ch.send(val), ch.receive()
 	src := `
 main() {
-    Chan<Int> ch = Chan.new(1)
+    Chan<Int> ch = Chan(1)
     go {
         ch.send(42)
     }
@@ -326,7 +326,7 @@ func TestIntegrationWithMutexInGoroutine(t *testing.T) {
 	src := `
 import "sync"
 main() {
-    mu := sync.Mutex.new()
+    mu := sync.Mutex()
     go {
         with (lock := mu) {
             print("critical section")

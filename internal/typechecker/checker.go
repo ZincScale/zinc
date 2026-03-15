@@ -837,7 +837,7 @@ func (c *Checker) inferUnary(e *parser.UnaryExpr) Type {
 }
 
 func (c *Checker) inferCall(e *parser.CallExpr) Type {
-	// SelectorExpr callee: obj.method(args) or Dog.new(args)
+	// SelectorExpr callee: obj.method(args)
 	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
 		return c.inferMethodCall(sel, e.Args, e.NamedArgs)
 	}
@@ -865,7 +865,7 @@ func (c *Checker) inferFnCall(name string, args []parser.Expr, namedArgs []parse
 	for _, na := range namedArgs {
 		c.inferExpr(na.Value)
 	}
-	// Check for ClassName(args) → constructor call (new syntax, no .new())
+	// Check for ClassName(args) → constructor call
 	if ct, found := c.classes[name]; found {
 		if ct.Ctor != nil && !ct.isGeneric() {
 			c.validateArgs(ct.Ctor, name, args, namedArgs)
@@ -886,28 +886,6 @@ func (c *Checker) inferMethodCall(sel *parser.SelectorExpr, args []parser.Expr, 
 	}
 	for _, na := range namedArgs {
 		c.inferExpr(na.Value)
-	}
-
-	// Check for ClassName.new(args) → constructor call
-	if id, ok := sel.Object.(*parser.Ident); ok {
-		if ct, found := c.classes[id.Name]; found && sel.Field == "new" {
-			if ct.Ctor != nil && !ct.isGeneric() {
-				c.validateArgs(ct.Ctor, id.Name+".new", args, namedArgs)
-			}
-			return ct
-		}
-	}
-
-	// Handle built-in container constructors: Chan.new, List.new, Map.new
-	if id, ok := sel.Object.(*parser.Ident); ok && sel.Field == "new" {
-		switch id.Name {
-		case "Chan":
-			return &ChanType{Elem: TypeUnknown}
-		case "List":
-			return &ListType{Elem: TypeUnknown}
-		case "Map":
-			return &MapType{Key: TypeUnknown, Value: TypeUnknown}
-		}
 	}
 
 	// Regular method call: obj.method(args)

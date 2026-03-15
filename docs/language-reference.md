@@ -339,9 +339,9 @@ main() {
 }
 ```
 
-### Go Type Construction (`.new()`)
+### Go Type Construction
 
-Zinc extends its constructor pattern to any Go type via `.new()` — the OO constructor pattern every Java/Python/C#/Ruby developer knows:
+Zinc uses the same constructor pattern for Go types — call the type like a function:
 
 ```zinc
 import "sync"
@@ -350,11 +350,11 @@ import "net/url"
 
 main() {
     // Zero-value construction
-    mu := sync.Mutex.new()
-    buf := bytes.Buffer.new()
+    mu := sync.Mutex()
+    buf := bytes.Buffer()
 
     // Named field construction (just like named args)
-    u := url.URL.new(Scheme: "https", Host: "example.com", Path: "/api")
+    u := url.URL(Scheme: "https", Host: "example.com", Path: "/api")
     print(u.String())   // https://example.com/api
 }
 ```
@@ -969,7 +969,7 @@ import "sync"
 
 main() {
     counter := 0
-    with (mu := sync.Mutex.new()) {
+    with (mu := sync.Mutex()) {
         counter += 1    // mutex locked here, unlocked when block exits
     }
 }
@@ -1020,7 +1020,7 @@ main() {
 
 ```zinc
 main() {
-    Chan<Int> ch = Chan.new(1)
+    Chan<Int> ch = Chan(1)
 
     go {
         ch.send(42)
