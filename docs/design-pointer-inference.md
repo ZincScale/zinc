@@ -37,17 +37,13 @@ Today in Zinc, `.new()` always emits `TypeName{}` (value), which causes a compil
 | Context | Example (Zinc) | Inference | Emitted Go |
 |---------|---------------|-----------|------------|
 | Function argument | `grpc.Creds(tls.Config.new(...))` | Check param type via `go/types` | `&tls.Config{...}` if param is `*tls.Config` |
-| Explicit type annotation | `*tls.Config c = tls.Config.new(...)` | Check declared type | `&tls.Config{...}` |
-| Return statement | `return tls.Config.new(...)` | Check function return type | `&tls.Config{...}` if returns `*tls.Config` |
 | `:=` with no context | `c := tls.Config.new(...)` | No type info — default | `tls.Config{}` (value) |
 | Nested in another `.new()` | `Outer.new(Inner: Inner.new())` | Check field type of `Outer` | `&Inner{}` if field is `*Inner` |
-| List literal | `[Config.new(), Config.new()]` | Check list element type | Value (no pointer context) |
 
 ### Zinc Syntax — No Change
 
 ```zinc
 import "crypto/tls"
-import "net/http"
 
 main() {
     // Argument context — go/types says grpc.Creds wants *tls.Config
@@ -55,13 +51,10 @@ main() {
 
     // No context — value (current behavior preserved)
     cfg := tls.Config.new(MinVersion: tls.VersionTLS12)
-
-    // Explicit type annotation — pointer context
-    *tls.Config tlsCfg = tls.Config.new(MinVersion: tls.VersionTLS12)
 }
 ```
 
-Users never write `&`. The transpiler handles it.
+Users never write `&`, `*`, or any pointer syntax. The transpiler handles it entirely based on what the Go API expects.
 
 ## Inference Contexts (Detailed)
 
@@ -85,35 +78,7 @@ grpc.Creds(tls.Config.new(MinVersion: tls.VersionTLS12))
 func (r *GoTypeResolver) ParamType(pkgPath, funcName string, paramIndex int) (string, string, bool, bool)
 ```
 
-### Context 2: Variable Declaration with Type Annotation
-
-```zinc
-*http.Server srv = http.Server.new(ReadTimeout: 5)
-```
-
-**Resolution:**
-1. The declared type is `*http.Server` (pointer)
-2. Emit `&http.Server{ReadTimeout: 5}`
-
-**Note:** This requires recognizing `*Type` as a pointer type in the type system. Today Zinc uses `Type?` for nullable (pointer) types. The `*Type` syntax would be new — but only for Go interop type annotations, not for Zinc classes.
-
-**Alternative (simpler):** Skip this context for v1. The function argument context covers 90%+ of real-world cases. Users rarely write explicit type annotations with Go types.
-
-### Context 3: Return Statement
-
-```zinc
-*http.Server createServer() {
-    return http.Server.new(ReadTimeout: 5)
-}
-```
-
-**Resolution:**
-1. Function return type is `*http.Server`
-2. Emit `return &http.Server{ReadTimeout: 5}`
-
-**Same note as Context 2** — requires `*Type` in the type system.
-
-### Context 4: Nested `.new()` (Struct Field)
+### Context 2: Nested `.new()` (Struct Field)
 
 ```zinc
 http.Server.new(TLSConfig: tls.Config.new(MinVersion: 3))
@@ -131,7 +96,7 @@ http.Server.new(TLSConfig: tls.Config.new(MinVersion: 3))
 func (r *GoTypeResolver) FieldType(pkgPath, typeName, fieldName string) (string, string, bool, bool)
 ```
 
-### Context 5: No Context (`:=`)
+### Context 3: No Context (`:=`)
 
 ```zinc
 cfg := tls.Config.new(MinVersion: tls.VersionTLS12)
@@ -257,9 +222,7 @@ http.Server.new(TLSConfig: tls.Config.new(...))
 
 When emitting named args of a `.new()` call, look up each field's type via `FieldType()`. If the field is a pointer type and the value is another `.new()`, set `expectPointer = true`.
 
-### Phase 3: Return Statement and Type Annotation Context (Future)
-
-These require `*Type` syntax in the type system — a larger change. Defer to a future iteration. Phase 1 + Phase 2 cover the vast majority of real-world use cases.
+Phase 1 + Phase 2 cover the vast majority of real-world use cases. No pointer syntax is ever exposed to users.
 
 ## Edge Cases
 
@@ -298,10 +261,6 @@ http.ListenAndServe(":8080", null)  // handler is http.Handler (interface), nil 
 ```
 
 This doesn't involve `.new()` — `null` → `nil` is a separate concern.
-
-### Multiple Return Values
-
-If a function returns `(*Config, error)`, and a Zinc function wants to return `.new()` from a failable context, the return type is the first element. Phase 3 handles this.
 
 ## Testing Strategy
 
@@ -343,12 +302,11 @@ All existing tests must continue to pass unchanged. The `:=` default (value) pre
 
 ## What This Does NOT Cover
 
-- **Pointer syntax for users** (`*Type`) — no new syntax in Zinc
-- **Address-of operator** (`&`) — not exposed to Zinc developers
+- **No pointer syntax in Zinc** — no `*Type`, no `&`, no pointer annotations, ever
 - **Pointer arithmetic** — not applicable (Go doesn't have it either)
 - **Dereferencing** — not needed; Go handles this transparently for method calls
 
-The goal is strictly: make `.new()` on Go types work correctly when passed to APIs expecting pointers, without the user knowing about pointers at all.
+Pointers are a Go implementation detail. Zinc developers work with objects — the transpiler decides whether the Go output needs `&` or not. The goal is strictly: make `.new()` on Go types work correctly when passed to APIs expecting pointers, without the user knowing about pointers at all.
 
 ## Alternatives Considered
 
@@ -363,7 +321,6 @@ The goal is strictly: make `.new()` on Go types work correctly when passed to AP
 
 - **Phase 1** (function argument context) covers 90%+ of real-world pointer inference needs
 - **Phase 2** (nested struct fields) covers the remaining common case
-- **Phase 3** (return types, type annotations) deferred — needs `*Type` syntax work
-- No syntax changes, no breaking changes, invisible to users
+- No syntax changes, no breaking changes, no pointer concepts exposed to users
 - Leverages existing `GoTypeResolver` infrastructure
 - Safe default: emit value when context is unknown
