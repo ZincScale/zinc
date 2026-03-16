@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"zinc/internal/codegen"
+	"zinc/internal/config"
 	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
@@ -32,21 +33,22 @@ import (
 // version is set by goreleaser via ldflags at build time.
 var version = "0.4.0"
 
-const usage = `Zinc transpiler — compiles .zn files to Go source.
+const usage = `Zinc — convention over configuration for native apps.
 
 Usage:
   zinc <file.zn> [flags]   Transpile a single file
-  zinc build [dir]         Transpile all .zn files in project and run go build
-  zinc run [dir]           Transpile all .zn files and run the project
-  zinc init [name]         Initialize a new Zinc project
+  zinc build [dir]         Transpile + compile (C# AOT default, --target go for Go)
+  zinc run [dir]           Transpile + run
+  zinc init [name]         Initialize a new Zinc project (creates zinc.toml + main.zn)
   zinc repl                Launch interactive REPL
 
 Flags:
-  -o <file>    Output Go file (default: <input>.go)
-  --verbose    Print tokens and AST summary after transpiling
-  --run        Transpile and immediately run with 'go run'
-  --watch      Watch file for changes and re-transpile automatically
-  --version    Print version and exit
+  -o <file>       Output file (default: <input>.go or .cs)
+  --target <t>    Backend target: csharp (default) or go
+  --verbose       Print tokens and AST summary after transpiling
+  --run           Transpile and immediately run
+  --watch         Watch file for changes and re-transpile automatically
+  --version       Print version and exit
 `
 
 func main() {
@@ -77,22 +79,22 @@ func main() {
 				}
 				name = filepath.Base(dir)
 			}
-			if _, err := os.Stat("go.mod"); err == nil {
-				errs.Error("go.mod already exists")
+			if _, err := os.Stat("zinc.toml"); err == nil {
+				errs.Error("zinc.toml already exists")
 				os.Exit(1)
 			}
-			gomod := fmt.Sprintf("module %s\n\ngo 1.26\n", name)
-			if err := os.WriteFile("go.mod", []byte(gomod), 0644); err != nil {
-				errs.Errorf("writing go.mod: %v", err)
+			cfg := config.DefaultConfig(name)
+			if err := os.WriteFile("zinc.toml", []byte(config.Generate(cfg)), 0644); err != nil {
+				errs.Errorf("writing zinc.toml: %v", err)
 				os.Exit(1)
 			}
-			mainZn := "fn main() {\n    print(\"Hello from Zinc!\")\n}\n"
+			mainZn := "main() {\n    print(\"Hello from Zinc!\")\n}\n"
 			if err := os.WriteFile("main.zn", []byte(mainZn), 0644); err != nil {
 				errs.Errorf("writing main.zn: %v", err)
 				os.Exit(1)
 			}
 			fmt.Printf("initialized project %q\n", name)
-			fmt.Println("  created go.mod")
+			fmt.Println("  created zinc.toml")
 			fmt.Println("  created main.zn")
 			return
 		case a == "repl":
