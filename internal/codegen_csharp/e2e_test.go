@@ -22,15 +22,33 @@ import (
 	"testing"
 )
 
-const dotnetPath = "/home/vrjoshi/.dotnet/dotnet"
+// findDotnet locates the dotnet CLI binary.
+func findDotnet() string {
+	// Check PATH first
+	if p, err := exec.LookPath("dotnet"); err == nil {
+		return p
+	}
+	// Check common install locations
+	home, _ := os.UserHomeDir()
+	for _, candidate := range []string{
+		home + "/.dotnet/dotnet",
+		"/usr/local/bin/dotnet",
+		"/usr/bin/dotnet",
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
 
 // e2eRun transpiles Zinc source to C#, creates a .NET console project,
 // compiles and runs it, and returns trimmed stdout.
 func e2eRun(t *testing.T, src string) string {
 	t.Helper()
 
-	// Check dotnet is available
-	if _, err := os.Stat(dotnetPath); err != nil {
+	dotnetPath := findDotnet()
+	if dotnetPath == "" {
 		t.Skip("dotnet SDK not found, skipping E2E test")
 	}
 
@@ -44,7 +62,7 @@ func e2eRun(t *testing.T, src string) string {
 	// Create a minimal .NET console project
 	cmd := exec.Command(dotnetPath, "new", "console", "--force", "--no-restore")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "DOTNET_ROOT=/home/vrjoshi/.dotnet", "DOTNET_NOLOGO=1")
+	cmd.Env = append(os.Environ(), "DOTNET_NOLOGO=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("dotnet new console failed: %v\n%s", err, out)
 	}
@@ -57,7 +75,7 @@ func e2eRun(t *testing.T, src string) string {
 	// Restore dependencies
 	restoreCmd := exec.Command(dotnetPath, "restore")
 	restoreCmd.Dir = dir
-	restoreCmd.Env = append(os.Environ(), "DOTNET_ROOT=/home/vrjoshi/.dotnet", "DOTNET_NOLOGO=1")
+	restoreCmd.Env = append(os.Environ(), "DOTNET_NOLOGO=1")
 	if out, err := restoreCmd.CombinedOutput(); err != nil {
 		t.Fatalf("dotnet restore failed: %v\n%s", err, out)
 	}
@@ -65,7 +83,7 @@ func e2eRun(t *testing.T, src string) string {
 	// Run the project
 	runCmd := exec.Command(dotnetPath, "run")
 	runCmd.Dir = dir
-	runCmd.Env = append(os.Environ(), "DOTNET_ROOT=/home/vrjoshi/.dotnet", "DOTNET_NOLOGO=1")
+	runCmd.Env = append(os.Environ(), "DOTNET_NOLOGO=1")
 	var stdout, stderr strings.Builder
 	runCmd.Stdout = &stdout
 	runCmd.Stderr = &stderr

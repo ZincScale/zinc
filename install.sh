@@ -158,6 +158,10 @@ main() {
     echo ""
     echo "  zinc --version"
     echo ""
+    echo "Prerequisites for building Zinc projects:"
+    echo "  C# AOT (default):  .NET 10+ SDK  — https://dotnet.microsoft.com/download"
+    echo "  Go backend:        Go 1.26+       — https://go.dev/dl/"
+    echo ""
 }
 
 main

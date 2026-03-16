@@ -29,6 +29,11 @@ jobs:
           cache: false
           go-version: ${{ matrix.go-version }}
 
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
       - name: Build
         run: go build ./...
 
