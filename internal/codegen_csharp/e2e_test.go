@@ -90,19 +90,19 @@ func TestE2EHelloWorld(t *testing.T) {
 }
 
 func TestE2EArithmetic(t *testing.T) {
-	out := e2eRun(t, `main() { x := 3 + 4 * 2; print(x) }`)
+	out := e2eRun(t, `main() { var x = 3 + 4 * 2; print(x) }`)
 	assertOutput(t, out, "11")
 }
 
 func TestE2EStringInterpolation(t *testing.T) {
-	out := e2eRun(t, `main() { name := "Zinc"; print("Hello, {name}!") }`)
+	out := e2eRun(t, `main() { var name = "Zinc"; print("Hello, {name}!") }`)
 	assertOutput(t, out, "Hello, Zinc!")
 }
 
 func TestE2EIfElse(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x := 10
+    var x = 10
     if x > 5 { print("big") } else { print("small") }
 }
 `)
@@ -112,7 +112,7 @@ main() {
 func TestE2EForLoop(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    for i := 0; i < 3; i += 1 {
+    for var i = 0; i < 3; i += 1 {
         print(i)
     }
 }
@@ -123,7 +123,7 @@ main() {
 func TestE2EWhileLoop(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x := 0
+    var x = 0
     while x < 3 {
         print(x)
         x += 1
@@ -147,7 +147,7 @@ Dog {
     }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.bark())
 }
 `)
@@ -166,7 +166,7 @@ Dog : Animal {
     pub String speak() { return "Woof!" }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.speak())
 }
 `)
@@ -177,7 +177,7 @@ func TestE2EEnum(t *testing.T) {
 	out := e2eRun(t, `
 enum Color { Red, Green, Blue }
 main() {
-    c := Color.Green
+    var c = Color.Green
     print(c)
 }
 `)
@@ -187,7 +187,7 @@ main() {
 func TestE2EMatchStmt(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x := 2
+    var x = 2
     match x {
         case 1 -> { print("one") }
         case 2 -> { print("two") }

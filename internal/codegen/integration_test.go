@@ -36,7 +36,7 @@ Container<T> : Showable {
     }
 }
 main() {
-    c := Container(42)
+    var c = Container(42)
     print(c.show())
 }`
 	out, errs := transpile(src)
@@ -64,7 +64,7 @@ Task {
     }
 }
 main() {
-    t := Task(StatusActive)
+    var t = Task(StatusActive)
     print(t.describe())
 }`
 	out, errs := transpile(src)
@@ -87,7 +87,7 @@ Int riskyOp(Int x) {
     return x * 2
 }
 Int safeDouble(Int x) {
-    r := riskyOp(x)
+    var r = riskyOp(x)
     return r
 }
 main() {
@@ -130,7 +130,7 @@ GoldenRetriever : Dog {
     }
 }
 main() {
-    g := GoldenRetriever("Buddy")
+    var g = GoldenRetriever("Buddy")
     print(g.speak())
     print(g.fetch())
 }`
@@ -160,7 +160,7 @@ Person {
     }
 }
 main() {
-    p := Person("Alice", 30)
+    var p = Person("Alice", 30)
     print(p.greeting())
 }`
 	out, errs := transpile(src)
@@ -189,7 +189,7 @@ Wrapper<T> {
     }
 }
 main() {
-    w := Wrapper()
+    var w = Wrapper()
     print(w.hasContent())
 }`
 	out, errs := transpile(src)
@@ -206,7 +206,7 @@ main() {
 func TestIntegrationForInWithBuiltins(t *testing.T) {
 	src := `
 main() {
-    words := ["hello", "world", "zinc"]
+    var words = ["hello", "world", "zinc"]
     for w in words {
         print(w.upper())
     }
@@ -229,7 +229,7 @@ main() {
     go {
         ch.send(42)
     }
-    result := ch.receive()
+    var result = ch.receive()
     print(result)
 }`
 	out, errs := transpile(src)
@@ -266,7 +266,7 @@ Dog : Animal, Speaker {
     }
 }
 main() {
-    d := Dog("Rex", "Lab")
+    var d = Dog("Rex", "Lab")
     print(d.speak())
     print(d.getName())
 }`
@@ -283,7 +283,7 @@ main() {
 func TestIntegrationWithPlainResource(t *testing.T) {
 	src := `
 main() {
-    with (f := openFile("x")) {
+    with (f = openFile("x")) {
         print("ok")
     }
 }
@@ -301,13 +301,13 @@ func TestIntegrationWithInClassMethod(t *testing.T) {
 DataProcessor {
     new() {}
     pub process() {
-        with (handle := openFile("data.txt")) {
+        with (handle = openFile("data.txt")) {
             print("processing")
         }
     }
 }
 main() {
-    p := DataProcessor()
+    var p = DataProcessor()
     p.process()
 }
 `
@@ -326,9 +326,9 @@ func TestIntegrationWithMutexInGoroutine(t *testing.T) {
 	src := `
 import "sync"
 main() {
-    mu := sync.Mutex()
+    var mu = sync.Mutex()
     go {
-        with (lock := mu) {
+        with (lock = mu) {
             print("critical section")
         }
     }
@@ -353,7 +353,7 @@ Int risky() {
 }
 main() {
     go {
-        r := risky()
+        var r = risky()
         print(r)
     }
 }
@@ -371,7 +371,7 @@ func TestIntegrationGoRoutineWith(t *testing.T) {
 	src := `
 main() {
     go {
-        with (f := openFile("x")) {
+        with (f = openFile("x")) {
             print("reading")
         }
     }
@@ -389,9 +389,9 @@ main() {
 func TestIntegrationGoRoutineClosure(t *testing.T) {
 	src := `
 main() {
-    base := 10
+    var base = 10
     go {
-        addBase := (Int x) -> x + base
+        var addBase = (Int x) -> x + base
         print(addBase(5))
     }
 }
@@ -414,7 +414,7 @@ Int risky() {
 }
 main() {
     go {
-        x := risky()
+        var x = risky()
         print(x)
     }
 }
@@ -435,11 +435,11 @@ Int risky() {
     return Error("fn error")
 }
 Int caller() {
-    r := risky()
+    var r = risky()
     return r
 }
 main() {
-    x := caller()
+    var x = caller()
     print(x)
 }
 `

@@ -199,15 +199,15 @@ func isFuncShape(s string) bool {
 
 // isVarDecl returns true if input is a variable declaration.
 // In type-before-name syntax, variable declarations use:
-//   - name := expr (inferred type)
+//   - var name = expr (inferred type)
 //   - Type name = expr (explicit typed, e.g. String? name = null)
 func isVarDecl(input string) bool {
 	trimmed := strings.TrimSpace(input)
-	// Inferred: name := expr
-	if strings.Contains(trimmed, ":=") {
+	// Inferred: var name = expr
+	if strings.HasPrefix(trimmed, "var ") {
 		return true
 	}
-	// Typed: Type name = expr — starts with uppercase, has ' = ' but not ':='
+	// Typed: Type name = expr — starts with uppercase, has ' = '
 	if len(trimmed) > 0 && trimmed[0] >= 'A' && trimmed[0] <= 'Z' &&
 		strings.Contains(trimmed, " = ") && !isTopLevelDecl(trimmed) {
 		return true
@@ -233,10 +233,7 @@ func isBareExpression(input string) bool {
 	if isTopLevelDecl(trimmed) {
 		return false
 	}
-	// Declaration with := or typed var decl
-	if strings.Contains(trimmed, ":=") {
-		return false
-	}
+	// Declaration with var keyword or typed var decl
 	if isVarDecl(trimmed) {
 		return false
 	}
@@ -360,17 +357,20 @@ func replEval(input string, topDecls []string, bodyDecls []string) {
 }
 
 // extractVarName pulls the variable name from a declaration.
-// Handles: name := expr, Type name = expr
+// Handles: var name = expr, Type name = expr
 func extractVarName(decl string) string {
 	trimmed := strings.TrimSpace(decl)
-	// name := expr
-	if idx := strings.Index(trimmed, ":="); idx > 0 {
-		name := strings.TrimSpace(trimmed[:idx])
-		// Skip tuple destructuring like (a, b) := ...
-		if strings.HasPrefix(name, "(") {
+	// var name = expr or var (a, b) = expr
+	if strings.HasPrefix(trimmed, "var ") {
+		rest := strings.TrimSpace(trimmed[4:])
+		// Skip tuple destructuring like var (a, b) = ...
+		if strings.HasPrefix(rest, "(") {
 			return ""
 		}
-		return name
+		if idx := strings.Index(rest, " "); idx > 0 {
+			return rest[:idx]
+		}
+		return rest
 	}
 	// Type name = expr — skip first word (type), extract second word (name)
 	// e.g. "String name = ..." or "String? name = ..."

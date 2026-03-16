@@ -58,7 +58,7 @@ Dog {
 }
 
 main() {
-    d := Dog(name: "Rex", age: 5)
+    var d = Dog(name: "Rex", age: 5)
     print(d.bark())
 }
 `

@@ -69,19 +69,19 @@ func TestE2EHelloWorld(t *testing.T) {
 }
 
 func TestE2EArithmetic(t *testing.T) {
-	out := e2eRun(t, `main() { x := 3 + 4 * 2; print(x) }`)
+	out := e2eRun(t, `main() { var x = 3 + 4 * 2; print(x) }`)
 	assertOutput(t, out, "11")
 }
 
 func TestE2EStringInterpolation(t *testing.T) {
-	out := e2eRun(t, `main() { name := "Zinc"; print("Hello, {name}!") }`)
+	out := e2eRun(t, `main() { var name = "Zinc"; print("Hello, {name}!") }`)
 	assertOutput(t, out, "Hello, Zinc!")
 }
 
 func TestE2EIfElse(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x := 5
+    var x = 5
     if x > 3 {
         print("big")
     } else {
@@ -94,8 +94,8 @@ main() {
 func TestE2EWhileLoop(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    i := 0
-    sum := 0
+    var i = 0
+    var sum = 0
     while i < 5 {
         sum = sum + i
         i = i + 1
@@ -108,8 +108,8 @@ main() {
 func TestE2EForIn(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [1, 2, 3]
-    sum := 0
+    var nums = [1, 2, 3]
+    var sum = 0
     for n in nums {
         sum = sum + n
     }
@@ -164,7 +164,7 @@ Dog {
     pub String bark() { return "{this.name} says: Woof!" }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.bark())
 }`)
 	assertOutput(t, out, "Rex says: Woof!")
@@ -182,7 +182,7 @@ Dog : Animal {
     pub String speak() { return "{this.name}: Woof!" }
 }
 main() {
-    d := Dog("Buddy")
+    var d = Dog("Buddy")
     print(d.speak())
 }`)
 	assertOutput(t, out, "Buddy: Woof!")
@@ -200,8 +200,8 @@ Spanish : Greeter {
     pub String greet() { return "Hola" }
 }
 main() {
-    e := English()
-    s := Spanish()
+    var e = English()
+    var s = Spanish()
     print(e.greet())
     print(s.greet())
 }`)
@@ -217,9 +217,9 @@ Int divide(Int a, Int b) {
     return a / b
 }
 main() {
-    r := divide(10, 2)
+    var r = divide(10, 2)
     print(r)
-    r2 := divide(10, 0) or {
+    var r2 = divide(10, 0) or {
         print("caught: division by zero")
         exit(0)
     }
@@ -233,8 +233,8 @@ main() {
 func TestE2EClosure(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    base := 10
-    addBase := (Int x) -> x + base
+    var base = 10
+    var addBase = (Int x) -> x + base
     print(addBase(5))
     print(addBase(20))
 }`)
@@ -246,7 +246,7 @@ func TestE2EHigherOrder(t *testing.T) {
 	// become interface{} in Go which cannot be called. Use a concrete fn type.
 	out := e2eRun(t, `
 Int applyDouble(Int x) {
-    double := (Int n) -> n * 2
+    var double = (Int n) -> n * 2
     return double(x)
 }
 main() {
@@ -264,7 +264,7 @@ main() {
     go {
         ch.send(42)
     }
-    val := ch.receive()
+    var val = ch.receive()
     print(val)
 }`)
 	assertOutput(t, out, "42")
@@ -324,7 +324,7 @@ func TestE2EWithFileResource(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    with (f := os.Stdin) {
+    with (f = os.Stdin) {
         print("resource open")
     }
     print("done")
@@ -336,11 +336,11 @@ func TestE2EWithFileOpenClose(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    path := "/tmp/zinc_with_test.txt"
-    with (f := os.Create(path)) {
+    var path = "/tmp/zinc_with_test.txt"
+    with (f = os.Create(path)) {
         f.WriteString("hello from zinc")
     }
-    content := readFile(path)
+    var content = readFile(path)
     print(content)
     os.Remove(path)
 }`)
@@ -352,7 +352,7 @@ func TestE2ETupleDestructureWithErrorPropagation(t *testing.T) {
 	// The two names in the tuple capture the non-error return values
 	src := `import "os"
 main() {
-    (r, w) := os.Pipe()
+    var (r, w) = os.Pipe()
     w.WriteString("pipe works")
     w.Close()
     r.Close()
@@ -366,12 +366,12 @@ func TestE2EWithMutex(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.Mutex()
-    x := 0
-    with (lock := mu) {
+    var mu = sync.Mutex()
+    var x = 0
+    with (lock = mu) {
         x = x + 1
     }
-    with (lock2 := mu) {
+    with (lock2 = mu) {
         x = x + 10
     }
     print(x)
@@ -385,7 +385,7 @@ func TestE2EAsCast(t *testing.T) {
 	out := e2eRun(t, `
 main() {
     Any x = 42
-    y := x as Int
+    var y = x as Int
     print(y + 1)
 }`)
 	assertOutput(t, out, "43")
@@ -436,7 +436,7 @@ Dog : Animal {
 
 main() {
     Any a = Dog("Rex")
-    d := a as Dog
+    var d = a as Dog
     print(d.bark())
 }`)
 	assertOutput(t, out, "Rex says woof")
@@ -450,7 +450,7 @@ func TestE2EPointerInferenceNestedField(t *testing.T) {
 import "net/http"
 import "crypto/tls"
 main() {
-    s := http.Server(TLSConfig: tls.Config(MinVersion: 3))
+    var s = http.Server(TLSConfig: tls.Config(MinVersion: 3))
     if s.TLSConfig != null {
         print("pointer inferred")
     }
@@ -464,7 +464,7 @@ func TestE2EGoTypeNew(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.Mutex()
+    var mu = sync.Mutex()
     mu.Lock()
     mu.Unlock()
     print("ok")
@@ -476,8 +476,8 @@ func TestE2EWithMutexNew(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    x := 0
-    with (mu := sync.Mutex()) {
+    var x = 0
+    with (mu = sync.Mutex()) {
         x = x + 1
     }
     print(x)
@@ -489,7 +489,7 @@ func TestE2EGoTypeNewBytesBuffer(t *testing.T) {
 	out := e2eRun(t, `
 import "bytes"
 main() {
-    buf := bytes.Buffer()
+    var buf = bytes.Buffer()
     buf.WriteString("hello")
     print(buf.String())
 }`)
@@ -500,7 +500,7 @@ func TestE2EGoTypeNewWithNamedFields(t *testing.T) {
 	out := e2eRun(t, `
 import "bytes"
 main() {
-    buf := bytes.Buffer()
+    var buf = bytes.Buffer()
     buf.WriteString("hello")
     print(buf.String())
     print(buf.Len())
@@ -513,7 +513,7 @@ func TestE2EGoTypeNewStructFields(t *testing.T) {
 	out := e2eRun(t, `
 import "net/url"
 main() {
-    u := url.URL(Scheme: "https", Host: "example.com", Path: "/api")
+    var u = url.URL(Scheme: "https", Host: "example.com", Path: "/api")
     print(u.String())
 }`)
 	assertOutput(t, out, "https://example.com/api")
@@ -524,9 +524,9 @@ main() {
 func TestE2ELabeledBreak(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    result := ""
-    @outer for (i := 0; i < 3; i += 1) {
-        for (j := 0; j < 3; j += 1) {
+    var result = ""
+    @outer for (var i = 0; i < 3; i += 1) {
+        for (var j = 0; j < 3; j += 1) {
             if j == 1 {
                 break @outer
             }
@@ -541,9 +541,9 @@ main() {
 func TestE2ELabeledContinue(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    result := ""
-    @outer for (i := 0; i < 3; i += 1) {
-        for (j := 0; j < 3; j += 1) {
+    var result = ""
+    @outer for (var i = 0; i < 3; i += 1) {
+        for (var j = 0; j < 3; j += 1) {
             if j == 1 {
                 continue @outer
             }
@@ -558,10 +558,10 @@ main() {
 func TestE2ELabeledWhile(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    i := 0
-    result := ""
+    var i = 0
+    var result = ""
     @outer while i < 3 {
-        j := 0
+        var j = 0
         while j < 3 {
             if j == 1 {
                 i += 1
@@ -590,7 +590,7 @@ Dog {
 }
 main() {
     Dog? d = Dog("Rex")
-    result := d?.name
+    var result = d?.name
     print(result)
 }`)
 	assertOutput(t, out, "Rex")
@@ -607,7 +607,7 @@ Dog {
 }
 main() {
     Dog? d = null
-    result := d?.name
+    var result = d?.name
     if result == null {
         print("nil safe")
     }
@@ -629,7 +629,7 @@ Dog {
 }
 main() {
     Dog? d = Dog("Rex")
-    result := d?.speak()
+    var result = d?.speak()
     print(result)
 }`)
 	assertOutput(t, out, "woof")
@@ -649,7 +649,7 @@ Dog {
 }
 main() {
     Dog? d = null
-    result := d?.speak()
+    var result = d?.speak()
     if result == null {
         print("method not called")
     }
@@ -717,7 +717,7 @@ Person {
 }
 main() {
     Person? p = Person("Alice", Address("NYC"))
-    city := p?.address?.city
+    var city = p?.address?.city
     print(city)
 }`)
 	assertOutput(t, out, "NYC")
@@ -742,7 +742,7 @@ Person {
 }
 main() {
     Person? p = Person("Bob", null)
-    city := p?.address?.city
+    var city = p?.address?.city
     if city == null {
         print("no city")
     }
@@ -756,7 +756,7 @@ func TestE2EWithTryMultiReturn(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    with (f := os.CreateTemp("", "test*.txt")) {
+    with (f = os.CreateTemp("", "test*.txt")) {
         f.WriteString("hello")
         print("ok")
     }
@@ -769,11 +769,11 @@ func TestE2EWithTryFileWriteRead(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    path := os.TempDir() + "/zinc_with_test.txt"
-    with (f := os.Create(path)) {
+    var path = os.TempDir() + "/zinc_with_test.txt"
+    with (f = os.Create(path)) {
         f.WriteString("hello from with")
     }
-    content := readFile(path)
+    var content = readFile(path)
     print(content)
     os.Remove(path)
 }`)
@@ -785,7 +785,7 @@ func TestE2EWithOrHandler(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    with (f := os.Open("/nonexistent/path/that/does/not/exist") or {
+    with (f = os.Open("/nonexistent/path/that/does/not/exist") or {
         print("caught error")
         exit(0)
     }) {
@@ -801,8 +801,8 @@ func TestE2EWithMultipleResources(t *testing.T) {
 import "sync"
 import "os"
 main() {
-    x := 0
-    with (f := os.Stdin, mu := sync.Mutex()) {
+    var x = 0
+    with (f = os.Stdin, mu = sync.Mutex()) {
         x = x + 1
         print("inside with")
     }
@@ -816,9 +816,9 @@ func TestE2EWithMultipleTryResources(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    p1 := os.TempDir() + "/zinc_multi1.txt"
-    p2 := os.TempDir() + "/zinc_multi2.txt"
-    with (f1 := os.Create(p1), f2 := os.Create(p2)) {
+    var p1 = os.TempDir() + "/zinc_multi1.txt"
+    var p2 = os.TempDir() + "/zinc_multi2.txt"
+    with (f1 = os.Create(p1), f2 = os.Create(p2)) {
         f1.WriteString("file1")
         f2.WriteString("file2")
     }
@@ -835,10 +835,10 @@ func TestE2EWithNested(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    x := 0
-    with (mu1 := sync.Mutex()) {
+    var x = 0
+    with (mu1 = sync.Mutex()) {
         x = x + 1
-        with (mu2 := sync.Mutex()) {
+        with (mu2 = sync.Mutex()) {
             x = x + 10
         }
     }
@@ -851,7 +851,7 @@ main() {
 func TestE2EWithPlainValue(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    with (x := 42) {
+    with (x = 42) {
         print(x)
     }
 }`)
@@ -863,8 +863,8 @@ func TestE2EWithTryReadAfterWrite(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    path := os.TempDir() + "/zinc_with_rw.txt"
-    with (f := os.Create(path)) {
+    var path = os.TempDir() + "/zinc_with_rw.txt"
+    with (f = os.Create(path)) {
         f.WriteString("zinc with rocks")
     }
     // File is now closed (defer Close() ran), safe to read
@@ -879,9 +879,9 @@ func TestE2EWithRWMutex(t *testing.T) {
 	out := e2eRun(t, `
 import "sync"
 main() {
-    mu := sync.RWMutex()
-    x := 0
-    with (lock := mu) {
+    var mu = sync.RWMutex()
+    var x = 0
+    with (lock = mu) {
         x = x + 5
     }
     print(x)
@@ -894,8 +894,8 @@ main() {
 func TestE2EJsonEncode(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    data := "hello"
-    encoded := jsonEncode(data)
+    var data = "hello"
+    var encoded = jsonEncode(data)
     print(encoded)
 }`)
 	assertOutput(t, out, `"hello"`)
@@ -904,7 +904,7 @@ main() {
 func TestE2ESprintf(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    result := sprintf("Hello, %s! You are %d.", "Alice", 30)
+    var result = sprintf("Hello, %s! You are %d.", "Alice", 30)
     print(result)
 }`)
 	assertOutput(t, out, "Hello, Alice! You are 30.")
@@ -913,7 +913,7 @@ main() {
 func TestE2ETypeOf(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    x := 42
+    var x = 42
     print(typeOf(x))
 }`)
 	assertOutput(t, out, "int")
@@ -932,10 +932,10 @@ func TestE2EReadWriteFile(t *testing.T) {
 	out := e2eRun(t, `
 import "os"
 main() {
-    dir := os.TempDir()
-    path := dir + "/zinc_test_rw.txt"
+    var dir = os.TempDir()
+    var path = dir + "/zinc_test_rw.txt"
     writeFile(path, "hello zinc")
-    content := readFile(path)
+    var content = readFile(path)
     print(content)
     os.Remove(path)
 }`)
@@ -975,8 +975,8 @@ main() {
 func TestE2EListClone(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    a := [1, 2, 3]
-    b := a.clone()
+    var a = [1, 2, 3]
+    var b = a.clone()
     b.add(4)
     print(a.size())
     print(b.size())
@@ -987,12 +987,12 @@ main() {
 func TestE2ECollectionSize(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    list := [1, 2, 3, 4, 5]
+    var list = [1, 2, 3, 4, 5]
     print(list.size())
     Map<String, Int> m = Map()
     m["x"] = 1
     print(m.size())
-    s := "hello"
+    var s = "hello"
     print(s.size())
 }`)
 	assertOutput(t, out, "5\n1\n5")
@@ -1003,7 +1003,7 @@ main() {
 func TestE2EStringUpper(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello"
+    var s = "hello"
     print(s.upper())
 }`)
 	assertOutput(t, out, "HELLO")
@@ -1012,7 +1012,7 @@ main() {
 func TestE2EStringLower(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "HELLO"
+    var s = "HELLO"
     print(s.lower())
 }`)
 	assertOutput(t, out, "hello")
@@ -1021,7 +1021,7 @@ main() {
 func TestE2EStringContains(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello world"
+    var s = "hello world"
     if s.contains("world") {
         print("yes")
     }
@@ -1035,7 +1035,7 @@ main() {
 func TestE2EStringStartsEndsWith(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello world"
+    var s = "hello world"
     if s.startsWith("hello") { print("starts") }
     if s.endsWith("world") { print("ends") }
 }`)
@@ -1045,7 +1045,7 @@ main() {
 func TestE2EStringTrim(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "  hello  "
+    var s = "  hello  "
     print(s.trim())
 }`)
 	assertOutput(t, out, "hello")
@@ -1054,8 +1054,8 @@ main() {
 func TestE2EStringSplit(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "a,b,c"
-    parts := s.split(",")
+    var s = "a,b,c"
+    var parts = s.split(",")
     for p in parts {
         print(p)
     }
@@ -1066,7 +1066,7 @@ main() {
 func TestE2EStringReplace(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello world world"
+    var s = "hello world world"
     print(s.replace("world", "zinc"))
 }`)
 	assertOutput(t, out, "hello zinc zinc")
@@ -1075,7 +1075,7 @@ main() {
 func TestE2EListJoin(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    parts := ["a", "b", "c"]
+    var parts = ["a", "b", "c"]
     print(parts.join(", "))
 }`)
 	assertOutput(t, out, "a, b, c")
@@ -1084,7 +1084,7 @@ main() {
 func TestE2EListSort(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [3, 1, 4, 1, 5]
+    var nums = [3, 1, 4, 1, 5]
     nums.sort()
     for n in nums {
         print(n)
@@ -1098,7 +1098,7 @@ main() {
 func TestE2EForKeyValueInMap(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m := {"a": 1}
+    var m = {"a": 1}
     for k, v in m {
         print("{k}={v}")
     }
@@ -1111,8 +1111,8 @@ main() {
 func TestE2EMapKeys(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m := {"x": 1}
-    ks := m.keys()
+    var m = {"x": 1}
+    var ks = m.keys()
     print(ks.size())
 }`)
 	assertOutput(t, out, "1")
@@ -1121,8 +1121,8 @@ main() {
 func TestE2EMapValues(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m := {"x": 42}
-    vs := m.values()
+    var m = {"x": 42}
+    var vs = m.values()
     print(vs.size())
 }`)
 	assertOutput(t, out, "1")
@@ -1131,7 +1131,7 @@ main() {
 func TestE2EMapContainsKey(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    m := {"hello": 1, "world": 2}
+    var m = {"hello": 1, "world": 2}
     print(m.containsKey("hello"))
     print(m.containsKey("nope"))
 }`)
@@ -1147,7 +1147,7 @@ Int apply(Int Fn(Int) f, Int x) {
 }
 
 main() {
-    double := (Int x) -> x * 2
+    var double = (Int x) -> x * 2
     print(apply(double, 7))
 }`)
 	assertOutput(t, out, "14")
@@ -1160,7 +1160,7 @@ Int combine(Int Fn(Int, Int) f, Int a, Int b) {
 }
 
 main() {
-    add := (Int a, Int b) -> a + b
+    var add = (Int a, Int b) -> a + b
     print(combine(add, 3, 4))
 }`)
 	assertOutput(t, out, "7")
@@ -1183,7 +1183,7 @@ main() {
 func TestE2EFnTypeVar(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    transform := (String s) -> s.size()
+    var transform = (String s) -> s.size()
     print(transform("hello"))
 }`)
 	assertOutput(t, out, "5")
@@ -1192,7 +1192,7 @@ main() {
 func TestE2EStringMethodChaining(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "  Hello World  "
+    var s = "  Hello World  "
     print(s.trim().lower())
 }`)
 	assertOutput(t, out, "hello world")
@@ -1213,7 +1213,7 @@ Cat {
 }
 
 main() {
-    c := Cat("Whiskers")
+    var c = Cat("Whiskers")
     print(c.greet())
 }`)
 	assertOutput(t, out, "Meow, I'm Whiskers")
@@ -1249,7 +1249,7 @@ func e2eRunTyped(t *testing.T, src string) string {
 func TestE2ETypedMapLiteral(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    m := {"a": 1, "b": 2}
+    var m = {"a": 1, "b": 2}
     print(m["a"] + m["b"])
 }`)
 	assertOutput(t, out, "3")
@@ -1258,7 +1258,7 @@ main() {
 func TestE2ETypedListLiteral(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    nums := [10, 20, 30]
+    var nums = [10, 20, 30]
     print(nums[0] + nums[2])
 }`)
 	assertOutput(t, out, "40")
@@ -1277,7 +1277,7 @@ main() {
 func TestE2ENestedList(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    grid := [[1, 2], [3, 4]]
+    var grid = [[1, 2], [3, 4]]
     print(grid[0][0] + grid[1][1])
 }`)
 	assertOutput(t, out, "5")
@@ -1299,8 +1299,8 @@ func TestE2EConstInExpr(t *testing.T) {
 	out := e2eRun(t, `
 pub const TAX_RATE = 0.08
 main() {
-    price := 100.0
-    total := price + price * TAX_RATE
+    var price = 100.0
+    var total = price + price * TAX_RATE
     print(total)
 }`)
 	assertOutput(t, out, "108")
@@ -1311,7 +1311,7 @@ main() {
 func TestE2EListIndexAccess(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [10, 20, 30]
+    var nums = [10, 20, 30]
     print(nums[0])
     print(nums[1])
     print(nums[2])
@@ -1322,7 +1322,7 @@ main() {
 func TestE2EListIndexAssignment(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [10, 20, 30]
+    var nums = [10, 20, 30]
     nums[1] = 99
     print(nums[0])
     print(nums[1])
@@ -1334,7 +1334,7 @@ main() {
 func TestE2EMapIndexAccess(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    m := {"a": 1, "b": 2}
+    var m = {"a": 1, "b": 2}
     print(m["a"])
     print(m["b"])
 }`)
@@ -1344,7 +1344,7 @@ main() {
 func TestE2EMapIndexAssignment(t *testing.T) {
 	out := e2eRunTyped(t, `
 main() {
-    m := {"x": 10}
+    var m = {"x": 10}
     m["x"] = 42
     m["y"] = 99
     print(m["x"])
@@ -1356,7 +1356,7 @@ main() {
 func TestE2EStringIndexAccess(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello"
+    var s = "hello"
     print(string(s[0]))
     print(string(s[4]))
 }`)
@@ -1368,8 +1368,8 @@ main() {
 func TestE2EListSliceBracket(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [1, 2, 3, 4, 5]
-    a := nums[1:3]
+    var nums = [1, 2, 3, 4, 5]
+    var a = nums[1:3]
     print(a.size())
     print(a[0])
     print(a[1])
@@ -1380,8 +1380,8 @@ main() {
 func TestE2EListSliceOpenEnd(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [10, 20, 30, 40]
-    a := nums[2:]
+    var nums = [10, 20, 30, 40]
+    var a = nums[2:]
     print(a.size())
     print(a[0])
 }`)
@@ -1391,8 +1391,8 @@ main() {
 func TestE2EListSliceOpenStart(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [10, 20, 30, 40]
-    a := nums[:2]
+    var nums = [10, 20, 30, 40]
+    var a = nums[:2]
     print(a.size())
     print(a[1])
 }`)
@@ -1402,7 +1402,7 @@ main() {
 func TestE2EStringSliceBracket(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "hello world"
+    var s = "hello world"
     print(s[0:5])
     print(s[6:])
 }`)
@@ -1412,8 +1412,8 @@ main() {
 func TestE2ESliceMethod(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    nums := [1, 2, 3, 4, 5]
-    a := nums.slice(1, 4)
+    var nums = [1, 2, 3, 4, 5]
+    var a = nums.slice(1, 4)
     print(a[0])
     print(a[2])
 }`)
@@ -1425,7 +1425,7 @@ main() {
 func TestE2EBreak(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    i := 0
+    var i = 0
     while true {
         if i == 3 { break }
         i = i + 1
@@ -1438,8 +1438,8 @@ main() {
 func TestE2EContinue(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    sum := 0
-    for (i := 0; i < 10; i += 1) {
+    var sum = 0
+    for (var i = 0; i < 10; i += 1) {
         if i % 2 == 0 { continue }
         sum = sum + i
     }
@@ -1470,8 +1470,8 @@ Box<T> {
     pub T get() { return this.value }
 }
 main() {
-    intBox := Box(42)
-    strBox := Box("hello")
+    var intBox = Box(42)
+    var strBox = Box("hello")
     print(intBox.get())
     print(strBox.get())
 }`)
@@ -1483,7 +1483,7 @@ main() {
 func TestE2EMethodChaining(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    s := "  HELLO WORLD  "
+    var s = "  HELLO WORLD  "
     print(s.trim().lower())
     print("a,b,c".split(",").join(" "))
 }`)
@@ -1495,7 +1495,7 @@ main() {
 func TestE2EVariadicSum(t *testing.T) {
 	out := e2eRun(t, `
 Int sum(Int... nums) {
-    total := 0
+    var total = 0
     for n in nums {
         total += n
     }
@@ -1512,14 +1512,14 @@ main() {
 func TestE2EVariadicSpread(t *testing.T) {
 	out := e2eRun(t, `
 Int sum(Int... nums) {
-    total := 0
+    var total = 0
     for n in nums {
         total += n
     }
     return total
 }
 main() {
-    items := [1, 2, 3, 4]
+    var items = [1, 2, 3, 4]
     print(sum(items...))
 }`)
 	assertOutput(t, out, "10")
@@ -1528,7 +1528,7 @@ main() {
 func TestE2EListAddMultiple(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    items := [1, 2]
+    var items = [1, 2]
     items.add(3, 4, 5)
     print(items)
 }`)
@@ -1538,8 +1538,8 @@ main() {
 func TestE2EListAddSpread(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    items := [1, 2]
-    more := [3, 4, 5]
+    var items = [1, 2]
+    var more = [3, 4, 5]
     items.add(more...)
     print(items)
 }`)
@@ -1575,7 +1575,7 @@ Logger {
     }
 }
 main() {
-    l := Logger("APP")
+    var l = Logger("APP")
     l.log("started", "ready")
 }`)
 	assertOutput(t, out, "APP: started\nAPP: ready")
@@ -1585,7 +1585,7 @@ func TestE2EFmtSprintf(t *testing.T) {
 	out := e2eRun(t, `
 import "fmt"
 main() {
-    msg := fmt.Sprintf("Hello %s, age %d", "Alice", 30)
+    var msg = fmt.Sprintf("Hello %s, age %d", "Alice", 30)
     print(msg)
 }`)
 	assertOutput(t, out, "Hello Alice, age 30")
@@ -1598,7 +1598,7 @@ func TestE2EAutoDetectStrconvAtoi(t *testing.T) {
 import "strconv"
 
 main() {
-    n := strconv.Atoi("42") or { print("error"); exit(1) }
+    var n = strconv.Atoi("42") or { print("error"); exit(1) }
     print(n)
 }`)
 	assertOutput(t, out, "42")
@@ -1609,7 +1609,7 @@ func TestE2EAutoDetectStrconvAtoiFail(t *testing.T) {
 import "strconv"
 
 main() {
-    n := strconv.Atoi("notanumber") or { print("caught"); exit(0) }
+    var n = strconv.Atoi("notanumber") or { print("caught"); exit(0) }
     print(n)
 }`)
 	assertOutput(t, out, "caught")
@@ -1620,7 +1620,7 @@ func TestE2EAutoDetectStrconvParseFloat(t *testing.T) {
 import "strconv"
 
 main() {
-    f := strconv.ParseFloat("3.14", 64) or { print("error"); exit(1) }
+    var f = strconv.ParseFloat("3.14", 64) or { print("error"); exit(1) }
     print(f)
 }`)
 	assertOutput(t, out, "3.14")
@@ -1632,12 +1632,12 @@ import "strconv"
 
 Int parseNum(String s) {
     if s == "" { return Error("empty") }
-    n := strconv.Atoi(s)
+    var n = strconv.Atoi(s)
     return n
 }
 
 main() {
-    x := parseNum("99") or { print("error"); exit(1) }
+    var x = parseNum("99") or { print("error"); exit(1) }
     print(x)
 }`)
 	assertOutput(t, out, "99")
@@ -1656,7 +1656,7 @@ main() {
 }
 
 func TestE2ERawString(t *testing.T) {
-	src := "main() { s := `hello\\nworld`; print(s) }"
+	src := "main() { var s = `hello\\nworld`; print(s) }"
 	out := e2eRun(t, src)
 	assertOutput(t, out, "hello\\nworld")
 }
@@ -1672,7 +1672,7 @@ String check(Int x) {
 }
 
 main() {
-    r := check(0) or { print("caught: {err}"); exit(0) }
+    var r = check(0) or { print("caught: {err}"); exit(0) }
     print(r)
 }`)
 	assertOutput(t, out, "caught: zero not allowed")
@@ -1683,7 +1683,7 @@ func TestE2EMethodFailable(t *testing.T) {
 import "os"
 
 main() {
-    f := os.Create("/tmp/zinc_test_method_failable.txt") or {
+    var f = os.Create("/tmp/zinc_test_method_failable.txt") or {
         print("create failed")
         exit(1)
     }
@@ -1695,7 +1695,7 @@ main() {
         print("close failed")
         exit(1)
     }
-    content := readFile("/tmp/zinc_test_method_failable.txt") or {
+    var content = readFile("/tmp/zinc_test_method_failable.txt") or {
         print("read failed")
         exit(1)
     }
@@ -1722,7 +1722,7 @@ Counter {
 }
 
 main() {
-    c := Counter()
+    var c = Counter()
     c.add(5)
     c.add(3)
     print(c.getCount())
@@ -1736,14 +1736,14 @@ func TestE2EWithMethodFailable(t *testing.T) {
 import "os"
 
 main() {
-    path := os.TempDir() + "/zinc_with_method_test.txt"
-    with (f := os.Create(path)) {
+    var path = os.TempDir() + "/zinc_with_method_test.txt"
+    with (f = os.Create(path)) {
         f.WriteString("with method failable") or {
             print("write failed")
             exit(1)
         }
     }
-    content := readFile(path) or {
+    var content = readFile(path) or {
         print("read failed")
         exit(1)
     }
@@ -1759,15 +1759,15 @@ func TestE2EWithVoidMethodFailable(t *testing.T) {
 import "os"
 
 main() {
-    path := os.TempDir() + "/zinc_with_sync_test.txt"
-    with (f := os.Create(path)) {
+    var path = os.TempDir() + "/zinc_with_sync_test.txt"
+    with (f = os.Create(path)) {
         f.WriteString("sync test")
         f.Sync() or {
             print("sync failed")
             exit(1)
         }
     }
-    content := readFile(path) or {
+    var content = readFile(path) or {
         print("read failed")
         exit(1)
     }
@@ -1783,9 +1783,9 @@ func TestE2EWithMultipleResourcesMethodCalls(t *testing.T) {
 import "os"
 
 main() {
-    p1 := os.TempDir() + "/zinc_multi_method_a.txt"
-    p2 := os.TempDir() + "/zinc_multi_method_b.txt"
-    with (f1 := os.Create(p1), f2 := os.Create(p2)) {
+    var p1 = os.TempDir() + "/zinc_multi_method_a.txt"
+    var p2 = os.TempDir() + "/zinc_multi_method_b.txt"
+    with (f1 = os.Create(p1), f2 = os.Create(p2)) {
         f1.WriteString("AAA") or { print("f1 write failed"); exit(1) }
         f2.WriteString("BBB") or { print("f2 write failed"); exit(1) }
     }
@@ -1841,7 +1841,7 @@ printSpeak(Speaker s) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     printSpeak(d)
     print(d.speak())
 }`)
@@ -1864,7 +1864,7 @@ greet(Person p) {
 }
 
 main() {
-    p := Person("Alice", 30)
+    var p = Person("Alice", 30)
     greet(p)
     print(p.name)
 }`)
@@ -1886,7 +1886,7 @@ Account {
 }
 
 main() {
-    a := Account("Alice", "secret123")
+    var a = Account("Alice", "secret123")
     print(a.owner)
     print(a.masked())
 }`)
@@ -1921,7 +1921,7 @@ AgeValidator {
 }
 
 checkAge(AgeValidator v) {
-    result := v.validate() or {
+    var result = v.validate() or {
         print("error: {err}")
         return
     }
@@ -1943,7 +1943,7 @@ Writer {
     String prefix
     new(String p) { this.prefix = p }
     pub process(String path) {
-        with (f := os.Create(path)) {
+        with (f = os.Create(path)) {
             f.WriteString("{this.prefix}: data") or {}
         }
     }
@@ -1954,9 +1954,9 @@ runWriter(Writer w, String path) {
 }
 
 main() {
-    path := "/tmp/zinc_void_failable_e2e.txt"
+    var path = "/tmp/zinc_void_failable_e2e.txt"
     runWriter(Writer("LOG"), path)
-    content := readFile(path) or {
+    var content = readFile(path) or {
         print("read error")
         exit(1)
     }
@@ -1974,18 +1974,18 @@ Int risky(Int x) {
 }
 
 Int middle(Int x) {
-    r := risky(x)
+    var r = risky(x)
     return r + 1
 }
 
 main() {
-    a := middle(5) or {
+    var a = middle(5) or {
         print("err")
         exit(1)
     }
     print(a)
 
-    b := middle(-1) or {
+    var b = middle(-1) or {
         print("caught: {err}")
         exit(0)
     }
@@ -2002,9 +2002,9 @@ Int risky(Int x) {
 }
 
 main() {
-    a := risky(5) or { print("err"); exit(1) }
+    var a = risky(5) or { print("err"); exit(1) }
     print(a)
-    b := risky(0) or {
+    var b = risky(0) or {
         print("caught: {err}")
         exit(0)
     }
@@ -2067,7 +2067,7 @@ Config {
 }
 
 main() {
-    c := Config(21)
+    var c = Config(21)
     print(c.getValue())
 }`)
 	assertOutput(t, out, "42")
@@ -2078,10 +2078,10 @@ func TestE2EWithNestedResources(t *testing.T) {
 import "os"
 
 main() {
-    path := "/tmp/zinc_nested_with_e2e.txt"
-    with (f := os.Create(path)) {
+    var path = "/tmp/zinc_nested_with_e2e.txt"
+    with (f = os.Create(path)) {
         f.WriteString("hello") or {}
-        with (f2 := os.Open(path)) {
+        with (f2 = os.Open(path)) {
             print("nested ok")
         }
     }
@@ -2096,12 +2096,12 @@ func TestE2EGoInteropStrconvChain(t *testing.T) {
 import "strconv"
 
 main() {
-    n := strconv.Atoi("42") or {
+    var n = strconv.Atoi("42") or {
         print("parse error")
         exit(1)
     }
     print(n * 2)
-    f := strconv.ParseFloat("3.14", 64) or {
+    var f = strconv.ParseFloat("3.14", 64) or {
         print("parse error")
         exit(1)
     }
@@ -2129,7 +2129,7 @@ printBox(Box<Int> b) {
 }
 
 main() {
-    b := Box(42)
+    var b = Box(42)
     printBox(b)
     print(b.getValue())
 }`)
@@ -2153,7 +2153,7 @@ printPairKey(Pair<String, Int> p) {
 }
 
 main() {
-    p := Pair("hello", 42)
+    var p = Pair("hello", 42)
     printPairKey(p)
     print(p.key)
 }`)
@@ -2180,7 +2180,7 @@ Stack<T> {
 }
 
 main() {
-    s := Stack(1)
+    var s = Stack(1)
     s.push(2)
     s.push(3)
     print(s.count())
@@ -2191,7 +2191,7 @@ main() {
 func TestE2ELambdaShorthand(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    double := (Int x) -> x * 2
+    var double = (Int x) -> x * 2
     print(double(5))
 }`)
 	assertOutput(t, out, "10")

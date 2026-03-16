@@ -70,7 +70,7 @@ Int add(Int a, Int b) {
     return a + b
 }
 main() {
-    x := add(1, 2)
+    var x = add(1, 2)
     print(x)
 }
 `)
@@ -81,9 +81,9 @@ main() {
 func TestVariables(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 42
-    name := "hello"
-    items := [1, 2, 3]
+    var x = 42
+    var name = "hello"
+    var items = [1, 2, 3]
     print(x)
 }
 `)
@@ -108,7 +108,7 @@ Dog {
     }
 }
 main() {
-    d := Dog(name: "Rex", age: 5)
+    var d = Dog(name: "Rex", age: 5)
     print(d.bark())
 }
 `)
@@ -131,7 +131,7 @@ Dog : Animal {
     pub String speak() { return "Woof!" }
 }
 main() {
-    d := Dog(name: "Rex")
+    var d = Dog(name: "Rex")
     print(d.speak())
 }
 `)
@@ -143,7 +143,7 @@ main() {
 func TestIfElse(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 10
+    var x = 10
     if x > 5 { print("big") } else { print("small") }
 }
 `)
@@ -154,7 +154,7 @@ main() {
 func TestForRange(t *testing.T) {
 	out := transpile(`
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     for item in items { print(item) }
 }
 `)
@@ -164,7 +164,7 @@ main() {
 func TestForRangeWithIndex(t *testing.T) {
 	out := transpile(`
 main() {
-    items := ["a", "b", "c"]
+    var items = ["a", "b", "c"]
     for i, item in items { print(i) }
 }
 `)
@@ -174,7 +174,7 @@ main() {
 func TestMapLiteral(t *testing.T) {
 	out := transpile(`
 main() {
-    scores := {"Alice": 90, "Bob": 85}
+    var scores = {"Alice": 90, "Bob": 85}
     print(scores)
 }
 `)
@@ -184,7 +184,7 @@ main() {
 func TestStringInterpolation(t *testing.T) {
 	out := transpile(`
 main() {
-    name := "world"
+    var name = "world"
     print("hello {name}!")
 }
 `)
@@ -194,7 +194,7 @@ main() {
 func TestEnum(t *testing.T) {
 	out := transpile(`
 enum Color { Red, Green, Blue }
-main() { c := Color.Red }
+main() { var c = Color.Red }
 `)
 	assertContains(t, out, "import enum")
 	assertContains(t, out, "class Color(enum.Enum):")
@@ -204,7 +204,7 @@ main() { c := Color.Red }
 func TestErrorHandling(t *testing.T) {
 	out := transpile(`
 main() {
-    x := riskyCall() or { print("failed"); return }
+    var x = riskyCall() or { print("failed"); return }
 }
 Int riskyCall() { return 42 }
 `)
@@ -215,11 +215,11 @@ Int riskyCall() { return 42 }
 func TestBuiltinMethods(t *testing.T) {
 	out := transpile(`
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     items.add(4)
-    n := items.size()
-    s := "Hello World"
-    u := s.upper()
+    var n = items.size()
+    var s = "Hello World"
+    var u = s.upper()
     print(n)
 }
 `)
@@ -232,7 +232,7 @@ func TestLambda(t *testing.T) {
 	out := transpile(`
 Int apply(Int x, Int Fn(Int) f) { return f(x) }
 main() {
-    result := apply(5, x -> x * 2)
+    var result = apply(5, x -> x * 2)
     print(result)
 }
 `)

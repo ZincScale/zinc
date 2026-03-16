@@ -76,7 +76,7 @@ func TestUndeclaredFunction(t *testing.T) {
 }
 
 func TestDeclaredVariableOK(t *testing.T) {
-	src := `main() { x := 1; print(x) }`
+	src := `main() { var x = 1; print(x) }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -115,13 +115,13 @@ func TestVarTypeMismatch(t *testing.T) {
 }
 
 func TestVarTypeMatch(t *testing.T) {
-	src := `main() { x := 42 }`
+	src := `main() { var x = 42 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestVarInferred(t *testing.T) {
-	src := `main() { x := 42; y := "hello" }`
+	src := `main() { var x = 42; var y = "hello" }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -143,7 +143,7 @@ func TestVarNonOptionalNull(t *testing.T) {
 // --- 3. Assignment type mismatch ---------------------------------------------
 
 func TestAssignTypeMismatch(t *testing.T) {
-	src := `main() { x := 1; x = "hello" }`
+	src := `main() { var x = 1; x = "hello" }`
 	errs := checkSrc(src)
 	if !hasError(errs, "cannot assign") {
 		t.Errorf("expected 'cannot assign' error on reassign, got %v", errs)
@@ -151,7 +151,7 @@ func TestAssignTypeMismatch(t *testing.T) {
 }
 
 func TestAssignTypeMatch(t *testing.T) {
-	src := `main() { x := 1; x = 2 }`
+	src := `main() { var x = 1; x = 2 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -212,7 +212,7 @@ func TestWhileConditionNotBool(t *testing.T) {
 }
 
 func TestWhileConditionBool(t *testing.T) {
-	src := `main() { done := false; while !done { done = true } }`
+	src := `main() { var done = false; while !done { done = true } }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
@@ -220,7 +220,7 @@ func TestWhileConditionBool(t *testing.T) {
 // --- 6. Binary operators -----------------------------------------------------
 
 func TestIntPlusString(t *testing.T) {
-	src := `main() { x := 1 + "hello" }`
+	src := `main() { var x = 1 + "hello" }`
 	errs := checkSrc(src)
 	// Should be an error since 1 is Int and "hello" is String
 	if !hasError(errs, "not applicable") {
@@ -229,7 +229,7 @@ func TestIntPlusString(t *testing.T) {
 }
 
 func TestBoolArithmetic(t *testing.T) {
-	src := `main() { x := true + false }`
+	src := `main() { var x = true + false }`
 	errs := checkSrc(src)
 	if !hasError(errs, "not applicable") {
 		t.Errorf("expected 'not applicable' error for Bool+Bool, got %v", errs)
@@ -237,37 +237,37 @@ func TestBoolArithmetic(t *testing.T) {
 }
 
 func TestIntArithmetic(t *testing.T) {
-	src := `main() { x := 1 + 2; y := 3 * 4 }`
+	src := `main() { var x = 1 + 2; var y = 3 * 4 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestFloatArithmetic(t *testing.T) {
-	src := `main() { x := 1.5 + 2.5 }`
+	src := `main() { var x = 1.5 + 2.5 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestStringConcatenation(t *testing.T) {
-	src := `main() { s := "hello" + " world" }`
+	src := `main() { var s = "hello" + " world" }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestComparisonOperator(t *testing.T) {
-	src := `main() { ok := 1 < 2 }`
+	src := `main() { var ok = 1 < 2 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestLogicalOperators(t *testing.T) {
-	src := `main() { ok := true && false }`
+	src := `main() { var ok = true && false }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
 }
 
 func TestLogicalOperatorNonBool(t *testing.T) {
-	src := `main() { ok := 1 && 2 }`
+	src := `main() { var ok = 1 && 2 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "requires Bool") {
 		t.Errorf("expected 'requires Bool' error for && on ints, got %v", errs)
@@ -282,7 +282,7 @@ Dog {
   String name = "Rex"
 }
 main() {
-  d := Dog()
+  var d = Dog()
   print(d.notAField)
 }
 `
@@ -298,7 +298,7 @@ Dog {
   String name = "Rex"
 }
 main() {
-  d := Dog()
+  var d = Dog()
   print(d.name)
 }
 `
@@ -314,7 +314,7 @@ Dog {
   String name = "Rex"
 }
 main() {
-  d := Dog()
+  var d = Dog()
   d.fly()
 }
 `
@@ -331,7 +331,7 @@ Dog {
   String speak() { return "woof" }
 }
 main() {
-  d := Dog()
+  var d = Dog()
   print(d.speak())
 }
 `
@@ -394,7 +394,7 @@ Dog : Speaker {
 func TestGenericFunctionNoFalsePositives(t *testing.T) {
 	src := `
 T identity<T>(T x) { return x }
-main() { y := identity(42) }
+main() { var y = identity(42) }
 `
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -407,7 +407,7 @@ Box<T> {
   T get() { return value }
 }
 main() {
-  b := Box()
+  var b = Box()
   print(b.get())
 }
 `
@@ -446,7 +446,7 @@ Int risky() {
   return 1
 }
 main() {
-  x := risky() or {
+  var x = risky() or {
     print(err)
     exit(1)
   }
@@ -464,8 +464,8 @@ Int risky() {
   return 1
 }
 main() {
-  x := risky() or {
-    msg := err
+  var x = risky() or {
+    var msg = err
     exit(1)
   }
   print(x)
@@ -480,7 +480,7 @@ main() {
 func TestOuterScopeAccessible(t *testing.T) {
 	src := `
 main() {
-  x := 42
+  var x = 42
   if true {
     print(x)
   }
@@ -495,7 +495,7 @@ func TestInnerVarNotInOuter(t *testing.T) {
 	src := `
 main() {
   if true {
-    y := 42
+    var y = 42
   }
   print(y)
 }
@@ -509,7 +509,7 @@ main() {
 func TestForLoopVarScoped(t *testing.T) {
 	src := `
 main() {
-  items := [1, 2, 3]
+  var items = [1, 2, 3]
   for item in items { print(item) }
 }
 `
@@ -685,7 +685,7 @@ func TestCtorDefaultParam(t *testing.T) {
     }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -701,7 +701,7 @@ func TestCtorNamedArg(t *testing.T) {
     }
 }
 main() {
-    d := Dog(name: "Rex")
+    var d = Dog(name: "Rex")
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)
@@ -715,7 +715,7 @@ func TestCtorUnknownNamedArg(t *testing.T) {
     }
 }
 main() {
-    d := Dog(badField: "Rex")
+    var d = Dog(badField: "Rex")
 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "unknown named argument") {
@@ -727,7 +727,7 @@ main() {
 
 func TestWithStmtTypecheck(t *testing.T) {
 	src := `main() {
-    with (f := openFile("data.txt")) {
+    with (f = openFile("data.txt")) {
         print("ok")
     }
 }`
@@ -737,7 +737,7 @@ func TestWithStmtTypecheck(t *testing.T) {
 
 func TestWithStmtResourceInScope(t *testing.T) {
 	src := `main() {
-    with (f := openFile("data.txt")) {
+    with (f = openFile("data.txt")) {
         print(f)
     }
 }`
@@ -753,7 +753,7 @@ NoClose {
     pub String read() { return "data" }
 }
 main() {
-    with (f := NoClose()) {
+    with (f = NoClose()) {
         print("ok")
     }
 }`
@@ -786,7 +786,7 @@ Dog {
     new(String name) { this.name = name }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d?.name)
 }`
 	errs := checkSrc(src)
@@ -928,7 +928,7 @@ User {
     new(Address addr) { this.address = addr }
 }
 main() {
-    u := User(Address("NYC"))
+    var u = User(Address("NYC"))
     print(u.address.city)
 }`
 	errs := checkSrc(src)

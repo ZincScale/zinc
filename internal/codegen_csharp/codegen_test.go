@@ -67,7 +67,7 @@ Int add(Int a, Int b) {
     return a + b
 }
 main() {
-    x := add(1, 2)
+    var x = add(1, 2)
     print(x)
 }
 `)
@@ -78,8 +78,8 @@ main() {
 func TestVariables(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 42
-    name := "hello"
+    var x = 42
+    var name = "hello"
     print(x)
 }
 `)
@@ -103,7 +103,7 @@ Dog {
     }
 }
 main() {
-    d := Dog(name: "Rex", age: 5)
+    var d = Dog(name: "Rex", age: 5)
     print(d.bark())
 }
 `)
@@ -128,7 +128,7 @@ Dog : Animal {
     pub String speak() { return "Woof!" }
 }
 main() {
-    d := Dog(name: "Rex")
+    var d = Dog(name: "Rex")
     print(d.speak())
 }
 `)
@@ -147,7 +147,7 @@ Cat : Speaker {
     pub String speak() { return "Meow!" }
 }
 main() {
-    c := Cat()
+    var c = Cat()
     print(c.speak())
 }
 `)
@@ -159,7 +159,7 @@ main() {
 func TestIfElse(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 10
+    var x = 10
     if x > 5 { print("big") } else { print("small") }
 }
 `)
@@ -170,7 +170,7 @@ main() {
 func TestForRange(t *testing.T) {
 	out := transpile(`
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     for item in items { print(item) }
 }
 `)
@@ -180,7 +180,7 @@ main() {
 func TestForRangeWithIndex(t *testing.T) {
 	out := transpile(`
 main() {
-    items := ["a", "b", "c"]
+    var items = ["a", "b", "c"]
     for i, item in items { print(i) }
 }
 `)
@@ -191,7 +191,7 @@ main() {
 func TestWhileLoop(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 0
+    var x = 0
     while x < 10 { x += 1 }
 }
 `)
@@ -201,7 +201,7 @@ main() {
 func TestMapLiteral(t *testing.T) {
 	out := transpile(`
 main() {
-    scores := {"Alice": 90, "Bob": 85}
+    var scores = {"Alice": 90, "Bob": 85}
     print(scores)
 }
 `)
@@ -212,7 +212,7 @@ main() {
 func TestStringInterpolation(t *testing.T) {
 	out := transpile(`
 main() {
-    name := "world"
+    var name = "world"
     print("hello {name}!")
 }
 `)
@@ -222,7 +222,7 @@ main() {
 func TestEnum(t *testing.T) {
 	out := transpile(`
 enum Color { Red, Green, Blue }
-main() { c := Color.Red }
+main() { var c = Color.Red }
 `)
 	assertContains(t, out, "public enum Color")
 	assertContains(t, out, "Red,")
@@ -233,7 +233,7 @@ main() { c := Color.Red }
 func TestErrorHandling(t *testing.T) {
 	out := transpile(`
 main() {
-    x := riskyCall() or { print("failed") }
+    var x = riskyCall() or { print("failed") }
 }
 Int riskyCall() { return 42 }
 `)
@@ -245,9 +245,9 @@ Int riskyCall() { return 42 }
 func TestBuiltinListMethods(t *testing.T) {
 	out := transpile(`
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     items.add(4)
-    n := items.size()
+    var n = items.size()
     print(n)
 }
 `)
@@ -258,10 +258,10 @@ main() {
 func TestBuiltinStringMethods(t *testing.T) {
 	out := transpile(`
 main() {
-    s := "Hello World"
-    u := s.upper()
-    l := s.lower()
-    t := s.trim()
+    var s = "Hello World"
+    var u = s.upper()
+    var l = s.lower()
+    var t = s.trim()
     print(u)
 }
 `)
@@ -273,9 +273,9 @@ main() {
 func TestBuiltinMapMethods(t *testing.T) {
 	out := transpile(`
 main() {
-    m := {"a": 1}
-    k := m.keys()
-    v := m.values()
+    var m = {"a": 1}
+    var k = m.keys()
+    var v = m.values()
     print(k)
 }
 `)
@@ -287,7 +287,7 @@ main() {
 func TestLambda(t *testing.T) {
 	out := transpile(`
 main() {
-    f := (Int x) -> x * 2
+    var f = (Int x) -> x * 2
     print(f)
 }
 `)
@@ -297,7 +297,7 @@ main() {
 func TestMatchStmt(t *testing.T) {
 	out := transpile(`
 main() {
-    x := 1
+    var x = 1
     match x {
         case 1 -> { print("one") }
         case 2 -> { print("two") }
@@ -315,8 +315,8 @@ main() {
 func TestSafeNavigation(t *testing.T) {
 	out := transpile(`
 main() {
-    x := null
-    y := x?.name
+    var x = null
+    var y = x?.name
 }
 `)
 	assertContains(t, out, "x?.Name")
@@ -330,7 +330,7 @@ Box<T> {
     pub T get() { return this.value }
 }
 main() {
-    b := Box<Int>(42)
+    var b = Box<Int>(42)
     print(b.get())
 }
 `)
@@ -342,7 +342,7 @@ main() {
 func TestWithStatement(t *testing.T) {
 	out := transpile(`
 main() {
-    with (f := openFile("test.txt")) {
+    with (f = openFile("test.txt")) {
         print(f)
     }
 }
@@ -389,7 +389,7 @@ Point {
     new(Int x, Int y) { this.x = x; this.y = y }
 }
 main() {
-    p := Point(1, 2)
+    var p = Point(1, 2)
     print(p)
 }
 `)
@@ -402,7 +402,7 @@ Secret {
     String hidden
     new(String hidden) { this.hidden = hidden }
 }
-main() { s := Secret("shh") }
+main() { var s = Secret("shh") }
 `)
 	assertContains(t, out, "private string _hidden;")
 }

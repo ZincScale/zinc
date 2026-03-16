@@ -682,19 +682,17 @@ func (p *Parser) parseStmt() Stmt {
 	tok := p.peek()
 
 	switch tok.Type {
-	case lexer.TOKEN_IDENT:
-		// name := expr → inferred variable declaration
-		if p.peekAt(1).Type == lexer.TOKEN_COLONASSIGN {
-			return p.parseShortVarStmt()
+	case lexer.TOKEN_VAR:
+		// var x = expr → inferred variable declaration
+		// var (a, b) = expr → tuple destructuring
+		if p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+			return p.parseTupleDestructure()
 		}
+		return p.parseShortVarStmt()
+	case lexer.TOKEN_IDENT:
 		// Type name = expr → typed variable declaration (e.g. Int x = 5)
 		if p.isTypedVarDecl() {
 			return p.parseTypedVarStmt()
-		}
-	case lexer.TOKEN_LPAREN:
-		// (a, b) := expr → tuple destructuring
-		if p.isTupleDestructure() {
-			return p.parseTupleDestructure()
 		}
 	case lexer.TOKEN_RETURN:
 		return p.parseReturnStmt()
@@ -772,38 +770,22 @@ func (p *Parser) parseConstDecl(isPub bool) *ConstDecl {
 	return &ConstDecl{Line: line, Name: name, IsPub: isPub, Type: typ, Value: val}
 }
 
-// parseShortVarStmt parses: name := expr [or { handler }]
+// parseShortVarStmt parses: var name = expr [or { handler }]
 func (p *Parser) parseShortVarStmt() Stmt {
 	line := p.peek().Line
-	name := p.advance().Literal // consume ident
-	p.advance()                 // consume :=
+	p.advance()                 // consume var
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
 	handler := p.parseOrHandler()
 	return &VarStmt{Line: line, Name: name, Value: val, OrHandler: handler}
 }
 
-// isTupleDestructure checks if ( starts a tuple destructuring: (a, b) := expr
-func (p *Parser) isTupleDestructure() bool {
-	// Walk past ( ident , ident ... ) :=
-	i := 1 // skip (
-	if p.peekAt(i).Type != lexer.TOKEN_IDENT {
-		return false
-	}
-	i++
-	for p.peekAt(i).Type == lexer.TOKEN_COMMA {
-		i++
-		if p.peekAt(i).Type != lexer.TOKEN_IDENT {
-			return false
-		}
-		i++
-	}
-	return p.peekAt(i).Type == lexer.TOKEN_RPAREN && p.peekAt(i+1).Type == lexer.TOKEN_COLONASSIGN
-}
-
-// parseTupleDestructure parses: (a, b) := expr [or { handler }]
+// parseTupleDestructure parses: var (a, b) = expr [or { handler }]
 func (p *Parser) parseTupleDestructure() *TupleVarStmt {
 	line := p.peek().Line
-	p.advance() // (
+	p.advance() // consume var
+	p.expect(lexer.TOKEN_LPAREN)
 	var names []string
 	names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
 	for p.check(lexer.TOKEN_COMMA) {
@@ -811,7 +793,7 @@ func (p *Parser) parseTupleDestructure() *TupleVarStmt {
 		names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
 	}
 	p.expect(lexer.TOKEN_RPAREN)
-	p.expect(lexer.TOKEN_COLONASSIGN)
+	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.parseExpr()
 	handler := p.parseOrHandler()
 	return &TupleVarStmt{Line: line, Names: names, Value: val, OrHandler: handler}
@@ -1007,7 +989,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 
 // parseVarOrAssign parses a short var decl or assignment for use in for-init/post.
 func (p *Parser) parseVarOrAssign() Stmt {
-	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_COLONASSIGN {
+	if p.check(lexer.TOKEN_VAR) {
 		return p.parseShortVarStmt()
 	}
 	return p.parseExprOrAssignStmt()
@@ -1088,7 +1070,7 @@ func (p *Parser) parseWithStmt() *WithStmt {
 	var resources []*WithResource
 	for {
 		name := p.expect(lexer.TOKEN_IDENT).Literal
-		p.expect(lexer.TOKEN_COLONASSIGN)
+		p.expect(lexer.TOKEN_ASSIGN)
 		val := p.parseExpr()
 		handler := p.parseOrHandler()
 		resources = append(resources, &WithResource{Name: name, Value: val, OrHandler: handler})

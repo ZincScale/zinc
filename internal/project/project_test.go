@@ -142,7 +142,7 @@ func TestFindModNotFound(t *testing.T) {
 func TestTranspileSingleFile(t *testing.T) {
 	dir := t.TempDir()
 	src := `main() {
-    x := 42
+    var x = 42
     print(x)
 }`
 	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(src), 0644)
@@ -285,7 +285,7 @@ func TestCrossFileSuperArgs(t *testing.T) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.name)
 }
 `
@@ -327,7 +327,7 @@ func TestCrossFileFailableDetection(t *testing.T) {
 }
 `
 	fileB := `main() {
-    x := risky()
+    var x = risky()
     print(x)
 }
 `
@@ -468,7 +468,7 @@ func TestCrossFileInterfaceCompliance(t *testing.T) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.speak())
 }
 `
@@ -519,7 +519,7 @@ func TestCrossFileMethodNamedArgs(t *testing.T) {
 }
 `
 	fileB := `main() {
-    g := Greeter("Hello")
+    var g = Greeter("Hello")
     print(g.greet("Alice"))
     print(g.greet("Bob", excited: true))
 }
@@ -622,7 +622,7 @@ func TestE2ECrossFileSuperArgs(t *testing.T) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.name)
     print(d.sound)
 }
@@ -640,7 +640,7 @@ func TestE2ECrossFileFailableDetection(t *testing.T) {
 }
 `,
 		"b.zn": `main() {
-    x := risky() or {
+    var x = risky() or {
         print("caught error")
         exit(0)
     }
@@ -707,7 +707,7 @@ func TestE2ECrossFileInterfaceCompliance(t *testing.T) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.speak())
 }
 `,
@@ -731,7 +731,7 @@ func TestE2ECrossFileMethodNamedArgs(t *testing.T) {
 }
 `,
 		"main.zn": `main() {
-    g := Greeter("Hello")
+    var g = Greeter("Hello")
     print(g.greet("Alice"))
     print(g.greet("Bob", excited: true))
 }

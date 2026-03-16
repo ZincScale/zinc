@@ -66,7 +66,7 @@ func TestParseFnWithParams(t *testing.T) {
 }
 
 func TestParseVarStmt(t *testing.T) {
-	prog, p := parse(`main() { x := 42 }`)
+	prog, p := parse(`main() { var x = 42 }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v, ok := fn.Body.Stmts[0].(*VarStmt)
@@ -109,7 +109,7 @@ func TestParseWhile(t *testing.T) {
 }
 
 func TestParseForCStyle(t *testing.T) {
-	prog, p := parse(`main() { for i := 0; i; i { } }`)
+	prog, p := parse(`main() { for var i = 0; i; i { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	f, ok := fn.Body.Stmts[0].(*ForStmt)
@@ -179,7 +179,7 @@ func TestParseInterface(t *testing.T) {
 }
 
 func TestParseOrHandler(t *testing.T) {
-	prog, p := parse(`main() { x := risky() or { print(err) } }`)
+	prog, p := parse(`main() { var x = risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v, ok := fn.Body.Stmts[0].(*VarStmt)
@@ -208,7 +208,7 @@ func TestParseOrHandlerOnExprStmt(t *testing.T) {
 }
 
 func TestParseOrHandlerOnAssign(t *testing.T) {
-	prog, p := parse(`main() { x := 0; x = risky() or { print(err) } }`)
+	prog, p := parse(`main() { var x = 0; x = risky() or { print(err) } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	a, ok := fn.Body.Stmts[1].(*AssignStmt)
@@ -258,7 +258,7 @@ func TestParseImportAlias(t *testing.T) {
 }
 
 func TestParseBinaryExpr(t *testing.T) {
-	prog, p := parse(`main() { x := 1 + 2 }`)
+	prog, p := parse(`main() { var x = 1 + 2 }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -283,7 +283,7 @@ func TestParseCallExpr(t *testing.T) {
 }
 
 func TestParseListLit(t *testing.T) {
-	prog, p := parse(`main() { x := [1, 2, 3] }`)
+	prog, p := parse(`main() { var x = [1, 2, 3] }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -297,7 +297,7 @@ func TestParseListLit(t *testing.T) {
 }
 
 func TestParseMapLit(t *testing.T) {
-	prog, p := parse(`main() { m := {"key": 1} }`)
+	prog, p := parse(`main() { var m = {"key": 1} }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -308,7 +308,7 @@ func TestParseMapLit(t *testing.T) {
 }
 
 func TestParseConstructorNew(t *testing.T) {
-	prog, p := parse(`main() { d := Dog("rex") }`)
+	prog, p := parse(`main() { var d = Dog("rex") }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	v := fn.Body.Stmts[0].(*VarStmt)
@@ -460,7 +460,7 @@ func TestParseMixedPositionalAndNamedArgs(t *testing.T) {
 }
 
 func TestParseWithStmtSingle(t *testing.T) {
-	prog, p := parse(`main() { with (f := openFile("x")) { } }`)
+	prog, p := parse(`main() { with (f = openFile("x")) { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ws, ok := fn.Body.Stmts[0].(*WithStmt)
@@ -479,7 +479,7 @@ func TestParseWithStmtSingle(t *testing.T) {
 }
 
 func TestParseWithStmtMultiple(t *testing.T) {
-	prog, p := parse(`main() { with (a := foo(), b := bar()) { } }`)
+	prog, p := parse(`main() { with (a = foo(), b = bar()) { } }`)
 	assertNoErrors(t, p)
 	fn := prog.Decls[0].(*FnDecl)
 	ws, ok := fn.Body.Stmts[0].(*WithStmt)

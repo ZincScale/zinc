@@ -25,16 +25,16 @@ func TestCountBraceDepth(t *testing.T) {
 		{`}`, -1},
 		{`if x > 0 { return 1 }`, 0},
 		// Braces inside strings should be ignored
-		{`s := "hello {world}"`, 0},
-		{`s := "a{b}c"`, 0},
+		{`var s = "hello {world}"`, 0},
+		{`var s = "a{b}c"`, 0},
 		{`print("{name}")`, 0},
 		// Braces inside raw strings
-		{"s := `raw {brace}`", 0},
+		{"var s = `raw {brace}`", 0},
 		// Braces after line comment
 		{`// this { doesn't count`, 0},
-		{`x := 1 // trailing { comment`, 0},
+		{`var x = 1 // trailing { comment`, 0},
 		// Escaped quote in string
-		{`s := "escaped \" { quote"`, 0},
+		{`var s = "escaped \" { quote"`, 0},
 		// Normal nesting
 		{`Dog {`, 1},
 		{`foo() { if true {`, 2},
@@ -70,7 +70,7 @@ func TestIsTopLevelDecl(t *testing.T) {
 	}
 
 	falseCases := []string{
-		"x := 1",
+		"var x = 1",
 		"print(42)",
 		"1 + 2",
 		"x = 5",
@@ -84,8 +84,8 @@ func TestIsTopLevelDecl(t *testing.T) {
 
 func TestIsVarDecl(t *testing.T) {
 	trueCases := []string{
-		"x := 1",
-		"name := \"hello\"",
+		"var x = 1",
+		"var name = \"hello\"",
 		`String name = "hello"`,
 		"Int x = 42",
 		"String? name = null",
@@ -127,7 +127,7 @@ func TestIsBareExpression(t *testing.T) {
 	}
 
 	falseCases := []string{
-		"x := 1",
+		"var x = 1",
 		"if true { }",
 		"for i in items { }",
 		"while true { }",
@@ -154,10 +154,10 @@ func TestExtractVarName(t *testing.T) {
 		decl string
 		want string
 	}{
-		{"x := 1", "x"},
-		{"name := \"hello\"", "name"},
-		{"  spaced := 42  ", "spaced"},
-		{"(a, b) := divide(10, 2)", ""},
+		{"var x = 1", "x"},
+		{"var name = \"hello\"", "name"},
+		{"  var spaced = 42  ", "spaced"},
+		{"var (a, b) = divide(10, 2)", ""},
 		{`String name = "hello"`, "name"},
 		{"Int x = 42", "x"},
 		{"String? name = null", "name"},

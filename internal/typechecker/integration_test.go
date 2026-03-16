@@ -42,8 +42,8 @@ Level getLevel(Int s) {
     return Level.Low
 }
 main() {
-    lvl := getLevel(90)
-    sc := Score(42, lvl)
+    var lvl = getLevel(90)
+    var sc = Score(42, lvl)
     print(sc.describe())
 }`
 	errs := checkSrc(src)
@@ -57,7 +57,7 @@ Int risky(Int x) {
     return x
 }
 Int run() {
-    a := risky(1)
+    var a = risky(1)
     return a
 }
 main() {
@@ -74,7 +74,7 @@ Int risky(Int x) {
     return x
 }
 main() {
-    a := risky(1) or {
+    var a = risky(1) or {
         print(err)
         exit(1)
     }
@@ -112,7 +112,7 @@ Leaf : Middle {
     }
 }
 main() {
-    l := Leaf(5)
+    var l = Leaf(5)
     print(l.label())
 }`
 	errs := checkSrc(src)
@@ -127,7 +127,7 @@ Calc {
     }
 }
 main() {
-    c := Calc()
+    var c = Calc()
 }`
 	errs := checkSrc(src)
 	if !hasError(errs, "return") {
@@ -158,7 +158,7 @@ Dog : Animal, Speaker {
     }
 }
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.speak())
     print(d.getName())
 }`

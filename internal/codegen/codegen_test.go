@@ -60,7 +60,7 @@ func TestHelloWorld(t *testing.T) {
 }
 
 func TestVarDecl(t *testing.T) {
-	out, errs := transpile(`main() { x := 42 }`)
+	out, errs := transpile(`main() { var x = 42 }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -68,7 +68,7 @@ func TestVarDecl(t *testing.T) {
 }
 
 func TestBinaryExpr(t *testing.T) {
-	out, errs := transpile(`main() { x := 1 + 2 }`)
+	out, errs := transpile(`main() { var x = 1 + 2 }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -101,7 +101,7 @@ func TestForIn(t *testing.T) {
 }
 
 func TestForCStyle(t *testing.T) {
-	out, errs := transpile(`main() { for (i := 0; i; i) { } }`)
+	out, errs := transpile(`main() { for (var i = 0; i; i) { } }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -193,7 +193,7 @@ func TestReturnErrorAndOrHandler(t *testing.T) {
 		return Error("oops")
 	}
 	main() {
-		r := risky() or {
+		var r = risky() or {
 			print("caught")
 			exit(1)
 		}
@@ -234,7 +234,7 @@ func TestImport(t *testing.T) {
 }
 
 func TestListLiteral(t *testing.T) {
-	out, errs := transpile(`main() { x := [1, 2, 3] }`)
+	out, errs := transpile(`main() { var x = [1, 2, 3] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -242,7 +242,7 @@ func TestListLiteral(t *testing.T) {
 }
 
 func TestListLiteralStrings(t *testing.T) {
-	out, errs := transpile(`main() { x := ["a", "b"] }`)
+	out, errs := transpile(`main() { var x = ["a", "b"] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -250,7 +250,7 @@ func TestListLiteralStrings(t *testing.T) {
 }
 
 func TestListLiteralEmpty(t *testing.T) {
-	out, errs := transpile(`main() { x := [] }`)
+	out, errs := transpile(`main() { var x = [] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -258,7 +258,7 @@ func TestListLiteralEmpty(t *testing.T) {
 }
 
 func TestMapLiteral(t *testing.T) {
-	src := `main() { m := {"a": 1} }`
+	src := `main() { var m = {"a": 1} }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -287,7 +287,7 @@ func TestStaticMethod(t *testing.T) {
 }
 
 func TestBuiltinSize(t *testing.T) {
-	src := `main() { n := items.size() }`
+	src := `main() { var n = items.size() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -296,7 +296,7 @@ func TestBuiltinSize(t *testing.T) {
 }
 
 func TestBuiltinToString(t *testing.T) {
-	src := `main() { s := toString(42) }`
+	src := `main() { var s = toString(42) }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -306,7 +306,7 @@ func TestBuiltinToString(t *testing.T) {
 }
 
 func TestBuiltinUpper(t *testing.T) {
-	src := `main() { s := "hello".upper() }`
+	src := `main() { var s = "hello".upper() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -326,7 +326,7 @@ func TestBuiltinSort(t *testing.T) {
 }
 
 func TestBuiltinSqrt(t *testing.T) {
-	src := `main() { r := sqrt(9.0) }`
+	src := `main() { var r = sqrt(9.0) }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -336,7 +336,7 @@ func TestBuiltinSqrt(t *testing.T) {
 }
 
 func TestTupleUnpack(t *testing.T) {
-	src := `main() { (a, b) := getPair() }`
+	src := `main() { var (a, b) = getPair() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -345,7 +345,7 @@ func TestTupleUnpack(t *testing.T) {
 }
 
 func TestTupleUnpackThree(t *testing.T) {
-	src := `main() { (x, y, z) := getTriple() }`
+	src := `main() { var (x, y, z) = getTriple() }`
 	out, errs := transpile(src)
 	if errs != nil {
 		t.Fatal(errs)
@@ -356,7 +356,7 @@ func TestTupleUnpackThree(t *testing.T) {
 func TestTupleUnpackFailable(t *testing.T) {
 	src := `import "os"
 main() {
-    (r, w) := os.Pipe()
+    var (r, w) = os.Pipe()
     print(r)
     print(w)
 }`
@@ -417,7 +417,7 @@ func TestOptionalTypeVar(t *testing.T) {
 }
 
 func TestStringInterpolation(t *testing.T) {
-	src := `main() { name := "World"
+	src := `main() { var name = "World"
 		print("Hello, {name}!")
 	}`
 	out, errs := transpile(src)
@@ -428,8 +428,8 @@ func TestStringInterpolation(t *testing.T) {
 }
 
 func TestStringInterpolationMultiple(t *testing.T) {
-	src := `main() { a := 1
-		b := 2
+	src := `main() { var a = 1
+		var b = 2
 		print("Sum of {a} and {b}")
 	}`
 	out, errs := transpile(src)
@@ -455,7 +455,7 @@ func TestEnumMemberExpr(t *testing.T) {
 	src := `
 enum Color { Red, Green, Blue }
 main() {
-    c := Color.Red
+    var c = Color.Red
     print(c)
 }`
 	out, errs := transpile(src)
@@ -489,7 +489,7 @@ String describe(Status s) {
 
 func TestMatch(t *testing.T) {
 	src := `main() {
-		x := 1
+		var x = 1
 		match x {
 			case 1 -> { print("one") }
 			case 2 -> { print("two") }
@@ -711,7 +711,7 @@ func TestLastSegment(t *testing.T) {
 
 func TestLambdaSingleExpr(t *testing.T) {
 	src := `main() {
-    double := (Int x) -> x * 2
+    var double = (Int x) -> x * 2
     print(double(5))
 }`
 	out, errs := transpile(src)
@@ -724,7 +724,7 @@ func TestLambdaSingleExpr(t *testing.T) {
 
 func TestLambdaNoReturnType(t *testing.T) {
 	src := `main() {
-    double := (Int x) -> x * 2
+    var double = (Int x) -> x * 2
     print(double(3))
 }`
 	out, errs := transpile(src)
@@ -737,7 +737,7 @@ func TestLambdaNoReturnType(t *testing.T) {
 
 func TestLambdaZeroParams(t *testing.T) {
 	src := `main() {
-    greet := () -> "hello"
+    var greet = () -> "hello"
     print(greet())
 }`
 	out, errs := transpile(src)
@@ -750,7 +750,7 @@ func TestLambdaZeroParams(t *testing.T) {
 
 func TestLambdaBlockBody(t *testing.T) {
 	src := `main() {
-    classify := (Int x) -> {
+    var classify = (Int x) -> {
         if x > 0 {
             return "positive"
         }
@@ -774,7 +774,7 @@ Int applyFn(Int val, Any callback) {
     return callback(val)
 }
 main() {
-    result := applyFn(5, (Int x) -> x * 3)
+    var result = applyFn(5, (Int x) -> x * 3)
     print(result)
 }`
 	out, errs := transpile(src)
@@ -786,7 +786,7 @@ main() {
 
 func TestLambdaFailableSignature(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) -> {
+    var safeDivide = (Int a, Int b) -> {
         if a == 0 {
             return Error("bad input")
         }
@@ -808,13 +808,13 @@ func TestLambdaFailableSignature(t *testing.T) {
 
 func TestLambdaFailableAutoPropagate(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) -> {
+    var safeDivide = (Int a, Int b) -> {
         if b == 0 {
             return Error("division by zero")
         }
         return a / b
     }
-    result := safeDivide(10, 0) or {
+    var result = safeDivide(10, 0) or {
         print("caught")
         exit(1)
     }
@@ -831,15 +831,15 @@ func TestLambdaFailableAutoPropagate(t *testing.T) {
 
 func TestMixedFailableAndNonFailableLambdas(t *testing.T) {
 	src := `main() {
-    double := (Int x) -> x * 2
-    safeSqrt := (Int x) -> {
+    var double = (Int x) -> x * 2
+    var safeSqrt = (Int x) -> {
         if x < 0 {
             return Error("negative input")
         }
         return x * x
     }
     print(double(4))
-    r := safeSqrt(3)
+    var r = safeSqrt(3)
     print(r)
 }`
 	out, errs := transpile(src)
@@ -858,15 +858,15 @@ func TestMixedFailableAndNonFailableLambdas(t *testing.T) {
 
 func TestMultipleFailableCallsInMain(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) -> {
+    var safeDivide = (Int a, Int b) -> {
         if b == 0 {
             return Error("division by zero")
         }
         return a / b
     }
-    r1 := safeDivide(10, 2)
+    var r1 = safeDivide(10, 2)
     print(r1)
-    r2 := safeDivide(8, 4)
+    var r2 = safeDivide(8, 4)
     print(r2)
 }`
 	out, errs := transpile(src)
@@ -883,7 +883,7 @@ func TestMultipleFailableCallsInMain(t *testing.T) {
 
 func TestIntegrationStringInterpolationInLambda(t *testing.T) {
 	src := `main() {
-    makeMsg := (String name) -> "Hello, {name}!"
+    var makeMsg = (String name) -> "Hello, {name}!"
     print(makeMsg("World"))
 }`
 	out, errs := transpile(src)
@@ -897,8 +897,8 @@ func TestIntegrationStringInterpolationInLambda(t *testing.T) {
 
 func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
 	src := `main() {
-    base := 100
-    addBase := (Int x) -> x + base
+    var base = 100
+    var addBase = (Int x) -> x + base
     print(addBase(5))
 }`
 	out, errs := transpile(src)
@@ -913,7 +913,7 @@ func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
 
 func TestFailableLambdaMultipleReturnPaths(t *testing.T) {
 	src := `main() {
-    classify := (Int x) -> {
+    var classify = (Int x) -> {
         if x < 0 {
             return Error("negative")
         }
@@ -922,7 +922,7 @@ func TestFailableLambdaMultipleReturnPaths(t *testing.T) {
         }
         return "positive"
     }
-    r := classify(5)
+    var r = classify(5)
     print(r)
 }`
 	out, errs := transpile(src)
@@ -958,10 +958,10 @@ greet(String name, String greeting = "Hello") {
 }
 
 main() {
-    d1 := Dog("Rex")
-    d2 := Dog("Buddy", 3)
-    d3 := Dog(name: "Max")
-    d4 := Dog(age: 5, name: "Spot")
+    var d1 = Dog("Rex")
+    var d2 = Dog("Buddy", 3)
+    var d3 = Dog(name: "Max")
+    var d4 = Dog(age: 5, name: "Spot")
     greet("Alice")
     greet("Bob", greeting: "Hi")
 }
@@ -987,7 +987,7 @@ main() {
 func TestWithStmt(t *testing.T) {
 	src := `
 main() {
-    with (f := openFile("data.txt")) {
+    with (f = openFile("data.txt")) {
         print("reading")
     }
 }
@@ -1007,7 +1007,7 @@ main() {
 func TestWithStmtMultipleResources(t *testing.T) {
 	src := `
 main() {
-    with (src := openFile("in.txt"), dst := createFile("out.txt")) {
+    with (src = openFile("in.txt"), dst = createFile("out.txt")) {
         print("copying")
     }
 }
@@ -1025,7 +1025,7 @@ main() {
 func TestWithStmtThreeResources(t *testing.T) {
 	src := `
 main() {
-    with (a := open("a"), b := open("b"), c := open("c")) {
+    with (a = open("a"), b = open("b"), c = open("c")) {
         print("ok")
     }
 }
@@ -1045,7 +1045,7 @@ main() {
 func TestWithStmtInsideFunction(t *testing.T) {
 	src := `
 process() {
-    with (f := openFile("data.txt")) {
+    with (f = openFile("data.txt")) {
         print("reading")
     }
 }
@@ -1064,8 +1064,8 @@ func TestWithStmtLocker(t *testing.T) {
 	src := `
 import "sync"
 main() {
-    mu := sync.Mutex()
-    with (locked := mu) {
+    var mu = sync.Mutex()
+    with (locked = mu) {
         print("critical section")
     }
 }
@@ -1081,7 +1081,7 @@ main() {
 func TestWithStmtWithOrHandler(t *testing.T) {
 	src := `
 main() {
-    with (f := openFile("x") or {
+    with (f = openFile("x") or {
         print("error")
         exit(1)
     }) {
@@ -1103,7 +1103,7 @@ Int add(Int x, Int y = 10) {
     return x + y
 }
 main() {
-    r := add(5)
+    var r = add(5)
 }
 `
 	out, errs := transpile(src)
@@ -1127,7 +1127,7 @@ func transpileWithTypes(src string) (string, []string) {
 }
 
 func TestTypedMapLiteral(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { m := {"a": 1, "b": 2} }`)
+	out, errs := transpileWithTypes(`main() { var m = {"a": 1, "b": 2} }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1136,7 +1136,7 @@ func TestTypedMapLiteral(t *testing.T) {
 }
 
 func TestTypedListLiteral(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { nums := [1, 2, 3] }`)
+	out, errs := transpileWithTypes(`main() { var nums = [1, 2, 3] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1144,7 +1144,7 @@ func TestTypedListLiteral(t *testing.T) {
 }
 
 func TestMixedListFallsBackToAny(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { m := [1, "a"] }`)
+	out, errs := transpileWithTypes(`main() { var m = [1, "a"] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1168,7 +1168,7 @@ func TestEmptyListWithDeclaredType(t *testing.T) {
 }
 
 func TestNestedListLiteral(t *testing.T) {
-	out, errs := transpileWithTypes(`main() { m := [[1, 2], [3, 4]] }`)
+	out, errs := transpileWithTypes(`main() { var m = [[1, 2], [3, 4]] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1191,7 +1191,7 @@ main() { print(PI) }`)
 
 func TestGoTypeNewZeroValue(t *testing.T) {
 	out, errs := transpile(`import "sync"
-main() { mu := sync.Mutex() }`)
+main() { var mu = sync.Mutex() }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1200,7 +1200,7 @@ main() { mu := sync.Mutex() }`)
 
 func TestGoTypeNewNamedFields(t *testing.T) {
 	out, errs := transpile(`import "net/http"
-main() { c := http.Client(Timeout: 30) }`)
+main() { var c = http.Client(Timeout: 30) }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1209,7 +1209,7 @@ main() { c := http.Client(Timeout: 30) }`)
 
 func TestGoTypeNewMultipleNamedFields(t *testing.T) {
 	out, errs := transpile(`import "net/http"
-main() { c := http.Client(Timeout: 30, MaxIdleConns: 10) }`)
+main() { var c = http.Client(Timeout: 30, MaxIdleConns: 10) }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1240,7 +1240,7 @@ main() { tls.Dial("tcp", "example.com:443", tls.Config(MinVersion: 3)) }`)
 func TestGoTypePointerInferenceNoContext(t *testing.T) {
 	// := assignment — no pointer context, emit value (no &)
 	out, errs := transpile(`import "crypto/tls"
-main() { cfg := tls.Config() }`)
+main() { var cfg = tls.Config() }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1252,7 +1252,7 @@ func TestGoTypePointerInferenceNestedField(t *testing.T) {
 	// http.Server.TLSConfig field is *tls.Config — nested pointer inference
 	out, errs := transpile(`import "net/http"
 import "crypto/tls"
-main() { s := http.Server(TLSConfig: tls.Config(MinVersion: 3)) }`)
+main() { var s = http.Server(TLSConfig: tls.Config(MinVersion: 3)) }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1262,7 +1262,7 @@ main() { s := http.Server(TLSConfig: tls.Config(MinVersion: 3)) }`)
 func TestGoTypePointerInferenceValueParam(t *testing.T) {
 	// Non-pointer param should NOT get &
 	out, errs := transpile(`import "sync"
-main() { mu := sync.Mutex() }`)
+main() { var mu = sync.Mutex() }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1273,7 +1273,7 @@ main() { mu := sync.Mutex() }`)
 // --- Index expressions -------------------------------------------------------
 
 func TestIndexExpr(t *testing.T) {
-	out, errs := transpile(`main() { x := nums[0] }`)
+	out, errs := transpile(`main() { var x = nums[0] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1289,7 +1289,7 @@ func TestIndexAssign(t *testing.T) {
 }
 
 func TestMapIndexExpr(t *testing.T) {
-	out, errs := transpile(`main() { x := m["key"] }`)
+	out, errs := transpile(`main() { var x = m["key"] }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1318,7 +1318,7 @@ func TestContinueStmt(t *testing.T) {
 
 func TestSliceBracketSyntax(t *testing.T) {
 	out, errs := transpile(`main() {
-	nums := [1, 2, 3, 4, 5]
+	var nums = [1, 2, 3, 4, 5]
 	print(nums[1:3])
 	print(nums[2:])
 	print(nums[:3])
@@ -1333,7 +1333,7 @@ func TestSliceBracketSyntax(t *testing.T) {
 
 func TestSliceMethodSyntax(t *testing.T) {
 	out, errs := transpile(`main() {
-	nums := [1, 2, 3, 4, 5]
+	var nums = [1, 2, 3, 4, 5]
 	print(nums.slice(1, 3))
 	print(nums.slice(2))
 }`)
@@ -1346,7 +1346,7 @@ func TestSliceMethodSyntax(t *testing.T) {
 
 func TestSliceStringBracket(t *testing.T) {
 	out, errs := transpile(`main() {
-	s := "hello"
+	var s = "hello"
 	print(s[1:4])
 	print(s[:3])
 	print(s[2:])
@@ -1361,7 +1361,7 @@ func TestSliceStringBracket(t *testing.T) {
 
 func TestSliceStringMethod(t *testing.T) {
 	out, errs := transpile(`main() {
-	s := "hello"
+	var s = "hello"
 	print(s.slice(1, 4))
 	print(s.slice(2))
 }`)
@@ -1387,7 +1387,7 @@ func transpileWithSourceMap(src, srcFile string) (string, []string) {
 
 func TestSourceMapDirectives(t *testing.T) {
 	out, errs := transpileWithSourceMap(`main() {
-	x := 42
+	var x = 42
 	print(x)
 }`, "test.zn")
 	if errs != nil {
@@ -1400,7 +1400,7 @@ func TestSourceMapDirectives(t *testing.T) {
 
 func TestSourceMapDisabledByDefault(t *testing.T) {
 	out, errs := transpile(`main() {
-	x := 42
+	var x = 42
 	print(x)
 }`)
 	if errs != nil {
@@ -1444,7 +1444,7 @@ Logger {
         print("logging")
     }
 }
-main() { l := Logger(); l.log("a", "b") }`)
+main() { var l = Logger(); l.log("a", "b") }`)
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1457,7 +1457,7 @@ Int sum(Int... nums) {
     return 0
 }
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     sum(items...)
 }`)
 	if errs != nil {
@@ -1469,7 +1469,7 @@ main() {
 func TestListAddMultipleArgs(t *testing.T) {
 	out, errs := transpile(`
 main() {
-    items := [1, 2, 3]
+    var items = [1, 2, 3]
     items.add(4, 5, 6)
 }`)
 	if errs != nil {
@@ -1481,8 +1481,8 @@ main() {
 func TestListAddSpread(t *testing.T) {
 	out, errs := transpile(`
 main() {
-    items := [1, 2, 3]
-    more := [4, 5, 6]
+    var items = [1, 2, 3]
+    var more = [4, 5, 6]
     items.add(more...)
 }`)
 	if errs != nil {
@@ -1552,7 +1552,7 @@ func TestAutoDetectStrconvAtoi(t *testing.T) {
 import "strconv"
 
 main() {
-    n := strconv.Atoi("42") or { print("fail"); halt }
+    var n = strconv.Atoi("42") or { print("fail"); halt }
     print(n)
 }`)
 	if errs != nil {
@@ -1568,7 +1568,7 @@ func TestAutoDetectJsonMarshal(t *testing.T) {
 import "encoding/json"
 
 main() {
-    data := json.Marshal("hello") or { print("fail"); halt }
+    var data = json.Marshal("hello") or { print("fail"); halt }
     print(data)
 }`)
 	if errs != nil {
@@ -1593,7 +1593,7 @@ main() {
 }
 
 func TestRawStringLit(t *testing.T) {
-	out, errs := transpile("main() { s := `hello\\nworld` }")
+	out, errs := transpile("main() { var s = `hello\\nworld` }")
 	if errs != nil {
 		t.Fatal(errs)
 	}
@@ -1621,7 +1621,7 @@ func TestMethodFailableDetection(t *testing.T) {
 import "os"
 
 String doWrite() {
-    f := os.Open("test.txt")
+    var f = os.Open("test.txt")
     f.WriteString("hello")
     return "done"
 }`
@@ -1640,7 +1640,7 @@ func TestMethodVoidFailableDetection(t *testing.T) {
 import "os"
 
 doClose() {
-    f := os.Open("test.txt")
+    var f = os.Open("test.txt")
     f.Close()
 }`
 	out, errs := transpile(src)
@@ -1657,7 +1657,7 @@ doClose() {
 
 func TestLambdaShorthandSingleParam(t *testing.T) {
 	src := `main() {
-	double := x -> x * 2
+	var double = x -> x * 2
 	print(double(5))
 }`
 	out, errs := transpile(src)
@@ -1670,7 +1670,7 @@ func TestLambdaShorthandSingleParam(t *testing.T) {
 
 func TestLambdaShorthandParens(t *testing.T) {
 	src := `main() {
-	add := (a, b) -> a + b
+	var add = (a, b) -> a + b
 	print(add(1, 2))
 }`
 	out, errs := transpile(src)
@@ -1684,7 +1684,7 @@ func TestLambdaShorthandParens(t *testing.T) {
 func TestLambdaShorthandMixedTyped(t *testing.T) {
 	// Typed lambda syntax
 	src := `main() {
-	double := (Int x) -> x * 2
+	var double = (Int x) -> x * 2
 	print(double(5))
 }`
 	out, errs := transpile(src)
