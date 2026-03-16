@@ -3,37 +3,36 @@
 
 # Zinc
 
-**Zinc** is an object-oriented language that transpiles to Go. Write clean, expressive OO code — get fast, idiomatic Go output.
+**Zinc** is a convention-over-configuration language that compiles to native binaries via C# AOT. Less typing, less ceremony, optimized native output — think Spring Boot for compiled apps.
 
 ```
 main() {
-    String name = "World"
+    var name = "World"
     print("Hello, {name}!")
 }
 ```
 
-Transpiles to:
+```bash
+$ zinc build
+  built hello (AOT native binary, 1.3 MB)
 
-```go
-func main() {
-    name := "World"
-    fmt.Println(fmt.Sprintf("Hello, %v!", name))
-}
+$ ./hello
+  Hello, World!
 ```
 
 ---
 
 ## Why Zinc?
 
-Go is fast, simple, and has excellent tooling — but its lack of traditional OO features can feel limiting for developers coming from Java, Kotlin, C#, Python, or TypeScript. Zinc bridges that gap:
+Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc gives you classes, interfaces, generics, LINQ-style collection methods, and error handling — then compiles to a **1-2 MB native binary** with zero runtime dependencies.
 
-- **Familiar OO syntax** — classes, interfaces, inheritance, constructors, and `this`
-- **Modern conveniences** — null safety (`?.`), string interpolation, errors as values with `or` handlers, `with` resource management, lambdas, enums, generics
-- **Zero runtime overhead** — everything compiles to plain Go; no reflection, no runtime library
-- **Full Go interop** — import any Go package, call any Go function, use any Go type
-- **Transparent output** — the generated `.go` files are readable, idiomatic, and `go vet`-clean
-
-Zinc doesn't replace Go — it's a better way to write it.
+- **No boilerplate** — no `public static void Main`, no `using` statements, no XML project files
+- **Familiar syntax** — classes, interfaces, inheritance, generics, lambdas, `match`
+- **LINQ collection methods** — `Where`, `Select`, `OrderBy`, `Aggregate`, `First`, and more
+- **Clean error handling** — `or {}` handlers instead of 6-line try/catch blocks
+- **Native AOT binaries** — 1-2 MB, ~9ms startup, fully tree-shaken and optimized
+- **Zero config** — `zinc.toml` replaces XML; `zinc build` does the rest
+- **Dual backend** — C# AOT (default) for ecosystem fit, Go for CLI tools
 
 ---
 
@@ -41,25 +40,13 @@ Zinc doesn't replace Go — it's a better way to write it.
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation, CLI usage, and running examples |
+| [Getting Started](docs/getting-started.md) | Installation, CLI usage, and project setup |
 | [Language Reference](docs/language-reference.md) | Complete syntax guide — variables, functions, classes, control flow, and more |
-| [Built-in Functions](docs/builtins.md) | All built-in functions with Go equivalents |
+| [Built-in Functions](docs/builtins.md) | All built-in functions |
 
 ---
 
 ## Installation
-
-**Quick install** (Linux / macOS):
-
-```bash
-curl -sSL https://raw.githubusercontent.com/victorybhg/zinc/master/install.sh | sh
-```
-
-**Homebrew** (macOS / Linux):
-
-```bash
-brew install victorybhg/tap/zinc
-```
 
 **From source** (requires Go 1.26+):
 
@@ -69,34 +56,34 @@ go install github.com/victorybhg/zinc/cmd/zinc@latest
 
 **Pre-built binaries**: download from [GitHub Releases](https://github.com/victorybhg/zinc/releases).
 
-You can customize the install directory with `ZINC_INSTALL_DIR`:
-
-```bash
-ZINC_INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/victorybhg/zinc/master/install.sh | sh
-```
+**Prerequisites**: .NET 10+ SDK for C# AOT builds, or Go 1.26+ for Go backend.
 
 ---
 
 ## Quick Start
 
 ```bash
-# try it
-zinc examples/hello.zn --run
-
 # start a project
 mkdir myapp && cd myapp
 zinc init myapp
+zinc build        # → native AOT binary
+./myapp           # → "Hello from Zinc!"
+
+# or just run it
 zinc run
 ```
 
-See the [Getting Started](docs/getting-started.md) guide for project setup, multi-file packages, and full CLI reference.
+`zinc init` creates a `zinc.toml` project config and `main.zn` entry point. No XML, no `.csproj`, no ceremony.
+
+See the [Getting Started](docs/getting-started.md) guide for multi-file projects, dependencies, and full CLI reference.
 
 ---
 
 ## Feature Highlights
 
-- Classes, interfaces, and inheritance
+- Classes, interfaces, and inheritance (1:1 mapping to C#)
 - Generic functions and classes
+- LINQ collection methods (`Where`, `Select`, `OrderBy`, `First`, `Sum`, `Aggregate`, etc.)
 - Field and constant visibility (`pub` / private by default)
 - Null safety with `?.` safe navigation
 - Errors as values with auto-propagation and `or` handlers
@@ -106,11 +93,38 @@ See the [Getting Started](docs/getting-started.md) guide for project setup, mult
 - String interpolation
 - Default parameters and named arguments
 - Variadic functions and spread operator
-- Go type construction with automatic pointer inference (`sync.Mutex()`, `url.URL(Scheme: "https")`)
-- Labeled loops
-- Tuple unpacking for multi-return functions
-- Constants
+- `zinc.toml` project config — no XML
+- Native AOT compilation with full optimizations (tree shaking, strip, speed)
+- Dual backend: C# AOT (default) and Go
 - Interactive REPL
+
+---
+
+## Example
+
+```
+Dog {
+    pub String name
+
+    new(String name) {
+        this.name = name
+    }
+
+    pub String bark() {
+        return "{this.name} says Woof!"
+    }
+}
+
+main() {
+    var dogs = [Dog("Rex"), Dog("Buddy"), Dog("Max")]
+    var names = dogs.Select((Dog d) -> d.name).OrderBy((String s) -> s)
+    for name in names {
+        print(name)
+    }
+}
+```
+
+Output: `Buddy`, `Max`, `Rex`
 
 ---
 

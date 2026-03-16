@@ -4,6 +4,32 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-16
+
+### Added
+- **C# AOT backend** — new default backend targeting .NET 10 Native AOT. Produces 1-2 MB native binaries with ~9ms startup. Classes, interfaces, inheritance, generics, enums, error handling (try/catch), lambdas, string interpolation, safe navigation, and all control flow supported.
+- **LINQ collection methods** — `Where`, `Select`, `First`, `FirstOrDefault`, `Last`, `Any`, `All`, `Count`, `Sum`, `Min`, `Max`, `Average`, `Aggregate`, `OrderBy`, `OrderByDescending`, `Take`, `Skip`, `Distinct`, `Zip`, `SelectMany`, `GroupBy`, `ToDictionary`, `ToList`, `ForEach` — all with E2E tests on .NET 10.
+- **`zinc.toml` project config** — replaces `go.mod` for project setup. Supports project name/version, build target (csharp/go), optimization toggle, and `[dependencies]` for NuGet packages. No XML.
+- **Full C# AOT build pipeline** — `zinc build` reads `zinc.toml`, transpiles `.zn` → `.cs`, generates `.csproj` internally, runs `dotnet publish` with AOT, copies native binary to project root.
+- **`zinc run` for C# target** — transpile + `dotnet run` in one command.
+- **List/map type inference** — list literals infer element type from contents (`List<int>` instead of `List<object>`), enabling typed LINQ operations.
+- **Virtual/override detection** — C# codegen detects method overrides across parent/child classes and emits `virtual`/`override` keywords.
+- **Benchmark harness** — Go vs C# AOT performance comparison (`benchmarks/csharp-aot/`). C# AOT 2-3x faster on Where+Select, 1.6 MB binary.
+
+### Changed
+- **Default backend** — C# AOT is now the default; Go is secondary (`target = "go"` in `zinc.toml`)
+- **Lambda syntax** — `=>` changed to `->` (matches Java/Kotlin, ergonomic)
+- **Variable declaration syntax** — `:=` changed to `var x = expr` (ergonomic — avoids pinky-shift colon)
+- **Match case syntax** — `case 1 => { }` changed to `case 1 -> { }`
+- **With statement** — `with (f := expr)` changed to `with (f = expr)`
+- **For-loop init** — `for i := 0;` changed to `for var i = 0;`
+- **Tuple destructuring** — `(a, b) := expr` changed to `var (a, b) = expr`
+- **Collection method names** — PascalCase C# LINQ naming (`Add`, `Remove`, `Contains`, `ToUpper`, `Keys`, etc.)
+- **`zinc init`** — now creates `zinc.toml` + `main.zn` (was `go.mod` + `main.zn`)
+
+### Removed
+- Python backend prototype — removed in favor of C# AOT + Go dual-backend strategy
+
 ## [0.4.0] - 2026-03-11
 
 ### Added

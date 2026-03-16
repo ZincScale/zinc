@@ -3,41 +3,50 @@
 ## Installation
 
 ```bash
+go install github.com/victorybhg/zinc/cmd/zinc@latest
+```
+
+Or build from source:
+
+```bash
 git clone https://github.com/victorybhg/zinc
 cd zinc
 go build -o zinc ./cmd/zinc/
 ```
 
-Requires **Go 1.26+**. After building, move the `zinc` binary somewhere on your `$PATH` (e.g. `/usr/local/bin/`) so you can use it from any directory.
+Requires **Go 1.26+** for building the compiler. For C# AOT builds (default), you also need **.NET 10+ SDK**.
 
-## Quick Start — Single File
+## Quick Start
 
-For quick scripts or experimentation, just write a `.zn` file and run it:
-
-```bash
-zinc hello.zn --run
-```
-
-This transpiles `hello.zn` to `hello.go` and immediately runs it.
-
-## Bootstrapping a Project
-
-For anything beyond a single file, use `zinc init` to scaffold a project:
+Create a project and run it:
 
 ```bash
 mkdir myapp && cd myapp
 zinc init myapp
+zinc run
 ```
 
-This creates two files:
+This creates:
 
 ```
 myapp/
-  go.mod      # Go module (module myapp, go 1.26)
-  main.zn     # Entry point
+  zinc.toml     # Project config (target, dependencies, optimization)
+  main.zn       # Entry point
 ```
 
-The generated `main.zn` contains:
+The generated `zinc.toml`:
+
+```toml
+[project]
+name = "myapp"
+version = "0.1.0"
+
+[build]
+target = "csharp"    # or "go"
+optimize = true      # AOT with full optimizations
+```
+
+The generated `main.zn`:
 
 ```
 main() {
@@ -45,26 +54,41 @@ main() {
 }
 ```
 
-Run it immediately:
+## Building
 
 ```bash
-zinc run
+zinc build          # → native AOT binary (C# target)
+./myapp             # run the binary
 ```
 
-Or compile to a binary:
+`zinc build` reads `zinc.toml`, transpiles `.zn` → `.cs`, generates a `.csproj` internally (you never see it), and runs `dotnet publish` with AOT. The native binary is copied to your project root.
+
+For the Go backend:
 
 ```bash
-zinc build
-./myapp
+# Set target = "go" in zinc.toml, or:
+zinc build          # uses go.mod + go build
 ```
 
-### Adding Packages
+## Adding Dependencies
 
-Zinc supports multi-file projects with packages, just like Go. Create subdirectories for each package and declare the package at the top of each `.zn` file:
+Add NuGet packages (C# target) or Go modules (Go target) in `zinc.toml`:
+
+```toml
+[dependencies]
+"Newtonsoft.Json" = "13.0.3"
+"Serilog" = "4.0.0"
+```
+
+These are automatically included in the build — no `dotnet add package` or XML editing needed.
+
+## Multi-File Projects
+
+Create subdirectories for packages:
 
 ```
 myapp/
-  go.mod
+  zinc.toml
   main.zn
   models/
     user.zn
@@ -72,7 +96,7 @@ myapp/
     math.zn
 ```
 
-**`utils/math.zn`** — helper functions in a subpackage:
+**`utils/math.zn`** — helper functions:
 
 ```
 package "myapp/utils"
@@ -82,7 +106,7 @@ pub Int add(Int a, Int b) {
 }
 ```
 
-**`models/user.zn`** — a class in another subpackage:
+**`models/user.zn`** — a class:
 
 ```
 package "myapp/models"
@@ -102,7 +126,7 @@ User {
 }
 ```
 
-**`main.zn`** — import and use your packages:
+**`main.zn`** — import and use:
 
 ```
 import "myapp/utils"
@@ -123,117 +147,62 @@ Then build and run:
 zinc run
 ```
 
-`zinc build` and `zinc run` automatically find and transpile all `.zn` files across all subdirectories, resolve cross-file types (constructors, enums, interfaces, default parameters), and invoke the Go toolchain.
-
-### Project Workflow Summary
-
-| Command | What it does |
-|---------|-------------|
-| `zinc init [name]` | Scaffold a new project (creates `go.mod` + `main.zn`) |
-| `zinc run [dir]` | Transpile all `.zn` files and run the project |
-| `zinc build [dir]` | Transpile all `.zn` files and compile to a binary |
-| `zinc <file.zn> --run` | Transpile and run a single file |
-| `zinc <file.zn> --watch` | Watch a file for changes and re-transpile on save |
-| `zinc repl` | Launch the interactive REPL |
-| `zinc --version` | Print version |
-
-## Watch Mode
-
-For rapid iteration on a single file, use `--watch` to automatically re-transpile on every save:
-
-```bash
-zinc hello.zn --watch
-```
-
-Output:
-```
-Watching hello.zn for changes (Ctrl+C to stop)...
-[14:32:05] transpiled hello.zn → hello.go
-[14:32:11] transpiled hello.zn → hello.go
-```
-
-The watcher polls the file every 300ms for modification time changes. On each save it runs the full pipeline (lex → parse → typecheck → codegen → gofmt). Errors are printed with timestamps but don't stop the watcher — fix the error, save again, and it picks up the change.
-
-You can combine it with `-o` to control the output path:
-
-```bash
-zinc hello.zn --watch -o build/hello.go
-```
-
-**Note:** Watch mode currently works with single files only. For multi-file projects, use `zinc run` or `zinc build` after each change. Project-wide watch mode is a planned enhancement.
-
 ## CLI Reference
 
 ```bash
-zinc <file.zn>               # transpile to <file>.go
-zinc <file.zn> -o out.go     # specify output file
-zinc <file.zn> --run         # transpile and run immediately
-zinc <file.zn> --watch       # watch for changes, re-transpile automatically
-zinc <file.zn> --verbose     # show token/AST debug info
-zinc init [name]             # initialize a new project (creates go.mod + main.zn)
-zinc build [dir]             # transpile all .zn files and compile with go build
-zinc run [dir]               # transpile all .zn files and run
-zinc repl                    # launch interactive REPL
-zinc --version               # print version
+zinc <file.zn>               # transpile a single file
+zinc <file.zn> -o out.cs      # specify output file
+zinc <file.zn> --run          # transpile and run immediately
+zinc <file.zn> --watch        # watch for changes, re-transpile automatically
+zinc <file.zn> --verbose      # show token/AST debug info
+zinc init [name]              # initialize a new project (creates zinc.toml + main.zn)
+zinc build [dir]              # transpile + compile (C# AOT default, Go with --target go)
+zinc run [dir]                # transpile + run
+zinc repl                     # launch interactive REPL
+zinc --version                # print version
 ```
 
-### Flag Shortcuts
+### Project Commands
 
-Every flag has a short alias:
+| Command | What it does |
+|---------|-------------|
+| `zinc init [name]` | Scaffold a new project (`zinc.toml` + `main.zn`) |
+| `zinc build [dir]` | Transpile + compile to native binary |
+| `zinc run [dir]` | Transpile + run |
+| `zinc repl` | Launch the interactive REPL |
 
-| Long | Short | Description |
+### Single-File Commands
+
+| Flag | Short | Description |
 |------|-------|-------------|
 | `--run` | `-r` | Transpile and run |
-| `--watch` | `-w` | Watch mode |
-| `--verbose` | `-v` | Debug output (token count, declaration count) |
+| `--watch` | `-w` | Watch mode (re-transpile on save) |
+| `--verbose` | `-v` | Debug output |
 | `--version` | `-V` | Print version |
 | `-o <file>` | | Output file path |
 
 ### Source Maps
 
-Zinc emits `//line` directives in the generated Go code. This means if the Go compiler reports an error, the file and line number will point back to your `.zn` source — not the generated `.go` file. You debug in Zinc, not in Go.
-
-### Error Output
-
-Errors are printed with color formatting (ANSI colors) when running in a terminal. Colors are automatically disabled when output is piped or in CI environments. Errors include the source file name and line number:
-
-```
-error: hello.zn:12 — undefined variable 'x'
-```
-
-### Prerequisites
-
-Zinc requires **Go 1.26+** installed on your system. The Go toolchain provides `gofmt` (used to format generated code) and `go build`/`go run` (used by `zinc build` and `zinc run`).
+Zinc emits line directives in the generated code. If the compiler reports an error, the file and line number point back to your `.zn` source — not the generated output. You debug in Zinc, not in C# or Go.
 
 ## Running Examples
 
-The [`examples/`](../examples/) directory contains working Zinc programs covering every major language feature:
+The [`examples/`](../examples/) directory contains working Zinc programs:
 
 | Example | Description |
 |---------|-------------|
-| [`hello.zn`](../examples/hello.zn) | Hello World + variables |
+| [`hello.zn`](../examples/hello.zn) | Hello World |
 | [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance, polymorphism |
-| [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
-| [`errors.zn`](../examples/errors.zn) | Errors as values, `or` handler |
+| [`closures.zn`](../examples/closures.zn) | Lambdas, closures, higher-order functions |
 | [`enums.zn`](../examples/enums.zn) | Enums + match |
-| [`generics.zn`](../examples/generics.zn) | Generic functions, classes, type inference, polymorphism |
-| [`fibonacci.zn`](../examples/fibonacci.zn) | Recursion |
-| [`closures.zn`](../examples/closures.zn) | Lambdas, closures, failable lambdas |
-| [`safe_navigation.zn`](../examples/safe_navigation.zn) | Safe navigation `?.` with chaining |
-| [`with_resources.zn`](../examples/with_resources.zn) | Resource management with `with` |
-| [`defaults_and_named_args.zn`](../examples/defaults_and_named_args.zn) | Default parameters + named arguments |
-| [`type_casting.zn`](../examples/type_casting.zn) | Type assertions (`as`) and checks (`is`) |
-| [`collections.zn`](../examples/collections.zn) | Typed literals, slicing, iteration |
-| [`callable_types.zn`](../examples/callable_types.zn) | `Fn` function types + higher-order functions |
-| [`labeled_loops.zn`](../examples/labeled_loops.zn) | Labeled `break` and `continue` |
-| [`tuple_unpacking.zn`](../examples/tuple_unpacking.zn) | Multi-return unpacking + error handling |
-| [`constants.zn`](../examples/constants.zn) | `const` declarations |
-| [`variadic.zn`](../examples/variadic.zn) | Variadic functions, spread operator |
+| [`errors.zn`](../examples/errors.zn) | Error handling with `or` |
+| [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
+| [`collections.zn`](../examples/collections.zn) | Lists, maps, slicing |
+| [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
+| [`with_resources.zn`](../examples/with_resources.zn) | Resource management |
 
-There's also a full [multi-file project example](../examples/myapp/) showing packages, classes with inheritance, and cross-file imports.
-
-Run any example:
+Run any example with the Go backend (single-file mode):
 
 ```bash
-./zinc examples/hello.zn --run
+zinc examples/hello.zn --run
 ```
