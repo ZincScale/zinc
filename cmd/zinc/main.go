@@ -106,9 +106,21 @@ func main() {
 				dir = args[i+1]
 				i++
 			}
-			if err := project.Build(dir); err != nil {
+			cfg, err := config.Load(dir)
+			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
+			}
+			if cfg != nil && cfg.Target == "csharp" {
+				if err := project.BuildCSharp(dir, cfg); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+			} else {
+				if err := project.Build(dir); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
 			}
 			return
 		case a == "run":
@@ -117,9 +129,21 @@ func main() {
 				dir = args[i+1]
 				i++
 			}
-			if err := project.Run(dir); err != nil {
+			cfg, err := config.Load(dir)
+			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
+			}
+			if cfg != nil && cfg.Target == "csharp" {
+				if err := project.RunCSharp(dir, cfg); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+			} else {
+				if err := project.Run(dir); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
 			}
 			return
 		case a == "-o" || a == "--o":

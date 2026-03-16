@@ -9,3 +9,6 @@
 # C# benchmark build artifacts
 benchmarks/csharp-aot/bin/
 benchmarks/csharp-aot/obj/
+
+# Zinc build directory
+.zinc-build/

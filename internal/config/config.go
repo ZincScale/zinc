@@ -20,15 +20,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 )
 
+// Dependency represents a package dependency.
+type Dependency struct {
+	Name    string // package name (NuGet package or Go module)
+	Version string // version constraint
+}
+
 // Config represents a zinc.toml project configuration.
 type Config struct {
-	Name     string // project name
-	Version  string // project version
-	Target   string // "csharp" (default) or "go"
-	Optimize bool   // AOT with full optimizations (default: true)
+	Name         string       // project name
+	Version      string       // project version
+	Target       string       // "csharp" (default) or "go"
+	Optimize     bool         // AOT with full optimizations (default: true)
+	Dependencies []Dependency // package dependencies
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -88,15 +97,20 @@ func Load(dir string) (*Config, error) {
 			fullKey = section + "." + key
 		}
 
-		switch fullKey {
-		case "project.name":
+		switch {
+		case fullKey == "project.name":
 			cfg.Name = val
-		case "project.version":
+		case fullKey == "project.version":
 			cfg.Version = val
-		case "build.target":
+		case fullKey == "build.target":
 			cfg.Target = val
-		case "build.optimize":
+		case fullKey == "build.optimize":
 			cfg.Optimize = val == "true"
+		case section == "dependencies":
+			cfg.Dependencies = append(cfg.Dependencies, Dependency{
+				Name:    strings.Trim(key, `"`),
+				Version: val,
+			})
 		}
 	}
 
@@ -117,7 +131,44 @@ func Generate(cfg *Config) string {
 	b.WriteString("[build]\n")
 	b.WriteString(fmt.Sprintf("target = \"%s\"\n", cfg.Target))
 	b.WriteString(fmt.Sprintf("optimize = %t\n", cfg.Optimize))
+	if len(cfg.Dependencies) > 0 {
+		b.WriteString("\n")
+		b.WriteString("[dependencies]\n")
+		for _, dep := range cfg.Dependencies {
+			b.WriteString(fmt.Sprintf("\"%s\" = \"%s\"\n", dep.Name, dep.Version))
+		}
+	}
 	return b.String()
+}
+
+// RuntimeID returns the .NET runtime identifier for the current platform.
+func RuntimeID() string {
+	os := runtime.GOOS
+	arch := runtime.GOARCH
+	switch os {
+	case "linux":
+		switch arch {
+		case "amd64":
+			return "linux-x64"
+		case "arm64":
+			return "linux-arm64"
+		}
+	case "darwin":
+		switch arch {
+		case "amd64":
+			return "osx-x64"
+		case "arm64":
+			return "osx-arm64"
+		}
+	case "windows":
+		switch arch {
+		case "amd64":
+			return "win-x64"
+		case "arm64":
+			return "win-arm64"
+		}
+	}
+	return os + "-" + arch
 }
 
 // GenerateCsproj creates a .csproj file for C# AOT compilation.
@@ -127,6 +178,7 @@ func GenerateCsproj(cfg *Config) string {
 	b.WriteString("  <PropertyGroup>\n")
 	b.WriteString("    <OutputType>Exe</OutputType>\n")
 	b.WriteString("    <TargetFramework>net10.0</TargetFramework>\n")
+	b.WriteString(fmt.Sprintf("    <AssemblyName>%s</AssemblyName>\n", cfg.Name))
 	if cfg.Optimize {
 		b.WriteString("    <PublishAot>true</PublishAot>\n")
 		b.WriteString("    <OptimizationPreference>Speed</OptimizationPreference>\n")
@@ -135,12 +187,34 @@ func GenerateCsproj(cfg *Config) string {
 		b.WriteString("    <TrimMode>full</TrimMode>\n")
 		b.WriteString("    <InvariantGlobalization>true</InvariantGlobalization>\n")
 	}
-	b.WriteString("  </PropertyGroup>\n\n")
-	b.WriteString("</Project>\n")
+	b.WriteString("  </PropertyGroup>\n")
+
+	if len(cfg.Dependencies) > 0 {
+		b.WriteString("\n  <ItemGroup>\n")
+		// Sort for deterministic output
+		deps := make([]Dependency, len(cfg.Dependencies))
+		copy(deps, cfg.Dependencies)
+		sort.Slice(deps, func(i, j int) bool { return deps[i].Name < deps[j].Name })
+		for _, dep := range deps {
+			b.WriteString(fmt.Sprintf("    <PackageReference Include=\"%s\" Version=\"%s\" />\n", dep.Name, dep.Version))
+		}
+		b.WriteString("  </ItemGroup>\n")
+	}
+
+	b.WriteString("\n</Project>\n")
 	return b.String()
 }
 
 // GenerateGoMod creates a go.mod file for the Go backend.
 func GenerateGoMod(cfg *Config) string {
-	return fmt.Sprintf("module %s\n\ngo 1.26\n", cfg.Name)
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("module %s\n\ngo 1.26\n", cfg.Name))
+	if len(cfg.Dependencies) > 0 {
+		b.WriteString("\nrequire (\n")
+		for _, dep := range cfg.Dependencies {
+			b.WriteString(fmt.Sprintf("\t%s %s\n", dep.Name, dep.Version))
+		}
+		b.WriteString(")\n")
+	}
+	return b.String()
 }
