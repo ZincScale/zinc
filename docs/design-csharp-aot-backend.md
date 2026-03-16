@@ -241,9 +241,8 @@ zinc build --target python    # Python backend (existing prototype)
 
 ### Error handling strategy
 
-Two options for mapping `or {}`:
+Zinc's `or {}` maps to C# exceptions — this is a natural fit since .NET libraries already throw exceptions and C# developers expect `try/catch`.
 
-**Option A: Exceptions (simpler)**
 ```zinc
 content := readFile("data.txt") or { print("failed") }
 ```
@@ -257,17 +256,7 @@ try {
 }
 ```
 
-**Option B: Result type (more Zinc-like)**
-```csharp
-var result = ReadFile("data.txt");
-if (result.IsError) {
-    Console.WriteLine("failed");
-    return Result<string>.Error(result.Error);  // propagate
-}
-var content = result.Value;
-```
-
-Recommendation: **Option A (exceptions)** for v1. It's simpler, matches C# conventions, and .NET libraries already throw exceptions. Option B could be explored later for performance-critical paths where exception overhead matters.
+This is simpler than the Go backend's `if err != nil` chains and matches C# conventions exactly. No Result type wrapper needed — exceptions are the idiomatic C# error handling mechanism, and Zinc's `or {}` semantics (always propagate unless `exit()`/`panic()`) map directly to `throw`.
 
 ### Phased implementation
 
