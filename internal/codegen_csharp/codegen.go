@@ -1,0 +1,959 @@
+// Copyright 2026 victorybhg
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package codegen_csharp transpiles Zinc AST to C# source code.
+// This is a prototype backend targeting .NET Native AOT compilation.
+package codegen_csharp
+
+import (
+	"fmt"
+	"strings"
+
+	"zinc/internal/parser"
+)
+
+// Generator converts a Zinc AST to C# source code.
+type Generator struct {
+	buf            strings.Builder
+	indent         int
+	neededUsings   map[string]bool
+	classNames     map[string]bool
+	interfaceNames map[string]bool
+	enumNames      map[string]bool
+	classMethods   map[string]map[string]bool // className → set of method names
+	classParents   map[string][]string       // className → parent names
+	errCounter     int
+}
+
+// New creates a C# Generator.
+func New() *Generator {
+	return &Generator{
+		neededUsings:   map[string]bool{"System": true},
+		classNames:     make(map[string]bool),
+		interfaceNames: make(map[string]bool),
+		enumNames:      make(map[string]bool),
+		classMethods:   make(map[string]map[string]bool),
+		classParents:   make(map[string][]string),
+	}
+}
+
+// Generate produces C# source from a Zinc AST.
+func (g *Generator) Generate(prog *parser.Program) string {
+	// First pass: collect type names and method signatures
+	for _, d := range prog.Decls {
+		switch d := d.(type) {
+		case *parser.ClassDecl:
+			g.classNames[d.Name] = true
+			methods := make(map[string]bool)
+			for _, m := range d.Methods {
+				methods[m.Name] = true
+			}
+			g.classMethods[d.Name] = methods
+			g.classParents[d.Name] = d.Parents
+		case *parser.InterfaceDecl:
+			g.interfaceNames[d.Name] = true
+		case *parser.EnumDecl:
+			g.enumNames[d.Name] = true
+		}
+	}
+
+	// Emit declarations
+	for i, d := range prog.Decls {
+		if i > 0 {
+			g.write("\n")
+		}
+		g.emitDecl(d)
+	}
+
+	// Prepend usings
+	var out strings.Builder
+	for u := range g.neededUsings {
+		out.WriteString(fmt.Sprintf("using %s;\n", u))
+	}
+	out.WriteString("\n")
+	out.WriteString(g.buf.String())
+	return out.String()
+}
+
+// --- Output helpers ----------------------------------------------------------
+
+func (g *Generator) write(s string) {
+	g.buf.WriteString(s)
+}
+
+func (g *Generator) writeln(s string) {
+	g.buf.WriteString(strings.Repeat("    ", g.indent))
+	g.buf.WriteString(s)
+	g.buf.WriteString("\n")
+}
+
+func (g *Generator) push() { g.indent++ }
+func (g *Generator) pop()  { g.indent-- }
+
+func (g *Generator) nextErr() string {
+	g.errCounter++
+	return fmt.Sprintf("_err%d", g.errCounter)
+}
+
+// --- Declarations ------------------------------------------------------------
+
+func (g *Generator) emitDecl(d parser.TopLevelDecl) {
+	switch d := d.(type) {
+	case *parser.FnDecl:
+		g.emitFnDecl(d)
+	case *parser.ClassDecl:
+		g.emitClassDecl(d)
+	case *parser.InterfaceDecl:
+		g.emitInterfaceDecl(d)
+	case *parser.EnumDecl:
+		g.emitEnumDecl(d)
+	case *parser.ConstDecl:
+		g.emitConstDecl(d)
+	}
+}
+
+func (g *Generator) emitFnDecl(d *parser.FnDecl) {
+	if d.Name == "main" {
+		// C# entry point
+		g.writeln("public class Program")
+		g.writeln("{")
+		g.push()
+		g.writeln("public static void Main(string[] args)")
+		g.writeln("{")
+		g.push()
+		if d.Body != nil {
+			g.emitBlock(d.Body)
+		}
+		g.pop()
+		g.writeln("}")
+		g.pop()
+		g.writeln("}")
+		return
+	}
+
+	retType := g.emitType(d.ReturnType)
+	vis := "private"
+	if d.IsPub {
+		vis = "public"
+	}
+	params := g.formatParams(d.Params)
+	typeParams := g.formatTypeParams(d.TypeParams)
+	g.writeln(fmt.Sprintf("public static class Functions"))
+	g.writeln("{")
+	g.push()
+	g.writeln(fmt.Sprintf("%s static %s %s%s(%s)", vis, retType, capitalize(d.Name), typeParams, params))
+	g.writeln("{")
+	g.push()
+	if d.Body != nil {
+		g.emitBlock(d.Body)
+	}
+	g.pop()
+	g.writeln("}")
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitClassDecl(d *parser.ClassDecl) {
+	// Build parents list
+	var parents []string
+	for _, p := range d.Parents {
+		if g.interfaceNames[p] {
+			parents = append(parents, "I"+p)
+		} else {
+			parents = append(parents, p)
+		}
+	}
+
+	typeParams := g.formatTypeParams(d.TypeParams)
+	inheritance := ""
+	if len(parents) > 0 {
+		inheritance = " : " + strings.Join(parents, ", ")
+	}
+
+	g.writeln(fmt.Sprintf("public class %s%s%s", d.Name, typeParams, inheritance))
+	g.writeln("{")
+	g.push()
+
+	// Fields
+	for _, f := range d.Fields {
+		fieldType := g.emitType(f.Type)
+		vis := "private"
+		if f.IsPub {
+			vis = "public"
+		}
+		fname := g.fieldName(f.Name, f.IsPub)
+		if f.Default != nil {
+			g.writeln(fmt.Sprintf("%s %s %s = %s;", vis, fieldType, fname, g.emitExpr(f.Default)))
+		} else {
+			g.writeln(fmt.Sprintf("%s %s %s;", vis, fieldType, fname))
+		}
+	}
+
+	if len(d.Fields) > 0 && (d.Ctor != nil || len(d.Methods) > 0) {
+		g.write("\n")
+	}
+
+	// Constructor
+	if d.Ctor != nil {
+		params := g.formatParams(d.Ctor.Params)
+		g.writeln(fmt.Sprintf("public %s(%s)", d.Name, params))
+		// Super call
+		if len(d.Ctor.SuperArgs) > 0 {
+			var args []string
+			for _, a := range d.Ctor.SuperArgs {
+				args = append(args, g.emitExpr(a))
+			}
+			g.indent++
+			g.writeln(fmt.Sprintf(": base(%s)", strings.Join(args, ", ")))
+			g.indent--
+		}
+		g.writeln("{")
+		g.push()
+		if d.Ctor.Body != nil {
+			g.emitBlock(d.Ctor.Body)
+		}
+		g.pop()
+		g.writeln("}")
+	}
+
+	// Methods
+	for _, m := range d.Methods {
+		g.write("\n")
+		g.emitMethodDecl(d.Name, d.TypeParams, d.Parents, m)
+	}
+
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitMethodDecl(className string, classTypeParams []string, parents []string, m *parser.MethodDecl) {
+	retType := g.emitType(m.ReturnType)
+	vis := "private"
+	if m.IsPub {
+		vis = "public"
+	}
+	params := g.formatParams(m.Params)
+	typeParams := g.formatTypeParams(nil)
+
+	modifier := ""
+	if m.IsStatic {
+		modifier = "static "
+	} else if g.parentHasMethod(parents, m.Name) {
+		modifier = "override "
+	} else if g.isOverriddenByChild(className, m.Name) {
+		modifier = "virtual "
+	}
+
+	g.writeln(fmt.Sprintf("%s %s%s %s%s(%s)", vis, modifier, retType, capitalize(m.Name), typeParams, params))
+	g.writeln("{")
+	g.push()
+	if m.Body != nil && len(m.Body.Stmts) > 0 {
+		g.emitBlock(m.Body)
+	}
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitInterfaceDecl(d *parser.InterfaceDecl) {
+	g.writeln(fmt.Sprintf("public interface I%s", d.Name))
+	g.writeln("{")
+	g.push()
+	for _, m := range d.Methods {
+		retType := g.emitType(m.ReturnType)
+		params := g.formatParams(m.Params)
+		g.writeln(fmt.Sprintf("%s %s(%s);", retType, capitalize(m.Name), params))
+	}
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitEnumDecl(d *parser.EnumDecl) {
+	g.writeln(fmt.Sprintf("public enum %s", d.Name))
+	g.writeln("{")
+	g.push()
+	for i, v := range d.Variants {
+		comma := ","
+		if i == len(d.Variants)-1 {
+			comma = ""
+		}
+		g.writeln(fmt.Sprintf("%s%s", v, comma))
+	}
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitConstDecl(d *parser.ConstDecl) {
+	constType := g.emitType(d.Type)
+	if constType == "var" {
+		constType = "object"
+	}
+	vis := "private"
+	if d.IsPub {
+		vis = "public"
+	}
+	g.writeln(fmt.Sprintf("%s const %s %s = %s;", vis, constType, capitalize(d.Name), g.emitExpr(d.Value)))
+}
+
+// --- Statements --------------------------------------------------------------
+
+func (g *Generator) emitBlock(block *parser.BlockStmt) {
+	for _, s := range block.Stmts {
+		g.emitStmt(s)
+	}
+}
+
+func (g *Generator) emitStmt(s parser.Stmt) {
+	switch s := s.(type) {
+	case *parser.VarStmt:
+		g.emitVarStmt(s)
+	case *parser.TupleVarStmt:
+		val := g.emitExpr(s.Value)
+		g.writeln(fmt.Sprintf("var _tuple = %s;", val))
+		for i, name := range s.Names {
+			g.writeln(fmt.Sprintf("var %s = _tuple.Item%d;", name, i+1))
+		}
+	case *parser.AssignStmt:
+		target := g.emitExpr(s.Target)
+		val := g.emitExpr(s.Value)
+		g.writeln(fmt.Sprintf("%s %s %s;", target, s.Op, val))
+	case *parser.ReturnStmt:
+		if s.Value != nil {
+			g.writeln(fmt.Sprintf("return %s;", g.emitExpr(s.Value)))
+		} else {
+			g.writeln("return;")
+		}
+	case *parser.IfStmt:
+		g.emitIfStmt(s)
+	case *parser.ForStmt:
+		g.emitForStmt(s)
+	case *parser.WhileStmt:
+		g.writeln(fmt.Sprintf("while (%s)", g.emitExpr(s.Cond)))
+		g.writeln("{")
+		g.push()
+		g.emitBlock(s.Body)
+		g.pop()
+		g.writeln("}")
+	case *parser.PrintStmt:
+		g.neededUsings["System"] = true
+		g.writeln(fmt.Sprintf("Console.WriteLine(%s);", g.emitExpr(s.Value)))
+	case *parser.ExprStmt:
+		g.writeln(fmt.Sprintf("%s;", g.emitExpr(s.Expr)))
+	case *parser.BreakStmt:
+		g.writeln("break;")
+	case *parser.ContinueStmt:
+		g.writeln("continue;")
+	case *parser.MatchStmt:
+		g.emitMatchStmt(s)
+	case *parser.BlockStmt:
+		g.writeln("{")
+		g.push()
+		g.emitBlock(s)
+		g.pop()
+		g.writeln("}")
+	case *parser.GoStmt:
+		g.neededUsings["System.Threading.Tasks"] = true
+		g.writeln("Task.Run(() =>")
+		g.writeln("{")
+		g.push()
+		g.emitBlock(s.Body)
+		g.pop()
+		g.writeln("});")
+	case *parser.DeferStmt:
+		// C# doesn't have defer — approximate with comment
+		g.writeln(fmt.Sprintf("// defer: %s", g.emitExpr(s.Expr)))
+	case *parser.WithStmt:
+		g.emitWithStmt(s)
+	}
+}
+
+func (g *Generator) emitVarStmt(s *parser.VarStmt) {
+	if s.Value == nil {
+		varType := g.emitType(s.Type)
+		if varType == "var" {
+			g.writeln(fmt.Sprintf("%s %s = default;", varType, s.Name))
+		} else {
+			g.writeln(fmt.Sprintf("%s %s = default(%s);", varType, s.Name, varType))
+		}
+		return
+	}
+
+	val := g.emitExpr(s.Value)
+
+	if s.OrHandler != nil {
+		// Failable: try/catch — or {} always propagates
+		varType := "var"
+		if s.Type != nil {
+			varType = g.emitType(s.Type)
+		}
+		g.writeln(fmt.Sprintf("%s %s;", varType, s.Name))
+		g.writeln("try")
+		g.writeln("{")
+		g.push()
+		g.writeln(fmt.Sprintf("%s = %s;", s.Name, val))
+		g.pop()
+		g.writeln("}")
+		g.writeln("catch (Exception)")
+		g.writeln("{")
+		g.push()
+		if s.OrHandler.Body != nil && len(s.OrHandler.Body.Stmts) > 0 {
+			g.emitBlock(s.OrHandler.Body)
+		}
+		g.writeln("throw;")
+		g.pop()
+		g.writeln("}")
+	} else if s.Type != nil {
+		g.writeln(fmt.Sprintf("%s %s = %s;", g.emitType(s.Type), s.Name, val))
+	} else {
+		g.writeln(fmt.Sprintf("var %s = %s;", s.Name, val))
+	}
+}
+
+func (g *Generator) emitIfStmt(s *parser.IfStmt) {
+	g.writeln(fmt.Sprintf("if (%s)", g.emitExpr(s.Cond)))
+	g.writeln("{")
+	g.push()
+	g.emitBlock(s.Then)
+	g.pop()
+	g.writeln("}")
+	if s.ElseStmt != nil {
+		if elseIf, ok := s.ElseStmt.(*parser.IfStmt); ok {
+			g.write(strings.Repeat("    ", g.indent))
+			g.write(fmt.Sprintf("else if (%s)\n", g.emitExpr(elseIf.Cond)))
+			g.writeln("{")
+			g.push()
+			g.emitBlock(elseIf.Then)
+			g.pop()
+			g.writeln("}")
+			if elseIf.ElseStmt != nil {
+				g.emitElseChain(elseIf.ElseStmt)
+			}
+		} else if block, ok := s.ElseStmt.(*parser.BlockStmt); ok {
+			g.writeln("else")
+			g.writeln("{")
+			g.push()
+			g.emitBlock(block)
+			g.pop()
+			g.writeln("}")
+		}
+	}
+}
+
+func (g *Generator) emitElseChain(s parser.Stmt) {
+	if elseIf, ok := s.(*parser.IfStmt); ok {
+		g.write(strings.Repeat("    ", g.indent))
+		g.write(fmt.Sprintf("else if (%s)\n", g.emitExpr(elseIf.Cond)))
+		g.writeln("{")
+		g.push()
+		g.emitBlock(elseIf.Then)
+		g.pop()
+		g.writeln("}")
+		if elseIf.ElseStmt != nil {
+			g.emitElseChain(elseIf.ElseStmt)
+		}
+	} else if block, ok := s.(*parser.BlockStmt); ok {
+		g.writeln("else")
+		g.writeln("{")
+		g.push()
+		g.emitBlock(block)
+		g.pop()
+		g.writeln("}")
+	}
+}
+
+func (g *Generator) emitForStmt(s *parser.ForStmt) {
+	if s.IsRange {
+		collection := g.emitExpr(s.Range)
+		if s.IndexVar != "" {
+			// for i, item in collection → indexed loop
+			g.writeln(fmt.Sprintf("for (int %s = 0; %s < %s.Count; %s++)", s.IndexVar, s.IndexVar, collection, s.IndexVar))
+			g.writeln("{")
+			g.push()
+			g.writeln(fmt.Sprintf("var %s = %s[%s];", s.Item, collection, s.IndexVar))
+			g.emitBlock(s.Body)
+			g.pop()
+			g.writeln("}")
+		} else {
+			g.writeln(fmt.Sprintf("foreach (var %s in %s)", s.Item, collection))
+			g.writeln("{")
+			g.push()
+			g.emitBlock(s.Body)
+			g.pop()
+			g.writeln("}")
+		}
+	} else {
+		// C-style for
+		init := ""
+		if s.Init != nil {
+			init = g.stmtInline(s.Init)
+		}
+		cond := ""
+		if s.Cond != nil {
+			cond = g.emitExpr(s.Cond)
+		}
+		post := ""
+		if s.Post != nil {
+			post = g.stmtInline(s.Post)
+		}
+		g.writeln(fmt.Sprintf("for (%s; %s; %s)", init, cond, post))
+		g.writeln("{")
+		g.push()
+		g.emitBlock(s.Body)
+		g.pop()
+		g.writeln("}")
+	}
+}
+
+func (g *Generator) emitMatchStmt(s *parser.MatchStmt) {
+	subject := g.emitExpr(s.Subject)
+	g.writeln(fmt.Sprintf("switch (%s)", subject))
+	g.writeln("{")
+	g.push()
+	for _, c := range s.Cases {
+		if c.Pattern == nil {
+			g.writeln("default:")
+		} else {
+			g.writeln(fmt.Sprintf("case %s:", g.emitExpr(c.Pattern)))
+		}
+		g.push()
+		g.emitBlock(c.Body)
+		g.writeln("break;")
+		g.pop()
+	}
+	g.pop()
+	g.writeln("}")
+}
+
+func (g *Generator) emitWithStmt(s *parser.WithStmt) {
+	for _, r := range s.Resources {
+		g.writeln(fmt.Sprintf("using (var %s = %s)", r.Name, g.emitExpr(r.Value)))
+	}
+	g.writeln("{")
+	g.push()
+	g.emitBlock(s.Body)
+	g.pop()
+	g.writeln("}")
+}
+
+// stmtInline returns a single statement as an inline expression (no semicolon/newline).
+func (g *Generator) stmtInline(s parser.Stmt) string {
+	switch s := s.(type) {
+	case *parser.VarStmt:
+		if s.Value != nil {
+			return fmt.Sprintf("var %s = %s", s.Name, g.emitExpr(s.Value))
+		}
+		return fmt.Sprintf("var %s = default", s.Name)
+	case *parser.AssignStmt:
+		return fmt.Sprintf("%s %s %s", g.emitExpr(s.Target), s.Op, g.emitExpr(s.Value))
+	case *parser.ExprStmt:
+		return g.emitExpr(s.Expr)
+	default:
+		return "/* unsupported */"
+	}
+}
+
+// --- Expressions -------------------------------------------------------------
+
+func (g *Generator) emitExpr(e parser.Expr) string {
+	if e == nil {
+		return ""
+	}
+	switch e := e.(type) {
+	case *parser.IntLit:
+		return e.Value
+	case *parser.FloatLit:
+		return e.Value
+	case *parser.StringLit:
+		return fmt.Sprintf(`"%s"`, e.Value)
+	case *parser.RawStringLit:
+		return fmt.Sprintf(`@"%s"`, strings.ReplaceAll(e.Value, `"`, `""`))
+	case *parser.BoolLit:
+		if e.Value {
+			return "true"
+		}
+		return "false"
+	case *parser.NullLit:
+		return "null"
+	case *parser.Ident:
+		return e.Name
+	case *parser.ThisExpr:
+		return "this"
+	case *parser.BinaryExpr:
+		return g.emitBinaryExpr(e)
+	case *parser.UnaryExpr:
+		return fmt.Sprintf("(%s%s)", e.Op, g.emitExpr(e.Operand))
+	case *parser.CallExpr:
+		return g.emitCallExpr(e)
+	case *parser.SelectorExpr:
+		return fmt.Sprintf("%s.%s", g.emitExpr(e.Object), capitalize(e.Field))
+	case *parser.SafeNavExpr:
+		obj := g.emitExpr(e.Object)
+		if e.Call != nil {
+			args := g.formatCallArgs(e.Call)
+			return fmt.Sprintf("%s?.%s(%s)", obj, capitalize(e.Field), args)
+		}
+		return fmt.Sprintf("%s?.%s", obj, capitalize(e.Field))
+	case *parser.IndexExpr:
+		return fmt.Sprintf("%s[%s]", g.emitExpr(e.Object), g.emitExpr(e.Index))
+	case *parser.SliceExpr:
+		obj := g.emitExpr(e.Object)
+		if e.Low != nil && e.High != nil {
+			low := g.emitExpr(e.Low)
+			high := g.emitExpr(e.High)
+			return fmt.Sprintf("%s[%s..%s]", obj, low, high)
+		} else if e.Low != nil {
+			return fmt.Sprintf("%s[%s..]", obj, g.emitExpr(e.Low))
+		} else if e.High != nil {
+			return fmt.Sprintf("%s[..%s]", obj, g.emitExpr(e.High))
+		}
+		return fmt.Sprintf("%s[..]", obj)
+	case *parser.ListLit:
+		g.neededUsings["System.Collections.Generic"] = true
+		var elems []string
+		for _, el := range e.Elements {
+			elems = append(elems, g.emitExpr(el))
+		}
+		return fmt.Sprintf("new List<object> { %s }", strings.Join(elems, ", "))
+	case *parser.MapLit:
+		g.neededUsings["System.Collections.Generic"] = true
+		var entries []string
+		for i, k := range e.Keys {
+			entries = append(entries, fmt.Sprintf("{ %s, %s }", g.emitExpr(k), g.emitExpr(e.Values[i])))
+		}
+		return fmt.Sprintf("new Dictionary<object, object> { %s }", strings.Join(entries, ", "))
+	case *parser.LambdaExpr:
+		return g.emitLambda(e)
+	case *parser.StringInterpLit:
+		return g.emitInterpString(e)
+	case *parser.TypeAssertExpr:
+		obj := g.emitExpr(e.Object)
+		if e.IsCheck {
+			return fmt.Sprintf("%s is %s", obj, e.TypeName)
+		}
+		return fmt.Sprintf("(%s)%s", e.TypeName, obj)
+	case *parser.SpreadExpr:
+		return g.emitExpr(e.Expr)
+	case *parser.SuperCallExpr:
+		var args []string
+		for _, a := range e.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		return fmt.Sprintf("base(%s)", strings.Join(args, ", "))
+	default:
+		return "default /* unsupported expr */"
+	}
+}
+
+func (g *Generator) emitBinaryExpr(e *parser.BinaryExpr) string {
+	left := g.emitExpr(e.Left)
+	right := g.emitExpr(e.Right)
+	op := e.Op
+	switch op {
+	case "??":
+		return fmt.Sprintf("(%s ?? %s)", left, right)
+	}
+	return fmt.Sprintf("(%s %s %s)", left, op, right)
+}
+
+func (g *Generator) emitCallExpr(e *parser.CallExpr) string {
+	// Handle builtin method calls
+	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
+		if result, handled := g.emitBuiltinMethod(sel, e); handled {
+			return result
+		}
+	}
+
+	callee := g.emitExpr(e.Callee)
+
+	// Constructor calls: ClassName(args) → new ClassName(args)
+	if ident, ok := e.Callee.(*parser.Ident); ok {
+		if g.classNames[ident.Name] {
+			args := g.formatCallArgs(e)
+			typeArgs := ""
+			if len(e.TypeArgs) > 0 {
+				typeArgs = fmt.Sprintf("<%s>", strings.Join(e.TypeArgs, ", "))
+			}
+			return fmt.Sprintf("new %s%s(%s)", ident.Name, typeArgs, args)
+		}
+	}
+
+	args := g.formatCallArgs(e)
+	return fmt.Sprintf("%s(%s)", callee, args)
+}
+
+func (g *Generator) formatCallArgs(e *parser.CallExpr) string {
+	var parts []string
+	for _, a := range e.Args {
+		parts = append(parts, g.emitExpr(a))
+	}
+	for _, na := range e.NamedArgs {
+		parts = append(parts, fmt.Sprintf("%s: %s", na.Name, g.emitExpr(na.Value)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (g *Generator) emitBuiltinMethod(sel *parser.SelectorExpr, call *parser.CallExpr) (string, bool) {
+	obj := g.emitExpr(sel.Object)
+	switch sel.Field {
+	// List methods
+	case "add":
+		if len(call.Args) == 1 {
+			return fmt.Sprintf("%s.Add(%s)", obj, g.emitExpr(call.Args[0])), true
+		}
+		var stmts []string
+		for _, a := range call.Args {
+			stmts = append(stmts, fmt.Sprintf("%s.Add(%s)", obj, g.emitExpr(a)))
+		}
+		return strings.Join(stmts, "; "), true
+	case "remove":
+		return fmt.Sprintf("%s.Remove(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "size":
+		return fmt.Sprintf("%s.Count", obj), true
+	case "clone":
+		return fmt.Sprintf("new List<object>(%s)", obj), true
+	case "sort":
+		return fmt.Sprintf("%s.OrderBy(x => x).ToList()", obj), true
+	case "join":
+		return fmt.Sprintf("string.Join(%s, %s)", g.emitExpr(call.Args[0]), obj), true
+	case "contains":
+		return fmt.Sprintf("%s.Contains(%s)", obj, g.emitExpr(call.Args[0])), true
+	// String methods
+	case "upper":
+		return fmt.Sprintf("%s.ToUpper()", obj), true
+	case "lower":
+		return fmt.Sprintf("%s.ToLower()", obj), true
+	case "startsWith":
+		return fmt.Sprintf("%s.StartsWith(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "endsWith":
+		return fmt.Sprintf("%s.EndsWith(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "trim":
+		return fmt.Sprintf("%s.Trim()", obj), true
+	case "split":
+		return fmt.Sprintf("%s.Split(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "replace":
+		return fmt.Sprintf("%s.Replace(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+	// Map methods
+	case "keys":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Keys.ToList()", obj), true
+	case "values":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Values.ToList()", obj), true
+	case "containsKey":
+		return fmt.Sprintf("%s.ContainsKey(%s)", obj, g.emitExpr(call.Args[0])), true
+	}
+	return "", false
+}
+
+func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
+	var params []string
+	for _, p := range e.Params {
+		params = append(params, p.Name)
+	}
+	paramStr := strings.Join(params, ", ")
+	if len(params) != 1 {
+		paramStr = "(" + paramStr + ")"
+	}
+
+	if e.Expr != nil {
+		return fmt.Sprintf("%s => %s", paramStr, g.emitExpr(e.Expr))
+	}
+	// Block-body lambda
+	var body strings.Builder
+	body.WriteString(fmt.Sprintf("%s =>\n", paramStr))
+	body.WriteString(strings.Repeat("    ", g.indent) + "{\n")
+	g.indent++
+	oldBuf := g.buf
+	g.buf = strings.Builder{}
+	g.emitBlock(e.Body)
+	body.WriteString(g.buf.String())
+	g.buf = oldBuf
+	g.indent--
+	body.WriteString(strings.Repeat("    ", g.indent) + "}")
+	return body.String()
+}
+
+func (g *Generator) emitInterpString(e *parser.StringInterpLit) string {
+	var parts []string
+	for _, p := range e.Parts {
+		if sl, ok := p.(*parser.StringLit); ok {
+			parts = append(parts, sl.Value)
+		} else {
+			parts = append(parts, fmt.Sprintf("{%s}", g.emitExpr(p)))
+		}
+	}
+	return fmt.Sprintf(`$"%s"`, strings.Join(parts, ""))
+}
+
+// --- Type mapping ------------------------------------------------------------
+
+func (g *Generator) emitType(t parser.TypeExpr) string {
+	if t == nil {
+		return "void"
+	}
+	switch t := t.(type) {
+	case *parser.SimpleType:
+		return g.mapSimpleType(t.Name)
+	case *parser.GenericType:
+		return g.mapGenericType(t)
+	case *parser.OptionalType:
+		inner := g.emitType(t.Inner)
+		return inner + "?"
+	case *parser.FuncTypeExpr:
+		if t.ReturnType == nil {
+			var paramTypes []string
+			for _, p := range t.Params {
+				paramTypes = append(paramTypes, g.emitType(p))
+			}
+			return fmt.Sprintf("Action<%s>", strings.Join(paramTypes, ", "))
+		}
+		var paramTypes []string
+		for _, p := range t.Params {
+			paramTypes = append(paramTypes, g.emitType(p))
+		}
+		paramTypes = append(paramTypes, g.emitType(t.ReturnType))
+		return fmt.Sprintf("Func<%s>", strings.Join(paramTypes, ", "))
+	default:
+		return "object"
+	}
+}
+
+func (g *Generator) mapSimpleType(name string) string {
+	switch name {
+	case "Int":
+		return "int"
+	case "Float":
+		return "double"
+	case "String":
+		return "string"
+	case "Bool":
+		return "bool"
+	case "Byte":
+		return "byte"
+	case "Error":
+		return "Exception"
+	case "Any":
+		return "object"
+	default:
+		if g.interfaceNames[name] {
+			return "I" + name
+		}
+		return name
+	}
+}
+
+func (g *Generator) mapGenericType(t *parser.GenericType) string {
+	g.neededUsings["System.Collections.Generic"] = true
+	switch t.Name {
+	case "List":
+		if len(t.TypeArgs) > 0 {
+			return fmt.Sprintf("List<%s>", g.emitType(t.TypeArgs[0]))
+		}
+		return "List<object>"
+	case "Map":
+		if len(t.TypeArgs) >= 2 {
+			return fmt.Sprintf("Dictionary<%s, %s>", g.emitType(t.TypeArgs[0]), g.emitType(t.TypeArgs[1]))
+		}
+		return "Dictionary<object, object>"
+	case "Chan":
+		g.neededUsings["System.Threading.Channels"] = true
+		if len(t.TypeArgs) > 0 {
+			return fmt.Sprintf("Channel<%s>", g.emitType(t.TypeArgs[0]))
+		}
+		return "Channel<object>"
+	case "Fn":
+		// Fn<(Int, String), Bool> → Func<int, string, bool>
+		return g.emitType(t) // handled by FuncTypeExpr
+	default:
+		// User generic type
+		var args []string
+		for _, a := range t.TypeArgs {
+			args = append(args, g.emitType(a))
+		}
+		base := t.Name
+		if g.interfaceNames[base] {
+			base = "I" + base
+		}
+		return fmt.Sprintf("%s<%s>", base, strings.Join(args, ", "))
+	}
+}
+
+// --- Helpers -----------------------------------------------------------------
+
+// parentHasMethod checks if any parent class defines a method with the given name.
+func (g *Generator) parentHasMethod(parents []string, methodName string) bool {
+	for _, p := range parents {
+		if g.interfaceNames[p] {
+			continue // interface methods are implemented, not overridden
+		}
+		if methods, ok := g.classMethods[p]; ok {
+			if methods[methodName] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isOverriddenByChild checks if any child class overrides a method from this class.
+func (g *Generator) isOverriddenByChild(className, methodName string) bool {
+	for childName, parents := range g.classParents {
+		for _, p := range parents {
+			if p == className {
+				if methods, ok := g.classMethods[childName]; ok {
+					if methods[methodName] {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func (g *Generator) fieldName(name string, isPublic bool) string {
+	if isPublic {
+		return capitalize(name)
+	}
+	// Private fields: prefix with underscore (C# convention)
+	return "_" + name
+}
+
+func (g *Generator) formatParams(params []*parser.ParamDecl) string {
+	var parts []string
+	for _, p := range params {
+		paramType := g.emitType(p.Type)
+		if p.Variadic {
+			parts = append(parts, fmt.Sprintf("params %s[] %s", paramType, p.Name))
+		} else if p.Default != nil {
+			parts = append(parts, fmt.Sprintf("%s %s = %s", paramType, p.Name, g.emitExpr(p.Default)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %s", paramType, p.Name))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (g *Generator) formatTypeParams(typeParams []string) string {
+	if len(typeParams) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("<%s>", strings.Join(typeParams, ", "))
+}
