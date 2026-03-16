@@ -56,19 +56,19 @@ main() {
     print(s)
 
     // Generic class — type inferred from constructor arg
-    box := Box(100)
+    var box = Box(100)
     print(box.get())
 
     box.set(200)
     print(box.get())
 
     // Generic class with list field
-    stack := Stack(1)
+    var stack = Stack(1)
     stack.push(2)
     stack.push(3)
     print(stack.count())
 
     // Generic polymorphism — pass to function expecting interface type
-    greeting := Box("Hello from generics!")
+    var greeting = Box("Hello from generics!")
     printBox(greeting)
 }

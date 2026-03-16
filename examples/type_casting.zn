@@ -2,11 +2,11 @@
 
 String describe(Any x) {
     if x is Int {
-        n := x as Int
+        var n = x as Int
         return "Int: {n}"
     }
     if x is String {
-        s := x as String
+        var s = x as String
         return "String: {s}"
     }
     return "Unknown type"
@@ -20,7 +20,7 @@ main() {
     print(describe(b))     // String: hello
 
     // Direct type assertion
-    n := a as Int
+    var n = a as Int
     print(n + 1)            // 43
 
     // Type check returns Bool

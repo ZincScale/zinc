@@ -6,8 +6,8 @@ main() {
         ch.send("second message")
     }
 
-    msg1 := ch.receive()
-    msg2 := ch.receive()
+    var msg1 = ch.receive()
+    var msg2 = ch.receive()
     print(msg1)
     print(msg2)
 }

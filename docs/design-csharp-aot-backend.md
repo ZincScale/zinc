@@ -244,7 +244,7 @@ zinc build --target python    # Python backend (existing prototype)
 Zinc's `or {}` maps to C# exceptions — this is a natural fit since .NET libraries already throw exceptions and C# developers expect `try/catch`.
 
 ```zinc
-content := readFile("data.txt") or { print("failed") }
+var content = readFile("data.txt") or { print("failed") }
 ```
 ```csharp
 string content;

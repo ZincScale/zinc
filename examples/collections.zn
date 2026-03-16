@@ -2,14 +2,14 @@
 
 main() {
     // Typed list literals
-    nums := [10, 20, 30, 40, 50]
-    names := ["Alice", "Bob", "Charlie"]
+    var nums = [10, 20, 30, 40, 50]
+    var names = ["Alice", "Bob", "Charlie"]
 
     // List methods
     nums.add(60)
     print(nums.size())         // 6
 
-    copy := nums.clone()
+    var copy = nums.clone()
     copy.sort()
     print(copy)                // [10 20 30 40 50 60]
 
@@ -26,20 +26,20 @@ main() {
     print(names.slice(1))          // [Bob Charlie]
 
     // Assign slices to new variables
-    firstTwo := nums[:2]        // [10 20]
-    lastThree := names.slice(1) // [Bob Charlie]
+    var firstTwo = nums[:2]        // [10 20]
+    var lastThree = names.slice(1) // [Bob Charlie]
     print(firstTwo)
     print(lastThree)
 
     // String slicing
-    greeting := "Hello, Zinc!"
+    var greeting = "Hello, Zinc!"
     print(greeting[0:5])           // Hello
     print(greeting.slice(7))       // Zinc!
-    word := greeting[7:11]      // Zinc
+    var word = greeting[7:11]      // Zinc
     print(word)
 
     // Typed map literals
-    scores := {"math": 95, "science": 88, "english": 92}
+    var scores = {"math": 95, "science": 88, "english": 92}
     print(scores["math"])      // 95
 
     // Map methods

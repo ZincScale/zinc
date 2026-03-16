@@ -3,10 +3,10 @@
 ## Variables
 
 ```zinc
-x := 42
-name := "Zinc"
-flag := true
-ratio := 3.14
+var x = 42
+var name = "Zinc"
+var flag = true
+var ratio = 3.14
 String? maybeNull = null    // optional (nullable) type
 ```
 
@@ -110,10 +110,10 @@ Dog {
 }
 
 main() {
-    d1 := Dog("Rex")              // age defaults to 0
-    d2 := Dog("Buddy", 3)         // explicit
-    d3 := Dog(name: "Max")        // named, age defaults
-    d4 := Dog(age: 5, name: "Spot") // named, reordered
+    var d1 = Dog("Rex")              // age defaults to 0
+    var d2 = Dog("Buddy", 3)         // explicit
+    var d3 = Dog(name: "Max")        // named, age defaults
+    var d4 = Dog(age: 5, name: "Spot") // named, reordered
 }
 ```
 
@@ -155,7 +155,7 @@ main() {
     log("INFO", "server started", "listening on :8080")
 
     // Spread a list into variadic args
-    errors := ["timeout", "connection refused"]
+    var errors = ["timeout", "connection refused"]
     log("ERROR", errors...)
 }
 ```
@@ -228,9 +228,9 @@ Point {
 }
 
 main() {
-    a := Point(3.0, 4.0)   // primary constructor
-    b := Point.origin()         // named constructor
-    c := Point.diagonal(5.0)    // named constructor
+    var a = Point(3.0, 4.0)   // primary constructor
+    var b = Point.origin()         // named constructor
+    var c = Point.diagonal(5.0)    // named constructor
 }
 ```
 
@@ -284,8 +284,8 @@ Box<T> {
 
 main() {
     // Type inference — Go infers T from the argument
-    intBox := Box(42)        // Box<Int>
-    strBox := Box("hello")   // Box<String>
+    var intBox = Box(42)        // Box<Int>
+    var strBox = Box("hello")   // Box<String>
     print(intBox.get())             // 42
     print(strBox.get())             // hello
 }
@@ -312,7 +312,7 @@ Stack<T> {
 }
 
 main() {
-    s := Stack(1)
+    var s = Stack(1)
     s.push(2)
     s.push(3)
     print(s.count())    // 3
@@ -333,7 +333,7 @@ Pair<K, V> {
 }
 
 main() {
-    p := Pair("name", 42)
+    var p = Pair("name", 42)
     print(p.key)    // name
     print(p.val)    // 42
 }
@@ -350,11 +350,11 @@ import "net/url"
 
 main() {
     // Zero-value construction
-    mu := sync.Mutex()
-    buf := bytes.Buffer()
+    var mu = sync.Mutex()
+    var buf = bytes.Buffer()
 
     // Named field construction (just like named args)
-    u := url.URL(Scheme: "https", Host: "example.com", Path: "/api")
+    var u = url.URL(Scheme: "https", Host: "example.com", Path: "/api")
     print(u.String())   // https://example.com/api
 }
 ```
@@ -377,13 +377,13 @@ import "crypto/tls"
 
 main() {
     // http.Server.TLSConfig is *tls.Config — Zinc auto-emits &tls.Config{...}
-    s := http.Server(TLSConfig: tls.Config(MinVersion: 3))
+    var s = http.Server(TLSConfig: tls.Config(MinVersion: 3))
 
     // tls.Dial's 3rd param is *tls.Config — auto-emits &tls.Config{}
-    conn := tls.Dial("tcp", "example.com:443", tls.Config())
+    var conn = tls.Dial("tcp", "example.com:443", tls.Config())
 
     // No pointer context — emits value (tls.Config{})
-    cfg := tls.Config(MinVersion: 3)
+    var cfg = tls.Config(MinVersion: 3)
 }
 ```
 
@@ -449,7 +449,7 @@ printSpeak(Speaker s) {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     printSpeak(d)         // Rex says Woof!
 }
 ```
@@ -477,7 +477,7 @@ Validator {
 }
 
 check(Validator v) {
-    result := v.validate() or {
+    var result = v.validate() or {
         print("error: {err}")
         return
     }
@@ -499,7 +499,7 @@ printKey(Pair<String, Int> p) {
 }
 
 main() {
-    p := Pair("hello", 42)
+    var p = Pair("hello", 42)
     printKey(p)     // hello
 }
 ```
@@ -529,19 +529,19 @@ List and map literals are automatically typed by the typechecker. When all eleme
 
 ```zinc
 main() {
-    nums := [1, 2, 3]             // inferred as []int
-    names := ["Alice", "Bob"]     // inferred as []string
-    scores := {"math": 95, "sci": 88}  // inferred as map[string]int
+    var nums = [1, 2, 3]             // inferred as []int
+    var names = ["Alice", "Bob"]     // inferred as []string
+    var scores = {"math": 95, "sci": 88}  // inferred as map[string]int
 
     // Mixed types fall back to interface{}
-    mixed := [1, "two", 3]        // []interface{}
+    var mixed = [1, "two", 3]        // []interface{}
 
     // Empty literals use the declared type
     Map<String, Int> m = {}     // map[string]int{}
     List<Int> l = []            // []int{}
 
     // Nested collections work too
-    grid := [[1, 2], [3, 4]]      // [][]int
+    var grid = [[1, 2], [3, 4]]      // [][]int
 }
 ```
 
@@ -564,7 +564,7 @@ func main() {
 Extract sub-sequences from lists and strings. Both bracket syntax and an OO `.slice()` method are supported:
 
 ```zinc
-nums := [1, 2, 3, 4, 5]
+var nums = [1, 2, 3, 4, 5]
 
 // Bracket syntax — [low:high], either bound optional
 print(nums[1:3])    // [2 3]
@@ -576,14 +576,14 @@ print(nums.slice(1, 3))   // [2 3]
 print(nums.slice(2))      // [3 4 5]
 
 // Assign slices to new variables
-firstTwo := nums[:2]        // [1 2]
-middle := nums.slice(1, 4)  // [2 3 4]
+var firstTwo = nums[:2]        // [1 2]
+var middle = nums.slice(1, 4)  // [2 3 4]
 
 // Works on strings too
-s := "Hello, Zinc!"
+var s = "Hello, Zinc!"
 print(s[0:5])          // Hello
 print(s.slice(7))      // Zinc!
-word := s[7:11]     // Zinc
+var word = s[7:11]     // Zinc
 ```
 
 Transpiles directly to Go slice expressions:
@@ -615,8 +615,8 @@ String describe(Direction d) {
 ## String Interpolation
 
 ```zinc
-name := "Zinc"
-version := 1
+var name = "Zinc"
+var version = 1
 print("Welcome to {name} v{version}!")
 // → fmt.Println(fmt.Sprintf("Welcome to %v v%v!", name, version))
 ```
@@ -639,7 +639,7 @@ while x > 0 {
 }
 
 // C-style for
-for (i := 0; i < 10; i += 1) {
+for (var i = 0; i < 10; i += 1) {
     print(i)
 }
 
@@ -654,7 +654,7 @@ for (i, item) in items {
 }
 
 // for-in with key-value (maps)
-scores := {"Alice": 95, "Bob": 87}
+var scores = {"Alice": 95, "Bob": 87}
 for (name, score) in scores {
     print("{name} got {score}")
 }
@@ -665,8 +665,8 @@ for (name, score) in scores {
 Like Java, Zinc supports labeled `break` and `continue` for nested loop control. Prefix a loop with `@label` and reference it from inner loops:
 
 ```zinc
-@outer for (i := 0; i < 10; i += 1) {
-    for (j := 0; j < 10; j += 1) {
+@outer for (var i = 0; i < 10; i += 1) {
+    for (var j = 0; j < 10; j += 1) {
         if j == 5 {
             break @outer       // exits both loops
         }
@@ -713,18 +713,18 @@ main() {
     User? user = User("Alice", Address("NYC"))
 
     // Field access — returns nil if user is nil
-    name := user?.name           // "Alice"
+    var name = user?.name           // "Alice"
 
     // Chaining — each ?. short-circuits independently (like Kotlin)
-    city := user?.address?.city   // "NYC"
+    var city = user?.address?.city   // "NYC"
 
     // Method call — skipped if receiver is nil
     user?.doSomething()
 
     // Nil receiver — no crash
     User? nobody = null
-    x := nobody?.name             // nil
-    y := nobody?.address?.city    // nil
+    var x = nobody?.name             // nil
+    var y = nobody?.address?.city    // nil
     nobody?.doSomething()            // no-op
 }
 ```
@@ -763,7 +763,7 @@ main() {
     Any x = 42
 
     // Type assertion — panics if wrong type (like Kotlin's `as`)
-    n := x as Int
+    var n = x as Int
     print(n + 1)    // 43
 
     // Type check — returns Bool (like Kotlin's `is`)
@@ -794,7 +794,7 @@ Dog {
 }
 
 main() {
-    d := Dog("Rex")
+    var d = Dog("Rex")
     print(d.name)         // OK — d is non-nullable, use regular dot
 
     Dog? d2 = null
@@ -822,10 +822,10 @@ run(Fn() callback) {
 }
 
 main() {
-    double := (Int x) -> x * 2
+    var double = (Int x) -> x * 2
     print(apply(double, 7))       // 14
 
-    add := (Int a, Int b) -> a + b
+    var add = (Int a, Int b) -> a + b
     print(combine(add, 3, 4))     // 7
 
     run(() -> { print("done") })
@@ -851,11 +851,11 @@ single expression or a block `{ ... }`.
 
 ```zinc
 // Single-expression lambda (inferred as a func literal)
-double := (Int x) -> x * 2
-greet  := () -> "Hello!"
+var double = (Int x) -> x * 2
+var greet  = () -> "Hello!"
 
 // Block-body lambda
-describe := (Int x) -> {
+var describe = (Int x) -> {
     if x > 0 {
         return "positive"
     }
@@ -863,11 +863,11 @@ describe := (Int x) -> {
 }
 
 // Closure capture — lambda body may reference outer variables
-base   := 100
-addBase := (Int x) -> x + base
+var base   = 100
+var addBase = (Int x) -> x + base
 
 // String interpolation works inside lambda bodies
-makeMsg := (String name) -> "Hello, {name}!"
+var makeMsg = (String name) -> "Hello, {name}!"
 ```
 
 Transpiles to idiomatic Go `func` literals:
@@ -887,17 +887,17 @@ A lambda that contains `return Error(...)` automatically gets an `error` return
 appended to its signature. Calls to failable lambdas auto-propagate errors:
 
 ```zinc
-safeDivide := (Int a, Int b) -> {
+var safeDivide = (Int a, Int b) -> {
     if b == 0 {
         return Error("division by zero")
     }
     return a / b
 }
 
-result := safeDivide(10, 2)   // auto-propagates error
+var result = safeDivide(10, 2)   // auto-propagates error
 print(result)
 
-bad := safeDivide(10, 0) or {
+var bad = safeDivide(10, 0) or {
     print("Error: {err}")
     exit(1)
 }
@@ -936,7 +936,7 @@ No manual cleanup needed — same OO ergonomics Java/C#/Python developers expect
 import "os"
 
 main() {
-    with (f := os.Stdin) {
+    with (f = os.Stdin) {
         // f is closed automatically when the block exits
         print("reading file")
     }
@@ -952,7 +952,7 @@ import "os"
 
 main() {
     // os.Create returns (*File, error) — auto-detected and unpacked
-    with (f := os.Create("output.txt")) {
+    with (f = os.Create("output.txt")) {
         f.WriteString("hello from Zinc")
     }
     // f is closed automatically, error was auto-checked
@@ -977,7 +977,7 @@ func main() {
 When a `with` resource is failable, use an `or` handler to add context or halt:
 
 ```zinc
-with (f := os.Open("/nonexistent/file") or {
+with (f = os.Open("/nonexistent/file") or {
     print("caught: {err}")
     exit(1)
 }) {
@@ -993,8 +993,8 @@ with (f := os.Open("/nonexistent/file") or {
 import "sync"
 
 main() {
-    counter := 0
-    with (mu := sync.Mutex()) {
+    var counter = 0
+    with (mu = sync.Mutex()) {
         counter += 1    // mutex locked here, unlocked when block exits
     }
 }
@@ -1008,7 +1008,7 @@ Comma-separated resources are closed in reverse order (LIFO), matching Go's `def
 import "os"
 
 main() {
-    with (f1 := os.Create("a.txt"), f2 := os.Create("b.txt")) {
+    with (f1 = os.Create("a.txt"), f2 = os.Create("b.txt")) {
         f1.WriteString("file A")
         f2.WriteString("file B")
     }
@@ -1030,11 +1030,11 @@ Int divide(Int a, Int b) {
 
 main() {
     // Auto-propagation: panics in main if error occurs
-    result := divide(10, 2)
+    var result = divide(10, 2)
     print(result)
 
     // Or handler: add context, log, and halt
-    bad := divide(10, 0) or {
+    var bad = divide(10, 0) or {
         print("caught: {err}")
         exit(0)
     }
@@ -1051,7 +1051,7 @@ main() {
         ch.send(42)
     }
 
-    val := ch.receive()
+    var val = ch.receive()
     print(val)
 }
 ```
@@ -1065,11 +1065,11 @@ import "strconv"
 
 main() {
     // strconv.Atoi returns (int, error)
-    (n, err) := strconv.Atoi("42")
+    var (n, err) = strconv.Atoi("42")
 }
 ```
 
-> **Note:** Both names in `(a, b) := ...` must be used. If you only need one value, assign the other to `_`.
+> **Note:** Both names in `var (a, b) = ...` must be used. If you only need one value, assign the other to `_`.
 
 ## Imports
 

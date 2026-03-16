@@ -39,7 +39,7 @@ Go type construction emits `&TypeName{}` or `TypeName{}` depending on what the s
 | Context | Example (Zinc) | Inference | Emitted Go |
 |---------|---------------|-----------|------------|
 | Function argument | `grpc.Creds(tls.Config(...))` | Check param type via `go/types` | `&tls.Config{...}` if param is `*tls.Config` |
-| `:=` with no context | `c := tls.Config(...)` | No type info — default | `tls.Config{}` (value) |
+| `var` with no context | `var c = tls.Config(...)` | No type info — default | `tls.Config{}` (value) |
 | Nested construction | `http.Server(TLSConfig: tls.Config(...))` | Check field type of `http.Server` | `&tls.Config{}` if field is `*tls.Config` |
 
 ### Zinc Syntax — No Change
@@ -49,10 +49,10 @@ import "crypto/tls"
 
 main() {
     // Argument context — go/types says grpc.Creds wants *tls.Config
-    creds := grpc.Creds(tls.Config(MinVersion: tls.VersionTLS12))
+    var creds = grpc.Creds(tls.Config(MinVersion: tls.VersionTLS12))
 
     // No context — value (current behavior preserved)
-    cfg := tls.Config(MinVersion: tls.VersionTLS12)
+    var cfg = tls.Config(MinVersion: tls.VersionTLS12)
 }
 ```
 
@@ -98,10 +98,10 @@ http.Server(TLSConfig: tls.Config(MinVersion: 3))
 func (r *GoTypeResolver) FieldType(pkgPath, typeName, fieldName string) (string, string, bool, bool)
 ```
 
-### Context 3: No Context (`:=`)
+### Context 3: No Context (`var`)
 
 ```zinc
-cfg := tls.Config(MinVersion: tls.VersionTLS12)
+var cfg = tls.Config(MinVersion: tls.VersionTLS12)
 ```
 
 **Resolution:** No type context available. Emit value literal `tls.Config{...}` (current behavior). This is safe — if the user later passes `cfg` to a function that wants `*tls.Config`, Go's compiler will report the type mismatch, and the user can restructure (pass the construction inline as argument).
@@ -300,7 +300,7 @@ TestE2EGoTypePointerInference()
 
 ### Backward Compatibility
 
-All existing tests must continue to pass unchanged. The `:=` default (value) preserves current behavior.
+All existing tests must continue to pass unchanged. The `var` default (value) preserves current behavior.
 
 ## What This Does NOT Cover
 

@@ -41,7 +41,7 @@ makeSpeak(Speaker s) {
 }
 
 main() {
-    d := Dog("Rex", "Labrador")
+    var d = Dog("Rex", "Labrador")
     print(d.speak())
     print(d.describe())
     greetAnimal(d)    // Dog passed as Animal

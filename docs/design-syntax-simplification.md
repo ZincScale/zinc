@@ -49,12 +49,12 @@ Parameters and fields use `Type name` (C-style, like Java/C#/Dart) with no colon
 greet(String name, String greeting = "Hello") { }
 ```
 
-**Local variable shorthand — `:=` for inferred declarations:**
+**Local variable shorthand — `var` for inferred declarations:**
 
 ```zinc
-x := 42              // inferred Int
-name := "hello"      // inferred String
-items := [1, 2, 3]   // inferred List<Int>
+var x = 42              // inferred Int
+var name = "hello"      // inferred String
+var items = [1, 2, 3]   // inferred List<Int>
 
 Int count = 0         // explicit type when needed
 String? label = null  // nullable with explicit type
@@ -81,7 +81,7 @@ Dog {
 Construction uses `ClassName(args)` directly — like Python, Kotlin, Swift, Dart.
 
 ```zinc
-d := Dog(name: "Rex", age: 5)
+var d = Dog(name: "Rex", age: 5)
 ```
 
 ### 7. Return type before name
@@ -131,7 +131,7 @@ Colon has exactly two uses, one meaning each:
 | Syntax | Meaning | Example |
 |--------|---------|---------|
 | `:` | Key-value separator | `Dog(name: "Rex")`, `{"key": val}` |
-| `:=` | Inferred declaration | `x := 42` |
+| `var` | Inferred declaration | `var x = 42` |
 
 ## Complete Example
 
@@ -190,9 +190,9 @@ String classify(Int x) {
 }
 
 main() {
-    d := Dog(name: "Rex", age: 5)
-    p := Puppy(name: "Spot", toy: "ball")
-    scores := {"Alice": 90, "Bob": 60}
+    var d = Dog(name: "Rex", age: 5)
+    var p = Puppy(name: "Spot", toy: "ball")
+    var scores = {"Alice": 90, "Bob": 60}
 
     if d.isOld() {
         print("Old dog")
@@ -205,10 +205,10 @@ main() {
     }
 
     List<Int> items = [1, 2, 3, 4, 5]
-    big := items.Where(x -> x > 3).Select(x -> x * 2).ToList()
+    var big = items.Where(x -> x > 3).Select(x -> x * 2).ToList()
     print(big.join(", "))
 
-    result := riskyCall() or {
+    var result = riskyCall() or {
         print("failed: {err}")
         return
     }

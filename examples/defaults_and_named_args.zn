@@ -33,9 +33,9 @@ main() {
     connect(tls: true, host: "secure.io")
 
     // Named constructor args
-    d1 := Dog("Rex")
-    d2 := Dog(name: "Buddy", age: 3)
-    d3 := Dog(age: 5, name: "Spot")
+    var d1 = Dog("Rex")
+    var d2 = Dog(name: "Buddy", age: 3)
+    var d3 = Dog(age: 5, name: "Spot")
     print(d1.describe())
     print(d2.describe())
     print(d3.describe())

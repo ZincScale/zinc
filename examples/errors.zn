@@ -7,11 +7,11 @@ Int divide(Int a, Int b) {
 
 main() {
     // Auto-propagation: panics in main if error occurs
-    result := divide(10, 2)
+    var result = divide(10, 2)
     print(result)
 
     // Or handler: add context, log, and halt
-    result2 := divide(5, 0) or {
+    var result2 = divide(5, 0) or {
         print("caught: {err}")
         exit(0)
     }

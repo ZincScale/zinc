@@ -9,11 +9,11 @@ Int divide(Int a, Int b) {
 
 main() {
     // Auto-propagation: panics on error in main
-    result := divide(10, 2)
+    var result = divide(10, 2)
     print("10 / 2 = {result}")    // 10 / 2 = 5
 
     // Or handler: catch and handle the error
-    result2 := divide(10, 0) or {
+    var result2 = divide(10, 0) or {
         print("caught: {err}")    // caught: division by zero
         exit(0)
     }

@@ -12,9 +12,9 @@ import "sync"
 
 main() {
     // --- Basic file write with auto-close ---
-    path := os.TempDir() + "/zinc_example.txt"
+    var path = os.TempDir() + "/zinc_example.txt"
 
-    with (f := os.Create(path)) {
+    with (f = os.Create(path)) {
         f.WriteString("Hello from Zinc!\n")
         f.WriteString("Resources are managed automatically.\n")
     }
@@ -23,8 +23,8 @@ main() {
     print(readFile(path))
 
     // --- Mutex locking (like Java's synchronized) ---
-    counter := 0
-    with (mu := sync.Mutex()) {
+    var counter = 0
+    with (mu = sync.Mutex()) {
         counter += 1
         counter += 10
     }
@@ -32,7 +32,7 @@ main() {
     print(counter)
 
     // --- with + or handler: error handling ---
-    with (f2 := os.Open("/nonexistent/file.txt") or {
+    with (f2 = os.Open("/nonexistent/file.txt") or {
         print("Caught error: {err}")
         exit(0)
     }) {
@@ -40,10 +40,10 @@ main() {
     }
 
     // --- Multiple resources in one with ---
-    p1 := os.TempDir() + "/zinc_multi_a.txt"
-    p2 := os.TempDir() + "/zinc_multi_b.txt"
+    var p1 = os.TempDir() + "/zinc_multi_a.txt"
+    var p2 = os.TempDir() + "/zinc_multi_b.txt"
 
-    with (f1 := os.Create(p1), f2 := os.Create(p2)) {
+    with (f1 = os.Create(p1), f2 = os.Create(p2)) {
         f1.WriteString("File A")
         f2.WriteString("File B")
     }

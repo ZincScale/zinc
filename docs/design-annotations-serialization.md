@@ -139,15 +139,15 @@ Both verbs are **failable**. Zinc's error handling auto-propagates errors — no
 
 ```zinc
 // Auto-propagation (most common) — errors propagate to caller automatically
-json := serialize(user)
-user := deserialize<User>(jsonStr)
+var json = serialize(user)
+var user = deserialize<User>(jsonStr)
 
 // With context — log then propagate
-json := serialize(user) or { print("serialize failed: {err}") }
-user := deserialize<User>(input) or { print("bad input: {err}") }
+var json = serialize(user) or { print("serialize failed: {err}") }
+var user = deserialize<User>(input) or { print("bad input: {err}") }
 
 // With recovery — handle error and continue
-user := deserialize<User>(input) or {
+var user = deserialize<User>(input) or {
     print("bad input, using defaults: {err}")
     exit(0)
 }
@@ -163,12 +163,12 @@ user := deserialize<User>(input) or {
 
 ```zinc
 // JSON (default — no format needed)
-json := serialize(user)
-user := deserialize<User>(jsonStr)
+var json = serialize(user)
+var user = deserialize<User>(jsonStr)
 
 // YAML
-yaml := serialize(user, Format.Yaml)
-user := deserialize<User>(yamlStr, Format.Yaml)
+var yaml = serialize(user, Format.Yaml)
+var user = deserialize<User>(yamlStr, Format.Yaml)
 ```
 
 ```zinc
@@ -187,7 +187,7 @@ For v1, only `Format.Json` ships. Other formats are a codegen extension — when
 
 **Zinc:**
 ```zinc
-json := serialize(user)
+var json = serialize(user)
 ```
 
 **Emitted Go (auto-propagation):**
@@ -201,7 +201,7 @@ json := string(_bytes)
 
 **Zinc with context:**
 ```zinc
-json := serialize(user) or { print("failed: {err}") }
+var json = serialize(user) or { print("failed: {err}") }
 ```
 
 **Emitted Go:**
@@ -218,7 +218,7 @@ json := string(_bytes)
 
 **Zinc:**
 ```zinc
-user := deserialize<User>(input)
+var user = deserialize<User>(input)
 ```
 
 **Emitted Go (auto-propagation):**
@@ -243,7 +243,7 @@ Config {
     Bool debug              // optional, defaults to zero value (false)
 }
 
-cfg := deserialize<Config>(input)
+var cfg = deserialize<Config>(input)
 ```
 
 **Emitted Go:**
@@ -275,11 +275,11 @@ Animal {
     }
 }
 
-dog := Animal("Rex", "Woof")
-json := serialize(dog)           // auto-propagates on error
+var dog = Animal("Rex", "Woof")
+var json = serialize(dog)           // auto-propagates on error
 // {"name":"Rex","sound":"Woof"}
 
-dog2 := deserialize<Animal>(json)
+var dog2 = deserialize<Animal>(json)
 print(dog2.name)                    // Rex
 ```
 
@@ -294,9 +294,9 @@ Box<T> {
     }
 }
 
-box := Box(42)
-json := serialize(box)           // {"value":42}
-box2 := deserialize<Box<Int>>(json)
+var box = Box(42)
+var json = serialize(box)           // {"value":42}
+var box2 = deserialize<Box<Int>>(json)
 print(box2.value)                   // 42
 ```
 
@@ -355,15 +355,15 @@ ApiResponse {
 }
 
 String handleRequest(String body) {
-    req := deserialize<ApiRequest>(body) or {
-        resp := ApiResponse()
+    var req = deserialize<ApiRequest>(body) or {
+        var resp = ApiResponse()
         resp.success = false
         resp.errorMessage = "invalid request: {err}"
         return serialize(resp)
     }
 
     // Process request...
-    resp := ApiResponse()
+    var resp = ApiResponse()
     resp.success = true
     return serialize(resp)
 }
