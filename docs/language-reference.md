@@ -1,5 +1,7 @@
 # Language Reference
 
+Zinc compiles to native binaries via **C# AOT** (default) or **Go**. The "Transpiles to:" sections below show Go output for reference — the C# backend produces equivalent idiomatic C# code.
+
 ## Variables
 
 ```zinc

@@ -1,6 +1,6 @@
 # Built-in Functions
 
-Zinc provides a set of built-in functions that map directly to Go standard library calls. No imports needed — the transpiler adds them automatically.
+Zinc provides built-in functions that map to the target backend's standard library. No imports needed — the transpiler adds them automatically. The table below shows Go equivalents; the C# backend produces equivalent `System.*` calls.
 
 ## I/O
 

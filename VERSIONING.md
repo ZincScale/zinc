@@ -2,7 +2,7 @@
 
 Zinc follows [Semantic Versioning 2.0.0](https://semver.org/).
 
-## Current version: 0.2.0
+## Current version: 0.5.0
 
 ## Pre-1.0 rules (0.x.y)
 
@@ -24,7 +24,7 @@ Once Zinc reaches 1.0, the language syntax and CLI interface are considered stab
 - Removing or renaming a keyword or built-in function
 - Changing the semantics of existing syntax
 - Removing a CLI command or changing its flags in incompatible ways
-- Changing generated Go output in ways that break previously-compiling Zinc code
+- Changing generated output (C# or Go) in ways that break previously-compiling Zinc code
 
 ## What does NOT count as a breaking change
 
