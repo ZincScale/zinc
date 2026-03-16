@@ -623,14 +623,16 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		for _, el := range e.Elements {
 			elems = append(elems, g.emitExpr(el))
 		}
-		return fmt.Sprintf("new List<object> { %s }", strings.Join(elems, ", "))
+		elemType := g.inferListElemType(e)
+		return fmt.Sprintf("new List<%s> { %s }", elemType, strings.Join(elems, ", "))
 	case *parser.MapLit:
 		g.neededUsings["System.Collections.Generic"] = true
 		var entries []string
 		for i, k := range e.Keys {
 			entries = append(entries, fmt.Sprintf("{ %s, %s }", g.emitExpr(k), g.emitExpr(e.Values[i])))
 		}
-		return fmt.Sprintf("new Dictionary<object, object> { %s }", strings.Join(entries, ", "))
+		keyType, valType := g.inferMapTypes(e)
+		return fmt.Sprintf("new Dictionary<%s, %s> { %s }", keyType, valType, strings.Join(entries, ", "))
 	case *parser.LambdaExpr:
 		return g.emitLambda(e)
 	case *parser.StringInterpLit:
@@ -705,8 +707,10 @@ func (g *Generator) formatCallArgs(e *parser.CallExpr) string {
 func (g *Generator) emitBuiltinMethod(sel *parser.SelectorExpr, call *parser.CallExpr) (string, bool) {
 	obj := g.emitExpr(sel.Object)
 	switch sel.Field {
-	// List methods
-	case "add":
+
+	// --- List mutation methods ------------------------------------------------
+
+	case "Add":
 		if len(call.Args) == 1 {
 			return fmt.Sprintf("%s.Add(%s)", obj, g.emitExpr(call.Args[0])), true
 		}
@@ -715,42 +719,177 @@ func (g *Generator) emitBuiltinMethod(sel *parser.SelectorExpr, call *parser.Cal
 			stmts = append(stmts, fmt.Sprintf("%s.Add(%s)", obj, g.emitExpr(a)))
 		}
 		return strings.Join(stmts, "; "), true
-	case "remove":
+	case "Remove":
 		return fmt.Sprintf("%s.Remove(%s)", obj, g.emitExpr(call.Args[0])), true
-	case "size":
-		return fmt.Sprintf("%s.Count", obj), true
-	case "clone":
-		return fmt.Sprintf("new List<object>(%s)", obj), true
-	case "sort":
-		return fmt.Sprintf("%s.OrderBy(x => x).ToList()", obj), true
-	case "join":
-		return fmt.Sprintf("string.Join(%s, %s)", g.emitExpr(call.Args[0]), obj), true
-	case "contains":
+	case "Clear":
+		return fmt.Sprintf("%s.Clear()", obj), true
+	case "Insert":
+		return fmt.Sprintf("%s.Insert(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+	case "RemoveAt":
+		return fmt.Sprintf("%s.RemoveAt(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Reverse":
+		return fmt.Sprintf("%s.Reverse()", obj), true
+	case "Sort":
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Sort()", obj), true
+		}
+		return fmt.Sprintf("%s.Sort((%s))", obj, g.emitExpr(call.Args[0])), true
+
+	// --- List/collection query methods (LINQ) --------------------------------
+
+	case "Where":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Where(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "Select":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Select(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "First":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.First()", obj), true
+		}
+		return fmt.Sprintf("%s.First(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "FirstOrDefault":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.FirstOrDefault()", obj), true
+		}
+		return fmt.Sprintf("%s.FirstOrDefault(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Last":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Last()", obj), true
+		}
+		return fmt.Sprintf("%s.Last(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Any":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Any()", obj), true
+		}
+		return fmt.Sprintf("%s.Any(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "All":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.All(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Count":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Count()", obj), true
+		}
+		return fmt.Sprintf("%s.Count(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Sum":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Sum()", obj), true
+		}
+		return fmt.Sprintf("%s.Sum(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Min":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Min()", obj), true
+		}
+		return fmt.Sprintf("%s.Min(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Max":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Max()", obj), true
+		}
+		return fmt.Sprintf("%s.Max(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Average":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 0 {
+			return fmt.Sprintf("%s.Average()", obj), true
+		}
+		return fmt.Sprintf("%s.Average(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Aggregate":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 2 {
+			return fmt.Sprintf("%s.Aggregate(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+		}
+		return fmt.Sprintf("%s.Aggregate(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "OrderBy":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.OrderBy(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "OrderByDescending":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.OrderByDescending(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "Take":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Take(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "Skip":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Skip(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "Distinct":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.Distinct().ToList()", obj), true
+	case "Zip":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 2 {
+			return fmt.Sprintf("%s.Zip(%s, %s).ToList()", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+		}
+		return fmt.Sprintf("%s.Zip(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "SelectMany":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.SelectMany(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "GroupBy":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.GroupBy(%s).ToList()", obj, g.emitExpr(call.Args[0])), true
+	case "ToDictionary":
+		g.neededUsings["System.Linq"] = true
+		if len(call.Args) == 2 {
+			return fmt.Sprintf("%s.ToDictionary(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+		}
+		return fmt.Sprintf("%s.ToDictionary(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "ToList":
+		g.neededUsings["System.Linq"] = true
+		return fmt.Sprintf("%s.ToList()", obj), true
+	case "ForEach":
+		return fmt.Sprintf("%s.ForEach(%s)", obj, g.emitExpr(call.Args[0])), true
+
+	// --- List property-like methods ------------------------------------------
+
+	case "Contains":
 		return fmt.Sprintf("%s.Contains(%s)", obj, g.emitExpr(call.Args[0])), true
-	// String methods
-	case "upper":
+
+	// --- String methods ------------------------------------------------------
+
+	case "ToUpper":
 		return fmt.Sprintf("%s.ToUpper()", obj), true
-	case "lower":
+	case "ToLower":
 		return fmt.Sprintf("%s.ToLower()", obj), true
-	case "startsWith":
+	case "StartsWith":
 		return fmt.Sprintf("%s.StartsWith(%s)", obj, g.emitExpr(call.Args[0])), true
-	case "endsWith":
+	case "EndsWith":
 		return fmt.Sprintf("%s.EndsWith(%s)", obj, g.emitExpr(call.Args[0])), true
-	case "trim":
+	case "Trim":
 		return fmt.Sprintf("%s.Trim()", obj), true
-	case "split":
+	case "Split":
 		return fmt.Sprintf("%s.Split(%s)", obj, g.emitExpr(call.Args[0])), true
-	case "replace":
+	case "Replace":
 		return fmt.Sprintf("%s.Replace(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
-	// Map methods
-	case "keys":
+	case "Substring":
+		if len(call.Args) == 2 {
+			return fmt.Sprintf("%s.Substring(%s, %s)", obj, g.emitExpr(call.Args[0]), g.emitExpr(call.Args[1])), true
+		}
+		return fmt.Sprintf("%s.Substring(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "IndexOf":
+		return fmt.Sprintf("%s.IndexOf(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "Join":
+		return fmt.Sprintf("string.Join(%s, %s)", g.emitExpr(call.Args[0]), obj), true
+	case "Length":
+		return fmt.Sprintf("%s.Length", obj), true
+
+	// --- Map methods ---------------------------------------------------------
+
+	case "Keys":
 		g.neededUsings["System.Linq"] = true
 		return fmt.Sprintf("%s.Keys.ToList()", obj), true
-	case "values":
+	case "Values":
 		g.neededUsings["System.Linq"] = true
 		return fmt.Sprintf("%s.Values.ToList()", obj), true
-	case "containsKey":
+	case "ContainsKey":
 		return fmt.Sprintf("%s.ContainsKey(%s)", obj, g.emitExpr(call.Args[0])), true
+	case "ContainsValue":
+		return fmt.Sprintf("%s.ContainsValue(%s)", obj, g.emitExpr(call.Args[0])), true
 	}
 	return "", false
 }
@@ -919,6 +1058,38 @@ func (g *Generator) isOverriddenByChild(className, methodName string) bool {
 		}
 	}
 	return false
+}
+
+// inferListElemType infers the C# element type from list literal contents.
+func (g *Generator) inferListElemType(e *parser.ListLit) string {
+	if len(e.Elements) == 0 {
+		return "object"
+	}
+	return g.inferExprCSharpType(e.Elements[0])
+}
+
+// inferMapTypes infers C# key and value types from map literal contents.
+func (g *Generator) inferMapTypes(e *parser.MapLit) (string, string) {
+	if len(e.Keys) == 0 {
+		return "object", "object"
+	}
+	return g.inferExprCSharpType(e.Keys[0]), g.inferExprCSharpType(e.Values[0])
+}
+
+// inferExprCSharpType returns the C# type of a literal expression.
+func (g *Generator) inferExprCSharpType(e parser.Expr) string {
+	switch e.(type) {
+	case *parser.IntLit:
+		return "int"
+	case *parser.FloatLit:
+		return "double"
+	case *parser.StringLit, *parser.RawStringLit, *parser.StringInterpLit:
+		return "string"
+	case *parser.BoolLit:
+		return "bool"
+	default:
+		return "object"
+	}
 }
 
 func capitalize(s string) string {

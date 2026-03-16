@@ -205,7 +205,7 @@ main() {
     print(scores)
 }
 `)
-	assertContains(t, out, "new Dictionary<object, object>")
+	assertContains(t, out, "new Dictionary<string, int>")
 	assertContains(t, out, `{ "Alice", 90 }`)
 }
 
@@ -246,42 +246,180 @@ func TestBuiltinListMethods(t *testing.T) {
 	out := transpile(`
 main() {
     var items = [1, 2, 3]
-    items.add(4)
-    var n = items.size()
-    print(n)
+    items.Add(4)
+    items.Remove(2)
+    items.Clear()
+    print(items)
 }
 `)
 	assertContains(t, out, "items.Add(4)")
-	assertContains(t, out, "items.Count")
+	assertContains(t, out, "items.Remove(2)")
+	assertContains(t, out, "items.Clear()")
 }
 
 func TestBuiltinStringMethods(t *testing.T) {
 	out := transpile(`
 main() {
     var s = "Hello World"
-    var u = s.upper()
-    var l = s.lower()
-    var t = s.trim()
+    var u = s.ToUpper()
+    var l = s.ToLower()
+    var tr = s.Trim()
+    var idx = s.IndexOf("World")
     print(u)
 }
 `)
 	assertContains(t, out, "s.ToUpper()")
 	assertContains(t, out, "s.ToLower()")
 	assertContains(t, out, "s.Trim()")
+	assertContains(t, out, `s.IndexOf("World")`)
 }
 
 func TestBuiltinMapMethods(t *testing.T) {
 	out := transpile(`
 main() {
     var m = {"a": 1}
-    var k = m.keys()
-    var v = m.values()
+    var k = m.Keys()
+    var v = m.Values()
     print(k)
 }
 `)
 	assertContains(t, out, "m.Keys.ToList()")
 	assertContains(t, out, "m.Values.ToList()")
 	assertContains(t, out, "using System.Linq;")
+}
+
+func TestLinqWhere(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3, 4, 5]
+    var evens = nums.Where((Int x) -> x > 2)
+    print(evens)
+}
+`)
+	assertContains(t, out, ".Where(x => (x > 2)).ToList()")
+	assertContains(t, out, "using System.Linq;")
+}
+
+func TestLinqSelect(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var doubled = nums.Select((Int x) -> x * 2)
+    print(doubled)
+}
+`)
+	assertContains(t, out, ".Select(x => (x * 2)).ToList()")
+}
+
+func TestLinqFirst(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var f = nums.First()
+    var g = nums.First((Int x) -> x > 1)
+    print(f)
+}
+`)
+	assertContains(t, out, ".First()")
+	assertContains(t, out, ".First(x => (x > 1))")
+}
+
+func TestLinqAnyAll(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var hasAny = nums.Any((Int x) -> x > 2)
+    var allPos = nums.All((Int x) -> x > 0)
+    print(hasAny)
+}
+`)
+	assertContains(t, out, ".Any(x => (x > 2))")
+	assertContains(t, out, ".All(x => (x > 0))")
+}
+
+func TestLinqSumMinMax(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var total = nums.Sum()
+    var lo = nums.Min()
+    var hi = nums.Max()
+    print(total)
+}
+`)
+	assertContains(t, out, ".Sum()")
+	assertContains(t, out, ".Min()")
+	assertContains(t, out, ".Max()")
+}
+
+func TestLinqOrderBy(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [3, 1, 2]
+    var sorted = nums.OrderBy((Int x) -> x)
+    var desc = nums.OrderByDescending((Int x) -> x)
+    print(sorted)
+}
+`)
+	assertContains(t, out, ".OrderBy(x => x).ToList()")
+	assertContains(t, out, ".OrderByDescending(x => x).ToList()")
+}
+
+func TestLinqTakeSkip(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3, 4, 5]
+    var first3 = nums.Take(3)
+    var rest = nums.Skip(2)
+    print(first3)
+}
+`)
+	assertContains(t, out, ".Take(3).ToList()")
+	assertContains(t, out, ".Skip(2).ToList()")
+}
+
+func TestLinqDistinct(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 2, 3, 3]
+    var unique = nums.Distinct()
+    print(unique)
+}
+`)
+	assertContains(t, out, ".Distinct().ToList()")
+}
+
+func TestLinqAggregate(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var sum = nums.Aggregate(0, (Int acc, Int x) -> acc + x)
+    print(sum)
+}
+`)
+	assertContains(t, out, ".Aggregate(0, (acc, x) => (acc + x))")
+}
+
+func TestLinqToDictionary(t *testing.T) {
+	out := transpile(`
+main() {
+    var names = ["alice", "bob"]
+    var dict = names.ToDictionary((String s) -> s, (String s) -> s.Length())
+    print(dict)
+}
+`)
+	assertContains(t, out, ".ToDictionary(s => s, s => s.Length)")
+}
+
+func TestLinqForEach(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    nums.ForEach((Int x) -> x * 2)
+    print("done")
+}
+`)
+	assertContains(t, out, ".ForEach(x => (x * 2))")
 }
 
 func TestLambda(t *testing.T) {

@@ -197,3 +197,87 @@ main() {
 `)
 	assertOutput(t, out, "two")
 }
+
+// --- LINQ Collection Methods -------------------------------------------------
+
+func TestE2ELinqWhereSelect(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [1, 2, 3, 4, 5]
+    var big = nums.Where((Int x) -> x > 3)
+    var doubled = big.Select((Int x) -> x * 2)
+    for item in doubled { print(item) }
+}
+`)
+	assertOutput(t, out, "8\n10")
+}
+
+func TestE2ELinqFirstAny(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [10, 20, 30]
+    var f = nums.First()
+    var hasLarge = nums.Any((Int x) -> x > 25)
+    print(f)
+    print(hasLarge)
+}
+`)
+	assertOutput(t, out, "10\nTrue")
+}
+
+func TestE2ELinqSumMinMax(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [3, 1, 4, 1, 5]
+    print(nums.Sum())
+    print(nums.Min())
+    print(nums.Max())
+}
+`)
+	assertOutput(t, out, "14\n1\n5")
+}
+
+func TestE2ELinqOrderByTake(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [5, 3, 1, 4, 2]
+    var sorted = nums.OrderBy((Int x) -> x)
+    var first3 = sorted.Take(3)
+    for item in first3 { print(item) }
+}
+`)
+	assertOutput(t, out, "1\n2\n3")
+}
+
+func TestE2ELinqDistinct(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [1, 2, 2, 3, 3, 3]
+    var unique = nums.Distinct()
+    for item in unique { print(item) }
+}
+`)
+	assertOutput(t, out, "1\n2\n3")
+}
+
+func TestE2ELinqAggregate(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [1, 2, 3, 4]
+    var sum = nums.Aggregate(0, (Int acc, Int x) -> acc + x)
+    print(sum)
+}
+`)
+	assertOutput(t, out, "10")
+}
+
+func TestE2ELinqChain(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    var result = nums.Where((Int x) -> x > 3).Select((Int x) -> x * x).Take(3)
+    for item in result { print(item) }
+}
+`)
+	assertOutput(t, out, "16\n25\n36")
+}
