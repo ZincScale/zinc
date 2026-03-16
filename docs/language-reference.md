@@ -603,11 +603,11 @@ enum Direction { North, South, East, West }
 
 String describe(Direction d) {
     match d {
-        case Direction.North => { return "Going North" }
-        case Direction.South => { return "Going South" }
-        case Direction.East  => { return "Going East"  }
-        case Direction.West  => { return "Going West"  }
-        case _ => { return "Unknown" }
+        case Direction.North -> { return "Going North" }
+        case Direction.South -> { return "Going South" }
+        case Direction.East  -> { return "Going East"  }
+        case Direction.West  -> { return "Going West"  }
+        case _ -> { return "Unknown" }
     }
 }
 ```
@@ -822,16 +822,16 @@ run(Fn() callback) {
 }
 
 main() {
-    double := (Int x) => x * 2
+    double := (Int x) -> x * 2
     print(apply(double, 7))       // 14
 
-    add := (Int a, Int b) => a + b
+    add := (Int a, Int b) -> a + b
     print(combine(add, 3, 4))     // 7
 
-    run(() => { print("done") })
+    run(() -> { print("done") })
 
     // Also works as variable type annotations
-    Int Fn(String) transform = (String s) => s.size()
+    Int Fn(String) transform = (String s) -> s.size()
     print(transform("hello"))     // 5
 }
 ```
@@ -846,16 +846,16 @@ func run(callback func()) { callback() }
 
 ## Closures / Lambdas
 
-Lambdas use the `(Type param) => body` syntax. The body is either a
+Lambdas use the `(Type param) -> body` syntax. The body is either a
 single expression or a block `{ ... }`.
 
 ```zinc
 // Single-expression lambda (inferred as a func literal)
-double := (Int x) => x * 2
-greet  := () => "Hello!"
+double := (Int x) -> x * 2
+greet  := () -> "Hello!"
 
 // Block-body lambda
-describe := (Int x) => {
+describe := (Int x) -> {
     if x > 0 {
         return "positive"
     }
@@ -864,10 +864,10 @@ describe := (Int x) => {
 
 // Closure capture — lambda body may reference outer variables
 base   := 100
-addBase := (Int x) => x + base
+addBase := (Int x) -> x + base
 
 // String interpolation works inside lambda bodies
-makeMsg := (String name) => "Hello, {name}!"
+makeMsg := (String name) -> "Hello, {name}!"
 ```
 
 Transpiles to idiomatic Go `func` literals:
@@ -887,7 +887,7 @@ A lambda that contains `return Error(...)` automatically gets an `error` return
 appended to its signature. Calls to failable lambdas auto-propagate errors:
 
 ```zinc
-safeDivide := (Int a, Int b) => {
+safeDivide := (Int a, Int b) -> {
     if b == 0 {
         return Error("division by zero")
     }

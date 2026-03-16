@@ -57,9 +57,9 @@ Task {
     }
     String describe() {
         match this.status {
-            case Status.Active => { return "active" }
-            case Status.Idle   => { return "idle" }
-            case _ => { return "done" }
+            case Status.Active -> { return "active" }
+            case Status.Idle   -> { return "idle" }
+            case _ -> { return "done" }
         }
     }
 }
@@ -391,7 +391,7 @@ func TestIntegrationGoRoutineClosure(t *testing.T) {
 main() {
     base := 10
     go {
-        addBase := (Int x) => x + base
+        addBase := (Int x) -> x + base
         print(addBase(5))
     }
 }

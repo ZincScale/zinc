@@ -179,6 +179,10 @@ func (l *Lexer) NextToken() Token {
 		}
 		return l.makeToken(TOKEN_PLUS, "+", line, col)
 	case '-':
+		if l.peek() == '>' {
+			l.advance()
+			return l.makeToken(TOKEN_ARROW, "->", line, col)
+		}
 		if l.peek() == '=' {
 			l.advance()
 			return l.makeToken(TOKEN_MINUS_EQ, "-=", line, col)
@@ -206,10 +210,6 @@ func (l *Lexer) NextToken() Token {
 		if l.peek() == '=' {
 			l.advance()
 			return l.makeToken(TOKEN_EQ, "==", line, col)
-		}
-		if l.peek() == '>' {
-			l.advance()
-			return l.makeToken(TOKEN_FAT_ARROW, "=>", line, col)
 		}
 		return l.makeToken(TOKEN_ASSIGN, "=", line, col)
 	case '<':

@@ -619,7 +619,7 @@ Int apply(Any callback) {
     return callback(5)
 }
 main() {
-    apply((Int x) => x * 2)
+    apply((Int x) -> x * 2)
 }`
 	errs := checkSrc(src)
 	noErrors(t, errs, src)

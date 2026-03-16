@@ -92,7 +92,7 @@ const (
 	TOKEN_MINUS_EQ   // -=
 	TOKEN_STAR_EQ    // *=
 	TOKEN_SLASH_EQ   // /=
-	TOKEN_FAT_ARROW          // =>
+	TOKEN_ARROW              // ->
 	TOKEN_QUESTION           // ?
 	TOKEN_QUESTION_DOT       // ?.
 	TOKEN_QUESTION_QUESTION  // ??
@@ -177,7 +177,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_MINUS_EQ:  "-=",
 	TOKEN_STAR_EQ:   "*=",
 	TOKEN_SLASH_EQ:  "/=",
-	TOKEN_FAT_ARROW:         "=>",
+	TOKEN_ARROW:             "->",
 	TOKEN_QUESTION:          "?",
 	TOKEN_QUESTION_DOT:      "?.",
 	TOKEN_QUESTION_QUESTION: "??",

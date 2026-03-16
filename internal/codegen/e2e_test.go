@@ -234,7 +234,7 @@ func TestE2EClosure(t *testing.T) {
 	out := e2eRun(t, `
 main() {
     base := 10
-    addBase := (Int x) => x + base
+    addBase := (Int x) -> x + base
     print(addBase(5))
     print(addBase(20))
 }`)
@@ -246,7 +246,7 @@ func TestE2EHigherOrder(t *testing.T) {
 	// become interface{} in Go which cannot be called. Use a concrete fn type.
 	out := e2eRun(t, `
 Int applyDouble(Int x) {
-    double := (Int n) => n * 2
+    double := (Int n) -> n * 2
     return double(x)
 }
 main() {
@@ -302,9 +302,9 @@ func TestE2EEnumMatch(t *testing.T) {
 enum Direction { North, South, East, West }
 String describe(Direction d) {
     match d {
-        case Direction.North => { return "north" }
-        case Direction.South => { return "south" }
-        case _ => { return "other" }
+        case Direction.North -> { return "north" }
+        case Direction.South -> { return "south" }
+        case _ -> { return "other" }
     }
 }
 main() {
@@ -1147,7 +1147,7 @@ Int apply(Int Fn(Int) f, Int x) {
 }
 
 main() {
-    double := (Int x) => x * 2
+    double := (Int x) -> x * 2
     print(apply(double, 7))
 }`)
 	assertOutput(t, out, "14")
@@ -1160,7 +1160,7 @@ Int combine(Int Fn(Int, Int) f, Int a, Int b) {
 }
 
 main() {
-    add := (Int a, Int b) => a + b
+    add := (Int a, Int b) -> a + b
     print(combine(add, 3, 4))
 }`)
 	assertOutput(t, out, "7")
@@ -1173,7 +1173,7 @@ run(Fn() callback) {
 }
 
 main() {
-    run(() => {
+    run(() -> {
         print("called")
     })
 }`)
@@ -1183,7 +1183,7 @@ main() {
 func TestE2EFnTypeVar(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    transform := (String s) => s.size()
+    transform := (String s) -> s.size()
     print(transform("hello"))
 }`)
 	assertOutput(t, out, "5")
@@ -1665,8 +1665,8 @@ func TestE2EMatchFailable(t *testing.T) {
 	out := e2eRun(t, `
 String check(Int x) {
     match x {
-        case 0 => { return Error("zero not allowed") }
-        case _ => { return "ok" }
+        case 0 -> { return Error("zero not allowed") }
+        case _ -> { return "ok" }
     }
     return "unreachable"
 }
@@ -2191,7 +2191,7 @@ main() {
 func TestE2ELambdaShorthand(t *testing.T) {
 	out := e2eRun(t, `
 main() {
-    double := (Int x) => x * 2
+    double := (Int x) -> x * 2
     print(double(5))
 }`)
 	assertOutput(t, out, "10")

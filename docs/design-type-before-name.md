@@ -14,8 +14,8 @@ Zinc uses Pascal-style type annotations (`name Type`) inherited from Go. Enterpr
 | Void function | `greet(name String) { }` | `greet(String name) { }` |
 | Param default | `greet(name String, greeting String = "Hi")` | `greet(String name, String greeting = "Hi")` |
 | Variadic | `log(msgs ...String)` | `log(String... msgs)` |
-| Lambda | `(x Int) Int => x * 2` | `(Int x) => x * 2` |
-| Lambda untyped | `x => x * 2` | `x => x * 2` |
+| Lambda | `(x Int) Int => x * 2` | `(Int x) -> x * 2` |
+| Lambda untyped | `x => x * 2` | `x -> x * 2` |
 | Fn type | `Fn<(Int), Int>` | `Int Fn(Int)` |
 | Fn type void | `Fn<(), Void>` | `Fn()` |
 | Field | `name String` | `String name` |
@@ -54,7 +54,7 @@ Same principle — methods have parentheses, fields don't. Scan forward:
 - `const MAX = 5` → untyped (after `const`, IDENT followed by `=`)
 
 ### Lambda detection
-- `(Int x) =>` → typed param (uppercase + lowercase inside parens)
+- `(Int x) ->` → typed param (uppercase + lowercase inside parens)
 - Other forms unchanged
 
 ### Fn type parsing in `parseType()`

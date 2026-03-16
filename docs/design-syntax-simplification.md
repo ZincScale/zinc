@@ -205,7 +205,7 @@ main() {
     }
 
     List<Int> items = [1, 2, 3, 4, 5]
-    big := items.Where(x => x > 3).Select(x => x * 2).ToList()
+    big := items.Where(x -> x > 3).Select(x -> x * 2).ToList()
     print(big.join(", "))
 
     result := riskyCall() or {
@@ -225,7 +225,7 @@ main() {
 - `static` for static methods
 - String interpolation `{expr}`
 - `or { }` error handling
-- Lambda syntax `x => expr`, `(x, y) => expr`
+- Lambda syntax `x -> expr`, `(x, y) -> expr`
 - Named arguments with colon `fn(name: value)`
 - Collection methods, generics, all existing features
 

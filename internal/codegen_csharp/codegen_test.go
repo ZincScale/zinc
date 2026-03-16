@@ -287,7 +287,7 @@ main() {
 func TestLambda(t *testing.T) {
 	out := transpile(`
 main() {
-    f := (Int x) => x * 2
+    f := (Int x) -> x * 2
     print(f)
 }
 `)
@@ -299,9 +299,9 @@ func TestMatchStmt(t *testing.T) {
 main() {
     x := 1
     match x {
-        case 1 => { print("one") }
-        case 2 => { print("two") }
-        case _ => { print("other") }
+        case 1 -> { print("one") }
+        case 2 -> { print("two") }
+        case _ -> { print("other") }
     }
 }
 `)

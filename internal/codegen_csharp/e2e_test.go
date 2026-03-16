@@ -189,9 +189,9 @@ func TestE2EMatchStmt(t *testing.T) {
 main() {
     x := 2
     match x {
-        case 1 => { print("one") }
-        case 2 => { print("two") }
-        case _ => { print("other") }
+        case 1 -> { print("one") }
+        case 2 -> { print("two") }
+        case _ -> { print("other") }
     }
 }
 `)

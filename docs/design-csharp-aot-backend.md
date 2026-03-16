@@ -30,7 +30,7 @@ This is where C# AOT is compelling. Nearly every Zinc concept maps 1:1 to C#, el
 | `or {}` error handling | `if err != nil` chains | `try/catch` or Result pattern | **Simpler** |
 | `print()` | `fmt.Println()` | `Console.WriteLine()` | **Same** |
 | `go { }` | `go func() { }()` | `Task.Run(() => { })` | **Similar** |
-| Lambda `(x) => x * 2` | `func(x int) int { return x * 2 }` | `(x) => x * 2` | **Direct** |
+| Lambda `(x) -> x * 2` | `func(x int) int { return x * 2 }` | `(x) => x * 2` | **Direct** |
 | String interpolation `"{name}"` | `fmt.Sprintf("%v", name)` | `$"{name}"` | **Direct** |
 | `match` | `switch` | `switch` / pattern matching | **Better** (C# patterns) |
 | `with` (resources) | `defer` cleanup | `using` statement | **Direct** |

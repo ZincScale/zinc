@@ -5,3 +5,7 @@
 # Generated .go files from local zinc runs (root dir)
 /*.go
 !/go.mod
+
+# C# benchmark build artifacts
+benchmarks/csharp-aot/bin/
+benchmarks/csharp-aot/obj/

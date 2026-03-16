@@ -472,9 +472,9 @@ func TestMatchWithEnumMembers(t *testing.T) {
 enum Status { Active, Idle, Done }
 String describe(Status s) {
     match s {
-        case Status.Active => { return "active" }
-        case Status.Idle   => { return "idle" }
-        case _ => { return "done" }
+        case Status.Active -> { return "active" }
+        case Status.Idle   -> { return "idle" }
+        case _ -> { return "done" }
     }
 }`
 	out, errs := transpile(src)
@@ -491,9 +491,9 @@ func TestMatch(t *testing.T) {
 	src := `main() {
 		x := 1
 		match x {
-			case 1 => { print("one") }
-			case 2 => { print("two") }
-			case _ => { print("other") }
+			case 1 -> { print("one") }
+			case 2 -> { print("two") }
+			case _ -> { print("other") }
 		}
 	}`
 	out, errs := transpile(src)
@@ -711,7 +711,7 @@ func TestLastSegment(t *testing.T) {
 
 func TestLambdaSingleExpr(t *testing.T) {
 	src := `main() {
-    double := (Int x) => x * 2
+    double := (Int x) -> x * 2
     print(double(5))
 }`
 	out, errs := transpile(src)
@@ -719,12 +719,12 @@ func TestLambdaSingleExpr(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "func(x int) int { return (x * 2) }")
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaNoReturnType(t *testing.T) {
 	src := `main() {
-    double := (Int x) => x * 2
+    double := (Int x) -> x * 2
     print(double(3))
 }`
 	out, errs := transpile(src)
@@ -732,12 +732,12 @@ func TestLambdaNoReturnType(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "func(x int) int { return")
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaZeroParams(t *testing.T) {
 	src := `main() {
-    greet := () => "hello"
+    greet := () -> "hello"
     print(greet())
 }`
 	out, errs := transpile(src)
@@ -745,12 +745,12 @@ func TestLambdaZeroParams(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "func() string { return")
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaBlockBody(t *testing.T) {
 	src := `main() {
-    classify := (Int x) => {
+    classify := (Int x) -> {
         if x > 0 {
             return "positive"
         }
@@ -765,7 +765,7 @@ func TestLambdaBlockBody(t *testing.T) {
 	assertContains(t, out, "func(x int) string {")
 	assertContains(t, out, `"positive"`)
 	assertContains(t, out, `"non-positive"`)
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaAsArgument(t *testing.T) {
@@ -774,7 +774,7 @@ Int applyFn(Int val, Any callback) {
     return callback(val)
 }
 main() {
-    result := applyFn(5, (Int x) => x * 3)
+    result := applyFn(5, (Int x) -> x * 3)
     print(result)
 }`
 	out, errs := transpile(src)
@@ -786,7 +786,7 @@ main() {
 
 func TestLambdaFailableSignature(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) => {
+    safeDivide := (Int a, Int b) -> {
         if a == 0 {
             return Error("bad input")
         }
@@ -808,7 +808,7 @@ func TestLambdaFailableSignature(t *testing.T) {
 
 func TestLambdaFailableAutoPropagate(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) => {
+    safeDivide := (Int a, Int b) -> {
         if b == 0 {
             return Error("division by zero")
         }
@@ -831,8 +831,8 @@ func TestLambdaFailableAutoPropagate(t *testing.T) {
 
 func TestMixedFailableAndNonFailableLambdas(t *testing.T) {
 	src := `main() {
-    double := (Int x) => x * 2
-    safeSqrt := (Int x) => {
+    double := (Int x) -> x * 2
+    safeSqrt := (Int x) -> {
         if x < 0 {
             return Error("negative input")
         }
@@ -858,7 +858,7 @@ func TestMixedFailableAndNonFailableLambdas(t *testing.T) {
 
 func TestMultipleFailableCallsInMain(t *testing.T) {
 	src := `main() {
-    safeDivide := (Int a, Int b) => {
+    safeDivide := (Int a, Int b) -> {
         if b == 0 {
             return Error("division by zero")
         }
@@ -883,7 +883,7 @@ func TestMultipleFailableCallsInMain(t *testing.T) {
 
 func TestIntegrationStringInterpolationInLambda(t *testing.T) {
 	src := `main() {
-    makeMsg := (String name) => "Hello, {name}!"
+    makeMsg := (String name) -> "Hello, {name}!"
     print(makeMsg("World"))
 }`
 	out, errs := transpile(src)
@@ -892,13 +892,13 @@ func TestIntegrationStringInterpolationInLambda(t *testing.T) {
 	}
 	// Interpolation must become Sprintf inside the func literal
 	assertContains(t, out, `fmt.Sprintf("Hello, %v!", name)`)
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
 	src := `main() {
     base := 100
-    addBase := (Int x) => x + base
+    addBase := (Int x) -> x + base
     print(addBase(5))
 }`
 	out, errs := transpile(src)
@@ -913,7 +913,7 @@ func TestIntegrationLambdaCapturesOuterVar(t *testing.T) {
 
 func TestFailableLambdaMultipleReturnPaths(t *testing.T) {
 	src := `main() {
-    classify := (Int x) => {
+    classify := (Int x) -> {
         if x < 0 {
             return Error("negative")
         }
@@ -1604,8 +1604,8 @@ func TestMatchStmtFailable(t *testing.T) {
 	out, errs := transpile(`
 String classify(Int x) {
     match x {
-        case 1 => { return Error("bad") }
-        case 2 => { return "two" }
+        case 1 -> { return Error("bad") }
+        case 2 -> { return "two" }
     }
     return "other"
 }`)
@@ -1657,7 +1657,7 @@ doClose() {
 
 func TestLambdaShorthandSingleParam(t *testing.T) {
 	src := `main() {
-	double := x => x * 2
+	double := x -> x * 2
 	print(double(5))
 }`
 	out, errs := transpile(src)
@@ -1665,12 +1665,12 @@ func TestLambdaShorthandSingleParam(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "func(x interface{})")
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaShorthandParens(t *testing.T) {
 	src := `main() {
-	add := (a, b) => a + b
+	add := (a, b) -> a + b
 	print(add(1, 2))
 }`
 	out, errs := transpile(src)
@@ -1678,13 +1678,13 @@ func TestLambdaShorthandParens(t *testing.T) {
 		t.Fatal(errs)
 	}
 	assertContains(t, out, "func(a interface{}, b interface{})")
-	assertNotContains(t, out, "=>")
+	assertNotContains(t, out, "->")
 }
 
 func TestLambdaShorthandMixedTyped(t *testing.T) {
 	// Typed lambda syntax
 	src := `main() {
-	double := (Int x) => x * 2
+	double := (Int x) -> x * 2
 	print(double(5))
 }`
 	out, errs := transpile(src)

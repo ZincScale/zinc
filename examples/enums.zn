@@ -2,11 +2,11 @@ enum Direction { North, South, East, West }
 
 String describe(Direction d) {
     match d {
-        case Direction.North => { return "Going North" }
-        case Direction.South => { return "Going South" }
-        case Direction.East  => { return "Going East" }
-        case Direction.West  => { return "Going West" }
-        case _ => { return "Unknown direction" }
+        case Direction.North -> { return "Going North" }
+        case Direction.South -> { return "Going South" }
+        case Direction.East  -> { return "Going East" }
+        case Direction.West  -> { return "Going West" }
+        case _ -> { return "Unknown direction" }
     }
 }
 

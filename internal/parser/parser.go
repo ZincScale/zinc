@@ -376,10 +376,10 @@ func (p *Parser) parseUnary() Expr {
 // isLambdaStart returns true if the current TOKEN_LPAREN begins a lambda, not a grouping.
 // Heuristics (peekAt is relative to current position = the '('):
 //
-//	() =>              → peek(1)==RPAREN, peek(2)==FAT_ARROW
+//	() =>              → peek(1)==RPAREN, peek(2)==ARROW
 //	(Type name) =>     → peek(1)==IDENT(upper), peek(2)==IDENT(lower) (typed param)
 //	(Type... name) =>  → peek(1)==IDENT(upper), peek(2)==DOTDOTDOT (variadic typed)
-//	(name) =>          → peek(1)==IDENT(lower),  peek(2)==RPAREN, peek(3)==FAT_ARROW (untyped single)
+//	(name) =>          → peek(1)==IDENT(lower),  peek(2)==RPAREN, peek(3)==ARROW (untyped single)
 //	(name, name) =>    → peek(1)==IDENT(lower),  peek(2)==COMMA (untyped multi)
 func (p *Parser) isLambdaStart() bool {
 	ahead1 := p.peekAt(1)
@@ -387,7 +387,7 @@ func (p *Parser) isLambdaStart() bool {
 	case lexer.TOKEN_RPAREN:
 		// () =>
 		next := p.peekAt(2)
-		if next.Type == lexer.TOKEN_FAT_ARROW {
+		if next.Type == lexer.TOKEN_ARROW {
 			return true
 		}
 	case lexer.TOKEN_IDENT:
@@ -428,7 +428,7 @@ func (p *Parser) isLambdaStart() bool {
 			if ahead2.Type == lexer.TOKEN_COMMA {
 				return true // (name, name) => ...
 			}
-			if ahead2.Type == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_FAT_ARROW {
+			if ahead2.Type == lexer.TOKEN_RPAREN && p.peekAt(3).Type == lexer.TOKEN_ARROW {
 				return true // (name) => ...
 			}
 		}
@@ -449,7 +449,7 @@ func (p *Parser) parseLambda() *LambdaExpr {
 	p.expect(lexer.TOKEN_RPAREN)
 
 	// Lambda return types are always inferred (no explicit return type)
-	p.expect(lexer.TOKEN_FAT_ARROW)
+	p.expect(lexer.TOKEN_ARROW)
 
 	if p.check(lexer.TOKEN_LBRACE) {
 		body := p.parseBlock()
@@ -541,7 +541,7 @@ func (p *Parser) parsePrimary() Expr {
 		return p.parseMapLit()
 	case lexer.TOKEN_IDENT:
 		// Check for shorthand lambda: name => expr
-		if p.peekAt(1).Type == lexer.TOKEN_FAT_ARROW {
+		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			name := p.advance().Literal
 			p.advance() // consume =>
 			if p.check(lexer.TOKEN_LBRACE) {
@@ -1072,7 +1072,7 @@ func (p *Parser) parseMatchStmt() *MatchStmt {
 		} else {
 			pattern = p.parseExpr()
 		}
-		p.expect(lexer.TOKEN_FAT_ARROW)
+		p.expect(lexer.TOKEN_ARROW)
 		body := p.parseBlock()
 		cases = append(cases, &MatchCase{Pattern: pattern, Body: body})
 		p.skipSemis()

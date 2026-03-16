@@ -412,9 +412,9 @@ func TestCrossFileEnumUsage(t *testing.T) {
 `
 	fileB := `String describe(Color c) {
     match c {
-        case Color.Red => { return "red" }
-        case Color.Green => { return "green" }
-        case _ => { return "other" }
+        case Color.Red -> { return "red" }
+        case Color.Green -> { return "green" }
+        case _ -> { return "other" }
     }
 }
 
@@ -676,9 +676,9 @@ func TestE2ECrossFileEnumMatch(t *testing.T) {
 `,
 		"main.zn": `String describe(Color c) {
     match c {
-        case Color.Red => { return "red" }
-        case Color.Green => { return "green" }
-        case _ => { return "other" }
+        case Color.Red -> { return "red" }
+        case Color.Green -> { return "green" }
+        case _ -> { return "other" }
     }
 }
 

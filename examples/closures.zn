@@ -1,17 +1,17 @@
 main() {
     // Single-expression lambdas
-    double := (Int x) => x * 2
-    addTen := (Int x) => x + 10
+    double := (Int x) -> x * 2
+    addTen := (Int x) -> x + 10
 
     print(double(5))    // 10
     print(addTen(3))    // 13
 
     // Zero-parameter lambda
-    greet := () => "Hello from lambda!"
+    greet := () -> "Hello from lambda!"
     print(greet())
 
     // Block-body lambda
-    describe := (Int x) => {
+    describe := (Int x) -> {
         if x > 0 {
             return "positive"
         }
@@ -21,11 +21,11 @@ main() {
     print(describe(-1))
 
     // String interpolation in lambda
-    makeMsg := (String name) => "Hello, {name}!"
+    makeMsg := (String name) -> "Hello, {name}!"
     print(makeMsg("Zinc"))
 
     // Failable lambda with return Error()
-    safeDivide := (Int a, Int b) => {
+    safeDivide := (Int a, Int b) -> {
         if b == 0 {
             return Error("division by zero")
         }

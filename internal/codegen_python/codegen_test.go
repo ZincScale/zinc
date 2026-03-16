@@ -232,7 +232,7 @@ func TestLambda(t *testing.T) {
 	out := transpile(`
 Int apply(Int x, Int Fn(Int) f) { return f(x) }
 main() {
-    result := apply(5, x => x * 2)
+    result := apply(5, x -> x * 2)
     print(result)
 }
 `)
