@@ -596,6 +596,79 @@ s[7:]
 word := s[7:11]
 ```
 
+## Collection Methods (C# Backend)
+
+When targeting the C# AOT backend, Zinc supports LINQ-style collection methods that map directly to C# LINQ:
+
+```zinc
+main() {
+    var nums = [5, 3, 8, 1, 9, 2, 7, 4, 6]
+
+    // Filtering
+    var evens = nums.Where((Int x) -> x % 2 == 0)          // [8, 2, 4, 6]
+
+    // Transformation
+    var doubled = nums.Select((Int x) -> x * 2)             // [10, 6, 16, ...]
+
+    // Sorting
+    var sorted = nums.OrderBy((Int x) -> x)                 // [1, 2, 3, ...]
+    var desc = nums.OrderByDescending((Int x) -> x)         // [9, 8, 7, ...]
+
+    // Querying
+    var first = nums.First((Int x) -> x > 7)                // 8
+    var hasNeg = nums.Any((Int x) -> x < 0)                 // false
+    var allPos = nums.All((Int x) -> x > 0)                 // true
+
+    // Aggregation
+    var total = nums.Sum()                                   // 45
+    var lo = nums.Min()                                      // 1
+    var hi = nums.Max()                                      // 9
+    var count = nums.Count((Int x) -> x > 5)                // 4
+    var product = nums.Aggregate(1, (Int a, Int x) -> a * x)
+
+    // Subsetting
+    var top3 = nums.Take(3)                                  // [5, 3, 8]
+    var rest = nums.Skip(3)                                  // [1, 9, 2, 7, 4, 6]
+    var unique = [1, 2, 2, 3].Distinct()                     // [1, 2, 3]
+
+    // Chaining — compose multiple operations
+    var result = nums.Where((Int x) -> x % 2 == 0)
+                     .Select((Int x) -> x * x)
+                     .OrderBy((Int x) -> x)
+                     .Take(3)
+}
+```
+
+### Full Method Reference
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `Where(predicate)` | Filter elements | `nums.Where((x) -> x > 5)` |
+| `Select(transform)` | Transform elements | `nums.Select((x) -> x * 2)` |
+| `First()` / `First(predicate)` | First element (or first matching) | `nums.First((x) -> x > 5)` |
+| `FirstOrDefault(predicate)` | First matching or default | `nums.FirstOrDefault((x) -> x > 100)` |
+| `Last()` / `Last(predicate)` | Last element | `nums.Last()` |
+| `Any()` / `Any(predicate)` | True if any match | `nums.Any((x) -> x < 0)` |
+| `All(predicate)` | True if all match | `nums.All((x) -> x > 0)` |
+| `Count()` / `Count(predicate)` | Count (optionally with filter) | `nums.Count((x) -> x > 5)` |
+| `Sum()` / `Sum(selector)` | Sum values | `nums.Sum()` |
+| `Min()` / `Max()` | Minimum / maximum | `nums.Min()` |
+| `Average()` | Average value | `nums.Average()` |
+| `Aggregate(seed, func)` | Fold / reduce | `nums.Aggregate(0, (a, x) -> a + x)` |
+| `OrderBy(key)` | Sort ascending | `nums.OrderBy((x) -> x)` |
+| `OrderByDescending(key)` | Sort descending | `nums.OrderByDescending((x) -> x)` |
+| `Take(n)` | First n elements | `nums.Take(3)` |
+| `Skip(n)` | Skip first n | `nums.Skip(3)` |
+| `Distinct()` | Remove duplicates | `nums.Distinct()` |
+| `SelectMany(func)` | Flatten nested collections | `lists.SelectMany((x) -> x)` |
+| `GroupBy(key)` | Group by key | `items.GroupBy((x) -> x.category)` |
+| `Zip(other, func)` | Combine two lists | `a.Zip(b, (x, y) -> x + y)` |
+| `ToDictionary(key, value)` | Convert to map | `items.ToDictionary((x) -> x.id, (x) -> x)` |
+| `ToList()` | Materialize to list | `query.ToList()` |
+| `ForEach(action)` | Execute action per element | `nums.ForEach((x) -> x * 2)` |
+
+> **Note:** Collection methods are available on the C# backend. On the Go backend, use `for` loops for equivalent operations.
+
 ## Match / Switch
 
 ```zinc

@@ -1,0 +1,64 @@
+// LINQ-style collection methods — Where, Select, OrderBy, First, Sum, etc.
+// These map directly to C# LINQ when targeting the C# AOT backend.
+
+main() {
+    var nums = [5, 3, 8, 1, 9, 2, 7, 4, 6]
+
+    // Where — filter elements
+    var evens = nums.Where((Int x) -> x % 2 == 0)
+    print("Evens: ")
+    for n in evens { print(n) }
+
+    // Select — transform elements
+    var doubled = nums.Select((Int x) -> x * 2)
+    print("Doubled first 3:")
+    var first3 = doubled.Take(3)
+    for n in first3 { print(n) }
+
+    // OrderBy — sort
+    var sorted = nums.OrderBy((Int x) -> x)
+    print("Sorted:")
+    for n in sorted { print(n) }
+
+    // First — get first matching element
+    var firstBig = nums.First((Int x) -> x > 7)
+    print("First > 7: {firstBig}")
+
+    // Any / All — boolean queries
+    var hasNeg = nums.Any((Int x) -> x < 0)
+    var allPos = nums.All((Int x) -> x > 0)
+    print("Has negative: {hasNeg}")
+    print("All positive: {allPos}")
+
+    // Sum, Min, Max
+    print("Sum: {nums.Sum()}")
+    print("Min: {nums.Min()}")
+    print("Max: {nums.Max()}")
+
+    // Count with predicate
+    var bigCount = nums.Count((Int x) -> x > 5)
+    print("Count > 5: {bigCount}")
+
+    // Distinct
+    var dupes = [1, 2, 2, 3, 3, 3]
+    var unique = dupes.Distinct()
+    print("Distinct:")
+    for n in unique { print(n) }
+
+    // Aggregate — fold/reduce
+    var product = nums.Aggregate(1, (Int acc, Int x) -> acc * x)
+    print("Product: {product}")
+
+    // Chaining — Where + Select + OrderBy + Take
+    print("Chain: evens squared, top 2:")
+    var chain = nums.Where((Int x) -> x % 2 == 0)
+                    .Select((Int x) -> x * x)
+                    .OrderByDescending((Int x) -> x)
+                    .Take(2)
+    for n in chain { print(n) }
+
+    // Skip
+    var tail = sorted.Skip(6)
+    print("Last 3 sorted:")
+    for n in tail { print(n) }
+}

@@ -198,6 +198,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs:
 | [`errors.zn`](../examples/errors.zn) | Error handling with `or` |
 | [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
 | [`collections.zn`](../examples/collections.zn) | Lists, maps, slicing |
+| [`csharp-only/linq.zn`](../examples/csharp-only/linq.zn) | LINQ methods — Where, Select, OrderBy, First, Sum, Aggregate, chaining (C# backend) |
 | [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
 | [`with_resources.zn`](../examples/with_resources.zn) | Resource management |
 
