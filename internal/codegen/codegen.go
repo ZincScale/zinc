@@ -61,8 +61,8 @@ type varTypeInfo struct {
 	Pointer  bool   // true for *os.File
 }
 
-// classFieldInfo records a class field for getter/setter generation.
-type classFieldInfo struct {
+// ClassFieldInfo records a class field for getter/setter generation.
+type ClassFieldInfo struct {
 	Name  string         // Zinc field name (e.g. "name")
 	IsPub bool           // whether the field is pub
 	Type  parser.TypeExpr // Zinc type expression
@@ -84,7 +84,7 @@ type Generator struct {
 	// classVars: local variable name → class name for Zinc class instances
 	classVars map[string]string
 	// classFields: class name → list of field info (for getter/setter generation)
-	classFields map[string][]*classFieldInfo
+	classFields map[string][]*ClassFieldInfo
 	// classParents: class name → parent class/interface names
 	classParents map[string][]string
 	// current receiver name for method emission
@@ -150,7 +150,7 @@ func New() *Generator {
 		voidCanThrowFns: make(map[string]bool),
 		varTypes:        make(map[string]varTypeInfo),
 		classVars:       make(map[string]string),
-		classFields:     make(map[string][]*classFieldInfo),
+		classFields:     make(map[string][]*ClassFieldInfo),
 		classParents:    make(map[string][]string),
 		classCtors:      make(map[string]*parser.CtorDecl),
 		enumNames:       make(map[string]bool),
@@ -178,7 +178,7 @@ func NewWithRegistry(reg *TypeRegistry, pkgName string) *Generator {
 		voidCanThrowFns: make(map[string]bool),
 		varTypes:        make(map[string]varTypeInfo),
 		classVars:       make(map[string]string),
-		classFields:     make(map[string][]*classFieldInfo),
+		classFields:     make(map[string][]*ClassFieldInfo),
 		classParents:    make(map[string][]string),
 		classCtors:      make(map[string]*parser.CtorDecl),
 		enumNames:       make(map[string]bool),
@@ -298,9 +298,9 @@ func (g *Generator) firstPass(prog *parser.Program) {
 				g.classCtors[d.Name] = d.Ctor
 			}
 			// Collect field info for getter/setter and auto-interface generation
-			var fields []*classFieldInfo
+			var fields []*ClassFieldInfo
 			for _, f := range d.Fields {
-				fields = append(fields, &classFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
+				fields = append(fields, &ClassFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
 			}
 			g.classFields[d.Name] = fields
 			g.classParents[d.Name] = d.Parents

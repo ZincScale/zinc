@@ -28,7 +28,7 @@ type TypeRegistry struct {
 	ClassCtors      map[string]*parser.CtorDecl            // class name → constructor
 	FnParams       map[string][]*parser.ParamDecl         // function name → params
 	MethodParams   map[string]map[string][]*parser.ParamDecl // class → method → params
-	ClassFields    map[string][]*classFieldInfo            // class name → fields
+	ClassFields    map[string][]*ClassFieldInfo            // class name → fields
 	ClassParents   map[string][]string                     // class name → parent names
 }
 
@@ -43,7 +43,7 @@ func NewTypeRegistry() *TypeRegistry {
 		ClassCtors:      make(map[string]*parser.CtorDecl),
 		FnParams:       make(map[string][]*parser.ParamDecl),
 		MethodParams:   make(map[string]map[string][]*parser.ParamDecl),
-		ClassFields:    make(map[string][]*classFieldInfo),
+		ClassFields:    make(map[string][]*ClassFieldInfo),
 		ClassParents:   make(map[string][]string),
 	}
 }
@@ -73,9 +73,9 @@ func BuildRegistry(progs []*parser.Program) *TypeRegistry {
 						reg.MethodParams[d.Name][m.Name] = m.Params
 					}
 				}
-				var fields []*classFieldInfo
+				var fields []*ClassFieldInfo
 				for _, f := range d.Fields {
-					fields = append(fields, &classFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
+					fields = append(fields, &ClassFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
 				}
 				reg.ClassFields[d.Name] = fields
 				reg.ClassParents[d.Name] = d.Parents

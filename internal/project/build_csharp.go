@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"zinc/internal/codegen"
 	codegen_csharp "zinc/internal/codegen_csharp"
 	"zinc/internal/config"
 	"zinc/internal/errs"
@@ -199,12 +200,16 @@ func TranspileCSharp(rootDir, buildDir string) ([]string, error) {
 		return nil, fmt.Errorf("%d type error(s) found", len(tcErrs))
 	}
 
+	// Build cross-file type registry
+	reg := codegen.BuildRegistry(progs)
+
 	// Generate C# files
 	var csFiles []string
 	for _, pf := range parsed {
 		rel, _ := filepath.Rel(rootDir, pf.srcPath)
 
-		gen := codegen_csharp.New()
+		gen := codegen_csharp.NewWithRegistry(reg)
+		gen.SetSourceFile(rel)
 		csSrc := gen.Generate(pf.prog)
 
 		// Output to build directory

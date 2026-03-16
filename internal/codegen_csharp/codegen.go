@@ -18,8 +18,10 @@ package codegen_csharp
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
+	"zinc/internal/codegen"
 	"zinc/internal/parser"
 )
 
@@ -33,19 +35,74 @@ type Generator struct {
 	enumNames      map[string]bool
 	classMethods   map[string]map[string]bool // className → set of method names
 	classParents   map[string][]string       // className → parent names
+	canThrowFns    map[string]bool            // function/method names that throw
+	voidCanThrowFns map[string]bool           // subset returning only error
+	classCtors     map[string]*parser.CtorDecl
+	fnParams       map[string][]*parser.ParamDecl
+	methodParams   map[string]map[string][]*parser.ParamDecl
+	classFields    map[string][]*codegen.ClassFieldInfo
+	srcFile        string // .zn source file for #line directives
+	lastDirectiveLine int
 	errCounter     int
 }
 
-// New creates a C# Generator.
+// New creates a C# Generator for single-file mode.
 func New() *Generator {
 	return &Generator{
-		neededUsings:   map[string]bool{"System": true},
-		classNames:     make(map[string]bool),
-		interfaceNames: make(map[string]bool),
-		enumNames:      make(map[string]bool),
-		classMethods:   make(map[string]map[string]bool),
-		classParents:   make(map[string][]string),
+		neededUsings:    map[string]bool{"System": true},
+		classNames:      make(map[string]bool),
+		interfaceNames:  make(map[string]bool),
+		enumNames:       make(map[string]bool),
+		classMethods:    make(map[string]map[string]bool),
+		classParents:    make(map[string][]string),
+		canThrowFns:     make(map[string]bool),
+		voidCanThrowFns: make(map[string]bool),
+		classCtors:      make(map[string]*parser.CtorDecl),
+		fnParams:        make(map[string][]*parser.ParamDecl),
+		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
+		classFields:     make(map[string][]*codegen.ClassFieldInfo),
 	}
+}
+
+// NewWithRegistry creates a C# Generator pre-seeded with cross-file type info.
+func NewWithRegistry(reg *codegen.TypeRegistry) *Generator {
+	g := New()
+	for k, v := range reg.ClassNames {
+		g.classNames[k] = v
+	}
+	for k, v := range reg.InterfaceNames {
+		g.interfaceNames[k] = v
+	}
+	for k, v := range reg.EnumNames {
+		g.enumNames[k] = v
+	}
+	for k, v := range reg.CanThrowFns {
+		g.canThrowFns[k] = v
+	}
+	for k, v := range reg.VoidCanThrowFns {
+		g.voidCanThrowFns[k] = v
+	}
+	for k, v := range reg.ClassCtors {
+		g.classCtors[k] = v
+	}
+	for k, v := range reg.FnParams {
+		g.fnParams[k] = v
+	}
+	for k, v := range reg.MethodParams {
+		g.methodParams[k] = v
+	}
+	for k, v := range reg.ClassFields {
+		g.classFields[k] = v
+	}
+	for k, v := range reg.ClassParents {
+		g.classParents[k] = v
+	}
+	return g
+}
+
+// SetSourceFile enables #line directive emission for source mapping.
+func (g *Generator) SetSourceFile(path string) {
+	g.srcFile = path
 }
 
 // Generate produces C# source from a Zinc AST.
@@ -68,17 +125,34 @@ func (g *Generator) Generate(prog *parser.Program) string {
 		}
 	}
 
-	// Emit declarations
-	for i, d := range prog.Decls {
-		if i > 0 {
+	// Process imports
+	for _, d := range prog.Decls {
+		if imp, ok := d.(*parser.ImportDecl); ok {
+			g.processImport(imp)
+		}
+	}
+
+	// Emit declarations (skip ImportDecl — already processed)
+	first := true
+	for _, d := range prog.Decls {
+		if _, ok := d.(*parser.ImportDecl); ok {
+			continue
+		}
+		if !first {
 			g.write("\n")
 		}
+		first = false
 		g.emitDecl(d)
 	}
 
-	// Prepend usings
-	var out strings.Builder
+	// Prepend usings (sorted for deterministic output)
+	var usings []string
 	for u := range g.neededUsings {
+		usings = append(usings, u)
+	}
+	sort.Strings(usings)
+	var out strings.Builder
+	for _, u := range usings {
 		out.WriteString(fmt.Sprintf("using %s;\n", u))
 	}
 	out.WriteString("\n")
@@ -108,17 +182,38 @@ func (g *Generator) nextErr() string {
 
 // --- Declarations ------------------------------------------------------------
 
+// processImport handles Zinc import declarations.
+// For cross-project imports, the alias becomes a namespace qualifier.
+func (g *Generator) processImport(imp *parser.ImportDecl) {
+	// For now, imports are handled by the project build system
+	// (all .zn files in a directory share a namespace).
+	// Future: map to C# using directives for NuGet packages.
+}
+
+func (g *Generator) emitLineDirective(line int) {
+	if g.srcFile == "" || line <= 0 || line == g.lastDirectiveLine {
+		return
+	}
+	g.lastDirectiveLine = line
+	g.writeln(fmt.Sprintf("#line %d \"%s\"", line, g.srcFile))
+}
+
 func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 	switch d := d.(type) {
 	case *parser.FnDecl:
+		g.emitLineDirective(d.Line)
 		g.emitFnDecl(d)
 	case *parser.ClassDecl:
+		g.emitLineDirective(d.Line)
 		g.emitClassDecl(d)
 	case *parser.InterfaceDecl:
+		g.emitLineDirective(d.Line)
 		g.emitInterfaceDecl(d)
 	case *parser.EnumDecl:
+		g.emitLineDirective(d.Line)
 		g.emitEnumDecl(d)
 	case *parser.ConstDecl:
+		g.emitLineDirective(d.Line)
 		g.emitConstDecl(d)
 	}
 }
