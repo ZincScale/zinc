@@ -115,6 +115,7 @@ See the [Getting Started](docs/getting-started.md) guide for multi-file projects
 - Null safety with `?.` safe navigation
 - Errors as values with auto-propagation and `or` handlers
 - `with` resource management (auto-dispose)
+- Concurrency primitives — `spawn`, `parallel`, `Lock<T>` with no function coloring
 - Closures and higher-order functions (`Fn` types)
 - Enums with `match` expressions
 - Implicit return — last expression is the return value

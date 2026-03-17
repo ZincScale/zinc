@@ -617,6 +617,15 @@ func (r *RawStringLit) exprTag() {}
 // .values, .containsKey, .send, .receive) are now parsed as regular CallExpr
 // and dispatched to builtin behavior in codegen based on receiver type.
 
+// SpawnExpr: spawn { body } — spawns a concurrent task, returns Future<T>
+type SpawnExpr struct {
+	Line int
+	Body *BlockStmt
+}
+
+func (*SpawnExpr) nodeTag() {}
+func (*SpawnExpr) exprTag() {}
+
 // SpreadExpr: expr... — spread a list into variadic args
 type SpreadExpr struct {
 	Expr Expr

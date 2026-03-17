@@ -1,0 +1,28 @@
+// Concurrency primitives — spawn, parallel, Lock<T>
+// These map to Task.Run, Task.WhenAll, and a thread-safe wrapper in C#.
+// No async/await, no function coloring — just normal code.
+
+main() {
+    // --- spawn: run work concurrently ---
+    // spawn returns a Future<T>. Access .value to wait for the result.
+    var a = spawn { 10 * 2 }
+    var b = spawn { 20 * 3 }
+    print("spawn results: {a.value}, {b.value}")
+
+    // --- parallel: fan-out over a collection ---
+    // Spawns one task per item, waits for all, returns results in order.
+    var nums = [1, 2, 3, 4, 5]
+    var doubled = parallel(nums) { it * 2 }
+    print("parallel results:")
+    for d in doubled {
+        print(d)
+    }
+
+    // --- Lock<T>: safe shared mutable state ---
+    // Wraps a value with thread-safe access. .update replaces the value.
+    var counter = Lock(0)
+    counter.update { it + 1 }
+    counter.update { it + 1 }
+    counter.update { it + 1 }
+    print("counter: {counter.value}")
+}

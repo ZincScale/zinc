@@ -11,7 +11,7 @@ Zinc compiles to native binaries via **C# AOT** (default) or **Go**. Convention 
 | [Functions](functions.md) | Functions, default/named args, generics, variadic, closures, `Fn` types |
 | [Classes and OOP](classes.md) | Classes, interfaces, inheritance, polymorphism, generics, annotations |
 | [Collections](collections.md) | List/map literals, slicing, LINQ collection methods |
-| [Control Flow](control-flow.md) | If/else, loops, match/switch, labeled loops, safe navigation, concurrency |
+| [Control Flow](control-flow.md) | If/else, loops, match/switch, safe navigation, concurrency (`spawn`, `parallel`, `Lock<T>`) |
 | [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
 | [Imports](imports.md) | .NET imports, Go imports, NuGet dependencies, type detection |
 | [Built-in Functions](builtins.md) | All global builtins — I/O, math, JSON, HTTP, environment, control |
@@ -51,6 +51,11 @@ var content = readFile("data.txt") or {
 import "System.Diagnostics"
 var sw = Stopwatch()    // auto-emits new Stopwatch()
 
+// Concurrency — no async/await
+var result = spawn { fetchData() }
+var items = parallel(ids) { process(it) }
+print(result.value)
+
 // Entry point
 main() {
     print("Hello, Zinc!")
@@ -63,6 +68,7 @@ main() {
 |---------|-------------------|-----|
 | Binary size | ~1.6 MB | ~2.3 MB |
 | Startup | ~9 ms | ~12 ms |
+| Concurrency | `spawn`, `parallel`, `Lock<T>` | Not supported |
 | Collection methods | LINQ (Where, Select, ...) | `for` loops |
 | Error handling | try/catch (generated) | if err != nil (generated) |
 | Type detection | .NET reflection probe | `go/types` |

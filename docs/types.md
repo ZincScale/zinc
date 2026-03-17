@@ -40,6 +40,8 @@ main() {
 | `String?`   | `string?`           |
 | `List<T>`   | `List<T>`           |
 | `Map<K,V>`  | `Dictionary<K,V>`   |
+| `Future<T>` | `Task<T>` wrapper   |
+| `Lock<T>`   | Thread-safe wrapper  |
 
 ## Enums
 

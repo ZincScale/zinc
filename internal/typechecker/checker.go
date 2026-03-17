@@ -847,6 +847,9 @@ func (c *Checker) inferExpr(expr parser.Expr) Type {
 		return c.resolveSimpleName(e.TypeName)
 	case *parser.SpreadExpr:
 		return c.inferExpr(e.Expr)
+	case *parser.SpawnExpr:
+		c.checkBlock(e.Body)
+		return TypeUnknown
 	}
 	return TypeUnknown
 }
@@ -982,6 +985,10 @@ func (c *Checker) inferFnCall(name string, args []parser.Expr, namedArgs []parse
 	if sig, ok := c.fns[name]; ok {
 		c.validateArgs(sig, name, args, namedArgs)
 		return sig.Return
+	}
+	// Concurrency builtins
+	if name == "parallel" || name == "Lock" {
+		return TypeUnknown
 	}
 	// Could be a built-in or imported fn — don't report error
 	return TypeUnknown

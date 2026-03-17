@@ -2480,6 +2480,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		}
 		// x as Type  →  x.(Type)
 		return fmt.Sprintf("%s.(%s)", obj, goType)
+	case *parser.SpawnExpr:
+		return "/* spawn is not supported in the Go backend — use C# AOT (default) */"
 	}
 	return "/* unknown expr */"
 }

@@ -88,6 +88,50 @@ var msg = match status {
 
 ## Safe Navigation (`?.`)
 
+## Concurrency
+
+Three primitives for concurrent work. No `async`/`await`, no function coloring.
+
+### `spawn` — Run work concurrently
+
+`spawn` returns a `Future<T>`. Access `.value` to wait for the result:
+
+```zinc
+var user = spawn { fetchUser(1) }
+var posts = spawn { fetchPosts(1) }
+
+// Both running concurrently. .value waits until ready.
+print(user.value)
+print(posts.value)
+```
+
+### `parallel` — Fan-out over a collection
+
+Spawns one task per item, waits for all results, returns them in input order:
+
+```zinc
+var ids = [1, 2, 3, 4, 5]
+var profiles = parallel(ids) { fetchProfile(it) }
+
+for p in profiles {
+    print(p.name)
+}
+```
+
+### `Lock<T>` — Safe shared state
+
+Wraps a value with thread-safe access. `.update` atomically replaces the value:
+
+```zinc
+var counter = Lock(0)
+counter.update { it + 1 }
+print(counter.value)    // 1
+```
+
+> See [Concurrency Design](design-concurrency.md) for structured scoping, error propagation, and runtime details.
+
+## Safe Navigation (`?.`)
+
 Access fields and call methods on nullable references without manual null checks. If the receiver is `nil`, the expression evaluates to `nil`:
 
 ```zinc

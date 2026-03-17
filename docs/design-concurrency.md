@@ -1,6 +1,6 @@
 # Design: Concurrency
 
-**Status:** Proposed
+**Status:** Phase 1 Implemented
 **Date:** 2026-03-17
 
 ## Problem

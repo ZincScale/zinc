@@ -279,6 +279,13 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 			left = nav
 		case lexer.TOKEN_LPAREN:
 			left = p.finishCallArgsNoLParen(left)
+			// Check for trailing lambda after closing paren: fn(args) { ... }
+			if p.check(lexer.TOKEN_LBRACE) && p.isTrailingLambda() {
+				lambda := p.parseTrailingLambda()
+				if call, ok := left.(*CallExpr); ok {
+					call.Args = append(call.Args, lambda)
+				}
+			}
 		case lexer.TOKEN_LBRACKET:
 			// Distinguish slice (a[low:high]) from index (a[idx])
 			if p.check(lexer.TOKEN_COLON) {
@@ -696,6 +703,8 @@ func (p *Parser) parsePrimary() Expr {
 		return p.parseIfExpr()
 	case lexer.TOKEN_MATCH:
 		return p.parseMatchExpr()
+	case lexer.TOKEN_SPAWN:
+		return p.parseSpawnExpr()
 	case lexer.TOKEN_LBRACKET:
 		return p.parseListLit()
 	case lexer.TOKEN_LBRACE:
@@ -1099,6 +1108,13 @@ func (p *Parser) parseMatchExpr() Expr {
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return &MatchExpr{Subject: subject, Cases: cases}
+}
+
+func (p *Parser) parseSpawnExpr() Expr {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_SPAWN)
+	body := p.parseBlock()
+	return &SpawnExpr{Line: line, Body: body}
 }
 
 func (p *Parser) parseForStmt() Stmt {

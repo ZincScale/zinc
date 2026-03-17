@@ -74,6 +74,7 @@ type Generator struct {
 	lastDirectiveLine int
 	errCounter     int
 	currentRecordFields map[string]bool       // non-nil inside a record method body
+	usesConcurrency     bool                  // set when spawn/parallel/Lock is used
 }
 
 // New creates a C# Generator for single-file mode.
@@ -233,6 +234,13 @@ func (g *Generator) Generate(prog *parser.Program) string {
 		g.writeln("}")
 	}
 
+	// Emit concurrency runtime helpers when needed
+	if g.usesConcurrency {
+		g.neededUsings["System.Threading.Tasks"] = true
+		g.write("\n")
+		g.emitConcurrencyHelpers()
+	}
+
 	// Prepend usings (sorted for deterministic output)
 	var usings []string
 	for u := range g.neededUsings {
@@ -246,6 +254,35 @@ func (g *Generator) Generate(prog *parser.Program) string {
 	out.WriteString("\n")
 	out.WriteString(g.buf.String())
 	return out.String()
+}
+
+// emitConcurrencyHelpers emits ZincFuture<T> and ZincLock<T> runtime classes.
+func (g *Generator) emitConcurrencyHelpers() {
+	// ZincFuture<T> — wraps Task<T> with blocking .Value and structured error propagation.
+	// Accessing .Value re-throws any exception from the spawned task.
+	g.writeln("public class ZincFuture<T>")
+	g.writeln("{")
+	g.push()
+	g.writeln("private readonly Task<T> _task;")
+	g.writeln("public ZincFuture(Task<T> task) { _task = task; }")
+	g.writeln("public T Value => _task.GetAwaiter().GetResult();")
+	g.writeln("public bool IsCompleted => _task.IsCompleted;")
+	g.writeln("public bool IsFaulted => _task.IsFaulted;")
+	g.pop()
+	g.writeln("}")
+	g.write("\n")
+	// ZincLock<T> — thread-safe wrapper with lock-based access.
+	g.writeln("public class ZincLock<T>")
+	g.writeln("{")
+	g.push()
+	g.writeln("private T _value;")
+	g.writeln("private readonly object _lock = new();")
+	g.writeln("public ZincLock(T initial) { _value = initial; }")
+	g.writeln("public T Value { get { lock (_lock) { return _value; } } }")
+	g.writeln("public void Update(Func<T, T> fn) { lock (_lock) { _value = fn(_value); } }")
+	g.writeln("public void Update(Action<T> fn) { lock (_lock) { fn(_value); } }")
+	g.pop()
+	g.writeln("}")
 }
 
 // --- Output helpers ----------------------------------------------------------
@@ -991,6 +1028,8 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			return fmt.Sprintf("Enumerable.Range(%s, %s - %s + 1)", start, end, start)
 		}
 		return fmt.Sprintf("Enumerable.Range(%s, %s - %s)", start, end, start)
+	case *parser.SpawnExpr:
+		return g.emitSpawnExpr(e)
 	default:
 		return "default /* unsupported expr */"
 	}
@@ -1266,6 +1305,44 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	return body.String()
 }
 
+func (g *Generator) emitSpawnExpr(e *parser.SpawnExpr) string {
+	g.usesConcurrency = true
+	g.neededUsings["System.Threading.Tasks"] = true
+
+	// The block's last statement is the return value.
+	// Emit: new ZincFuture<...>(Task.Run(() => { ... return lastExpr; }))
+	if e.Body == nil || len(e.Body.Stmts) == 0 {
+		return "new ZincFuture<dynamic>(Task.Run(() => (dynamic)null))"
+	}
+
+	// Build the inner block
+	oldBuf := g.buf
+	g.buf = strings.Builder{}
+
+	stmts := e.Body.Stmts
+	// Emit all but the last statement normally
+	for _, s := range stmts[:len(stmts)-1] {
+		g.emitStmt(s)
+	}
+	// Last statement: if it's an ExprStmt, emit as return (cast to dynamic for Task<dynamic>)
+	last := stmts[len(stmts)-1]
+	if es, ok := last.(*parser.ExprStmt); ok {
+		g.writeln(fmt.Sprintf("return (dynamic)(%s);", g.emitExpr(es.Expr)))
+	} else {
+		g.emitStmt(last)
+	}
+
+	innerBody := g.buf.String()
+	g.buf = oldBuf
+
+	var result strings.Builder
+	result.WriteString("new ZincFuture<dynamic>(Task.Run(() =>\n")
+	result.WriteString(strings.Repeat("    ", g.indent) + "{\n")
+	result.WriteString(innerBody)
+	result.WriteString(strings.Repeat("    ", g.indent) + "}))")
+	return result.String()
+}
+
 func (g *Generator) emitInterpString(e *parser.StringInterpLit) string {
 	var parts []string
 	for _, p := range e.Parts {
@@ -1466,6 +1543,47 @@ func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []
 	case "httpGet":
 		g.neededUsings["System.Net.Http"] = true
 		return fmt.Sprintf("new HttpClient().GetStringAsync(%s).Result", argStrs[0]), true
+
+	// Concurrency
+	case "parallel":
+		g.usesConcurrency = true
+		g.neededUsings["System.Threading.Tasks"] = true
+		g.neededUsings["System.Linq"] = true
+		// parallel(list) { expr } → args[0] is list, args[1] is trailing lambda
+		// We need to wrap the lambda so each invocation runs in Task.Run
+		if len(args) >= 2 {
+			listStr := argStrs[0]
+			lambda := args[1]
+			// Extract lambda param name and body for wrapping in Task.Run
+			if le, ok := lambda.(*parser.LambdaExpr); ok && len(le.Params) > 0 {
+				paramName := le.Params[0].Name
+				var bodyStr string
+				if le.Expr != nil {
+					bodyStr = g.emitExpr(le.Expr)
+				} else if le.Body != nil && len(le.Body.Stmts) > 0 {
+					// Block lambda — use last expr as return
+					last := le.Body.Stmts[len(le.Body.Stmts)-1]
+					if es, ok := last.(*parser.ExprStmt); ok {
+						bodyStr = g.emitExpr(es.Expr)
+					}
+				}
+				if bodyStr != "" {
+					return fmt.Sprintf("Task.WhenAll(%s.Select(%s => Task.Run(() => (dynamic)(%s)))).GetAwaiter().GetResult().ToList()",
+						listStr, paramName, bodyStr), true
+				}
+			}
+			// Fallback: use the lambda as-is
+			lambdaStr := argStrs[1]
+			return fmt.Sprintf("Task.WhenAll(%s.Select(%s)).GetAwaiter().GetResult().ToList()", listStr, lambdaStr), true
+		}
+		return fmt.Sprintf("parallel(%s)", argStr), true
+
+	case "Lock":
+		g.usesConcurrency = true
+		if len(args) >= 1 {
+			return fmt.Sprintf("new ZincLock<dynamic>(%s)", argStrs[0]), true
+		}
+		return "new ZincLock<dynamic>(null)", true
 	}
 
 	return "", false

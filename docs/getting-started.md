@@ -229,6 +229,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs:
 | [`csharp-only/annotations.zn`](../examples/csharp-only/annotations.zn) | Annotations — @JsonPropertyName, @Serializable, C# attributes |
 | [`csharp-only/expressions.zn`](../examples/csharp-only/expressions.zn) | Expression if, expression match, implicit return |
 | [`csharp-only/ranges.zn`](../examples/csharp-only/ranges.zn) | Range loops — `for i in 0..10`, `for i in 1..=5` |
+| [`csharp-only/concurrency.zn`](../examples/csharp-only/concurrency.zn) | Concurrency — `spawn`, `parallel`, `Lock<T>` |
 
 Run any example:
 

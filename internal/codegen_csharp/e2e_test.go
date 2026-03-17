@@ -405,6 +405,39 @@ main() {
     }
 }`, mode: modeExact, expected: []string{"1\n2\n3"}},
 
+	// --- Concurrency ---
+	{name: "SpawnFuture", src: `
+main() {
+    var f = spawn { 42 }
+    print(f.value)
+}`, mode: modeExact, expected: []string{"42"}},
+
+	{name: "SpawnTwoFutures", src: `
+main() {
+    var a = spawn { 10 }
+    var b = spawn { 20 }
+    print(a.value)
+    print(b.value)
+}`, mode: modeExact, expected: []string{"10\n20"}},
+
+	{name: "ParallelBasic", src: `
+main() {
+    var nums = [1, 2, 3]
+    var results = parallel(nums) { it * 10 }
+    for r in results {
+        print(r)
+    }
+}`, mode: modeContains, expected: []string{"10", "20", "30"}},
+
+	{name: "LockUpdate", src: `
+main() {
+    var counter = Lock(0)
+    counter.update { it + 1 }
+    counter.update { it + 1 }
+    counter.update { it + 1 }
+    print(counter.value)
+}`, mode: modeExact, expected: []string{"3"}},
+
 }
 
 // --- Batched E2E runner ------------------------------------------------------

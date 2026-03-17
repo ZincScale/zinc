@@ -6,33 +6,7 @@ Convention over configuration. Less typing, less ceremony.
 
 ## Priority Order
 
-### P1 — Concurrency: `spawn`, `parallel`, `Lock<T>` ✦ NEXT
-Three primitives for concurrent programming. No async/await, no function coloring.
-
-```zinc
-// spawn — run work concurrently, get a Future<T>
-var user = spawn { fetchUser(1) }
-var posts = spawn { fetchPosts(1) }
-print(user.value)
-print(posts.value)
-
-// parallel — fan-out over a collection
-var profiles = parallel(userIds) { fetchProfile(it) }
-
-// Lock<T> — safe shared state
-var count = Lock(0)
-parallel(0..100) { count.update { value = value + 1 } }
-print(count.value)
-```
-
-- `spawn { expr }` → `Future<T>`, `.value` to collect
-- `parallel(list) { expr }` → spawn per item, collect in order
-- `Lock<T>` → thread-safe wrapper with `.value` and `.update { }`
-- Structured scoping — parent waits for children, errors cancel siblings
-- See [design doc](docs/design-concurrency.md)
-- **Effort:** Medium (AST + parser + codegen + runtime wrapper)
-
-### P2 — Scripting Builtins
+### P1 — Scripting Builtins ✦ NEXT
 Make CLI tools trivial.
 
 ```zinc
@@ -49,11 +23,11 @@ main() {
 - `listDir(path)` → `List<String>`, failable
 - **Effort:** Quick
 
-### P3 — VS Code Extension
+### P2 — VS Code Extension
 TextMate grammar for `.zn` syntax highlighting.
 - **Effort:** Quick
 
-### P4 — `zinc add` / Dependency Management
+### P3 — `zinc add` / Dependency Management
 ```bash
 zinc add Newtonsoft.Json
 zinc add Serilog --version 4.0.0
@@ -61,7 +35,7 @@ zinc remove Newtonsoft.Json
 ```
 - **Effort:** Medium
 
-### P5 — `zinc test`
+### P4 — `zinc test`
 ```bash
 zinc test       # discovers and runs test functions
 ```
@@ -130,6 +104,13 @@ main() {
 | Supervised blocks | Only if in-process resilience demand emerges (K8s handles restarts) |
 
 ---
+
+## Completed (v0.11.0)
+- Concurrency: `spawn { }` → `Future<T>`, `parallel(list) { }` → `List<T>`, `Lock(value)` → thread-safe wrapper
+- No async/await, no function coloring — three primitives only
+- `ZincFuture<T>` and `ZincLock<T>` runtime helpers (emitted only when used)
+- 4 unit tests + 4 E2E tests (spawn, spawn-two, parallel, lock-update)
+- See [design doc](docs/design-concurrency.md)
 
 ## Completed (v0.10.0)
 - Implicit return — last expression in function/method body is the return value

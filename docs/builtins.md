@@ -100,6 +100,37 @@ Zinc provides built-in functions that map to C#'s standard library. No imports n
 | `panic(msg)`      | `throw new Exception(msg)` |
 | `exit(code)`      | `Environment.Exit(code)` |
 
+## Concurrency
+
+| Zinc            | Returns | C# equivalent |
+|-------------------|---------|---------------|
+| `spawn { expr }`  | `Future<T>` | `Task.Run(() => expr)` |
+| `future.value`    | `T` | `.GetAwaiter().GetResult()` |
+| `parallel(list) { expr }` | `List<T>` | `Task.WhenAll(list.Select(x => Task.Run(...)))` |
+| `Lock(value)`     | `Lock<T>` | Thread-safe wrapper with `lock` statement |
+| `lock.value`      | `T` | Read current value (thread-safe) |
+| `lock.update { newValue }` | `void` | Replace value atomically |
+
+No `async`/`await`. No function coloring. Write normal code — the runtime handles threads.
+
+```zinc
+// Spawn concurrent work, collect results
+var user = spawn { fetchUser(1) }
+var posts = spawn { fetchPosts(1) }
+print(user.value)
+print(posts.value)
+
+// Fan-out over a collection
+var results = parallel(ids) { process(it) }
+
+// Thread-safe shared state
+var count = Lock(0)
+count.update { it + 1 }
+print(count.value)
+```
+
+> See [Concurrency Design](design-concurrency.md) for the full design rationale.
+
 ## Error Handling with Failable Builtins
 
 Failable builtins (`readFile`, `writeFile`, `httpGet`) can fail at runtime. Use `or { }` to handle errors — the `err` variable is automatically available inside the handler:

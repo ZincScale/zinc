@@ -1065,6 +1065,56 @@ main() {
 	assertContains(t, out, "public record Point(int X, int Y);")
 }
 
+// === Concurrency ===
+
+func TestSpawn_EmitsZincFuture(t *testing.T) {
+	out := transpile(`
+main() {
+    var f = spawn {
+        42
+    }
+    print(f.Value)
+}
+`)
+	assertContains(t, out, "new ZincFuture<dynamic>(Task.Run(")
+	assertContains(t, out, "public class ZincFuture<T>")
+	assertContains(t, out, "using System.Threading.Tasks;")
+}
+
+func TestParallel_EmitsTaskWhenAll(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var results = parallel(nums) { it * 2 }
+    print(results)
+}
+`)
+	assertContains(t, out, "Task.WhenAll(")
+	assertContains(t, out, "Task.Run(")
+	assertContains(t, out, "using System.Threading.Tasks;")
+}
+
+func TestLock_EmitsZincLock(t *testing.T) {
+	out := transpile(`
+main() {
+    var counter = Lock(0)
+    print(counter.Value)
+}
+`)
+	assertContains(t, out, "new ZincLock<dynamic>(0)")
+	assertContains(t, out, "public class ZincLock<T>")
+}
+
+func TestConcurrencyHelpers_NotEmittedWhenUnused(t *testing.T) {
+	out := transpile(`
+main() {
+    print("no concurrency")
+}
+`)
+	assertNotContains(t, out, "ZincFuture")
+	assertNotContains(t, out, "ZincLock")
+}
+
 func TestDataClass_WithParent(t *testing.T) {
 	out := transpile(`
 interface Printable {
