@@ -99,13 +99,36 @@ func TestGenerateCsproj(t *testing.T) {
 		"SelfContained",
 		"OptimizationPreference",
 		"TrimMode",
-		"StripSymbols",
+		"DebugType",
 		"InvariantGlobalization",
 		"JsonSerializerIsReflectionEnabledByDefault",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s in csproj:\n%s", want, out)
 		}
+	}
+}
+
+func TestGenerateCsprojDebugMode(t *testing.T) {
+	cfg := DefaultConfig("myapp")
+	out := GenerateCsproj(cfg)
+	if strings.Contains(out, "StripSymbols") {
+		t.Errorf("default build should not strip symbols:\n%s", out)
+	}
+	if !strings.Contains(out, "DebugType") {
+		t.Errorf("default build should have embedded debug info:\n%s", out)
+	}
+}
+
+func TestGenerateCsprojRelease(t *testing.T) {
+	cfg := DefaultConfig("myapp")
+	cfg.Release = true
+	out := GenerateCsproj(cfg)
+	if !strings.Contains(out, "StripSymbols") {
+		t.Errorf("release build should strip symbols:\n%s", out)
+	}
+	if strings.Contains(out, "DebugType") {
+		t.Errorf("release build should not have embedded debug info:\n%s", out)
 	}
 }
 

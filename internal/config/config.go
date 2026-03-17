@@ -37,6 +37,7 @@ type Config struct {
 	Version      string       // project version
 	Target       string       // "csharp" (default) or "go"
 	Optimize     bool         // AOT with full optimizations (default: true)
+	Release      bool         // strip symbols for production (default: false, set by --release)
 	Dependencies []Dependency // package dependencies
 }
 
@@ -184,7 +185,11 @@ func GenerateCsproj(cfg *Config) string {
 		b.WriteString("    <SelfContained>true</SelfContained>\n")
 		b.WriteString("    <OptimizationPreference>Speed</OptimizationPreference>\n")
 		b.WriteString("    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>\n")
-		b.WriteString("    <StripSymbols>true</StripSymbols>\n")
+		if cfg.Release {
+			b.WriteString("    <StripSymbols>true</StripSymbols>\n")
+		} else {
+			b.WriteString("    <DebugType>embedded</DebugType>\n")
+		}
 		b.WriteString("    <TrimMode>full</TrimMode>\n")
 		b.WriteString("    <InvariantGlobalization>true</InvariantGlobalization>\n")
 		b.WriteString("    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>\n")

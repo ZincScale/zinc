@@ -178,7 +178,8 @@ zinc <file.zn> --run          # transpile and run immediately
 zinc <file.zn> --watch        # watch for changes, re-transpile automatically
 zinc <file.zn> --verbose      # show token/AST debug info
 zinc init [name]              # initialize a new project (creates zinc.toml + main.zn)
-zinc build [dir]              # transpile + compile (native AOT binary)
+zinc build [dir]              # transpile + compile (native AOT binary, debug info included)
+zinc build [dir] --release    # production build (stripped symbols, smaller binary)
 zinc run [dir]                # transpile + run
 zinc repl                     # launch interactive REPL
 zinc --version                # print version
@@ -189,7 +190,8 @@ zinc --version                # print version
 | Command | What it does |
 |---------|-------------|
 | `zinc init [name]` | Scaffold a new project (`zinc.toml` + `main.zn`) |
-| `zinc build [dir]` | Transpile + compile to native binary |
+| `zinc build [dir]` | Transpile + compile to native binary (debug info embedded) |
+| `zinc build [dir] --release` | Production build (symbols stripped, smaller binary) |
 | `zinc run [dir]` | Transpile + run |
 | `zinc repl` | Launch the interactive REPL |
 
@@ -205,7 +207,9 @@ zinc --version                # print version
 
 ### Source Maps
 
-Zinc emits line directives in the generated code. If the compiler reports an error, the file and line number point back to your `.zn` source — not the generated output. You debug in Zinc, not in C#.
+Zinc emits `#line` directives in the generated C# code. Both compile-time and runtime errors point back to your `.zn` source file and line number — you debug in Zinc, not in C#.
+
+By default, `zinc build` embeds debug info so runtime stack traces show `.zn` line numbers. Use `--release` for production builds that strip symbols for a smaller binary.
 
 ## Running Examples
 

@@ -110,13 +110,17 @@ with (f1 = os.Create("a.txt"), f2 = os.Create("b.txt")) {
 // f2 closes first, then f1 (LIFO)
 ```
 
-## Backend Differences
+## Runtime Error Reporting
 
-| Concept | Go Backend | C# Backend |
-|---------|------------|------------|
-| Error type | `error` interface | `Exception` |
-| `or { }` | `if err != nil { }` | `try/catch (Exception)` |
-| `err` variable | `err.Error()` (string) | `exception.Message` (string) |
-| Auto-propagation | `return zero, err` | `throw;` |
-| `panic()` | `panic(msg)` | `throw new Exception(msg)` |
-| `exit()` | `os.Exit(code)` | `Environment.Exit(code)` |
+Zinc emits `#line` directives so runtime exceptions show your `.zn` source file and line number — not the generated C#. By default, `zinc build` embeds debug info for full stack traces. Use `zinc build --release` for production builds that strip symbols.
+
+## How It Works
+
+| Concept | C# Backend |
+|---------|------------|
+| Error type | `Exception` |
+| `or { }` | `try/catch (Exception)` |
+| `err` variable | `exception.Message` (string) |
+| Auto-propagation | `throw;` |
+| `panic()` | `throw new Exception(msg)` |
+| `exit()` | `Environment.Exit(code)` |

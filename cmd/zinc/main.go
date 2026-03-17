@@ -44,6 +44,7 @@ Usage:
 
 Flags:
   -o <file>       Output file (default: <input>.cs)
+  --release       Strip debug symbols for production (smaller binary, no line numbers)
   --verbose       Print tokens and AST summary after transpiling
   --run           Transpile and immediately run
   --watch         Watch file for changes and re-transpile automatically
@@ -101,9 +102,13 @@ func main() {
 			return
 		case a == "build":
 			dir := "."
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				dir = args[i+1]
-				i++
+			release := false
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "--release" {
+					release = true
+				} else if !strings.HasPrefix(args[j], "-") && dir == "." {
+					dir = args[j]
+				}
 			}
 			cfg, err := config.Load(dir)
 			if err != nil {
@@ -111,6 +116,7 @@ func main() {
 				os.Exit(1)
 			}
 			if cfg != nil && cfg.Target == "csharp" {
+				cfg.Release = release
 				if err := project.BuildCSharp(dir, cfg); err != nil {
 					errs.Error(err.Error())
 					os.Exit(1)

@@ -90,11 +90,14 @@ go install github.com/victorybhg/zinc/cmd/zinc@latest
 # start a project
 mkdir myapp && cd myapp
 zinc init myapp
-zinc build        # → native AOT binary
+zinc build        # → native AOT binary (debug info included)
 ./myapp           # → "Hello from Zinc!"
 
 # or just run it
 zinc run
+
+# production build (stripped, smaller)
+zinc build --release
 ```
 
 `zinc init` creates a `zinc.toml` project config and `main.zn` entry point. No XML, no `.csproj`, no ceremony.
