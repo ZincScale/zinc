@@ -63,20 +63,14 @@ type Generator struct {
 	buf            strings.Builder
 	indent         int
 	neededUsings   map[string]bool
-	importedNs     map[string]string // alias → C# namespace (for future qualified-call support)
-	typeResolver   *CSharpTypeResolver // optional — resolves .NET types from imports
+	typeResolver   *CSharpTypeResolver
 	classNames     map[string]bool
 	interfaceNames map[string]bool
 	enumNames      map[string]bool
 	classMethods   map[string]map[string]bool // className → set of method names
-	classParents   map[string][]string       // className → parent names
-	canThrowFns    map[string]bool            // function/method names that throw
-	voidCanThrowFns map[string]bool           // subset returning only error
-	classCtors     map[string]*parser.CtorDecl
-	fnParams       map[string][]*parser.ParamDecl
-	methodParams   map[string]map[string][]*parser.ParamDecl
-	classFields    map[string][]*codegen.ClassFieldInfo
-	srcFile        string // .zn source file for #line directives
+	classParents   map[string][]string        // className → parent names
+	canThrowFns    map[string]bool             // function/method names that throw
+	srcFile        string
 	lastDirectiveLine int
 	errCounter     int
 }
@@ -84,19 +78,13 @@ type Generator struct {
 // New creates a C# Generator for single-file mode.
 func New() *Generator {
 	return &Generator{
-		neededUsings:    map[string]bool{"System": true},
-		importedNs:      make(map[string]string),
-		classNames:      make(map[string]bool),
-		interfaceNames:  make(map[string]bool),
-		enumNames:       make(map[string]bool),
-		classMethods:    make(map[string]map[string]bool),
-		classParents:    make(map[string][]string),
-		canThrowFns:     make(map[string]bool),
-		voidCanThrowFns: make(map[string]bool),
-		classCtors:      make(map[string]*parser.CtorDecl),
-		fnParams:        make(map[string][]*parser.ParamDecl),
-		methodParams:    make(map[string]map[string][]*parser.ParamDecl),
-		classFields:     make(map[string][]*codegen.ClassFieldInfo),
+		neededUsings:   map[string]bool{"System": true},
+		classNames:     make(map[string]bool),
+		interfaceNames: make(map[string]bool),
+		enumNames:      make(map[string]bool),
+		classMethods:   make(map[string]map[string]bool),
+		classParents:   make(map[string][]string),
+		canThrowFns:    make(map[string]bool),
 	}
 }
 
@@ -114,21 +102,6 @@ func NewWithRegistry(reg *codegen.TypeRegistry) *Generator {
 	}
 	for k, v := range reg.CanThrowFns {
 		g.canThrowFns[k] = v
-	}
-	for k, v := range reg.VoidCanThrowFns {
-		g.voidCanThrowFns[k] = v
-	}
-	for k, v := range reg.ClassCtors {
-		g.classCtors[k] = v
-	}
-	for k, v := range reg.FnParams {
-		g.fnParams[k] = v
-	}
-	for k, v := range reg.MethodParams {
-		g.methodParams[k] = v
-	}
-	for k, v := range reg.ClassFields {
-		g.classFields[k] = v
 	}
 	for k, v := range reg.ClassParents {
 		g.classParents[k] = v
@@ -299,16 +272,7 @@ func (g *Generator) processImport(imp *parser.ImportDecl) {
 		ns = mapped
 	}
 
-	// Determine the alias (identifier used in Zinc code for qualified access)
-	alias := imp.Alias
-	if alias == "" {
-		// Last segment of the namespace: "System.Text.Json" → "Json"
-		parts := strings.Split(ns, ".")
-		alias = parts[len(parts)-1]
-	}
-
 	g.neededUsings[ns] = true
-	g.importedNs[alias] = ns
 
 	// If a type resolver is available, register imported classes so that
 	// constructor calls like Stopwatch() emit `new Stopwatch()`.
@@ -1390,14 +1354,6 @@ func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []
 func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
 		return g.canThrowFns[ident.Name] || failableBuiltins[ident.Name]
-	}
-	return false
-}
-
-// isVoidFailable checks whether a call expression calls a void failable function.
-func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
-	if ident, ok := call.Callee.(*parser.Ident); ok {
-		return g.voidCanThrowFns[ident.Name] || voidFailableBuiltins[ident.Name]
 	}
 	return false
 }

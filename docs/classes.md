@@ -82,6 +82,53 @@ Pair<K, V> {
 }
 ```
 
+## Annotations
+
+Use `@Name` or `@Name("args")` to attach C# attributes to classes, fields, and methods. Any annotation passes through — no hardcoded list.
+
+```zinc
+@Serializable
+@Table("users")
+User {
+    @Column("user_name")
+    @Required
+    pub String name
+
+    @JsonIgnore
+    String secret
+
+    new(String name) { this.name = name }
+
+    @HttpGet
+    @Route("/api/greet")
+    pub String greet() { return "Hi, {this.name}" }
+}
+```
+
+Generated C#:
+
+```csharp
+[Serializable]
+[Table("users")]
+public class User
+{
+    [Column("user_name")]
+    [Required]
+    public string Name;
+
+    [JsonIgnore]
+    private string _secret;
+
+    // ...
+
+    [HttpGet]
+    [Route("/api/greet")]
+    public string Greet() { return $"Hi, {Name}"; }
+}
+```
+
+Multiple arguments: `@Authorize("admin", "editor")` → `[Authorize("admin", "editor")]`
+
 ## Interfaces
 
 ```zinc

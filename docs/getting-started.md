@@ -229,6 +229,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs:
 | [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
 | [`collections.zn`](../examples/collections.zn) | Lists, maps, slicing |
 | [`csharp-only/linq.zn`](../examples/csharp-only/linq.zn) | LINQ methods — Where, Select, OrderBy, First, Sum, Aggregate, chaining (C# backend) |
+| [`csharp-only/annotations.zn`](../examples/csharp-only/annotations.zn) | Annotations — @JsonPropertyName, @Serializable, C# attributes (C# backend) |
 | [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
 | [`with_resources.zn`](../examples/with_resources.zn) | Resource management |
 

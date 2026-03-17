@@ -1,0 +1,30 @@
+// Annotations — @Name maps directly to C# [Attribute]
+// Works with any C# attribute: serialization, web, ORM, validation, etc.
+
+import "System.Text.Json"
+import "System.Text.Json.Serialization"
+
+@Serializable
+User {
+    @JsonInclude
+    @JsonPropertyName("user_name")
+    pub String name
+
+    @JsonInclude
+    @JsonPropertyName("user_age")
+    pub Int age
+
+    new(String name, Int age) {
+        this.name = name
+        this.age = age
+    }
+}
+
+main() {
+    var u = User("Alice", 30)
+    var opts = JsonSerializerOptions()
+    opts.IncludeFields = true
+    var json = JsonSerializer.Serialize(u, opts)
+    print(json)
+    // → {"user_name":"Alice","user_age":30}
+}

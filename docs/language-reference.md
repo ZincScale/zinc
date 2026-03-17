@@ -9,7 +9,7 @@ Zinc compiles to native binaries via **C# AOT** (default) or **Go**. Convention 
 | [Getting Started](getting-started.md) | Installation, CLI, project setup |
 | [Types and Variables](types.md) | Variables, constants, type system, enums, null safety, type casting, string interpolation |
 | [Functions](functions.md) | Functions, default/named args, generics, variadic, closures, `Fn` types |
-| [Classes and OOP](classes.md) | Classes, interfaces, inheritance, polymorphism, generics |
+| [Classes and OOP](classes.md) | Classes, interfaces, inheritance, polymorphism, generics, annotations |
 | [Collections](collections.md) | List/map literals, slicing, LINQ collection methods |
 | [Control Flow](control-flow.md) | If/else, loops, match/switch, labeled loops, safe navigation, concurrency |
 | [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
