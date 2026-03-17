@@ -1,195 +1,195 @@
 # Zinc Feature Roadmap
 
-Convention over configuration for native apps. Less typing, less ceremony.
+Convention over configuration. Less typing, less ceremony.
 
 ---
 
-## Priority Order — Expressiveness First
+## Priority Order — Expressiveness
 
-### P1 — Data Classes ✦ NEXT
-Eliminate constructor boilerplate — the #1 LOC waster in Zinc today.
+### P1 — Trailing Lambdas + `it` Keyword ✦ NEXT
+The single biggest readability win. Every LINQ chain gets cleaner.
 
 ```zinc
-// Before: 8 lines
+// TODAY: noisy, type-heavy
+var names = users.Where((User u) -> u.age > 28)
+                 .Select((User u) -> u.name)
+                 .OrderBy((String s) -> s)
+
+// AFTER: clean, Kotlin-style
+var names = users.Where { it.age > 28 }
+                 .Select { it.name }
+                 .OrderBy { it }
+```
+
+- Single-param lambdas auto-bind `it` (like Kotlin)
+- Trailing lambda: last arg is a block `{ }` outside parens
+- Multi-param still uses arrow: `.Aggregate(0) { acc, x -> acc + x }`
+- Type inference from collection element type
+- **Effort:** Medium (parser + typechecker + codegen)
+
+### P2 — Data Classes
+Eliminate constructor boilerplate.
+
+```zinc
+data User(pub String name, pub Int age)
+
+// Equivalent to:
 User {
     pub String name
     pub Int age
-    new(String name, Int age) {
-        this.name = name
-        this.age = age
-    }
+    new(String name, Int age) { this.name = name; this.age = age }
 }
-
-// After: 1 line
-data User(pub String name, pub Int age)
 ```
 
-- Maps to C# `record` or class with auto-generated constructor
+- Maps to C# `record` or class with auto-constructor
 - Auto-generates ToString
-- Fields declared inline with the class name
-- Still supports methods if needed: `data User(...) { pub String greet() { ... } }`
+- Can add methods: `data User(...) { pub String greet() { ... } }`
 - **Effort:** Medium
 
-### P2 — Lambda Type Inference
-Remove redundant type annotations from lambdas — the type is inferrable from context.
+### P3 — Implicit Return + Expression If/Match
+Last expression in a block is the return value. If and match become expressions.
 
 ```zinc
-// Before:
-var big = nums.Where((Int x) -> x > 3)
-var doubled = nums.Select((Int x) -> x * 2)
+// Implicit return — no `return` keyword needed
+Int double(Int x) { x * 2 }
+String greet(String name) { "Hello, {name}!" }
 
-// After:
-var big = nums.Where(x -> x > 3)
-var doubled = nums.Select(x -> x * 2)
-```
+// Expression if — returns a value
+var label = if x > 0 { "positive" } else { "negative" }
 
-- Infer param types from the collection element type
-- Multi-param: `(a, b) -> a + b` instead of `(Int a, Int b) -> a + b`
-- Still allow explicit types when needed for clarity
-- **Effort:** Medium (parser + typechecker changes)
-
-### P3 — `or die` / `or exit` Shorthands
-The `or { print(err); exit(1) }` pattern is ubiquitous. Make it a one-liner.
-
-```zinc
-// Before: 3 lines
-var content = readFile("data.txt") or {
-    print("Error: {err}")
-    exit(1)
-}
-
-// After: 1 line
-var content = readFile("data.txt") or die       // prints err + exits
-var content = readFile("data.txt") or exit(1)   // exits with code
-var content = readFile("data.txt") or ""        // default value
-```
-
-- `or die` → print error message to stderr + exit(1)
-- `or exit(N)` → exit with specific code
-- `or <default>` → use default value on error
-- **Effort:** Quick (parser + codegen)
-
-### P4 — Auto-Assign Constructor Params
-When constructor params match field names, auto-assign them.
-
-```zinc
-// Before:
-Dog {
-    pub String name
-    pub Int age
-    new(String name, Int age) {
-        this.name = name
-        this.age = age
-    }
-}
-
-// After:
-Dog {
-    pub String name
-    pub Int age
-    new(String name, Int age) {}  // auto-assigns matching fields
+// Expression match — returns a value
+var msg = match status {
+    case Status.Active -> "running"
+    case Status.Closed -> "done"
+    case _ -> "unknown"
 }
 ```
 
-- If constructor body is empty or doesn't assign a matching field, auto-assign it
-- Explicit assignments override auto-assign
-- **Effort:** Quick (codegen-only, no parser changes)
+- Last expression in function/lambda body is implicit return
+- `if` and `match` can be used in expression position
+- Explicit `return` still works for early returns
+- **Effort:** Medium (parser + codegen)
 
-### P5 — `args` and Scripting Builtins
-Make CLI tools trivial:
+### P4 — Ranges
+Replace C-style for loops.
+
+```zinc
+// TODAY:
+for (var i = 0; i < 10; i += 1) { print(i) }
+
+// AFTER:
+for i in 0..10 { print(i) }        // 0 to 9 (exclusive end)
+for i in 0..=10 { print(i) }       // 0 to 10 (inclusive)
+for i in 10..0 { print(i) }        // countdown
+
+var firstFive = nums[0..5]          // slice syntax already exists
+```
+
+- `..` exclusive end (like Kotlin `until`, Rust `..`)
+- `..=` inclusive end (like Rust `..=`)
+- Works in for loops and slice expressions
+- **Effort:** Quick (lexer + parser + codegen)
+
+### P5 — Scripting Builtins
+Make CLI tools trivial.
 
 ```zinc
 main() {
     if args.Count() < 2 { print("usage: tool <file>"); exit(1) }
-    var content = readFile(args[1]) or die
+    var content = readFile(args[1]) or { print(err); exit(1) }
     print(content)
 }
 ```
 
-- `args` — built-in `List<String>`, maps to command-line args
-- `exec(cmd)` — run shell command, return output, failable
+- `args` — built-in `List<String>` for command-line args
+- `exec(cmd)` — run shell command, failable
 - `fileExists(path)` → `Bool`
 - `listDir(path)` → `List<String>`, failable
-- `pathJoin(parts...)` → path joining
 - **Effort:** Quick
 
 ### P6 — `zinc add` / Dependency Management
 ```bash
-zinc add Newtonsoft.Json              # adds to zinc.toml
-zinc add Serilog --version 4.0.0     # pinned version
-zinc remove Newtonsoft.Json           # removes
+zinc add Newtonsoft.Json
+zinc add Serilog --version 4.0.0
+zinc remove Newtonsoft.Json
 ```
 - **Effort:** Medium
 
-### P7 — VS Code Extension (Syntax Highlighting)
-Basic `.zn` editor support — TextMate grammar.
+### P7 — VS Code Extension
+TextMate grammar for `.zn` syntax highlighting.
 - **Effort:** Quick
 
 ### P8 — `zinc test`
-`zinc test` → runs `dotnet test` or `go test`.
+`zinc test` → `dotnet test` or `go test`.
 - **Effort:** Quick
 
 ---
 
 ## Expressiveness Comparison
 
-What a real program looks like today vs. after P1-P4:
+Same program across languages:
 
+**Python (8 lines):**
+```python
+users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
+seniors = [u.name for u in users if u.age > 28]
+config = json.load(open("config.json"))
+for name in sorted(seniors):
+    print(name)
+```
+
+**Kotlin (8 lines):**
+```kotlin
+data class User(val name: String, val age: Int)
+val users = listOf(User("Alice", 30), User("Bob", 25), User("Carol", 35))
+val seniors = users.filter { it.age > 28 }.map { it.name }.sorted()
+val config = File("config.json").readText()
+seniors.forEach { println(it) }
+```
+
+**Zinc today (15 lines):**
 ```zinc
-// ===== TODAY (21 lines) =====
 User {
     pub String name
     pub Int age
-    new(String name, Int age) {
-        this.name = name
-        this.age = age
-    }
+    new(String name, Int age) { this.name = name; this.age = age }
 }
-
 main() {
-    var users = [User("Alice", 30), User("Bob", 25)]
-    var names = users.Select((User u) -> u.name)
-                     .Where((String s) -> s.StartsWith("A"))
-    for name in names { print(name) }
-
-    var content = readFile("data.txt") or {
-        print("Error: {err}")
-        exit(1)
-    }
-    print(content)
-}
-
-// ===== AFTER P1-P4 (11 lines) =====
-data User(pub String name, pub Int age)
-
-main() {
-    var users = [User("Alice", 30), User("Bob", 25)]
-    var names = users.Select(u -> u.name)
-                     .Where(s -> s.StartsWith("A"))
-    for name in names { print(name) }
-
-    var content = readFile("data.txt") or die
-    print(content)
+    var users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
+    var seniors = users.Where((User u) -> u.age > 28)
+                       .Select((User u) -> u.name)
+                       .OrderBy((String s) -> s)
+    var config = readFile("config.json") or { print(err); exit(1) }
+    for name in seniors { print(name) }
 }
 ```
 
-**48% fewer lines for the same logic.**
+**Zinc after P1-P3 (9 lines):**
+```zinc
+data User(pub String name, pub Int age)
+
+main() {
+    var users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
+    var seniors = users.Where { it.age > 28 }
+                       .Select { it.name }
+                       .OrderBy { it }
+    var config = readFile("config.json") or { print(err); exit(1) }
+    for name in seniors { print(name) }
+}
+```
+
+**On par with Kotlin. Compiles to a 1.6 MB native binary.**
 
 ---
 
 ## Interop Roadmap
 
-All unblocked by v0.8.0 (imports + type resolver + annotations).
+All unblocked (imports + type resolver + annotations).
 
 | Use Case | Status |
 |----------|--------|
-| Logging (Serilog/NLog) | ✅ Ready |
-| HTTP client | ✅ Ready |
-| Configuration | ✅ Ready |
-| JSON serialization | ✅ Ready |
-| Dependency injection | ✅ Ready |
-| REST API (ASP.NET) | ✅ Ready |
-| Database/ORM (EF Core) | ✅ Ready |
+| Logging, HTTP, Config, JSON, DI | ✅ Ready |
+| REST API, ORM, Serialization | ✅ Ready |
 | Testing (xUnit) | ⚠ Needs `zinc test` (P8) |
 
 ---
@@ -198,53 +198,22 @@ All unblocked by v0.8.0 (imports + type resolver + annotations).
 
 | Feature | Notes |
 |---------|-------|
-| Typed errors | Exception hierarchy, `catch UserError` |
+| Typed errors | Exception hierarchy |
 | Structured concurrency | `await { }` blocks |
 | Operator overloading | Via .NET interop |
-| Enhanced destructuring | `var (a, b, c) = ...` |
-
----
-
-## Project Infrastructure
-
-| Feature | Status |
-|---------|--------|
-| CI: .NET SDK in tests | ✅ Done |
-| CONTRIBUTING.md | TODO |
-| Code coverage | TODO |
-
----
-
-## Future — IDE & Ecosystem
-
-| Feature | Effort |
-|---------|--------|
-| LSP server | Large |
-| VS Code extension + LSP | Medium |
-| Web playground | Large |
-| `zinc doc` | Medium |
+| Destructuring | `var (name, age) = user` |
 
 ---
 
 ## Completed (v0.8.0)
-- Generic annotations: `@Name("args")` → `[Name("args")]` in C#
-- Split docs into 8 focused topic files
-- Removed dead code from Generator (6 fields, 1 method)
+- Generic annotations, doc restructure, dead code cleanup
 
 ## Completed (v0.7.0)
-- NuGet import → `using` mapping (16 aliases)
-- CSharpTypeResolver: .NET reflection probe (3,700+ types)
-- Auto `new` for constructors, static class detection
-- Single Functions class, unique catch vars, AOT trim fixes
+- NuGet imports, CSharpTypeResolver, auto `new`, AOT fixes
 
 ## Completed (v0.6.0)
-- 28 global builtins in C# backend
-- Failable infrastructure + `or { }` error handling
+- 28 builtins, failable infrastructure, `or { }` error handling
 
-## Completed (v0.5.0)
-- C# AOT backend, LINQ (22 methods), `zinc.toml`, build pipeline
-- TypeRegistry, source maps, lambda `->`, `var`, type inference
-
-## Completed (v0.4.0 and earlier)
-- Type-before-name, OO polymorphism, generics, error handling
-- Go backend (3,326 lines), pointer inference, REPL, CI
+## Completed (v0.5.0 and earlier)
+- C# AOT backend, LINQ, `zinc.toml`, TypeRegistry, OO polymorphism
+- Go backend, pointer inference, REPL, CI
