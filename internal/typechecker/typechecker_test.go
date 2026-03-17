@@ -573,15 +573,6 @@ func TestValidEnums(t *testing.T) {
 	noErrors(t, errs, string(src))
 }
 
-func TestValidConcurrency(t *testing.T) {
-	src, err := os.ReadFile("../../examples/concurrency.zn")
-	if err != nil {
-		t.Fatalf("reading example: %v", err)
-	}
-	errs := checkSrc(string(src))
-	noErrors(t, errs, string(src))
-}
-
 func TestValidClosures(t *testing.T) {
 	src, err := os.ReadFile("../../examples/closures.zn")
 	if err != nil {

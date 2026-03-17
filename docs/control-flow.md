@@ -102,29 +102,3 @@ var x = nobody?.name             // nil
 nobody?.doSomething()            // no-op
 ```
 
-## Concurrency
-
-```zinc
-main() {
-    Chan<Int> ch = Chan(1)
-
-    go {
-        ch.send(42)
-    }
-
-    var val = ch.receive()
-    print(val)
-}
-```
-
-## Tuple Unpacking
-
-```zinc
-import "strconv"
-
-main() {
-    var (n, err) = strconv.Atoi("42")
-}
-```
-
-> **Note:** Both names in `var (a, b) = ...` must be used. If you only need one value, assign the other to `_`.

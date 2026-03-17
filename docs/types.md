@@ -28,19 +28,18 @@ main() {
 
 ## Type System
 
-| Zinc     | Go          | C#            |
-|-------------|-------------|---------------|
-| `Int`       | `int`       | `int`         |
-| `Float`     | `float64`   | `double`      |
-| `String`    | `string`    | `string`      |
-| `Bool`      | `bool`      | `bool`        |
-| `Byte`      | `byte`      | `byte`        |
-| `Any`       | `interface{}`| `object`     |
-| `Error`     | `error`     | `Exception`   |
-| `String?`   | `*string`   | `string?`     |
-| `List<T>`   | `[]T`       | `List<T>`     |
-| `Map<K,V>`  | `map[K]V`   | `Dictionary<K,V>` |
-| `Chan<T>`   | `chan T`    | `Channel<T>`  |
+| Zinc        | C#                 |
+|-------------|---------------------|
+| `Int`       | `int`               |
+| `Float`     | `double`            |
+| `String`    | `string`            |
+| `Bool`      | `bool`              |
+| `Byte`      | `byte`              |
+| `Any`       | `object`            |
+| `Error`     | `Exception`         |
+| `String?`   | `string?`           |
+| `List<T>`   | `List<T>`           |
+| `Map<K,V>`  | `Dictionary<K,V>`   |
 
 ## Enums
 

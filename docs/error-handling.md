@@ -61,53 +61,27 @@ var body = httpGet("https://api.example.com/data") or {
 
 ## With (Resource Management)
 
-The `with` statement is Zinc's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`:
+The `with` statement is Zinc's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`. Any `IDisposable` resource is automatically closed when the block exits:
 
 ```zinc
-import "os"
+import "io"
 
 main() {
-    with (f = os.Create("output.txt")) {
-        f.WriteString("hello from Zinc")
+    with (stream = File.OpenRead("data.txt")) {
+        // stream is closed automatically when block exits
     }
-    // f is closed automatically
 }
 ```
 
 ### `with` + `or` Handler
 
 ```zinc
-with (f = os.Open("/nonexistent/file") or {
+with (stream = File.OpenRead("/nonexistent/file") or {
     print("caught: {err}")
     exit(1)
 }) {
     print("should not reach")
 }
-```
-
-### Mutex Locking
-
-`with` auto-detects `sync.Locker` and locks/unlocks:
-
-```zinc
-import "sync"
-
-main() {
-    var counter = 0
-    with (mu = sync.Mutex()) {
-        counter += 1    // mutex locked here, unlocked when block exits
-    }
-}
-```
-
-### Multiple Resources
-
-```zinc
-with (f1 = os.Create("a.txt"), f2 = os.Create("b.txt")) {
-    f1.WriteString("file A")
-    f2.WriteString("file B")
-}
-// f2 closes first, then f1 (LIFO)
 ```
 
 ## Runtime Error Reporting

@@ -54,7 +54,7 @@ Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc giv
 | [Classes and OOP](docs/classes.md) | Classes, interfaces, inheritance, polymorphism |
 | [Collections](docs/collections.md) | List/map literals, slicing, LINQ methods |
 | [Control Flow](docs/control-flow.md) | If/else, loops, match, labeled loops, safe navigation |
-| [Error Handling](docs/error-handling.md) | Errors as values, `or` handlers, `with` resources |
+| [Error Handling](docs/error-handling.md) | Errors as values, `or` handlers, `with` resource management |
 | [Imports](docs/imports.md) | .NET imports, NuGet dependencies, type detection |
 | [Built-in Functions](docs/builtins.md) | I/O, math, JSON, HTTP, environment, control |
 
@@ -114,15 +114,17 @@ See the [Getting Started](docs/getting-started.md) guide for multi-file projects
 - Field and constant visibility (`pub` / private by default)
 - Null safety with `?.` safe navigation
 - Errors as values with auto-propagation and `or` handlers
-- `with` resource management (auto-close, auto-unlock)
+- `with` resource management (auto-dispose)
 - Closures and higher-order functions (`Fn` types)
 - Enums with `match` expressions
+- Implicit return — last expression is the return value
+- Expression `if` and `match` — use in assignments
+- Range loops — `for i in 0..10`, `for i in 1..=5`
 - String interpolation
 - Default parameters and named arguments
 - Variadic functions and spread operator
 - `zinc.toml` project config — no XML
-- Native AOT compilation with full optimizations (tree shaking, strip, speed)
-- Native AOT compilation via C# backend
+- Native AOT compilation with full optimizations (tree shaking, speed)
 - Interactive REPL
 
 ---
