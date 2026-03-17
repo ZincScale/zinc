@@ -55,15 +55,16 @@ func (i *ImportDecl) topLevelTag() {}
 
 // --- Declarations ------------------------------------------------------------
 
-// ClassDecl: class Dog[<T>] : Animal, Speaker { ... }
+// ClassDecl: [@annotations] class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
-	Line       int // source line number (1-indexed)
-	Name       string
-	TypeParams []string // generic type parameter names
-	Parents    []string // base class + interfaces
-	Fields     []*FieldDecl
-	Ctor       *CtorDecl // nil if no constructor
-	Methods    []*MethodDecl
+	Line        int // source line number (1-indexed)
+	Name        string
+	TypeParams  []string // generic type parameter names
+	Parents     []string // base class + interfaces
+	Fields      []*FieldDecl
+	Ctor        *CtorDecl // nil if no constructor
+	Methods     []*MethodDecl
+	Annotations []*Annotation
 }
 
 func (c *ClassDecl) nodeTag()      {}
@@ -94,29 +95,31 @@ type CtorDecl struct {
 	SuperArgs []Expr // args extracted from super(...) call in body
 }
 
-// MethodDecl: [pub] [static] fn name(params) [: ReturnType] { body }
+// MethodDecl: [@annotations] [pub] [static] fn name(params) [: ReturnType] { body }
 type MethodDecl struct {
-	Name       string
-	IsPub      bool
-	IsStatic   bool
-	Params     []*ParamDecl
-	ReturnType TypeExpr // nil = void
-	Body       *BlockStmt
-	CanThrow   bool // set by codegen first pass
+	Name        string
+	IsPub       bool
+	IsStatic    bool
+	Params      []*ParamDecl
+	ReturnType  TypeExpr // nil = void
+	Body        *BlockStmt
+	CanThrow    bool // set by codegen first pass
+	Annotations []*Annotation
 }
 
 func (m *MethodDecl) nodeTag() {}
 
-// FnDecl: [pub] fn name[<T, U>](params) [: ReturnType] { body }
+// FnDecl: [@annotations] [pub] fn name[<T, U>](params) [: ReturnType] { body }
 type FnDecl struct {
-	Line       int // source line number (1-indexed)
-	Name       string
-	IsPub      bool
-	TypeParams []string  // generic type parameter names, e.g. ["T", "U"]
-	Params     []*ParamDecl
-	ReturnType TypeExpr // nil = void
-	Body       *BlockStmt
-	CanThrow   bool // set by codegen first pass
+	Line        int // source line number (1-indexed)
+	Name        string
+	IsPub       bool
+	TypeParams  []string  // generic type parameter names, e.g. ["T", "U"]
+	Params      []*ParamDecl
+	ReturnType  TypeExpr // nil = void
+	Body        *BlockStmt
+	CanThrow    bool // set by codegen first pass
+	Annotations []*Annotation
 }
 
 func (f *FnDecl) nodeTag()      {}
@@ -144,12 +147,21 @@ type ConstDecl struct {
 func (c *ConstDecl) nodeTag()      {}
 func (c *ConstDecl) topLevelTag() {}
 
-// FieldDecl: [pub] Type name [= expr]
+// Annotation: @Name or @Name("arg1", "arg2")
+type Annotation struct {
+	Name string   // annotation name (e.g. "JsonPropertyName", "Route")
+	Args []string // string arguments (may be empty)
+}
+
+func (a *Annotation) nodeTag() {}
+
+// FieldDecl: [@annotations] [pub] Type name [= expr]
 type FieldDecl struct {
-	Name    string
-	IsPub   bool
-	Type    TypeExpr
-	Default Expr // may be nil
+	Name        string
+	IsPub       bool
+	Type        TypeExpr
+	Default     Expr // may be nil
+	Annotations []*Annotation
 }
 
 // ParamDecl: name: Type [= expr]  OR  name: ...Type (variadic)

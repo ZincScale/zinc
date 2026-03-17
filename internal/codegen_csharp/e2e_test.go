@@ -536,3 +536,44 @@ main() {
 `)
 	assertOutput(t, out, "ok")
 }
+
+// --- Annotations -------------------------------------------------------------
+
+func TestE2EAnnotationOnClass(t *testing.T) {
+	out := e2eRun(t, `
+@Serializable
+User {
+    pub String name
+    new(String name) { this.name = name }
+    pub String greet() { return "Hi, {this.name}" }
+}
+main() {
+    var u = User("Alice")
+    print(u.greet())
+}
+`)
+	assertOutput(t, out, "Hi, Alice")
+}
+
+func TestE2EAnnotationJsonPropertyName(t *testing.T) {
+	out := e2eRunResolved(t, `
+import "System.Text.Json"
+import "System.Text.Json.Serialization"
+User {
+    @JsonInclude
+    @JsonPropertyName("user_name")
+    pub String name
+
+    new(String name) { this.name = name }
+}
+main() {
+    var opts = JsonSerializerOptions()
+    opts.IncludeFields = true
+    var u = User("Bob")
+    var json = JsonSerializer.Serialize(u, opts)
+    print(json)
+}
+`)
+	assertContains(t, out, "user_name")
+	assertContains(t, out, "Bob")
+}

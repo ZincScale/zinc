@@ -1105,6 +1105,30 @@ func (p *Parser) parseExprOrAssignStmt() Stmt {
 
 // --- Declarations ------------------------------------------------------------
 
+// parseAnnotations collects zero or more @Name or @Name("arg1", "arg2") annotations.
+func (p *Parser) parseAnnotations() []*Annotation {
+	var annotations []*Annotation
+	for p.check(lexer.TOKEN_AT) {
+		p.advance() // consume @
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		var args []string
+		if p.check(lexer.TOKEN_LPAREN) {
+			p.advance() // consume (
+			for !p.check(lexer.TOKEN_RPAREN) && !p.check(lexer.TOKEN_EOF) {
+				arg := p.expect(lexer.TOKEN_STRING_LIT).Literal
+				args = append(args, arg)
+				if p.check(lexer.TOKEN_COMMA) {
+					p.advance()
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		annotations = append(annotations, &Annotation{Name: name, Args: args})
+		p.skipSemis()
+	}
+	return annotations
+}
+
 func (p *Parser) parseFieldDecl(isPub bool) *FieldDecl {
 	// [pub] Type name [= default]
 	typ := p.parseType()
@@ -1289,58 +1313,72 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		// Collect annotations before each member
+		annots := p.parseAnnotations()
+
 		tok := p.peek()
 		switch {
 		case tok.Type == lexer.TOKEN_NEW:
 			ctor = p.parseCtorDecl()
 		case tok.Type == lexer.TOKEN_STATIC:
-			methods = append(methods, p.parseMethodDecl())
+			m := p.parseMethodDecl()
+			m.Annotations = annots
+			methods = append(methods, m)
 		case tok.Type == lexer.TOKEN_PUB:
 			// pub can prefix methods or fields
 			// Peek past pub to disambiguate
 			next := p.peekAt(1)
 			if next.Type == lexer.TOKEN_STATIC {
 				// pub static — always a method
-				methods = append(methods, p.parseMethodDecl())
+				m := p.parseMethodDecl()
+				m.Annotations = annots
+				methods = append(methods, m)
 			} else if next.Type == lexer.TOKEN_IDENT {
 				nextIsUpper := len(next.Literal) > 0 && next.Literal[0] >= 'A' && next.Literal[0] <= 'Z'
 				if !nextIsUpper {
 					// pub lowercaseName( — void method
-					methods = append(methods, p.parseMethodDecl())
+					m := p.parseMethodDecl()
+					m.Annotations = annots
+					methods = append(methods, m)
 				} else {
 					// pub UpperType — could be field or method with return type
-					// Use offset-based lookahead (skip past pub) to disambiguate
 					if p.isClassMethodDeclAt(1) {
-						methods = append(methods, p.parseMethodDecl())
+						m := p.parseMethodDecl()
+						m.Annotations = annots
+						methods = append(methods, m)
 					} else {
 						p.advance() // consume pub
-						fields = append(fields, p.parseFieldDecl(true))
+						f := p.parseFieldDecl(true)
+						f.Annotations = annots
+						fields = append(fields, f)
 					}
 				}
 			} else {
-				methods = append(methods, p.parseMethodDecl())
+				m := p.parseMethodDecl()
+				m.Annotations = annots
+				methods = append(methods, m)
 			}
 		case tok.Type == lexer.TOKEN_IDENT:
-			// Type-before-name disambiguation in class body:
-			// Uppercase ident could be: field (Type name), method with return type (Type methodName(...))
-			// Lowercase ident: void method (name(...))
 			isUpper := len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z'
 			if !isUpper {
-				// Lowercase: must be a void method
 				next := p.peekAt(1)
 				if next.Type == lexer.TOKEN_LPAREN || next.Type == lexer.TOKEN_LT {
-					methods = append(methods, p.parseMethodDecl())
+					m := p.parseMethodDecl()
+					m.Annotations = annots
+					methods = append(methods, m)
 				} else {
 					p.errorf("unexpected token %s after method name %q in class body", next.Type, tok.Literal)
 					p.advance()
 				}
 			} else {
-				// Uppercase: field or method with return type
-				// Scan past the type to find what follows the name
 				if p.isClassMethodDecl() {
-					methods = append(methods, p.parseMethodDecl())
+					m := p.parseMethodDecl()
+					m.Annotations = annots
+					methods = append(methods, m)
 				} else {
-					fields = append(fields, p.parseFieldDecl(false))
+					f := p.parseFieldDecl(false)
+					f.Annotations = annots
+					fields = append(fields, f)
 				}
 			}
 		default:
@@ -1484,6 +1522,9 @@ func (p *Parser) Parse() *Program {
 		p.skipSemis()
 	}
 	for !p.check(lexer.TOKEN_EOF) {
+		// Collect annotations before top-level declarations
+		annots := p.parseAnnotations()
+
 		tok := p.peek()
 		switch tok.Type {
 		case lexer.TOKEN_IMPORT:
@@ -1499,22 +1540,26 @@ func (p *Parser) Parse() *Program {
 			if p.check(lexer.TOKEN_CONST) {
 				prog.Decls = append(prog.Decls, p.parseConstDecl(true))
 			} else {
-				prog.Decls = append(prog.Decls, p.parseFnDecl(true))
+				fn := p.parseFnDecl(true)
+				fn.Annotations = annots
+				prog.Decls = append(prog.Decls, fn)
 			}
 		case lexer.TOKEN_IDENT:
 			if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
-				// Uppercase: could be class or function with return type
-				// Function with return type: UpperType lowerName(...)
-				// Class: UpperName { or UpperName : or UpperName<T> {
 				next := p.peekAt(1)
 				if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'a' && next.Literal[0] <= 'z' {
-					// ReturnType functionName — parse as function with return type
-					prog.Decls = append(prog.Decls, p.parseFnDecl(false))
+					fn := p.parseFnDecl(false)
+					fn.Annotations = annots
+					prog.Decls = append(prog.Decls, fn)
 				} else {
-					prog.Decls = append(prog.Decls, p.parseClassDecl())
+					cls := p.parseClassDecl()
+					cls.Annotations = annots
+					prog.Decls = append(prog.Decls, cls)
 				}
 			} else {
-				prog.Decls = append(prog.Decls, p.parseFnDecl(false))
+				fn := p.parseFnDecl(false)
+				fn.Annotations = annots
+				prog.Decls = append(prog.Decls, fn)
 			}
 		default:
 			p.errorf("unexpected top-level token %s (%q)", tok.Type, tok.Literal)

@@ -370,8 +370,25 @@ func (g *Generator) emitFnDecl(d *parser.FnDecl) {
 	g.emitFnBody(d)
 }
 
+// emitAnnotations emits C# attributes for a list of Zinc annotations.
+// @Foo → [Foo], @Foo("bar") → [Foo("bar")], @Foo("a", "b") → [Foo("a", "b")]
+func (g *Generator) emitAnnotations(annotations []*parser.Annotation) {
+	for _, a := range annotations {
+		if len(a.Args) == 0 {
+			g.writeln(fmt.Sprintf("[%s]", a.Name))
+		} else {
+			quoted := make([]string, len(a.Args))
+			for i, arg := range a.Args {
+				quoted[i] = fmt.Sprintf(`"%s"`, arg)
+			}
+			g.writeln(fmt.Sprintf("[%s(%s)]", a.Name, strings.Join(quoted, ", ")))
+		}
+	}
+}
+
 // emitFnBody emits a single static method (without the wrapping class).
 func (g *Generator) emitFnBody(d *parser.FnDecl) {
+	g.emitAnnotations(d.Annotations)
 	retType := g.emitType(d.ReturnType)
 	vis := "private"
 	if d.IsPub {
@@ -406,12 +423,14 @@ func (g *Generator) emitClassDecl(d *parser.ClassDecl) {
 		inheritance = " : " + strings.Join(parents, ", ")
 	}
 
+	g.emitAnnotations(d.Annotations)
 	g.writeln(fmt.Sprintf("public class %s%s%s", d.Name, typeParams, inheritance))
 	g.writeln("{")
 	g.push()
 
 	// Fields
 	for _, f := range d.Fields {
+		g.emitAnnotations(f.Annotations)
 		fieldType := g.emitType(f.Type)
 		vis := "private"
 		if f.IsPub {
@@ -463,6 +482,7 @@ func (g *Generator) emitClassDecl(d *parser.ClassDecl) {
 }
 
 func (g *Generator) emitMethodDecl(className string, classTypeParams []string, parents []string, m *parser.MethodDecl) {
+	g.emitAnnotations(m.Annotations)
 	retType := g.emitType(m.ReturnType)
 	vis := "private"
 	if m.IsPub {

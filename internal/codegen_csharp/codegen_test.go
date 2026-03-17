@@ -842,3 +842,108 @@ main() {
 `)
 	assertContains(t, out, "using System.Diagnostics;")
 }
+
+// === Annotations ===
+
+func TestAnnotationOnClass(t *testing.T) {
+	out := transpile(`
+@Serializable
+User {
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "[Serializable]")
+	assertContains(t, out, "public class User")
+}
+
+func TestAnnotationWithArgs(t *testing.T) {
+	out := transpile(`
+@Table("users")
+User {
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, `[Table("users")]`)
+}
+
+func TestAnnotationOnField(t *testing.T) {
+	out := transpile(`
+User {
+    @JsonPropertyName("user_name")
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, `[JsonPropertyName("user_name")]`)
+	assertContains(t, out, "public string Name;")
+}
+
+func TestAnnotationOnMethod(t *testing.T) {
+	out := transpile(`
+Controller {
+    new() {}
+
+    @HttpGet
+    @Route("/api/hello")
+    pub String hello() { return "hi" }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "[HttpGet]")
+	assertContains(t, out, `[Route("/api/hello")]`)
+	assertContains(t, out, "public string Hello()")
+}
+
+func TestMultipleAnnotationsOnClass(t *testing.T) {
+	out := transpile(`
+@Serializable
+@Table("products")
+Product {
+    @Column("product_name")
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "[Serializable]")
+	assertContains(t, out, `[Table("products")]`)
+	assertContains(t, out, `[Column("product_name")]`)
+}
+
+func TestAnnotationMultipleArgs(t *testing.T) {
+	out := transpile(`
+@Authorize("admin", "editor")
+Controller {
+    new() {}
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, `[Authorize("admin", "editor")]`)
+}
+
+func TestAnnotationNoArgsOnField(t *testing.T) {
+	out := transpile(`
+User {
+    @Required
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "[Required]")
+}
+
+func TestAnnotationOnFunction(t *testing.T) {
+	out := transpile(`
+@Obsolete("use newMethod instead")
+String oldMethod() { return "old" }
+main() { print("ok") }
+`)
+	assertContains(t, out, `[Obsolete("use newMethod instead")]`)
+	assertContains(t, out, "string OldMethod()")
+}
