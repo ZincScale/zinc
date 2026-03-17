@@ -12,6 +12,15 @@ if x > 0 {
 }
 ```
 
+### Expression If
+
+`if` can be used in expression position — returns a value:
+
+```zinc
+var label = if x > 0 { "positive" } else { "negative" }
+var tier = if score > 90 { "A" } else if score > 80 { "B" } else { "C" }
+```
+
 ## While Loop
 
 ```zinc
@@ -28,7 +37,11 @@ for (var i = 0; i < 10; i += 1) {
     print(i)
 }
 
-// for-in (range)
+// Range loops
+for i in 0..10 { print(i) }       // 0 to 9 (exclusive end)
+for i in 1..=10 { print(i) }      // 1 to 10 (inclusive)
+
+// for-in (collection)
 for item in items {
     print(item)
 }
@@ -75,6 +88,18 @@ String describe(Direction d) {
         case Direction.West  -> { return "Going West"  }
         case _ -> { return "Unknown" }
     }
+}
+```
+
+### Expression Match
+
+`match` can be used in expression position — returns a value:
+
+```zinc
+var msg = match status {
+    case 1 -> "running"
+    case 2 -> "stopped"
+    case _ -> "unknown"
 }
 ```
 

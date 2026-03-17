@@ -12,7 +12,20 @@ pub String greet(String name) {
 }
 ```
 
-On the C# backend, all top-level functions are emitted as static methods inside a single `Functions` class. The `main()` function becomes `Program.Main()`.
+## Implicit Return
+
+The last expression in a function or method body is automatically returned — no `return` keyword needed:
+
+```zinc
+Int double(Int x) { x * 2 }
+String greet(String name) { "Hello, {name}!" }
+
+Calculator {
+    pub Int square(Int x) { x * x }
+}
+```
+
+Explicit `return` still works for early returns or clarity.
 
 ## Default Parameter Values
 
