@@ -1,6 +1,6 @@
 # Language Reference
 
-Zinc compiles to native binaries via **C# AOT** (default) or **Go**. Convention over configuration — less typing, less ceremony, optimized native output.
+Zinc compiles to native binaries via **C# AOT**. Convention over configuration — less typing, less ceremony, optimized native output.
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@ Zinc compiles to native binaries via **C# AOT** (default) or **Go**. Convention 
 | [Collections](collections.md) | List/map literals, slicing, LINQ collection methods |
 | [Control Flow](control-flow.md) | If/else, loops, match/switch, safe navigation, concurrency (`spawn`, `parallel`, `Lock<T>`) |
 | [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
-| [Imports](imports.md) | .NET imports, Go imports, NuGet dependencies, type detection |
+| [Imports](imports.md) | .NET imports, NuGet dependencies, type detection |
 | [Built-in Functions](builtins.md) | All global builtins — I/O, math, JSON, HTTP, environment, control |
 
 ## Quick Syntax Overview
@@ -62,15 +62,17 @@ main() {
 }
 ```
 
-## Backend Comparison
+## Backend
 
-| Feature | C# AOT (default) | Go |
-|---------|-------------------|-----|
-| Binary size | ~1.6 MB | ~2.3 MB |
-| Startup | ~9 ms | ~12 ms |
-| Concurrency | `spawn`, `parallel`, `Lock<T>` | Not supported |
-| Collection methods | LINQ (Where, Select, ...) | `for` loops |
-| Error handling | try/catch (generated) | if err != nil (generated) |
-| Type detection | .NET reflection probe | `go/types` |
-| Ecosystem | NuGet packages | Go modules |
-| Config | `zinc.toml` | `zinc.toml` + `go.mod` |
+Zinc targets **C# AOT** (Native AOT via .NET). The compiler transpiles `.zn` → `.cs`, generates a `.csproj` internally, and runs `dotnet publish` with AOT to produce a native binary.
+
+| Property | Value |
+|----------|-------|
+| Binary size | ~1.6 MB |
+| Startup | ~9 ms |
+| Concurrency | `spawn`, `parallel`, `Lock<T>` |
+| Collection methods | LINQ (Where, Select, OrderBy, ...) |
+| Error handling | try/catch (generated from `or { }`) |
+| Type detection | .NET reflection probe |
+| Ecosystem | NuGet packages |
+| Config | `zinc.toml` |

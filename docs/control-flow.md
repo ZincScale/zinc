@@ -86,8 +86,6 @@ var msg = match status {
 }
 ```
 
-## Safe Navigation (`?.`)
-
 ## Concurrency
 
 Three primitives for concurrent work. No `async`/`await`, no function coloring.

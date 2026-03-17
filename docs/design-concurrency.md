@@ -118,14 +118,14 @@ main() {
     var counter = Lock(0)
 
     parallel(0..100) {
-        counter.update { value = value + 1 }
+        counter.update { it + 1 }
     }
 
     print(counter.value)    // 100
 }
 ```
 
-`Lock<T>` wraps a value with safe concurrent access. `.update { }` locks, gives you `value`, and you mutate directly — no return value needed. Can't forget to unlock.
+`Lock<T>` wraps a value with safe concurrent access. `.update { }` locks, receives the current value as `it`, and returns the new value. Can't forget to unlock.
 
 ```zinc
 var cache = Lock(Map<String, User>())
@@ -134,8 +134,8 @@ var stats = Lock(Stats())
 parallel(requests) {
     var user = fetchUser(it.userId)
 
-    cache.update { value.Add(user.id, user) }
-    stats.update { value.totalProcessed = value.totalProcessed + 1 }
+    cache.update { it.Add(user.id, user) }
+    stats.update { it.totalProcessed = it.totalProcessed + 1 }
 }
 ```
 
@@ -210,7 +210,7 @@ main() {
 
     var results = parallel(0..10) {
         var data = fetchData(it)
-        count.update { value = value + 1 }
+        count.update { it + 1 }
         data
     }
 

@@ -65,6 +65,7 @@ Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc giv
 | [C# AOT Backend](docs/design-csharp-aot-backend.md) | Implemented |
 | [Pointer Inference](docs/design-pointer-inference.md) | Implemented |
 | [Annotations & Serialization](docs/design-annotations-serialization.md) | Planned |
+| [Concurrency](docs/design-concurrency.md) | Implemented |
 | [Syntax Simplification](docs/design-syntax-simplification.md) | Complete |
 | [Type-Before-Name](docs/design-type-before-name.md) | Complete |
 
