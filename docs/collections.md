@@ -108,4 +108,4 @@ main() {
 | `ToList()` | Materialize to list | `query.ToList()` |
 | `ForEach(action)` | Execute action per element | `nums.ForEach((x) -> x * 2)` |
 
-> **Note:** Collection methods are available on the C# backend. On the Go backend, use `for` loops for equivalent operations.
+> **Note:** Collection methods use C# LINQ under the hood and are fully supported in Zinc.

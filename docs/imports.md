@@ -72,31 +72,6 @@ main() {
 }
 ```
 
-## Go Package Imports (Go Backend)
-
-```zinc
-import "os"
-import "math/rand" as rand
-
-main() {
-    Any args = os.Args
-}
-```
-
-### Pointer Inference
-
-Many Go APIs expect pointer-to-struct parameters. Zinc automatically infers when `&` is needed:
-
-```zinc
-import "net/http"
-import "crypto/tls"
-
-main() {
-    // http.Server.TLSConfig is *tls.Config — auto-emits &tls.Config{...}
-    var s = http.Server(TLSConfig: tls.Config(MinVersion: 3))
-}
-```
-
 ## Same-Project Types (Auto-Discovery)
 
 All types (classes, interfaces, enums) defined anywhere in your project are **automatically visible** to all other files. No import needed:
@@ -126,12 +101,3 @@ This matches how C#, Kotlin, and Swift work — all types in the same project/mo
 
 > **Note:** Top-level functions across files are currently scoped to their file. For shared logic, use classes with static methods.
 
-## Local Package Imports (Go Backend)
-
-On the Go backend, cross-directory imports require explicit `import` statements because Go enforces package boundaries:
-
-```zinc
-import "myapp/utils"                 // required on Go backend
-```
-
-On the C# backend, these are silently ignored — types are already auto-discovered.

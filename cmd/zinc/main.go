@@ -37,14 +37,13 @@ const usage = `Zinc — convention over configuration for native apps.
 
 Usage:
   zinc <file.zn> [flags]   Transpile a single file
-  zinc build [dir]         Transpile + compile (C# AOT default, --target go for Go)
+  zinc build [dir]         Transpile + compile (native AOT binary)
   zinc run [dir]           Transpile + run
   zinc init [name]         Initialize a new Zinc project (creates zinc.toml + main.zn)
   zinc repl                Launch interactive REPL
 
 Flags:
-  -o <file>       Output file (default: <input>.go or .cs)
-  --target <t>    Backend target: csharp (default) or go
+  -o <file>       Output file (default: <input>.cs)
   --verbose       Print tokens and AST summary after transpiling
   --run           Transpile and immediately run
   --watch         Watch file for changes and re-transpile automatically

@@ -32,7 +32,7 @@ Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc giv
 - **Clean error handling** — `or {}` handlers instead of 6-line try/catch blocks
 - **Native AOT binaries** — 1-2 MB, ~9ms startup, fully tree-shaken and optimized
 - **Zero config** — `zinc.toml` replaces XML; `zinc build` does the rest
-- **Dual backend** — C# AOT (default) for ecosystem fit, Go for CLI tools
+- **Native AOT** — compiles to optimized native binaries via C# AOT
 
 ---
 
@@ -55,7 +55,7 @@ Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc giv
 | [Collections](docs/collections.md) | List/map literals, slicing, LINQ methods |
 | [Control Flow](docs/control-flow.md) | If/else, loops, match, labeled loops, safe navigation |
 | [Error Handling](docs/error-handling.md) | Errors as values, `or` handlers, `with` resources |
-| [Imports](docs/imports.md) | .NET/Go imports, NuGet dependencies, type detection |
+| [Imports](docs/imports.md) | .NET imports, NuGet dependencies, type detection |
 | [Built-in Functions](docs/builtins.md) | I/O, math, JSON, HTTP, environment, control |
 
 ### Design Docs
@@ -80,7 +80,7 @@ go install github.com/victorybhg/zinc/cmd/zinc@latest
 
 **Pre-built binaries**: download from [GitHub Releases](https://github.com/victorybhg/zinc/releases).
 
-**Prerequisites**: .NET 10+ SDK for C# AOT builds, or Go 1.26+ for Go backend.
+**Prerequisites**: .NET 10+ SDK for building Zinc projects.
 
 ---
 
@@ -119,7 +119,7 @@ See the [Getting Started](docs/getting-started.md) guide for multi-file projects
 - Variadic functions and spread operator
 - `zinc.toml` project config — no XML
 - Native AOT compilation with full optimizations (tree shaking, strip, speed)
-- Dual backend: C# AOT (default) and Go
+- Native AOT compilation via C# backend
 - Interactive REPL
 
 ---

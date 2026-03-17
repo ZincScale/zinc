@@ -14,7 +14,7 @@ cd zinc
 go build -o zinc ./cmd/zinc/
 ```
 
-Requires **Go 1.26+** for building the compiler. For C# AOT builds (default), you also need **.NET 10+ SDK**.
+Requires **Go 1.26+** for building the compiler from source, and **.NET 10+ SDK** for building Zinc projects.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ name = "myapp"
 version = "0.1.0"
 
 [build]
-target = "csharp"    # or "go"
+target = "csharp"
 optimize = true      # AOT with full optimizations
 ```
 
@@ -63,16 +63,9 @@ zinc build          # → native AOT binary (C# target)
 
 `zinc build` reads `zinc.toml`, transpiles `.zn` → `.cs`, generates a `.csproj` internally (you never see it), and runs `dotnet publish` with AOT. The native binary is copied to your project root.
 
-For the Go backend:
-
-```bash
-# Set target = "go" in zinc.toml, or:
-zinc build          # uses go.mod + go build
-```
-
 ## Adding Dependencies
 
-Add NuGet packages (C# target) or Go modules (Go target) in `zinc.toml`:
+Add NuGet packages in `zinc.toml`:
 
 ```toml
 [dependencies]
@@ -185,7 +178,7 @@ zinc <file.zn> --run          # transpile and run immediately
 zinc <file.zn> --watch        # watch for changes, re-transpile automatically
 zinc <file.zn> --verbose      # show token/AST debug info
 zinc init [name]              # initialize a new project (creates zinc.toml + main.zn)
-zinc build [dir]              # transpile + compile (C# AOT default, Go with --target go)
+zinc build [dir]              # transpile + compile (native AOT binary)
 zinc run [dir]                # transpile + run
 zinc repl                     # launch interactive REPL
 zinc --version                # print version
@@ -212,7 +205,7 @@ zinc --version                # print version
 
 ### Source Maps
 
-Zinc emits line directives in the generated code. If the compiler reports an error, the file and line number point back to your `.zn` source — not the generated output. You debug in Zinc, not in C# or Go.
+Zinc emits line directives in the generated code. If the compiler reports an error, the file and line number point back to your `.zn` source — not the generated output. You debug in Zinc, not in C#.
 
 ## Running Examples
 
@@ -233,8 +226,8 @@ The [`examples/`](../examples/) directory contains working Zinc programs:
 | [`concurrency.zn`](../examples/concurrency.zn) | Channels + goroutines |
 | [`with_resources.zn`](../examples/with_resources.zn) | Resource management |
 
-Run any example with the Go backend (single-file mode):
+Run any example:
 
 ```bash
-zinc examples/hello.zn --run
+zinc run
 ```

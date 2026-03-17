@@ -17,7 +17,7 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 - **Benchmark harness** — Go vs C# AOT performance comparison (`benchmarks/csharp-aot/`). C# AOT 2-3x faster on Where+Select, 1.6 MB binary.
 
 ### Changed
-- **Default backend** — C# AOT is now the default; Go is secondary (`target = "go"` in `zinc.toml`)
+- **Default backend** — C# AOT is now the default backend
 - **Lambda syntax** — `=>` changed to `->` (matches Java/Kotlin, ergonomic)
 - **Variable declaration syntax** — `:=` changed to `var x = expr` (ergonomic — avoids pinky-shift colon)
 - **Match case syntax** — `case 1 => { }` changed to `case 1 -> { }`
