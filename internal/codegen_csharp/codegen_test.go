@@ -71,8 +71,26 @@ main() {
     print(x)
 }
 `)
+	assertContains(t, out, "public static class Functions")
 	assertContains(t, out, "int Add(int a, int b)")
 	assertContains(t, out, "return (a + b);")
+}
+
+func TestMultipleFunctionsSingleClass(t *testing.T) {
+	out := transpile(`
+Int add(Int a, Int b) { return a + b }
+Int multiply(Int a, Int b) { return a * b }
+main() { print(add(1, 2)) }
+`)
+	// All functions should be in ONE Functions class
+	assertContains(t, out, "public static class Functions")
+	assertContains(t, out, "int Add(int a, int b)")
+	assertContains(t, out, "int Multiply(int a, int b)")
+	// Should NOT have multiple Functions class declarations
+	count := strings.Count(out, "public static class Functions")
+	if count != 1 {
+		t.Errorf("expected exactly 1 Functions class, got %d\n--- output ---\n%s", count, out)
+	}
 }
 
 func TestVariables(t *testing.T) {
@@ -238,8 +256,8 @@ main() {
 Int riskyCall() { return 42 }
 `)
 	assertContains(t, out, "try")
-	assertContains(t, out, "catch (Exception _ex)")
-	assertContains(t, out, "var err = _ex.Message;")
+	assertContains(t, out, "catch (Exception _err")
+	assertContains(t, out, ".Message;")
 	assertContains(t, out, "throw;")
 }
 
@@ -701,8 +719,8 @@ main() {
 }
 `)
 	assertContains(t, out, "try")
-	assertContains(t, out, "catch (Exception _ex)")
-	assertContains(t, out, "var err = _ex.Message;")
+	assertContains(t, out, "catch (Exception _err")
+	assertContains(t, out, ".Message;")
 	assertContains(t, out, "throw;")
 }
 
@@ -714,8 +732,8 @@ main() {
 `)
 	assertContains(t, out, "try")
 	assertContains(t, out, `File.WriteAllText("out.txt", "data")`)
-	assertContains(t, out, "catch (Exception _ex)")
-	assertContains(t, out, "var err = _ex.Message;")
+	assertContains(t, out, "catch (Exception _err")
+	assertContains(t, out, ".Message;")
 }
 
 func TestHandlerHaltSuppressesThrow(t *testing.T) {

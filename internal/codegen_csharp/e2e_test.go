@@ -116,7 +116,7 @@ func e2eRunResolved(t *testing.T, src string) string {
 	}
 
 	resolver := NewCSharpTypeResolver()
-	cfg := &config.Config{Name: "test", Target: "csharp"}
+	cfg := config.DefaultConfig("test")
 	if err := resolver.Probe(cfg); err != nil {
 		t.Fatalf("type probe failed: %v", err)
 	}

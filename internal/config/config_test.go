@@ -94,17 +94,18 @@ func TestLoadConfigMissing(t *testing.T) {
 func TestGenerateCsproj(t *testing.T) {
 	cfg := DefaultConfig("myapp")
 	out := GenerateCsproj(cfg)
-	if !strings.Contains(out, "PublishAot") {
-		t.Errorf("missing PublishAot in csproj:\n%s", out)
-	}
-	if !strings.Contains(out, "OptimizationPreference") {
-		t.Errorf("missing OptimizationPreference in csproj:\n%s", out)
-	}
-	if !strings.Contains(out, "TrimMode") {
-		t.Errorf("missing TrimMode in csproj:\n%s", out)
-	}
-	if !strings.Contains(out, "StripSymbols") {
-		t.Errorf("missing StripSymbols in csproj:\n%s", out)
+	for _, want := range []string{
+		"PublishAot",
+		"SelfContained",
+		"OptimizationPreference",
+		"TrimMode",
+		"StripSymbols",
+		"InvariantGlobalization",
+		"JsonSerializerIsReflectionEnabledByDefault",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in csproj:\n%s", want, out)
+		}
 	}
 }
 

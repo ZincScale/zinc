@@ -63,7 +63,7 @@ type Generator struct {
 	buf            strings.Builder
 	indent         int
 	neededUsings   map[string]bool
-	importAliases  map[string]string // alias → C# namespace (for package-qualified calls)
+	importedNs     map[string]string // alias → C# namespace (for future qualified-call support)
 	typeResolver   *CSharpTypeResolver // optional — resolves .NET types from imports
 	classNames     map[string]bool
 	interfaceNames map[string]bool
@@ -85,7 +85,7 @@ type Generator struct {
 func New() *Generator {
 	return &Generator{
 		neededUsings:    map[string]bool{"System": true},
-		importAliases:   make(map[string]string),
+		importedNs:      make(map[string]string),
 		classNames:      make(map[string]bool),
 		interfaceNames:  make(map[string]bool),
 		enumNames:       make(map[string]bool),
@@ -201,14 +201,45 @@ func (g *Generator) Generate(prog *parser.Program) string {
 		g.processImport(imp)
 	}
 
-	// Emit declarations
-	first := true
+	// Separate top-level functions from other declarations.
+	// All non-main functions go into a single static Functions class.
+	var fnDecls []*parser.FnDecl
+	var otherDecls []parser.TopLevelDecl
 	for _, d := range prog.Decls {
+		if fn, ok := d.(*parser.FnDecl); ok && fn.Name != "main" {
+			fnDecls = append(fnDecls, fn)
+		} else {
+			otherDecls = append(otherDecls, d)
+		}
+	}
+
+	// Emit non-function declarations (classes, interfaces, enums, consts, main)
+	first := true
+	for _, d := range otherDecls {
 		if !first {
 			g.write("\n")
 		}
 		first = false
 		g.emitDecl(d)
+	}
+
+	// Emit all non-main functions inside a single Functions class
+	if len(fnDecls) > 0 {
+		if !first {
+			g.write("\n")
+		}
+		g.writeln("public static class Functions")
+		g.writeln("{")
+		g.push()
+		for i, fn := range fnDecls {
+			if i > 0 {
+				g.write("\n")
+			}
+			g.emitLineDirective(fn.Line)
+			g.emitFnBody(fn)
+		}
+		g.pop()
+		g.writeln("}")
 	}
 
 	// Prepend usings (sorted for deterministic output)
@@ -277,7 +308,7 @@ func (g *Generator) processImport(imp *parser.ImportDecl) {
 	}
 
 	g.neededUsings[ns] = true
-	g.importAliases[alias] = ns
+	g.importedNs[alias] = ns
 
 	// If a type resolver is available, register imported classes so that
 	// constructor calls like Stopwatch() emit `new Stopwatch()`.
@@ -335,6 +366,12 @@ func (g *Generator) emitFnDecl(d *parser.FnDecl) {
 		return
 	}
 
+	// Standalone function — wrapped in Functions class by Generate()
+	g.emitFnBody(d)
+}
+
+// emitFnBody emits a single static method (without the wrapping class).
+func (g *Generator) emitFnBody(d *parser.FnDecl) {
 	retType := g.emitType(d.ReturnType)
 	vis := "private"
 	if d.IsPub {
@@ -342,17 +379,12 @@ func (g *Generator) emitFnDecl(d *parser.FnDecl) {
 	}
 	params := g.formatParams(d.Params)
 	typeParams := g.formatTypeParams(d.TypeParams)
-	g.writeln(fmt.Sprintf("public static class Functions"))
-	g.writeln("{")
-	g.push()
 	g.writeln(fmt.Sprintf("%s static %s %s%s(%s)", vis, retType, capitalize(d.Name), typeParams, params))
 	g.writeln("{")
 	g.push()
 	if d.Body != nil {
 		g.emitBlock(d.Body)
 	}
-	g.pop()
-	g.writeln("}")
 	g.pop()
 	g.writeln("}")
 }
@@ -595,6 +627,7 @@ func (g *Generator) emitVarStmt(s *parser.VarStmt) {
 		if s.Type != nil {
 			varType = g.emitType(s.Type)
 		}
+		exVar := g.nextErr()
 		g.writeln(fmt.Sprintf("%s %s;", varType, s.Name))
 		g.writeln("try")
 		g.writeln("{")
@@ -602,10 +635,10 @@ func (g *Generator) emitVarStmt(s *parser.VarStmt) {
 		g.writeln(fmt.Sprintf("%s = %s;", s.Name, val))
 		g.pop()
 		g.writeln("}")
-		g.writeln("catch (Exception _ex)")
+		g.writeln(fmt.Sprintf("catch (Exception %s)", exVar))
 		g.writeln("{")
 		g.push()
-		g.writeln("var err = _ex.Message;")
+		g.writeln(fmt.Sprintf("var err = %s.Message;", exVar))
 		if s.OrHandler.Body != nil && len(s.OrHandler.Body.Stmts) > 0 {
 			g.emitBlock(s.OrHandler.Body)
 		}
@@ -1432,6 +1465,7 @@ func (g *Generator) handlerHasHalt(body *parser.BlockStmt) bool {
 
 // emitFailableExprStmt emits a standalone failable call with an or-handler as ExprStmt.
 func (g *Generator) emitFailableExprStmt(call *parser.CallExpr, handler *parser.OrHandler) {
+	exVar := g.nextErr()
 	val := g.emitExpr(call)
 	g.writeln("try")
 	g.writeln("{")
@@ -1439,10 +1473,10 @@ func (g *Generator) emitFailableExprStmt(call *parser.CallExpr, handler *parser.
 	g.writeln(fmt.Sprintf("%s;", val))
 	g.pop()
 	g.writeln("}")
-	g.writeln("catch (Exception _ex)")
+	g.writeln(fmt.Sprintf("catch (Exception %s)", exVar))
 	g.writeln("{")
 	g.push()
-	g.writeln("var err = _ex.Message;")
+	g.writeln(fmt.Sprintf("var err = %s.Message;", exVar))
 	if handler.Body != nil && len(handler.Body.Stmts) > 0 {
 		g.emitBlock(handler.Body)
 	}

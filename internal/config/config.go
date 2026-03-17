@@ -181,11 +181,13 @@ func GenerateCsproj(cfg *Config) string {
 	b.WriteString(fmt.Sprintf("    <AssemblyName>%s</AssemblyName>\n", cfg.Name))
 	if cfg.Optimize {
 		b.WriteString("    <PublishAot>true</PublishAot>\n")
+		b.WriteString("    <SelfContained>true</SelfContained>\n")
 		b.WriteString("    <OptimizationPreference>Speed</OptimizationPreference>\n")
 		b.WriteString("    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>\n")
 		b.WriteString("    <StripSymbols>true</StripSymbols>\n")
 		b.WriteString("    <TrimMode>full</TrimMode>\n")
 		b.WriteString("    <InvariantGlobalization>true</InvariantGlobalization>\n")
+		b.WriteString("    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>\n")
 	}
 	b.WriteString("  </PropertyGroup>\n")
 

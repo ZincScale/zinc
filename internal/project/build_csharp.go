@@ -136,6 +136,12 @@ func TranspileCSharpWithConfig(rootDir, buildDir string, cfg *config.Config) ([]
 		return nil, err
 	}
 
+	// Clean stale .cs files from previous builds
+	existing, _ := filepath.Glob(filepath.Join(buildDir, "*.cs"))
+	for _, f := range existing {
+		os.Remove(f)
+	}
+
 	// Collect .zn files
 	var srcPaths []string
 	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
