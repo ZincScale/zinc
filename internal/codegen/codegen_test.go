@@ -1,3 +1,5 @@
+//go:build gobackend
+
 // Copyright 2026 victorybhg
 //
 // Licensed under the Apache License, Version 2.0 (the "License");

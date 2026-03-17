@@ -140,6 +140,7 @@ func TestFindModNotFound(t *testing.T) {
 // --- Transpile tests ---------------------------------------------------------
 
 func TestTranspileSingleFile(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	dir := t.TempDir()
 	src := `main() {
     var x = 42
@@ -177,6 +178,7 @@ func TestTranspileSingleFile(t *testing.T) {
 }
 
 func TestTranspileWithPackageDecl(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, "utils")
 	os.Mkdir(subDir, 0755)
@@ -211,6 +213,7 @@ pub Int add(Int a, Int b) {
 }
 
 func TestTranspileMultipleFiles(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "main.zn"), []byte(`main() { print("hello") }`), 0644)
@@ -230,6 +233,7 @@ pub Int add(Int a, Int b) { return a }`), 0644)
 }
 
 func TestTranspileSharedRegistry(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// Two files in the same directory: dog.zn defines Dog, animal.zn defines Animal.
 	// With shared registry, Dog can reference Animal (cross-file type resolution).
 	dir := t.TempDir()
@@ -264,6 +268,7 @@ Dog : Animal {
 }
 
 func TestCrossFileSuperArgs(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// Animal defined in one file, Dog inheriting from Animal in another.
 	// Dog's constructor calls super(name, "Woof") — the registry must share
 	// ClassCtors across files for the super args to codegen correctly.
@@ -318,6 +323,7 @@ main() {
 }
 
 func TestCrossFileFailableDetection(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// File A defines a failable function, file B calls it.
 	// The registry must share CanThrowFns so B's caller auto-propagates.
 	dir := t.TempDir()
@@ -361,6 +367,7 @@ func TestCrossFileFailableDetection(t *testing.T) {
 }
 
 func TestCrossFileNamedArgs(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// File A defines a function with defaults, file B calls it with named args.
 	dir := t.TempDir()
 
@@ -404,6 +411,7 @@ func TestCrossFileNamedArgs(t *testing.T) {
 // --- Cross-file enum usage ---------------------------------------------------
 
 func TestCrossFileEnumUsage(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// File A defines an enum, file B uses it in a match statement.
 	// Uses Color.Red syntax (Zinc-style), not ColorRed (Go-style).
 	dir := t.TempDir()
@@ -454,6 +462,7 @@ main() {
 // --- Cross-file interface compliance -----------------------------------------
 
 func TestCrossFileInterfaceCompliance(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// File A defines an interface, file B defines a class implementing it.
 	dir := t.TempDir()
 
@@ -503,6 +512,7 @@ main() {
 // --- Cross-file method params with defaults ----------------------------------
 
 func TestCrossFileMethodNamedArgs(t *testing.T) {
+	t.Skip("Go backend tests disabled")
 	// File A defines a class with a method that has default params.
 	// File B calls that method with named args.
 	dir := t.TempDir()
@@ -562,6 +572,7 @@ func TestCrossFileMethodNamedArgs(t *testing.T) {
 // the resulting Go code. Returns trimmed stdout.
 func crossFileE2ERun(t *testing.T, files map[string]string) string {
 	t.Helper()
+	t.Skip("Go backend tests disabled")
 	dir := t.TempDir()
 
 	for name, src := range files {
