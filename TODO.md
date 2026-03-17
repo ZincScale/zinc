@@ -21,7 +21,7 @@ var profiles = parallel(userIds) { fetchProfile(it) }
 
 // Lock<T> — safe shared state
 var count = Lock(0)
-parallel(0..100) { count.update { value + 1 } }
+parallel(0..100) { count.update { value = value + 1 } }
 print(count.value)
 ```
 

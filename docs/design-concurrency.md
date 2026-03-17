@@ -117,16 +117,31 @@ main() {
 main() {
     var counter = Lock(0)
 
-    var fibers = (0..100).Select { spawn {
-        counter.update { value + 1 }
-    }}
-    fibers.ForEach { it.value }    // wait for all
+    parallel(0..100) {
+        counter.update { value = value + 1 }
+    }
 
     print(counter.value)    // 100
 }
 ```
 
-`Lock<T>` wraps a value with safe concurrent access. The trailing lambda receives the current value and returns the new value. Can't forget to unlock.
+`Lock<T>` wraps a value with safe concurrent access. `.update { }` locks, gives you `value`, and you mutate directly — no return value needed. Can't forget to unlock.
+
+```zinc
+var cache = Lock(Map<String, User>())
+var stats = Lock(Stats())
+
+parallel(requests) {
+    var user = fetchUser(it.userId)
+
+    cache.update { value.Add(user.id, user) }
+    stats.update { value.totalProcessed = value.totalProcessed + 1 }
+}
+```
+
+Each Lock is independently locked — updating `cache` doesn't block fibers updating `stats`.
+
+**Limitation:** If you need to update two Locks atomically (e.g., move an item from one collection to another), there's no built-in transaction. Keep locked operations simple and independent. If multi-Lock atomicity is needed, restructure into a single Lock holding both values.
 
 ## What Zinc Does NOT Have
 
@@ -195,7 +210,7 @@ main() {
 
     var results = parallel(0..10) {
         var data = fetchData(it)
-        count.update { value + 1 }
+        count.update { value = value + 1 }
         data
     }
 
