@@ -4,6 +4,24 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-17
+
+### Added
+- **Implicit return** — last expression in a function or method body is automatically returned. `Int square(Int x) { x * x }` just works.
+- **Expression if** — `if` can be used in expression position: `var label = if x > 0 { "positive" } else { "negative" }`. Emits C# ternary.
+- **Expression match** — `match` can be used in expression position: `var msg = match status { case 1 -> "running" case _ -> "unknown" }`. Emits C# switch expression.
+- **Range loops** — `for i in 0..10` (exclusive) and `for i in 1..=10` (inclusive). New `..` and `..=` operators. Emits `Enumerable.Range()`.
+- **`--release` flag** — `zinc build --release` strips debug symbols for smaller production binaries.
+- **Runtime source maps** — default builds embed debug info (`DebugType=embedded`) so runtime exceptions show `.zn` file and line numbers via `#line` directives.
+- **`using static Functions`** — standalone functions are now callable from `main()` without qualification.
+- **Cross-package constructor fix** — `models.Dog("Rex")` now correctly emits `models.NewDog("Rex")` in Go backend.
+- **Global TypeRegistry** — multi-directory Go projects share type info across all packages.
+- 49 E2E tests (6 new: ImplicitReturnMethod, ExpressionIf, ExpressionIfNested, ExpressionMatch, RangeExclusive, RangeInclusive)
+
+### Changed
+- Go backend tests gated behind `//go:build gobackend` build tag — run with `go test -tags gobackend`
+- Go backend hidden from user-facing CLI help, docs, and installer
+
 ## [0.5.0] - 2026-03-16
 
 ### Added
