@@ -58,23 +58,6 @@ for (name, score) in scores {
 }
 ```
 
-## Labeled Loops
-
-Like Java, Zinc supports labeled `break` and `continue` for nested loop control:
-
-```zinc
-@outer for (var i = 0; i < 10; i += 1) {
-    for (var j = 0; j < 10; j += 1) {
-        if j == 5 {
-            break @outer       // exits both loops
-        }
-        if i == j {
-            continue @outer    // skips to next i iteration
-        }
-    }
-}
-```
-
 ## Match / Switch
 
 ```zinc

@@ -860,20 +860,13 @@ func (p *Parser) parseStmt() Stmt {
 	case lexer.TOKEN_IF:
 		return p.parseIfStmt()
 	case lexer.TOKEN_FOR:
-		return p.parseForStmt("")
+		return p.parseForStmt()
 	case lexer.TOKEN_WHILE:
-		return p.parseWhileStmt("")
+		return p.parseWhileStmt()
 	case lexer.TOKEN_AT:
-		// @label for/while — labeled loop
+		// @annotations are handled at the declaration level, not statement level
+		p.errorf("unexpected @ in statement context")
 		p.advance()
-		label := p.expect(lexer.TOKEN_IDENT).Literal
-		if p.check(lexer.TOKEN_FOR) {
-			return p.parseForStmt(label)
-		}
-		if p.check(lexer.TOKEN_WHILE) {
-			return p.parseWhileStmt(label)
-		}
-		p.errorf("expected 'for' or 'while' after @%s", label)
 		return nil
 	case lexer.TOKEN_GO:
 		return p.parseGoStmt()
@@ -883,20 +876,10 @@ func (p *Parser) parseStmt() Stmt {
 		return p.parseMatchStmt()
 	case lexer.TOKEN_BREAK:
 		p.advance()
-		label := ""
-		if p.check(lexer.TOKEN_AT) {
-			p.advance()
-			label = p.expect(lexer.TOKEN_IDENT).Literal
-		}
-		return &BreakStmt{Label: label}
+		return &BreakStmt{}
 	case lexer.TOKEN_CONTINUE:
 		p.advance()
-		label := ""
-		if p.check(lexer.TOKEN_AT) {
-			p.advance()
-			label = p.expect(lexer.TOKEN_IDENT).Literal
-		}
-		return &ContinueStmt{Label: label}
+		return &ContinueStmt{}
 	case lexer.TOKEN_DEFER:
 		p.advance()
 		expr := p.parseExpr()
@@ -1118,7 +1101,7 @@ func (p *Parser) parseMatchExpr() Expr {
 	return &MatchExpr{Subject: subject, Cases: cases}
 }
 
-func (p *Parser) parseForStmt(label string) Stmt {
+func (p *Parser) parseForStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_FOR)
 
@@ -1129,7 +1112,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		p.advance()                 // consume "in"
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{Line: line, Label: label, IsRange: true, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Line: line, IsRange: true, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// Detect: for i, item in expr { } (new) or for (i, item) in expr { } (legacy)
@@ -1143,7 +1126,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		p.advance()                     // in
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{Line: line, Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Line: line, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 	// Legacy: for (i, item) in expr { }
 	if p.check(lexer.TOKEN_LPAREN) &&
@@ -1160,7 +1143,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		p.advance()                      // in
 		rangeExpr := p.parseExpr()
 		body := p.parseBlock()
-		return &ForStmt{Line: line, Label: label, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
+		return &ForStmt{Line: line, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// C-style: for init; cond; post { } (new) or for (init; cond; post) { } (legacy)
@@ -1190,7 +1173,7 @@ func (p *Parser) parseForStmt(label string) Stmt {
 		}
 	}
 	body := p.parseBlock()
-	return &ForStmt{Line: line, Label: label, Init: init, Cond: cond, Post: post, Body: body}
+	return &ForStmt{Line: line, Init: init, Cond: cond, Post: post, Body: body}
 }
 
 // parseVarOrAssign parses a short var decl or assignment for use in for-init/post.
@@ -1201,7 +1184,7 @@ func (p *Parser) parseVarOrAssign() Stmt {
 	return p.parseExprOrAssignStmt()
 }
 
-func (p *Parser) parseWhileStmt(label string) *WhileStmt {
+func (p *Parser) parseWhileStmt() *WhileStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_WHILE)
 	// Parens around condition are optional
@@ -1214,7 +1197,7 @@ func (p *Parser) parseWhileStmt(label string) *WhileStmt {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	body := p.parseBlock()
-	return &WhileStmt{Line: line, Label: label, Cond: cond, Body: body}
+	return &WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
 func (p *Parser) parseGoStmt() *GoStmt {

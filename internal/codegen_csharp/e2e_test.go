@@ -404,6 +404,7 @@ main() {
         print(i)
     }
 }`, mode: modeExact, expected: []string{"1\n2\n3"}},
+
 }
 
 // --- Batched E2E runner ------------------------------------------------------

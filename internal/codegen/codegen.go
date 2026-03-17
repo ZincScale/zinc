@@ -1396,17 +1396,9 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.MatchStmt:
 		g.emitMatchStmt(st)
 	case *parser.BreakStmt:
-		if st.Label != "" {
-			g.writeln(fmt.Sprintf("break %s", st.Label))
-		} else {
-			g.writeln("break")
-		}
+		g.writeln("break")
 	case *parser.ContinueStmt:
-		if st.Label != "" {
-			g.writeln(fmt.Sprintf("continue %s", st.Label))
-		} else {
-			g.writeln("continue")
-		}
+		g.writeln("continue")
 	case *parser.DeferStmt:
 		g.writeln(fmt.Sprintf("defer %s", g.emitExpr(st.Expr)))
 	case *parser.WithStmt:
@@ -1869,9 +1861,6 @@ func (g *Generator) emitIfStmt(i *parser.IfStmt) {
 }
 
 func (g *Generator) emitForStmt(f *parser.ForStmt) {
-	if f.Label != "" {
-		g.writeln(fmt.Sprintf("%s:", f.Label))
-	}
 	if f.IsRange {
 		g.writeIndent()
 		indexVarName := "_"
@@ -1926,9 +1915,6 @@ func (g *Generator) stmtInline(s parser.Stmt) string {
 }
 
 func (g *Generator) emitWhileStmt(w *parser.WhileStmt) {
-	if w.Label != "" {
-		g.writeln(fmt.Sprintf("%s:", w.Label))
-	}
 	g.writeIndent()
 	g.write(fmt.Sprintf("for %s ", g.emitExpr(w.Cond)))
 	g.write("{\n")

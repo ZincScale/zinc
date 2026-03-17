@@ -304,10 +304,9 @@ type IfStmt struct {
 func (i *IfStmt) nodeTag() {}
 func (i *IfStmt) stmtTag() {}
 
-// ForStmt: [@label] for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
+// ForStmt: for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
 type ForStmt struct {
-	Line  int    // source line number (1-indexed)
-	Label string // optional label (from @label prefix)
+	Line  int // source line number (1-indexed)
 
 	// C-style
 	Init Stmt // VarStmt or AssignStmt
@@ -326,10 +325,9 @@ type ForStmt struct {
 func (f *ForStmt) nodeTag() {}
 func (f *ForStmt) stmtTag() {}
 
-// WhileStmt: [@label] while (cond) { }
+// WhileStmt: while (cond) { }
 type WhileStmt struct {
-	Line  int    // source line number (1-indexed)
-	Label string // optional label (from @label prefix)
+	Line  int // source line number (1-indexed)
 	Cond  Expr
 	Body  *BlockStmt
 }
@@ -388,18 +386,14 @@ type MatchCase struct {
 	Body    *BlockStmt
 }
 
-// BreakStmt: break [@label]
-type BreakStmt struct {
-	Label string // empty if no label
-}
+// BreakStmt: break
+type BreakStmt struct{}
 
 func (b *BreakStmt) nodeTag() {}
 func (b *BreakStmt) stmtTag() {}
 
-// ContinueStmt: continue [@label]
-type ContinueStmt struct {
-	Label string // empty if no label
-}
+// ContinueStmt: continue
+type ContinueStmt struct{}
 
 func (c *ContinueStmt) nodeTag() {}
 func (c *ContinueStmt) stmtTag() {}
