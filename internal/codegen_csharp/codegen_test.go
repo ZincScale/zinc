@@ -728,3 +728,99 @@ main() {
 	assertContains(t, out, "Environment.Exit(1)")
 	assertNotContains(t, out, "throw;")
 }
+
+// === Imports / NuGet ===
+
+func TestImportDirectNamespace(t *testing.T) {
+	out := transpile(`
+import "Newtonsoft.Json"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using Newtonsoft.Json;")
+}
+
+func TestImportShortAlias(t *testing.T) {
+	out := transpile(`
+import "http"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Net.Http;")
+}
+
+func TestImportJsonShortcut(t *testing.T) {
+	out := transpile(`
+import "json"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Text.Json;")
+}
+
+func TestImportWithAlias(t *testing.T) {
+	out := transpile(`
+import "Newtonsoft.Json" as nj
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using Newtonsoft.Json;")
+}
+
+func TestImportMultipleNamespaces(t *testing.T) {
+	out := transpile(`
+import "Newtonsoft.Json"
+import "Serilog"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using Newtonsoft.Json;")
+	assertContains(t, out, "using Serilog;")
+}
+
+func TestImportLocalPackageSkipped(t *testing.T) {
+	out := transpile(`
+import "myapp/utils"
+main() {
+    print("hello")
+}
+`)
+	assertNotContains(t, out, "using myapp")
+}
+
+func TestImportQualifiedCall(t *testing.T) {
+	out := transpile(`
+import "Newtonsoft.Json"
+main() {
+    var s = JsonConvert.SerializeObject(42)
+    print(s)
+}
+`)
+	assertContains(t, out, "using Newtonsoft.Json;")
+	assertContains(t, out, "JsonConvert.SerializeObject(42)")
+}
+
+func TestImportSystemTextRegex(t *testing.T) {
+	out := transpile(`
+import "regex"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Text.RegularExpressions;")
+}
+
+func TestImportDotNetNamespaceDirect(t *testing.T) {
+	out := transpile(`
+import "System.Diagnostics"
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Diagnostics;")
+}

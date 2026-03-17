@@ -1232,6 +1232,54 @@ main() {
 
 ## Imports
 
+Zinc uses `import` statements to bring in external packages. On the C# backend, imports map to `using` directives. On the Go backend, they map to Go imports.
+
+### .NET Namespace Imports (C# Backend)
+
+```zinc
+import "System.Text.Json"           // → using System.Text.Json;
+import "Newtonsoft.Json"             // → using Newtonsoft.Json;
+import "Serilog"                     // → using Serilog;
+
+// Short aliases for common namespaces
+import "http"                        // → using System.Net.Http;
+import "json"                        // → using System.Text.Json;
+import "io"                          // → using System.IO;
+import "regex"                       // → using System.Text.RegularExpressions;
+import "threading"                   // → using System.Threading;
+import "tasks"                       // → using System.Threading.Tasks;
+
+main() {
+    // Use imported types directly
+    var s = JsonSerializer.Serialize(42)
+    print(s)
+}
+```
+
+Imported .NET types are automatically recognized. Constructor calls emit `new`:
+
+```zinc
+import "System.Diagnostics"
+import "http"
+import "System.Text"
+
+main() {
+    var sw = Stopwatch()           // → new Stopwatch()
+    var client = HttpClient()      // → new HttpClient()
+    var sb = StringBuilder()       // → new StringBuilder()
+
+    sw.Start()
+    // ...
+    sw.Stop()
+}
+```
+
+Static classes (`Console`, `Math`, `File`, etc.) are detected automatically and don't receive `new`.
+
+NuGet packages are declared in `zinc.toml` under `[dependencies]` — they become `<PackageReference>` entries in the generated `.csproj`.
+
+### Go Package Imports (Go Backend)
+
 ```zinc
 import "os"
 import "math/rand" as rand
@@ -1240,6 +1288,14 @@ main() {
     Any args = os.Args
 }
 ```
+
+### Local Package Imports
+
+```zinc
+import "myapp/utils"                 // cross-file import (handled by TypeRegistry)
+```
+
+Local imports (paths containing `/`) are resolved by the build system — all `.zn` files in a directory share a namespace.
 
 ## Type System
 

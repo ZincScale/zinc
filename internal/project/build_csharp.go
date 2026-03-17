@@ -34,7 +34,7 @@ import (
 func BuildCSharp(rootDir string, cfg *config.Config) error {
 	buildDir := filepath.Join(rootDir, ".zinc-build")
 
-	csFiles, err := TranspileCSharp(rootDir, buildDir)
+	csFiles, err := TranspileCSharpWithConfig(rootDir, buildDir, cfg)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func BuildCSharp(rootDir string, cfg *config.Config) error {
 func RunCSharp(rootDir string, cfg *config.Config) error {
 	buildDir := filepath.Join(rootDir, ".zinc-build")
 
-	if _, err := TranspileCSharp(rootDir, buildDir); err != nil {
+	if _, err := TranspileCSharpWithConfig(rootDir, buildDir, cfg); err != nil {
 		return err
 	}
 
@@ -117,7 +117,15 @@ func RunCSharp(rootDir string, cfg *config.Config) error {
 }
 
 // TranspileCSharp transpiles all .zn files to .cs files in the build directory.
+// This is the backward-compatible version without type resolution.
 func TranspileCSharp(rootDir, buildDir string) ([]string, error) {
+	return TranspileCSharpWithConfig(rootDir, buildDir, nil)
+}
+
+// TranspileCSharpWithConfig transpiles all .zn files to .cs files,
+// optionally using a CSharpTypeResolver to discover .NET types from
+// the project's NuGet dependencies.
+func TranspileCSharpWithConfig(rootDir, buildDir string, cfg *config.Config) ([]string, error) {
 	abs, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, err
@@ -203,6 +211,19 @@ func TranspileCSharp(rootDir, buildDir string) ([]string, error) {
 	// Build cross-file type registry
 	reg := codegen.BuildRegistry(progs)
 
+	// Run .NET type probe if config is available
+	var typeResolver *codegen_csharp.CSharpTypeResolver
+	if cfg != nil {
+		typeResolver = codegen_csharp.NewCSharpTypeResolver()
+		if err := typeResolver.Probe(cfg); err != nil {
+			// Non-fatal — log and continue without type resolution
+			fmt.Printf("  note: type probe skipped (%v)\n", err)
+			typeResolver = nil
+		} else {
+			fmt.Println("  .NET type probe complete")
+		}
+	}
+
 	// Generate C# files
 	var csFiles []string
 	for _, pf := range parsed {
@@ -210,6 +231,9 @@ func TranspileCSharp(rootDir, buildDir string) ([]string, error) {
 
 		gen := codegen_csharp.NewWithRegistry(reg)
 		gen.SetSourceFile(rel)
+		if typeResolver != nil {
+			gen.SetTypeResolver(typeResolver)
+		}
 		csSrc := gen.Generate(pf.prog)
 
 		// Output to build directory

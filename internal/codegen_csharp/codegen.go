@@ -37,11 +37,34 @@ var voidFailableBuiltins = map[string]bool{
 	"writeFile": true,
 }
 
+// csharpNamespaceMap maps short Zinc import names to C# namespaces.
+var csharpNamespaceMap = map[string]string{
+	// Common shortcuts
+	"http":         "System.Net.Http",
+	"json":         "System.Text.Json",
+	"io":           "System.IO",
+	"math":         "System",
+	"collections":  "System.Collections.Generic",
+	"linq":         "System.Linq",
+	"text":         "System.Text",
+	"regex":        "System.Text.RegularExpressions",
+	"threading":    "System.Threading",
+	"tasks":        "System.Threading.Tasks",
+	"crypto":       "System.Security.Cryptography",
+	"net":          "System.Net",
+	"diagnostics":  "System.Diagnostics",
+	"xml":          "System.Xml",
+	"data":         "System.Data",
+	"reflection":   "System.Reflection",
+}
+
 // Generator converts a Zinc AST to C# source code.
 type Generator struct {
 	buf            strings.Builder
 	indent         int
 	neededUsings   map[string]bool
+	importAliases  map[string]string // alias → C# namespace (for package-qualified calls)
+	typeResolver   *CSharpTypeResolver // optional — resolves .NET types from imports
 	classNames     map[string]bool
 	interfaceNames map[string]bool
 	enumNames      map[string]bool
@@ -62,6 +85,7 @@ type Generator struct {
 func New() *Generator {
 	return &Generator{
 		neededUsings:    map[string]bool{"System": true},
+		importAliases:   make(map[string]string),
 		classNames:      make(map[string]bool),
 		interfaceNames:  make(map[string]bool),
 		enumNames:       make(map[string]bool),
@@ -117,6 +141,16 @@ func (g *Generator) SetSourceFile(path string) {
 	g.srcFile = path
 }
 
+// SetTypeResolver attaches a CSharpTypeResolver for .NET type introspection.
+// Also registers classes from the default System namespace.
+func (g *Generator) SetTypeResolver(r *CSharpTypeResolver) {
+	g.typeResolver = r
+	// Register classes from the always-imported System namespace
+	for _, className := range r.ClassesInNamespace("System") {
+		g.classNames[className] = true
+	}
+}
+
 // Generate produces C# source from a Zinc AST.
 func (g *Generator) Generate(prog *parser.Program) string {
 	// First pass: collect type names and method signatures
@@ -162,19 +196,14 @@ func (g *Generator) Generate(prog *parser.Program) string {
 		}
 	}
 
-	// Process imports
-	for _, d := range prog.Decls {
-		if imp, ok := d.(*parser.ImportDecl); ok {
-			g.processImport(imp)
-		}
+	// Process imports from prog.Imports
+	for _, imp := range prog.Imports {
+		g.processImport(imp)
 	}
 
-	// Emit declarations (skip ImportDecl — already processed)
+	// Emit declarations
 	first := true
 	for _, d := range prog.Decls {
-		if _, ok := d.(*parser.ImportDecl); ok {
-			continue
-		}
 		if !first {
 			g.write("\n")
 		}
@@ -219,12 +248,44 @@ func (g *Generator) nextErr() string {
 
 // --- Declarations ------------------------------------------------------------
 
-// processImport handles Zinc import declarations.
-// For cross-project imports, the alias becomes a namespace qualifier.
+// processImport maps a Zinc import to a C# using directive.
+//
+// Import resolution order:
+//  1. Short aliases: "http" → "System.Net.Http", "json" → "System.Text.Json"
+//  2. Direct namespace: "Newtonsoft.Json" → using Newtonsoft.Json;
+//  3. Local packages: "myapp/utils" → skipped (handled by TypeRegistry)
 func (g *Generator) processImport(imp *parser.ImportDecl) {
-	// For now, imports are handled by the project build system
-	// (all .zn files in a directory share a namespace).
-	// Future: map to C# using directives for NuGet packages.
+	path := imp.Path
+
+	// Skip local package imports (contain "/" — cross-file resolution via TypeRegistry)
+	if strings.Contains(path, "/") {
+		return
+	}
+
+	// Determine the C# namespace
+	ns := path
+	if mapped, ok := csharpNamespaceMap[path]; ok {
+		ns = mapped
+	}
+
+	// Determine the alias (identifier used in Zinc code for qualified access)
+	alias := imp.Alias
+	if alias == "" {
+		// Last segment of the namespace: "System.Text.Json" → "Json"
+		parts := strings.Split(ns, ".")
+		alias = parts[len(parts)-1]
+	}
+
+	g.neededUsings[ns] = true
+	g.importAliases[alias] = ns
+
+	// If a type resolver is available, register imported classes so that
+	// constructor calls like Stopwatch() emit `new Stopwatch()`.
+	if g.typeResolver != nil {
+		for _, className := range g.typeResolver.ClassesInNamespace(ns) {
+			g.classNames[className] = true
+		}
+	}
 }
 
 func (g *Generator) emitLineDirective(line int) {

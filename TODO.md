@@ -6,23 +6,25 @@ Convention over configuration for native apps. C# AOT is the default backend, Go
 
 ## Priority Order
 
-### P1 — NuGet Import & Interop ✦ NEXT
+### P1 — NuGet Import & Interop ✦ IN PROGRESS
 Enable Zinc projects to use third-party .NET libraries seamlessly. This is the #1 blocker for real-world adoption.
 
-**Phase 1: Import → Using mapping**
+**Phase 1: Import → Using mapping** ✅ DONE
 - `import "Newtonsoft.Json"` → `using Newtonsoft.Json;`
 - `import "Serilog"` → `using Serilog;`
-- Auto-map common namespaces: `import "http"` → `using Microsoft.AspNetCore.*`
-- Zinc `import` generates `using` directives in C# output
+- Short aliases: `import "http"` → `using System.Net.Http;`, `import "json"` → `using System.Text.Json;`, etc.
+- Local package imports (containing `/`) skipped — handled by TypeRegistry
 - `[dependencies]` in `zinc.toml` → `<PackageReference>` in generated `.csproj`
-- **Effort:** Medium
+- 9 unit tests + 4 E2E tests
 
-**Phase 2: CSharpTypeResolver**
-- Introspect .NET assemblies at transpile time (analogous to GoTypeResolver using `go/types`)
-- Auto-detect which methods throw exceptions (failable detection for .NET APIs)
-- Auto-detect method signatures for named/default arg resolution
-- Options: shell out to a Roslyn helper, or parse NuGet package XML metadata
-- **Effort:** Medium-Large
+**Phase 2: CSharpTypeResolver** ✅ DONE
+- `CSharpTypeResolver` shells out to a .NET probe that uses `System.Reflection` to enumerate ALL public types from the BCL and NuGet packages (3,700+ types across 130+ namespaces)
+- Force-loads assemblies by touching key types (`typeof(HttpClient)`, `typeof(Stopwatch)`, etc.)
+- Auto-detects constructable classes → `Stopwatch()` emits `new Stopwatch()`
+- Auto-detects static classes → `Console`, `Math`, `File` correctly skip `new`
+- Integrated into build pipeline: `TranspileCSharpWithConfig` probes before codegen
+- Falls back gracefully if dotnet is unavailable
+- 5 resolver unit tests + 4 resolver E2E tests
 
 **Phase 3: Interop patterns**
 - Consume C# classes/interfaces from Zinc (use them as types in Zinc code)

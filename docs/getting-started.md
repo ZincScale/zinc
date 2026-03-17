@@ -82,6 +82,27 @@ Add NuGet packages (C# target) or Go modules (Go target) in `zinc.toml`:
 
 These are automatically included in the build — no `dotnet add package` or XML editing needed.
 
+Then import and use them in your Zinc code:
+
+```zinc
+import "Newtonsoft.Json"
+
+main() {
+    var json = JsonConvert.SerializeObject(42)
+    print(json)
+}
+```
+
+Zinc also provides short aliases for common .NET namespaces:
+
+| Zinc Import | C# Namespace |
+|-------------|-------------|
+| `import "http"` | `System.Net.Http` |
+| `import "json"` | `System.Text.Json` |
+| `import "io"` | `System.IO` |
+| `import "regex"` | `System.Text.RegularExpressions` |
+| `import "threading"` | `System.Threading` |
+
 ## Multi-File Projects
 
 Create subdirectories for packages:
