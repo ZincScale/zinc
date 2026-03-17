@@ -7,7 +7,7 @@ Convention over configuration. Less typing, less ceremony.
 ## Priority Order — Expressiveness
 
 ### P1 — Trailing Lambdas + `it` Keyword ✦ NEXT
-The single biggest readability win. Every LINQ chain gets cleaner.
+The single biggest readability win. One mechanism covers all 22 LINQ methods.
 
 ```zinc
 // TODAY: noisy, type-heavy
@@ -21,10 +21,28 @@ var names = users.Where { it.age > 28 }
                  .OrderBy { it }
 ```
 
+Covers everything — no comprehensions or query syntax needed:
+```zinc
+users.Sum { it.age }                                  // aggregation
+users.GroupBy { it.department }                       // grouping
+users.Any { it.active }                               // boolean query
+users.Aggregate(0) { acc, u -> acc + u.age }          // fold (multi-param)
+users.OrderBy { it.name }.Take(3)                     // sort + slice
+```
+
 - Single-param lambdas auto-bind `it` (like Kotlin)
 - Trailing lambda: last arg is a block `{ }` outside parens
-- Multi-param still uses arrow: `.Aggregate(0) { acc, x -> acc + x }`
+- Multi-param uses arrow: `{ acc, x -> acc + x }`
 - Type inference from collection element type
+- Explicit types still allowed when needed
+- Works on maps too:
+```zinc
+var scores = {"Alice": 95, "Bob": 72, "Carol": 88}
+scores.Where { it.Value > 80 }                       // filter entries
+scores.Select { it.Key }                              // extract keys
+scores.Any { it.Value > 90 }                          // query
+// it.Key and it.Value for map entries (like C# KeyValuePair)
+```
 - **Effort:** Medium (parser + typechecker + codegen)
 
 ### P2 — Data Classes
