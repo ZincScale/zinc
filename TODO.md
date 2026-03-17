@@ -4,53 +4,35 @@ Convention over configuration. Less typing, less ceremony.
 
 ---
 
-## Priority Order — Expressiveness
+## Priority Order
 
-### ~~P1 — Implicit Return + Expression If/Match~~ ✅ Done
-Last expression in a block is the return value. If and match become expressions.
-
-```zinc
-// Implicit return — no `return` keyword needed
-Int double(Int x) { x * 2 }
-String greet(String name) { "Hello, {name}!" }
-
-// Expression if — returns a value
-var label = if x > 0 { "positive" } else { "negative" }
-
-// Expression match — returns a value
-var msg = match status {
-    case Status.Active -> "running"
-    case Status.Closed -> "done"
-    case _ -> "unknown"
-}
-```
-
-- Last expression in function/lambda body is implicit return
-- `if` and `match` can be used in expression position
-- Explicit `return` still works for early returns
-- **Effort:** Medium (parser + codegen)
-
-### ~~P2 — Ranges~~ ✅ Done
-Replace C-style for loops.
+### P1 — Concurrency: `spawn`, `parallel`, `Lock<T>` ✦ NEXT
+Three primitives for concurrent programming. No async/await, no function coloring.
 
 ```zinc
-// TODAY:
-for (var i = 0; i < 10; i += 1) { print(i) }
+// spawn — run work concurrently, get a Future<T>
+var user = spawn { fetchUser(1) }
+var posts = spawn { fetchPosts(1) }
+print(user.value)
+print(posts.value)
 
-// AFTER:
-for i in 0..10 { print(i) }        // 0 to 9 (exclusive end)
-for i in 0..=10 { print(i) }       // 0 to 10 (inclusive)
-for i in 10..0 { print(i) }        // countdown
+// parallel — fan-out over a collection
+var profiles = parallel(userIds) { fetchProfile(it) }
 
-var firstFive = nums[0..5]          // slice syntax already exists
+// Lock<T> — safe shared state
+var count = Lock(0)
+parallel(0..100) { count.update { value + 1 } }
+print(count.value)
 ```
 
-- `..` exclusive end (like Kotlin `until`, Rust `..`)
-- `..=` inclusive end (like Rust `..=`)
-- Works in for loops and slice expressions
-- **Effort:** Quick (lexer + parser + codegen)
+- `spawn { expr }` → `Future<T>`, `.value` to collect
+- `parallel(list) { expr }` → spawn per item, collect in order
+- `Lock<T>` → thread-safe wrapper with `.value` and `.update { }`
+- Structured scoping — parent waits for children, errors cancel siblings
+- See [design doc](docs/design-concurrency.md)
+- **Effort:** Medium (AST + parser + codegen + runtime wrapper)
 
-### P3 — Scripting Builtins
+### P2 — Scripting Builtins
 Make CLI tools trivial.
 
 ```zinc
@@ -67,6 +49,10 @@ main() {
 - `listDir(path)` → `List<String>`, failable
 - **Effort:** Quick
 
+### P3 — VS Code Extension
+TextMate grammar for `.zn` syntax highlighting.
+- **Effort:** Quick
+
 ### P4 — `zinc add` / Dependency Management
 ```bash
 zinc add Newtonsoft.Json
@@ -75,13 +61,11 @@ zinc remove Newtonsoft.Json
 ```
 - **Effort:** Medium
 
-### P5 — VS Code Extension
-TextMate grammar for `.zn` syntax highlighting.
-- **Effort:** Quick
-
-### P6 — `zinc test`
-`zinc test` → `dotnet test` or `go test`.
-- **Effort:** Quick
+### P5 — `zinc test`
+```bash
+zinc test       # discovers and runs test functions
+```
+- **Effort:** Medium
 
 ---
 
@@ -107,21 +91,7 @@ val config = File("config.json").readText()
 seniors.forEach { println(it) }
 ```
 
-**Zinc today (10 lines):**
-```zinc
-data User(pub String name, pub Int age)
-
-main() {
-    var users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
-    var seniors = users.Where { it.age > 28 }
-                       .Select { it.name }
-                       .OrderBy { it }
-    var config = readFile("config.json") or { print(err); exit(1) }
-    for name in seniors { print(name) }
-}
-```
-
-**Zinc after P1 (9 lines) — implicit return:**
+**Zinc (9 lines):**
 ```zinc
 data User(pub String name, pub Int age)
 
@@ -141,13 +111,11 @@ main() {
 
 ## Interop Roadmap
 
-All unblocked (imports + type resolver + annotations).
-
 | Use Case | Status |
 |----------|--------|
-| Logging, HTTP, Config, JSON, DI | ✅ Ready |
-| REST API, ORM, Serialization | ✅ Ready |
-| Testing (xUnit) | ⚠ Needs `zinc test` (P6) |
+| Logging, HTTP, Config, JSON, DI | Ready |
+| REST API, ORM, Serialization | Ready |
+| Testing (xUnit) | Needs `zinc test` (P5) |
 
 ---
 
@@ -156,9 +124,10 @@ All unblocked (imports + type resolver + annotations).
 | Feature | Notes |
 |---------|-------|
 | Typed errors | Exception hierarchy |
-| Structured concurrency | `await { }` blocks |
 | Operator overloading | Via .NET interop |
 | Destructuring | `var (name, age) = user` |
+| Channels | Only if in-process producer/consumer demand emerges |
+| Supervised blocks | Only if in-process resilience demand emerges (K8s handles restarts) |
 
 ---
 
@@ -169,6 +138,8 @@ All unblocked (imports + type resolver + annotations).
 - Range loops — `for i in 0..10` (exclusive) and `for i in 0..=10` (inclusive)
 - `--release` flag — strips debug symbols for production builds
 - Embedded debug info by default — runtime errors show `.zn` line numbers
+- Removed labeled loops, Go-only features (channels, goroutines, tuple destructuring, defer)
+- Cleaned up 22 stale .go files, 4 Go-only examples
 
 ## Completed (v0.9.0)
 - Trailing lambdas + `it` keyword (Kotlin-style `{ it > 3 }`)
