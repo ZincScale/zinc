@@ -12,21 +12,19 @@ String? maybeNull = null    // optional (nullable) type
 
 ## Constants
 
-Top-level immutable values declared with `const`. By default, constants are package-private. Use `pub const` to export them:
+Top-level immutable values. Private by default — use `pub` to make public (see [Visibility](classes.md#visibility)).
 
 ```zinc
-const Float INTERNAL_RATE = 0.05        // private — only visible within the package
-pub const PI = 3.14159                  // exported
-pub const Int MAX_RETRIES = 3           // exported, with explicit type
-pub const String APP_NAME = "Zinc"      // exported, with explicit type
+const Float INTERNAL_RATE = 0.05        // private
+pub const PI = 3.14159                  // public
+pub const Int MAX_RETRIES = 3           // public, with explicit type
+pub const String APP_NAME = "Zinc"      // public, with explicit type
 
 main() {
     print(APP_NAME)
     print(PI * 2.0)
 }
 ```
-
-> **Visibility rule:** `const` → private. `pub const` → public.
 
 ## Type System
 

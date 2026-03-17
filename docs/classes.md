@@ -1,8 +1,71 @@
 # Classes and OOP
 
-## Classes
+## Visibility
 
-Fields are **private by default**. Prefix with `pub` to make a field public.
+Everything in Zinc is **private by default**. Use `pub` to make it public. There is no `protected` or `internal` — just private and public.
+
+| Declaration | Default | With `pub` |
+|------------|---------|-----------|
+| Fields | private — only accessible inside the class | public — accessible from anywhere |
+| Methods | private | public |
+| Functions | private — only accessible within the file | public |
+| Constants | private | public |
+| Classes | always public | — |
+| Interfaces | always public | — |
+| Enums | always public | — |
+
+```zinc
+Dog {
+    pub String name        // public — accessible from outside
+    String secret          // private — only inside Dog
+
+    new(String name) {
+        this.name = name
+        this.secret = "shhh"
+    }
+
+    pub String bark() {    // public method
+        return helper()    // can call private method
+    }
+
+    String helper() {      // private method
+        return "{this.name}: {this.secret}"
+    }
+}
+
+main() {
+    var d = Dog("Rex")
+    print(d.name)          // OK — name is pub
+    print(d.bark())        // OK — bark is pub
+    // print(d.secret)     // ERROR — secret is private
+    // print(d.helper())   // ERROR — helper is private
+}
+```
+
+**Generated C#:**
+
+```csharp
+public class Dog
+{
+    public string Name;        // pub → public
+    private string _secret;    // no pub → private, underscore prefix
+
+    public string Bark() { ... }     // pub → public
+    private string Helper() { ... }  // no pub → private
+}
+```
+
+**Constants and functions follow the same rule:**
+
+```zinc
+const Float INTERNAL = 0.05       // private
+pub const Float PI = 3.14159      // public
+
+String helper() { return "hi" }   // private
+pub String greet() { return "hello" }  // public
+```
+
+## Classes
 
 ```zinc
 Dog {
