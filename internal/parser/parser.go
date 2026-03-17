@@ -176,6 +176,7 @@ type precedence int
 
 const (
 	precNone            precedence = iota
+	precRange                      // .. ..=
 	precNullCoalesce               // ??
 	precOr                         // ||
 	precAnd                        // &&
@@ -208,6 +209,8 @@ func tokenPrec(t lexer.TokenType) precedence {
 		return precTypeOp
 	case lexer.TOKEN_DOT, lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_QUESTION_DOT:
 		return precCall
+	case lexer.TOKEN_DOTDOT, lexer.TOKEN_DOTDOTEQ:
+		return precRange
 	}
 	return precNone
 }
@@ -310,6 +313,12 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 		case lexer.TOKEN_IS:
 			typeName := p.expect(lexer.TOKEN_IDENT).Literal
 			left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: true}
+		case lexer.TOKEN_DOTDOT:
+			right := p.parseExprPrec(prec)
+			left = &RangeExpr{Start: left, End: right, Inclusive: false}
+		case lexer.TOKEN_DOTDOTEQ:
+			right := p.parseExprPrec(prec)
+			left = &RangeExpr{Start: left, End: right, Inclusive: true}
 		default:
 			right := p.parseExprPrec(prec)
 			left = &BinaryExpr{Left: left, Op: tok.Literal, Right: right}
@@ -683,6 +692,10 @@ func (p *Parser) parsePrimary() Expr {
 		expr := p.parseExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 		return expr
+	case lexer.TOKEN_IF:
+		return p.parseIfExpr()
+	case lexer.TOKEN_MATCH:
+		return p.parseMatchExpr()
 	case lexer.TOKEN_LBRACKET:
 		return p.parseListLit()
 	case lexer.TOKEN_LBRACE:
@@ -1058,6 +1071,51 @@ func (p *Parser) parseIfStmt() *IfStmt {
 		}
 	}
 	return &IfStmt{Line: line, Cond: cond, Then: then, ElseStmt: elseStmt}
+}
+
+// parseIfExpr parses: if cond { expr } else { expr }
+// Used when if appears in expression position (e.g., var x = if cond { a } else { b })
+func (p *Parser) parseIfExpr() Expr {
+	p.expect(lexer.TOKEN_IF)
+	cond := p.parseExpr()
+	p.expect(lexer.TOKEN_LBRACE)
+	then := p.parseExpr()
+	p.expect(lexer.TOKEN_RBRACE)
+	p.expect(lexer.TOKEN_ELSE)
+	if p.check(lexer.TOKEN_IF) {
+		// else if → nested IfExpr
+		elseExpr := p.parseIfExpr()
+		return &IfExpr{Cond: cond, Then: then, Else: elseExpr}
+	}
+	p.expect(lexer.TOKEN_LBRACE)
+	elseExpr := p.parseExpr()
+	p.expect(lexer.TOKEN_RBRACE)
+	return &IfExpr{Cond: cond, Then: then, Else: elseExpr}
+}
+
+// parseMatchExpr parses: match subject { case pat -> expr, case _ -> expr }
+// Used when match appears in expression position (e.g., var x = match val { ... })
+func (p *Parser) parseMatchExpr() Expr {
+	p.expect(lexer.TOKEN_MATCH)
+	subject := p.parseExpr()
+	p.expect(lexer.TOKEN_LBRACE)
+	var cases []*MatchExprCase
+	p.skipSemis()
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		p.expect(lexer.TOKEN_CASE)
+		var pattern Expr
+		if p.peek().Type == lexer.TOKEN_IDENT && p.peek().Literal == "_" {
+			p.advance() // wildcard — pattern stays nil
+		} else {
+			pattern = p.parseExpr()
+		}
+		p.expect(lexer.TOKEN_ARROW)
+		value := p.parseExpr()
+		cases = append(cases, &MatchExprCase{Pattern: pattern, Value: value})
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &MatchExpr{Subject: subject, Cases: cases}
 }
 
 func (p *Parser) parseForStmt(label string) Stmt {

@@ -347,6 +347,63 @@ main() {
     var u = User("Alice", 30)
     print(u.greet())
 }`, mode: modeContains, expected: []string{"Hello, Alice!"}},
+
+	// --- P1: Implicit return (method) ---
+	{name: "ImplicitReturnMethod", src: `
+Calculator {
+    pub Int square(Int x) { x * x }
+    pub String describe(Int x) { "result: {x}" }
+}
+main() {
+    var c = Calculator()
+    print(c.square(7))
+    print(c.describe(42))
+}`, mode: modeExact, expected: []string{"49\nresult: 42"}},
+
+	// --- P1: Expression if ---
+	{name: "ExpressionIf", src: `
+main() {
+    var x = 10
+    var label = if x > 0 { "positive" } else { "negative" }
+    print(label)
+    var y = -5
+    var label2 = if y > 0 { "positive" } else { "negative" }
+    print(label2)
+}`, mode: modeExact, expected: []string{"positive\nnegative"}},
+
+	{name: "ExpressionIfNested", src: `
+main() {
+    var x = 0
+    var label = if x > 0 { "positive" } else if x == 0 { "zero" } else { "negative" }
+    print(label)
+}`, mode: modeExact, expected: []string{"zero"}},
+
+	// --- P1: Expression match ---
+	{name: "ExpressionMatch", src: `
+main() {
+    var status = 1
+    var msg = match status {
+        case 1 -> "running"
+        case 2 -> "stopped"
+        case _ -> "unknown"
+    }
+    print(msg)
+}`, mode: modeExact, expected: []string{"running"}},
+
+	// --- P2: Ranges ---
+	{name: "RangeExclusive", src: `
+main() {
+    for i in 0..5 {
+        print(i)
+    }
+}`, mode: modeExact, expected: []string{"0\n1\n2\n3\n4"}},
+
+	{name: "RangeInclusive", src: `
+main() {
+    for i in 1..=3 {
+        print(i)
+    }
+}`, mode: modeExact, expected: []string{"1\n2\n3"}},
 }
 
 // --- Batched E2E runner ------------------------------------------------------

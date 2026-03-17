@@ -631,6 +631,41 @@ type SpreadExpr struct {
 func (*SpreadExpr) nodeTag() {}
 func (*SpreadExpr) exprTag() {}
 
+// IfExpr: if cond { expr } else { expr } — expression-position if
+type IfExpr struct {
+	Cond Expr
+	Then Expr
+	Else Expr // required — expression if must have else
+}
+
+func (*IfExpr) nodeTag() {}
+func (*IfExpr) exprTag() {}
+
+// MatchExpr: match subject { case pat -> expr, ... } — expression-position match
+type MatchExpr struct {
+	Subject Expr
+	Cases   []*MatchExprCase
+}
+
+func (*MatchExpr) nodeTag() {}
+func (*MatchExpr) exprTag() {}
+
+// MatchExprCase: case pattern -> expr
+type MatchExprCase struct {
+	Pattern Expr // nil = wildcard (_)
+	Value   Expr
+}
+
+// RangeExpr: start..end (exclusive) or start..=end (inclusive)
+type RangeExpr struct {
+	Start     Expr
+	End       Expr
+	Inclusive bool // true for ..=, false for ..
+}
+
+func (*RangeExpr) nodeTag() {}
+func (*RangeExpr) exprTag() {}
+
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {
 	Params     []*ParamDecl

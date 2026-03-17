@@ -218,6 +218,7 @@ func (g *Generator) Generate(prog *parser.Program) string {
 		if !first {
 			g.write("\n")
 		}
+		g.neededUsings["static Functions"] = true
 		g.writeln("public static class Functions")
 		g.writeln("{")
 		g.push()
@@ -384,7 +385,7 @@ func (g *Generator) emitFnBody(d *parser.FnDecl) {
 	g.writeln("{")
 	g.push()
 	if d.Body != nil {
-		g.emitBlock(d.Body)
+		g.emitBlockWithImplicitReturn(d.Body, d.ReturnType != nil)
 	}
 	g.pop()
 	g.writeln("}")
@@ -537,7 +538,7 @@ func (g *Generator) emitMethodDecl(className string, classTypeParams []string, p
 	g.writeln("{")
 	g.push()
 	if m.Body != nil && len(m.Body.Stmts) > 0 {
-		g.emitBlock(m.Body)
+		g.emitBlockWithImplicitReturn(m.Body, m.ReturnType != nil)
 	}
 	g.pop()
 	g.writeln("}")
@@ -589,6 +590,28 @@ func (g *Generator) emitBlock(block *parser.BlockStmt) {
 	for _, s := range block.Stmts {
 		g.emitStmt(s)
 	}
+}
+
+// emitBlockWithImplicitReturn emits a block where the last ExprStmt is
+// automatically treated as a return statement if hasReturnType is true.
+func (g *Generator) emitBlockWithImplicitReturn(block *parser.BlockStmt, hasReturnType bool) {
+	if !hasReturnType || len(block.Stmts) == 0 {
+		g.emitBlock(block)
+		return
+	}
+	// Emit all but last statement normally
+	for _, s := range block.Stmts[:len(block.Stmts)-1] {
+		g.emitStmt(s)
+	}
+	// Check if last statement is a bare ExprStmt (no or-handler) — make it a return
+	last := block.Stmts[len(block.Stmts)-1]
+	if es, ok := last.(*parser.ExprStmt); ok && es.OrHandler == nil {
+		g.emitLineDirective(es.Line)
+		g.writeln(fmt.Sprintf("return %s;", g.emitExpr(es.Expr)))
+		return
+	}
+	// Otherwise emit normally (e.g., last stmt is an if/return/etc.)
+	g.emitStmt(last)
 }
 
 func (g *Generator) emitStmt(s parser.Stmt) {
@@ -943,6 +966,31 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			args = append(args, g.emitExpr(a))
 		}
 		return fmt.Sprintf("base(%s)", strings.Join(args, ", "))
+	case *parser.IfExpr:
+		cond := g.emitExpr(e.Cond)
+		then := g.emitExpr(e.Then)
+		elseVal := g.emitExpr(e.Else)
+		return fmt.Sprintf("(%s ? %s : %s)", cond, then, elseVal)
+	case *parser.MatchExpr:
+		subject := g.emitExpr(e.Subject)
+		var arms []string
+		for _, c := range e.Cases {
+			val := g.emitExpr(c.Value)
+			if c.Pattern == nil {
+				arms = append(arms, fmt.Sprintf("_ => %s", val))
+			} else {
+				arms = append(arms, fmt.Sprintf("%s => %s", g.emitExpr(c.Pattern), val))
+			}
+		}
+		return fmt.Sprintf("(%s switch { %s })", subject, strings.Join(arms, ", "))
+	case *parser.RangeExpr:
+		g.neededUsings["System.Linq"] = true
+		start := g.emitExpr(e.Start)
+		end := g.emitExpr(e.End)
+		if e.Inclusive {
+			return fmt.Sprintf("Enumerable.Range(%s, %s - %s + 1)", start, end, start)
+		}
+		return fmt.Sprintf("Enumerable.Range(%s, %s - %s)", start, end, start)
 	default:
 		return "default /* unsupported expr */"
 	}

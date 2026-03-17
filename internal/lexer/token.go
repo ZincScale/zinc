@@ -99,6 +99,8 @@ const (
 	TOKEN_QUESTION_QUESTION  // ??
 	TOKEN_RAW_STRING         // `raw string`
 	TOKEN_AT                 // @
+	TOKEN_DOTDOT             // ..
+	TOKEN_DOTDOTEQ           // ..=
 	TOKEN_DOTDOTDOT          // ...
 	TOKEN_COLONASSIGN        // :=
 
@@ -185,6 +187,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_QUESTION_QUESTION: "??",
 	TOKEN_RAW_STRING:        "RAW_STRING",
 	TOKEN_AT:                "@",
+	TOKEN_DOTDOT:            "..",
+	TOKEN_DOTDOTEQ:          "..=",
 	TOKEN_DOTDOTDOT:         "...",
 	TOKEN_COLONASSIGN:       ":=",
 

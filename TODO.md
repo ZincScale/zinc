@@ -6,7 +6,7 @@ Convention over configuration. Less typing, less ceremony.
 
 ## Priority Order — Expressiveness
 
-### P1 — Implicit Return + Expression If/Match ✦ NEXT
+### ~~P1 — Implicit Return + Expression If/Match~~ ✅ Done
 Last expression in a block is the return value. If and match become expressions.
 
 ```zinc
@@ -30,7 +30,7 @@ var msg = match status {
 - Explicit `return` still works for early returns
 - **Effort:** Medium (parser + codegen)
 
-### P2 — Ranges
+### ~~P2 — Ranges~~ ✅ Done
 Replace C-style for loops.
 
 ```zinc
@@ -161,6 +161,14 @@ All unblocked (imports + type resolver + annotations).
 | Destructuring | `var (name, age) = user` |
 
 ---
+
+## Completed (v0.10.0)
+- Implicit return — last expression in function/method body is the return value
+- Expression if — `var x = if cond { a } else { b }` (emits C# ternary)
+- Expression match — `var x = match val { case 1 -> "a" case _ -> "b" }` (emits C# switch expression)
+- Range loops — `for i in 0..10` (exclusive) and `for i in 0..=10` (inclusive)
+- `--release` flag — strips debug symbols for production builds
+- Embedded debug info by default — runtime errors show `.zn` line numbers
 
 ## Completed (v0.9.0)
 - Trailing lambdas + `it` keyword (Kotlin-style `{ it > 3 }`)

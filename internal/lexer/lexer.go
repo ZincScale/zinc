@@ -149,6 +149,15 @@ func (l *Lexer) NextToken() Token {
 			l.advance()
 			return l.makeToken(TOKEN_DOTDOTDOT, "...", line, col)
 		}
+		if l.peek() == '.' && l.peekAt(1) == '=' {
+			l.advance()
+			l.advance()
+			return l.makeToken(TOKEN_DOTDOTEQ, "..=", line, col)
+		}
+		if l.peek() == '.' {
+			l.advance()
+			return l.makeToken(TOKEN_DOTDOT, "..", line, col)
+		}
 		return l.makeToken(TOKEN_DOT, ".", line, col)
 	case ':':
 		if l.peek() == '=' {
