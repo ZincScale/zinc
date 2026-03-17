@@ -34,11 +34,12 @@ Within a single request, concurrency means: fan out to multiple APIs or processi
 
 ## Design
 
-Two primitives. That's the entire concurrency API.
+Three primitives. That's the entire concurrency API.
 
 | Primitive | Purpose | Returns |
 |-----------|---------|---------|
 | `spawn { }` | Run work on a fiber | `Future<T>` |
+| `parallel(list) { }` | Spawn over a collection, collect results | `List<T>` |
 | `Lock(value)` | Safe shared mutable state | `Lock<T>` |
 
 ### `spawn` — Run work concurrently
@@ -56,15 +57,14 @@ main() {
 
 `spawn` returns a `Future<T>`. Accessing `.value` suspends the current fiber (not the OS thread) until the result is ready.
 
-### Fan-out pattern (replaces `parallel`)
+### `parallel` — Spawn over a collection
 
-`parallel` is just spawn + collect. No special primitive needed:
+Sugar over spawn + collect. These two always happen together, so one keyword:
 
 ```zinc
 main() {
     var users = [1, 2, 3, 4, 5]
-    var futures = users.Select { spawn { fetchProfile(it) } }
-    var profiles = futures.Select { it.value }
+    var profiles = parallel(users) { fetchProfile(it) }
 
     for p in profiles {
         print(p.name)
@@ -72,7 +72,7 @@ main() {
 }
 ```
 
-If this pattern is common enough, `parallel` can be sugar later — but it's not a separate concept.
+`parallel` spawns a fiber per item, waits for all results, returns them in input order. It's not a separate concept from `spawn` — just the shorthand for the collection case.
 
 ### No function coloring
 
@@ -153,6 +153,7 @@ For Phase 1, this maps directly to .NET's `ThreadPool` which already does work s
 |------|---------|
 | `spawn { expr }` | `Task.Run(() => expr)` returning `Task<T>` |
 | `future.value` | `.GetAwaiter().GetResult()` |
+| `parallel(list) { ... }` | `Task.WhenAll(list.Select(x => Task.Run(...)))` |
 | `Lock<T>` | Wrapper class with `lock` statement |
 
 ## Examples
@@ -181,8 +182,7 @@ main() {
 ```zinc
 main() {
     var items = loadWorkItems()
-    var futures = items.Select { spawn { process(it) } }
-    var results = futures.Select { it.value }
+    var results = parallel(items) { process(it) }
     print("processed {results.Count()} items")
 }
 ```
@@ -193,13 +193,12 @@ main() {
 main() {
     var count = Lock(0)
 
-    var futures = (0..10).Select { spawn {
+    var results = parallel(0..10) {
         var data = fetchData(it)
         count.update { value + 1 }
         data
-    }}
+    }
 
-    var results = futures.Select { it.value }
     print("fetched {count.value} items")
 }
 ```
@@ -207,16 +206,15 @@ main() {
 ## Implementation Plan
 
 ### Phase 1 (v0.11)
-- AST: `SpawnExpr` node
-- Parser: `spawn { expr }` syntax
-- C# codegen: `Task.Run(() => expr)`, `.GetAwaiter().GetResult()` for `.value`
+- AST: `SpawnExpr`, `ParallelExpr` nodes
+- Parser: `spawn { expr }`, `parallel(collection) { expr }`
+- C# codegen: `Task.Run(() => expr)`, `Task.WhenAll`, `.GetAwaiter().GetResult()` for `.value`
 - Structured scoping: parent waits for child tasks
 - Error propagation: child failure cancels siblings
 - `Lock<T>`: emit wrapper class with `lock` statement
 - E2E tests
 
 ### Future — only if needed
-- `parallel(list) { }` sugar if the spawn+Select pattern is too verbose
 - `spawn(isolated: true)` for CPU-bound work on a dedicated thread
 - Custom fiber scheduler replacing Task.Run for 10K+ fiber workloads
 - `supervised` blocks if in-process resilience demand emerges
@@ -225,9 +223,9 @@ main() {
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Two primitives only | `spawn` + `Lock<T>` | Covers 90% of in-process concurrency. Less to learn. |
+| Three primitives only | `spawn` + `parallel` + `Lock<T>` | Covers 90% of in-process concurrency. Less to learn. |
 | No channels | Infrastructure (SQS/Kafka) handles messaging | Avoids duplicating what the deployment platform already provides. |
-| No `parallel` keyword | Sugar over spawn + LINQ | One concept (spawn), not two. Add sugar later if needed. |
+| `parallel` is sugar | Spawn per item + collect results | The two-line spawn+collect pattern always happens together. One keyword. |
 | No `supervised` | Kubernetes/infrastructure handles restarts | Language shouldn't duplicate platform capabilities. |
 | No `select` | Rare within a request | Can be built from spawn. Add if demand emerges. |
 | Structured scoping | Parent waits, errors cancel siblings | Prevents leaked fibers. Simple mental model. |
