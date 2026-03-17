@@ -38,11 +38,35 @@ Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc giv
 
 ## Documentation
 
+### User Guide
+
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation, CLI usage, and project setup |
-| [Language Reference](docs/language-reference.md) | Complete syntax guide — variables, functions, classes, control flow, and more |
-| [Built-in Functions](docs/builtins.md) | All built-in functions |
+| [Getting Started](docs/getting-started.md) | Installation, CLI, project setup, dependencies |
+| [Language Reference](docs/language-reference.md) | Quick syntax overview and doc index |
+
+### Language
+
+| Document | Description |
+|----------|-------------|
+| [Types and Variables](docs/types.md) | Variables, constants, type system, enums, null safety, casting |
+| [Functions](docs/functions.md) | Functions, defaults, named args, generics, variadic, closures |
+| [Classes and OOP](docs/classes.md) | Classes, interfaces, inheritance, polymorphism |
+| [Collections](docs/collections.md) | List/map literals, slicing, LINQ methods |
+| [Control Flow](docs/control-flow.md) | If/else, loops, match, labeled loops, safe navigation |
+| [Error Handling](docs/error-handling.md) | Errors as values, `or` handlers, `with` resources |
+| [Imports](docs/imports.md) | .NET/Go imports, NuGet dependencies, type detection |
+| [Built-in Functions](docs/builtins.md) | I/O, math, JSON, HTTP, environment, control |
+
+### Design Docs
+
+| Document | Status |
+|----------|--------|
+| [C# AOT Backend](docs/design-csharp-aot-backend.md) | Implemented |
+| [Pointer Inference](docs/design-pointer-inference.md) | Implemented |
+| [Annotations & Serialization](docs/design-annotations-serialization.md) | Planned |
+| [Syntax Simplification](docs/design-syntax-simplification.md) | Complete |
+| [Type-Before-Name](docs/design-type-before-name.md) | Complete |
 
 ---
 

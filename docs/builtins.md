@@ -131,3 +131,5 @@ On the **Go backend**, `or { }` maps to Go's `if err != nil { }` pattern.
 On the **C# backend**, `or { }` maps to `try/catch (Exception)` — the `err` variable receives the exception message.
 
 If the handler ends with `exit()` or `panic()`, the error is not re-thrown. Otherwise, the error auto-propagates after the handler runs.
+
+> See [Error Handling](error-handling.md) for the full error handling guide.
