@@ -162,11 +162,11 @@ import "myapp/utils"
 import "myapp/models"
 
 main() {
-    var sum = utils.Add(2, 3)
+    var sum = utils.add(2, 3)
     print(sum)
 
-    var user = models.NewUser("Alice", 30)
-    print(user.Greet())
+    var user = models.User("Alice", 30)
+    print(user.greet())
 }
 ```
 
