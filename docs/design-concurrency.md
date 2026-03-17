@@ -23,37 +23,40 @@ This is the direction the industry is heading: Java Virtual Threads (Project Loo
 
 ## Prior Art
 
-| Language | Model | Strengths | Weaknesses |
-|----------|-------|-----------|------------|
-| **Go** | Goroutines + channels, M:N scheduler, work stealing | Simple syntax, efficient | Channels are still a coordination primitive |
-| **Kotlin** | Coroutines + dispatchers, structured concurrency | Multiple contexts, cancellation | `suspend` keyword = function coloring |
-| **Java 21+** | Virtual threads (Project Loom) | Transparent, no coloring | No structured concurrency built-in |
-| **Crystal** | Fibers + execution contexts (RFC 0002) | Context types (concurrent/parallel/isolated), work stealing | Complex API surface |
-| **Erlang/BEAM** | Processes + message passing, preemptive | Fault isolation, no shared state | Different programming model |
+| Language | Model | What Zinc takes |
+|----------|-------|-----------------|
+| **Erlang/BEAM** | Processes, message passing, supervisors, preemptive scheduling, "let it crash" | Supervision trees, process isolation, fault recovery, preemption philosophy |
+| **Go** | Goroutines, M:N scheduler, work stealing | Simple `spawn` syntax, work stealing scheduler |
+| **Java 21+** | Virtual threads (Project Loom) | Transparent concurrency — no function coloring |
+| **Crystal** | Fibers + execution contexts (RFC 0002) | Context types (parallel/isolated/single), fiber-thread independence |
+| **Kotlin** | Coroutines + structured concurrency | Scoped cancellation, parent-child fiber trees |
 
-Zinc takes the best from each: Go's simplicity, Kotlin's structured scoping, Java's transparency, and Crystal's execution context architecture.
+BEAM is the gold standard for resilient concurrent systems. Running since the 80s, powering telecom (five 9s uptime), WhatsApp (2M connections/server), Discord. Its key insight: **fault isolation at the process level + automatic recovery via supervision is more reliable than trying to write bug-free code.** Zinc adopts this philosophy while keeping a familiar OO syntax.
 
 ## Runtime Model
 
-### Fibers — Not threads
+### Fibers — Lightweight processes
 
-A **fiber** is a lightweight unit of work managed by the Zinc runtime. Thousands of fibers can run on a handful of OS threads. Fibers are cooperative — they yield at I/O boundaries, `sleep`, and other suspension points.
+A **fiber** is a lightweight unit of work managed by the Zinc runtime. Inspired by BEAM processes and Go goroutines. Thousands of fibers can run on a handful of OS threads.
 
-Key property: **a fiber can be resumed by any thread**. Fibers don't belong to threads, they belong to an execution context. The runtime moves fibers to wherever there's capacity.
+Key properties:
+- **Any thread can resume any fiber** — fibers don't belong to threads, they belong to an execution context. The runtime moves fibers to wherever there's capacity.
+- **Cooperative with preemption safety net** — fibers yield at I/O boundaries, `sleep`, and other suspension points. The runtime tracks execution budget and can preempt fibers that run too long without yielding (inspired by BEAM's reduction counting).
+- **Isolated failure** — a crashing fiber doesn't take down other fibers. Errors propagate through the supervision tree, not through shared memory corruption.
 
 ### Execution Contexts
 
-An execution context manages a pool of threads and a scheduler that runs fibers. Zinc provides three context types:
+An execution context manages a pool of threads and a scheduler that runs fibers. Zinc starts with one context type and adds more as needed:
 
-**Parallel (default)** — Multiple threads with work stealing. Fibers run in parallel across all available CPU cores. Idle threads steal fibers from busy threads — no wasted cores, no starvation. This is the only context most developers ever need.
+**Parallel (default, Phase 1)** — Multiple threads with work stealing. Fibers run in parallel across all available CPU cores. Idle threads steal fibers from busy threads — no wasted cores, no starvation. Sized to `cpu_count`. This is the only context most developers ever need.
 
-**Isolated** — One fiber, one dedicated thread. For CPU-bound work that would block other fibers (password hashing, compression, video encoding). The fiber owns the thread entirely.
+**Isolated (Phase 2)** — One fiber, one dedicated thread. For CPU-bound work that would block other fibers (password hashing, compression, video encoding). Simple to add once parallel works — it's just a context with one thread and one fiber.
 
-**Single** — One thread, multiple fibers. Fibers run concurrently but never in parallel. Useful when you need to avoid synchronization overhead for a group of fibers that share state — no locks needed within the context, only for cross-context communication.
+**Single (future)** — One thread, multiple fibers. Fibers run concurrently but never in parallel. No locks needed within the context. Useful for specific optimization scenarios.
 
 ### Work Stealing
 
-The parallel context uses work-stealing scheduling (inspired by Go and Crystal RFC 0002):
+The parallel context uses work-stealing scheduling:
 
 ```
 Thread 1: [fiber A] [fiber B] [fiber C]    ← busy
@@ -65,11 +68,19 @@ When a thread's run queue is empty, it steals fibers from the busiest thread. No
 
 ### Defaults
 
-Zinc starts a single **parallel** execution context sized to `System.cpu_count` threads. This is the right default for ~95% of applications. Developers who need more control can create additional contexts.
-
-No flags, no configuration, no tuning. It just works.
+Zinc starts a single **parallel** execution context sized to `cpu_count` threads. No flags, no configuration, no tuning. It just works.
 
 ## Developer API
+
+Five primitives. That's the entire concurrency API.
+
+| Primitive | Purpose | Returns |
+|-----------|---------|---------|
+| `spawn { }` | Run work on a fiber | `Future<T>` |
+| `parallel(list) { }` | Fan-out/fan-in over a collection | `List<T>` |
+| `Lock(value)` | Safe shared mutable state | `Lock<T>` |
+| `select { }` | Race multiple futures | `T` |
+| `supervised { }` | Auto-restart crashed fibers | — |
 
 ### `spawn` — Run work concurrently
 
@@ -101,9 +112,9 @@ main() {
 }
 ```
 
-`parallel` is the common case — map a collection through a concurrent operation. Results are returned in input order. If any fiber fails, remaining fibers are cancelled (fail-fast).
+Results returned in input order. If any fiber fails, remaining fibers are cancelled (fail-fast).
 
-### `parallel` with concurrency limit
+With concurrency limit:
 
 ```zinc
 main() {
@@ -113,8 +124,6 @@ main() {
     var pages = parallel(urls, max: 50) { httpGet(it) or { "" } }
 }
 ```
-
-The `max` parameter caps concurrent fibers. Essential for I/O-bound work against rate-limited APIs or databases. Default: unlimited (bounded only by thread pool size).
 
 ### No function coloring
 
@@ -136,7 +145,7 @@ main() {
 }
 ```
 
-When `fetchUser` runs inside a `spawn`, the runtime suspends the fiber during I/O and schedules other fibers on the same thread. When called outside `spawn`, it blocks normally. The developer never has to think about which mode they're in.
+When `fetchUser` runs inside a `spawn`, the runtime suspends the fiber during I/O and schedules other fibers. When called outside `spawn`, it blocks normally. The developer never thinks about it.
 
 ### Structured Concurrency
 
@@ -144,7 +153,6 @@ All spawned work is scoped. No fire-and-forget. No leaked fibers.
 
 ```zinc
 main() {
-    // This scope waits for all spawned fibers to complete
     var results = spawn {
         var a = spawn { fetchData("source-a") }
         var b = spawn { fetchData("source-b") }
@@ -189,20 +197,63 @@ main() {
 }
 ```
 
+### `supervised` — Let it crash, recover automatically
+
+Inspired by Erlang/OTP supervisors. Instead of defensive try/catch everywhere, let fibers crash and let the supervisor handle recovery:
+
+```zinc
+main() {
+    supervised {
+        spawn { handleConnections(8080) }   // auto-restarts on crash
+        spawn { processJobQueue() }          // auto-restarts on crash
+        spawn { collectMetrics() }           // auto-restarts on crash
+    }
+    // If any fiber crashes, the supervisor restarts it.
+    // The supervised block runs until explicitly stopped.
+}
+```
+
+The supervisor logs the crash, restarts the fiber, and life goes on. This is how you build systems that run for months without intervention.
+
+#### Restart strategies
+
+```zinc
+// Default: restart just the crashed fiber
+supervised {
+    spawn { serviceA() }
+    spawn { serviceB() }
+}
+
+// one_for_all: if one crashes, restart all (for interdependent fibers)
+supervised(strategy: one_for_all) {
+    spawn { database() }
+    spawn { cache() }       // depends on database
+    spawn { api() }         // depends on both
+}
+
+// Restart budget: if a fiber crashes more than 5 times in 60 seconds, stop
+supervised(max_restarts: 5, within: 60) {
+    spawn { flakeyService() }
+}
+```
+
+Strategies match Erlang/OTP's proven model:
+- **one_for_one** (default): restart only the crashed fiber
+- **one_for_all**: restart all fibers when one crashes
+- **rest_for_one** (future): restart the crashed fiber and everything started after it
+
 ### `spawn(isolated: true)` — Dedicated thread
 
 For CPU-bound work that would block other fibers:
 
 ```zinc
 main() {
-    // Runs on its own thread — won't block other fibers
     var hash = spawn(isolated: true) {
         bcrypt(password, cost: 14)
     }
 
     // Meanwhile, handle other work on the main context
     var user = fetchUser(id)
-
     print("hash: {hash.value}")
 }
 ```
@@ -216,9 +267,10 @@ The isolated fiber gets a dedicated OS thread. The parallel context's threads re
 | `async` / `await` keywords | Function coloring. Infects entire call chain. |
 | Manual `Thread` creation | Too low-level. Runtime manages threads. |
 | `lock` / `unlock` / `Mutex` | Use `Lock<T>` instead. Can't forget to unlock. |
-| Channels | Coordination primitive — `Future<T>` + `select` is simpler. |
+| Channels | Coordination primitive — `Future<T>` + `select` is simpler for most cases. |
 | `volatile` / memory fences | Runtime handles memory visibility. |
 | Thread affinity | Fibers resume on any thread. Runtime decides. |
+| Callbacks / promises | Blocking `.value` is simpler. No callback hell. |
 
 ## C# Backend Mapping
 
@@ -229,14 +281,15 @@ The isolated fiber gets a dedicated OS thread. The parallel context's threads re
 | `parallel(list) { ... }` | `Task.WhenAll(list.Select(x => Task.Run(...)))` |
 | `parallel(list, max: N) { ... }` | `SemaphoreSlim` + `Task.WhenAll` |
 | `Lock<T>` | Wrapper class with `lock` statement |
-| `select { ... }` | `Task.WhenAny` + cancellation of losers |
+| `select { ... }` | `Task.WhenAny` + `CancellationTokenSource` |
 | `spawn(isolated: true) { ... }` | `Task.Factory.StartNew(..., TaskCreationOptions.LongRunning)` |
+| `supervised { ... }` | While-loop with try/catch per spawned task, restart logic |
 
-### Phase 1 vs Future
+### Phase 1 vs Future Runtime
 
-Phase 1 maps to .NET's `Task` system — efficient, battle-tested, good enough for most workloads. The thread pool already does work stealing internally.
+Phase 1 maps to .NET's `Task` system — efficient, battle-tested, good enough for most workloads. The .NET thread pool already does work stealing internally.
 
-Future phases may emit a custom fiber scheduler that sits below `Task`, giving us true fiber suspension (not blocking thread pool threads on `.Result`). This becomes important at high concurrency (10K+ fibers). The developer API stays exactly the same — only the emit changes.
+Future phases replace `Task.Run` with a Zinc-managed fiber scheduler — true fiber suspension without blocking thread pool threads, BEAM-style preemption budgets, custom work stealing. The developer API stays exactly the same — only the emit layer changes. This becomes important at high concurrency (10K+ fibers).
 
 ## Examples
 
@@ -277,18 +330,19 @@ main() {
 }
 ```
 
-### Producer-consumer with Lock
+### Resilient web server
 
 ```zinc
 main() {
-    var results = Lock(List<String>())
+    supervised {
+        // HTTP listener — restarts if it crashes
+        spawn { listenHttp(8080) }
 
-    parallel(0..10) {
-        var data = processItem(it)
-        results.update { value.Add(data); value }
+        // Background workers — each restarts independently
+        spawn { processEmailQueue() }
+        spawn { syncExternalData() }
+        spawn { cleanupExpiredSessions() }
     }
-
-    print("processed {results.value.Count()} items")
 }
 ```
 
@@ -306,13 +360,27 @@ main() {
 }
 ```
 
+### Producer-consumer with Lock
+
+```zinc
+main() {
+    var results = Lock(List<String>())
+
+    parallel(0..10) {
+        var data = processItem(it)
+        results.update { value.Add(data); value }
+    }
+
+    print("processed {results.value.Count()} items")
+}
+```
+
 ### CPU-bound isolation
 
 ```zinc
 main() {
     var passwords = ["pass1", "pass2", "pass3"]
 
-    // Each hash runs on its own isolated thread — doesn't block the fiber pool
     var hashes = parallel(passwords) {
         spawn(isolated: true) { bcrypt(it, cost: 14) }.value
     }
@@ -323,32 +391,53 @@ main() {
 }
 ```
 
+### Nested supervision
+
+```zinc
+main() {
+    supervised {
+        // Database layer — if db crashes, restart cache too
+        supervised(strategy: one_for_all) {
+            spawn { databasePool() }
+            spawn { queryCache() }
+        }
+
+        // API layer — each handler restarts independently
+        supervised {
+            spawn { handleUsers() }
+            spawn { handleOrders() }
+            spawn { handlePayments() }
+        }
+    }
+}
+```
+
 ## Implementation Plan
 
-### Phase 1 — `spawn` and `Future<T>` (v0.11)
-- AST: `SpawnExpr` node
-- Parser: `spawn { expr }` syntax
-- C# codegen: `Task.Run(() => expr)` + `.GetAwaiter().GetResult()` for `.value`
+### Phase 1 — `spawn`, `Future<T>`, `parallel` (v0.11)
+- AST: `SpawnExpr`, `ParallelExpr` nodes
+- Parser: `spawn { expr }`, `parallel(collection) { expr }`, `parallel(collection, max: N) { expr }`
+- C# codegen: `Task.Run`, `Task.WhenAll`, `SemaphoreSlim`
+- `future.value` → `.GetAwaiter().GetResult()`
 - Structured scoping: parent waits for all child tasks
-- Error propagation from child to parent
+- Error propagation: child failure cancels siblings via `CancellationTokenSource`
+- E2E tests
 
-### Phase 2 — `parallel` (v0.11)
-- AST: `ParallelExpr` node
-- Parser: `parallel(collection) { expr }` and `parallel(collection, max: N) { expr }`
-- C# codegen: `Task.WhenAll` + `Select`, `SemaphoreSlim` for max
-- Results in input order
+### Phase 2 — `Lock<T>`, `select`, `spawn(isolated: true)` (v0.12)
+- `Lock<T>`: emit wrapper class with `lock` statement
+- `select { case ... }`: emit `Task.WhenAny` + cancellation
+- `spawn(isolated: true)`: emit `TaskCreationOptions.LongRunning`
 
-### Phase 3 — `Lock<T>` and `select` (v0.12)
-- `Lock<T>`: wrapper class with `lock` statement, `.value` and `.update { }`
-- `select`: `Task.WhenAny` with cancellation of non-winners
+### Phase 3 — `supervised` (v0.12)
+- Supervisor loop: try/catch + restart per fiber
+- `strategy: one_for_one` (default), `one_for_all`
+- `max_restarts` / `within` budget — stop if crashing too fast
+- Crash logging
 
-### Phase 4 — `spawn(isolated: true)` (v0.12)
-- C# codegen: `TaskCreationOptions.LongRunning`
-- Validates that isolated fibers don't spawn children into the isolation context
-
-### Phase 5 — Custom fiber scheduler (future)
-- Replace `Task.Run` with a Zinc-managed fiber scheduler
+### Phase 4 — Custom fiber scheduler (future)
+- Replace `Task.Run` with Zinc-managed fiber scheduler
 - True fiber suspension without blocking thread pool threads
+- Preemption budget (BEAM-style reduction counting)
 - Work stealing across Zinc-managed threads
 - Same developer API — only the emit layer changes
 
@@ -357,15 +446,18 @@ main() {
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Default context | Parallel, cpu_count threads | Right for 95% of apps. No config needed. |
-| Fiber-thread binding | None — any thread can resume any fiber | Enables work stealing, prevents starvation |
+| Fiber-thread binding | None — any thread resumes any fiber | Enables work stealing, prevents starvation |
 | Error strategy in `parallel` | Fail-fast, cancel siblings | Matches structured concurrency expectation |
-| `parallel` default max | Unlimited | Let the thread pool manage backpressure by default |
-| Cancellation model | Scope-based, automatic | No explicit tokens. Parent scope exit = cancel children. |
-| `select` losers | Cancelled automatically | Prevent resource leaks from abandoned futures |
+| `parallel` default max | Unlimited | Thread pool manages backpressure by default |
+| Cancellation model | Scope-based, automatic | No explicit tokens. Scope exit = cancel children. |
+| `select` losers | Cancelled automatically | Prevent resource leaks |
+| Supervision default | one_for_one | Most fibers are independent. Match Erlang default. |
 | Phase 1 backing | .NET Task/ThreadPool | Battle-tested, work stealing built in, zero custom runtime |
+| Preemption | Cooperative now, preemptive in Phase 4 | Cooperative is simpler to implement correctly first |
 
 ## Open Questions
 
-1. **Fiber preemption:** Should the runtime preempt fibers that run too long without yielding? Crystal explicitly doesn't, Go does. For Phase 1, cooperative is fine.
-2. **Context API:** Should developers be able to create custom execution contexts (`Context.new(threads: 4)`) or is `spawn` + `isolated` sufficient?
-3. **`with` + concurrency:** Should `with` (resource management) interact with fiber scoping — e.g., auto-dispose when a fiber is cancelled?
+1. **Message passing:** Should fibers communicate via typed mailboxes (BEAM-style `receive`) in addition to shared state (`Lock<T>`)? Could be cleaner for actor-like patterns.
+2. **Supervision nesting:** How deep should supervision trees go? Erlang allows arbitrary depth. Should Zinc?
+3. **Hot restart state:** When a supervised fiber restarts, should it receive any state from its previous incarnation, or always start fresh?
+4. **`with` + cancellation:** Should `with` (resource management) auto-dispose when a fiber is cancelled mid-block?
