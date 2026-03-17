@@ -1,82 +1,207 @@
 # Zinc Feature Roadmap
 
-Convention over configuration for native apps. C# AOT is the default backend, Go is secondary.
+Convention over configuration for native apps. Less typing, less ceremony.
 
 ---
 
-## Priority Order
+## Priority Order — Expressiveness First
 
-### P1 — NuGet Import & Interop ✅ DONE
-- Import → `using` mapping with 16 short aliases
-- CSharpTypeResolver: .NET reflection probe (3,700+ types), auto `new` for constructors
-- Generic annotations: `@Name("args")` → `[Name("args")]` — unlocks all C# attributes
+### P1 — Data Classes ✦ NEXT
+Eliminate constructor boilerplate — the #1 LOC waster in Zinc today.
 
-### P2 — Scripting Builtins ✦ NEXT
-Reduce ceremony for quick scripts:
-- `args` — built-in `List<String>`, maps to command-line args
-- `exec(cmd)` — run a shell command, return output as `String`, failable
-- `fileExists(path)` — returns `Bool`
-- `listDir(path)` — returns `List<String>`, failable
-- `pathJoin(parts...)` — path joining
-- **Effort:** Quick — just new builtins in codegen
+```zinc
+// Before: 8 lines
+User {
+    pub String name
+    pub Int age
+    new(String name, Int age) {
+        this.name = name
+        this.age = age
+    }
+}
 
-### P3 — `zinc add` / Dependency Management
-- `zinc add Newtonsoft.Json` → adds to `[dependencies]` in `zinc.toml`
-- `zinc add Serilog --version 4.0.0` → pinned version
-- `zinc remove Newtonsoft.Json` → removes dependency
+// After: 1 line
+data User(pub String name, pub Int age)
+```
+
+- Maps to C# `record` or class with auto-generated constructor
+- Auto-generates ToString
+- Fields declared inline with the class name
+- Still supports methods if needed: `data User(...) { pub String greet() { ... } }`
 - **Effort:** Medium
 
-### P4 — Data Classes / Records
-`data User(String name, Int age)` — immutable DTOs with auto-generated ToString/Equals/GetHashCode. Maps to C# `record`.
-- **Effort:** Medium — **write design doc first**
+### P2 — Lambda Type Inference
+Remove redundant type annotations from lambdas — the type is inferrable from context.
 
-### P5 — Typed Errors
-Extend error handling with typed error classes. Maps to C# exception hierarchy.
-- **Effort:** Medium — **write design doc first**
+```zinc
+// Before:
+var big = nums.Where((Int x) -> x > 3)
+var doubled = nums.Select((Int x) -> x * 2)
 
-### P6 — Structured Concurrency
-`await { }` blocks — maps to C# `Task.WhenAll` or Go `sync.WaitGroup`.
-- **Effort:** Medium — **write design doc first**
+// After:
+var big = nums.Where(x -> x > 3)
+var doubled = nums.Select(x -> x * 2)
+```
+
+- Infer param types from the collection element type
+- Multi-param: `(a, b) -> a + b` instead of `(Int a, Int b) -> a + b`
+- Still allow explicit types when needed for clarity
+- **Effort:** Medium (parser + typechecker changes)
+
+### P3 — `or die` / `or exit` Shorthands
+The `or { print(err); exit(1) }` pattern is ubiquitous. Make it a one-liner.
+
+```zinc
+// Before: 3 lines
+var content = readFile("data.txt") or {
+    print("Error: {err}")
+    exit(1)
+}
+
+// After: 1 line
+var content = readFile("data.txt") or die       // prints err + exits
+var content = readFile("data.txt") or exit(1)   // exits with code
+var content = readFile("data.txt") or ""        // default value
+```
+
+- `or die` → print error message to stderr + exit(1)
+- `or exit(N)` → exit with specific code
+- `or <default>` → use default value on error
+- **Effort:** Quick (parser + codegen)
+
+### P4 — Auto-Assign Constructor Params
+When constructor params match field names, auto-assign them.
+
+```zinc
+// Before:
+Dog {
+    pub String name
+    pub Int age
+    new(String name, Int age) {
+        this.name = name
+        this.age = age
+    }
+}
+
+// After:
+Dog {
+    pub String name
+    pub Int age
+    new(String name, Int age) {}  // auto-assigns matching fields
+}
+```
+
+- If constructor body is empty or doesn't assign a matching field, auto-assign it
+- Explicit assignments override auto-assign
+- **Effort:** Quick (codegen-only, no parser changes)
+
+### P5 — `args` and Scripting Builtins
+Make CLI tools trivial:
+
+```zinc
+main() {
+    if args.Count() < 2 { print("usage: tool <file>"); exit(1) }
+    var content = readFile(args[1]) or die
+    print(content)
+}
+```
+
+- `args` — built-in `List<String>`, maps to command-line args
+- `exec(cmd)` — run shell command, return output, failable
+- `fileExists(path)` → `Bool`
+- `listDir(path)` → `List<String>`, failable
+- `pathJoin(parts...)` → path joining
+- **Effort:** Quick
+
+### P6 — `zinc add` / Dependency Management
+```bash
+zinc add Newtonsoft.Json              # adds to zinc.toml
+zinc add Serilog --version 4.0.0     # pinned version
+zinc remove Newtonsoft.Json           # removes
+```
+- **Effort:** Medium
 
 ### P7 — VS Code Extension (Syntax Highlighting)
 Basic `.zn` editor support — TextMate grammar.
 - **Effort:** Quick
 
 ### P8 — `zinc test`
-Run tests without manual test commands. Maps to `dotnet test` or `go test`.
+`zinc test` → runs `dotnet test` or `go test`.
 - **Effort:** Quick
-
-### P9 — `zinc fmt`
-Format `.zn` files consistently.
-- **Effort:** Medium
 
 ---
 
-## Interop Roadmap (by ecosystem)
+## Expressiveness Comparison
 
-All use cases are unblocked by P1 (imports + type resolver + annotations).
+What a real program looks like today vs. after P1-P4:
 
-| Use Case | NuGet Packages | Status |
-|----------|---------------|--------|
-| **Logging** | Serilog / NLog | ✅ Ready |
-| **HTTP client** | System.Net.Http | ✅ Ready |
-| **Configuration** | Microsoft.Extensions.Configuration | ✅ Ready |
-| **JSON serialization** | System.Text.Json / Newtonsoft | ✅ Ready (`@JsonPropertyName` works) |
-| **Dependency injection** | Microsoft.Extensions.DI | ✅ Ready |
-| **REST API** | ASP.NET Core | ✅ Ready (`@Route`, `@HttpGet` work) |
-| **Database / ORM** | Entity Framework Core | ✅ Ready (`@Table`, `@Column` work) |
-| **Testing** | xUnit / NUnit | ⚠ Needs `zinc test` command (P8) |
+```zinc
+// ===== TODAY (21 lines) =====
+User {
+    pub String name
+    pub Int age
+    new(String name, Int age) {
+        this.name = name
+        this.age = age
+    }
+}
+
+main() {
+    var users = [User("Alice", 30), User("Bob", 25)]
+    var names = users.Select((User u) -> u.name)
+                     .Where((String s) -> s.StartsWith("A"))
+    for name in names { print(name) }
+
+    var content = readFile("data.txt") or {
+        print("Error: {err}")
+        exit(1)
+    }
+    print(content)
+}
+
+// ===== AFTER P1-P4 (11 lines) =====
+data User(pub String name, pub Int age)
+
+main() {
+    var users = [User("Alice", 30), User("Bob", 25)]
+    var names = users.Select(u -> u.name)
+                     .Where(s -> s.StartsWith("A"))
+    for name in names { print(name) }
+
+    var content = readFile("data.txt") or die
+    print(content)
+}
+```
+
+**48% fewer lines for the same logic.**
+
+---
+
+## Interop Roadmap
+
+All unblocked by v0.8.0 (imports + type resolver + annotations).
+
+| Use Case | Status |
+|----------|--------|
+| Logging (Serilog/NLog) | ✅ Ready |
+| HTTP client | ✅ Ready |
+| Configuration | ✅ Ready |
+| JSON serialization | ✅ Ready |
+| Dependency injection | ✅ Ready |
+| REST API (ASP.NET) | ✅ Ready |
+| Database/ORM (EF Core) | ✅ Ready |
+| Testing (xUnit) | ⚠ Needs `zinc test` (P8) |
 
 ---
 
 ## Revisit Later
 
-| Feature | Effort |
-|---------|--------|
-| Enhanced destructuring (`var (a, b, c) = ...`) | Medium |
-| Operator overloading | Medium |
-| Go interop improvements | Medium |
-| Async/await bridging | Medium |
+| Feature | Notes |
+|---------|-------|
+| Typed errors | Exception hierarchy, `catch UserError` |
+| Structured concurrency | `await { }` blocks |
+| Operator overloading | Via .NET interop |
+| Enhanced destructuring | `var (a, b, c) = ...` |
 
 ---
 
@@ -86,7 +211,7 @@ All use cases are unblocked by P1 (imports + type resolver + annotations).
 |---------|--------|
 | CI: .NET SDK in tests | ✅ Done |
 | CONTRIBUTING.md | TODO |
-| Code coverage reporting | TODO |
+| Code coverage | TODO |
 
 ---
 
@@ -95,7 +220,7 @@ All use cases are unblocked by P1 (imports + type resolver + annotations).
 | Feature | Effort |
 |---------|--------|
 | LSP server | Large |
-| VS Code extension + LSP | Medium (after LSP) |
+| VS Code extension + LSP | Medium |
 | Web playground | Large |
 | `zinc doc` | Medium |
 
@@ -103,38 +228,23 @@ All use cases are unblocked by P1 (imports + type resolver + annotations).
 
 ## Completed (v0.8.0)
 - Generic annotations: `@Name("args")` → `[Name("args")]` in C#
-- Annotations on classes, fields, methods, and functions
-- No hardcoded annotation names — pass-through to C# attributes
-- E2E tested with `@JsonPropertyName` serialization round-trip
-- Split docs into 8 focused topic files + TOC
-- Updated README with full documentation table
-- 90 unit + 37 E2E + 5 resolver tests
+- Split docs into 8 focused topic files
+- Removed dead code from Generator (6 fields, 1 method)
 
 ## Completed (v0.7.0)
-- NuGet import → `using` mapping with 16 short aliases
-- CSharpTypeResolver: .NET reflection probe (3,700+ BCL types)
-- Auto `new` for imported constructable classes
-- Static class detection (skip `new`)
-- Single `Functions` class for all non-main functions
-- Unique exception variable names in catch blocks
-- AOT trim fixes: SelfContained, JsonSerializer reflection
-- Stale .cs cleanup in .zinc-build/
+- NuGet import → `using` mapping (16 aliases)
+- CSharpTypeResolver: .NET reflection probe (3,700+ types)
+- Auto `new` for constructors, static class detection
+- Single Functions class, unique catch vars, AOT trim fixes
 
 ## Completed (v0.6.0)
-- All 28 global builtin functions in C# backend
-- Failable builtin infrastructure + `or { }` error handling
-- `handlerHasHalt` + standalone failable ExprStmt
+- 28 global builtins in C# backend
+- Failable infrastructure + `or { }` error handling
 
 ## Completed (v0.5.0)
-- C# AOT backend with LINQ collection methods (22 methods)
-- `zinc.toml` project config, full build pipeline
-- Cross-file TypeRegistry, `#line` source maps
-- Lambda `->`, `var` declarations, list/map type inference
-- Virtual/override detection, benchmarks, CI
+- C# AOT backend, LINQ (22 methods), `zinc.toml`, build pipeline
+- TypeRegistry, source maps, lambda `->`, `var`, type inference
 
 ## Completed (v0.4.0 and earlier)
-- Type-before-name syntax, auto-generated interfaces
-- Generic class polymorphism, field visibility
-- Error handling, Python backend prototype
-- Full Go backend (3,326 lines), pointer inference
-- REPL, watch mode, examples, CI
+- Type-before-name, OO polymorphism, generics, error handling
+- Go backend (3,326 lines), pointer inference, REPL, CI
