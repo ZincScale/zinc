@@ -25,6 +25,18 @@ import (
 	"zinc/internal/parser"
 )
 
+// failableBuiltins is the set of Zinc built-in functions that can throw.
+var failableBuiltins = map[string]bool{
+	"readFile":  true,
+	"writeFile": true,
+	"httpGet":   true,
+}
+
+// voidFailableBuiltins is the subset that returns no value (void).
+var voidFailableBuiltins = map[string]bool{
+	"writeFile": true,
+}
+
 // Generator converts a Zinc AST to C# source code.
 type Generator struct {
 	buf            strings.Builder
@@ -122,6 +134,31 @@ func (g *Generator) Generate(prog *parser.Program) string {
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
 			g.enumNames[d.Name] = true
+		}
+	}
+
+	// Fixed-point: transitively mark user fns as failable
+	for {
+		changed := false
+		for _, d := range prog.Decls {
+			switch d := d.(type) {
+			case *parser.FnDecl:
+				if !g.canThrowFns[d.Name] && g.bodyIsFailable(d.Body) {
+					g.canThrowFns[d.Name] = true
+					changed = true
+				}
+			case *parser.ClassDecl:
+				for _, m := range d.Methods {
+					key := d.Name + "." + m.Name
+					if !g.canThrowFns[key] && g.bodyIsFailable(m.Body) {
+						g.canThrowFns[key] = true
+						changed = true
+					}
+				}
+			}
+		}
+		if !changed {
+			break
 		}
 	}
 
@@ -443,6 +480,12 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.neededUsings["System"] = true
 		g.writeln(fmt.Sprintf("Console.WriteLine(%s);", g.emitExpr(s.Value)))
 	case *parser.ExprStmt:
+		if s.OrHandler != nil {
+			if call, ok := s.Expr.(*parser.CallExpr); ok {
+				g.emitFailableExprStmt(call, s.OrHandler)
+				return
+			}
+		}
 		g.writeln(fmt.Sprintf("%s;", g.emitExpr(s.Expr)))
 	case *parser.BreakStmt:
 		g.writeln("break;")
@@ -487,7 +530,7 @@ func (g *Generator) emitVarStmt(s *parser.VarStmt) {
 
 	if s.OrHandler != nil {
 		// Failable: try/catch — or {} always propagates
-		varType := "var"
+		varType := "object"
 		if s.Type != nil {
 			varType = g.emitType(s.Type)
 		}
@@ -498,13 +541,16 @@ func (g *Generator) emitVarStmt(s *parser.VarStmt) {
 		g.writeln(fmt.Sprintf("%s = %s;", s.Name, val))
 		g.pop()
 		g.writeln("}")
-		g.writeln("catch (Exception)")
+		g.writeln("catch (Exception _ex)")
 		g.writeln("{")
 		g.push()
+		g.writeln("var err = _ex.Message;")
 		if s.OrHandler.Body != nil && len(s.OrHandler.Body.Stmts) > 0 {
 			g.emitBlock(s.OrHandler.Body)
 		}
-		g.writeln("throw;")
+		if !g.handlerHasHalt(s.OrHandler.Body) {
+			g.writeln("throw;")
+		}
 		g.pop()
 		g.writeln("}")
 	} else if s.Type != nil {
@@ -770,8 +816,6 @@ func (g *Generator) emitCallExpr(e *parser.CallExpr) string {
 		}
 	}
 
-	callee := g.emitExpr(e.Callee)
-
 	// Constructor calls: ClassName(args) → new ClassName(args)
 	if ident, ok := e.Callee.(*parser.Ident); ok {
 		if g.classNames[ident.Name] {
@@ -782,8 +826,14 @@ func (g *Generator) emitCallExpr(e *parser.CallExpr) string {
 			}
 			return fmt.Sprintf("new %s%s(%s)", ident.Name, typeArgs, args)
 		}
+
+		// Builtin function calls
+		if code, ok := g.emitBuiltinCall(ident.Name, e.Args, e.TypeArgs); ok {
+			return code
+		}
 	}
 
+	callee := g.emitExpr(e.Callee)
 	args := g.formatCallArgs(e)
 	return fmt.Sprintf("%s(%s)", callee, args)
 }
@@ -1120,6 +1170,226 @@ func (g *Generator) mapGenericType(t *parser.GenericType) string {
 		}
 		return fmt.Sprintf("%s<%s>", base, strings.Join(args, ", "))
 	}
+}
+
+// --- Builtin functions -------------------------------------------------------
+
+// emitBuiltinCall maps a Zinc global builtin function to its C# equivalent.
+// Returns the C# code and true if the name is a known builtin, or ("", false).
+func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []string) (string, bool) {
+	argStrs := make([]string, len(args))
+	for i, a := range args {
+		argStrs[i] = g.emitExpr(a)
+	}
+	argStr := strings.Join(argStrs, ", ")
+
+	switch name {
+	// I/O
+	case "readLine":
+		return "Console.ReadLine()", true
+
+	// Conversions
+	case "toString":
+		return fmt.Sprintf("(%s).ToString()", argStrs[0]), true
+	case "toInt", "parseInt":
+		return fmt.Sprintf("int.Parse(%s)", argStrs[0]), true
+	case "toFloat", "parseFloat":
+		return fmt.Sprintf("double.Parse(%s)", argStrs[0]), true
+	case "toBool":
+		return fmt.Sprintf("bool.Parse(%s)", argStrs[0]), true
+
+	// Inspect
+	case "typeOf":
+		return fmt.Sprintf("(%s).GetType().Name", argStrs[0]), true
+
+	// Math
+	case "abs":
+		return fmt.Sprintf("Math.Abs(%s)", argStrs[0]), true
+	case "sqrt":
+		return fmt.Sprintf("Math.Sqrt(%s)", argStrs[0]), true
+	case "pow":
+		return fmt.Sprintf("Math.Pow(%s)", argStr), true
+	case "floor":
+		return fmt.Sprintf("Math.Floor(%s)", argStrs[0]), true
+	case "ceil":
+		return fmt.Sprintf("Math.Ceiling(%s)", argStrs[0]), true
+	case "round":
+		return fmt.Sprintf("Math.Round(%s)", argStrs[0]), true
+	case "max":
+		return fmt.Sprintf("Math.Max(%s)", argStr), true
+	case "min":
+		return fmt.Sprintf("Math.Min(%s)", argStr), true
+
+	// Control
+	case "panic":
+		return fmt.Sprintf("throw new Exception(%s)", argStrs[0]), true
+	case "exit":
+		return fmt.Sprintf("Environment.Exit(%s)", argStrs[0]), true
+
+	// Environment
+	case "getEnv":
+		return fmt.Sprintf("Environment.GetEnvironmentVariable(%s)", argStrs[0]), true
+	case "setEnv":
+		return fmt.Sprintf("Environment.SetEnvironmentVariable(%s)", argStr), true
+
+	// Time
+	case "now":
+		return "DateTime.Now.ToString()", true
+	case "sleep":
+		g.neededUsings["System.Threading"] = true
+		return fmt.Sprintf("Thread.Sleep(%s)", argStrs[0]), true
+
+	// String formatting
+	case "sprintf":
+		return fmt.Sprintf("string.Format(%s)", argStr), true
+
+	// JSON
+	case "jsonEncode":
+		g.neededUsings["System.Text.Json"] = true
+		return fmt.Sprintf("JsonSerializer.Serialize(%s)", argStrs[0]), true
+	case "jsonDecode":
+		g.neededUsings["System.Text.Json"] = true
+		if len(typeArgs) > 0 {
+			csType := g.mapSimpleType(typeArgs[0])
+			return fmt.Sprintf("JsonSerializer.Deserialize<%s>(%s)", csType, argStrs[0]), true
+		}
+		return fmt.Sprintf("JsonSerializer.Deserialize<object>(%s)", argStrs[0]), true
+
+	// File I/O
+	case "readFile":
+		g.neededUsings["System.IO"] = true
+		return fmt.Sprintf("File.ReadAllText(%s)", argStrs[0]), true
+	case "writeFile":
+		g.neededUsings["System.IO"] = true
+		return fmt.Sprintf("File.WriteAllText(%s)", argStr), true
+
+	// HTTP
+	case "httpGet":
+		g.neededUsings["System.Net.Http"] = true
+		return fmt.Sprintf("new HttpClient().GetStringAsync(%s).Result", argStrs[0]), true
+	}
+
+	return "", false
+}
+
+// callIsFailable checks whether a call expression calls a failable function.
+func (g *Generator) callIsFailable(call *parser.CallExpr) bool {
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		return g.canThrowFns[ident.Name] || failableBuiltins[ident.Name]
+	}
+	return false
+}
+
+// isVoidFailable checks whether a call expression calls a void failable function.
+func (g *Generator) isVoidFailable(call *parser.CallExpr) bool {
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		return g.voidCanThrowFns[ident.Name] || voidFailableBuiltins[ident.Name]
+	}
+	return false
+}
+
+// bodyIsFailable checks if a block body contains any failable calls.
+func (g *Generator) bodyIsFailable(body *parser.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if g.stmtIsFailable(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Generator) stmtIsFailable(s parser.Stmt) bool {
+	switch st := s.(type) {
+	case *parser.ExprStmt:
+		return g.exprIsFailable(st.Expr)
+	case *parser.VarStmt:
+		if st.Value != nil {
+			return g.exprIsFailable(st.Value)
+		}
+	case *parser.AssignStmt:
+		return g.exprIsFailable(st.Value)
+	case *parser.BlockStmt:
+		return g.bodyIsFailable(st)
+	case *parser.IfStmt:
+		if g.bodyIsFailable(st.Then) {
+			return true
+		}
+		if st.ElseStmt != nil {
+			if b, ok := st.ElseStmt.(*parser.BlockStmt); ok {
+				return g.bodyIsFailable(b)
+			}
+			if i, ok := st.ElseStmt.(*parser.IfStmt); ok {
+				return g.stmtIsFailable(i)
+			}
+		}
+	case *parser.ForStmt:
+		return g.bodyIsFailable(st.Body)
+	case *parser.WhileStmt:
+		return g.bodyIsFailable(st.Body)
+	case *parser.MatchStmt:
+		for _, c := range st.Cases {
+			if g.bodyIsFailable(c.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (g *Generator) exprIsFailable(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	return g.callIsFailable(call)
+}
+
+// handlerHasHalt checks if the last statement in a handler is return/exit/panic.
+func (g *Generator) handlerHasHalt(body *parser.BlockStmt) bool {
+	if body == nil || len(body.Stmts) == 0 {
+		return false
+	}
+	last := body.Stmts[len(body.Stmts)-1]
+	if _, ok := last.(*parser.ReturnStmt); ok {
+		return true
+	}
+	if es, ok := last.(*parser.ExprStmt); ok {
+		if call, ok := es.Expr.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				return ident.Name == "exit" || ident.Name == "panic"
+			}
+		}
+	}
+	return false
+}
+
+// emitFailableExprStmt emits a standalone failable call with an or-handler as ExprStmt.
+func (g *Generator) emitFailableExprStmt(call *parser.CallExpr, handler *parser.OrHandler) {
+	val := g.emitExpr(call)
+	g.writeln("try")
+	g.writeln("{")
+	g.push()
+	g.writeln(fmt.Sprintf("%s;", val))
+	g.pop()
+	g.writeln("}")
+	g.writeln("catch (Exception _ex)")
+	g.writeln("{")
+	g.push()
+	g.writeln("var err = _ex.Message;")
+	if handler.Body != nil && len(handler.Body.Stmts) > 0 {
+		g.emitBlock(handler.Body)
+	}
+	if !g.handlerHasHalt(handler.Body) {
+		g.writeln("throw;")
+	}
+	g.pop()
+	g.writeln("}")
 }
 
 // --- Helpers -----------------------------------------------------------------

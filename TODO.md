@@ -132,6 +132,16 @@ These unlock real-world enterprise use cases and depend on P1 + P2:
 
 ---
 
+## Completed (v0.6.0)
+- All 28 global builtin functions in C# backend (toString, toInt, abs, sqrt, pow, floor, ceil, round, max, min, readFile, writeFile, httpGet, jsonEncode, jsonDecode, getEnv, setEnv, now, sleep, sprintf, typeOf, readLine, toBool, parseFloat, parseInt, toFloat, panic, exit)
+- Failable builtin infrastructure for C# (failableBuiltins map, callIsFailable, bodyIsFailable, fixed-point transitive marking)
+- `or { }` error handling for C# failable builtins (readFile, writeFile, httpGet) — try/catch with `err` binding
+- `handlerHasHalt` — skip auto-propagation when handler ends with exit/panic
+- Standalone failable ExprStmt support (`writeFile(...) or { }` as statement)
+- 67 unit tests + 27 E2E tests for C# backend
+- `examples/builtins.zn` — new example covering all builtin categories
+- Updated docs: builtins.md (C# column), language-reference.md (Built-in Functions section, C# type table), getting-started.md
+
 ## Completed (v0.5.0)
 - C# AOT backend with 37 unit + 17 E2E tests
 - LINQ collection methods (22 methods)

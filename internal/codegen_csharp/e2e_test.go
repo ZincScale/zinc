@@ -299,3 +299,78 @@ main() {
 `)
 	assertOutput(t, out, "16\n25\n36")
 }
+
+// --- Builtin Functions -------------------------------------------------------
+
+func TestE2EBuiltinToString(t *testing.T) {
+	out := e2eRun(t, `main() { var s = toString(42); print(s) }`)
+	assertOutput(t, out, "42")
+}
+
+func TestE2EBuiltinToInt(t *testing.T) {
+	out := e2eRun(t, `main() { var n = toInt("99"); print(n + 1) }`)
+	assertOutput(t, out, "100")
+}
+
+func TestE2EBuiltinAbs(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    var x = 0 - 7
+    print(abs(x))
+}
+`)
+	assertOutput(t, out, "7")
+}
+
+func TestE2EBuiltinSqrt(t *testing.T) {
+	out := e2eRun(t, `main() { print(sqrt(16.0)) }`)
+	assertOutput(t, out, "4")
+}
+
+func TestE2EBuiltinMaxMin(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    print(max(3, 7))
+    print(min(3, 7))
+}
+`)
+	assertOutput(t, out, "7\n3")
+}
+
+func TestE2EBuiltinTypeOf(t *testing.T) {
+	out := e2eRun(t, `main() { print(typeOf(42)) }`)
+	assertOutput(t, out, "Int32")
+}
+
+func TestE2EBuiltinGetEnv(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    setEnv("ZINC_TEST_VAR", "hello_zinc")
+    var v = getEnv("ZINC_TEST_VAR")
+    print(v)
+}
+`)
+	assertOutput(t, out, "hello_zinc")
+}
+
+func TestE2EBuiltinReadWriteFile(t *testing.T) {
+	out := e2eRun(t, `
+main() {
+    writeFile("_test_out.txt", "zinc_data") or { print(err) }
+    var content = readFile("_test_out.txt") or { print(err) }
+    print(content)
+}
+`)
+	assertOutput(t, out, "zinc_data")
+}
+
+func TestE2EBuiltinJsonEncode(t *testing.T) {
+	out := e2eRun(t, `main() { var j = jsonEncode(42); print(j) }`)
+	assertOutput(t, out, "42")
+}
+
+func TestE2EBuiltinSprintf(t *testing.T) {
+	src := "main() {\n    var pattern = `{0} is {1}`\n    var s = sprintf(pattern, \"age\", 30)\n    print(s)\n}"
+	out := e2eRun(t, src)
+	assertOutput(t, out, "age is 30")
+}

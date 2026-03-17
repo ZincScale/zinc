@@ -238,7 +238,8 @@ main() {
 Int riskyCall() { return 42 }
 `)
 	assertContains(t, out, "try")
-	assertContains(t, out, "catch (Exception)")
+	assertContains(t, out, "catch (Exception _ex)")
+	assertContains(t, out, "var err = _ex.Message;")
 	assertContains(t, out, "throw;")
 }
 
@@ -552,4 +553,178 @@ main() {
 }
 `)
 	assertContains(t, out, "using System;")
+}
+
+// === Builtin Functions ===
+
+func TestBuiltinToString(t *testing.T) {
+	out := transpile(`main() { var s = toString(42); print(s) }`)
+	assertContains(t, out, "(42).ToString()")
+}
+
+func TestBuiltinToInt(t *testing.T) {
+	out := transpile(`main() { var n = toInt("42"); print(n) }`)
+	assertContains(t, out, `int.Parse("42")`)
+}
+
+func TestBuiltinParseInt(t *testing.T) {
+	out := transpile(`main() { var n = parseInt("42"); print(n) }`)
+	assertContains(t, out, `int.Parse("42")`)
+}
+
+func TestBuiltinToFloat(t *testing.T) {
+	out := transpile(`main() { var f = toFloat("3.14"); print(f) }`)
+	assertContains(t, out, `double.Parse("3.14")`)
+}
+
+func TestBuiltinParseFloat(t *testing.T) {
+	out := transpile(`main() { var f = parseFloat("3.14"); print(f) }`)
+	assertContains(t, out, `double.Parse("3.14")`)
+}
+
+func TestBuiltinToBool(t *testing.T) {
+	out := transpile(`main() { var b = toBool("true"); print(b) }`)
+	assertContains(t, out, `bool.Parse("true")`)
+}
+
+func TestBuiltinTypeOf(t *testing.T) {
+	out := transpile(`main() { var t = typeOf(42); print(t) }`)
+	assertContains(t, out, "(42).GetType().Name")
+}
+
+func TestBuiltinAbs(t *testing.T) {
+	out := transpile(`main() { var a = abs(-5); print(a) }`)
+	assertContains(t, out, "Math.Abs(")
+}
+
+func TestBuiltinSqrt(t *testing.T) {
+	out := transpile(`main() { var s = sqrt(16.0); print(s) }`)
+	assertContains(t, out, "Math.Sqrt(16.0)")
+}
+
+func TestBuiltinPow(t *testing.T) {
+	out := transpile(`main() { var p = pow(2.0, 3.0); print(p) }`)
+	assertContains(t, out, "Math.Pow(2.0, 3.0)")
+}
+
+func TestBuiltinFloor(t *testing.T) {
+	out := transpile(`main() { var f = floor(3.7); print(f) }`)
+	assertContains(t, out, "Math.Floor(3.7)")
+}
+
+func TestBuiltinCeil(t *testing.T) {
+	out := transpile(`main() { var c = ceil(3.2); print(c) }`)
+	assertContains(t, out, "Math.Ceiling(3.2)")
+}
+
+func TestBuiltinRound(t *testing.T) {
+	out := transpile(`main() { var r = round(3.5); print(r) }`)
+	assertContains(t, out, "Math.Round(3.5)")
+}
+
+func TestBuiltinMaxMin(t *testing.T) {
+	out := transpile(`main() { var a = max(3, 5); var b = min(3, 5); print(a) }`)
+	assertContains(t, out, "Math.Max(3, 5)")
+	assertContains(t, out, "Math.Min(3, 5)")
+}
+
+func TestBuiltinPanic(t *testing.T) {
+	out := transpile(`main() { panic("boom") }`)
+	assertContains(t, out, `throw new Exception("boom")`)
+}
+
+func TestBuiltinExit(t *testing.T) {
+	out := transpile(`main() { exit(1) }`)
+	assertContains(t, out, "Environment.Exit(1)")
+}
+
+func TestBuiltinGetEnv(t *testing.T) {
+	out := transpile(`main() { var h = getEnv("HOME"); print(h) }`)
+	assertContains(t, out, `Environment.GetEnvironmentVariable("HOME")`)
+}
+
+func TestBuiltinSetEnv(t *testing.T) {
+	out := transpile(`main() { setEnv("FOO", "bar") }`)
+	assertContains(t, out, `Environment.SetEnvironmentVariable("FOO", "bar")`)
+}
+
+func TestBuiltinNow(t *testing.T) {
+	out := transpile(`main() { var t = now(); print(t) }`)
+	assertContains(t, out, "DateTime.Now.ToString()")
+}
+
+func TestBuiltinSleep(t *testing.T) {
+	out := transpile(`main() { sleep(100) }`)
+	assertContains(t, out, "Thread.Sleep(100)")
+	assertContains(t, out, "using System.Threading;")
+}
+
+func TestBuiltinSprintf(t *testing.T) {
+	src := "main() { var s = sprintf(`{0} is {1}`, \"age\", 30); print(s) }"
+	out := transpile(src)
+	assertContains(t, out, "string.Format(")
+}
+
+func TestBuiltinJsonEncode(t *testing.T) {
+	out := transpile(`main() { var j = jsonEncode(42); print(j) }`)
+	assertContains(t, out, "JsonSerializer.Serialize(42)")
+	assertContains(t, out, "using System.Text.Json;")
+}
+
+func TestBuiltinReadFile(t *testing.T) {
+	out := transpile(`main() { var c = readFile("test.txt") or { print(err) }; print(c) }`)
+	assertContains(t, out, `File.ReadAllText("test.txt")`)
+	assertContains(t, out, "using System.IO;")
+}
+
+func TestBuiltinWriteFile(t *testing.T) {
+	out := transpile(`main() { writeFile("test.txt", "hello") or { print(err) } }`)
+	assertContains(t, out, `File.WriteAllText("test.txt", "hello")`)
+}
+
+func TestBuiltinHttpGet(t *testing.T) {
+	out := transpile(`main() { var r = httpGet("http://example.com") or { print(err) }; print(r) }`)
+	assertContains(t, out, `new HttpClient().GetStringAsync("http://example.com").Result`)
+	assertContains(t, out, "using System.Net.Http;")
+}
+
+func TestBuiltinReadLine(t *testing.T) {
+	out := transpile(`main() { var s = readLine(); print(s) }`)
+	assertContains(t, out, "Console.ReadLine()")
+}
+
+func TestFailableWithOrHandler(t *testing.T) {
+	out := transpile(`
+main() {
+    var content = readFile("data.txt") or { print(err) }
+    print(content)
+}
+`)
+	assertContains(t, out, "try")
+	assertContains(t, out, "catch (Exception _ex)")
+	assertContains(t, out, "var err = _ex.Message;")
+	assertContains(t, out, "throw;")
+}
+
+func TestFailableExprStmtWithOrHandler(t *testing.T) {
+	out := transpile(`
+main() {
+    writeFile("out.txt", "data") or { print(err) }
+}
+`)
+	assertContains(t, out, "try")
+	assertContains(t, out, `File.WriteAllText("out.txt", "data")`)
+	assertContains(t, out, "catch (Exception _ex)")
+	assertContains(t, out, "var err = _ex.Message;")
+}
+
+func TestHandlerHaltSuppressesThrow(t *testing.T) {
+	out := transpile(`
+main() {
+    var content = readFile("data.txt") or { exit(1) }
+    print(content)
+}
+`)
+	assertContains(t, out, "Environment.Exit(1)")
+	assertNotContains(t, out, "throw;")
 }

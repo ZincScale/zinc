@@ -195,6 +195,7 @@ The [`examples/`](../examples/) directory contains working Zinc programs:
 | [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance, polymorphism |
 | [`closures.zn`](../examples/closures.zn) | Lambdas, closures, higher-order functions |
 | [`enums.zn`](../examples/enums.zn) | Enums + match |
+| [`builtins.zn`](../examples/builtins.zn) | Built-in functions — toString, abs, sqrt, jsonEncode, readFile, getEnv |
 | [`errors.zn`](../examples/errors.zn) | Error handling with `or` |
 | [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
 | [`collections.zn`](../examples/collections.zn) | Lists, maps, slicing |

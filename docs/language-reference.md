@@ -1091,6 +1091,90 @@ main() {
 }
 ```
 
+## Built-in Functions
+
+Zinc provides global built-in functions that work on both backends. The transpiler automatically adds the required imports.
+
+### Type Conversions
+
+```zinc
+var s = toString(42)           // "42"
+var n = toInt("42")            // 42 (alias: parseInt)
+var f = toFloat("3.14")       // 3.14 (alias: parseFloat)
+var b = toBool("true")        // true
+var t = typeOf(42)             // "Int32" (C#) or "int" (Go)
+```
+
+### Math
+
+```zinc
+var a = abs(-7)                // 7
+var s = sqrt(16.0)             // 4
+var p = pow(2.0, 10.0)         // 1024
+var f = floor(3.7)             // 3
+var c = ceil(3.2)              // 4
+var r = round(3.5)             // 4
+var hi = max(3, 7)             // 7
+var lo = min(3, 7)             // 3
+```
+
+### I/O and Files
+
+```zinc
+var line = readLine()                          // read from stdin
+
+var content = readFile("data.txt") or {        // failable
+    print("Error: {err}")
+    exit(1)
+}
+
+writeFile("out.txt", "hello") or {             // failable
+    print("Write failed: {err}")
+}
+```
+
+### JSON
+
+```zinc
+var json = jsonEncode(42)                      // "42"
+var val = jsonDecode<Int>(json)                // 42
+```
+
+### HTTP
+
+```zinc
+var body = httpGet("https://example.com") or { // failable
+    print("Request failed: {err}")
+    exit(1)
+}
+```
+
+### Environment & Time
+
+```zinc
+setEnv("APP_MODE", "production")
+var mode = getEnv("APP_MODE")                  // "production"
+var timestamp = now()                           // current time as string
+sleep(1000)                                     // pause 1 second
+```
+
+### String Formatting
+
+```zinc
+// Go backend: uses %s/%d format verbs
+// C# backend: uses {0}/{1} placeholders
+var msg = sprintf("{0} is {1}", "age", 30)     // "age is 30"
+```
+
+### Control
+
+```zinc
+panic("something went wrong")                  // throw/panic — halts execution
+exit(1)                                         // exit with code
+```
+
+> See [builtins.md](builtins.md) for the complete reference with backend-specific output.
+
 ## Error Handling
 
 Zinc uses errors as values with auto-propagation — no try/catch needed:
@@ -1159,14 +1243,16 @@ main() {
 
 ## Type System
 
-| Zinc     | Go          |
-|-------------|-------------|
-| `Int`       | `int`       |
-| `Float`     | `float64`   |
-| `String`    | `string`    |
-| `Bool`      | `bool`      |
-| `Any`       | `interface{}`|
-| `String?`   | `*string`   |
-| `List<T>`   | `[]T`       |
-| `Map<K,V>`  | `map[K]V`   |
-| `Chan<T>`   | `chan T`    |
+| Zinc     | Go          | C#            |
+|-------------|-------------|---------------|
+| `Int`       | `int`       | `int`         |
+| `Float`     | `float64`   | `double`      |
+| `String`    | `string`    | `string`      |
+| `Bool`      | `bool`      | `bool`        |
+| `Byte`      | `byte`      | `byte`        |
+| `Any`       | `interface{}`| `object`     |
+| `Error`     | `error`     | `Exception`   |
+| `String?`   | `*string`   | `string?`     |
+| `List<T>`   | `[]T`       | `List<T>`     |
+| `Map<K,V>`  | `map[K]V`   | `Dictionary<K,V>` |
+| `Chan<T>`   | `chan T`    | `Channel<T>`  |
