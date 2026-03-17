@@ -164,6 +164,15 @@ func (c *Checker) prePass(progs []*parser.Program) {
 					Methods:    make(map[string]*FnSig),
 				}
 				c.classes[d.Name] = ct
+			case *parser.DataClassDecl:
+				ct := &ClassType{
+					Name:       d.Name,
+					TypeParams: d.TypeParams,
+					Parents:    d.Parents,
+					Fields:     make(map[string]Type),
+					Methods:    make(map[string]*FnSig),
+				}
+				c.classes[d.Name] = ct
 			case *parser.InterfaceDecl:
 				it := &InterfaceType{
 					Name:    d.Name,
@@ -231,6 +240,50 @@ func (c *Checker) prePass(progs []*parser.Program) {
 				}
 				c.currentTypeParams = saved
 
+			case *parser.DataClassDecl:
+				ct := c.classes[d.Name]
+				saved := c.currentTypeParams
+				c.currentTypeParams = make(map[string]bool)
+				for _, tp := range d.TypeParams {
+					c.currentTypeParams[tp] = true
+				}
+				// Params become fields
+				paramTypes := make([]Type, len(d.Params))
+				paramNames := make([]string, len(d.Params))
+				hasDefaults := make([]bool, len(d.Params))
+				for i, f := range d.Params {
+					resolved := c.resolveTypeExpr(f.Type)
+					ct.Fields[f.Name] = resolved
+					paramTypes[i] = resolved
+					paramNames[i] = f.Name
+				}
+				ct.Ctor = &FnSig{
+					Params:     paramTypes,
+					ParamNames: paramNames,
+					HasDefault: hasDefaults,
+					Return:     ct,
+				}
+				// Methods
+				for _, m := range d.Methods {
+					params := make([]Type, len(m.Params))
+					for i, p := range m.Params {
+						params[i] = c.resolveTypeExpr(p.Type)
+					}
+					ret := TypeVoid
+					if m.ReturnType != nil {
+						ret = c.resolveTypeExpr(m.ReturnType)
+					}
+					ct.Methods[m.Name] = &FnSig{
+						Params:     params,
+						ParamNames: paramNamesFrom(m.Params),
+						HasDefault: hasDefaultsFrom(m.Params),
+						Return:     ret,
+						CanThrow:   m.CanThrow,
+						IsVariadic: isVariadicFrom(m.Params),
+					}
+				}
+				c.currentTypeParams = saved
+
 			case *parser.InterfaceDecl:
 				it := c.interfaces[d.Name]
 				for _, m := range d.Methods {
@@ -283,6 +336,8 @@ func (c *Checker) checkProgram(prog *parser.Program) {
 			c.checkFnDecl(d)
 		case *parser.ClassDecl:
 			c.checkClassDecl(d)
+		case *parser.DataClassDecl:
+			c.checkDataClassDecl(d)
 		case *parser.EnumDecl:
 			c.checkEnumDecl(d)
 		case *parser.ConstDecl:
@@ -387,6 +442,58 @@ func (c *Checker) checkClassDecl(d *parser.ClassDecl) {
 		c.pushScope()
 		c.scope.define("this", ct)
 		// Field access via 'this' — define fields in method scope too
+		for fname, ftype := range ct.Fields {
+			c.scope.define(fname, ftype)
+		}
+		for _, p := range m.Params {
+			c.scope.define(p.Name, c.resolveTypeExpr(p.Type))
+		}
+		c.checkBlock(m.Body)
+		c.popScope()
+		c.currentReturnType = savedReturn
+	}
+
+	c.currentClass = savedClass
+	c.currentTypeParams = saved
+}
+
+func (c *Checker) checkDataClassDecl(d *parser.DataClassDecl) {
+	c.currentLine = d.Line
+	ct := c.classes[d.Name]
+	if ct == nil {
+		return
+	}
+
+	// Check parents exist
+	for _, parent := range d.Parents {
+		if _, ok := c.classes[parent]; ok {
+			continue
+		}
+		if _, ok := c.interfaces[parent]; ok {
+			continue
+		}
+		c.errorf(c.currentLine, 0, "undefined class/interface %q (used as parent of %s)", parent, d.Name)
+	}
+
+	// Check methods
+	saved := c.currentTypeParams
+	c.currentTypeParams = make(map[string]bool)
+	for _, tp := range d.TypeParams {
+		c.currentTypeParams[tp] = true
+	}
+	savedClass := c.currentClass
+	c.currentClass = ct
+
+	for _, m := range d.Methods {
+		sig := ct.Methods[m.Name]
+		retType := TypeVoid
+		if sig != nil {
+			retType = sig.Return
+		}
+		savedReturn := c.currentReturnType
+		c.currentReturnType = retType
+		c.pushScope()
+		c.scope.define("this", ct)
 		for fname, ftype := range ct.Fields {
 			c.scope.define(fname, ftype)
 		}

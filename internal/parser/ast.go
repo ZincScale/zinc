@@ -125,6 +125,19 @@ type FnDecl struct {
 func (f *FnDecl) nodeTag()      {}
 func (f *FnDecl) topLevelTag() {}
 
+// DataClassDecl: data User(pub String name, pub Int age) { optional methods }
+type DataClassDecl struct {
+	Line       int // source line number (1-indexed)
+	Name       string
+	TypeParams []string     // generic type parameter names
+	Parents    []string     // base class + interfaces
+	Params     []*FieldDecl // constructor params (become fields)
+	Methods    []*MethodDecl
+}
+
+func (d *DataClassDecl) nodeTag()      {}
+func (d *DataClassDecl) topLevelTag() {}
+
 // EnumDecl: enum Color { Red, Green, Blue }
 type EnumDecl struct {
 	Line     int // source line number (1-indexed)

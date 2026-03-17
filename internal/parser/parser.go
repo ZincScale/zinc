@@ -243,9 +243,20 @@ func (p *Parser) parseExprPrec(minPrec precedence) Expr {
 		case lexer.TOKEN_DOT:
 			field := p.expect(lexer.TOKEN_IDENT).Literal
 			sel := &SelectorExpr{Object: left, Field: field}
-			// Check for call: obj.method(...)
+			// Check for call: obj.method(...) or obj.method { trailing lambda }
 			if p.check(lexer.TOKEN_LPAREN) {
 				left = p.finishCall(sel)
+				// Check for trailing lambda after closing paren: obj.method(args) { ... }
+				if p.check(lexer.TOKEN_LBRACE) && p.isTrailingLambda() {
+					lambda := p.parseTrailingLambda()
+					if call, ok := left.(*CallExpr); ok {
+						call.Args = append(call.Args, lambda)
+					}
+				}
+			} else if p.check(lexer.TOKEN_LBRACE) && p.isTrailingLambda() {
+				// obj.method { trailing lambda } — no parens, lambda is only arg
+				lambda := p.parseTrailingLambda()
+				left = &CallExpr{Callee: sel, Args: []Expr{lambda}}
 			} else {
 				left = sel
 			}
@@ -484,6 +495,143 @@ func (p *Parser) parseLambdaParam() *ParamDecl {
 	// Untyped param: just the name (type will be inferred during codegen)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	return &ParamDecl{Name: name}
+}
+
+// isTrailingLambda returns true if the current '{' starts a trailing lambda,
+// not a map literal or block. A trailing lambda is:
+//   { expr }           — implicit `it` parameter
+//   { a, b -> expr }   — explicit parameters
+// We distinguish from map literals by checking if the content has ':' (map) vs '->' (lambda).
+func (p *Parser) isTrailingLambda() bool {
+	if !p.check(lexer.TOKEN_LBRACE) {
+		return false
+	}
+	// Scan ahead inside the { } to check for -> (lambda) or : (map literal)
+	depth := 0
+	for i := 0; ; i++ {
+		tok := p.peekAt(i)
+		if tok.Type == lexer.TOKEN_EOF {
+			return false
+		}
+		if tok.Type == lexer.TOKEN_LBRACE {
+			depth++
+		} else if tok.Type == lexer.TOKEN_RBRACE {
+			depth--
+			if depth == 0 {
+				// Reached end of block without finding ':' or '->'
+				// This is a trailing lambda with implicit `it`
+				return true
+			}
+		} else if depth == 1 {
+			if tok.Type == lexer.TOKEN_COLON {
+				// Looks like a map literal: { "key": value }
+				return false
+			}
+			if tok.Type == lexer.TOKEN_ARROW {
+				// Explicit params: { a, b -> expr }
+				return true
+			}
+		}
+	}
+}
+
+// parseTrailingLambda parses { expr } or { a, b -> expr } as a LambdaExpr.
+func (p *Parser) parseTrailingLambda() *LambdaExpr {
+	p.expect(lexer.TOKEN_LBRACE)
+
+	// Check for explicit params: ident [, ident]* ->
+	if p.hasTrailingLambdaParams() {
+		var params []*ParamDecl
+		params = append(params, &ParamDecl{Name: p.expect(lexer.TOKEN_IDENT).Literal})
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			params = append(params, &ParamDecl{Name: p.expect(lexer.TOKEN_IDENT).Literal})
+		}
+		p.expect(lexer.TOKEN_ARROW)
+
+		// Parse body — single expression or multiple statements
+		if p.isTrailingLambdaMultiStmt() {
+			body := &BlockStmt{}
+			for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+				body.Stmts = append(body.Stmts, p.parseStmt())
+				p.skipSemis()
+			}
+			p.expect(lexer.TOKEN_RBRACE)
+			return &LambdaExpr{Params: params, Body: body}
+		}
+		expr := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACE)
+		return &LambdaExpr{Params: params, Expr: expr}
+	}
+
+	// Implicit `it` parameter
+	// Parse body — single expression or multiple statements
+	if p.isTrailingLambdaMultiStmt() {
+		body := &BlockStmt{}
+		for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+			body.Stmts = append(body.Stmts, p.parseStmt())
+			p.skipSemis()
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+		return &LambdaExpr{Params: []*ParamDecl{{Name: "it"}}, Body: body}
+	}
+	expr := p.parseExpr()
+	p.expect(lexer.TOKEN_RBRACE)
+	return &LambdaExpr{Params: []*ParamDecl{{Name: "it"}}, Expr: expr}
+}
+
+// hasTrailingLambdaParams checks if the trailing lambda starts with: ident [, ident]* ->
+func (p *Parser) hasTrailingLambdaParams() bool {
+	i := 0
+	for {
+		tok := p.peekAt(i)
+		if tok.Type != lexer.TOKEN_IDENT {
+			return false
+		}
+		// Must be lowercase (not a type name)
+		if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
+			return false
+		}
+		i++
+		next := p.peekAt(i)
+		if next.Type == lexer.TOKEN_ARROW {
+			return true
+		}
+		if next.Type == lexer.TOKEN_COMMA {
+			i++
+			continue
+		}
+		return false
+	}
+}
+
+// isTrailingLambdaMultiStmt returns true if the trailing lambda body contains
+// multiple statements (detected by looking for semicolons or statement-starting keywords).
+func (p *Parser) isTrailingLambdaMultiStmt() bool {
+	// Scan for semicolons or newline-separated statements at depth 1
+	depth := 0
+	for i := 0; ; i++ {
+		tok := p.peekAt(i)
+		if tok.Type == lexer.TOKEN_EOF {
+			return false
+		}
+		if tok.Type == lexer.TOKEN_LBRACE {
+			depth++
+		} else if tok.Type == lexer.TOKEN_RBRACE {
+			if depth == 0 {
+				return false // single expression
+			}
+			depth--
+		} else if depth == 0 {
+			// Multiple statements indicated by: var, return, if, for, while, print, semicolons
+			switch tok.Type {
+			case lexer.TOKEN_SEMICOLON:
+				return true
+			case lexer.TOKEN_VAR, lexer.TOKEN_RETURN, lexer.TOKEN_IF, lexer.TOKEN_FOR, lexer.TOKEN_WHILE, lexer.TOKEN_PRINT:
+				return true
+			}
+		}
+	}
 }
 
 func (p *Parser) parsePrimary() Expr {
@@ -1493,6 +1641,76 @@ func (p *Parser) parseEnumDecl() *EnumDecl {
 	return &EnumDecl{Line: line, Name: name, Variants: variants}
 }
 
+// parseDataClassDecl parses: data Name[<T>](params) [: Parents] [{ methods }]
+func (p *Parser) parseDataClassDecl() *DataClassDecl {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_DATA)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	typeParams := p.parseTypeParams()
+
+	// Parse constructor params — these become fields
+	p.expect(lexer.TOKEN_LPAREN)
+	var params []*FieldDecl
+	if !p.check(lexer.TOKEN_RPAREN) {
+		params = append(params, p.parseDataClassParam())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			if p.check(lexer.TOKEN_RPAREN) {
+				break
+			}
+			params = append(params, p.parseDataClassParam())
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+
+	// Optional parents
+	var parents []string
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		}
+	}
+
+	// Optional body with methods
+	var methods []*MethodDecl
+	if p.check(lexer.TOKEN_LBRACE) {
+		p.advance()
+		p.skipSemis()
+		for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+			annots := p.parseAnnotations()
+			m := p.parseMethodDecl()
+			m.Annotations = annots
+			methods = append(methods, m)
+			p.skipSemis()
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+	}
+
+	return &DataClassDecl{
+		Line:       line,
+		Name:       name,
+		TypeParams: typeParams,
+		Parents:    parents,
+		Params:     params,
+		Methods:    methods,
+	}
+}
+
+// parseDataClassParam parses a single data class parameter: [pub] Type name
+func (p *Parser) parseDataClassParam() *FieldDecl {
+	isPub := false
+	if p.check(lexer.TOKEN_PUB) {
+		isPub = true
+		p.advance()
+	}
+	typ := p.parseType()
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	return &FieldDecl{Name: name, IsPub: isPub, Type: typ}
+}
+
 func (p *Parser) parseImportDecl() *ImportDecl {
 	p.expect(lexer.TOKEN_IMPORT)
 	path := p.expect(lexer.TOKEN_STRING_LIT).Literal
@@ -1529,6 +1747,8 @@ func (p *Parser) Parse() *Program {
 		switch tok.Type {
 		case lexer.TOKEN_IMPORT:
 			prog.Imports = append(prog.Imports, p.parseImportDecl())
+		case lexer.TOKEN_DATA:
+			prog.Decls = append(prog.Decls, p.parseDataClassDecl())
 		case lexer.TOKEN_ENUM:
 			prog.Decls = append(prog.Decls, p.parseEnumDecl())
 		case lexer.TOKEN_INTERFACE:

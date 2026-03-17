@@ -304,6 +304,14 @@ func (g *Generator) firstPass(prog *parser.Program) {
 			}
 			g.classFields[d.Name] = fields
 			g.classParents[d.Name] = d.Parents
+		case *parser.DataClassDecl:
+			g.classNames[d.Name] = true
+			var fields []*ClassFieldInfo
+			for _, f := range d.Params {
+				fields = append(fields, &ClassFieldInfo{Name: f.Name, IsPub: f.IsPub, Type: f.Type})
+			}
+			g.classFields[d.Name] = fields
+			g.classParents[d.Name] = d.Parents
 		case *parser.InterfaceDecl:
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
@@ -325,6 +333,12 @@ func (g *Generator) firstPass(prog *parser.Program) {
 				g.methodGoNames[m.Name] = goName
 			}
 		}
+		if cls, ok := decl.(*parser.DataClassDecl); ok {
+			for _, m := range cls.Methods {
+				goName := exportName(m.Name, m.IsPub)
+				g.methodGoNames[m.Name] = goName
+			}
+		}
 	}
 
 	// Collect fn and method param lists for named-arg / default resolution
@@ -335,6 +349,15 @@ func (g *Generator) firstPass(prog *parser.Program) {
 				g.fnParams[d.Name] = d.Params
 			}
 		case *parser.ClassDecl:
+			for _, m := range d.Methods {
+				if len(m.Params) > 0 {
+					if g.methodParams[d.Name] == nil {
+						g.methodParams[d.Name] = make(map[string][]*parser.ParamDecl)
+					}
+					g.methodParams[d.Name][m.Name] = m.Params
+				}
+			}
+		case *parser.DataClassDecl:
 			for _, m := range d.Methods {
 				if len(m.Params) > 0 {
 					if g.methodParams[d.Name] == nil {
@@ -361,6 +384,17 @@ func (g *Generator) firstPass(prog *parser.Program) {
 					changed = true
 				}
 			case *parser.ClassDecl:
+				for _, m := range d.Methods {
+					if !m.CanThrow && g.bodyIsFailable(m.Body) {
+						m.CanThrow = true
+						g.canThrowFns[d.Name+"."+m.Name] = true
+						if m.ReturnType == nil {
+							g.voidCanThrowFns[d.Name+"."+m.Name] = true
+						}
+						changed = true
+					}
+				}
+			case *parser.DataClassDecl:
 				for _, m := range d.Methods {
 					if !m.CanThrow && g.bodyIsFailable(m.Body) {
 						m.CanThrow = true
@@ -723,6 +757,9 @@ func (g *Generator) emitTopLevel(decl parser.TopLevelDecl) {
 	case *parser.ClassDecl:
 		g.emitLineDirective(d.Line)
 		g.emitClass(d)
+	case *parser.DataClassDecl:
+		g.emitLineDirective(d.Line)
+		g.emitDataClass(d)
 	case *parser.InterfaceDecl:
 		g.emitLineDirective(d.Line)
 		g.emitInterface(d)
@@ -905,6 +942,67 @@ func (g *Generator) emitClass(cls *parser.ClassDecl) {
 	for _, m := range cls.Methods {
 		g.emitMethod(cls.Name, cls.TypeParams, recv, m)
 	}
+	g.receiver = ""
+}
+
+func (g *Generator) emitDataClass(d *parser.DataClassDecl) {
+	typeParamStr := ""
+	if len(d.TypeParams) > 0 {
+		constraints := make([]string, len(d.TypeParams))
+		for i, tp := range d.TypeParams {
+			constraints[i] = tp + " any"
+		}
+		typeParamStr = "[" + strings.Join(constraints, ", ") + "]"
+	}
+
+	// Struct definition
+	g.writeln(fmt.Sprintf("type %s%s struct {", d.Name, typeParamStr))
+	g.indent++
+	for _, f := range d.Params {
+		fname := exportName(f.Name, f.IsPub)
+		ftype := g.emitType(f.Type)
+		g.writeln(fmt.Sprintf("%s %s", fname, ftype))
+	}
+	g.indent--
+	g.writeln("}")
+	g.write("\n")
+
+	// Constructor function
+	recv := strings.ToLower(d.Name[:1])
+	var paramParts, bodyParts []string
+	for _, f := range d.Params {
+		fname := f.Name
+		ftype := g.emitType(f.Type)
+		paramParts = append(paramParts, fname+" "+ftype)
+		bodyParts = append(bodyParts, fmt.Sprintf("%s: %s", exportName(f.Name, f.IsPub), fname))
+	}
+	g.writeln(fmt.Sprintf("func New%s%s(%s) %s%s {", d.Name, typeParamStr, strings.Join(paramParts, ", "), d.Name, typeParamStr))
+	g.indent++
+	g.writeln(fmt.Sprintf("return %s%s{%s}", d.Name, typeParamStr, strings.Join(bodyParts, ", ")))
+	g.indent--
+	g.writeln("}")
+	g.write("\n")
+
+	// ToString method
+	g.writeln(fmt.Sprintf("func (%s %s%s) String() string {", recv, d.Name, typeParamStr))
+	g.indent++
+	g.neededImports["fmt"] = true
+	var fmtParts []string
+	var fmtArgs []string
+	for _, f := range d.Params {
+		fmtParts = append(fmtParts, f.Name+": %v")
+		fmtArgs = append(fmtArgs, recv+"."+exportName(f.Name, f.IsPub))
+	}
+	g.writeln(fmt.Sprintf("return fmt.Sprintf(\"%s(%s)\", %s)", d.Name, strings.Join(fmtParts, ", "), strings.Join(fmtArgs, ", ")))
+	g.indent--
+	g.writeln("}")
+
+	// Methods
+	for _, m := range d.Methods {
+		g.write("\n")
+		g.emitMethod(d.Name, d.TypeParams, recv, m)
+	}
+
 	g.receiver = ""
 }
 

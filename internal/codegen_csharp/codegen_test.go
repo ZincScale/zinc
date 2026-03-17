@@ -947,3 +947,138 @@ main() { print("ok") }
 	assertContains(t, out, `[Obsolete("use newMethod instead")]`)
 	assertContains(t, out, "string OldMethod()")
 }
+
+// === Trailing Lambdas + it ===
+
+func TestTrailingLambda_ImplicitIt(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3, 4, 5]
+    var big = nums.Where { it > 3 }
+    print(big)
+}
+`)
+	assertContains(t, out, "nums.Where(it => (it > 3))")
+}
+
+func TestTrailingLambda_Select(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var doubled = nums.Select { it * 2 }
+    print(doubled)
+}
+`)
+	assertContains(t, out, "nums.Select(it => (it * 2))")
+}
+
+func TestTrailingLambda_Chain(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [5, 3, 8, 1, 9]
+    var result = nums.Where { it > 3 }.Select { it * 2 }.OrderBy { it }
+    print(result)
+}
+`)
+	assertContains(t, out, ".Where(it => (it > 3))")
+	assertContains(t, out, ".Select(it => (it * 2))")
+	assertContains(t, out, ".OrderBy(it => it)")
+}
+
+func TestTrailingLambda_WithArgs(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3, 4, 5]
+    var sum = nums.Aggregate(0) { acc, x -> acc + x }
+    print(sum)
+}
+`)
+	assertContains(t, out, "nums.Aggregate(0, (acc, x) => (acc + x))")
+}
+
+func TestTrailingLambda_ExplicitParams(t *testing.T) {
+	out := transpile(`
+main() {
+    var nums = [1, 2, 3]
+    var sum = nums.Aggregate(0) { a, b -> a + b }
+    print(sum)
+}
+`)
+	assertContains(t, out, "(a, b) => (a + b)")
+}
+
+func TestTrailingLambda_FieldAccess(t *testing.T) {
+	out := transpile(`
+User {
+    pub String name
+    pub Int age
+    new(String name, Int age) { this.name = name; this.age = age }
+}
+main() {
+    var users = [User("Alice", 30), User("Bob", 25)]
+    var names = users.Where { it.age > 28 }.Select { it.name }
+    print(names)
+}
+`)
+	assertContains(t, out, ".Where(it => (it.Age > 28))")
+	assertContains(t, out, ".Select(it => it.Name)")
+}
+
+// === Data Classes ===
+
+func TestDataClass_Simple(t *testing.T) {
+	out := transpile(`
+data User(pub String name, pub Int age)
+main() {
+    var u = User("Alice", 30)
+    print(u)
+}
+`)
+	assertContains(t, out, "public record User(string Name, int Age);")
+	assertContains(t, out, "new User")
+}
+
+func TestDataClass_WithMethods(t *testing.T) {
+	out := transpile(`
+data User(pub String name, pub Int age) {
+    pub String greet() {
+        return "Hello, I am {name}"
+    }
+}
+main() {
+    var u = User("Alice", 30)
+    print(u.greet())
+}
+`)
+	assertContains(t, out, "public record User(string Name, int Age)")
+	assertContains(t, out, "public string Greet()")
+}
+
+func TestDataClass_PrivateFields(t *testing.T) {
+	out := transpile(`
+data Point(Int x, Int y)
+main() {
+    var p = Point(1, 2)
+    print(p)
+}
+`)
+	assertContains(t, out, "public record Point(int X, int Y);")
+}
+
+func TestDataClass_WithParent(t *testing.T) {
+	out := transpile(`
+interface Printable {
+    String display()
+}
+data User(pub String name) : Printable {
+    pub String display() {
+        return name
+    }
+}
+main() {
+    var u = User("Alice")
+    print(u.display())
+}
+`)
+	assertContains(t, out, "public record User(string Name) : IPrintable")
+}

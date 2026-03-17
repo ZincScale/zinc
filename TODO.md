@@ -6,65 +6,7 @@ Convention over configuration. Less typing, less ceremony.
 
 ## Priority Order — Expressiveness
 
-### P1 — Trailing Lambdas + `it` Keyword ✦ NEXT
-The single biggest readability win. One mechanism covers all 22 LINQ methods.
-
-```zinc
-// TODAY: noisy, type-heavy
-var names = users.Where((User u) -> u.age > 28)
-                 .Select((User u) -> u.name)
-                 .OrderBy((String s) -> s)
-
-// AFTER: clean, Kotlin-style
-var names = users.Where { it.age > 28 }
-                 .Select { it.name }
-                 .OrderBy { it }
-```
-
-Covers everything — no comprehensions or query syntax needed:
-```zinc
-users.Sum { it.age }                                  // aggregation
-users.GroupBy { it.department }                       // grouping
-users.Any { it.active }                               // boolean query
-users.Aggregate(0) { acc, u -> acc + u.age }          // fold (multi-param)
-users.OrderBy { it.name }.Take(3)                     // sort + slice
-```
-
-- Single-param lambdas auto-bind `it` (like Kotlin)
-- Trailing lambda: last arg is a block `{ }` outside parens
-- Multi-param uses arrow: `{ acc, x -> acc + x }`
-- Type inference from collection element type
-- Explicit types still allowed when needed
-- Works on maps too:
-```zinc
-var scores = {"Alice": 95, "Bob": 72, "Carol": 88}
-scores.Where { it.Value > 80 }                       // filter entries
-scores.Select { it.Key }                              // extract keys
-scores.Any { it.Value > 90 }                          // query
-// it.Key and it.Value for map entries (like C# KeyValuePair)
-```
-- **Effort:** Medium (parser + typechecker + codegen)
-
-### P2 — Data Classes
-Eliminate constructor boilerplate.
-
-```zinc
-data User(pub String name, pub Int age)
-
-// Equivalent to:
-User {
-    pub String name
-    pub Int age
-    new(String name, Int age) { this.name = name; this.age = age }
-}
-```
-
-- Maps to C# `record` or class with auto-constructor
-- Auto-generates ToString
-- Can add methods: `data User(...) { pub String greet() { ... } }`
-- **Effort:** Medium
-
-### P3 — Implicit Return + Expression If/Match
+### P1 — Implicit Return + Expression If/Match ✦ NEXT
 Last expression in a block is the return value. If and match become expressions.
 
 ```zinc
@@ -88,7 +30,7 @@ var msg = match status {
 - Explicit `return` still works for early returns
 - **Effort:** Medium (parser + codegen)
 
-### P4 — Ranges
+### P2 — Ranges
 Replace C-style for loops.
 
 ```zinc
@@ -108,7 +50,7 @@ var firstFive = nums[0..5]          // slice syntax already exists
 - Works in for loops and slice expressions
 - **Effort:** Quick (lexer + parser + codegen)
 
-### P5 — Scripting Builtins
+### P3 — Scripting Builtins
 Make CLI tools trivial.
 
 ```zinc
@@ -125,7 +67,7 @@ main() {
 - `listDir(path)` → `List<String>`, failable
 - **Effort:** Quick
 
-### P6 — `zinc add` / Dependency Management
+### P4 — `zinc add` / Dependency Management
 ```bash
 zinc add Newtonsoft.Json
 zinc add Serilog --version 4.0.0
@@ -133,11 +75,11 @@ zinc remove Newtonsoft.Json
 ```
 - **Effort:** Medium
 
-### P7 — VS Code Extension
+### P5 — VS Code Extension
 TextMate grammar for `.zn` syntax highlighting.
 - **Effort:** Quick
 
-### P8 — `zinc test`
+### P6 — `zinc test`
 `zinc test` → `dotnet test` or `go test`.
 - **Effort:** Quick
 
@@ -165,24 +107,7 @@ val config = File("config.json").readText()
 seniors.forEach { println(it) }
 ```
 
-**Zinc today (15 lines):**
-```zinc
-User {
-    pub String name
-    pub Int age
-    new(String name, Int age) { this.name = name; this.age = age }
-}
-main() {
-    var users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
-    var seniors = users.Where((User u) -> u.age > 28)
-                       .Select((User u) -> u.name)
-                       .OrderBy((String s) -> s)
-    var config = readFile("config.json") or { print(err); exit(1) }
-    for name in seniors { print(name) }
-}
-```
-
-**Zinc after P1-P3 (9 lines):**
+**Zinc today (10 lines):**
 ```zinc
 data User(pub String name, pub Int age)
 
@@ -193,6 +118,20 @@ main() {
                        .OrderBy { it }
     var config = readFile("config.json") or { print(err); exit(1) }
     for name in seniors { print(name) }
+}
+```
+
+**Zinc after P1 (9 lines) — implicit return:**
+```zinc
+data User(pub String name, pub Int age)
+
+main() {
+    var users = [User("Alice", 30), User("Bob", 25), User("Carol", 35)]
+    var seniors = users.Where { it.age > 28 }
+                       .Select { it.name }
+                       .OrderBy { it }
+    var config = readFile("config.json") or { print(err); exit(1) }
+    seniors.ForEach { print(it) }
 }
 ```
 
@@ -208,7 +147,7 @@ All unblocked (imports + type resolver + annotations).
 |----------|--------|
 | Logging, HTTP, Config, JSON, DI | ✅ Ready |
 | REST API, ORM, Serialization | ✅ Ready |
-| Testing (xUnit) | ⚠ Needs `zinc test` (P8) |
+| Testing (xUnit) | ⚠ Needs `zinc test` (P6) |
 
 ---
 
@@ -222,6 +161,11 @@ All unblocked (imports + type resolver + annotations).
 | Destructuring | `var (name, age) = user` |
 
 ---
+
+## Completed (v0.9.0)
+- Trailing lambdas + `it` keyword (Kotlin-style `{ it > 3 }`)
+- Data classes (`data User(pub String name, pub Int age)` → C# `record`)
+- Batched E2E test runner (43 tests in ~9s, single dotnet build)
 
 ## Completed (v0.8.0)
 - Generic annotations, doc restructure, dead code cleanup

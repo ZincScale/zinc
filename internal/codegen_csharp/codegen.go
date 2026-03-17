@@ -73,6 +73,7 @@ type Generator struct {
 	srcFile        string
 	lastDirectiveLine int
 	errCounter     int
+	currentRecordFields map[string]bool       // non-nil inside a record method body
 }
 
 // New creates a C# Generator for single-file mode.
@@ -137,6 +138,14 @@ func (g *Generator) Generate(prog *parser.Program) string {
 			}
 			g.classMethods[d.Name] = methods
 			g.classParents[d.Name] = d.Parents
+		case *parser.DataClassDecl:
+			g.classNames[d.Name] = true
+			methods := make(map[string]bool)
+			for _, m := range d.Methods {
+				methods[m.Name] = true
+			}
+			g.classMethods[d.Name] = methods
+			g.classParents[d.Name] = d.Parents
 		case *parser.InterfaceDecl:
 			g.interfaceNames[d.Name] = true
 		case *parser.EnumDecl:
@@ -155,6 +164,14 @@ func (g *Generator) Generate(prog *parser.Program) string {
 					changed = true
 				}
 			case *parser.ClassDecl:
+				for _, m := range d.Methods {
+					key := d.Name + "." + m.Name
+					if !g.canThrowFns[key] && g.bodyIsFailable(m.Body) {
+						g.canThrowFns[key] = true
+						changed = true
+					}
+				}
+			case *parser.DataClassDecl:
 				for _, m := range d.Methods {
 					key := d.Name + "." + m.Name
 					if !g.canThrowFns[key] && g.bodyIsFailable(m.Body) {
@@ -299,6 +316,9 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 	case *parser.ClassDecl:
 		g.emitLineDirective(d.Line)
 		g.emitClassDecl(d)
+	case *parser.DataClassDecl:
+		g.emitLineDirective(d.Line)
+		g.emitDataClassDecl(d)
 	case *parser.InterfaceDecl:
 		g.emitLineDirective(d.Line)
 		g.emitInterfaceDecl(d)
@@ -443,6 +463,55 @@ func (g *Generator) emitClassDecl(d *parser.ClassDecl) {
 
 	g.pop()
 	g.writeln("}")
+}
+
+func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
+	// Build parents list
+	var parents []string
+	for _, p := range d.Parents {
+		if g.interfaceNames[p] {
+			parents = append(parents, "I"+p)
+		} else {
+			parents = append(parents, p)
+		}
+	}
+
+	typeParams := g.formatTypeParams(d.TypeParams)
+	inheritance := ""
+	if len(parents) > 0 {
+		inheritance = " : " + strings.Join(parents, ", ")
+	}
+
+	// Build record parameter list
+	var params []string
+	for _, f := range d.Params {
+		fieldType := g.emitType(f.Type)
+		fname := capitalize(f.Name)
+		params = append(params, fmt.Sprintf("%s %s", fieldType, fname))
+	}
+
+	if len(d.Methods) == 0 {
+		// Simple record — single line
+		g.writeln(fmt.Sprintf("public record %s%s(%s)%s;", d.Name, typeParams, strings.Join(params, ", "), inheritance))
+	} else {
+		// Record with body — set currentRecordFields so bare field refs get capitalized
+		fieldSet := make(map[string]bool)
+		for _, f := range d.Params {
+			fieldSet[f.Name] = true
+		}
+		g.writeln(fmt.Sprintf("public record %s%s(%s)%s", d.Name, typeParams, strings.Join(params, ", "), inheritance))
+		g.writeln("{")
+		g.push()
+		saved := g.currentRecordFields
+		g.currentRecordFields = fieldSet
+		for _, m := range d.Methods {
+			g.write("\n")
+			g.emitMethodDecl(d.Name, d.TypeParams, d.Parents, m)
+		}
+		g.currentRecordFields = saved
+		g.pop()
+		g.writeln("}")
+	}
 }
 
 func (g *Generator) emitMethodDecl(className string, classTypeParams []string, parents []string, m *parser.MethodDecl) {
@@ -804,6 +873,10 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.NullLit:
 		return "null"
 	case *parser.Ident:
+		// Inside a record method, bare field references must be PascalCase
+		if g.currentRecordFields != nil && g.currentRecordFields[e.Name] {
+			return capitalize(e.Name)
+		}
 		return e.Name
 	case *parser.ThisExpr:
 		return "this"

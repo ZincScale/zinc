@@ -61,6 +61,7 @@ const (
 	TOKEN_DEFER
 	TOKEN_IS
 	TOKEN_WITH
+	TOKEN_DATA
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -147,6 +148,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_DEFER:     "defer",
 	TOKEN_IS:        "is",
 	TOKEN_WITH:      "with",
+	TOKEN_DATA:      "data",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -241,6 +243,7 @@ var keywords = map[string]TokenType{
 	"defer":     TOKEN_DEFER,
 	"is":        TOKEN_IS,
 	"with":      TOKEN_WITH,
+	"data":      TOKEN_DATA,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.
