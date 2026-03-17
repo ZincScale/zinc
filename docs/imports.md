@@ -97,10 +97,41 @@ main() {
 }
 ```
 
-## Local Package Imports
+## Same-Project Types (Auto-Discovery)
 
-```zinc
-import "myapp/utils"                 // cross-file import (handled by TypeRegistry)
+All types (classes, interfaces, enums) defined anywhere in your project are **automatically visible** to all other files. No import needed:
+
+```
+myapp/
+  zinc.toml
+  main.zn          ← can use Dog, User, Color without importing
+  models/
+    dog.zn         ← defines Dog class
+    user.zn        ← defines User class
+  types/
+    color.zn       ← defines enum Color
 ```
 
-Local imports (paths containing `/`) are resolved by the build system — all `.zn` files in a directory share a namespace.
+```zinc
+// main.zn — no imports needed for project types
+main() {
+    var d = Dog("Rex")           // Dog from models/dog.zn
+    var u = User("Alice", 30)    // User from models/user.zn
+    var c = Color.Red            // Color from types/color.zn
+    print(d.bark())
+}
+```
+
+This matches how C#, Kotlin, and Swift work — all types in the same project/module are visible without imports.
+
+> **Note:** Top-level functions across files are currently scoped to their file. For shared logic, use classes with static methods.
+
+## Local Package Imports (Go Backend)
+
+On the Go backend, cross-directory imports require explicit `import` statements because Go enforces package boundaries:
+
+```zinc
+import "myapp/utils"                 // required on Go backend
+```
+
+On the C# backend, these are silently ignored — types are already auto-discovered.
