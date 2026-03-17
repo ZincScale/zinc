@@ -63,7 +63,7 @@ func Run(rootDir string) error {
 }
 
 // Transpile walks rootDir, groups .zn files by directory (= Go package),
-// builds a shared TypeRegistry per directory, and emits .go files.
+// builds a global TypeRegistry across all directories, and emits .go files.
 func Transpile(rootDir string) ([]FileUnit, error) {
 	abs, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -87,9 +87,46 @@ func Transpile(rootDir string) ([]FileUnit, error) {
 		return nil, err
 	}
 
-	var units []FileUnit
+	// Phase 1: parse all files from all directories
+	dirParsed := make(map[string][]parsedFile) // dir → parsed files
+	var allProgs []*parser.Program
+
 	for dir, srcPaths := range dirFiles {
-		dirUnits, err := transpileDir(rootDir, dir, srcPaths)
+		for _, src := range srcPaths {
+			rel, _ := filepath.Rel(rootDir, src)
+			if rel == "" {
+				rel = src
+			}
+			data, err := os.ReadFile(src)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", rel, err)
+			}
+			l := lexer.New(string(data))
+			tokens := l.Tokenize()
+			if len(l.Errors) > 0 {
+				errs.FileErrors(rel, l.Errors)
+				return nil, fmt.Errorf("%s: lexer errors found", rel)
+			}
+			p := parser.New(tokens)
+			prog := p.Parse()
+			if len(p.Errors) > 0 {
+				errs.FileErrors(rel, p.Errors)
+				return nil, fmt.Errorf("%s: parse errors found", rel)
+			}
+			prog.SourceFile = rel
+			pf := parsedFile{srcPath: src, prog: prog, dir: dir}
+			dirParsed[dir] = append(dirParsed[dir], pf)
+			allProgs = append(allProgs, prog)
+		}
+	}
+
+	// Phase 2: build global registry from ALL files across all directories
+	globalReg := codegen.BuildRegistry(allProgs)
+
+	// Phase 3: generate .go files per directory
+	var units []FileUnit
+	for dir, parsed := range dirParsed {
+		dirUnits, err := transpileDirWithRegistry(rootDir, dir, parsed, globalReg)
 		if err != nil {
 			return nil, err
 		}
@@ -98,40 +135,15 @@ func Transpile(rootDir string) ([]FileUnit, error) {
 	return units, nil
 }
 
-// transpileDir handles all .zn files in one directory (one Go package).
-func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
-	// Phase 1: parse all files
-	type parsedFile struct {
-		srcPath string
-		prog    *parser.Program
-	}
-	var parsed []parsedFile
+type parsedFile struct {
+	srcPath string
+	prog    *parser.Program
+	dir     string
+}
 
-	for _, src := range srcPaths {
-		rel, _ := filepath.Rel(rootDir, src)
-		if rel == "" {
-			rel = src
-		}
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", rel, err)
-		}
-		l := lexer.New(string(data))
-		tokens := l.Tokenize()
-		if len(l.Errors) > 0 {
-			errs.FileErrors(rel, l.Errors)
-			return nil, fmt.Errorf("%s: lexer errors found", rel)
-		}
-		p := parser.New(tokens)
-		prog := p.Parse()
-		if len(p.Errors) > 0 {
-			errs.FileErrors(rel, p.Errors)
-			return nil, fmt.Errorf("%s: parse errors found", rel)
-		}
-		prog.SourceFile = rel
-		parsed = append(parsed, parsedFile{srcPath: src, prog: prog})
-	}
-
+// transpileDirWithRegistry handles all .zn files in one directory using a
+// global TypeRegistry that includes types from all directories in the project.
+func transpileDirWithRegistry(rootDir, dir string, parsed []parsedFile, reg *codegen.TypeRegistry) ([]FileUnit, error) {
 	// Determine Go package name for this directory
 	pkgName := ""
 	for _, pf := range parsed {
@@ -147,14 +159,11 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 		}
 	}
 
-	// Build shared TypeRegistry from all files in this directory
+	// Type checking across all files in this directory
 	progs := make([]*parser.Program, len(parsed))
 	for i, pf := range parsed {
 		progs[i] = pf.prog
 	}
-	reg := codegen.BuildRegistry(progs)
-
-	// Type checking across all files in this directory
 	if tcErrs := typechecker.CheckAll(progs); len(tcErrs) > 0 {
 		for _, e := range tcErrs {
 			file := e.File
@@ -170,7 +179,7 @@ func transpileDir(rootDir, dir string, srcPaths []string) ([]FileUnit, error) {
 		return nil, fmt.Errorf("%d type error(s) found", len(tcErrs))
 	}
 
-	// Phase 2: generate .go files
+	// Generate .go files
 	var units []FileUnit
 	for _, pf := range parsed {
 		// Compute relative path for //line directives

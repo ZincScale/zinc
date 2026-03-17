@@ -3109,6 +3109,17 @@ func (g *Generator) emitCallExpr(call *parser.CallExpr) string {
 		if code, ok := g.emitBuiltinMethodCall(callee, call); ok {
 			return code
 		}
+		// Cross-package constructor: pkg.ClassName(args) → pkg.NewClassName(args)
+		if ident, ok := callee.Object.(*parser.Ident); ok {
+			if _, ok := g.importMap[ident.Name]; ok && g.classNames[callee.Field] {
+				var ctorParams []*parser.ParamDecl
+				if ctor := g.classCtors[callee.Field]; ctor != nil {
+					ctorParams = ctor.Params
+				}
+				resolved := g.resolveArgs(ctorParams, call)
+				return fmt.Sprintf("%s.New%s(%s)", ident.Name, callee.Field, strings.Join(resolved, ", "))
+			}
+		}
 		// Go package function call: pkg.Func(args) — emit with pointer inference
 		if ident, ok := callee.Object.(*parser.Ident); ok {
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
