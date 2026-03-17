@@ -1,6 +1,10 @@
 # Language Reference
 
-Zinc compiles to native binaries via **C# AOT** (default) or **Go**. The "Transpiles to:" sections below show Go output for reference — the C# backend produces equivalent idiomatic C# code.
+Zinc compiles to native binaries via **C# AOT** (default) or **Go**.
+
+The C# backend uses .NET Native AOT with full tree-shaking (`TrimMode=full`), symbol stripping, and speed optimization. The compiler runs a .NET type probe at transpile time to discover 3,700+ BCL types — so imported constructors like `Stopwatch()` automatically emit `new Stopwatch()`.
+
+The "Transpiles to:" sections below show Go output for reference — the C# backend produces equivalent idiomatic C# code.
 
 ## Variables
 
@@ -53,6 +57,17 @@ Int add(Int a, Int b) {
 
 pub String greet(String name) {
     return "Hello, {name}!"
+}
+```
+
+On the C# backend, all top-level functions are emitted as static methods inside a single `Functions` class. The `main()` function becomes `Program.Main()`:
+
+```csharp
+// Generated C#:
+public static class Functions
+{
+    private static int Add(int a, int b) { return (a + b); }
+    public static string Greet(string name) { return $"Hello, {name}!"; }
 }
 ```
 

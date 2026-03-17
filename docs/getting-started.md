@@ -102,6 +102,14 @@ Zinc also provides short aliases for common .NET namespaces:
 | `import "io"` | `System.IO` |
 | `import "regex"` | `System.Text.RegularExpressions` |
 | `import "threading"` | `System.Threading` |
+| `import "tasks"` | `System.Threading.Tasks` |
+| `import "diagnostics"` | `System.Diagnostics` |
+| `import "net"` | `System.Net` |
+| `import "crypto"` | `System.Security.Cryptography` |
+| `import "text"` | `System.Text` |
+| `import "xml"` | `System.Xml` |
+
+When using `zinc build` or `zinc run`, the compiler runs a .NET type probe that discovers all available types from the BCL and your NuGet dependencies. This means constructor calls like `HttpClient()` and `Stopwatch()` automatically emit `new` — no extra configuration needed.
 
 ## Multi-File Projects
 

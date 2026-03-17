@@ -6,32 +6,24 @@ Convention over configuration for native apps. C# AOT is the default backend, Go
 
 ## Priority Order
 
-### P1 — NuGet Import & Interop ✦ IN PROGRESS
-Enable Zinc projects to use third-party .NET libraries seamlessly. This is the #1 blocker for real-world adoption.
+### P1 — NuGet Import & Interop ✅ DONE (Phases 1-2), Phase 3 deferred
+Enable Zinc projects to use third-party .NET libraries seamlessly.
 
 **Phase 1: Import → Using mapping** ✅ DONE
 - `import "Newtonsoft.Json"` → `using Newtonsoft.Json;`
-- `import "Serilog"` → `using Serilog;`
 - Short aliases: `import "http"` → `using System.Net.Http;`, `import "json"` → `using System.Text.Json;`, etc.
-- Local package imports (containing `/`) skipped — handled by TypeRegistry
 - `[dependencies]` in `zinc.toml` → `<PackageReference>` in generated `.csproj`
-- 9 unit tests + 4 E2E tests
 
 **Phase 2: CSharpTypeResolver** ✅ DONE
-- `CSharpTypeResolver` shells out to a .NET probe that uses `System.Reflection` to enumerate ALL public types from the BCL and NuGet packages (3,700+ types across 130+ namespaces)
-- Force-loads assemblies by touching key types (`typeof(HttpClient)`, `typeof(Stopwatch)`, etc.)
+- .NET reflection probe discovers 3,700+ types across 130+ namespaces
 - Auto-detects constructable classes → `Stopwatch()` emits `new Stopwatch()`
 - Auto-detects static classes → `Console`, `Math`, `File` correctly skip `new`
-- Integrated into build pipeline: `TranspileCSharpWithConfig` probes before codegen
-- Falls back gracefully if dotnet is unavailable
-- 5 resolver unit tests + 4 resolver E2E tests
 
-**Phase 3: Interop patterns**
-- Consume C# classes/interfaces from Zinc (use them as types in Zinc code)
-- Calling static methods: `JsonConvert.SerializeObject(obj)` works via SelectorExpr
+**Phase 3: Advanced interop** — deferred, depends on P2 (annotations)
 - Async/await bridging: `.Result` or `await` for Task-returning methods
 - Attribute pass-through: `@JsonProperty("name")` → `[JsonProperty("name")]`
-- **Effort:** Large
+- Consuming C# generics/interfaces from Zinc
+- **Effort:** Large — blocked by annotations (P2)
 
 ### P2 — Annotations / Decorators
 `@Json("name")`, `@Column("id")`, `@Serialize`, `@Validate` — maps to C# `[Attribute]` or Go struct tags. Critical for ORM, serialization, and web framework interop.
@@ -88,18 +80,18 @@ Format `.zn` files consistently.
 
 ## Interop Roadmap (by ecosystem)
 
-These unlock real-world enterprise use cases and depend on P1 + P2:
+These unlock real-world enterprise use cases. Import mapping (P1) is done; most depend on annotations (P2).
 
-| Use Case | NuGet Packages | Zinc Features Needed |
-|----------|---------------|---------------------|
-| **REST API** | ASP.NET Core | Import mapping, annotations (`@Route`, `@Get`) |
-| **JSON serialization** | System.Text.Json / Newtonsoft | Annotations (`@Json`), data classes |
-| **Database / ORM** | Entity Framework Core | Annotations (`@Table`, `@Column`), data classes |
-| **Logging** | Serilog / NLog | Import mapping (straightforward) |
-| **HTTP client** | System.Net.Http | Import mapping, async/await |
-| **Dependency injection** | Microsoft.Extensions.DI | Constructor injection (natural fit for Zinc classes) |
-| **Configuration** | Microsoft.Extensions.Configuration | Import mapping |
-| **Testing** | xUnit / NUnit | `zinc test` command, test annotations |
+| Use Case | NuGet Packages | Status | Remaining |
+|----------|---------------|--------|-----------|
+| **Logging** | Serilog / NLog | ✅ Ready | Import mapping works now |
+| **HTTP client** | System.Net.Http | ✅ Ready | `HttpClient()` auto-emits `new` |
+| **Configuration** | Microsoft.Extensions.Configuration | ✅ Ready | Import mapping works now |
+| **JSON serialization** | System.Text.Json / Newtonsoft | ⚠ Partial | Works for static calls; annotations needed for class decoration |
+| **Dependency injection** | Microsoft.Extensions.DI | ⚠ Partial | Constructor injection works; service registration needs static calls |
+| **REST API** | ASP.NET Core | ❌ Blocked | Needs annotations (`@Route`, `@Get`) |
+| **Database / ORM** | Entity Framework Core | ❌ Blocked | Needs annotations (`@Table`, `@Column`), data classes |
+| **Testing** | xUnit / NUnit | ❌ Blocked | Needs `zinc test` command, test annotations |
 
 ---
 
@@ -134,15 +126,25 @@ These unlock real-world enterprise use cases and depend on P1 + P2:
 
 ---
 
+## Completed (v0.7.0)
+- NuGet import → `using` mapping with 16 short aliases (http, json, io, regex, etc.)
+- CSharpTypeResolver: .NET reflection probe discovers 3,700+ BCL types at transpile time
+- Auto `new` for imported constructable classes (Stopwatch, HttpClient, StringBuilder, etc.)
+- Static class detection (Console, Math, File skip `new`)
+- Single `Functions` class for all non-main functions (was emitting duplicate class per function)
+- Unique exception variable names in catch blocks (nested try/catch safe)
+- AOT trim fixes: SelfContained=true, JsonSerializerIsReflectionEnabledByDefault=true
+- Stale .cs file cleanup in .zinc-build/ before regenerating
+- 82 unit + 35 E2E + 5 resolver tests for C# backend
+
 ## Completed (v0.6.0)
-- All 28 global builtin functions in C# backend (toString, toInt, abs, sqrt, pow, floor, ceil, round, max, min, readFile, writeFile, httpGet, jsonEncode, jsonDecode, getEnv, setEnv, now, sleep, sprintf, typeOf, readLine, toBool, parseFloat, parseInt, toFloat, panic, exit)
-- Failable builtin infrastructure for C# (failableBuiltins map, callIsFailable, bodyIsFailable, fixed-point transitive marking)
-- `or { }` error handling for C# failable builtins (readFile, writeFile, httpGet) — try/catch with `err` binding
+- All 28 global builtin functions in C# backend
+- Failable builtin infrastructure (callIsFailable, bodyIsFailable, fixed-point transitive marking)
+- `or { }` error handling for C# failable builtins — try/catch with `err` binding
 - `handlerHasHalt` — skip auto-propagation when handler ends with exit/panic
 - Standalone failable ExprStmt support (`writeFile(...) or { }` as statement)
-- 67 unit tests + 27 E2E tests for C# backend
 - `examples/builtins.zn` — new example covering all builtin categories
-- Updated docs: builtins.md (C# column), language-reference.md (Built-in Functions section, C# type table), getting-started.md
+- Updated docs: builtins.md (C# column), language-reference.md, getting-started.md
 
 ## Completed (v0.5.0)
 - C# AOT backend with 37 unit + 17 E2E tests
