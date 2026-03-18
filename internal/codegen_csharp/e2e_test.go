@@ -438,6 +438,65 @@ main() {
     print(counter.value)
 }`, mode: modeExact, expected: []string{"3"}},
 
+	// --- Structured Concurrency: Error Propagation ---
+	{name: "SpawnErrorPropagation", src: `
+main() {
+    var f = spawn { panic("fiber failed") }
+    var result = f.value or {
+        print("caught: " + err)
+        return
+    }
+    print(result)
+}`, mode: modeExact, expected: []string{"caught: fiber failed"}},
+
+	{name: "SpawnSiblingCancellation", src: `
+main() {
+    var a = spawn {
+        panic("a failed")
+    }
+    var b = spawn {
+        100
+    }
+    var result = a.value or {
+        print("a failed as expected")
+        return
+    }
+}`, mode: modeExact, expected: []string{"a failed as expected"}},
+
+	{name: "SpawnStructuredExit", src: `
+main() {
+    var f1 = spawn { 10 }
+    var f2 = spawn { 20 }
+    print(f1.value + f2.value)
+}`, mode: modeExact, expected: []string{"30"}},
+
+	{name: "ParallelWithScope", src: `
+main() {
+    var nums = [1, 2, 3]
+    var results = parallel(nums) { it * 5 }
+    for r in results {
+        print(r)
+    }
+}`, mode: modeContains, expected: []string{"5", "10", "15"}},
+
+	{name: "SpawnOrHandlerWithDefault", src: `
+main() {
+    var f = spawn { panic("oops") }
+    var result = f.value or {
+        print("handled error")
+        return
+    }
+}`, mode: modeExact, expected: []string{"handled error"}},
+
+	{name: "ParallelErrorPropagation", src: `
+main() {
+    var nums = [1, 2, 3]
+    var results = parallel(nums) { panic("task failed") } or {
+        print("caught: " + err)
+        return
+    }
+}`, mode: modeExact, expected: []string{"caught: task failed"}},
+
 }
 
 // --- Batched E2E runner ------------------------------------------------------

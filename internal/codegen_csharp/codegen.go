@@ -237,6 +237,8 @@ func (g *Generator) Generate(prog *parser.Program) string {
 	// Emit concurrency runtime helpers when needed
 	if g.usesConcurrency {
 		g.neededUsings["System.Threading.Tasks"] = true
+		g.neededUsings["System.Threading"] = true
+		g.neededUsings["System.Collections.Generic"] = true
 		g.write("\n")
 		g.emitConcurrencyHelpers()
 	}
@@ -256,8 +258,54 @@ func (g *Generator) Generate(prog *parser.Program) string {
 	return out.String()
 }
 
-// emitConcurrencyHelpers emits ZincFuture<T> and ZincLock<T> runtime classes.
+// emitConcurrencyHelpers emits ZincScope, ZincFuture<T>, and ZincLock<T> runtime classes.
 func (g *Generator) emitConcurrencyHelpers() {
+	// ZincScope — structured concurrency scope with cancellation.
+	// Tracks all spawned tasks. If any task faults, cancels all siblings.
+	// Disposing the scope cancels all remaining tasks and waits for completion.
+	g.writeln("public class ZincScope : IDisposable")
+	g.writeln("{")
+	g.push()
+	g.writeln("private readonly CancellationTokenSource _cts = new();")
+	g.writeln("private readonly List<Task> _tasks = new();")
+	g.writeln("private readonly object _lock = new();")
+	g.writeln("public CancellationToken Token => _cts.Token;")
+	g.write("\n")
+	g.writeln("public ZincFuture<T> Spawn<T>(Func<T> body)")
+	g.writeln("{")
+	g.push()
+	g.writeln("var token = _cts.Token;")
+	g.writeln("var task = Task.Run(() =>")
+	g.writeln("{")
+	g.push()
+	g.writeln("token.ThrowIfCancellationRequested();")
+	g.writeln("return body();")
+	g.pop()
+	g.writeln("}, token);")
+	g.writeln("lock (_lock) { _tasks.Add(task); }")
+	g.writeln("task.ContinueWith(t =>")
+	g.writeln("{")
+	g.push()
+	g.writeln("if (t.IsFaulted && !_cts.IsCancellationRequested) _cts.Cancel();")
+	g.pop()
+	g.writeln("}, TaskContinuationOptions.OnlyOnFaulted);")
+	g.writeln("return new ZincFuture<T>(task);")
+	g.pop()
+	g.writeln("}")
+	g.write("\n")
+	g.writeln("public void Dispose()")
+	g.writeln("{")
+	g.push()
+	g.writeln("_cts.Cancel();")
+	g.writeln("try { Task.WaitAll(_tasks.ToArray()); }")
+	g.writeln("catch (AggregateException) { /* expected — tasks were cancelled */ }")
+	g.writeln("_cts.Dispose();")
+	g.pop()
+	g.writeln("}")
+	g.pop()
+	g.writeln("}")
+	g.write("\n")
+
 	// ZincFuture<T> — wraps Task<T> with blocking .Value and structured error propagation.
 	// Accessing .Value re-throws any exception from the spawned task.
 	g.writeln("public class ZincFuture<T>")
@@ -379,7 +427,18 @@ func (g *Generator) emitFnDecl(d *parser.FnDecl) {
 		g.writeln("{")
 		g.push()
 		if d.Body != nil {
-			g.emitBlock(d.Body)
+			if g.bodyUsesConcurrency(d.Body) {
+				// Structured concurrency: wrap main body in ZincScope
+				// All spawned work is scoped — no fire-and-forget.
+				g.writeln("using (var __scope = new ZincScope())")
+				g.writeln("{")
+				g.push()
+				g.emitBlock(d.Body)
+				g.pop()
+				g.writeln("}")
+			} else {
+				g.emitBlock(d.Body)
+			}
 		}
 		g.pop()
 		g.writeln("}")
@@ -691,6 +750,9 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 				g.emitFailableExprStmt(call, s.OrHandler)
 				return
 			}
+			// Non-call expression with or-handler (e.g. f.value or { })
+			g.emitFailableExprStmtGeneric(s.Expr, s.OrHandler)
+			return
 		}
 		g.writeln(fmt.Sprintf("%s;", g.emitExpr(s.Expr)))
 	case *parser.BreakStmt:
@@ -751,7 +813,7 @@ func (g *Generator) emitVarStmt(s *parser.VarStmt) {
 		g.writeln(fmt.Sprintf("catch (Exception %s)", exVar))
 		g.writeln("{")
 		g.push()
-		g.writeln(fmt.Sprintf("var err = %s.Message;", exVar))
+		g.emitErrUnwrap(exVar)
 		if s.OrHandler.Body != nil && len(s.OrHandler.Body.Stmts) > 0 {
 			g.emitBlock(s.OrHandler.Body)
 		}
@@ -1309,10 +1371,10 @@ func (g *Generator) emitSpawnExpr(e *parser.SpawnExpr) string {
 	g.usesConcurrency = true
 	g.neededUsings["System.Threading.Tasks"] = true
 
-	// The block's last statement is the return value.
-	// Emit: new ZincFuture<...>(Task.Run(() => { ... return lastExpr; }))
+	// Structured concurrency: __scope.Spawn<dynamic>(() => { ... })
+	// The scope tracks the task and cancels siblings on failure.
 	if e.Body == nil || len(e.Body.Stmts) == 0 {
-		return "new ZincFuture<dynamic>(Task.Run(() => (dynamic)null))"
+		return "__scope.Spawn<dynamic>(() => (dynamic)null)"
 	}
 
 	// Build the inner block
@@ -1324,10 +1386,15 @@ func (g *Generator) emitSpawnExpr(e *parser.SpawnExpr) string {
 	for _, s := range stmts[:len(stmts)-1] {
 		g.emitStmt(s)
 	}
-	// Last statement: if it's an ExprStmt, emit as return (cast to dynamic for Task<dynamic>)
+	// Last statement: if it's an ExprStmt, emit as return (cast to dynamic for Spawn<dynamic>)
+	// Exception: throw expressions (panic) must stay as statements.
 	last := stmts[len(stmts)-1]
 	if es, ok := last.(*parser.ExprStmt); ok {
-		g.writeln(fmt.Sprintf("return (dynamic)(%s);", g.emitExpr(es.Expr)))
+		if g.isThrowExpr(es.Expr) {
+			g.emitStmt(last)
+		} else {
+			g.writeln(fmt.Sprintf("return (dynamic)(%s);", g.emitExpr(es.Expr)))
+		}
 	} else {
 		g.emitStmt(last)
 	}
@@ -1336,10 +1403,10 @@ func (g *Generator) emitSpawnExpr(e *parser.SpawnExpr) string {
 	g.buf = oldBuf
 
 	var result strings.Builder
-	result.WriteString("new ZincFuture<dynamic>(Task.Run(() =>\n")
+	result.WriteString("__scope.Spawn<dynamic>(() =>\n")
 	result.WriteString(strings.Repeat("    ", g.indent) + "{\n")
 	result.WriteString(innerBody)
-	result.WriteString(strings.Repeat("    ", g.indent) + "}))")
+	result.WriteString(strings.Repeat("    ", g.indent) + "})")
 	return result.String()
 }
 
@@ -1550,7 +1617,8 @@ func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []
 		g.neededUsings["System.Threading.Tasks"] = true
 		g.neededUsings["System.Linq"] = true
 		// parallel(list) { expr } → args[0] is list, args[1] is trailing lambda
-		// We need to wrap the lambda so each invocation runs in Task.Run
+		// Each item runs via Task.Run with the scope's CancellationToken.
+		// If any task fails, the scope cancels all siblings.
 		if len(args) >= 2 {
 			listStr := argStrs[0]
 			lambda := args[1]
@@ -1568,7 +1636,12 @@ func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []
 					}
 				}
 				if bodyStr != "" {
-					return fmt.Sprintf("Task.WhenAll(%s.Select(%s => Task.Run(() => (dynamic)(%s)))).GetAwaiter().GetResult().ToList()",
+					// If the body is a throw (panic), emit as statement, not return expression
+					if g.isThrowExprStr(bodyStr) {
+						return fmt.Sprintf("Task.WhenAll(%s.Select(%s => Task.Run(() => { __scope.Token.ThrowIfCancellationRequested(); %s; return (dynamic)null; }, __scope.Token))).GetAwaiter().GetResult().ToList()",
+							listStr, paramName, bodyStr), true
+					}
+					return fmt.Sprintf("Task.WhenAll(%s.Select(%s => Task.Run(() => { __scope.Token.ThrowIfCancellationRequested(); return (dynamic)(%s); }, __scope.Token))).GetAwaiter().GetResult().ToList()",
 						listStr, paramName, bodyStr), true
 				}
 			}
@@ -1691,7 +1764,7 @@ func (g *Generator) emitFailableExprStmt(call *parser.CallExpr, handler *parser.
 	g.writeln(fmt.Sprintf("catch (Exception %s)", exVar))
 	g.writeln("{")
 	g.push()
-	g.writeln(fmt.Sprintf("var err = %s.Message;", exVar))
+	g.emitErrUnwrap(exVar)
 	if handler.Body != nil && len(handler.Body.Stmts) > 0 {
 		g.emitBlock(handler.Body)
 	}
@@ -1700,6 +1773,120 @@ func (g *Generator) emitFailableExprStmt(call *parser.CallExpr, handler *parser.
 	}
 	g.pop()
 	g.writeln("}")
+}
+
+// isThrowExpr checks if an expression will emit a throw statement (e.g. panic()).
+func (g *Generator) isThrowExpr(e parser.Expr) bool {
+	if call, ok := e.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok {
+			return ident.Name == "panic"
+		}
+	}
+	return false
+}
+
+// isThrowExprStr checks if an emitted expression string is a throw statement.
+func (g *Generator) isThrowExprStr(s string) bool {
+	return len(s) >= 5 && s[:5] == "throw"
+}
+
+// emitErrUnwrap emits the `var err = ...` line, unwrapping AggregateException
+// so `err` contains the actual error message, not "One or more errors occurred".
+func (g *Generator) emitErrUnwrap(exVar string) {
+	g.writeln(fmt.Sprintf("var err = %s is AggregateException %s_agg ? %s_agg.InnerException?.Message ?? %s.Message : %s.Message;", exVar, exVar, exVar, exVar, exVar))
+}
+
+// emitFailableExprStmtGeneric emits a try/catch for any expression with an or-handler.
+// Used for non-call expressions like `f.value or { }`.
+func (g *Generator) emitFailableExprStmtGeneric(expr parser.Expr, handler *parser.OrHandler) {
+	exVar := g.nextErr()
+	val := g.emitExpr(expr)
+	g.writeln("try")
+	g.writeln("{")
+	g.push()
+	g.writeln(fmt.Sprintf("_ = %s;", val))
+	g.pop()
+	g.writeln("}")
+	g.writeln(fmt.Sprintf("catch (Exception %s)", exVar))
+	g.writeln("{")
+	g.push()
+	g.emitErrUnwrap(exVar)
+	if handler.Body != nil && len(handler.Body.Stmts) > 0 {
+		g.emitBlock(handler.Body)
+	}
+	if !g.handlerHasHalt(handler.Body) {
+		g.writeln("throw;")
+	}
+	g.pop()
+	g.writeln("}")
+}
+
+// bodyUsesConcurrency checks if a function body uses spawn, parallel, or Lock.
+// Used to determine whether to wrap main() in a ZincScope.
+func (g *Generator) bodyUsesConcurrency(body *parser.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if g.stmtUsesConcurrency(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Generator) stmtUsesConcurrency(s parser.Stmt) bool {
+	switch s := s.(type) {
+	case *parser.VarStmt:
+		return g.exprUsesConcurrency(s.Value)
+	case *parser.ExprStmt:
+		return g.exprUsesConcurrency(s.Expr)
+	case *parser.AssignStmt:
+		return g.exprUsesConcurrency(s.Value)
+	case *parser.IfStmt:
+		if g.bodyUsesConcurrency(s.Then) {
+			return true
+		}
+		if s.ElseStmt != nil {
+			if bs, ok := s.ElseStmt.(*parser.BlockStmt); ok {
+				return g.bodyUsesConcurrency(bs)
+			}
+			return g.stmtUsesConcurrency(s.ElseStmt)
+		}
+	case *parser.ForStmt:
+		return g.bodyUsesConcurrency(s.Body)
+	case *parser.WhileStmt:
+		return g.bodyUsesConcurrency(s.Body)
+	case *parser.BlockStmt:
+		return g.bodyUsesConcurrency(s)
+	case *parser.ReturnStmt:
+		return g.exprUsesConcurrency(s.Value)
+	}
+	return false
+}
+
+func (g *Generator) exprUsesConcurrency(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch e := e.(type) {
+	case *parser.SpawnExpr:
+		return true
+	case *parser.CallExpr:
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			if ident.Name == "parallel" || ident.Name == "Lock" {
+				return true
+			}
+		}
+		for _, a := range e.Args {
+			if g.exprUsesConcurrency(a) {
+				return true
+			}
+		}
+	case *parser.BinaryExpr:
+		return g.exprUsesConcurrency(e.Left) || g.exprUsesConcurrency(e.Right)
+	}
+	return false
 }
 
 // --- Helpers -----------------------------------------------------------------

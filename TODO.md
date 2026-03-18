@@ -97,6 +97,7 @@ main() {
 
 | Feature | Notes |
 |---------|-------|
+| Drop Go compilation target | Go backend functional but dual-backend leaks Go idioms (functional handler patterns) into Zinc's OO design. C# supports both OO and functional styles natively. Keep Go as compiler impl language, C# AOT as sole output. |
 | Typed errors | Exception hierarchy |
 | Operator overloading | Via .NET interop |
 | Destructuring | `var (name, age) = user` |
@@ -108,8 +109,11 @@ main() {
 ## Completed (v0.11.0)
 - Concurrency: `spawn { }` → `Future<T>`, `parallel(list) { }` → `List<T>`, `Lock(value)` → thread-safe wrapper
 - No async/await, no function coloring — three primitives only
+- `ZincScope` structured concurrency — all spawned work is scoped, no fire-and-forget
 - `ZincFuture<T>` and `ZincLock<T>` runtime helpers (emitted only when used)
-- 4 unit tests + 4 E2E tests (spawn, spawn-two, parallel, lock-update)
+- Error propagation: child failure cancels siblings via `CancellationTokenSource`
+- `or { }` on `future.value` and `parallel(list) { }` — catches fiber errors with `AggregateException` unwrapping
+- 5 unit tests + 10 E2E tests (spawn, parallel, Lock, error propagation, sibling cancellation)
 - See [design doc](docs/design-concurrency.md)
 
 ## Completed (v0.10.0)

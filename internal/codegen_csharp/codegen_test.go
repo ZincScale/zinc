@@ -1067,7 +1067,7 @@ main() {
 
 // === Concurrency ===
 
-func TestSpawn_EmitsZincFuture(t *testing.T) {
+func TestSpawn_EmitsStructuredConcurrency(t *testing.T) {
 	out := transpile(`
 main() {
     var f = spawn {
@@ -1076,12 +1076,14 @@ main() {
     print(f.Value)
 }
 `)
-	assertContains(t, out, "new ZincFuture<dynamic>(Task.Run(")
+	assertContains(t, out, "__scope.Spawn<dynamic>(")
+	assertContains(t, out, "public class ZincScope : IDisposable")
 	assertContains(t, out, "public class ZincFuture<T>")
+	assertContains(t, out, "using (var __scope = new ZincScope())")
 	assertContains(t, out, "using System.Threading.Tasks;")
 }
 
-func TestParallel_EmitsTaskWhenAll(t *testing.T) {
+func TestParallel_EmitsTaskWhenAllWithScope(t *testing.T) {
 	out := transpile(`
 main() {
     var nums = [1, 2, 3]
@@ -1091,6 +1093,8 @@ main() {
 `)
 	assertContains(t, out, "Task.WhenAll(")
 	assertContains(t, out, "Task.Run(")
+	assertContains(t, out, "__scope.Token")
+	assertContains(t, out, "using (var __scope = new ZincScope())")
 	assertContains(t, out, "using System.Threading.Tasks;")
 }
 
@@ -1113,6 +1117,20 @@ main() {
 `)
 	assertNotContains(t, out, "ZincFuture")
 	assertNotContains(t, out, "ZincLock")
+	assertNotContains(t, out, "ZincScope")
+}
+
+func TestScope_CancellationOnFailure(t *testing.T) {
+	out := transpile(`
+main() {
+    var a = spawn { 1 }
+    var b = spawn { 2 }
+    print(a.value)
+}
+`)
+	// Verify scope cancels siblings: ContinueWith fires on fault
+	assertContains(t, out, "if (t.IsFaulted && !_cts.IsCancellationRequested) _cts.Cancel()")
+	assertContains(t, out, "token.ThrowIfCancellationRequested()")
 }
 
 func TestDataClass_WithParent(t *testing.T) {

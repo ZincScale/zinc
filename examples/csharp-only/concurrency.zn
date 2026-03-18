@@ -1,5 +1,6 @@
 // Concurrency primitives — spawn, parallel, Lock<T>
-// These map to Task.Run, Task.WhenAll, and a thread-safe wrapper in C#.
+// Structured concurrency: all spawned work is scoped, no fire-and-forget.
+// If a spawn fails, siblings are cancelled. If main exits, everything is cancelled.
 // No async/await, no function coloring — just normal code.
 
 main() {
@@ -25,4 +26,22 @@ main() {
     counter.update { it + 1 }
     counter.update { it + 1 }
     print("counter: {counter.value}")
+
+    // --- Error propagation with or { } ---
+    // If a spawn body throws, accessing .value propagates the error.
+    // Use or { } to catch and handle fiber errors.
+    var risky = spawn { panic("something went wrong") }
+    var result = risky.value or {
+        print("caught fiber error: " + err)
+        return
+    }
+
+    // --- parallel error propagation ---
+    // If any task in parallel panics, or { } catches it.
+    // The error message is unwrapped from AggregateException automatically.
+    var items = [1, 2, 3]
+    var processed = parallel(items) { panic("task failed") } or {
+        print("parallel caught: " + err)
+        return
+    }
 }

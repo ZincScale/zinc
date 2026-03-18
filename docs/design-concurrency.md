@@ -166,10 +166,12 @@ For Phase 1, this maps directly to .NET's `ThreadPool` which already does work s
 
 | Zinc | C# Emit |
 |------|---------|
-| `spawn { expr }` | `Task.Run(() => expr)` returning `Task<T>` |
-| `future.value` | `.GetAwaiter().GetResult()` |
-| `parallel(list) { ... }` | `Task.WhenAll(list.Select(x => Task.Run(...)))` |
+| `spawn { expr }` | `__scope.Spawn<T>(() => expr)` — tracked by `ZincScope` |
+| `future.value` | `.GetAwaiter().GetResult()` — re-throws fiber exceptions |
+| `future.value or { }` | try/catch on `.Value` — catches fiber errors |
+| `parallel(list) { ... }` | `Task.WhenAll(list.Select(x => Task.Run(..., __scope.Token)))` |
 | `Lock<T>` | Wrapper class with `lock` statement |
+| `main() { ... }` | Wrapped in `using (var __scope = new ZincScope())` — structured exit |
 
 ## Examples
 
@@ -220,14 +222,15 @@ main() {
 
 ## Implementation Plan
 
-### Phase 1 (v0.11)
+### Phase 1 (v0.11) — Complete
 - AST: `SpawnExpr`, `ParallelExpr` nodes
 - Parser: `spawn { expr }`, `parallel(collection) { expr }`
-- C# codegen: `Task.Run(() => expr)`, `Task.WhenAll`, `.GetAwaiter().GetResult()` for `.value`
-- Structured scoping: parent waits for child tasks
-- Error propagation: child failure cancels siblings
+- C# codegen: `ZincScope` for structured concurrency, `ZincFuture<T>`, `ZincLock<T>`
+- Structured scoping: `main()` wrapped in `ZincScope` — all spawned work is scoped, no fire-and-forget
+- Error propagation: child failure cancels siblings via `CancellationTokenSource`
+- `or { }` on `future.value`: catches fiber errors with familiar Zinc error handling
 - `Lock<T>`: emit wrapper class with `lock` statement
-- E2E tests
+- E2E tests: spawn, parallel, Lock, error propagation, sibling cancellation
 
 ### Future — only if needed
 - `spawn(isolated: true)` for CPU-bound work on a dedicated thread
