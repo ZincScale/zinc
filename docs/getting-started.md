@@ -186,5 +186,6 @@ zinc repl                             # interactive REPL
 ## Next Steps
 
 - [Language Reference](language-reference.md) — full syntax guide
+- [Deployment Guide](deployment.md) — Docker, K8s, PyInstaller, CI/CD
 - [Design Doc](design-zinc-v2-python.md) — philosophy and decisions
 - [Examples](../examples/v2/) — working examples

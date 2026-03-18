@@ -44,6 +44,7 @@ Python is the best language for getting things done fast. But it has pain points
 | [Getting Started](docs/getting-started.md) | Install, hello world, key concepts |
 | [Language Reference](docs/language-reference.md) | Full syntax guide |
 | [Design Doc](docs/design-zinc-v2-python.md) | Philosophy, decisions, rationale |
+| [Deployment Guide](docs/deployment.md) | Docker, K8s, PyInstaller, CI/CD |
 | [Known Limitations](docs/v2-limitations.md) | What's not yet implemented |
 
 ### Design
