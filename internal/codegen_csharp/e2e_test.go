@@ -245,6 +245,20 @@ main() {
     print(j)
 }`, mode: modeExact, expected: []string{"99"}},
 
+	// --- Use keyword (replaces import with dotted identifiers) ---
+	{name: "UseJsonNamespace", src: `
+use System.Text.Json
+main() {
+    var j = JsonSerializer.Serialize(42)
+    print(j)
+}`, mode: modeExact, expected: []string{"42"}},
+	{name: "UseShortAlias", src: `
+use json
+main() {
+    var s = JsonSerializer.Serialize("test")
+    print(s)
+}`, mode: modeExact, expected: []string{`"test"`}},
+
 	// --- Resolver (need type introspection) ---
 	{name: "ResolverStopwatch", resolved: true, src: `
 import "System.Diagnostics"

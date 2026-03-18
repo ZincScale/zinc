@@ -1779,6 +1779,22 @@ func (p *Parser) parseImportDecl() *ImportDecl {
 	return &ImportDecl{Path: path, Alias: alias}
 }
 
+func (p *Parser) parseUseDecl() *ImportDecl {
+	p.expect(lexer.TOKEN_USE)
+	// Parse dotted identifier: System.Text.Json or just "http"
+	path := p.expect(lexer.TOKEN_IDENT).Literal
+	for p.check(lexer.TOKEN_DOT) {
+		p.advance()
+		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
+	}
+	alias := ""
+	if p.check(lexer.TOKEN_AS) {
+		p.advance()
+		alias = p.expect(lexer.TOKEN_IDENT).Literal
+	}
+	return &ImportDecl{Path: path, Alias: alias}
+}
+
 func (p *Parser) parsePackageDecl() *PackageDecl {
 	p.expect(lexer.TOKEN_PACKAGE)
 	path := p.expect(lexer.TOKEN_STRING_LIT).Literal
@@ -1804,6 +1820,8 @@ func (p *Parser) Parse() *Program {
 		switch tok.Type {
 		case lexer.TOKEN_IMPORT:
 			prog.Imports = append(prog.Imports, p.parseImportDecl())
+		case lexer.TOKEN_USE:
+			prog.Imports = append(prog.Imports, p.parseUseDecl())
 		case lexer.TOKEN_DATA:
 			prog.Decls = append(prog.Decls, p.parseDataClassDecl())
 		case lexer.TOKEN_ENUM:

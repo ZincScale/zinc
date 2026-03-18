@@ -843,6 +843,50 @@ main() {
 	assertContains(t, out, "using System.Diagnostics;")
 }
 
+// === Use Keyword ===
+
+func TestUseDirectNamespace(t *testing.T) {
+	out := transpile(`
+use System.Text.Json
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Text.Json;")
+}
+
+func TestUseShortAlias(t *testing.T) {
+	out := transpile(`
+use http
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Net.Http;")
+}
+
+func TestUseWithAlias(t *testing.T) {
+	out := transpile(`
+use Newtonsoft.Json as nj
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using Newtonsoft.Json;")
+}
+
+func TestUseMultiple(t *testing.T) {
+	out := transpile(`
+use System.Text.Json
+use System.Diagnostics
+main() {
+    print("hello")
+}
+`)
+	assertContains(t, out, "using System.Text.Json;")
+	assertContains(t, out, "using System.Diagnostics;")
+}
+
 // === Annotations ===
 
 func TestAnnotationOnClass(t *testing.T) {

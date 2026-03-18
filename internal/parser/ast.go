@@ -224,6 +224,7 @@ type OptionalType struct {
 func (o *OptionalType) nodeTag() {}
 func (o *OptionalType) typeTag() {}
 
+
 // FuncTypeExpr: Fn<(Int, String), Bool> → func(int, string) bool
 type FuncTypeExpr struct {
 	Params     []TypeExpr // parameter types
