@@ -21,6 +21,14 @@ var items: list[int] = []   // generic type
 var a, b = divmod(10, 3)    // tuple unpacking
 ```
 
+## Constants
+
+```zinc
+const PI = 3.14159
+const MAX_RETRIES = 3
+const APP_NAME = "zinc-app"
+```
+
 ## Functions
 
 ```zinc
@@ -29,8 +37,11 @@ fn greet(name: str): str {
 }
 
 fn double(x: int): int = x * 2       // single-expression
-fn log(*args, **kwargs)               // variadic
-fn connect(host: str, port: int = 80) // default args
+fn log(*args, **kwargs) { }           // variadic
+fn connect(host: str, port: int = 80) { }  // default args
+
+// Named arguments at call site
+connect("db.example.com", port=3306, ssl=false)
 ```
 
 ## Strings
@@ -41,6 +52,18 @@ fn connect(host: str, port: int = 80) // default args
 'no {interpolation}'    // single quotes: literal strings
 """multi-line
 string"""               // triple quotes: multi-line
+```
+
+## Tuples
+
+```zinc
+var point = (3, 5)
+var rgb = (255, 128, 0)
+
+fn swap(a: int, b: int) {
+    return b, a              // return tuple without parens
+}
+var x, y = swap(1, 2)       // tuple unpacking
 ```
 
 ## Classes
@@ -60,16 +83,37 @@ class Stack {
     fn str(): str {              // → __str__(self)
         return "Stack({items})"
     }
-}
 
-class Dog(Animal) {              // inheritance
-    var breed: str
-
-    @staticmethod
-    fn species(): str {
-        return "Canis lupus"
+    @property
+    fn size(): int {
+        return len(items)
     }
 }
+```
+
+### Inheritance
+
+```zinc
+class Animal {
+    var name: str
+    var sound: str
+
+    fn speak(): str {
+        return "{name} says {sound}"
+    }
+}
+
+class Dog(Animal) {
+    var breed: str
+
+    fn fetch(): str {
+        return "{name} fetches!"   // inherited fields auto-inject self.
+    }
+}
+
+var d = Dog(breed="Lab", name="Rex", sound="Woof")
+print(d.speak())     // Rex says Woof
+print(d.fetch())     // Rex fetches!
 ```
 
 ### Dunder Mapping
@@ -89,176 +133,7 @@ class Dog(Animal) {              // inheritance
 | `fn lt(other)` | `__lt__` |
 | `fn call(...)` | `__call__` |
 
-## Data Classes
-
-```zinc
-data User {
-    name: str
-    email: str
-    age: int = 0
-}
-```
-
-Transpiles to `@dataclass class User`.
-
-## Enums
-
-```zinc
-enum Color {
-    Red
-    Green
-    Blue
-}
-```
-
-## Control Flow
-
-```zinc
-// if / else if / else
-if x > 0 {
-    print("positive")
-} else if x == 0 {
-    print("zero")
-} else {
-    print("negative")
-}
-
-// expression if (ternary)
-var label = if count == 1: "item" else: "items"
-
-// for loop
-for item in items {
-    print(item)
-}
-
-for i, item in items {       // with index (enumerate)
-    print("{i}: {item}")
-}
-
-// while
-while running {
-    process()
-}
-
-// match
-match command {
-    case "start" -> start()
-    case "stop" -> stop()
-    case _ -> print("unknown")
-}
-```
-
-## Error Handling
-
-### Track 1 — Result[T] for expected failures
-
-```zinc
-fn parse_age(input: str): Result[int] {
-    if not input.isdigit() {
-        return Err("not a number")
-    }
-    return int(input)            // auto-wrapped in Ok()
-}
-
-// Default value (single expression, no end needed)
-var age = parse_age(input) Err 0
-
-// Handler block
-var age = parse_age(input) Err {
-    print("bad: {err}")
-    return
-}
-```
-
-### Track 2 — Exceptions for unexpected failures
-
-```zinc
-try {
-    var conn = db.connect(url)
-} catch err: ConnectionError {
-    print("down: {err}")
-}
-
-raise ValueError("bad") from original
-```
-
-## Imports
-
-```zinc
-import json
-import os.path
-from pathlib import Path
-from os.path import join, exists
-```
-
-## Operators
-
-```zinc
-// Arithmetic
-+ - * / % **
-
-// Comparison
-== != < <= > >=
-
-// Boolean
-and  or  not
-
-// Membership
-in   not in
-
-// Identity
-is   is not
-
-// None
-none
-```
-
-## Collection Methods
-
-```zinc
-items.filter(x -> x > 0)        // → [x for x in items if (x > 0)]
-items.map(x -> x * 2)           // → [(x * 2) for x in items]
-items.sum()                      // → sum(items)
-items.sort_by(x -> x.age)       // → sorted(items, key=...)
-items.take(10)                   // → items[:10]
-items.first(x -> x > 10)        // → next(x for x in items if ...)
-items.any(x -> x > 0)           // → any(...)
-items.group_by(x -> x.category) // → itertools.groupby(...)
-
-// Comprehensions (transpiler auto-picks list vs generator)
-var squares = [x * x for x in range(10)]
-var total = sum([x for x in items])   // auto-stripped to generator
-var lengths = {w: len(w) for w in words}
-
-// With --optimize polars, chains become Polars lazy frames:
-// orders.filter(o -> o["status"] == "active").map(o -> o["amount"]).sum()
-// → pl.DataFrame(orders).lazy().filter(pl.col("status") == "active").select("amount").sum().collect().item()
-```
-
-## Generators
-
-```zinc
-fn fibonacci(limit: int) {
-    var a = 0
-    var b = 1
-    while a < limit {
-        yield a
-        var temp = a
-        a = b
-        b = temp + b
-    }
-}
-```
-
-## Context Managers
-
-```zinc
-with f = open("data.txt") {
-    var content = f.read()
-}
-```
-
-## Decorators
+### Decorators
 
 ```zinc
 @cache
@@ -276,7 +151,282 @@ class MyClass {
     fn from_dict(d: dict): MyClass {
         return MyClass()
     }
+
+    @property
+    fn label(): str {
+        return "MyClass"
+    }
 }
+```
+
+## Data Classes
+
+```zinc
+data User {
+    name: str
+    email: str
+    age: int = 0
+}
+
+var u = User("Alice", "alice@example.com", 30)
+// Auto-generates __init__, __repr__, __eq__
+```
+
+Transpiles to `@dataclass class User`.
+
+## Enums
+
+```zinc
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+enum Direction {
+    North
+    South
+    East
+    West
+}
+```
+
+## Control Flow
+
+```zinc
+// if / else if / else
+if x > 0 {
+    print("positive")
+} else if x == 0 {
+    print("zero")
+} else {
+    print("negative")
+}
+
+// expression if (ternary) — condition first
+var label = if count == 1: "item" else: "items"
+
+// for loop
+for item in items {
+    print(item)
+}
+
+for i, item in items {       // with index (auto enumerate)
+    print("{i}: {item}")
+}
+
+// while
+while running {
+    process()
+}
+
+// match
+match command {
+    case "start" -> start()
+    case "stop" -> stop()
+    case _ -> print("unknown")
+}
+```
+
+## Type Checking with `is`
+
+`is` does both identity checks and type checks — the transpiler decides based on context:
+
+```zinc
+// Type check — rhs is a type name → generates isinstance()
+if x is str {
+    print(x.upper())        // x narrowed to str in this block
+}
+if x is int {
+    print(x + 1)             // x narrowed to int
+}
+if x is not list {
+    print("not a list")
+}
+
+// Identity check — rhs is a value → generates Python is
+if value is none {
+    print("no value")
+}
+if value is not none {
+    print("has value: {value}")
+}
+```
+
+## Error Handling
+
+### Track 1 — Result[T] for expected failures
+
+Use for validation, parsing, missing data — anything you'd put in a loop over 10,000 records:
+
+```zinc
+fn parse_port(s: str): Result[int] {
+    if not s.isdigit() {
+        return Err("not a number: {s}")
+    }
+    var port = int(s)
+    if port < 1 or port > 65535 {
+        return Err("out of range: {port}")
+    }
+    return port              // auto-wrapped in Ok()
+}
+
+// Default value
+var port = parse_port("8080") Err 80
+
+// Handler block
+var port = parse_port(input) Err {
+    print("bad port: {err}")
+    return
+}
+
+// Batch processing — skip bad records
+for record in records {
+    var age = parse_age(record["age"]) Err {
+        print("skipping: {err}")
+        continue
+    }
+    process(age)
+}
+```
+
+### Track 2 — Exceptions for unexpected failures
+
+Use for program-stopping failures — network down, disk full, out of memory:
+
+```zinc
+try {
+    var conn = db.connect(url)
+} catch err: ConnectionError {
+    print("database down: {err}")
+    exit(1)
+}
+
+// Exception chaining
+raise ValueError("bad config") from original_error
+```
+
+## Imports
+
+```zinc
+import json
+import os.path
+from pathlib import Path
+from os.path import join, exists, basename
+```
+
+## Operators
+
+```zinc
+// Arithmetic
++ - * / % **
+
+// Comparison
+== != < <= > >=
+
+// Boolean
+and  or  not
+
+// Membership
+in   not in
+
+// Type check / Identity
+is   is not                  // type check or identity based on rhs
+
+// None
+none
+```
+
+## Collection Methods
+
+Single operations generate inline comprehensions (zero overhead):
+
+```zinc
+items.filter(x -> x > 0)        // → [x for x in items if (x > 0)]
+items.map(x -> x * 2)           // → [(x * 2) for x in items]
+items.sum()                      // → sum(items)
+items.sort_by(x -> x.age)       // → sorted(items, key=...)
+items.take(10)                   // → items[:10]
+items.skip(5)                    // → items[5:]
+items.first(x -> x > 10)        // → next(x for x if ...)
+items.any(x -> x > 0)           // → any(...)
+items.all(x -> x > 0)           // → all(...)
+items.distinct()                 // → list(set(...))
+items.group_by(x -> x.category) // → itertools.groupby(...)
+```
+
+Chained operations use smart dispatch runtime:
+
+```zinc
+// Chain of 2+ → _zinc_collect() with method chaining
+var total = orders
+    .filter(o -> o["status"] == "active")
+    .map(o -> o["amount"])
+    .sum()
+```
+
+With `--optimize polars`, chains become Polars lazy frames:
+
+```zinc
+// Same code, different backend:
+// zinc run script.zn --optimize polars
+// → pl.DataFrame(orders).lazy().filter(...).select(...).sum().collect().item()
+```
+
+## Comprehensions
+
+```zinc
+// List comprehension
+var squares = [x ** 2 for x in range(10)]
+var evens = [x for x in numbers if x % 2 == 0]
+
+// Dict comprehension
+var lengths = {w: len(w) for w in words}
+
+// Auto generator promotion — transpiler strips brackets inside sum/any/all
+var total = sum([x for x in items])   // → sum(x for x in items)
+```
+
+## Generators
+
+```zinc
+fn fibonacci(limit: int) {
+    var a = 0
+    var b = 1
+    while a < limit {
+        yield a
+        var temp = a
+        a = b
+        b = temp + b
+    }
+}
+
+for n in fibonacci(100) {
+    print(n)
+}
+```
+
+## Context Managers
+
+```zinc
+with f = open("data.txt") {
+    var content = f.read()
+}
+// f is automatically closed
+```
+
+## Assert
+
+```zinc
+assert x > 0, "x must be positive"
+assert len(items) > 0
+```
+
+## Delete
+
+```zinc
+var config = {"host": "localhost", "secret": "abc123"}
+del config["secret"]
 ```
 
 ## Type Safety
@@ -284,13 +434,23 @@ class MyClass {
 Types are enforced at transpile time — errors block `.py` output:
 
 ```
-// These are caught before your code runs:
-var x: int = "hello"           // type mismatch: expected int, got str
-fn add(): int { return "bad" } // return type mismatch: expected int, got str
-greet(42)                      // argument 1: expected str, got int
-greet("a", "b")                // expects 1 args, got 2
-break                          // 'break' outside of loop
-y = 10                         // undefined variable "y"
+var x: int = "hello"                    // type mismatch: expected int, got str
+fn add(): int { return "bad" }          // return type mismatch
+greet(42)                               // argument 1: expected str, got int
+greet("a", "b")                         // expects 1 args, got 2
+break                                   // 'break' outside of loop
+y = 10                                  // undefined variable "y"
+fn f(): int { if x > 0 { return 1 } }  // not all code paths return
+```
+
+Type narrowing works after `is` checks:
+
+```zinc
+fn process(x: any) {
+    if x is str {
+        var s: str = x       // OK — x narrowed to str
+    }
+}
 ```
 
 ## Shebang
@@ -300,14 +460,17 @@ y = 10                         // undefined variable "y"
 print("directly executable!")
 ```
 
-## Tuples
+```bash
+chmod +x script.zn
+./script.zn
+```
 
-```zinc
-var point = (3, 5)
-var rgb = (255, 128, 0)
+## CLI
 
-fn swap(a: int, b: int) {
-    return b, a
-}
-var x, y = swap(1, 2)
+```bash
+zinc run script.zn                    # transpile + run
+zinc run script.zn -- arg1 arg2       # pass args to script
+zinc run script.zn --optimize polars  # Polars for collection chains
+zinc transpile script.zn              # output .py file
+zinc transpile script.zn -o out.py    # specify output path
 ```

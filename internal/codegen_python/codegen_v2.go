@@ -790,7 +790,7 @@ func (g *Generator) isTypeName(e parser.Expr) bool {
 // These consume items lazily — no need to build the full list in memory.
 var generatorFriendly = map[string]bool{
 	"sum": true, "any": true, "all": true, "min": true, "max": true,
-	"len": true, "sorted": true, "list": true, "set": true, "tuple": true,
+	"sorted": true, "list": true, "set": true, "tuple": true,
 	"dict": true, "enumerate": true, "zip": true, "next": true,
 }
 
