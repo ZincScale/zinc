@@ -125,6 +125,7 @@ type FnDecl struct {
 
 func (f *FnDecl) nodeTag()      {}
 func (f *FnDecl) topLevelTag() {}
+func (f *FnDecl) stmtTag()     {} // v2: nested functions are statements
 
 // DataClassDecl: data User(pub String name, pub Int age) { optional methods }
 type DataClassDecl struct {
@@ -430,6 +431,15 @@ type RaiseStmt struct {
 
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
+
+// DelStmt: del expr
+type DelStmt struct {
+	Line   int
+	Target Expr
+}
+
+func (d *DelStmt) nodeTag() {}
+func (d *DelStmt) stmtTag() {}
 
 // AssertStmt: assert expr [, "message"]
 type AssertStmt struct {

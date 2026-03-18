@@ -418,12 +418,17 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 		} else {
 			g.writeln(fmt.Sprintf("raise %s", g.emitV2Expr(s.Value)))
 		}
+	case *parser.DelStmt:
+		g.writeln(fmt.Sprintf("del %s", g.emitV2Expr(s.Target)))
 	case *parser.AssertStmt:
 		if s.Message != nil {
 			g.writeln(fmt.Sprintf("assert %s, %s", g.emitV2Expr(s.Cond), g.emitV2Expr(s.Message)))
 		} else {
 			g.writeln(fmt.Sprintf("assert %s", g.emitV2Expr(s.Cond)))
 		}
+	case *parser.FnDecl:
+		// Nested function definition
+		g.emitV2FnDecl(s)
 	case *parser.WithStmt:
 		var resources []string
 		for _, r := range s.Resources {
@@ -579,6 +584,13 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 	case *parser.FloatLit:
 		return e.Value
 	case *parser.StringLit:
+		if strings.Contains(e.Value, "\n") {
+			return fmt.Sprintf(`"""%s"""`, e.Value)
+		}
+		// Use single quotes if the string contains double quotes
+		if strings.Contains(e.Value, `"`) {
+			return fmt.Sprintf(`'%s'`, e.Value)
+		}
 		return fmt.Sprintf(`"%s"`, e.Value)
 	case *parser.RawStringLit:
 		return fmt.Sprintf(`r"%s"`, e.Value)

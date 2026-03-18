@@ -106,9 +106,19 @@ func (l *Lexer) NextToken() Token {
 		return l.makeToken(TOKEN_EOF, "", line, col)
 	}
 
-	// String literal (double or single quotes)
-	if ch == '"' || ch == '\'' {
+	// Triple-quote multi-line string: """
+	if ch == '"' && l.peekAt(1) == '"' && l.peekAt(2) == '"' {
+		return l.readTripleQuoteString(ch, line, col)
+	}
+
+	// Double-quote string (supports {interpolation})
+	if ch == '"' {
 		return l.readStringWithQuote(ch, line, col)
+	}
+
+	// Single-quote string (literal, NO interpolation — safe for JSON, SQL, etc.)
+	if ch == '\'' {
+		return l.readLiteralString(line, col)
 	}
 
 	// Raw string literal
@@ -333,6 +343,74 @@ func (l *Lexer) readRawString(line, col int) Token {
 		sb.WriteRune(l.advance())
 	}
 	return l.makeToken(TOKEN_RAW_STRING, sb.String(), line, col)
+}
+
+// readLiteralString reads a single-quoted string with NO interpolation.
+// Single quotes = literal strings. Use for JSON, SQL, regexes, etc.
+func (l *Lexer) readLiteralString(line, col int) Token {
+	l.advance() // consume opening '
+	var sb strings.Builder
+	for {
+		ch := l.peek()
+		if ch == 0 || ch == '\n' {
+			l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unterminated string", line, col))
+			break
+		}
+		if ch == '\'' {
+			l.advance()
+			break
+		}
+		if ch == '\\' {
+			l.advance()
+			esc := l.advance()
+			switch esc {
+			case 'n':
+				sb.WriteRune('\n')
+			case 't':
+				sb.WriteRune('\t')
+			case '\'':
+				sb.WriteRune('\'')
+			case '\\':
+				sb.WriteRune('\\')
+			default:
+				sb.WriteRune('\\')
+				sb.WriteRune(esc)
+			}
+			continue
+		}
+		sb.WriteRune(l.advance())
+	}
+	return l.makeToken(TOKEN_STRING_LIT, sb.String(), line, col)
+}
+
+// readTripleQuoteString reads a """ or ''' multi-line string.
+func (l *Lexer) readTripleQuoteString(quote rune, line, col int) Token {
+	l.advance() // consume first quote
+	l.advance() // consume second quote
+	l.advance() // consume third quote
+	var sb strings.Builder
+	hasInterp := false
+	for {
+		ch := l.peek()
+		if ch == 0 {
+			l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unterminated triple-quoted string", line, col))
+			break
+		}
+		if ch == quote && l.peekAt(1) == quote && l.peekAt(2) == quote {
+			l.advance()
+			l.advance()
+			l.advance()
+			break
+		}
+		if ch == '{' {
+			hasInterp = true
+		}
+		sb.WriteRune(l.advance())
+	}
+	if hasInterp {
+		return l.makeToken(TOKEN_INTERP_STRING, sb.String(), line, col)
+	}
+	return l.makeToken(TOKEN_STRING_LIT, sb.String(), line, col)
 }
 
 func (l *Lexer) readNumber(line, col int) Token {

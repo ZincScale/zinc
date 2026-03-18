@@ -589,6 +589,31 @@ end
 	}
 }
 
+func TestV2DelStatement(t *testing.T) {
+	assertV2Contains(t,
+		`del items["key"]`,
+		`del items["key"]`,
+	)
+}
+
+func TestV2DataAsVariable(t *testing.T) {
+	assertV2Contains(t, `
+var data = json.loads(text)
+print(data)
+`,
+		"data = json.loads(text)",
+		"print(data)",
+	)
+}
+
+func TestV2TripleQuoteString(t *testing.T) {
+	src := "var sql = \"\"\"SELECT * FROM users\"\"\""
+	result := transpileV2(src)
+	if !strings.Contains(result, "SELECT") {
+		t.Errorf("expected SQL in output, got: %s", result)
+	}
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json

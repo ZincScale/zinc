@@ -135,11 +135,22 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseTryStmt()
 	case lexer.TOKEN_RAISE:
 		return p.v2ParseRaiseStmt()
+	case lexer.TOKEN_FN:
+		// Nested function definition — parsed as FnDecl, emitted inline
+		return p.v2ParseFnDeclAsStmt()
 	case lexer.TOKEN_IDENT:
-		// Handle 'assert' as a statement (it's not a keyword token)
 		if tok.Literal == "assert" {
 			return p.v2ParseAssertStmt()
 		}
+		if tok.Literal == "del" {
+			return p.v2ParseDelStmt()
+		}
+	case lexer.TOKEN_DATA, lexer.TOKEN_CLASS, lexer.TOKEN_ENUM:
+		// Allow data/class/enum inside function bodies (local types)
+		// For now, skip — treat as top-level only
+		p.errorf("data/class/enum declarations must be at top level")
+		p.advance()
+		return nil
 	}
 
 	// Expression statement or assignment
@@ -151,7 +162,13 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 	line := p.peek().Line
 	p.advance() // consume var
 
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	// Allow some keywords as variable names (data, type, etc.)
+	var name string
+	if p.check(lexer.TOKEN_IDENT) || p.check(lexer.TOKEN_DATA) || p.check(lexer.TOKEN_MATCH) {
+		name = p.advance().Literal
+	} else {
+		name = p.expect(lexer.TOKEN_IDENT).Literal
+	}
 
 	// Tuple unpacking: var a, b = expr
 	if p.check(lexer.TOKEN_COMMA) {
@@ -393,6 +410,19 @@ func (p *Parser) v2ParseRaiseStmt() *RaiseStmt {
 		from = p.v2ParseExpr()
 	}
 	return &RaiseStmt{Line: line, Value: val, From: from}
+}
+
+// v2ParseFnDeclAsStmt parses a nested function definition as a statement.
+func (p *Parser) v2ParseFnDeclAsStmt() *FnDecl {
+	return p.v2ParseFnDecl()
+}
+
+// v2ParseDelStmt: del expr
+func (p *Parser) v2ParseDelStmt() *DelStmt {
+	line := p.peek().Line
+	p.advance() // consume "del" ident
+	target := p.v2ParseExpr()
+	return &DelStmt{Line: line, Target: target}
 }
 
 // v2ParseAssertStmt: assert expr [, "message"]
@@ -1013,8 +1043,8 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_NULL, lexer.TOKEN_NONE:
 		p.advance()
 		return &NullLit{}
-	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT:
-		// print is a regular function in v2 (not a special statement)
+	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:
+		// print and data are regular identifiers in expression context
 		// Check for lambda: name -> expr
 		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			return p.v2ParseLambda()

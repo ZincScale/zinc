@@ -833,6 +833,63 @@ func TestV2RaiseFrom(t *testing.T) {
 	}
 }
 
+func TestV2DelStatement(t *testing.T) {
+	prog, errs := parseV2(`del items["key"]`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	delStmt, ok := prog.Stmts[0].(*DelStmt)
+	if !ok {
+		t.Fatalf("expected DelStmt, got %T", prog.Stmts[0])
+	}
+	if delStmt.Target == nil {
+		t.Error("expected target expression")
+	}
+}
+
+func TestV2DataAsVariable(t *testing.T) {
+	prog, errs := parseV2(`
+var data = json.loads(text)
+print(data["key"])
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(prog.Stmts) != 2 {
+		t.Fatalf("expected 2 stmts, got %d", len(prog.Stmts))
+	}
+}
+
+func TestV2TripleQuoteString(t *testing.T) {
+	src := "var sql = \"\"\"SELECT *\nFROM users\nWHERE age > 18\"\"\""
+	prog, errs := parseV2(src)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	str, ok := varStmt.Value.(*StringLit)
+	if !ok {
+		t.Fatalf("expected StringLit, got %T", varStmt.Value)
+	}
+	if !strings.Contains(str.Value, "SELECT") {
+		t.Errorf("expected SQL content, got %q", str.Value)
+	}
+}
+
+func TestV2NestedFunction(t *testing.T) {
+	_, errs := parseV2(`
+fn outer(): int
+    fn inner(x: int): int
+        return x * 2
+    end
+    return inner(5)
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {
