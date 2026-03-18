@@ -30,7 +30,7 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 
 | You write | Zinc handles |
 |---|---|
-| `fn str() -> str` | Generates `def __str__(self)` |
+| `fn str(): str` | Generates `def __str__(self)` |
 | `items.filter(x -> x > 0)` | Dispatches to Polars/NumPy/comprehension based on data shape and available deps |
 | Field access: `name` | Injects `self.name` |
 | `data User ... end` | Full `@dataclass` with `__init__`, `__repr__`, `__eq__` |
@@ -60,7 +60,7 @@ else
     print("small")
 end
 
-fn process(items: list[dict]) -> list[dict]
+fn process(items: list[dict]): list[dict]
     var result = items.filter(x -> x["status"] == "active")
     if len(result) > 100
         result = result.sort_by(x -> x["priority"]).take(100)
@@ -150,12 +150,12 @@ scores: list[int] = []
 ### Functions
 
 ```zinc
-fn greet(name: str) -> str
+fn greet(name: str): str
     return "Hello, {name}!"
 end
 
 // Single-expression shorthand — no end needed
-fn double(x: int) -> int = x * 2
+fn double(x: int): int = x * 2
 ```
 
 Transpiles to:
@@ -201,22 +201,22 @@ Python's `__dunder__` methods are powerful but ugly and hard to remember. Zinc r
 | Zinc | Python dunder | Purpose |
 |---|---|---|
 | `fn init(...)` | `__init__` | Constructor |
-| `fn str() -> str` | `__str__` | String representation |
-| `fn repr() -> str` | `__repr__` | Debug representation |
-| `fn eq(other: T) -> bool` | `__eq__` | Equality |
-| `fn hash() -> int` | `__hash__` | Hash value |
-| `fn len() -> int` | `__len__` | Length |
+| `fn str(): str` | `__str__` | String representation |
+| `fn repr(): str` | `__repr__` | Debug representation |
+| `fn eq(other: T): bool` | `__eq__` | Equality |
+| `fn hash(): int` | `__hash__` | Hash value |
+| `fn len(): int` | `__len__` | Length |
 | `fn iter()` | `__iter__` | Iteration |
 | `fn next()` | `__next__` | Next item |
-| `fn contains(item: T) -> bool` | `__contains__` | `in` operator |
-| `fn get(key: K) -> V` | `__getitem__` | Index/key access |
+| `fn contains(item: T): bool` | `__contains__` | `in` operator |
+| `fn get(key: K): V` | `__getitem__` | Index/key access |
 | `fn set(key: K, val: V)` | `__setitem__` | Index/key assignment |
 | `fn del(key: K)` | `__delitem__` | Index/key deletion |
-| `fn add(other: T) -> T` | `__add__` | `+` operator |
-| `fn sub(other: T) -> T` | `__sub__` | `-` operator |
-| `fn mul(other: T) -> T` | `__mul__` | `*` operator |
-| `fn lt(other: T) -> bool` | `__lt__` | `<` comparison |
-| `fn le(other: T) -> bool` | `__le__` | `<=` comparison |
+| `fn add(other: T): T` | `__add__` | `+` operator |
+| `fn sub(other: T): T` | `__sub__` | `-` operator |
+| `fn mul(other: T): T` | `__mul__` | `*` operator |
+| `fn lt(other: T): bool` | `__lt__` | `<` comparison |
+| `fn le(other: T): bool` | `__le__` | `<=` comparison |
 | `fn enter()` | `__enter__` | Context manager enter |
 | `fn exit(...)` | `__exit__` | Context manager exit |
 | `fn call(...)` | `__call__` | Callable object |
@@ -231,15 +231,15 @@ class Stack
         items.append(item)
     end
 
-    fn pop() -> int
+    fn pop(): int
         return items.pop()
     end
 
-    fn len() -> int
+    fn len(): int
         return len(items)
     end
 
-    fn str() -> str
+    fn str(): str
         return "Stack({items})"
     end
 
@@ -321,7 +321,7 @@ Zinc separates **expected failures** (validation, parsing, missing data) from **
 **Track 1 — Results for expected failures:**
 
 ```zinc
-fn parse_age(input: str) -> Result[int]
+fn parse_age(input: str): Result[int]
     if not input.isdigit()
         return Err("must be a number")
     end
@@ -383,12 +383,32 @@ Transpiles directly — no transformation needed. This is critical: **Zinc doesn
 ```zinc
 if x > 0
     print("positive")
-elif x == 0
+else if x == 0
     print("zero")
 else
     print("negative")
 end
 ```
+
+Go-style `else if` (two words) instead of Python's `elif` — reads like English, no special keyword to remember.
+
+### Expression If (Ternary)
+
+Condition-first inline if — no more reading Python ternaries backwards:
+
+```zinc
+var encoded = if value != none: str(value).encode("utf-8") else: b""
+var label = if count == 1: "item" else: "items"
+var access = if user.is_admin: "full" else if user.is_member: "read" else: "none"
+```
+
+Transpiles to Python's ternary:
+```python
+encoded = str(value).encode("utf-8") if value is not None else b""
+label = "item" if count == 1 else "items"
+```
+
+The colon separates condition from value, reads left-to-right: "if this: that, else: other."
 
 ### Loops
 
@@ -632,7 +652,7 @@ zinc pack script.zn --format pex     # PEX archive (Python EXecutable)
 // greet.zn
 import sys
 
-var name = sys.argv[1] if len(sys.argv) > 1 else "world"
+var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
 print("Hello, {name}!")
 ```
 
@@ -789,7 +809,7 @@ print("Above average: {len(big)}")
 import requests
 import json
 
-fn get_issues(repo: str) -> list[dict]
+fn get_issues(repo: str): list[dict]
     var resp = requests.get("https://api.github.com/repos/{repo}/issues")
     resp.raise_for_status()
     return resp.json()
@@ -815,6 +835,12 @@ end
 
 5. **Auto-inject `self`** — fields accessed by name, transpiler adds `self.` prefix.
 
+6. **`else if`** — two words instead of Python's `elif`. Reads like English.
+
+7. **Expression if** — condition-first ternary: `if cond: val else: val`. Transpiles to Python's backwards ternary.
+
+8. **Colon for return types** — `fn greet(name: str): str` instead of `->`. Colon is home-row, no shift needed. Lambdas keep `->` arrow (`x -> x * 2`).
+
 ## Open Questions
 
 1. **Method chaining vs comprehensions?** — Could support both. Comprehensions pass through to Python naturally. Method chaining (`.filter().map()`) is more readable for long pipelines and enables smart dispatch. Leaning: support both.
@@ -832,7 +858,7 @@ end
 ## Implementation Plan
 
 ### Phase 1 — Minimum Viable Transpiler
-- Lexer/parser for: `var`, `fn`, `if/elif/else`, `for`, `while`, `return`, `print`
+- Lexer/parser for: `var`, `fn`, `if/else if/else`, `for`, `while`, `return`, `print`
 - `end` blocks → indentation conversion
 - Multi-line statement continuation
 - String interpolation → f-strings
