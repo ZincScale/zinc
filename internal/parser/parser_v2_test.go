@@ -909,6 +909,38 @@ end
 	}
 }
 
+func TestV2TupleLiteral(t *testing.T) {
+	prog, errs := parseV2(`var point = (3, 5)`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	tuple, ok := varStmt.Value.(*TupleLit)
+	if !ok {
+		t.Fatalf("expected TupleLit, got %T", varStmt.Value)
+	}
+	if len(tuple.Elements) != 2 {
+		t.Errorf("expected 2 elements, got %d", len(tuple.Elements))
+	}
+}
+
+func TestV2ReturnTuple(t *testing.T) {
+	prog, errs := parseV2(`
+fn divmod(a: int, b: int)
+    return a / b, a % b
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	ret := fn.Body.Stmts[0].(*ReturnStmt)
+	_, ok := ret.Value.(*TupleLit)
+	if !ok {
+		t.Fatalf("expected TupleLit return, got %T", ret.Value)
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

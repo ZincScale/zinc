@@ -32,6 +32,8 @@ type Generator struct {
 	classNames    map[string]bool
 	// v2: auto-self injection — field names of current class being emitted
 	currentClassFields map[string]bool
+	// v2: all class fields including inherited (built in first pass)
+	classFieldRegistry map[string]map[string]bool
 	// v2: Result type tracking
 	needsResultRuntime      bool // true if any function uses Result[T]
 	inResultFn              bool // true when emitting body of a Result-returning function

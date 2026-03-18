@@ -17,7 +17,7 @@ class Dog(Animal)
     var breed: str
 
     fn fetch(): str
-        return "{self.name} fetches the ball!"
+        return "{name} fetches the ball!"
     end
 end
 
@@ -40,9 +40,7 @@ enum Direction
 end
 
 // Usage
-var dog = Dog("Lab")
-dog.name = "Rex"
-dog.sound = "Woof"
+var dog = Dog(breed="Lab", name="Rex", sound="Woof")
 print(dog.speak())
 print(dog.fetch())
 

@@ -263,7 +263,17 @@ func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
 		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
 		return &ReturnStmt{Line: line}
 	}
-	return &ReturnStmt{Line: line, Value: p.v2ParseExpr()}
+	first := p.v2ParseExpr()
+	// return a, b → return (a, b) tuple
+	if p.check(lexer.TOKEN_COMMA) {
+		elems := []Expr{first}
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			elems = append(elems, p.v2ParseExpr())
+		}
+		return &ReturnStmt{Line: line, Value: &TupleLit{Elements: elems}}
+	}
+	return &ReturnStmt{Line: line, Value: first}
 }
 
 // v2ParseIfStmt: if cond ... [else if cond ...] [else ...] end
@@ -1121,17 +1131,35 @@ func (p *Parser) v2ParseLambda() Expr {
 	return &LambdaExpr{Params: []*ParamDecl{param}, Expr: expr}
 }
 
-// v2ParseParenOrLambda: (expr) or (a, b) -> expr
+// v2ParseParenOrLambda: (expr), (a, b) -> expr, or (a, b, c) tuple
 func (p *Parser) v2ParseParenOrLambda() Expr {
 	// Look ahead to detect lambda: (ident, ...) ->
 	if p.v2LooksLikeLambdaParams() {
 		return p.v2ParseMultiParamLambda()
 	}
-	// Regular parenthesized expression
+	// Parse first expression
 	p.advance() // consume (
-	expr := p.v2ParseExpr()
+	if p.check(lexer.TOKEN_RPAREN) {
+		p.advance()
+		return &TupleLit{} // empty tuple ()
+	}
+	first := p.v2ParseExpr()
+	// If comma follows, it's a tuple: (a, b, c)
+	if p.check(lexer.TOKEN_COMMA) {
+		elems := []Expr{first}
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			if p.check(lexer.TOKEN_RPAREN) {
+				break // trailing comma: (a,)
+			}
+			elems = append(elems, p.v2ParseExpr())
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+		return &TupleLit{Elements: elems}
+	}
+	// Single expression in parens: (expr)
 	p.expect(lexer.TOKEN_RPAREN)
-	return expr
+	return first
 }
 
 // v2LooksLikeLambdaParams checks if ( starts lambda params.

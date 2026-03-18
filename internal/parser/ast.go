@@ -723,6 +723,14 @@ type RangeExpr struct {
 func (*RangeExpr) nodeTag() {}
 func (*RangeExpr) exprTag() {}
 
+// TupleLit: (a, b, c)
+type TupleLit struct {
+	Elements []Expr
+}
+
+func (*TupleLit) nodeTag() {}
+func (*TupleLit) exprTag() {}
+
 // DictComprehensionExpr: {keyExpr: valExpr for var in iterable [if cond]}
 type DictComprehensionExpr struct {
 	Key  Expr   // key expression

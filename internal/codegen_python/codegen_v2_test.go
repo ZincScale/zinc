@@ -712,6 +712,33 @@ func TestV2DefaultNoPolars(t *testing.T) {
 	}
 }
 
+func TestV2TupleLiteral(t *testing.T) {
+	assertV2Contains(t, `var point = (3, 5)`, `point = (3, 5)`)
+}
+
+func TestV2ReturnTuple(t *testing.T) {
+	assertV2Contains(t, `
+fn swap(a: int, b: int)
+    return b, a
+end
+`,
+		"return (b, a)",
+	)
+}
+
+func TestV2TupleUnpackFromTuple(t *testing.T) {
+	assertV2Contains(t, `
+fn get_pair()
+    return (1, 2)
+end
+var x, y = get_pair()
+print("x={x}, y={y}")
+`,
+		"return (1, 2)",
+		"x, y = get_pair()",
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json

@@ -47,15 +47,39 @@ var dunders = map[string]string{
 
 // GenerateV2 produces Python source from a Zinc v2 AST (end-block syntax, script mode).
 func (g *Generator) GenerateV2(prog *parser.Program) string {
-	// First pass: collect class names
+	// First pass: collect class names and field maps (including inherited)
+	classFields := make(map[string]map[string]bool) // className → field names
 	for _, d := range prog.Decls {
 		switch cd := d.(type) {
 		case *parser.ClassDecl:
 			g.classNames[cd.Name] = true
+			fields := make(map[string]bool)
+			for _, f := range cd.Fields {
+				fields[f.Name] = true
+			}
+			classFields[cd.Name] = fields
 		case *parser.DataClassDecl:
 			g.classNames[cd.Name] = true
+			fields := make(map[string]bool)
+			for _, f := range cd.Params {
+				fields[f.Name] = true
+			}
+			classFields[cd.Name] = fields
 		}
 	}
+	// Resolve inherited fields: add parent fields to child classes
+	for _, d := range prog.Decls {
+		if cd, ok := d.(*parser.ClassDecl); ok {
+			for _, parent := range cd.Parents {
+				if parentFields, exists := classFields[parent]; exists {
+					for field := range parentFields {
+						classFields[cd.Name][field] = true
+					}
+				}
+			}
+		}
+	}
+	g.classFieldRegistry = classFields
 
 	// Emit imports — consolidate from-imports from same module
 	g.emitV2Imports(prog.Imports)
@@ -228,14 +252,20 @@ func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
 	}
 	g.push()
 
-	// Track fields for auto-self injection
-	g.currentClassFields = make(map[string]bool)
-	for _, f := range d.Fields {
-		g.currentClassFields[f.Name] = true
+	// Track fields for auto-self injection (includes inherited fields)
+	if registry, ok := g.classFieldRegistry[d.Name]; ok {
+		g.currentClassFields = registry
+	} else {
+		g.currentClassFields = make(map[string]bool)
+		for _, f := range d.Fields {
+			g.currentClassFields[f.Name] = true
+		}
 	}
 
-	// Auto-generate __init__ from fields
-	if len(d.Fields) > 0 {
+	// Auto-generate __init__ from own fields + call super() for parents
+	hasParent := len(d.Parents) > 0
+
+	if len(d.Fields) > 0 || hasParent {
 		var initParams []string
 		for _, f := range d.Fields {
 			param := f.Name
@@ -247,8 +277,15 @@ func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
 			}
 			initParams = append(initParams, param)
 		}
+		// Add **kwargs to pass extra args to parent
+		if hasParent {
+			initParams = append(initParams, "**kwargs")
+		}
 		g.writeln(fmt.Sprintf("def __init__(self, %s):", strings.Join(initParams, ", ")))
 		g.push()
+		if hasParent {
+			g.writeln("super().__init__(**kwargs)")
+		}
 		for _, f := range d.Fields {
 			g.writeln(fmt.Sprintf("self.%s = %s", f.Name, f.Name))
 		}
@@ -646,6 +683,15 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 			elems = append(elems, g.emitV2Expr(el))
 		}
 		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
+	case *parser.TupleLit:
+		var elems []string
+		for _, el := range e.Elements {
+			elems = append(elems, g.emitV2Expr(el))
+		}
+		if len(elems) == 1 {
+			return fmt.Sprintf("(%s,)", elems[0]) // single-element tuple needs trailing comma
+		}
+		return fmt.Sprintf("(%s)", strings.Join(elems, ", "))
 	case *parser.MapLit:
 		var entries []string
 		for i, k := range e.Keys {
