@@ -12,3 +12,8 @@ benchmarks/csharp-aot/obj/
 
 # Zinc build directory
 .zinc-build/
+*.py
+Dockerfile
+.dockerignore
+*-deployment.yaml
+*_pack.py
