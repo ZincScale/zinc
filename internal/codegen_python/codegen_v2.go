@@ -57,10 +57,8 @@ func (g *Generator) GenerateV2(prog *parser.Program) string {
 		}
 	}
 
-	// Emit imports
-	for _, imp := range prog.Imports {
-		g.emitV2Import(imp)
-	}
+	// Emit imports — consolidate from-imports from same module
+	g.emitV2Imports(prog.Imports)
 	if len(prog.Imports) > 0 {
 		g.write("\n")
 	}
@@ -92,23 +90,53 @@ func (g *Generator) GenerateV2(prog *parser.Program) string {
 
 // --- Imports -----------------------------------------------------------------
 
-func (g *Generator) emitV2Import(imp *parser.ImportDecl) {
-	if strings.HasPrefix(imp.Path, "from:") {
-		// from:module:name format
-		parts := strings.SplitN(imp.Path, ":", 3)
-		if len(parts) == 3 {
-			if imp.Alias != "" {
-				g.writeln(fmt.Sprintf("from %s import %s as %s", parts[1], parts[2], imp.Alias))
-			} else {
-				g.writeln(fmt.Sprintf("from %s import %s", parts[1], parts[2]))
+// emitV2Imports consolidates from-imports from the same module onto one line.
+func (g *Generator) emitV2Imports(imports []*parser.ImportDecl) {
+	// Group from-imports by module
+	type fromName struct {
+		name  string
+		alias string
+	}
+	fromGroups := make(map[string][]fromName) // module → names
+	var fromOrder []string                     // preserve order
+	var regularImports []*parser.ImportDecl
+
+	for _, imp := range imports {
+		if strings.HasPrefix(imp.Path, "from:") {
+			parts := strings.SplitN(imp.Path, ":", 3)
+			if len(parts) == 3 {
+				module := parts[1]
+				if _, seen := fromGroups[module]; !seen {
+					fromOrder = append(fromOrder, module)
+				}
+				fromGroups[module] = append(fromGroups[module], fromName{name: parts[2], alias: imp.Alias})
 			}
+		} else {
+			regularImports = append(regularImports, imp)
 		}
-	} else {
+	}
+
+	// Emit regular imports
+	for _, imp := range regularImports {
 		if imp.Alias != "" {
 			g.writeln(fmt.Sprintf("import %s as %s", imp.Path, imp.Alias))
 		} else {
 			g.writeln(fmt.Sprintf("import %s", imp.Path))
 		}
+	}
+
+	// Emit consolidated from-imports
+	for _, module := range fromOrder {
+		names := fromGroups[module]
+		var parts []string
+		for _, n := range names {
+			if n.alias != "" {
+				parts = append(parts, fmt.Sprintf("%s as %s", n.name, n.alias))
+			} else {
+				parts = append(parts, n.name)
+			}
+		}
+		g.writeln(fmt.Sprintf("from %s import %s", module, strings.Join(parts, ", ")))
 	}
 }
 
@@ -599,16 +627,24 @@ func (g *Generator) emitV2CollectionMethod(sel *parser.SelectorExpr, call *parse
 	switch sel.Field {
 	case "filter":
 		if len(call.Args) == 1 {
+			// If the predicate is a lambda, inline its body directly
+			if lam, ok := call.Args[0].(*parser.LambdaExpr); ok && lam.Expr != nil && len(lam.Params) == 1 {
+				paramName := lam.Params[0].Name
+				body := g.emitV2Expr(lam.Expr)
+				return fmt.Sprintf("[%s for %s in %s if %s]", paramName, paramName, obj, body), true
+			}
 			pred := g.emitV2Expr(call.Args[0])
 			return fmt.Sprintf("[x for x in %s if %s(x)]", obj, pred), true
 		}
 	case "map":
 		if len(call.Args) == 1 {
-			fn := g.emitV2Expr(call.Args[0])
-			// Wrap lambda in parens so (lambda x: expr)(x) calls correctly
-			if _, isLambda := call.Args[0].(*parser.LambdaExpr); isLambda {
-				return fmt.Sprintf("[(%s)(x) for x in %s]", fn, obj), true
+			// If the mapper is a lambda, inline its body directly
+			if lam, ok := call.Args[0].(*parser.LambdaExpr); ok && lam.Expr != nil && len(lam.Params) == 1 {
+				paramName := lam.Params[0].Name
+				body := g.emitV2Expr(lam.Expr)
+				return fmt.Sprintf("[%s for %s in %s]", body, paramName, obj), true
 			}
+			fn := g.emitV2Expr(call.Args[0])
 			return fmt.Sprintf("[%s(x) for x in %s]", fn, obj), true
 		}
 	case "sum":

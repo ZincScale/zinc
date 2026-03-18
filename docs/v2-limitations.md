@@ -12,16 +12,25 @@ Track issues to fix before v2 is production-ready.
 - [ ] No `async` / `await`
 - [ ] No `global` / `nonlocal` keywords
 - [ ] No `del` statement
-- [ ] No `assert` statement
+- [x] ~~No `assert` statement~~ — implemented
 - [ ] No `type` aliases
-- [ ] No decorators beyond `@asset`/`@op` (need general decorator pass-through)
+- [x] ~~No decorators~~ — general decorator pass-through implemented
 - [ ] No nested function definitions
-- [ ] `from x import a, b` — only imports single name, not multiple
+- [x] ~~`from x import a, b`~~ — multiple names implemented (but generates separate lines)
 - [ ] No star import (`from module import *`)
-- [ ] No `@staticmethod` / `@classmethod` / `@property`
-- [ ] `print` is a special statement, not a regular function (can't do `print(a, b, sep=", ")`)
+- [x] ~~No `@staticmethod` / `@classmethod` / `@property`~~ — staticmethod/classmethod implemented
+- [x] ~~`print` is a special statement~~ — now a regular function call
 
-## Codegen
+## Codegen (Critical — design doc promises these)
+
+- [ ] **Result[T] / Err {} error handling** — core design feature, zero implementation
+- [ ] **Smart collection dispatch** — Polars/NumPy/Numba tiers not implemented, only comprehensions
+- [ ] **Fast serialization builtins** — json_load(), csv_load(), avro_load() not implemented
+- [ ] **.parallel_map()** — free-threaded parallel dispatch not implemented
+- [ ] `from x import a, b` generates separate lines instead of consolidated
+- [ ] `.filter()` with lambdas generates awkward `(lambda x: ...)(x)` pattern
+
+## Codegen (Other)
 
 - [ ] Auto-self injection doesn't track inherited fields
 - [ ] No `__init__` generation for inherited class fields (super() calls)

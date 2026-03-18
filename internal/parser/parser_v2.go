@@ -561,7 +561,7 @@ func (p *Parser) v2ParseFieldDecl() *FieldDecl {
 		p.advance()
 		def = p.v2ParseExpr()
 	}
-	return &FieldDecl{Name: name, Type: typ, Default: def, IsPub: true}
+	return &FieldDecl{Name: name, Type: typ, Default: def}
 }
 
 // v2ParseBareFieldDecl: name: type [= default]
@@ -574,7 +574,7 @@ func (p *Parser) v2ParseBareFieldDecl() *FieldDecl {
 		p.advance()
 		def = p.v2ParseExpr()
 	}
-	return &FieldDecl{Name: name, Type: typ, Default: def, IsPub: true}
+	return &FieldDecl{Name: name, Type: typ, Default: def}
 }
 
 // v2ParseDataClassDecl: data Name ... end

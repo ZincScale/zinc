@@ -202,9 +202,10 @@ from requests import get as http_get
 }
 
 func TestV2Lambda(t *testing.T) {
+	// Lambda body is inlined directly into comprehension (no awkward lambda call)
 	assertV2Contains(t,
 		`var doubled = items.map(x -> x * 2)`,
-		`[(lambda x: (x * 2))(x) for x in items]`,
+		`[(x * 2) for x in items]`,
 	)
 }
 
@@ -421,10 +422,10 @@ end
 }
 
 func TestV2MultipleFromImports(t *testing.T) {
+	// Multiple names from same module consolidated on one line
 	assertV2Contains(t,
 		`from os.path import join, exists`,
-		"from os.path import join",
-		"from os.path import exists",
+		"from os.path import join, exists",
 	)
 }
 
