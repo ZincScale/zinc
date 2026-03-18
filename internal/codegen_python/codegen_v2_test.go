@@ -739,6 +739,22 @@ print("x={x}, y={y}")
 	)
 }
 
+func TestV2Property(t *testing.T) {
+	assertV2Contains(t, `
+class Circle
+    var radius: float
+
+    @property
+    fn area(): float
+        return 3.14 * radius ** 2
+    end
+end
+`,
+		"@property",
+		"def area(self) -> float:",
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
