@@ -520,7 +520,7 @@ main() {
 // --- 14. Valid programs — all examples produce zero errors -------------------
 
 func TestValidHello(t *testing.T) {
-	src, err := os.ReadFile("../../examples/hello.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/hello.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestValidHello(t *testing.T) {
 }
 
 func TestValidClasses(t *testing.T) {
-	src, err := os.ReadFile("../../examples/classes.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/classes.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestValidClasses(t *testing.T) {
 }
 
 func TestValidGenerics(t *testing.T) {
-	src, err := os.ReadFile("../../examples/generics.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/generics.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestValidGenerics(t *testing.T) {
 }
 
 func TestValidErrors(t *testing.T) {
-	src, err := os.ReadFile("../../examples/errors.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/errors.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestValidErrors(t *testing.T) {
 }
 
 func TestValidFibonacci(t *testing.T) {
-	src, err := os.ReadFile("../../examples/fibonacci.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/fibonacci.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestValidFibonacci(t *testing.T) {
 }
 
 func TestValidEnums(t *testing.T) {
-	src, err := os.ReadFile("../../examples/enums.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/enums.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}
@@ -574,7 +574,7 @@ func TestValidEnums(t *testing.T) {
 }
 
 func TestValidClosures(t *testing.T) {
-	src, err := os.ReadFile("../../examples/closures.zn")
+	src, err := os.ReadFile("../../examples/v1-archive/closures.zn")
 	if err != nil {
 		t.Fatalf("reading example: %v", err)
 	}

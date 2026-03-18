@@ -30,6 +30,8 @@ import (
 	"zinc/internal/parser"
 	"zinc/internal/project"
 	"zinc/internal/typechecker"
+
+	// v2 type checker is used in transpileV2File
 )
 
 // version is set by goreleaser via ldflags at build time.
@@ -402,6 +404,19 @@ func transpileV2File(inFile, outFile string, verbose bool) (string, error) {
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] %d declarations, %d top-level statements\n",
 			len(prog.Decls), len(prog.Stmts))
+	}
+
+	// Type checking (v2)
+	if tcErrors := typechecker.CheckV2(prog); len(tcErrors) > 0 {
+		var msgs []string
+		for _, e := range tcErrors {
+			msgs = append(msgs, e.String())
+		}
+		return "", fmt.Errorf("type errors in %s:\n%s", inFile, strings.Join(msgs, "\n"))
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] type check passed\n")
 	}
 
 	// Code generation (Python)
