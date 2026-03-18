@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"zinc/internal/codegen"
+	"zinc/internal/codegen_python"
 	"zinc/internal/config"
 	"zinc/internal/errs"
 	"zinc/internal/lexer"
@@ -34,25 +35,20 @@ import (
 // version is set by goreleaser via ldflags at build time.
 var version = "0.13.0"
 
-const usage = `Zinc — convention over configuration for native apps.
+const usage = `Zinc — typed Python with explicit blocks.
 
 Usage:
-  zinc <file.zn> [flags]   Transpile a single file
+  zinc run <file.zn>           Transpile to Python and run
+  zinc transpile <file.zn>     Output .py file
+  zinc <file.zn>               Transpile a single file (outputs .py)
+
+Legacy (v1 — C#/Go backends):
   zinc build [dir]         Transpile + compile (native AOT binary)
-  zinc run [dir]           Transpile + run
   zinc test [dir]          Discover and run test_* functions
-  zinc add <pkg> [...]     Add NuGet dependency (latest version)
-  zinc remove <pkg>        Remove a dependency
-  zinc deps                List current dependencies
-  zinc init [name]         Initialize a new Zinc project (creates zinc.toml + main.zn)
-  zinc repl                Launch interactive REPL
 
 Flags:
-  -o <file>       Output file (default: <input>.cs)
-  --release       Strip debug symbols for production (smaller binary, no line numbers)
+  -o <file>       Output file (default: <input>.py)
   --verbose       Print tokens and AST summary after transpiling
-  --run           Transpile and immediately run
-  --watch         Watch file for changes and re-transpile automatically
   --version       Print version and exit
 `
 
@@ -61,7 +57,6 @@ func main() {
 	var inFile, outFile string
 	verbose := false
 	runAfter := false
-	watchMode := false
 	args := os.Args[1:]
 
 	for i := 0; i < len(args); i++ {
@@ -134,11 +129,41 @@ func main() {
 			}
 			return
 		case a == "run":
-			dir := "."
+			target := "."
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				dir = args[i+1]
+				target = args[i+1]
 				i++
 			}
+			// If target is a .zn file, use v2 pipeline (transpile → run with python)
+			if strings.HasSuffix(target, ".zn") {
+				pyFile, err := transpileV2File(target, "", false)
+				if err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+				// Collect remaining args to pass to the script
+				var scriptArgs []string
+				for j := i + 1; j < len(args); j++ {
+					if args[j] == "--" {
+						scriptArgs = args[j+1:]
+						break
+					}
+				}
+				runArgs := append([]string{pyFile}, scriptArgs...)
+				cmd := exec.Command("python3", runArgs...)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				cmd.Stdin = os.Stdin
+				if err := cmd.Run(); err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						os.Exit(exitErr.ExitCode())
+					}
+					os.Exit(1)
+				}
+				return
+			}
+			// Legacy: directory-based project mode
+			dir := target
 			cfg, err := config.Load(dir)
 			if err != nil {
 				errs.Error(err.Error())
@@ -155,6 +180,31 @@ func main() {
 					os.Exit(1)
 				}
 			}
+			return
+		case a == "transpile":
+			target := ""
+			localOut := ""
+			localVerbose := false
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "-o" && j+1 < len(args) {
+					localOut = args[j+1]
+					j++
+				} else if args[j] == "--verbose" || args[j] == "-v" {
+					localVerbose = true
+				} else if !strings.HasPrefix(args[j], "-") && target == "" {
+					target = args[j]
+				}
+			}
+			if target == "" {
+				errs.Error("usage: zinc transpile <file.zn>")
+				os.Exit(1)
+			}
+			pyFile, err := transpileV2File(target, localOut, localVerbose)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			fmt.Printf("transpiled %s → %s\n", target, pyFile)
 			return
 		case a == "test":
 			dir := "."
@@ -291,8 +341,6 @@ func main() {
 			verbose = true
 		case a == "--run" || a == "-r":
 			runAfter = true
-		case a == "--watch" || a == "-w":
-			watchMode = true
 		case !strings.HasPrefix(a, "-"):
 			if inFile == "" {
 				inFile = a
@@ -305,83 +353,75 @@ func main() {
 		os.Exit(1)
 	}
 
-	if watchMode {
-		runWatch(inFile, outFile)
-		return
+	// Default: v2 transpile single file to Python
+	pyFile, err := transpileV2File(inFile, outFile, verbose)
+	if err != nil {
+		errs.Error(err.Error())
+		os.Exit(1)
 	}
+	fmt.Printf("transpiled %s → %s\n", inFile, pyFile)
 
+	if runAfter {
+		cmd := exec.Command("python3", pyFile)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			os.Exit(1)
+		}
+	}
+}
+
+// transpileV2File transpiles a .zn file to .py using the v2 pipeline.
+func transpileV2File(inFile, outFile string, verbose bool) (string, error) {
 	src, err := os.ReadFile(inFile)
 	if err != nil {
-		errs.FileError(inFile, err.Error())
-		os.Exit(1)
+		return "", fmt.Errorf("reading %s: %w", inFile, err)
 	}
 
 	// Lexer
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
-		errs.FileErrors(inFile, l.Errors)
-		os.Exit(1)
+		return "", fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
 	}
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] %d tokens\n", len(tokens))
 	}
 
-	// Parser
+	// Parser (v2)
 	p := parser.New(tokens)
-	prog := p.Parse()
+	prog := p.ParseV2()
 	if len(p.Errors) > 0 {
-		errs.FileErrors(inFile, p.Errors)
-		os.Exit(1)
+		return "", fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
 	}
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "[verbose] %d top-level declarations\n", len(prog.Decls))
+		fmt.Fprintf(os.Stderr, "[verbose] %d declarations, %d top-level statements\n",
+			len(prog.Decls), len(prog.Stmts))
 	}
 
-	// Type checking
-	if tcErrs := typechecker.Check(prog); len(tcErrs) > 0 {
-		strs := make([]string, len(tcErrs))
-		for i, e := range tcErrs {
-			strs[i] = e.String()
-		}
-		errs.TypeErrors(inFile, strs)
-		os.Exit(1)
-	}
-
-	// Code generation
-	gen := codegen.New()
-	gen.SetSourceFile(inFile)
-	goSrc := gen.Generate(prog)
+	// Code generation (Python)
+	gen := codegen_python.New()
+	pySrc := gen.GenerateV2(prog)
 
 	// Determine output path
 	if outFile == "" {
 		base := filepath.Base(inFile)
 		base = strings.TrimSuffix(base, filepath.Ext(base))
-		outFile = base + ".go"
+		outFile = base + ".py"
 	}
 
 	// Write output
-	if err := os.WriteFile(outFile, []byte(goSrc), 0644); err != nil {
-		errs.Errorf("writing %s: %v", outFile, err)
-		os.Exit(1)
+	if err := os.WriteFile(outFile, []byte(pySrc), 0644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", outFile, err)
 	}
 
-	// Run gofmt
-	cmd := exec.Command("gofmt", "-w", outFile)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		errs.Warningf("gofmt: %v\n%s", err, string(out))
-	}
-
-	fmt.Printf("transpiled %s → %s\n", inFile, outFile)
-
-	if runAfter {
-		run := exec.Command("go", "run", outFile)
-		run.Stdout = os.Stdout
-		run.Stderr = os.Stderr
-		if err := run.Run(); err != nil {
-			os.Exit(1)
-		}
-	}
+	return outFile, nil
 }
+
+// Keep v1 imports referenced so they compile (used by legacy commands).
+var (
+	_ = codegen.New
+	_ = typechecker.Check
+)

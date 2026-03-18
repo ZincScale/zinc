@@ -1,0 +1,34 @@
+// data_processing.zn — Zinc v2 data processing example
+
+data Order
+    id: str
+    customer: str
+    amount: float
+    status: str
+end
+
+fn create_orders(): list[dict]
+    return [
+        {"id": "1", "customer": "Alice", "amount": 150.0, "status": "completed"},
+        {"id": "2", "customer": "Bob", "amount": 50.0, "status": "pending"},
+        {"id": "3", "customer": "Alice", "amount": 300.0, "status": "completed"},
+        {"id": "4", "customer": "Charlie", "amount": 75.0, "status": "completed"},
+        {"id": "5", "customer": "Bob", "amount": 200.0, "status": "cancelled"}
+    ]
+end
+
+var orders = create_orders()
+print("Total orders: {len(orders)}")
+
+// Filter and process
+var total = 0.0
+var completed_count = 0
+for order in orders
+    var status = order["status"]
+    if status == "completed"
+        total = total + order["amount"]
+        completed_count = completed_count + 1
+    end
+end
+print("Completed: {completed_count}")
+print("Revenue: {total}")

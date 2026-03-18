@@ -1,0 +1,17 @@
+// hello.zn — Zinc v2 hello world
+import sys
+
+fn greet(name: str): str
+    return "Hello, {name}!"
+end
+
+var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
+print(greet(name))
+
+// Show some v2 features
+var numbers = [1, 2, 3, 4, 5]
+for i, n in numbers
+    if n > 3
+        print("{i}: {n} is big")
+    end
+end
