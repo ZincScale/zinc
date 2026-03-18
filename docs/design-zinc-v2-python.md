@@ -314,44 +314,56 @@ class Color(Enum):
     Blue = auto()
 ```
 
-### Error Handling
+### Error Handling — Two Tracks
 
-Python's exception model, with braces and transpiler guardrails. No invented abstractions.
+Zinc separates **expected failures** (validation, parsing, missing data) from **exceptional failures** (disk full, network down). This is a core design principle — no more try/catch for data validation.
+
+**Track 1 — Results for expected failures:**
 
 ```zinc
-// Full try/catch for when you need specificity
-try
-    var data = open("config.json").read()
-    var config = json.loads(data)
-catch err: FileNotFoundError
-    print("Config not found, using defaults")
-    var config = {}
-catch err: json.JSONDecodeError
-    print("Bad JSON: {err}")
-    exit(1)
+fn parse_age(input: str) -> Result[int]
+    if not input.isdigit()
+        return Err("age must be a number, got: {input}")
+    end
+    var age = int(input)
+    if age < 0 or age > 150
+        return Err("age out of range: {age}")
+    end
+    return Ok(age)
 end
 
-// or {} shorthand for scripts — catch and handle inline
-var data = open("config.json").read() or {
-    print("Config not found")
+// Pattern match on results
+match parse_age(user_input)
+    case Ok(age) -> print("Age: {age}")
+    case Err(msg) -> print("Invalid: {msg}")
+end
+
+// ? operator to propagate — like Rust but simpler
+fn process_form(data: dict) -> Result[User]
+    var name = validate_name(data["name"])?
+    var age = parse_age(data["age"])?
+    var email = validate_email(data["email"])?
+    return Ok(User(name, age, email))
+end
+
+// Default value
+var age = parse_age(input).unwrap_or(0)
+```
+
+**Track 2 — Exceptions for unexpected failures:**
+
+```zinc
+try
+    var conn = db.connect(url)
+catch err: ConnectionError
+    print("Database down: {err}")
     exit(1)
-}
-
-// or {} with default value
-var port = int(os.getenv("PORT")) or { 8080 }
-
-// raise works as expected
-fn divide(a: int, b: int) -> int
-    if b == 0
-        raise ValueError("division by zero")
-    end
-    return a / b
 end
 ```
 
-Note: `or {}` keeps braces — it's an inline expression, not a block. Think of it as a catch clause attached to a single expression.
+**The litmus test:** If you'd put it in a loop processing 10,000 records, it should be a Result. If it would stop your entire program, it's an exception. The transpiler warns if you raise exceptions inside loops.
 
-**Transpiler safety:** bare `except:` not allowed (must specify type), warns on empty catch blocks, warns on unhandled failable calls. See `error-handling.md` for full details.
+See `error-handling.md` for full details.
 
 ### Imports — Use Python's Ecosystem Directly
 
@@ -795,7 +807,7 @@ end
 
 2. **Multi-line continuation** — implicit via trailing operators, commas, open brackets. No backslash hell.
 
-3. **Python exceptions** — `try/catch/end` with braces-free syntax, `or {}` kept for inline shorthand.
+3. **Two-track error handling** — `Result[T]` for expected failures (validation, parsing), exceptions only for truly exceptional cases. No `or {}` — clean separation.
 
 4. **No dunders** — clean method names (`fn str()`, `fn len()`, etc.), transpiler maps to `__dunder__`.
 
@@ -836,7 +848,7 @@ end
 ### Phase 3 — Scripting Power
 - Shebang support
 - Builtins (file I/O, exec, path utils)
-- `or {}` error handling (if we decide to keep it)
+- Result type runtime library
 
 ### Phase 4 — Ecosystem
 - Multi-file support with module resolution
