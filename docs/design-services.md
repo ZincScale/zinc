@@ -289,6 +289,119 @@ test_notify_user() {
 
 No interface required for mocking. The mock just needs matching method signatures. Named constructor args make it clear which dependency is being overridden.
 
+### Service Lifetimes
+
+Services need different lifetimes depending on what they hold:
+
+| Lifetime | When to use | Example |
+|----------|------------|---------|
+| **singleton** | Stateless or shared state, expensive to create | Database connection pool, config, cache |
+| **scoped** | Per-request state, must not leak across requests | Request context, current user, unit of work |
+| **transient** | Lightweight, no shared state, cheap to create | Formatters, validators, mappers |
+
+#### Syntax
+
+```zinc
+service DbConnectionPool { }                    // default — singleton
+service RequestContext { scope: scoped }         // one per request
+service InputValidator { scope: transient }      // new instance every time
+```
+
+No keyword clutter in the default case. Most services are singletons — connection pools, repositories, external clients. You only annotate when you need something different.
+
+#### How it works
+
+**Singleton** (default) — one instance for the lifetime of the application. Created once at startup, shared across all requests. The compiler instantiates these in dependency order in `main()` or the server startup.
+
+```zinc
+// Created once, shared by all requests
+service UserRepository {
+    readonly DbConnectionPool db
+    new(DbConnectionPool db) { this.db = db }
+}
+```
+
+**Scoped** — one instance per request. In a web server (`serve()`), each HTTP request gets a fresh instance. In Lambda, each invocation is one scope. Scoped services can depend on singletons but not the other way around.
+
+```zinc
+service RequestContext { scope: scoped }
+    pub readonly String requestId
+    pub readonly String userId
+
+    new() {
+        this.requestId = generateId()
+        this.userId = ""
+    }
+
+    pub setUser(String id) {
+        this.userId = id
+    }
+}
+
+service AuditLogger {
+    readonly RequestContext context    // scoped — gets current request's context
+    new(RequestContext context) { this.context = context }
+
+    pub log(String action) {
+        log.info("{action}", requestId: context.requestId, userId: context.userId)
+    }
+}
+```
+
+**Transient** — new instance every time it's requested. No shared state. Useful for lightweight objects that shouldn't carry state between uses.
+
+```zinc
+service InputValidator { scope: transient }
+    pub Bool validate(String input) {
+        input.length() > 0
+    }
+}
+```
+
+#### Compile-time lifetime validation
+
+The compiler enforces lifetime rules:
+
+```zinc
+service RequestContext { scope: scoped }
+
+service CacheManager {                         // singleton (default)
+    readonly RequestContext context             // COMPILE ERROR
+    new(RequestContext context) { this.context = context }
+}
+// ERROR: singleton service CacheManager cannot depend on scoped service RequestContext
+//   singletons outlive scoped services — the reference would become stale
+```
+
+| Depends on → | Singleton | Scoped | Transient |
+|---|---|---|---|
+| **Singleton** | OK | **Error** | OK |
+| **Scoped** | OK | OK | OK |
+| **Transient** | OK | OK | OK |
+
+A singleton can't hold a scoped dependency (the scoped instance would outlive its scope). This is a common bug in ASP.NET Core that produces a runtime warning — Zinc catches it at compile time.
+
+#### C# mapping
+
+| Zinc | C# Emit |
+|------|---------|
+| `service Foo { }` (singleton) | Single `new Foo()` at startup, passed by reference |
+| `service Foo { scope: scoped }` | Created per-request in `app.Use()` middleware or Lambda handler |
+| `service Foo { scope: transient }` | `new Foo()` at every injection point |
+
+For Lambda (single request = single invocation), singleton and scoped behave the same — everything is created once per invocation. Lifetimes matter when running as a long-lived server via `serve()`.
+
+#### Lifetime in zinc.toml (optional override)
+
+For testing or environment-specific behavior, lifetimes can be overridden in config:
+
+```toml
+[services]
+RequestContext.scope = "transient"    # override to transient for testing
+```
+
+This is rare — lifetime should live in the code. But it's useful for debugging (make everything transient to isolate state bugs).
+
 ### Convention Routing (Phase 2)
 
 When a service is annotated or declared as an API, its methods become HTTP endpoints:
@@ -422,8 +535,10 @@ success: true
 ### Phase 1 — `service` keyword + compile-time DI
 - AST: `ServiceDecl` node (extends ClassDecl with service semantics)
 - Parser: `service Name { }` parsed like class but flagged as service
+- Parser: `scope: scoped` / `scope: transient` field in service declaration
 - Codegen: detect service constructors, resolve dependency graph, emit wiring
-- Compile errors: circular deps, missing deps
+- Codegen: lifetime-aware instantiation (singleton at startup, scoped per-request, transient per-use)
+- Compile errors: circular deps, missing deps, lifetime violations (singleton → scoped)
 - **Effort:** Medium
 
 ### Phase 2 — Providers
@@ -721,6 +836,8 @@ This is 25 lines. The equivalent Spring Boot code (controller + aspect classes +
 | Named args for test overrides | `UserService(users: mockRepo)` | Clear, explicit, no test framework needed. Consistent with Zinc's named arg syntax. |
 | `api` separate from `service` | Different concerns | Services contain business logic. APIs define HTTP boundaries. Separation of concerns. |
 | Convention routing | Method name → HTTP verb | Zero annotation ceremony. Matches the "clear intent" philosophy. |
+| Singleton default | Most services are stateless/shared | Convention over configuration — annotate only when different. |
+| Compile-time lifetime checks | Singleton can't depend on scoped | ASP.NET catches this at runtime with a warning. Zinc catches it at compile time. |
 | Compile-time aspects | Inlined code generation | No proxies, no bytecode weaving, normal stack traces, zero runtime overhead. |
 | Built-in aspects | `@logged`, `@timed`, `@retry`, etc. | Most common cross-cutting concerns pre-built. One annotation instead of a separate aspect class. |
 | Aspect visibility | Generated C# shows inlined code | "Clearer Spring" — you can always see what runs by reading the generated code. |
