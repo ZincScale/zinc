@@ -67,7 +67,6 @@ Everything below is implemented, tested, and working end-to-end:
 - [x] ~~Function call arg checking~~ — catches wrong arg types and counts
 - [x] ~~break/continue outside loop~~ — caught at transpile time
 - [ ] No generic type constraints
-- [ ] No union types (`str | int`)
 - [ ] No Protocol support
 - [ ] Doesn't verify all code paths return a value
 - [ ] No type narrowing after `isinstance` checks

@@ -40,7 +40,6 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`.
 - [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design doc)
 - [ ] Chained comparisons (`0 < x < 10`)
 - [ ] async / await
-- [ ] Union types (str | int)
 - [ ] zinc fmt (formatter)
 - [ ] zinc repl for v2
 
