@@ -121,19 +121,39 @@ try:
 except AttributeError:
     pass  # Python < 3.13
 
-# Try to enhance with Polars for structured data
+# Auto-install and use best available backend
+import subprocess as _sp
+
+def _auto_install(pkg):
+    """Install a package if not available."""
+    try:
+        _sp.check_call([sys.executable, '-m', 'pip', 'install', '-q', pkg],
+                       stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+# Try Polars for structured data — auto-install if needed
 try:
     import polars as pl
     _POLARS = True
 except ImportError:
-    _POLARS = False
+    if _auto_install('polars'):
+        import polars as pl
+        _POLARS = True
+    else:
+        _POLARS = False
 
-# Try to enhance with NumPy for numeric data
+# Try NumPy for numeric data — auto-install if needed
 try:
     import numpy as np
     _NUMPY = True
 except ImportError:
-    _NUMPY = False
+    if _auto_install('numpy'):
+        import numpy as np
+        _NUMPY = True
+    else:
+        _NUMPY = False
 
 def _zinc_collect(data):
     """Wrap data for smart collection dispatch.
