@@ -136,11 +136,14 @@ func main() {
 			}
 			// If target is a .zn file, use v2 pipeline (transpile → run with python)
 			if strings.HasSuffix(target, ".zn") {
-				pyFile, err := transpileV2File(target, "", false)
+				// Transpile to temp file, run, clean up
+				tmpFile := filepath.Join(os.TempDir(), "zinc_run_"+filepath.Base(strings.TrimSuffix(target, ".zn"))+".py")
+				pyFile, err := transpileV2File(target, tmpFile, false)
 				if err != nil {
 					errs.Error(err.Error())
 					os.Exit(1)
 				}
+				defer os.Remove(pyFile)
 				// Collect remaining args to pass to the script
 				var scriptArgs []string
 				for j := i + 1; j < len(args); j++ {

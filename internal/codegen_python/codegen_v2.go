@@ -130,6 +130,14 @@ func (g *Generator) emitV2Decl(d parser.TopLevelDecl) {
 }
 
 func (g *Generator) emitV2FnDecl(d *parser.FnDecl) {
+	// Emit decorators
+	for _, a := range d.Annotations {
+		if len(a.Args) > 0 {
+			g.writeln(fmt.Sprintf("@%s(%s)", a.Name, strings.Join(a.Args, ", ")))
+		} else {
+			g.writeln(fmt.Sprintf("@%s", a.Name))
+		}
+	}
 	params := g.v2FormatParams(d.Params)
 	retAnnotation := ""
 	if d.ReturnType != nil {
@@ -197,16 +205,46 @@ func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
 }
 
 func (g *Generator) emitV2MethodDecl(m *parser.MethodDecl) {
+	// Emit decorators
+	isStatic := false
+	isClassMethod := false
+	for _, a := range m.Annotations {
+		if len(a.Args) > 0 {
+			g.writeln(fmt.Sprintf("@%s(%s)", a.Name, strings.Join(a.Args, ", ")))
+		} else {
+			g.writeln(fmt.Sprintf("@%s", a.Name))
+		}
+		if a.Name == "staticmethod" {
+			isStatic = true
+		}
+		if a.Name == "classmethod" {
+			isClassMethod = true
+		}
+	}
+
 	pyName := m.Name
-	if dn, ok := dunders[m.Name]; ok {
-		pyName = dn
+	// Only map to dunder if it's a regular instance method (not static/classmethod)
+	if !isStatic && !isClassMethod {
+		if dn, ok := dunders[m.Name]; ok {
+			pyName = dn
+		}
 	}
 
 	params := g.v2FormatParams(m.Params)
-	if params != "" {
-		params = "self, " + params
+	if isStatic {
+		// No self/cls param
+	} else if isClassMethod {
+		if params != "" {
+			params = "cls, " + params
+		} else {
+			params = "cls"
+		}
 	} else {
-		params = "self"
+		if params != "" {
+			params = "self, " + params
+		} else {
+			params = "self"
+		}
 	}
 
 	retAnnotation := ""
@@ -306,6 +344,12 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 		g.emitV2TryStmt(s)
 	case *parser.RaiseStmt:
 		g.writeln(fmt.Sprintf("raise %s", g.emitV2Expr(s.Value)))
+	case *parser.AssertStmt:
+		if s.Message != nil {
+			g.writeln(fmt.Sprintf("assert %s, %s", g.emitV2Expr(s.Cond), g.emitV2Expr(s.Message)))
+		} else {
+			g.writeln(fmt.Sprintf("assert %s", g.emitV2Expr(s.Cond)))
+		}
 	case *parser.WithStmt:
 		var resources []string
 		for _, r := range s.Resources {

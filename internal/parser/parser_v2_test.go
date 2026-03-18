@@ -44,9 +44,13 @@ print("hello")
 	if _, ok := prog.Stmts[0].(*VarStmt); !ok {
 		t.Errorf("expected VarStmt, got %T", prog.Stmts[0])
 	}
-	// Second stmt is print
-	if _, ok := prog.Stmts[1].(*PrintStmt); !ok {
-		t.Errorf("expected PrintStmt, got %T", prog.Stmts[1])
+	// Second stmt is print (now parsed as ExprStmt with CallExpr)
+	if es, ok := prog.Stmts[1].(*ExprStmt); ok {
+		if _, ok := es.Expr.(*CallExpr); !ok {
+			t.Errorf("expected CallExpr inside ExprStmt, got %T", es.Expr)
+		}
+	} else {
+		t.Errorf("expected ExprStmt for print(), got %T", prog.Stmts[1])
 	}
 }
 
@@ -387,10 +391,11 @@ func TestV2StringInterpolation(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	printStmt := prog.Stmts[0].(*PrintStmt)
-	interp, ok := printStmt.Value.(*StringInterpLit)
+	exprStmt := prog.Stmts[0].(*ExprStmt)
+	call := exprStmt.Expr.(*CallExpr)
+	interp, ok := call.Args[0].(*StringInterpLit)
 	if !ok {
-		t.Fatalf("expected StringInterpLit, got %T", printStmt.Value)
+		t.Fatalf("expected StringInterpLit, got %T", call.Args[0])
 	}
 	if len(interp.Parts) != 3 {
 		t.Fatalf("expected 3 parts, got %d", len(interp.Parts))
@@ -682,6 +687,82 @@ end
 	fn := prog.Decls[0].(*FnDecl)
 	if fn.Params[1].Default == nil {
 		t.Error("expected default value for 'greeting'")
+	}
+}
+
+func TestV2MultipleFromImports(t *testing.T) {
+	prog, errs := parseV2(`from os.path import join, exists, basename`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(prog.Imports) != 3 {
+		t.Fatalf("expected 3 imports, got %d", len(prog.Imports))
+	}
+}
+
+func TestV2Decorator(t *testing.T) {
+	prog, errs := parseV2(`
+@cache
+fn expensive(n: int): int
+    return n * n
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if len(fn.Annotations) != 1 || fn.Annotations[0].Name != "cache" {
+		t.Errorf("expected @cache decorator, got %v", fn.Annotations)
+	}
+}
+
+func TestV2StaticMethod(t *testing.T) {
+	prog, errs := parseV2(`
+class Math
+    @staticmethod
+    fn add(a: int, b: int): int
+        return a + b
+    end
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	cls := prog.Decls[0].(*ClassDecl)
+	if len(cls.Methods[0].Annotations) != 1 {
+		t.Error("expected @staticmethod annotation")
+	}
+}
+
+func TestV2Assert(t *testing.T) {
+	prog, errs := parseV2(`assert x > 0, "x must be positive"`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	assertStmt, ok := prog.Stmts[0].(*AssertStmt)
+	if !ok {
+		t.Fatalf("expected AssertStmt, got %T", prog.Stmts[0])
+	}
+	if assertStmt.Message == nil {
+		t.Error("expected assert message")
+	}
+}
+
+func TestV2PrintMultiArg(t *testing.T) {
+	prog, errs := parseV2(`print("hello", "world", sep=", ")`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	exprStmt := prog.Stmts[0].(*ExprStmt)
+	call, ok := exprStmt.Expr.(*CallExpr)
+	if !ok {
+		t.Fatalf("expected CallExpr, got %T", exprStmt.Expr)
+	}
+	if len(call.Args) != 2 {
+		t.Errorf("expected 2 args, got %d", len(call.Args))
+	}
+	if len(call.NamedArgs) != 1 {
+		t.Errorf("expected 1 named arg, got %d", len(call.NamedArgs))
 	}
 }
 

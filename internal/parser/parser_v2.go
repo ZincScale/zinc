@@ -32,7 +32,25 @@ func (p *Parser) ParseV2() *Program {
 		case lexer.TOKEN_IMPORT:
 			prog.Imports = append(prog.Imports, p.v2ParseImport())
 		case lexer.TOKEN_FROM:
-			prog.Imports = append(prog.Imports, p.v2ParseFromImport())
+			prog.Imports = append(prog.Imports, p.v2ParseFromImport()...)
+		case lexer.TOKEN_AT:
+			annots := p.v2ParseAnnotations()
+			if p.check(lexer.TOKEN_FN) {
+				fn := p.v2ParseFnDecl()
+				fn.Annotations = annots
+				prog.Decls = append(prog.Decls, fn)
+			} else if p.check(lexer.TOKEN_CLASS) {
+				cls := p.v2ParseClassDecl()
+				cls.Annotations = annots
+				prog.Decls = append(prog.Decls, cls)
+			} else if p.check(lexer.TOKEN_DATA) {
+				// data class with annotations
+				d := p.v2ParseDataClassDecl()
+				prog.Decls = append(prog.Decls, d)
+			} else {
+				p.errorf("expected fn or class after decorator")
+				p.advance()
+			}
 		case lexer.TOKEN_FN:
 			prog.Decls = append(prog.Decls, p.v2ParseFnDecl())
 		case lexer.TOKEN_CLASS:
@@ -103,7 +121,8 @@ func (p *Parser) v2ParseStmt() Stmt {
 	case lexer.TOKEN_MATCH:
 		return p.v2ParseMatchStmt()
 	case lexer.TOKEN_PRINT:
-		return p.parsePrintStmt()
+		// Treat print as a regular function call in v2 (supports multi-arg, kwargs)
+		return p.v2ParseExprOrAssignStmt()
 	case lexer.TOKEN_BREAK:
 		p.advance()
 		return &BreakStmt{}
@@ -116,6 +135,11 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseTryStmt()
 	case lexer.TOKEN_RAISE:
 		return p.v2ParseRaiseStmt()
+	case lexer.TOKEN_IDENT:
+		// Handle 'assert' as a statement (it's not a keyword token)
+		if tok.Literal == "assert" {
+			return p.v2ParseAssertStmt()
+		}
 	}
 
 	// Expression statement or assignment
@@ -341,6 +365,19 @@ func (p *Parser) v2ParseRaiseStmt() *RaiseStmt {
 	return &RaiseStmt{Line: line, Value: val}
 }
 
+// v2ParseAssertStmt: assert expr [, "message"]
+func (p *Parser) v2ParseAssertStmt() *AssertStmt {
+	line := p.peek().Line
+	p.advance() // consume "assert" ident
+	cond := p.v2ParseExpr()
+	var msg Expr
+	if p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		msg = p.v2ParseExpr()
+	}
+	return &AssertStmt{Line: line, Cond: cond, Message: msg}
+}
+
 // v2ParseExprOrAssignStmt handles expression statements and assignments.
 func (p *Parser) v2ParseExprOrAssignStmt() Stmt {
 	line := p.peek().Line
@@ -466,7 +503,12 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	for !p.check(lexer.TOKEN_END) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
-		if tok.Type == lexer.TOKEN_FN {
+		if tok.Type == lexer.TOKEN_AT {
+			annots := p.v2ParseAnnotations()
+			m := p.v2ParseMethodDecl()
+			m.Annotations = annots
+			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_FN {
 			m := p.v2ParseMethodDecl()
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_VAR {
@@ -601,25 +643,63 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 	return &ImportDecl{Path: path, Alias: alias}
 }
 
-// v2ParseFromImport: from pathlib import Path  OR  from requests import get as http_get
-func (p *Parser) v2ParseFromImport() *ImportDecl {
+// v2ParseFromImport: from pathlib import Path  OR  from os.path import join, exists
+func (p *Parser) v2ParseFromImport() []*ImportDecl {
 	p.expect(lexer.TOKEN_FROM)
-	// Parse module path
 	path := p.expect(lexer.TOKEN_IDENT).Literal
 	for p.check(lexer.TOKEN_DOT) {
 		p.advance()
 		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
 	}
 	p.expect(lexer.TOKEN_IMPORT)
-	// Parse imported name
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	alias := ""
-	if p.check(lexer.TOKEN_AS) {
+
+	var imports []*ImportDecl
+	for {
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		alias := ""
+		if p.check(lexer.TOKEN_AS) {
+			p.advance()
+			alias = p.expect(lexer.TOKEN_IDENT).Literal
+		}
+		imports = append(imports, &ImportDecl{Path: "from:" + path + ":" + name, Alias: alias})
+		if !p.check(lexer.TOKEN_COMMA) {
+			break
+		}
 		p.advance()
-		alias = p.expect(lexer.TOKEN_IDENT).Literal
 	}
-	// Store as "from:module:name" so codegen can reconstruct
-	return &ImportDecl{Path: "from:" + path + ":" + name, Alias: alias}
+	return imports
+}
+
+// --- Annotations/Decorators --------------------------------------------------
+
+// v2ParseAnnotations: @name or @name(...) — one or more decorators
+func (p *Parser) v2ParseAnnotations() []*Annotation {
+	var annots []*Annotation
+	for p.check(lexer.TOKEN_AT) {
+		p.advance() // consume @
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		// Support dotted names: @dagster.asset
+		for p.check(lexer.TOKEN_DOT) {
+			p.advance()
+			name += "." + p.expect(lexer.TOKEN_IDENT).Literal
+		}
+		var args []string
+		if p.check(lexer.TOKEN_LPAREN) {
+			p.advance()
+			for !p.check(lexer.TOKEN_RPAREN) && !p.check(lexer.TOKEN_EOF) {
+				// Collect raw arg tokens as strings
+				tok := p.advance()
+				args = append(args, tok.Literal)
+				if p.check(lexer.TOKEN_COMMA) {
+					p.advance()
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		annots = append(annots, &Annotation{Name: name, Args: args})
+		p.skipSemis()
+	}
+	return annots
 }
 
 // --- Types (v2: Python-style generics with []) -------------------------------
@@ -903,7 +983,8 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_NULL, lexer.TOKEN_NONE:
 		p.advance()
 		return &NullLit{}
-	case lexer.TOKEN_IDENT:
+	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT:
+		// print is a regular function in v2 (not a special statement)
 		// Check for lambda: name -> expr
 		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			return p.v2ParseLambda()

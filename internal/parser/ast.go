@@ -430,6 +430,16 @@ type RaiseStmt struct {
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
 
+// AssertStmt: assert expr [, "message"]
+type AssertStmt struct {
+	Line    int
+	Cond    Expr
+	Message Expr // optional message (nil if no message)
+}
+
+func (a *AssertStmt) nodeTag() {}
+func (a *AssertStmt) stmtTag() {}
+
 // WithResource is a single resource binding inside a with statement.
 type WithResource struct {
 	Name      string

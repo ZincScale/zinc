@@ -420,6 +420,68 @@ end
 	)
 }
 
+func TestV2MultipleFromImports(t *testing.T) {
+	assertV2Contains(t,
+		`from os.path import join, exists`,
+		"from os.path import join",
+		"from os.path import exists",
+	)
+}
+
+func TestV2Decorator(t *testing.T) {
+	assertV2Contains(t, `
+@cache
+fn expensive(n: int): int
+    return n * n
+end
+`,
+		"@cache",
+		"def expensive(n: int) -> int:",
+	)
+}
+
+func TestV2StaticMethod(t *testing.T) {
+	assertV2Contains(t, `
+class Math
+    @staticmethod
+    fn add(a: int, b: int): int
+        return a + b
+    end
+end
+`,
+		"@staticmethod",
+		"def add(a: int, b: int) -> int:",
+	)
+}
+
+func TestV2ClassMethod(t *testing.T) {
+	assertV2Contains(t, `
+class MyClass
+    @classmethod
+    fn create(name: str): MyClass
+        return MyClass(name)
+    end
+end
+`,
+		"@classmethod",
+		"def create(cls, name: str) -> MyClass:",
+	)
+}
+
+func TestV2Assert(t *testing.T) {
+	assertV2Contains(t,
+		`assert x > 0, "must be positive"`,
+		`assert (x > 0), "must be positive"`,
+	)
+}
+
+func TestV2PrintMultiArg(t *testing.T) {
+	assertV2Contains(t,
+		`print("hello", "world", sep=", ")`,
+		`print("hello", "world", sep=", ")`,
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
