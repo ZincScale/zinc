@@ -36,12 +36,12 @@ A processor is a Zinc function that takes a FlowFile and returns one or more Flo
 
 ```zinc
 @processor
-fn enrich_order(flow: FlowFile): FlowFile
+fn enrich_order(flow: FlowFile): FlowFile {
     var data = json.loads(flow.content)
     data["enriched_at"] = datetime.now().isoformat()
     data["region"] = lookup_region(data["zip_code"])
     return flow.with_content(json.dumps(data))
-end
+}
 ```
 
 - **Stateless by default** — no shared mutable state between invocations
@@ -55,12 +55,12 @@ end
 The unit of data flowing through the pipeline. Same concept as NiFi:
 
 ```zinc
-data FlowFile
+data FlowFile {
     id: str                    // unique identifier
     attributes: dict[str, str] // metadata (filename, mime.type, source, etc.)
     content: bytes             // the payload (1 byte to 100MB+)
     provenance: list[str]      // processing history
-end
+}
 ```
 
 - **Attributes** — small metadata dict, copied freely between processors
@@ -92,7 +92,7 @@ pipeline order_processing
     process_payment -> sink kafka("payments-topic")
     hold_queue      -> sink s3("s3://bucket/pending/")
     dead_letter     -> sink filesystem("/var/zinc-flow/dead-letter/")
-end
+}
 ```
 
 ### R4 — Hot Swap / Live Processor Management
@@ -135,11 +135,11 @@ When a downstream processor is slow or stopped, upstream should slow down:
 
 ```zinc
 @processor(retries=3, dead_letter="errors")
-fn risky_transform(flow: FlowFile): FlowFile
+fn risky_transform(flow: FlowFile): FlowFile {
     // If this throws, retried 3 times, then sent to "errors" queue
     var result = external_api_call(flow.content)
     return flow.with_content(result)
-end
+}
 ```
 
 ### R7 — Sources and Sinks
@@ -159,15 +159,15 @@ Custom sources/sinks are just Zinc functions:
 
 ```zinc
 @source
-fn watch_directory(path: str, pattern: str = "*"): FlowFile
+fn watch_directory(path: str, pattern: str = "*"): FlowFile {
     // yield FlowFiles as files appear
-    for file in glob(path, pattern)
+    for file in glob(path, pattern) {
         yield FlowFile(
             attributes={"filename": file.name, "path": str(file)},
             content=file.read_bytes()
         )
-    end
-end
+    }
+}
 ```
 
 ### R8 — GUI / Management Interface

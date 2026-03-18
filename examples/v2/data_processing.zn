@@ -1,6 +1,6 @@
 // data_processing.zn — Zinc v2 data processing with comprehensions
 
-fn create_orders(): list[dict]
+fn create_orders(): list[dict] {
     return [
         {"id": "1", "customer": "Alice", "amount": 150.0, "status": "completed"},
         {"id": "2", "customer": "Bob", "amount": 50.0, "status": "pending"},
@@ -8,7 +8,7 @@ fn create_orders(): list[dict]
         {"id": "4", "customer": "Charlie", "amount": 75.0, "status": "completed"},
         {"id": "5", "customer": "Bob", "amount": 200.0, "status": "cancelled"}
     ]
-end
+}
 
 var orders = create_orders()
 print("Total orders: {len(orders)}")

@@ -81,6 +81,22 @@ func (p *Parser) ParseV2() *Program {
 
 // --- Body parsing (end-block) ------------------------------------------------
 
+// v2ParseBlock parses a brace-delimited block: { stmts }
+func (p *Parser) v2ParseBlock() *BlockStmt {
+	p.expect(lexer.TOKEN_LBRACE)
+	var stmts []Stmt
+	p.skipSemis()
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		s := p.v2ParseStmt()
+		if s != nil {
+			stmts = append(stmts, s)
+		}
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &BlockStmt{Stmts: stmts}
+}
+
 // v2ParseBody parses statements until it hits one of the terminator tokens.
 // Does NOT consume the terminator — the caller handles that.
 func (p *Parser) v2ParseBody(terminators ...lexer.TokenType) *BlockStmt {
@@ -205,8 +221,8 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 
 // v2ParseErrHandler checks for `Err` after a failable call.
 // Two forms:
-//   var x = call() Err 0              — single-expression default (same line)
-//   var x = call() Err ... end        — multi-statement handler block
+//   var x = call() Err 0         — single-expression default
+//   var x = call() Err { ... }   — multi-statement handler block
 // Returns nil if no Err follows.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
 	if !p.check(lexer.TOKEN_IDENT) || p.peek().Literal != "Err" {
@@ -214,52 +230,22 @@ func (p *Parser) v2ParseErrHandler() *OrHandler {
 	}
 	p.advance() // consume "Err"
 
-	if p.check(lexer.TOKEN_END) {
-		p.advance()
-		return &OrHandler{Body: &BlockStmt{}}
-	}
-
-	// Simple heuristic: parse one expression. If END follows immediately,
-	// it was a single-statement block. If not, it's a single-expression default.
-	// But first check for obvious block starters (return, continue, break, var, if, etc.)
-	if p.v2IsBlockStarter() {
-		body := p.v2ParseBody(lexer.TOKEN_END)
-		p.expect(lexer.TOKEN_END)
+	// Brace block: Err { handler }
+	if p.check(lexer.TOKEN_LBRACE) {
+		body := p.v2ParseBlock()
 		return &OrHandler{Body: body}
 	}
 
-	// Parse as expression (could be default value or single-statement call)
-	expr := p.v2ParseExpr()
-	if p.check(lexer.TOKEN_END) {
-		// Single-statement block: Err print("bad") end
-		p.advance()
-		return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
-	}
 	// Single-expression default: Err 0
+	expr := p.v2ParseExpr()
 	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
-}
-
-// v2IsBlockStarter returns true if the current token starts a statement (not an expression default).
-func (p *Parser) v2IsBlockStarter() bool {
-	tok := p.peek()
-	switch tok.Type {
-	case lexer.TOKEN_VAR, lexer.TOKEN_IF, lexer.TOKEN_FOR, lexer.TOKEN_WHILE,
-		lexer.TOKEN_TRY, lexer.TOKEN_RETURN, lexer.TOKEN_RAISE, lexer.TOKEN_WITH,
-		lexer.TOKEN_MATCH, lexer.TOKEN_BREAK, lexer.TOKEN_CONTINUE, lexer.TOKEN_FN,
-		lexer.TOKEN_PRINT:
-		return true
-	case lexer.TOKEN_IDENT:
-		// "assert", "del", "yield" are statement starters
-		return tok.Literal == "assert" || tok.Literal == "del" || tok.Literal == "yield"
-	}
-	return false
 }
 
 func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
 	line := p.peek().Line
 	p.advance() // consume return
 	// Return with no value if next token is a block terminator
-	if p.check(lexer.TOKEN_END) || p.check(lexer.TOKEN_ELSE) ||
+	if p.check(lexer.TOKEN_RBRACE) || p.check(lexer.TOKEN_ELSE) ||
 		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
 		return &ReturnStmt{Line: line}
 	}
@@ -276,27 +262,21 @@ func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
 	return &ReturnStmt{Line: line, Value: first}
 }
 
-// v2ParseIfStmt: if cond ... [else if cond ...] [else ...] end
+// v2ParseIfStmt: if cond { } [else if cond { }] [else { }]
 func (p *Parser) v2ParseIfStmt() *IfStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_IF)
 	cond := p.v2ParseExpr()
-	then := p.v2ParseBody(lexer.TOKEN_ELSE, lexer.TOKEN_END)
+	then := p.v2ParseBlock()
 
 	var elseStmt Stmt
 	if p.check(lexer.TOKEN_ELSE) {
 		p.advance()
 		if p.check(lexer.TOKEN_IF) {
-			// else if — recursive
 			elseStmt = p.v2ParseIfStmt()
 		} else {
-			// else block
-			elseBody := p.v2ParseBody(lexer.TOKEN_END)
-			p.expect(lexer.TOKEN_END)
-			elseStmt = elseBody
+			elseStmt = p.v2ParseBlock()
 		}
-	} else {
-		p.expect(lexer.TOKEN_END)
 	}
 	return &IfStmt{Line: line, Cond: cond, Then: then, ElseStmt: elseStmt}
 }
@@ -311,8 +291,7 @@ func (p *Parser) v2ParseForStmt() Stmt {
 		item := p.advance().Literal
 		p.advance() // consume "in"
 		rangeExpr := p.v2ParseExpr()
-		body := p.v2ParseBody(lexer.TOKEN_END)
-		p.expect(lexer.TOKEN_END)
+		body := p.v2ParseBlock()
 		return &ForStmt{Line: line, IsRange: true, Item: item, Range: rangeExpr, Body: body}
 	}
 
@@ -326,15 +305,13 @@ func (p *Parser) v2ParseForStmt() Stmt {
 		item := p.advance().Literal
 		p.advance() // in
 		rangeExpr := p.v2ParseExpr()
-		body := p.v2ParseBody(lexer.TOKEN_END)
-		p.expect(lexer.TOKEN_END)
+		body := p.v2ParseBlock()
 		return &ForStmt{Line: line, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// while-style for (bare condition) — shouldn't happen in v2, but handle gracefully
 	cond := p.v2ParseExpr()
-	body := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	body := p.v2ParseBlock()
 	return &WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
@@ -343,16 +320,16 @@ func (p *Parser) v2ParseWhileStmt() *WhileStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_WHILE)
 	cond := p.v2ParseExpr()
-	body := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	body := p.v2ParseBlock()
 	return &WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
-// v2ParseMatchStmt: match expr ... case pat -> expr ... end
+// v2ParseMatchStmt: match expr { case pat -> expr ... }
 func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_MATCH)
 	subject := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_LBRACE)
 	var cases []*MatchCase
 	p.skipSemis()
 	for p.check(lexer.TOKEN_CASE) {
@@ -370,13 +347,13 @@ func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 			stmt := p.v2ParseStmt()
 			cases = append(cases, &MatchCase{Pattern: pattern, Body: &BlockStmt{Stmts: []Stmt{stmt}}})
 		} else {
-			// Multi-line case: case pat ... (body until next case or end)
-			body := p.v2ParseBody(lexer.TOKEN_CASE, lexer.TOKEN_END)
+			// Multi-line case with braces: case pat { body }
+			body := p.v2ParseBlock()
 			cases = append(cases, &MatchCase{Pattern: pattern, Body: body})
 		}
 		p.skipSemis()
 	}
-	p.expect(lexer.TOKEN_END)
+	p.expect(lexer.TOKEN_RBRACE)
 	return &MatchStmt{Line: line, Subject: subject, Cases: cases}
 }
 
@@ -401,20 +378,17 @@ func (p *Parser) v2ParseWithStmt() *WithStmt {
 		p.advance()
 	}
 
-	body := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	body := p.v2ParseBlock()
 	return &WithStmt{Line: line, Resources: resources, Body: body}
 }
 
-// v2ParseTryStmt: try ... catch err: ExType ... end
+// v2ParseTryStmt: try { } catch err: ExType { }
 func (p *Parser) v2ParseTryStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_TRY)
-	tryBody := p.v2ParseBody(lexer.TOKEN_CATCH, lexer.TOKEN_END)
+	tryBody := p.v2ParseBlock()
 
 	if !p.check(lexer.TOKEN_CATCH) {
-		p.expect(lexer.TOKEN_END)
-		// try without catch — just a block
 		return &ExprStmt{Line: line, Expr: &Ident{Name: "__try__"}}
 	}
 
@@ -430,8 +404,7 @@ func (p *Parser) v2ParseTryStmt() Stmt {
 		}
 	}
 
-	catchBody := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	catchBody := p.v2ParseBlock()
 
 	// Map to AST — we'll use a TryStmt node (need to add to AST)
 	return &TryStmt{
@@ -461,7 +434,7 @@ func (p *Parser) v2ParseYieldStmt() *YieldStmt {
 	line := p.peek().Line
 	p.advance() // consume "yield" ident
 	// Bare yield if next is end/else/rbrace/EOF
-	if p.check(lexer.TOKEN_END) || p.check(lexer.TOKEN_ELSE) ||
+	if p.check(lexer.TOKEN_RBRACE) || p.check(lexer.TOKEN_ELSE) ||
 		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
 		return &YieldStmt{Line: line}
 	}
@@ -535,8 +508,7 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 		return &FnDecl{Line: line, Name: name, Params: params, ReturnType: retType, Body: body}
 	}
 
-	body := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	body := p.v2ParseBlock()
 	return &FnDecl{Line: line, Name: name, Params: params, ReturnType: retType, Body: body}
 }
 
@@ -615,8 +587,9 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	var fields []*FieldDecl
 	var methods []*MethodDecl
 
+	p.expect(lexer.TOKEN_LBRACE)
 	p.skipSemis()
-	for !p.check(lexer.TOKEN_END) && !p.check(lexer.TOKEN_EOF) {
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
 		if tok.Type == lexer.TOKEN_AT {
@@ -631,7 +604,6 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)
 		} else if tok.Type == lexer.TOKEN_IDENT {
-			// Field without var: name: type [= default]
 			f := p.v2ParseBareFieldDecl()
 			fields = append(fields, f)
 		} else {
@@ -640,7 +612,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		}
 		p.skipSemis()
 	}
-	p.expect(lexer.TOKEN_END)
+	p.expect(lexer.TOKEN_RBRACE)
 	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods}
 }
 
@@ -657,8 +629,7 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 		retType = p.v2ParseType()
 	}
 
-	body := p.v2ParseBody(lexer.TOKEN_END)
-	p.expect(lexer.TOKEN_END)
+	body := p.v2ParseBlock()
 	return &MethodDecl{Name: name, Params: params, ReturnType: retType, Body: body,
 		IsPub: true} // v2: all methods are public (Python convention)
 }
@@ -693,16 +664,16 @@ func (p *Parser) v2ParseBareFieldDecl() *FieldDecl {
 	return &FieldDecl{Name: name, Type: typ, Default: def}
 }
 
-// v2ParseDataClassDecl: data Name ... end
+// v2ParseDataClassDecl: data Name { fields... }
 func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_DATA)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 
-	// Fields are listed directly (no parens), each as name: type [= default]
+	p.expect(lexer.TOKEN_LBRACE)
 	var params []*FieldDecl
 	p.skipSemis()
-	for !p.check(lexer.TOKEN_END) && !p.check(lexer.TOKEN_FN) && !p.check(lexer.TOKEN_EOF) {
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_FN) && !p.check(lexer.TOKEN_EOF) {
 		if !p.check(lexer.TOKEN_IDENT) {
 			break
 		}
@@ -711,32 +682,32 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 		p.skipSemis()
 	}
 
-	// Optional methods
 	var methods []*MethodDecl
 	for p.check(lexer.TOKEN_FN) {
 		methods = append(methods, p.v2ParseMethodDecl())
 		p.skipSemis()
 	}
 
-	p.expect(lexer.TOKEN_END)
+	p.expect(lexer.TOKEN_RBRACE)
 	return &DataClassDecl{Line: line, Name: name, Params: params, Methods: methods}
 }
 
-// v2ParseEnumDecl: enum Name ... end
+// v2ParseEnumDecl: enum Name { variants }
 func (p *Parser) v2ParseEnumDecl() *EnumDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_ENUM)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.expect(lexer.TOKEN_LBRACE)
 	var variants []string
 	p.skipSemis()
-	for !p.check(lexer.TOKEN_END) && !p.check(lexer.TOKEN_EOF) {
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		variants = append(variants, p.expect(lexer.TOKEN_IDENT).Literal)
 		if p.check(lexer.TOKEN_COMMA) {
 			p.advance()
 		}
 		p.skipSemis()
 	}
-	p.expect(lexer.TOKEN_END)
+	p.expect(lexer.TOKEN_RBRACE)
 	return &EnumDecl{Line: line, Name: name, Variants: variants}
 }
 

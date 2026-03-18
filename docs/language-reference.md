@@ -2,14 +2,14 @@
 
 ## Blocks
 
-All blocks close with `end`. No braces, no significant whitespace.
+Blocks use `{ }` braces. Indentation is for readability only.
 
 ```zinc
-fn example()
-    if true
+fn example() {
+    if true {
         print("yes")
-    end
-end
+    }
+}
 ```
 
 ## Variables
@@ -24,9 +24,9 @@ var a, b = divmod(10, 3)    // tuple unpacking
 ## Functions
 
 ```zinc
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 
 fn double(x: int): int = x * 2       // single-expression
 fn log(*args, **kwargs)               // variadic
@@ -45,30 +45,30 @@ string"""               // triple quotes: multi-line
 ## Classes
 
 ```zinc
-class Stack
+class Stack {
     var items: list[int] = []
 
-    fn push(item: int)
+    fn push(item: int) {
         items.append(item)       // auto-injects self.items
-    end
+    }
 
-    fn len(): int                // → __len__(self)
+    fn len(): int                // → __len__(self) {
         return len(items)
-    end
+    }
 
-    fn str(): str                // → __str__(self)
+    fn str(): str                // → __str__(self) {
         return "Stack({items})"
-    end
-end
+    }
+}
 
-class Dog(Animal)                // inheritance
+class Dog(Animal)                // inheritance {
     var breed: str
 
     @staticmethod
-    fn species(): str
+    fn species(): str {
         return "Canis lupus"
-    end
-end
+    }
+}
 ```
 
 ### Dunder Mapping
@@ -91,11 +91,11 @@ end
 ## Data Classes
 
 ```zinc
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 ```
 
 Transpiles to `@dataclass class User`.
@@ -103,48 +103,48 @@ Transpiles to `@dataclass class User`.
 ## Enums
 
 ```zinc
-enum Color
+enum Color {
     Red
     Green
     Blue
-end
+}
 ```
 
 ## Control Flow
 
 ```zinc
 // if / else if / else
-if x > 0
+if x > 0 {
     print("positive")
-else if x == 0
+} else if x == 0 {
     print("zero")
-else
+} else {
     print("negative")
-end
+}
 
 // expression if (ternary)
 var label = if count == 1: "item" else: "items"
 
 // for loop
-for item in items
+for item in items {
     print(item)
-end
+}
 
-for i, item in items        // with index (enumerate)
+for i, item in items        // with index (enumerate) {
     print("{i}: {item}")
-end
+}
 
 // while
-while running
+while running {
     process()
-end
+}
 
 // match
-match command
+match command {
     case "start" -> start()
     case "stop" -> stop()
     case _ -> print("unknown")
-end
+}
 ```
 
 ## Error Handling
@@ -152,31 +152,31 @@ end
 ### Track 1 — Result[T] for expected failures
 
 ```zinc
-fn parse_age(input: str): Result[int]
-    if not input.isdigit()
+fn parse_age(input: str): Result[int] {
+    if not input.isdigit() {
         return Err("not a number")
-    end
+    }
     return int(input)            // auto-wrapped in Ok()
-end
+}
 
 // Default value (single expression, no end needed)
 var age = parse_age(input) Err 0
 
 // Handler block
-var age = parse_age(input) Err
+var age = parse_age(input) Err {
     print("bad: {err}")
     return
-end
+}
 ```
 
 ### Track 2 — Exceptions for unexpected failures
 
 ```zinc
-try
+try {
     var conn = db.connect(url)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("down: {err}")
-end
+}
 
 raise ValueError("bad") from original
 ```
@@ -237,43 +237,43 @@ var lengths = {w: len(w) for w in words}
 ## Generators
 
 ```zinc
-fn fibonacci(limit: int)
+fn fibonacci(limit: int) {
     var a = 0
     var b = 1
-    while a < limit
+    while a < limit {
         yield a
         var temp = a
         a = b
         b = temp + b
-    end
-end
+    }
+}
 ```
 
 ## Context Managers
 
 ```zinc
-with f = open("data.txt")
+with f = open("data.txt") {
     var content = f.read()
-end
+}
 ```
 
 ## Decorators
 
 ```zinc
 @cache
-fn expensive(n: int): int
+fn expensive(n: int): int {
     return compute(n)
-end
+}
 
-class MyClass
+class MyClass {
     @staticmethod
-    fn create(): MyClass
+    fn create(): MyClass {
         return MyClass()
-    end
+    }
 
     @classmethod
-    fn from_dict(d: dict): MyClass
+    fn from_dict(d: dict): MyClass {
         return MyClass()
-    end
-end
+    }
+}
 ```

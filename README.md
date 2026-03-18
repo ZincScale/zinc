@@ -8,9 +8,9 @@
 ```zinc
 import sys
 
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 
 var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
 print(greet(name))
@@ -89,30 +89,30 @@ No project setup, no config, no boilerplate. Single files just run.
 
 ```zinc
 // Data classes
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 
 // Classes with auto-self and dunder mapping
-class Stack
+class Stack {
     var items: list[int] = []
-    fn push(item: int)
+    fn push(item: int) {
         items.append(item)     // → self.items.append(item)
-    end
-    fn len(): int              // → __len__(self)
+    }
+    fn len(): int              // → __len__(self) {
         return len(items)
-    end
-end
+    }
+}
 
 // Two-track error handling
-fn parse_port(s: str): Result[int]
-    if not s.isdigit()
+fn parse_port(s: str): Result[int] {
+    if not s.isdigit() {
         return Err("not a number")
-    end
+    }
     return int(s)
-end
+}
 var port = parse_port("8080") Err 80
 
 // Collection methods → comprehensions
@@ -123,16 +123,16 @@ var total = sum([o.amount for o in active])
 var label = if count == 1: "item" else: "items"
 
 // Generators
-fn fibonacci(limit: int)
+fn fibonacci(limit: int) {
     var a = 0
     var b = 1
-    while a < limit
+    while a < limit {
         yield a
         var temp = a
         a = b
         b = temp + b
-    end
-end
+    }
+}
 ```
 
 ---

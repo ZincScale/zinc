@@ -56,9 +56,9 @@ print("hello")
 
 func TestV2FnDecl(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -105,13 +105,13 @@ func TestV2FnSingleExpr(t *testing.T) {
 
 func TestV2IfElseEnd(t *testing.T) {
 	prog, errs := parseV2(`
-if x > 0
+if x > 0 {
     print("positive")
-else if x == 0
+} else if x == 0 {
     print("zero")
-else
+} else {
     print("negative")
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -139,9 +139,9 @@ end
 
 func TestV2ForLoop(t *testing.T) {
 	prog, errs := parseV2(`
-for item in items
+for item in items {
     print(item)
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -157,9 +157,9 @@ end
 
 func TestV2ForLoopWithIndex(t *testing.T) {
 	prog, errs := parseV2(`
-for i, item in items
+for i, item in items {
     print(i)
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -175,9 +175,9 @@ end
 
 func TestV2WhileLoop(t *testing.T) {
 	prog, errs := parseV2(`
-while running
+while running {
     process_next()
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -190,11 +190,11 @@ end
 
 func TestV2Match(t *testing.T) {
 	prog, errs := parseV2(`
-match command
+match command {
     case "start" -> start_server()
     case "stop" -> stop_server()
     case _ -> print("unknown")
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -211,11 +211,11 @@ end
 
 func TestV2DataClass(t *testing.T) {
 	prog, errs := parseV2(`
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -234,11 +234,11 @@ end
 
 func TestV2Enum(t *testing.T) {
 	prog, errs := parseV2(`
-enum Color
+enum Color {
     Red
     Green
     Blue
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -251,17 +251,17 @@ end
 
 func TestV2Class(t *testing.T) {
 	prog, errs := parseV2(`
-class Stack
+class Stack {
     var items: list[int] = []
 
-    fn push(item: int)
+    fn push(item: int) {
         items.append(item)
-    end
+    }
 
-    fn pop(): int
+    fn pop(): int {
         return items.pop()
-    end
-end
+    }
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -362,11 +362,11 @@ func TestV2AndOrNot(t *testing.T) {
 
 func TestV2TryCatch(t *testing.T) {
 	prog, errs := parseV2(`
-try
+try {
     var conn = db.connect(url)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("failed")
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -442,23 +442,23 @@ import json
 import sys
 from pathlib import Path
 
-data Config
+data Config {
     host: str
     port: int = 8080
-end
+}
 
-fn load_config(path: str): Config
+fn load_config(path: str): Config {
     var text = Path(path).read_text()
     var raw = json.loads(text)
     return Config(raw["host"], raw["port"])
-end
+}
 
 var config = load_config("config.json")
 print("Server at {config.host}:{config.port}")
 
-if len(sys.argv) > 1
+if len(sys.argv) > 1 {
     print("Args: {sys.argv}")
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -593,13 +593,13 @@ func TestV2PowerOperator(t *testing.T) {
 func TestV2PrivateConvention(t *testing.T) {
 	// _prefix fields should parse fine (just naming convention)
 	prog, errs := parseV2(`
-class Cache
+class Cache {
     var _data: dict = {}
 
-    fn _internal_method()
+    fn _internal_method() {
         print("private")
-    end
-end
+    }
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -615,10 +615,10 @@ end
 
 func TestV2WithStatement(t *testing.T) {
 	prog, errs := parseV2(`
-with f = open("test.txt")
+with f = open("test.txt") {
     var content = f.read()
     print(content)
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -637,13 +637,13 @@ end
 
 func TestV2ClassInheritance(t *testing.T) {
 	prog, errs := parseV2(`
-class Dog(Animal)
+class Dog(Animal) {
     var breed: str
 
-    fn speak(): str
+    fn speak(): str {
         return "Woof"
-    end
-end
+    }
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -656,9 +656,9 @@ end
 
 func TestV2ArgsKwargs(t *testing.T) {
 	prog, errs := parseV2(`
-fn flexible(*args, **kwargs)
+fn flexible(*args, **kwargs) {
     print(args)
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -677,9 +677,9 @@ end
 
 func TestV2DefaultArgs(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(name: str, greeting: str = "Hello"): str
+fn greet(name: str, greeting: str = "Hello"): str {
     return "{greeting}, {name}!"
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -703,9 +703,9 @@ func TestV2MultipleFromImports(t *testing.T) {
 func TestV2Decorator(t *testing.T) {
 	prog, errs := parseV2(`
 @cache
-fn expensive(n: int): int
+fn expensive(n: int): int {
     return n * n
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -718,12 +718,12 @@ end
 
 func TestV2StaticMethod(t *testing.T) {
 	prog, errs := parseV2(`
-class Math
+class Math {
     @staticmethod
-    fn add(a: int, b: int): int
+    fn add(a: int, b: int): int {
         return a + b
-    end
-end
+    }
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -768,13 +768,13 @@ func TestV2PrintMultiArg(t *testing.T) {
 
 func TestV2ResultFn(t *testing.T) {
 	prog, errs := parseV2(`
-fn parse_age(input: str): Result[int]
-    if not input.isdigit()
+fn parse_age(input: str): Result[int] {
+    if not input.isdigit() {
         return Err("must be a number")
-    end
+    }
     var age = int(input)
     return age
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -791,10 +791,10 @@ end
 
 func TestV2ErrHandlerBlock(t *testing.T) {
 	prog, errs := parseV2(`
-var age = parse_age(input) Err
+var age = parse_age(input) Err {
     print("bad age")
     return
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -878,12 +878,12 @@ func TestV2TripleQuoteString(t *testing.T) {
 
 func TestV2NestedFunction(t *testing.T) {
 	_, errs := parseV2(`
-fn outer(): int
-    fn inner(x: int): int
+fn outer(): int {
+    fn inner(x: int): int {
         return x * 2
-    end
+    }
     return inner(5)
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -892,11 +892,11 @@ end
 
 func TestV2Yield(t *testing.T) {
 	prog, errs := parseV2(`
-fn count_up(n: int)
-    for i in range(n)
+fn count_up(n: int) {
+    for i in range(n) {
         yield i
-    end
-end
+    }
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -926,9 +926,9 @@ func TestV2TupleLiteral(t *testing.T) {
 
 func TestV2ReturnTuple(t *testing.T) {
 	prog, errs := parseV2(`
-fn divmod(a: int, b: int)
+fn divmod(a: int, b: int) {
     return a / b, a % b
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)

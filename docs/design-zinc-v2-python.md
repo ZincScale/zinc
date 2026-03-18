@@ -51,22 +51,22 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 
 ### Block Delimiters — `end` Keyword
 
-Zinc uses `end` to close blocks — like Julia, Crystal, Ruby, and Lua. No braces, no significant whitespace. Indentation is for readability only (enforced by `zinc fmt`, ignored by the compiler).
+Zinc uses `end` to close blocks — like Julia, Crystal, Ruby, and Lua. Indentation is for readability only. Indentation is for readability only (enforced by `zinc fmt`, ignored by the compiler).
 
 ```zinc
-if x > 10
+if x > 10 {
     print("big")
-else
+} else {
     print("small")
-end
+}
 
-fn process(items: list[dict]): list[dict]
+fn process(items: list[dict]): list[dict] {
     var result = items.filter(x -> x["status"] == "active")
-    if len(result) > 100
+    if len(result) > 100 {
         result = result.sort_by(x -> x["priority"]).take(100)
-    end
+    }
     return result
-end
+}
 ```
 
 Why `end` over braces:
@@ -99,11 +99,11 @@ var config = {
     ],
 }
 
-if user.is_active and
+if user.is_active and {
    user.role == "admin" and
    user.last_login > cutoff_date
     grant_access(user)
-end
+}
 ```
 
 **Rules (same as Ruby/Julia):**
@@ -126,10 +126,10 @@ This means **no backslash hell** like Python for multi-line conditions, and **no
 //      user.role == "admin":
 //
 // Zinc — just write it:
-if user.is_active and
+if user.is_active and {
    user.role == "admin"
     do_thing()
-end
+}
 ```
 
 ### Variables
@@ -150,9 +150,9 @@ scores: list[int] = []
 ### Functions
 
 ```zinc
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 
 // Single-expression shorthand — no end needed
 fn double(x: int): int = x * 2
@@ -224,29 +224,29 @@ Python's `__dunder__` methods are powerful but ugly and hard to remember. Zinc r
 Example:
 
 ```zinc
-class Stack
+class Stack {
     var items: list[int] = []
 
-    fn push(item: int)
+    fn push(item: int) {
         items.append(item)
-    end
+    }
 
-    fn pop(): int
+    fn pop(): int {
         return items.pop()
-    end
+    }
 
-    fn len(): int
+    fn len(): int {
         return len(items)
-    end
+    }
 
-    fn str(): str
+    fn str(): str {
         return "Stack({items})"
-    end
+    }
 
-    fn iter()
+    fn iter() {
         return iter(items)
-    end
-end
+    }
+}
 ```
 
 Transpiles to:
@@ -276,11 +276,11 @@ The transpiler also auto-injects `self` — no need to write it in Zinc. Fields 
 ### Data Classes
 
 ```zinc
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 ```
 
 Transpiles to:
@@ -297,11 +297,11 @@ class User:
 ### Enums
 
 ```zinc
-enum Color
+enum Color {
     Red
     Green
     Blue
-end
+}
 ```
 
 Transpiles to:
@@ -321,46 +321,46 @@ Zinc separates **expected failures** (validation, parsing, missing data) from **
 **Track 1 — Results for expected failures:**
 
 ```zinc
-fn parse_age(input: str): Result[int]
-    if not input.isdigit()
+fn parse_age(input: str): Result[int] {
+    if not input.isdigit() {
         return Err("must be a number")
-    end
+    }
     var age = int(input)
-    if age < 0 or age > 150
+    if age < 0 or age > 150 {
         return Err("out of range: {age}")
-    end
+    }
     return age  // just return it — transpiler wraps in Ok
-end
+}
 
 // Handle error inline — no ceremony on the happy path
-var age = parse_age(input) Err
+var age = parse_age(input) Err {
     print("bad age: {err}")
     return
-end
+}
 print("Age: {age}")  // age is an int, just keep going
 
 // Provide a default (single expression, no end needed)
 var age = parse_age(input) Err 0
 
 // Skip bad records in a batch
-for i, record in enumerate(records)
+for i, record in enumerate(records) {
     var age = parse_age(record["age"]) Err
         errors.append("record {i}: {err}")
         continue
-    end
+    }
     users.append(User(record["name"], age))
-end
+}
 ```
 
 **Track 2 — Exceptions for unexpected failures:**
 
 ```zinc
-try
+try {
     var conn = db.connect(url)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("Database down: {err}")
     exit(1)
-end
+}
 ```
 
 **The litmus test:** If you'd put it in a loop processing 10,000 records, it should be a Result. If it would stop your entire program, it's an exception. The transpiler warns if you raise exceptions inside loops.
@@ -381,13 +381,13 @@ Transpiles directly — no transformation needed. This is critical: **Zinc doesn
 ### Conditionals
 
 ```zinc
-if x > 0
+if x > 0 {
     print("positive")
-else if x == 0
+} else if x == 0 {
     print("zero")
-else
+} else {
     print("negative")
-end
+}
 ```
 
 Go-style `else if` (two words) instead of Python's `elif` — reads like English, no special keyword to remember.
@@ -413,27 +413,27 @@ The colon separates condition from value, reads left-to-right: "if this: that, e
 ### Loops
 
 ```zinc
-for item in items
+for item in items {
     print(item)
-end
+}
 
-for i in range(10)
+for i in range(10) {
     print(i)
-end
+}
 
-while running
+while running {
     process_next()
-end
+}
 ```
 
 ### Match
 
 ```zinc
-match command
+match command {
     case "start" -> start_server()
     case "stop" -> stop_server()
     case other -> print("Unknown: {other}")
-end
+}
 ```
 
 Transpiles to:
@@ -492,13 +492,13 @@ Real data pipelines process JSON records, Avro messages, NiFi flowfiles, CSV row
 
 ```zinc
 // Processing NiFi flowfiles, JSON records, Avro messages
-data Order
+data Order {
     id: str
     customer: str
     amount: float
     status: str
     items: list[dict]
-end
+}
 
 var orders = json.loads(read_file("orders.json"))
 
@@ -731,19 +731,19 @@ var results = items.parallel_map(item -> process(item), workers=4)
 var counts = {}
 var lock = threading.Lock()
 
-fn count_words(chunk: list[str])
+fn count_words(chunk: list[str]) {
     var local_counts = {}
-    for line in chunk
-        for word in line.split()
+    for line in chunk {
+        for word in line.split() {
             local_counts[word] = local_counts.get(word, 0) + 1
-        end
-    end
-    with lock
-        for word, count in local_counts.items()
+        }
+    }
+    with lock {
+        for word, count in local_counts.items() {
             counts[word] = counts.get(word, 0) + count
-        end
-    end
-end
+        }
+    }
+}
 ```
 
 **Future potential:** The transpiler could auto-detect pure `.map()` / `.filter()` chains on large collections and generate parallel dispatch code using thread pools. The developer writes sequential-looking code, Zinc makes it parallel.
@@ -767,16 +767,16 @@ end
 import os
 
 var total = 0
-for root, dirs, files in os.walk(".")
-    for f in files
-        if f.endswith(".py")
+for root, dirs, files in os.walk(".") {
+    for f in files {
+        if f.endswith(".py") {
             var path = os.path.join(root, f)
             var lines = len(open(path).readlines())
             print("{path}: {lines}")
             total += lines
-        end
-    end
-end
+        }
+    }
+}
 print("\nTotal: {total} lines")
 ```
 
@@ -809,16 +809,16 @@ print("Above average: {len(big)}")
 import requests
 import json
 
-fn get_issues(repo: str): list[dict]
+fn get_issues(repo: str): list[dict] {
     var resp = requests.get("https://api.github.com/repos/{repo}/issues")
     resp.raise_for_status()
     return resp.json()
-end
+}
 
 var issues = get_issues("python/cpython")
-for issue in issues[:10]
+for issue in issues[:10] {
     print("#{issue['number']}: {issue['title']}")
-end
+}
 ```
 
 ---

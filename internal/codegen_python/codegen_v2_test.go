@@ -65,9 +65,9 @@ print("Hello, {name}!")
 
 func TestV2FnWithReturnType(t *testing.T) {
 	assertV2Contains(t, `
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 `,
 		`def greet(name: str) -> str:`,
 		`return f"Hello, {name}!"`,
@@ -83,13 +83,13 @@ func TestV2FnSingleExpr(t *testing.T) {
 
 func TestV2IfElseIfElse(t *testing.T) {
 	assertV2Contains(t, `
-if x > 0
+if x > 0 {
     print("positive")
-else if x == 0
+} else if x == 0 {
     print("zero")
-else
+} else {
     print("negative")
-end
+}
 `,
 		"if (x > 0):",
 		"elif (x == 0):",
@@ -99,9 +99,9 @@ end
 
 func TestV2ForLoop(t *testing.T) {
 	assertV2Contains(t, `
-for item in items
+for item in items {
     print(item)
-end
+}
 `,
 		"for item in items:",
 		"print(item)",
@@ -110,9 +110,9 @@ end
 
 func TestV2ForWithIndex(t *testing.T) {
 	assertV2Contains(t, `
-for i, item in items
+for i, item in items {
     print(i)
-end
+}
 `,
 		"for i, item in enumerate(items):",
 	)
@@ -120,9 +120,9 @@ end
 
 func TestV2WhileLoop(t *testing.T) {
 	assertV2Contains(t, `
-while running
+while running {
     process_next()
-end
+}
 `,
 		"while running:",
 		"process_next()",
@@ -131,11 +131,11 @@ end
 
 func TestV2DataClass(t *testing.T) {
 	assertV2Contains(t, `
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 `,
 		"@dataclasses.dataclass",
 		"class User:",
@@ -147,11 +147,11 @@ end
 
 func TestV2Enum(t *testing.T) {
 	assertV2Contains(t, `
-enum Color
+enum Color {
     Red
     Green
     Blue
-end
+}
 `,
 		"class Color(enum.Enum):",
 		"Red = 1",
@@ -162,21 +162,21 @@ end
 
 func TestV2ClassWithMethods(t *testing.T) {
 	assertV2Contains(t, `
-class Stack
+class Stack {
     var items: list[int] = []
 
-    fn push(item: int)
+    fn push(item: int) {
         items.append(item)
-    end
+    }
 
-    fn len(): int
+    fn len(): int {
         return len(items)
-    end
+    }
 
-    fn str(): str
+    fn str(): str {
         return "Stack"
-    end
-end
+    }
+}
 `,
 		"class Stack:",
 		"def __init__(self, items: list[int] = []):",
@@ -218,11 +218,11 @@ func TestV2ExpressionIf(t *testing.T) {
 
 func TestV2TryCatch(t *testing.T) {
 	assertV2Contains(t, `
-try
+try {
     var conn = db.connect(url)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("failed")
-end
+}
 `,
 		"try:",
 		"conn = db.connect(url)",
@@ -233,11 +233,11 @@ end
 
 func TestV2Match(t *testing.T) {
 	assertV2Contains(t, `
-match command
+match command {
     case "start" -> start_server()
     case "stop" -> stop_server()
     case _ -> print("unknown")
-end
+}
 `,
 		"match command:",
 		`case "start":`,
@@ -337,17 +337,17 @@ func TestV2TupleUnpacking(t *testing.T) {
 
 func TestV2AutoSelfInjection(t *testing.T) {
 	assertV2Contains(t, `
-class Counter
+class Counter {
     var count: int = 0
 
-    fn increment()
+    fn increment() {
         count = count + 1
-    end
+    }
 
-    fn get_count(): int
+    fn get_count(): int {
         return count
-    end
-end
+    }
+}
 `,
 		"self.count = (self.count + 1)",
 		"return self.count",
@@ -363,9 +363,9 @@ func TestV2PowerOperator(t *testing.T) {
 
 func TestV2WithStatement(t *testing.T) {
 	assertV2Contains(t, `
-with f = open("test.txt")
+with f = open("test.txt") {
     var content = f.read()
-end
+}
 `,
 		"with open(\"test.txt\") as f:",
 		"content = f.read()",
@@ -374,13 +374,13 @@ end
 
 func TestV2PrivateFields(t *testing.T) {
 	assertV2Contains(t, `
-class Cache
+class Cache {
     var _data: dict = {}
 
-    fn get(key: str): str
+    fn get(key: str): str {
         return _data[key]
-    end
-end
+    }
+}
 `,
 		"self._data",
 	)
@@ -388,13 +388,13 @@ end
 
 func TestV2ClassInheritance(t *testing.T) {
 	assertV2Contains(t, `
-class Dog(Animal)
+class Dog(Animal) {
     var breed: str
 
-    fn speak(): str
+    fn speak(): str {
         return "Woof"
-    end
-end
+    }
+}
 `,
 		"class Dog(Animal):",
 		"def speak(self) -> str:",
@@ -403,9 +403,9 @@ end
 
 func TestV2ArgsKwargs(t *testing.T) {
 	assertV2Contains(t, `
-fn flexible(*args, **kwargs)
+fn flexible(*args, **kwargs) {
     print(args)
-end
+}
 `,
 		"def flexible(*args, **kwargs):",
 	)
@@ -413,9 +413,9 @@ end
 
 func TestV2DefaultArgs(t *testing.T) {
 	assertV2Contains(t, `
-fn greet(name: str, greeting: str = "Hello"): str
+fn greet(name: str, greeting: str = "Hello"): str {
     return "{greeting}, {name}!"
-end
+}
 `,
 		`def greet(name: str, greeting: str = "Hello") -> str:`,
 	)
@@ -432,9 +432,9 @@ func TestV2MultipleFromImports(t *testing.T) {
 func TestV2Decorator(t *testing.T) {
 	assertV2Contains(t, `
 @cache
-fn expensive(n: int): int
+fn expensive(n: int): int {
     return n * n
-end
+}
 `,
 		"@cache",
 		"def expensive(n: int) -> int:",
@@ -443,12 +443,12 @@ end
 
 func TestV2StaticMethod(t *testing.T) {
 	assertV2Contains(t, `
-class Math
+class Math {
     @staticmethod
-    fn add(a: int, b: int): int
+    fn add(a: int, b: int): int {
         return a + b
-    end
-end
+    }
+}
 `,
 		"@staticmethod",
 		"def add(a: int, b: int) -> int:",
@@ -457,12 +457,12 @@ end
 
 func TestV2ClassMethod(t *testing.T) {
 	assertV2Contains(t, `
-class MyClass
+class MyClass {
     @classmethod
-    fn create(name: str): MyClass
+    fn create(name: str): MyClass {
         return MyClass(name)
-    end
-end
+    }
+}
 `,
 		"@classmethod",
 		"def create(cls, name: str) -> MyClass:",
@@ -486,9 +486,9 @@ func TestV2PrintMultiArg(t *testing.T) {
 func TestV2ResultFnOkWrap(t *testing.T) {
 	// Bare return in Result function → wrapped in Ok()
 	assertV2Contains(t, `
-fn parse_age(input: str): Result[int]
+fn parse_age(input: str): Result[int] {
     return 42
-end
+}
 `,
 		"return Ok(42)",
 	)
@@ -497,9 +497,9 @@ end
 func TestV2ResultFnErrPassthrough(t *testing.T) {
 	// Err() return stays as-is (not double-wrapped)
 	assertV2Contains(t, `
-fn parse_age(input: str): Result[int]
+fn parse_age(input: str): Result[int] {
     return Err("bad input")
-end
+}
 `,
 		`return Err("bad input")`,
 	)
@@ -507,10 +507,10 @@ end
 
 func TestV2ErrHandlerBlock(t *testing.T) {
 	assertV2Contains(t, `
-var age = parse_age(input) Err
+var age = parse_age(input) Err {
     print("bad age")
     return
-end
+}
 `,
 		"_result = parse_age(input)",
 		"if _result.is_err():",
@@ -529,9 +529,9 @@ func TestV2ErrHandlerDefault(t *testing.T) {
 func TestV2ResultRuntime(t *testing.T) {
 	// When Result types are used, runtime is inlined
 	result := transpileV2(`
-fn validate(x: int): Result[int]
+fn validate(x: int): Result[int] {
     return x
-end
+}
 `)
 	if !strings.Contains(result, "class _Ok:") {
 		t.Error("expected Result runtime to be inlined")
@@ -551,26 +551,26 @@ func TestV2RaiseFrom(t *testing.T) {
 func TestV2TwoTrackErrorStory(t *testing.T) {
 	// Full two-track test: Result for expected, try/catch for exceptional
 	result := transpileV2(`
-fn parse_port(s: str): Result[int]
-    if not s.isdigit()
+fn parse_port(s: str): Result[int] {
+    if not s.isdigit() {
         return Err("not a number: {s}")
-    end
+    }
     var port = int(s)
-    if port < 1 or port > 65535
+    if port < 1 or port > 65535 {
         return Err("out of range: {port}")
-    end
+    }
     return port
-end
+}
 
 var port = parse_port("8080") Err 80
 print("Using port: {port}")
 
-try
+try {
     var conn = connect(host, port)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("Connection failed: {err}")
     exit(1)
-end
+}
 `)
 	expected := []string{
 		"def parse_port(s: str) -> Result[int]:",
@@ -616,11 +616,11 @@ func TestV2TripleQuoteString(t *testing.T) {
 
 func TestV2Yield(t *testing.T) {
 	assertV2Contains(t, `
-fn count_up(n: int)
-    for i in range(n)
+fn count_up(n: int) {
+    for i in range(n) {
         yield i
-    end
-end
+    }
+}
 `,
 		"yield i",
 	)
@@ -718,9 +718,9 @@ func TestV2TupleLiteral(t *testing.T) {
 
 func TestV2ReturnTuple(t *testing.T) {
 	assertV2Contains(t, `
-fn swap(a: int, b: int)
+fn swap(a: int, b: int) {
     return b, a
-end
+}
 `,
 		"return (b, a)",
 	)
@@ -728,9 +728,9 @@ end
 
 func TestV2TupleUnpackFromTuple(t *testing.T) {
 	assertV2Contains(t, `
-fn get_pair()
+fn get_pair() {
     return (1, 2)
-end
+}
 var x, y = get_pair()
 print("x={x}, y={y}")
 `,
@@ -741,14 +741,14 @@ print("x={x}, y={y}")
 
 func TestV2Property(t *testing.T) {
 	assertV2Contains(t, `
-class Circle
+class Circle {
     var radius: float
 
     @property
-    fn area(): float
+    fn area(): float {
         return 3.14 * radius ** 2
-    end
-end
+    }
+}
 `,
 		"@property",
 		"def area(self) -> float:",
@@ -760,23 +760,23 @@ func TestV2FullScript(t *testing.T) {
 import json
 import sys
 
-data Config
+data Config {
     host: str
     port: int = 8080
-end
+}
 
-fn load_config(path: str): Config
+fn load_config(path: str): Config {
     var text = open(path).read()
     var raw = json.loads(text)
     return Config(raw["host"], raw["port"])
-end
+}
 
 var config = load_config("config.json")
 print("Server at {config.host}:{config.port}")
 
-if len(sys.argv) > 1
+if len(sys.argv) > 1 {
     print("Args provided")
-end
+}
 `)
 	// Verify it produces valid-looking Python
 	expected := []string{

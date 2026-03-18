@@ -30,9 +30,9 @@ That's it. No main function, no project setup. Top-level code just runs.
 // greet.zn
 import sys
 
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 
 var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
 print(greet(name))
@@ -65,9 +65,9 @@ var scores: list[int] = []  // generic type
 ## Functions
 
 ```zinc
-fn add(a: int, b: int): int
+fn add(a: int, b: int): int {
     return a + b
-end
+}
 
 // Single-expression shorthand
 fn double(x: int): int = x * 2
@@ -76,31 +76,31 @@ fn double(x: int): int = x * 2
 ## Control Flow
 
 ```zinc
-if x > 0
+if x > 0 {
     print("positive")
-else if x == 0
+} else if x == 0 {
     print("zero")
-else
+} else {
     print("negative")
-end
+}
 
-for item in items
+for item in items {
     print(item)
-end
+}
 
-while running
+while running {
     process()
-end
+}
 ```
 
 ## Data Classes
 
 ```zinc
-data User
+data User {
     name: str
     email: str
     age: int = 0
-end
+}
 
 var u = User("Alice", "alice@example.com")
 ```
@@ -110,12 +110,12 @@ var u = User("Alice", "alice@example.com")
 **Expected errors** (validation, parsing) use `Result[T]`:
 
 ```zinc
-fn parse_port(s: str): Result[int]
-    if not s.isdigit()
+fn parse_port(s: str): Result[int] {
+    if not s.isdigit() {
         return Err("not a number")
-    end
+    }
     return int(s)
-end
+}
 
 var port = parse_port("8080") Err 80
 ```
@@ -123,12 +123,12 @@ var port = parse_port("8080") Err 80
 **Unexpected errors** (network down, disk full) use exceptions:
 
 ```zinc
-try
+try {
     var conn = db.connect(url)
-catch err: ConnectionError
+} catch err: ConnectionError {
     print("Failed: {err}")
     exit(1)
-end
+}
 ```
 
 ## Imports
