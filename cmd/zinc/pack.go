@@ -101,6 +101,11 @@ func runPack(target string, format string) {
 			prog := p.ParseV2()
 			allDeps = append(allDeps, extractDeps(prog)...)
 		}
+		// Smart dispatch runtime auto-installs polars/numpy at runtime,
+		// but for packaged deployments (Docker, K8s) we need them pre-installed.
+		// Include them so pip install gets them at build time.
+		allDeps = append(allDeps, "polars", "numpy")
+
 		// Deduplicate
 		seen := make(map[string]bool)
 		var uniqueDeps []string
