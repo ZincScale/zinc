@@ -71,11 +71,18 @@ Requires: Go 1.21+ and Python 3.13+
 # Write a script
 echo 'print("Hello from Zinc!")' > hello.zn
 
-# Run it
+# Run it (free-threaded Python, GIL disabled)
 zinc run hello.zn
 
-# Or transpile to Python
-zinc transpile hello.zn    # → hello.py
+# Transpile to Python
+zinc transpile hello.zn
+
+# Package for deployment
+zinc pack hello.zn                   # PyInstaller binary
+zinc pack hello.zn --format nuitka   # compiled native binary
+zinc pack hello.zn --format docker   # Dockerfile
+zinc pack hello.zn --format k8s      # Dockerfile + K8s manifest
+zinc pack myproject/                 # entire project directory
 ```
 
 No project setup, no config, no boilerplate. Single files just run.

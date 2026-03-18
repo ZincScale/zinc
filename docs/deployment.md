@@ -19,6 +19,23 @@ Zinc transpiles `.zn` files to `.py` and runs on free-threaded Python (GIL disab
 | `zinc pack script.zn --format nuitka` | Native compiled binary | Performance-critical, smaller |
 | `zinc pack script.zn --format docker` | Dockerfile + .py | Containers, microservices |
 | `zinc pack script.zn --format k8s` | Dockerfile + K8s manifest | Kubernetes deployments |
+| `zinc pack myproject/` | Same as above | Entire project (all .zn files) |
+
+All `zinc pack` commands accept a single `.zn` file or a project directory:
+
+```bash
+# Single file
+zinc pack script.zn --format nuitka
+zinc pack script.zn --format docker
+zinc pack script.zn --format k8s
+
+# Project directory — transpiles all .zn files
+zinc pack myproject/ --format nuitka
+zinc pack myproject/ --format docker
+zinc pack myproject/ --format k8s
+```
+
+Entry point auto-detected: `main.zn` > `app.zn` > first file found.
 
 ---
 
