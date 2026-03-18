@@ -32,7 +32,7 @@ import (
 )
 
 // version is set by goreleaser via ldflags at build time.
-var version = "0.12.0"
+var version = "0.13.0"
 
 const usage = `Zinc — convention over configuration for native apps.
 
