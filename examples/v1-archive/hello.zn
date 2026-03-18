@@ -1,5 +1,0 @@
-main() {
-    print("Hello, World!")
-    String name = "Zinc"
-    print(name)
-}
