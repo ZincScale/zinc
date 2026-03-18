@@ -405,24 +405,59 @@ func (p *Parser) v2ParseParamList() []*ParamDecl {
 	return params
 }
 
-// v2ParseParam: name: type [= default]
+// v2ParseParam: name: type [= default]  OR  *args: type  OR  **kwargs: type
 func (p *Parser) v2ParseParam() *ParamDecl {
+	// Handle *args
+	variadic := false
+	kwVariadic := false
+	if p.check(lexer.TOKEN_STAR_STAR) {
+		p.advance()
+		kwVariadic = true
+	} else if p.check(lexer.TOKEN_STAR) {
+		p.advance()
+		variadic = true
+	}
+
 	name := p.expect(lexer.TOKEN_IDENT).Literal
-	p.expect(lexer.TOKEN_COLON)
-	typ := p.v2ParseType()
+
+	// Type annotation is optional for *args/**kwargs
+	var typ TypeExpr
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		typ = p.v2ParseType()
+	}
+
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
 		def = p.v2ParseExpr()
 	}
-	return &ParamDecl{Name: name, Type: typ, Default: def}
+
+	param := &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic}
+	if kwVariadic {
+		// Mark as **kwargs — reuse Variadic field but prefix name with **
+		param.Name = "**" + name
+	}
+	return param
 }
 
-// v2ParseClassDecl: class Name ... end
+// v2ParseClassDecl: class Name[(Parent)] ... end
 func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_CLASS)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+
+	// Optional parent class: class Dog(Animal)
+	var parents []string
+	if p.check(lexer.TOKEN_LPAREN) {
+		p.advance()
+		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
 
 	var fields []*FieldDecl
 	var methods []*MethodDecl
@@ -448,7 +483,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_END)
-	return &ClassDecl{Line: line, Name: name, Fields: fields, Methods: methods}
+	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods}
 }
 
 // v2ParseMethodDecl: fn name(params)[: ReturnType] ... end

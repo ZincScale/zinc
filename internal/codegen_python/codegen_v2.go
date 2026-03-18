@@ -146,7 +146,11 @@ func (g *Generator) emitV2FnDecl(d *parser.FnDecl) {
 }
 
 func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
-	g.writeln(fmt.Sprintf("class %s:", d.Name))
+	if len(d.Parents) > 0 {
+		g.writeln(fmt.Sprintf("class %s(%s):", d.Name, strings.Join(d.Parents, ", ")))
+	} else {
+		g.writeln(fmt.Sprintf("class %s:", d.Name))
+	}
 	g.push()
 
 	// Track fields for auto-self injection
@@ -719,7 +723,14 @@ func (g *Generator) v2FormatType(t parser.TypeExpr) string {
 func (g *Generator) v2FormatParams(params []*parser.ParamDecl) string {
 	var parts []string
 	for _, p := range params {
-		s := p.Name
+		var s string
+		if strings.HasPrefix(p.Name, "**") {
+			s = p.Name // **kwargs
+		} else if p.Variadic {
+			s = "*" + p.Name // *args
+		} else {
+			s = p.Name
+		}
 		if p.Type != nil {
 			s += ": " + g.v2FormatType(p.Type)
 		}

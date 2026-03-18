@@ -630,6 +630,61 @@ end
 	}
 }
 
+func TestV2ClassInheritance(t *testing.T) {
+	prog, errs := parseV2(`
+class Dog(Animal)
+    var breed: str
+
+    fn speak(): str
+        return "Woof"
+    end
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	cls := prog.Decls[0].(*ClassDecl)
+	if len(cls.Parents) != 1 || cls.Parents[0] != "Animal" {
+		t.Errorf("expected parent 'Animal', got %v", cls.Parents)
+	}
+}
+
+func TestV2ArgsKwargs(t *testing.T) {
+	prog, errs := parseV2(`
+fn flexible(*args, **kwargs)
+    print(args)
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if len(fn.Params) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(fn.Params))
+	}
+	if !fn.Params[0].Variadic || fn.Params[0].Name != "args" {
+		t.Errorf("expected *args, got %v", fn.Params[0])
+	}
+	if fn.Params[1].Name != "**kwargs" {
+		t.Errorf("expected **kwargs, got %q", fn.Params[1].Name)
+	}
+}
+
+func TestV2DefaultArgs(t *testing.T) {
+	prog, errs := parseV2(`
+fn greet(name: str, greeting: str = "Hello"): str
+    return "{greeting}, {name}!"
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if fn.Params[1].Default == nil {
+		t.Error("expected default value for 'greeting'")
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

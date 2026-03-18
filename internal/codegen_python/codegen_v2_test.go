@@ -385,6 +385,41 @@ end
 	)
 }
 
+func TestV2ClassInheritance(t *testing.T) {
+	assertV2Contains(t, `
+class Dog(Animal)
+    var breed: str
+
+    fn speak(): str
+        return "Woof"
+    end
+end
+`,
+		"class Dog(Animal):",
+		"def speak(self) -> str:",
+	)
+}
+
+func TestV2ArgsKwargs(t *testing.T) {
+	assertV2Contains(t, `
+fn flexible(*args, **kwargs)
+    print(args)
+end
+`,
+		"def flexible(*args, **kwargs):",
+	)
+}
+
+func TestV2DefaultArgs(t *testing.T) {
+	assertV2Contains(t, `
+fn greet(name: str, greeting: str = "Hello"): str
+    return "{greeting}, {name}!"
+end
+`,
+		`def greet(name: str, greeting: str = "Hello") -> str:`,
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
