@@ -75,9 +75,6 @@ zinc run hello.zn
 
 # Or transpile to Python
 zinc transpile hello.zn    # → hello.py
-
-# Optimize for Polars (large data pipelines)
-zinc run pipeline.zn --optimize polars
 ```
 
 No project setup, no config, no boilerplate. Single files just run.
@@ -150,7 +147,7 @@ See [`examples/v2/`](examples/v2/) for working examples:
 - [`enums.zn`](examples/v2/enums.zn) — enums and match expressions
 - [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err, try/catch
 - [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
-- [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with --optimize polars
+- [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with smart dispatch
 - [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, `is` type checks, none
 - [`variadic.zn`](examples/v2/variadic.zn) — *args and **kwargs
 

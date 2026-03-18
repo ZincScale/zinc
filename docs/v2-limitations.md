@@ -20,7 +20,7 @@ Everything below is implemented, tested, and working end-to-end:
 - List/dict comprehensions (auto list vs generator promotion)
 - Collection methods: `.filter()`, `.map()`, `.sum()`, `.sort_by()`, `.take()`, etc.
 - Smart dispatch: single method → comprehension, chains → `_zinc_collect()` runtime
-- `--optimize polars` → Polars lazy frame pipelines at transpile time
+- Smart data shape dispatch: list[dict]→Polars, list[numeric]→NumPy (auto)
 - Type checker: type mismatches, undefined variables, return types, arg types, break outside loop
 - Source maps: Python errors show .zn file and line numbers
 - `yield` / generator functions, nested functions
@@ -30,7 +30,7 @@ Everything below is implemented, tested, and working end-to-end:
 - Shebang: `#!/usr/bin/env zinc run`
 - `**` power operator, `match`, `break`/`continue`
 - `data` is a contextual keyword — fully usable as variable name
-- CLI: `zinc run`, `zinc transpile`, `--optimize`, temp file cleanup
+- CLI: `zinc run`, `zinc transpile`, `zinc fmt`, `zinc repl`, temp file cleanup
 
 ## Parser — Not Yet Implemented
 
@@ -50,7 +50,6 @@ Everything below is implemented, tested, and working end-to-end:
 - [x] ~~No super() auto-gen~~ — classes with parents generate super().__init__(**kwargs)
 - [x] ~~Nested quotes in string interpolation~~ — `"{data["key"]}"` works
 - [ ] `match` emits Python 3.10+ syntax — no fallback for older Python
-- [ ] No NumPy-specific `--optimize numpy` codegen (Polars works)
 - [x] ~~No source map / line number tracking~~ — errors show .zn file and line numbers
 - [ ] Fast serialization builtins (json_load, csv_load) — use imports directly
 - [ ] `.parallel_map()` — not implemented (use threads/multiprocessing directly)

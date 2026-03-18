@@ -174,7 +174,6 @@ chmod +x script.zn
 ```bash
 zinc run script.zn                    # transpile + run
 zinc run script.zn -- arg1            # pass args to script
-zinc run script.zn --optimize polars  # use Polars for collection chains
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
 zinc fmt script.zn                    # format source code

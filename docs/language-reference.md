@@ -365,11 +365,9 @@ var total = orders
     .sum()
 ```
 
-With `--optimize polars`, chains become Polars lazy frames:
 
 ```zinc
 // Same code, different backend:
-// zinc run script.zn --optimize polars
 // → pl.DataFrame(orders).lazy().filter(...).select(...).sum().collect().item()
 ```
 
@@ -470,7 +468,6 @@ chmod +x script.zn
 ```bash
 zinc run script.zn                    # transpile + run
 zinc run script.zn -- arg1 arg2       # pass args to script
-zinc run script.zn --optimize polars  # Polars for collection chains
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
 zinc fmt script.zn                    # format source code

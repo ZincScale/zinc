@@ -656,62 +656,6 @@ func TestV2SingleMethodNoDispatch(t *testing.T) {
 	}
 }
 
-func TestV2PolarsDispatch(t *testing.T) {
-	// --optimize polars → generates Polars lazy frame pipeline
-	lex := lexer.New(`var revenue = orders.filter(o -> o["status"] == "active").map(o -> o["amount"]).sum()`)
-	tokens := lex.Tokenize()
-	p := parser.New(tokens)
-	prog := p.ParseV2()
-	gen := New()
-	gen.OptimizeBackend = "polars"
-	result := gen.GenerateV2(prog)
-	if !strings.Contains(result, "pl.DataFrame(orders)") {
-		t.Errorf("expected pl.DataFrame, got:\n%s", result)
-	}
-	if !strings.Contains(result, "pl.col(") {
-		t.Errorf("expected pl.col(), got:\n%s", result)
-	}
-	if !strings.Contains(result, ".lazy()") {
-		t.Errorf("expected .lazy(), got:\n%s", result)
-	}
-	if !strings.Contains(result, ".collect()") {
-		t.Errorf("expected .collect(), got:\n%s", result)
-	}
-}
-
-func TestV2PolarsFilterSort(t *testing.T) {
-	lex := lexer.New(`var top = orders.filter(o -> o["amount"] > 100).sort_by(o -> o["amount"], reverse=true).take(5)`)
-	tokens := lex.Tokenize()
-	p := parser.New(tokens)
-	prog := p.ParseV2()
-	gen := New()
-	gen.OptimizeBackend = "polars"
-	result := gen.GenerateV2(prog)
-	if !strings.Contains(result, ".filter(") {
-		t.Errorf("expected .filter, got:\n%s", result)
-	}
-	if !strings.Contains(result, ".sort(") {
-		t.Errorf("expected .sort, got:\n%s", result)
-	}
-	if !strings.Contains(result, ".head(5)") {
-		t.Errorf("expected .head(5), got:\n%s", result)
-	}
-	if !strings.Contains(result, "to_dicts()") {
-		t.Errorf("expected to_dicts(), got:\n%s", result)
-	}
-}
-
-func TestV2DefaultNoPolars(t *testing.T) {
-	// Without --optimize, chains use _zinc_collect
-	result := transpileV2(`var x = items.filter(o -> o > 0).map(o -> o * 2).sum()`)
-	if strings.Contains(result, "pl.DataFrame") {
-		t.Errorf("default should NOT use Polars, got:\n%s", result)
-	}
-	if !strings.Contains(result, "_zinc_collect") {
-		t.Errorf("default should use _zinc_collect, got:\n%s", result)
-	}
-}
-
 func TestV2TupleLiteral(t *testing.T) {
 	assertV2Contains(t, `var point = (3, 5)`, `point = (3, 5)`)
 }

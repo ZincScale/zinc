@@ -31,7 +31,7 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 | You write | Zinc handles |
 |---|---|
 | `fn str(): str` | Generates `def __str__(self)` |
-| `items.filter(x -> x > 0)` | Comprehension (default) or Polars lazy frame (`--optimize polars`) |
+| `items.filter(x -> x > 0)` | Auto-dispatches: comprehension, Polars, or NumPy based on data shape |
 | Field access: `name` | Injects `self.name` |
 | `data User ... end` | Full `@dataclass` with `__init__`, `__repr__`, `__eq__` |
 | `var x = 5` | Infers type, enforces it at transpile time |

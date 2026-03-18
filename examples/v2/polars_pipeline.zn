@@ -1,8 +1,9 @@
-// polars_pipeline.zn — Data pipeline using --optimize polars
-// Run with: zinc run polars_pipeline.zn --optimize polars
+// polars_pipeline.zn — Data pipeline with smart collection dispatch
 //
-// Same code works without --optimize (uses pure Python comprehensions)
-// but runs faster with Polars on large datasets.
+// Collection chains auto-detect the best backend:
+// - list[dict] + Polars installed → Polars-backed dispatch
+// - list[int/float] + NumPy installed → NumPy-backed dispatch
+// - No deps → pure Python comprehensions (always works)
 
 fn create_sales_data(): list[dict] {
     return [
@@ -20,8 +21,7 @@ fn create_sales_data(): list[dict] {
 var sales = create_sales_data()
 print("Total records: {len(sales)}")
 
-// Chained operations → Polars lazy frames with --optimize polars
-// → pure Python _zinc_collect() without it
+// Chained operations → auto-dispatched to best backend
 var revenue = sales.filter(s -> s["status"] == "completed").map(s -> s["amount"]).sum()
 print("Completed revenue: ${revenue}")
 
