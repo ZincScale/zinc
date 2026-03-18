@@ -323,31 +323,33 @@ Zinc separates **expected failures** (validation, parsing, missing data) from **
 ```zinc
 fn parse_age(input: str) -> Result[int]
     if not input.isdigit()
-        return Err("age must be a number, got: {input}")
+        return Err("must be a number")
     end
     var age = int(input)
     if age < 0 or age > 150
-        return Err("age out of range: {age}")
+        return Err("out of range: {age}")
     end
-    return Ok(age)
+    return age  // just return it — transpiler wraps in Ok
 end
 
-// Pattern match on results
-match parse_age(user_input)
-    case Ok(age) -> print("Age: {age}")
-    case Err(msg) -> print("Invalid: {msg}")
-end
+// Handle error inline — no ceremony on the happy path
+var age = parse_age(input) Err {
+    print("bad age: {err}")
+    return
+}
+print("Age: {age}")  // age is an int, just keep going
 
-// ? operator to propagate — like Rust but simpler
-fn process_form(data: dict) -> Result[User]
-    var name = validate_name(data["name"])?
-    var age = parse_age(data["age"])?
-    var email = validate_email(data["email"])?
-    return Ok(User(name, age, email))
-end
+// Provide a default
+var age = parse_age(input) Err { 0 }
 
-// Default value
-var age = parse_age(input).unwrap_or(0)
+// Skip bad records in a batch
+for i, record in enumerate(records)
+    var age = parse_age(record["age"]) Err {
+        errors.append("record {i}: {err}")
+        continue
+    }
+    users.append(User(record["name"], age))
+end
 ```
 
 **Track 2 — Exceptions for unexpected failures:**
