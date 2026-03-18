@@ -19,6 +19,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"zinc/internal/lexer"
+	"zinc/internal/parser"
 )
 
 // runPack packages a .zn file or project directory for deployment.
@@ -78,6 +81,42 @@ func runPack(target string, format string) {
 		pyFiles = []string{pyFile}
 		entryPoint = pyFile
 		projectDir = "."
+	}
+
+	// Auto-generate requirements.txt from imports (if not already present)
+	if _, err := os.Stat("requirements.txt"); os.IsNotExist(err) {
+		var allDeps []string
+		// Parse each .zn file to extract third-party deps
+		var znFilesToScan []string
+		if info.IsDir() {
+			znFilesToScan, _ = filepath.Glob(filepath.Join(target, "*.zn"))
+		} else {
+			znFilesToScan = []string{target}
+		}
+		for _, zn := range znFilesToScan {
+			src, _ := os.ReadFile(zn)
+			lex := lexer.New(string(src))
+			tokens := lex.Tokenize()
+			p := parser.New(tokens)
+			prog := p.ParseV2()
+			allDeps = append(allDeps, extractDeps(prog)...)
+		}
+		// Deduplicate
+		seen := make(map[string]bool)
+		var uniqueDeps []string
+		for _, d := range allDeps {
+			if !seen[d] {
+				seen[d] = true
+				uniqueDeps = append(uniqueDeps, d)
+			}
+		}
+		if len(uniqueDeps) > 0 {
+			reqs := generateRequirements(uniqueDeps)
+			os.WriteFile("requirements.txt", []byte(reqs), 0644)
+			fmt.Printf("generated requirements.txt: %s\n", strings.Join(uniqueDeps, ", "))
+		}
+	} else {
+		fmt.Println("using existing requirements.txt")
 	}
 
 	pythonBin := findPython()
