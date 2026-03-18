@@ -504,8 +504,9 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 			g.writeln(fmt.Sprintf("assert %s", g.emitV2Expr(s.Cond)))
 		}
 	case *parser.FnDecl:
-		// Nested function definition
 		g.emitV2FnDecl(s)
+	case *parser.ParallelForStmt:
+		g.emitV2ParallelFor(s)
 	case *parser.WithStmt:
 		var resources []string
 		for _, r := range s.Resources {
@@ -738,6 +739,8 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 		return g.emitV2Comprehension(e)
 	case *parser.DictComprehensionExpr:
 		return g.emitV2DictComprehension(e)
+	case *parser.SpawnExpr:
+		return g.emitV2Spawn(e)
 	case *parser.SpreadExpr:
 		return fmt.Sprintf("*%s", g.emitV2Expr(e.Expr))
 	default:
@@ -769,6 +772,43 @@ func (g *Generator) emitV2BinaryExpr(e *parser.BinaryExpr) string {
 		op = "or"
 	}
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
+}
+
+// emitV2ParallelFor generates a parallel for loop using ThreadPoolExecutor.
+// parallel for item in items { body } → ThreadPoolExecutor.map(fn, items)
+func (g *Generator) emitV2ParallelFor(s *parser.ParallelForStmt) {
+	g.neededImports["concurrent.futures"] = true
+	collection := g.emitV2Expr(s.Range)
+
+	// Generate a worker function from the body
+	workerName := fmt.Sprintf("_worker_%s", s.Item)
+	g.writeln(fmt.Sprintf("def %s(%s):", workerName, s.Item))
+	g.push()
+	g.emitV2Block(s.Body)
+	g.pop()
+
+	// Execute in parallel
+	g.writeln("with concurrent.futures.ThreadPoolExecutor() as _pool:")
+	g.push()
+	if s.IndexVar != "" {
+		g.writeln(fmt.Sprintf("list(_pool.map(%s, enumerate(%s)))", workerName, collection))
+	} else {
+		g.writeln(fmt.Sprintf("list(_pool.map(%s, %s))", workerName, collection))
+	}
+	g.pop()
+}
+
+// emitV2Spawn generates a spawn expression using ThreadPoolExecutor.submit().
+// spawn { body } → executor.submit(lambda: body)
+func (g *Generator) emitV2Spawn(e *parser.SpawnExpr) string {
+	g.neededImports["concurrent.futures"] = true
+	// Generate an inline function for the spawn body
+	fnName := fmt.Sprintf("_spawn_%d", e.Line)
+	g.writeln(fmt.Sprintf("def %s():", fnName))
+	g.push()
+	g.emitV2Block(e.Body)
+	g.pop()
+	return fmt.Sprintf("concurrent.futures.ThreadPoolExecutor().submit(%s)", fnName)
 }
 
 // isTypeName checks if an expression is a known type name (builtin or declared class).

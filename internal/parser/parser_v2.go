@@ -175,8 +175,11 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseTryStmt()
 	case lexer.TOKEN_RAISE:
 		return p.v2ParseRaiseStmt()
+	case lexer.TOKEN_SPAWN:
+		return p.v2ParseSpawnStmt()
+	case lexer.TOKEN_PARALLEL:
+		return p.v2ParseParallelForStmt()
 	case lexer.TOKEN_FN:
-		// Nested function definition — parsed as FnDecl, emitted inline
 		return p.v2ParseFnDeclAsStmt()
 	case lexer.TOKEN_IDENT:
 		if tok.Literal == "assert" {
@@ -385,21 +388,27 @@ func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 	return &MatchStmt{Line: line, Subject: subject, Cases: cases}
 }
 
-// v2ParseWithStmt: with var name = expr ... end
+// v2ParseWithStmt: with name = expr { } OR with expr { }
 func (p *Parser) v2ParseWithStmt() *WithStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_WITH)
 
 	var resources []*WithResource
-	// Parse: var name = expr [, var name = expr ...]
 	for {
 		if p.check(lexer.TOKEN_VAR) {
 			p.advance()
 		}
-		name := p.expect(lexer.TOKEN_IDENT).Literal
-		p.expect(lexer.TOKEN_ASSIGN)
-		val := p.v2ParseExpr()
-		resources = append(resources, &WithResource{Name: name, Value: val})
+		// Check if it's "name = expr" or just "expr"
+		if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_ASSIGN {
+			name := p.v2ExpectIdent()
+			p.advance() // consume =
+			val := p.v2ParseExpr()
+			resources = append(resources, &WithResource{Name: name, Value: val})
+		} else {
+			// Just an expression: with lock { }, with open("f") { }
+			val := p.v2ParseExpr()
+			resources = append(resources, &WithResource{Name: "_ctx", Value: val})
+		}
 		if !p.check(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -467,6 +476,34 @@ func (p *Parser) v2ParseYieldStmt() *YieldStmt {
 		return &YieldStmt{Line: line}
 	}
 	return &YieldStmt{Line: line, Value: p.v2ParseExpr()}
+}
+
+// v2ParseSpawnStmt: spawn { body } or var x = spawn { expr }
+func (p *Parser) v2ParseSpawnStmt() Stmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_SPAWN)
+	body := p.v2ParseBlock()
+	return &ExprStmt{Line: line, Expr: &SpawnExpr{Line: line, Body: body}}
+}
+
+// v2ParseParallelForStmt: parallel for item in expr { body }
+func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_PARALLEL)
+	p.expect(lexer.TOKEN_FOR)
+
+	var item, indexVar string
+	if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_COMMA {
+		indexVar = p.advance().Literal
+		p.advance() // comma
+		item = p.v2ExpectIdent()
+	} else {
+		item = p.v2ExpectIdent()
+	}
+	p.expect(lexer.TOKEN_IN)
+	rangeExpr := p.v2ParseExpr()
+	body := p.v2ParseBlock()
+	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body}
 }
 
 // v2ParseFnDeclAsStmt parses a nested function definition as a statement.
@@ -1098,6 +1135,11 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_NULL, lexer.TOKEN_NONE:
 		p.advance()
 		return &NullLit{}
+	case lexer.TOKEN_SPAWN:
+		line := tok.Line
+		p.advance()
+		body := p.v2ParseBlock()
+		return &SpawnExpr{Line: line, Body: body}
 	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:
 		// print and data are regular identifiers in expression context
 		// Check for lambda: name -> expr

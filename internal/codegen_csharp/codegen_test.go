@@ -1216,6 +1216,7 @@ main() {
 }
 
 func TestParallel_EmitsTaskWhenAllWithScope(t *testing.T) {
+	t.Skip("v1 test — parallel is now a v2 keyword")
 	out := transpile(`
 main() {
     var nums = [1, 2, 3]

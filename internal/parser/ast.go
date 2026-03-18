@@ -432,6 +432,18 @@ type RaiseStmt struct {
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
 
+// ParallelForStmt: parallel for item in items { body }
+type ParallelForStmt struct {
+	Line     int
+	Item     string
+	IndexVar string
+	Range    Expr
+	Body     *BlockStmt
+}
+
+func (p *ParallelForStmt) nodeTag() {}
+func (p *ParallelForStmt) stmtTag() {}
+
 // YieldStmt: yield expr  OR  yield (bare)
 type YieldStmt struct {
 	Line  int

@@ -1,0 +1,42 @@
+// threading.zn — Parallel processing with free-threaded Python
+import time
+import threading
+
+// Process items in parallel — each runs on a real thread (no GIL)
+fn heavy_compute(n: int): int {
+    time.sleep(0.05)  // simulate work
+    return n * n
+}
+
+var items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Sequential
+var start = time.time()
+for item in items {
+    heavy_compute(item)
+}
+var seq_time = time.time() - start
+
+// Parallel
+start = time.time()
+parallel for item in items {
+    heavy_compute(item)
+}
+var par_time = time.time() - start
+
+print("Sequential: {seq_time:.3f}s")
+print("Parallel:   {par_time:.3f}s")
+print("Speedup:    {seq_time / par_time:.1f}x")
+
+// Spawn — background tasks
+var future1 = spawn {
+    time.sleep(0.1)
+    return "task A done"
+}
+var future2 = spawn {
+    time.sleep(0.1)
+    return "task B done"
+}
+// Both run concurrently
+print(future1.result())
+print(future2.result())

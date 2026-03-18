@@ -72,7 +72,8 @@ const (
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
-	TOKEN_NONE  // none (Python-style null)
+	TOKEN_NONE     // none (Python-style null)
+	TOKEN_PARALLEL // parallel (parallel for)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -174,6 +175,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_AND:       "and",
 	TOKEN_FROM:      "from",
 	TOKEN_NONE:      "none",
+	TOKEN_PARALLEL:  "parallel",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -283,6 +285,7 @@ var keywords = map[string]TokenType{
 	"and":       TOKEN_AND,
 	"from":      TOKEN_FROM,
 	"none":      TOKEN_NONE,
+	"parallel":  TOKEN_PARALLEL,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.
