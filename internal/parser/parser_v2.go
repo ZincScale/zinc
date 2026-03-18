@@ -56,7 +56,15 @@ func (p *Parser) ParseV2() *Program {
 		case lexer.TOKEN_CLASS:
 			prog.Decls = append(prog.Decls, p.v2ParseClassDecl())
 		case lexer.TOKEN_DATA:
-			prog.Decls = append(prog.Decls, p.v2ParseDataClassDecl())
+			// Disambiguate: data Name { ... } (declaration) vs data = ... (variable)
+			if p.peekAt(1).Type == lexer.TOKEN_IDENT {
+				prog.Decls = append(prog.Decls, p.v2ParseDataClassDecl())
+			} else {
+				s := p.v2ParseStmt()
+				if s != nil {
+					topStmts = append(topStmts, s)
+				}
+			}
 		case lexer.TOKEN_ENUM:
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
@@ -79,7 +87,23 @@ func (p *Parser) ParseV2() *Program {
 	return prog
 }
 
-// --- Body parsing (end-block) ------------------------------------------------
+// v2IsIdent returns true if the current token can act as an identifier
+// (includes contextual keywords like data, match, print).
+func (p *Parser) v2IsIdent() bool {
+	t := p.peek().Type
+	return t == lexer.TOKEN_IDENT || t == lexer.TOKEN_DATA ||
+		t == lexer.TOKEN_MATCH || t == lexer.TOKEN_PRINT
+}
+
+// v2ExpectIdent expects an identifier, allowing contextual keywords (data, match, etc.)
+func (p *Parser) v2ExpectIdent() string {
+	if p.v2IsIdent() {
+		return p.advance().Literal
+	}
+	return p.expect(lexer.TOKEN_IDENT).Literal
+}
+
+// --- Body parsing ------------------------------------------------
 
 // v2ParseBlock parses a brace-delimited block: { stmts }
 func (p *Parser) v2ParseBlock() *BlockStmt {
@@ -164,10 +188,20 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "yield" {
 			return p.v2ParseYieldStmt()
 		}
-	case lexer.TOKEN_DATA, lexer.TOKEN_CLASS, lexer.TOKEN_ENUM:
-		// Allow data/class/enum inside function bodies (local types)
-		// For now, skip — treat as top-level only
-		p.errorf("data/class/enum declarations must be at top level")
+	case lexer.TOKEN_DATA:
+		// data as variable name (data = ..., data["key"], data.field)
+		// vs data class declaration (data Name { ... })
+		next := p.peekAt(1)
+		if next.Type == lexer.TOKEN_IDENT {
+			// data Name { ... } — data class declaration (shouldn't be in function body)
+			p.errorf("data class declarations must be at top level")
+			p.advance()
+			return nil
+		}
+		// data used as variable: data = x, data["key"], etc.
+		return p.v2ParseExprOrAssignStmt()
+	case lexer.TOKEN_CLASS, lexer.TOKEN_ENUM:
+		p.errorf("class/enum declarations must be at top level")
 		p.advance()
 		return nil
 	}
@@ -181,13 +215,7 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 	line := p.peek().Line
 	p.advance() // consume var
 
-	// Allow some keywords as variable names (data, type, etc.)
-	var name string
-	if p.check(lexer.TOKEN_IDENT) || p.check(lexer.TOKEN_DATA) || p.check(lexer.TOKEN_MATCH) {
-		name = p.advance().Literal
-	} else {
-		name = p.expect(lexer.TOKEN_IDENT).Literal
-	}
+	name := p.v2ExpectIdent()
 
 	// Tuple unpacking: var a, b = expr
 	if p.check(lexer.TOKEN_COMMA) {
@@ -287,7 +315,7 @@ func (p *Parser) v2ParseForStmt() Stmt {
 	p.expect(lexer.TOKEN_FOR)
 
 	// for item in expr
-	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_IN {
+	if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_IN {
 		item := p.advance().Literal
 		p.advance() // consume "in"
 		rangeExpr := p.v2ParseExpr()
@@ -296,9 +324,9 @@ func (p *Parser) v2ParseForStmt() Stmt {
 	}
 
 	// for i, item in expr
-	if p.check(lexer.TOKEN_IDENT) &&
+	if p.v2IsIdent() &&
 		p.peekAt(1).Type == lexer.TOKEN_COMMA &&
-		p.peekAt(2).Type == lexer.TOKEN_IDENT &&
+		(p.peekAt(2).Type == lexer.TOKEN_IDENT || p.peekAt(2).Type == lexer.TOKEN_DATA) &&
 		p.peekAt(3).Type == lexer.TOKEN_IN {
 		indexVar := p.advance().Literal
 		p.advance() // comma
@@ -543,7 +571,7 @@ func (p *Parser) v2ParseParam() *ParamDecl {
 		variadic = true
 	}
 
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	name := p.v2ExpectIdent()
 
 	// Type annotation is optional for *args/**kwargs
 	var typ TypeExpr
