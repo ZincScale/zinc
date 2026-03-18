@@ -141,10 +141,18 @@ fn fibonacci(limit: int) {
 See [`examples/v2/`](examples/v2/) for working examples:
 
 - [`hello.zn`](examples/v2/hello.zn) — hello world with functions
+- [`classes.zn`](examples/v2/classes.zn) — classes, inheritance, data classes, enums
+- [`closures.zn`](examples/v2/closures.zn) — lambdas, closures, higher-order functions
+- [`collections.zn`](examples/v2/collections.zn) — lists, dicts, comprehensions, method chains
+- [`constants.zn`](examples/v2/constants.zn) — const declarations
 - [`data_processing.zn`](examples/v2/data_processing.zn) — comprehensions, filtering
-- [`classes.zn`](examples/v2/classes.zn) — classes, inheritance, data classes
-- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err/end, try/catch
+- [`defaults_and_named_args.zn`](examples/v2/defaults_and_named_args.zn) — default params, named args
+- [`enums.zn`](examples/v2/enums.zn) — enums and match expressions
+- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err, try/catch
 - [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
+- [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with --optimize polars
+- [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, isinstance, none
+- [`variadic.zn`](examples/v2/variadic.zn) — *args and **kwargs
 
 ---
 

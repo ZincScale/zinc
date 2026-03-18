@@ -1,0 +1,38 @@
+// enums.zn — Enums and match expressions
+
+enum Direction {
+    North
+    South
+    East
+    West
+}
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+fn describe_direction(d: Direction): str {
+    match d {
+        case Direction.North -> return "heading north"
+        case Direction.South -> return "heading south"
+        case Direction.East -> return "heading east"
+        case Direction.West -> return "heading west"
+    }
+    return "unknown"
+}
+
+fn move(x: int, y: int, d: Direction) {
+    match d {
+        case Direction.North -> y = y + 1
+        case Direction.South -> y = y - 1
+        case Direction.East -> x = x + 1
+        case Direction.West -> x = x - 1
+    }
+    print("moved {d}: now at ({x}, {y})")
+}
+
+print(describe_direction(Direction.North))
+move(0, 0, Direction.East)
+move(1, 0, Direction.North)

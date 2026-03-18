@@ -1,0 +1,23 @@
+// defaults_and_named_args.zn — Default parameter values and named arguments
+
+fn greet(name: str, greeting: str = "Hello", punctuation: str = "!") {
+    print("{greeting}, {name}{punctuation}")
+}
+
+// Positional args
+greet("Alice")
+greet("Bob", "Hi")
+greet("Charlie", "Hey", ".")
+
+// Named args — order doesn't matter
+greet("Dave", punctuation="?")
+greet("Eve", greeting="Howdy", punctuation="!!")
+
+// Mixed with defaults
+fn connect(host: str, port: int = 5432, ssl: bool = true, timeout: int = 30) {
+    print("Connecting to {host}:{port} ssl={ssl} timeout={timeout}")
+}
+
+connect("db.example.com")
+connect("db.example.com", port=3306, ssl=false)
+connect("localhost", timeout=5)

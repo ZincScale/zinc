@@ -1,0 +1,43 @@
+// type_checking.zn — Type annotations, is/isinstance, none checks
+
+// Type annotations
+var name: str = "Alice"
+var age: int = 30
+var scores: list[int] = [95, 87, 92]
+var config: dict = {"debug": true}
+
+// Type checking with isinstance
+fn describe(x) {
+    if isinstance(x, str) {
+        print("string: {x}")
+    } else if isinstance(x, int) {
+        print("integer: {x}")
+    } else if isinstance(x, list) {
+        print("list with {len(x)} items")
+    } else {
+        print("something else: {x}")
+    }
+}
+
+describe("hello")
+describe(42)
+describe([1, 2, 3])
+describe(3.14)
+
+// None checks
+var value = none
+if value is none {
+    print("value is none")
+}
+
+value = "found"
+if value is not none {
+    print("value: {value}")
+}
+
+// not in
+var allowed = ["admin", "editor", "viewer"]
+var role = "guest"
+if role not in allowed {
+    print("{role} is not allowed")
+}
