@@ -398,11 +398,13 @@ No change to existing format:
 
 ### Problem
 
-Enterprise teams need structured logging. `print()` is for debugging. Production code needs log levels, context, and structured output.
+Enterprise teams need structured logging. `print()` is for debugging. Production code needs log levels, context, and structured output that routes to CloudWatch, OpenSearch, files, etc.
+
+Java teams are used to SLF4J + Logback with `logback.xml` controlling everything. Zinc needs the same power with zero C# logging concepts exposed.
 
 ### Design
 
-#### Builtins
+#### Zinc Code — Simple
 
 ```zinc
 main() {
@@ -422,51 +424,172 @@ log.error("payment failed", orderId: "abc-123", amount: 99.99)
 
 #### Log Levels
 
-| Zinc | C# Emit | When |
-|------|---------|------|
-| `log.debug(msg)` | `Console.Error.WriteLine($"DEBUG: {msg}")` | Development |
-| `log.info(msg)` | `Console.Error.WriteLine($"INFO: {msg}")` | Normal operation |
-| `log.warn(msg)` | `Console.Error.WriteLine($"WARN: {msg}")` | Potential issues |
-| `log.error(msg)` | `Console.Error.WriteLine($"ERROR: {msg}")` | Failures |
+| Zinc | Serilog Emit | When |
+|------|-------------|------|
+| `log.debug(msg)` | `Log.Debug(msg)` | Development |
+| `log.info(msg)` | `Log.Information(msg)` | Normal operation |
+| `log.warn(msg)` | `Log.Warning(msg)` | Potential issues |
+| `log.error(msg)` | `Log.Error(msg)` | Failures |
 
-Phase 1 emits to stderr with level prefix. This keeps it simple, works in Lambda (CloudWatch captures stderr), and doesn't require any NuGet dependency.
+#### Configuration via `zinc.toml`
 
-#### Structured Output (Phase 1)
+This is the Logback equivalent. Developer configures logging in `zinc.toml`, Zinc generates the Serilog setup. No `appsettings.json`, no `ILogger`, no DI plumbing.
 
-Plain text with key-value pairs appended:
+**Default (zero config):**
+
+If no `[logging]` section exists, Zinc emits console logging at `info` level. Just works.
 
 ```
-INFO: user login [userId=42, region=us-east-1]
-ERROR: payment failed [orderId=abc-123, amount=99.99]
+2026-03-18 10:30:00 [INF] server started on port 8080
+2026-03-18 10:30:01 [WRN] connection pool low: 2 remaining
 ```
 
-#### JSON Output (Phase 2 — later)
+**Basic config:**
 
-When structured logging demand emerges:
-
-```json
-{"level":"info","msg":"user login","userId":42,"region":"us-east-1","timestamp":"2026-03-18T10:30:00Z"}
+```toml
+[logging]
+level = "debug"
+format = "json"
 ```
+
+**Full config — per-class levels, multiple outputs:**
+
+```toml
+[logging]
+level = "info"
+format = "text"
+
+[logging.levels]
+UserService = "debug"
+DataLayer = "error"
+HttpClient = "warn"
+
+[logging.console]
+enabled = true
+format = "text"
+
+[logging.file]
+enabled = true
+path = "logs/app.log"
+rolling = "daily"
+retain = 30
+
+[logging.opensearch]
+enabled = true
+url = "https://search-myapp.us-east-1.es.amazonaws.com"
+index = "app-logs-{0:yyyy.MM.dd}"
+```
+
+Compare to Logback (Java):
+
+```xml
+<!-- This is what your team writes today -->
+<configuration>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss} [%level] %logger - %msg%n</pattern></encoder>
+  </appender>
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>logs/app.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>logs/app.%d{yyyy-MM-dd}.log</fileNamePattern>
+      <maxHistory>30</maxHistory>
+    </rollingPolicy>
+    <encoder><pattern>%d{yyyy-MM-dd HH:mm:ss} [%level] %logger - %msg%n</pattern></encoder>
+  </appender>
+  <logger name="com.myapp.service.UserService" level="DEBUG"/>
+  <logger name="com.myapp.data" level="ERROR"/>
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="FILE"/>
+  </root>
+</configuration>
+```
+
+12 lines of TOML vs 18 lines of XML. Same power.
+
+#### C# Mapping
+
+Zinc generates the Serilog setup code in the program entry point. The developer never sees it.
+
+`zinc.toml`:
+```toml
+[logging]
+level = "info"
+
+[logging.file]
+enabled = true
+path = "logs/app.log"
+rolling = "daily"
+```
+
+Generated C#:
+```csharp
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File("logs/app.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+```
+
+Zinc code:
+```zinc
+log.info("user login", userId: 42, region: "us-east-1")
+```
+
+Generated C#:
+```csharp
+Log.Information("user login {@UserId} {@Region}", 42, "us-east-1");
+```
+
+Note: Serilog uses `@` prefix for structured property destructuring — Zinc handles this automatically from the named args.
+
+#### Serilog Sinks Mapped to zinc.toml
+
+| zinc.toml section | Serilog Sink (NuGet) | Use case |
+|---|---|---|
+| `[logging.console]` | Built-in | Always available |
+| `[logging.file]` | `Serilog.Sinks.File` | Local log files |
+| `[logging.opensearch]` | `Serilog.Sinks.OpenSearch` | OpenSearch/Elasticsearch |
+| `[logging.cloudwatch]` | `Serilog.Sinks.AwsCloudWatch` | AWS CloudWatch Logs |
+| `[logging.seq]` | `Serilog.Sinks.Seq` | Centralized log server |
+
+When a sink is enabled in `zinc.toml`, `zinc build` automatically adds the required NuGet package to the generated `.csproj`. The developer never runs `zinc add Serilog.Sinks.File` — it's inferred from config.
+
+#### Auto-Dependency Management
+
+If `zinc.toml` has a `[logging]` section (or if any `log.*` call exists in code):
+- `Serilog` is auto-added as a dependency
+- `Serilog.Sinks.Console` is auto-added
+- Additional sinks added based on `[logging.*]` sections
+
+The developer's `[dependencies]` section stays clean — logging deps are managed by the compiler.
 
 ### Implementation
 
 | Step | File | Change |
 |------|------|--------|
 | 1 | `internal/parser/parser.go` | Parse `log.info(...)`, `log.warn(...)` etc. as builtin calls — `log` is a reserved namespace, not a variable |
-| 2 | `internal/codegen_csharp/codegen.go` | Emit `Console.Error.WriteLine(...)` with level prefix |
-| 3 | Named args in log calls | Parse `key: value` pairs after the message string |
-| 4 | `docs/builtins.md` | Document logging functions |
-| 5 | Unit + E2E tests | All log levels, structured fields |
+| 2 | `internal/codegen_csharp/codegen.go` | Emit Serilog calls: `Log.Information(...)`, `Log.Warning(...)`, etc. |
+| 3 | `internal/codegen_csharp/codegen.go` | Emit structured fields: named args → Serilog message template properties |
+| 4 | `internal/config/config.go` | Parse `[logging]`, `[logging.levels]`, `[logging.console]`, `[logging.file]`, etc. |
+| 5 | `internal/codegen_csharp/codegen.go` | Generate Serilog `LoggerConfiguration` setup from config |
+| 6 | `internal/project/build_csharp.go` | Auto-add Serilog NuGet packages to `.csproj` based on config |
+| 7 | `docs/builtins.md` | Document logging functions |
+| 8 | Unit + E2E tests | All log levels, structured fields, config-driven setup |
 
 ### Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| `log.info()` not `logInfo()` | Dot notation | Reads naturally, groups log functions visually, familiar from every logging framework |
-| stderr not stdout | `Console.Error` | Separates log output from program output. Lambda/CloudWatch captures stderr. |
-| No external dependency | Built-in | Logging is too fundamental to require `zinc add Serilog`. |
-| Phase 1 plain text | Simple | JSON logging can come later. Plain text works for development and CloudWatch. |
-| Named args for fields | `log.info("msg", key: value)` | Consistent with Zinc's named arg syntax. No new concepts. |
+| Serilog underneath | Industry standard | Battle-tested, structured logging, 100+ sinks, AOT compatible |
+| `log.info()` not `logInfo()` | Dot notation | Reads naturally, familiar from every logging framework (SLF4J, Logback, Python, etc.) |
+| Config in `zinc.toml` | Single config file | No `appsettings.json`, no Serilog API to learn. One file for everything. |
+| Auto-add Serilog deps | Inferred from config/usage | Developer never manually adds logging packages. Convention over configuration. |
+| Named args for fields | `log.info("msg", key: value)` | Consistent with Zinc's named arg syntax. Maps to Serilog message templates. |
+| Default console at info | Zero config works | `log.info("hello")` works without any `[logging]` section. |
+| Per-class log levels | `[logging.levels]` | Matches Logback's `<logger name="..." level="..."/>` — enterprise teams expect this. |
 
 ---
 
@@ -476,11 +599,11 @@ When structured logging demand emerges:
 |-------|---------|--------|-------------|
 | 1 | `use` keyword | Small | None — lexer/parser change |
 | 2 | Destructuring | Small | None — parser/codegen, half done |
-| 3 | Logging | Small | None — builtin emission |
+| 3 | `zinc add` | Medium | NuGet API, config file write-back |
 | 4 | `zinc test` | Medium | Assert builtins, test harness generation |
-| 5 | `zinc add` | Medium | NuGet API, config file write-back |
+| 5 | Logging | Medium | Config parsing, Serilog codegen, auto-dependency injection |
 
-Features 1-3 are independent and could be done in parallel. Feature 4 depends on 1-3 being stable (tests will use all of them). Feature 5 is independent.
+Features 1-2 are quick wins. Feature 3 (`zinc add`) before logging because logging's auto-dependency management builds on the same NuGet infrastructure. Feature 4 (`zinc test`) is independent. Feature 5 (logging) is the most complex — config parsing, Serilog setup generation, sink auto-detection.
 
 ---
 
