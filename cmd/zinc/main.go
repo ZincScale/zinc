@@ -132,15 +132,23 @@ func main() {
 			return
 		case a == "run":
 			target := "."
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				target = args[i+1]
-				i++
+			optimize := ""
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "--optimize" && j+1 < len(args) {
+					optimize = args[j+1]
+					j++
+				} else if !strings.HasPrefix(args[j], "-") && target == "." {
+					target = args[j]
+				}
+			}
+			if target != "." {
+				i++ // skip target in main loop
 			}
 			// If target is a .zn file, use v2 pipeline (transpile → run with python)
 			if strings.HasSuffix(target, ".zn") {
 				// Transpile to temp file, run, clean up
 				tmpFile := filepath.Join(os.TempDir(), "zinc_run_"+filepath.Base(strings.TrimSuffix(target, ".zn"))+".py")
-				pyFile, err := transpileV2File(target, tmpFile, false)
+				pyFile, err := transpileV2File(target, tmpFile, false, optimize)
 				if err != nil {
 					errs.Error(err.Error())
 					os.Exit(1)
@@ -190,9 +198,13 @@ func main() {
 			target := ""
 			localOut := ""
 			localVerbose := false
+			localOptimize := ""
 			for j := i + 1; j < len(args); j++ {
 				if args[j] == "-o" && j+1 < len(args) {
 					localOut = args[j+1]
+					j++
+				} else if args[j] == "--optimize" && j+1 < len(args) {
+					localOptimize = args[j+1]
 					j++
 				} else if args[j] == "--verbose" || args[j] == "-v" {
 					localVerbose = true
@@ -204,7 +216,7 @@ func main() {
 				errs.Error("usage: zinc transpile <file.zn>")
 				os.Exit(1)
 			}
-			pyFile, err := transpileV2File(target, localOut, localVerbose)
+			pyFile, err := transpileV2File(target, localOut, localVerbose, localOptimize)
 			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
@@ -377,7 +389,12 @@ func main() {
 }
 
 // transpileV2File transpiles a .zn file to .py using the v2 pipeline.
-func transpileV2File(inFile, outFile string, verbose bool) (string, error) {
+func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (string, error) {
+	// Parse optimize option from opts
+	optimize := ""
+	for _, o := range opts {
+		optimize = o
+	}
 	src, err := os.ReadFile(inFile)
 	if err != nil {
 		return "", fmt.Errorf("reading %s: %w", inFile, err)
@@ -421,6 +438,7 @@ func transpileV2File(inFile, outFile string, verbose bool) (string, error) {
 
 	// Code generation (Python)
 	gen := codegen_python.New()
+	gen.OptimizeBackend = optimize
 	pySrc := gen.GenerateV2(prog)
 
 	// Determine output path

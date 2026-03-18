@@ -36,6 +36,8 @@ type Generator struct {
 	needsResultRuntime      bool // true if any function uses Result[T]
 	inResultFn              bool // true when emitting body of a Result-returning function
 	needsCollectionsRuntime bool // true if smart collection dispatch is used
+	// v2: optimize backend — "", "polars", "numpy"
+	OptimizeBackend string
 }
 
 // New creates a Python Generator.
