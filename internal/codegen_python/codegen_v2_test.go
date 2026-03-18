@@ -262,6 +262,34 @@ func TestV2AndOrNot(t *testing.T) {
 	)
 }
 
+func TestV2Comprehension(t *testing.T) {
+	assertV2Contains(t,
+		`var squares = [x * x for x in range(10)]`,
+		`squares = [(x * x) for x in range(10)]`,
+	)
+}
+
+func TestV2ComprehensionWithFilter(t *testing.T) {
+	assertV2Contains(t,
+		`var evens = [x for x in numbers if x % 2 == 0]`,
+		`evens = [x for x in numbers if ((x % 2) == 0)]`,
+	)
+}
+
+func TestV2GeneratorExpr(t *testing.T) {
+	assertV2Contains(t,
+		`var total = sum(x for x in items)`,
+		`total = sum(x for x in items)`,
+	)
+}
+
+func TestV2SingleQuoteString(t *testing.T) {
+	assertV2Contains(t,
+		`var x = 'hello'`,
+		`x = "hello"`,
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json

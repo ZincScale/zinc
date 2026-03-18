@@ -459,3 +459,70 @@ end
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 }
+
+func TestV2Comprehension(t *testing.T) {
+	prog, errs := parseV2(`var squares = [x * x for x in range(10)]`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	comp, ok := varStmt.Value.(*ComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected ComprehensionExpr, got %T", varStmt.Value)
+	}
+	if comp.Var != "x" {
+		t.Errorf("expected var 'x', got %q", comp.Var)
+	}
+	if comp.Cond != nil {
+		t.Error("expected no condition")
+	}
+}
+
+func TestV2ComprehensionWithFilter(t *testing.T) {
+	prog, errs := parseV2(`var evens = [x for x in numbers if x % 2 == 0]`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	comp := varStmt.Value.(*ComprehensionExpr)
+	if comp.Cond == nil {
+		t.Error("expected filter condition")
+	}
+}
+
+func TestV2GeneratorExpr(t *testing.T) {
+	prog, errs := parseV2(`var total = sum(x * x for x in range(10))`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	call, ok := varStmt.Value.(*CallExpr)
+	if !ok {
+		t.Fatalf("expected CallExpr, got %T", varStmt.Value)
+	}
+	if len(call.Args) != 1 {
+		t.Fatalf("expected 1 arg, got %d", len(call.Args))
+	}
+	comp, ok := call.Args[0].(*ComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected ComprehensionExpr arg, got %T", call.Args[0])
+	}
+	if comp.Var != "x" {
+		t.Errorf("expected var 'x', got %q", comp.Var)
+	}
+}
+
+func TestV2SingleQuoteString(t *testing.T) {
+	prog, errs := parseV2(`var x = 'hello'`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	str, ok := varStmt.Value.(*StringLit)
+	if !ok {
+		t.Fatalf("expected StringLit, got %T", varStmt.Value)
+	}
+	if str.Value != "hello" {
+		t.Errorf("expected 'hello', got %q", str.Value)
+	}
+}

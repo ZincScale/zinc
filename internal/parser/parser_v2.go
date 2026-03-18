@@ -783,7 +783,7 @@ func (p *Parser) v2ParseCallArgs(callee Expr) Expr {
 	return &CallExpr{Callee: callee, Args: args, NamedArgs: namedArgs}
 }
 
-// v2ParseCallArg: expr or name=expr
+// v2ParseCallArg: expr or name=expr or generator expr (expr for var in iterable)
 func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 	// Check for named arg: ident = expr
 	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_ASSIGN {
@@ -793,8 +793,23 @@ func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 		*namedArgs = append(*namedArgs, NamedArg{Name: name, Value: val})
 		return
 	}
-	// Check for lambda: ident -> expr or (params) -> expr
 	arg := p.v2ParseExpr()
+
+	// Check for generator expression: expr for var in iterable [if cond]
+	if p.check(lexer.TOKEN_FOR) {
+		p.advance()
+		varName := p.expect(lexer.TOKEN_IDENT).Literal
+		p.expect(lexer.TOKEN_IN)
+		iter := p.v2ParseExpr()
+		var cond Expr
+		if p.check(lexer.TOKEN_IF) {
+			p.advance()
+			cond = p.v2ParseExpr()
+		}
+		*args = append(*args, &ComprehensionExpr{Expr: arg, Var: varName, Iter: iter, Cond: cond})
+		return
+	}
+
 	*args = append(*args, arg)
 }
 
@@ -903,19 +918,40 @@ func (p *Parser) v2ParseMultiParamLambda() Expr {
 	return &LambdaExpr{Params: params, Expr: expr}
 }
 
-// v2ParseListLit: [elem, elem, ...]
+// v2ParseListLit: [elem, elem, ...]  OR  [expr for var in iterable [if cond]]
 func (p *Parser) v2ParseListLit() Expr {
 	p.advance() // consume [
-	var elems []Expr
-	if !p.check(lexer.TOKEN_RBRACKET) {
-		elems = append(elems, p.v2ParseExpr())
-		for p.check(lexer.TOKEN_COMMA) {
+	if p.check(lexer.TOKEN_RBRACKET) {
+		p.advance()
+		return &ListLit{}
+	}
+
+	// Parse first expression
+	first := p.v2ParseExpr()
+
+	// Check for comprehension: [expr for var in iterable [if cond]]
+	if p.check(lexer.TOKEN_FOR) {
+		p.advance() // consume for
+		varName := p.expect(lexer.TOKEN_IDENT).Literal
+		p.expect(lexer.TOKEN_IN)
+		iter := p.v2ParseExpr()
+		var cond Expr
+		if p.check(lexer.TOKEN_IF) {
 			p.advance()
-			if p.check(lexer.TOKEN_RBRACKET) {
-				break
-			}
-			elems = append(elems, p.v2ParseExpr())
+			cond = p.v2ParseExpr()
 		}
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ComprehensionExpr{Expr: first, Var: varName, Iter: iter, Cond: cond}
+	}
+
+	// Regular list literal
+	elems := []Expr{first}
+	for p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		if p.check(lexer.TOKEN_RBRACKET) {
+			break
+		}
+		elems = append(elems, p.v2ParseExpr())
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
 	return &ListLit{Elements: elems}

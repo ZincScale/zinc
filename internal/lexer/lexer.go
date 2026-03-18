@@ -106,9 +106,9 @@ func (l *Lexer) NextToken() Token {
 		return l.makeToken(TOKEN_EOF, "", line, col)
 	}
 
-	// String literal
-	if ch == '"' {
-		return l.readString(line, col)
+	// String literal (double or single quotes)
+	if ch == '"' || ch == '\'' {
+		return l.readStringWithQuote(ch, line, col)
 	}
 
 	// Raw string literal
@@ -254,7 +254,12 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) readString(line, col int) Token {
-	l.advance() // consume opening "
+	return l.readStringWithQuote('"', line, col)
+}
+
+// readStringWithQuote reads a string delimited by the given quote character (" or ').
+func (l *Lexer) readStringWithQuote(quote rune, line, col int) Token {
+	l.advance() // consume opening quote
 	var sb strings.Builder
 	hasInterp := false
 	for {
@@ -263,7 +268,7 @@ func (l *Lexer) readString(line, col int) Token {
 			l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unterminated string", line, col))
 			break
 		}
-		if ch == '"' {
+		if ch == quote {
 			l.advance()
 			break
 		}
@@ -288,6 +293,8 @@ func (l *Lexer) readString(line, col int) Token {
 				sb.WriteRune('\t')
 			case '"':
 				sb.WriteRune('"')
+			case '\'':
+				sb.WriteRune('\'')
 			case '\\':
 				sb.WriteRune('\\')
 			case 'r':

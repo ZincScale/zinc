@@ -693,6 +693,17 @@ type RangeExpr struct {
 func (*RangeExpr) nodeTag() {}
 func (*RangeExpr) exprTag() {}
 
+// ComprehensionExpr: [expr for var in iterable [if cond]]
+type ComprehensionExpr struct {
+	Expr     Expr   // the output expression
+	Var      string // loop variable name
+	Iter     Expr   // iterable expression
+	Cond     Expr   // optional filter condition (nil if no if-clause)
+}
+
+func (*ComprehensionExpr) nodeTag() {}
+func (*ComprehensionExpr) exprTag() {}
+
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {
 	Params     []*ParamDecl

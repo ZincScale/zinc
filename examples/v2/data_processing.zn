@@ -1,11 +1,4 @@
-// data_processing.zn — Zinc v2 data processing example
-
-data Order
-    id: str
-    customer: str
-    amount: float
-    status: str
-end
+// data_processing.zn — Zinc v2 data processing with comprehensions
 
 fn create_orders(): list[dict]
     return [
@@ -20,15 +13,14 @@ end
 var orders = create_orders()
 print("Total orders: {len(orders)}")
 
-// Filter and process
-var total = 0.0
-var completed_count = 0
-for order in orders
-    var status = order["status"]
-    if status == "completed"
-        total = total + order["amount"]
-        completed_count = completed_count + 1
-    end
-end
-print("Completed: {completed_count}")
-print("Revenue: {total}")
+// Comprehension: filter completed orders
+var completed = [o for o in orders if o["status"] == "completed"]
+print("Completed: {len(completed)}")
+
+// Generator expression: sum amounts
+var revenue = sum(o["amount"] for o in completed)
+print("Revenue: ${revenue}")
+
+// Comprehension: extract customer names
+var customers = [o["customer"] for o in completed]
+print("Customers: {customers}")

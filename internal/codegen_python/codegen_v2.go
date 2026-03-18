@@ -472,6 +472,8 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 		return g.emitV2InterpString(e)
 	case *parser.IfExpr:
 		return g.emitV2IfExpr(e)
+	case *parser.ComprehensionExpr:
+		return g.emitV2Comprehension(e)
 	case *parser.SpreadExpr:
 		return fmt.Sprintf("*%s", g.emitV2Expr(e.Expr))
 	default:
@@ -504,7 +506,12 @@ func (g *Generator) emitV2CallExpr(e *parser.CallExpr) string {
 
 	var parts []string
 	for _, a := range e.Args {
-		parts = append(parts, g.emitV2Expr(a))
+		// Generator expressions inside calls don't get brackets
+		if comp, ok := a.(*parser.ComprehensionExpr); ok {
+			parts = append(parts, g.emitV2ComprehensionInner(comp, false))
+		} else {
+			parts = append(parts, g.emitV2Expr(a))
+		}
 	}
 	for _, na := range e.NamedArgs {
 		parts = append(parts, fmt.Sprintf("%s=%s", na.Name, g.emitV2Expr(na.Value)))
@@ -627,6 +634,23 @@ func (g *Generator) emitV2InterpString(e *parser.StringInterpLit) string {
 		}
 	}
 	return fmt.Sprintf(`f"%s"`, strings.Join(parts, ""))
+}
+
+func (g *Generator) emitV2Comprehension(e *parser.ComprehensionExpr) string {
+	return g.emitV2ComprehensionInner(e, true)
+}
+
+func (g *Generator) emitV2ComprehensionInner(e *parser.ComprehensionExpr, withBrackets bool) string {
+	expr := g.emitV2Expr(e.Expr)
+	iter := g.emitV2Expr(e.Iter)
+	body := fmt.Sprintf("%s for %s in %s", expr, e.Var, iter)
+	if e.Cond != nil {
+		body += " if " + g.emitV2Expr(e.Cond)
+	}
+	if withBrackets {
+		return "[" + body + "]"
+	}
+	return body
 }
 
 func (g *Generator) emitV2IfExpr(e *parser.IfExpr) string {
