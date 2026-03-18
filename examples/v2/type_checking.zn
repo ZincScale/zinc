@@ -1,4 +1,4 @@
-// type_checking.zn — Type annotations, is/isinstance, none checks
+// type_checking.zn — Type annotations, is checks, none
 
 // Type annotations
 var name: str = "Alice"
@@ -6,13 +6,13 @@ var age: int = 30
 var scores: list[int] = [95, 87, 92]
 var config: dict = {"debug": true}
 
-// Type checking with isinstance
-fn describe(x) {
-    if isinstance(x, str) {
+// Type checking with is — transpiler generates isinstance()
+fn describe(x: any) {
+    if x is str {
         print("string: {x}")
-    } else if isinstance(x, int) {
+    } else if x is int {
         print("integer: {x}")
-    } else if isinstance(x, list) {
+    } else if x is list {
         print("list with {len(x)} items")
     } else {
         print("something else: {x}")

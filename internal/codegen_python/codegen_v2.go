@@ -749,14 +749,41 @@ func (g *Generator) emitV2BinaryExpr(e *parser.BinaryExpr) string {
 	left := g.emitV2Expr(e.Left)
 	right := g.emitV2Expr(e.Right)
 	op := e.Op
+
+	// "x is Type" → isinstance(x, Type) when right side is a known type
+	if op == "is" {
+		if g.isTypeName(e.Right) {
+			return fmt.Sprintf("isinstance(%s, %s)", left, right)
+		}
+	}
+	if op == "is not" {
+		if g.isTypeName(e.Right) {
+			return fmt.Sprintf("not isinstance(%s, %s)", left, right)
+		}
+	}
+
 	switch op {
 	case "&&":
 		op = "and"
 	case "||":
 		op = "or"
-	// "not in", "is not", "is", "in" pass through directly to Python
 	}
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
+}
+
+// isTypeName checks if an expression is a known type name (builtin or declared class).
+func (g *Generator) isTypeName(e parser.Expr) bool {
+	ident, ok := e.(*parser.Ident)
+	if !ok {
+		return false
+	}
+	// Builtin types
+	switch ident.Name {
+	case "str", "int", "float", "bool", "list", "dict", "tuple", "set", "bytes":
+		return true
+	}
+	// Declared classes/data classes
+	return g.classNames[ident.Name]
 }
 
 // generatorFriendly lists builtins where a generator is better than a list.

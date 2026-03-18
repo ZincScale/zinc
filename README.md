@@ -151,7 +151,7 @@ See [`examples/v2/`](examples/v2/) for working examples:
 - [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err, try/catch
 - [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
 - [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with --optimize polars
-- [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, isinstance, none
+- [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, `is` type checks, none
 - [`variadic.zn`](examples/v2/variadic.zn) — *args and **kwargs
 
 ---

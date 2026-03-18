@@ -69,7 +69,7 @@ Everything below is implemented, tested, and working end-to-end:
 - [ ] No generic type constraints
 - [ ] No Protocol support
 - [x] ~~Doesn't verify all code paths return~~ — catches missing returns in if/else/match
-- [x] ~~No type narrowing~~ — `if x is str` and `isinstance(x, T)` narrow x in then-branch
+- [x] ~~No type narrowing~~ — `if x is str` narrows x in then-branch (generates isinstance)
 
 ## Design Doc Over-Promises (Not Yet Implemented)
 
