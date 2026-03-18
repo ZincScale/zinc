@@ -466,10 +466,15 @@ chmod +x script.zn
 ## CLI
 
 ```bash
-zinc run script.zn                    # transpile + run
+zinc run script.zn                    # transpile + run (free-threaded Python)
 zinc run script.zn -- arg1 arg2       # pass args to script
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
 zinc fmt script.zn                    # format source code
+zinc pack script.zn                   # package with PyInstaller
+zinc pack script.zn --format docker   # generate Dockerfile
+zinc pack script.zn --format k8s      # Dockerfile + K8s manifest
 zinc repl                             # interactive REPL
 ```
+
+All `zinc run` and `zinc pack` use free-threaded Python (GIL disabled) by default. `PYTHON_GIL=0` is set in generated Dockerfiles and K8s manifests.

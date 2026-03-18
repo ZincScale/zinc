@@ -172,11 +172,14 @@ chmod +x script.zn
 ## CLI
 
 ```bash
-zinc run script.zn                    # transpile + run
+zinc run script.zn                    # transpile + run (free-threaded Python)
 zinc run script.zn -- arg1            # pass args to script
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
 zinc fmt script.zn                    # format source code
+zinc pack script.zn                   # package with PyInstaller
+zinc pack script.zn --format docker   # generate Dockerfile (PYTHON_GIL=0)
+zinc pack script.zn --format k8s      # Dockerfile + K8s deployment manifest
 zinc repl                             # interactive REPL
 ```
 

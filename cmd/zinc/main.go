@@ -43,6 +43,7 @@ Usage:
   zinc run <file.zn>           Transpile to Python and run
   zinc transpile <file.zn>     Output .py file
   zinc fmt <file.zn>           Format Zinc source code
+  zinc pack <file.zn>         Package for deployment (pyinstaller, docker, k8s)
   zinc repl                    Interactive Zinc REPL
   zinc <file.zn>               Transpile a single file (outputs .py)
 
@@ -106,6 +107,23 @@ func main() {
 				os.Exit(1)
 			}
 			runFmt(args[i+1])
+			return
+		case a == "pack":
+			target := ""
+			format := ""
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "--format" && j+1 < len(args) {
+					format = args[j+1]
+					j++
+				} else if !strings.HasPrefix(args[j], "-") && target == "" {
+					target = args[j]
+				}
+			}
+			if target == "" {
+				fmt.Fprintln(os.Stderr, "usage: zinc pack <file.zn> [--format pyinstaller|docker|k8s]")
+				os.Exit(1)
+			}
+			runPack(target, format)
 			return
 		case a == "build":
 			dir := "."
