@@ -18,7 +18,7 @@ var completed = [o for o in orders if o["status"] == "completed"]
 print("Completed: {len(completed)}")
 
 // Generator expression: sum amounts
-var revenue = sum(o["amount"] for o in completed)
+var revenue = sum([o["amount"] for o in completed])
 print("Revenue: ${revenue}")
 
 // Comprehension: extract customer names

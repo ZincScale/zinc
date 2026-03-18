@@ -783,7 +783,9 @@ func (p *Parser) v2ParseCallArgs(callee Expr) Expr {
 	return &CallExpr{Callee: callee, Args: args, NamedArgs: namedArgs}
 }
 
-// v2ParseCallArg: expr or name=expr or generator expr (expr for var in iterable)
+// v2ParseCallArg: expr or name=expr
+// Note: comprehensions [expr for var in iter] are parsed as regular expressions
+// and auto-promoted to generators by codegen when inside sum(), any(), etc.
 func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 	// Check for named arg: ident = expr
 	if p.check(lexer.TOKEN_IDENT) && p.peekAt(1).Type == lexer.TOKEN_ASSIGN {
@@ -794,22 +796,6 @@ func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 		return
 	}
 	arg := p.v2ParseExpr()
-
-	// Check for generator expression: expr for var in iterable [if cond]
-	if p.check(lexer.TOKEN_FOR) {
-		p.advance()
-		varName := p.expect(lexer.TOKEN_IDENT).Literal
-		p.expect(lexer.TOKEN_IN)
-		iter := p.v2ParseExpr()
-		var cond Expr
-		if p.check(lexer.TOKEN_IF) {
-			p.advance()
-			cond = p.v2ParseExpr()
-		}
-		*args = append(*args, &ComprehensionExpr{Expr: arg, Var: varName, Iter: iter, Cond: cond})
-		return
-	}
-
 	*args = append(*args, arg)
 }
 

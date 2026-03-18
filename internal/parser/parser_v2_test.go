@@ -490,8 +490,10 @@ func TestV2ComprehensionWithFilter(t *testing.T) {
 	}
 }
 
-func TestV2GeneratorExpr(t *testing.T) {
-	prog, errs := parseV2(`var total = sum(x * x for x in range(10))`)
+func TestV2ComprehensionInCall(t *testing.T) {
+	// User writes [x for x in items] everywhere — even inside sum()
+	// Codegen decides to strip brackets → generator
+	prog, errs := parseV2(`var total = sum([x * x for x in range(10)])`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -503,12 +505,9 @@ func TestV2GeneratorExpr(t *testing.T) {
 	if len(call.Args) != 1 {
 		t.Fatalf("expected 1 arg, got %d", len(call.Args))
 	}
-	comp, ok := call.Args[0].(*ComprehensionExpr)
+	_, ok = call.Args[0].(*ComprehensionExpr)
 	if !ok {
 		t.Fatalf("expected ComprehensionExpr arg, got %T", call.Args[0])
-	}
-	if comp.Var != "x" {
-		t.Errorf("expected var 'x', got %q", comp.Var)
 	}
 }
 

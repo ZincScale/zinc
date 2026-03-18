@@ -494,6 +494,14 @@ func (g *Generator) emitV2BinaryExpr(e *parser.BinaryExpr) string {
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
 }
 
+// generatorFriendly lists builtins where a generator is better than a list.
+// These consume items lazily — no need to build the full list in memory.
+var generatorFriendly = map[string]bool{
+	"sum": true, "any": true, "all": true, "min": true, "max": true,
+	"len": true, "sorted": true, "list": true, "set": true, "tuple": true,
+	"dict": true, "enumerate": true, "zip": true, "next": true,
+}
+
 func (g *Generator) emitV2CallExpr(e *parser.CallExpr) string {
 	callee := g.emitV2Expr(e.Callee)
 
@@ -504,11 +512,13 @@ func (g *Generator) emitV2CallExpr(e *parser.CallExpr) string {
 		}
 	}
 
+	// Decide: comprehensions inside generator-friendly builtins → generator (no brackets)
+	useGenerator := generatorFriendly[callee]
+
 	var parts []string
 	for _, a := range e.Args {
-		// Generator expressions inside calls don't get brackets
 		if comp, ok := a.(*parser.ComprehensionExpr); ok {
-			parts = append(parts, g.emitV2ComprehensionInner(comp, false))
+			parts = append(parts, g.emitV2ComprehensionInner(comp, !useGenerator))
 		} else {
 			parts = append(parts, g.emitV2Expr(a))
 		}

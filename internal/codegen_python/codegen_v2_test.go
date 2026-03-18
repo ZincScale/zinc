@@ -276,10 +276,19 @@ func TestV2ComprehensionWithFilter(t *testing.T) {
 	)
 }
 
-func TestV2GeneratorExpr(t *testing.T) {
+func TestV2ComprehensionAutoGenerator(t *testing.T) {
+	// User writes [x for x in items] — transpiler strips brackets inside sum()
 	assertV2Contains(t,
-		`var total = sum(x for x in items)`,
+		`var total = sum([x for x in items])`,
 		`total = sum(x for x in items)`,
+	)
+}
+
+func TestV2ComprehensionStaysList(t *testing.T) {
+	// Inside non-generator-friendly functions, brackets stay
+	assertV2Contains(t,
+		`var result = process([x for x in items])`,
+		`result = process([x for x in items])`,
 	)
 }
 
