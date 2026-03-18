@@ -299,6 +299,60 @@ func TestV2SingleQuoteString(t *testing.T) {
 	)
 }
 
+func TestV2NotIn(t *testing.T) {
+	assertV2Contains(t,
+		`var x = "a" not in items`,
+		`("a" not in items)`,
+	)
+}
+
+func TestV2IsNot(t *testing.T) {
+	assertV2Contains(t,
+		`var found = value is not none`,
+		`(value is not None)`,
+	)
+}
+
+func TestV2None(t *testing.T) {
+	assertV2Contains(t,
+		`var x = none`,
+		`x = None`,
+	)
+}
+
+func TestV2DictComprehension(t *testing.T) {
+	assertV2Contains(t,
+		`var lengths = {word: len(word) for word in words}`,
+		`{word: len(word) for word in words}`,
+	)
+}
+
+func TestV2TupleUnpacking(t *testing.T) {
+	assertV2Contains(t,
+		`var a, b = get_pair()`,
+		`a, b = get_pair()`,
+	)
+}
+
+func TestV2AutoSelfInjection(t *testing.T) {
+	assertV2Contains(t, `
+class Counter
+    var count: int = 0
+
+    fn increment()
+        count = count + 1
+    end
+
+    fn get_count(): int
+        return count
+    end
+end
+`,
+		"self.count = (self.count + 1)",
+		"return self.count",
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json

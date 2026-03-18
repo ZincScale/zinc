@@ -511,6 +511,68 @@ func TestV2ComprehensionInCall(t *testing.T) {
 	}
 }
 
+func TestV2NotIn(t *testing.T) {
+	prog, errs := parseV2(`var x = "a" not in items`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	bin, ok := varStmt.Value.(*BinaryExpr)
+	if !ok || bin.Op != "not in" {
+		t.Fatalf("expected 'not in' op, got %T %v", varStmt.Value, varStmt.Value)
+	}
+}
+
+func TestV2IsNot(t *testing.T) {
+	prog, errs := parseV2(`var x = value is not none`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	bin, ok := varStmt.Value.(*BinaryExpr)
+	if !ok || bin.Op != "is not" {
+		t.Fatalf("expected 'is not' op, got %T", varStmt.Value)
+	}
+}
+
+func TestV2None(t *testing.T) {
+	prog, errs := parseV2(`var x = none`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	_, ok := varStmt.Value.(*NullLit)
+	if !ok {
+		t.Fatalf("expected NullLit, got %T", varStmt.Value)
+	}
+}
+
+func TestV2DictComprehension(t *testing.T) {
+	prog, errs := parseV2(`var lengths = {word: len(word) for word in words}`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	_, ok := varStmt.Value.(*DictComprehensionExpr)
+	if !ok {
+		t.Fatalf("expected DictComprehensionExpr, got %T", varStmt.Value)
+	}
+}
+
+func TestV2TupleUnpacking(t *testing.T) {
+	prog, errs := parseV2(`var a, b = get_pair()`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	tuple, ok := prog.Stmts[0].(*TupleVarStmt)
+	if !ok {
+		t.Fatalf("expected TupleVarStmt, got %T", prog.Stmts[0])
+	}
+	if len(tuple.Names) != 2 || tuple.Names[0] != "a" || tuple.Names[1] != "b" {
+		t.Errorf("expected [a, b], got %v", tuple.Names)
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

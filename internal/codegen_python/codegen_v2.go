@@ -149,6 +149,12 @@ func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
 	g.writeln(fmt.Sprintf("class %s:", d.Name))
 	g.push()
 
+	// Track fields for auto-self injection
+	g.currentClassFields = make(map[string]bool)
+	for _, f := range d.Fields {
+		g.currentClassFields[f.Name] = true
+	}
+
 	// Auto-generate __init__ from fields
 	if len(d.Fields) > 0 {
 		var initParams []string
@@ -182,6 +188,7 @@ func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
 		g.writeln("pass")
 	}
 
+	g.currentClassFields = nil
 	g.pop()
 }
 
@@ -260,6 +267,8 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 	switch s := s.(type) {
 	case *parser.VarStmt:
 		g.emitV2VarStmt(s)
+	case *parser.TupleVarStmt:
+		g.writeln(fmt.Sprintf("%s = %s", strings.Join(s.Names, ", "), g.emitV2Expr(s.Value)))
 	case *parser.AssignStmt:
 		g.writeln(fmt.Sprintf("%s %s %s", g.emitV2Expr(s.Target), s.Op, g.emitV2Expr(s.Value)))
 	case *parser.ReturnStmt:
@@ -430,6 +439,10 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 	case *parser.NullLit:
 		return "None"
 	case *parser.Ident:
+		// Auto-inject self. for class field access
+		if g.currentClassFields != nil && g.currentClassFields[e.Name] {
+			return "self." + e.Name
+		}
 		return e.Name
 	case *parser.BinaryExpr:
 		return g.emitV2BinaryExpr(e)
@@ -474,6 +487,8 @@ func (g *Generator) emitV2Expr(e parser.Expr) string {
 		return g.emitV2IfExpr(e)
 	case *parser.ComprehensionExpr:
 		return g.emitV2Comprehension(e)
+	case *parser.DictComprehensionExpr:
+		return g.emitV2DictComprehension(e)
 	case *parser.SpreadExpr:
 		return fmt.Sprintf("*%s", g.emitV2Expr(e.Expr))
 	default:
@@ -490,6 +505,7 @@ func (g *Generator) emitV2BinaryExpr(e *parser.BinaryExpr) string {
 		op = "and"
 	case "||":
 		op = "or"
+	// "not in", "is not", "is", "in" pass through directly to Python
 	}
 	return fmt.Sprintf("(%s %s %s)", left, op, right)
 }
@@ -661,6 +677,17 @@ func (g *Generator) emitV2ComprehensionInner(e *parser.ComprehensionExpr, withBr
 		return "[" + body + "]"
 	}
 	return body
+}
+
+func (g *Generator) emitV2DictComprehension(e *parser.DictComprehensionExpr) string {
+	key := g.emitV2Expr(e.Key)
+	val := g.emitV2Expr(e.Val)
+	iter := g.emitV2Expr(e.Iter)
+	body := fmt.Sprintf("%s: %s for %s in %s", key, val, e.Var, iter)
+	if e.Cond != nil {
+		body += " if " + g.emitV2Expr(e.Cond)
+	}
+	return "{" + body + "}"
 }
 
 func (g *Generator) emitV2IfExpr(e *parser.IfExpr) string {

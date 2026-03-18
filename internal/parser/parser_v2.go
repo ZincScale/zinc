@@ -122,11 +122,24 @@ func (p *Parser) v2ParseStmt() Stmt {
 	return p.v2ParseExprOrAssignStmt()
 }
 
-// v2ParseVarStmt: var name = expr  OR  var name: type = expr
+// v2ParseVarStmt: var name = expr  OR  var name: type = expr  OR  var a, b = expr
 func (p *Parser) v2ParseVarStmt() Stmt {
 	line := p.peek().Line
 	p.advance() // consume var
+
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+
+	// Tuple unpacking: var a, b = expr
+	if p.check(lexer.TOKEN_COMMA) {
+		names := []string{name}
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
+		}
+		p.expect(lexer.TOKEN_ASSIGN)
+		val := p.v2ParseExpr()
+		return &TupleVarStmt{Line: line, Names: names, Value: val}
+	}
 
 	var typ TypeExpr
 	if p.check(lexer.TOKEN_COLON) {
@@ -676,11 +689,30 @@ func (p *Parser) v2ParseNot() Expr {
 	return p.v2ParseComparison()
 }
 
-// v2ParseComparison: expr (== != < <= > >= is in) expr
+// v2ParseComparison: expr (== != < <= > >= is in not_in) expr
 func (p *Parser) v2ParseComparison() Expr {
 	left := p.v2ParseAddSub()
-	for p.match(lexer.TOKEN_EQ, lexer.TOKEN_NEQ, lexer.TOKEN_LT, lexer.TOKEN_LTE,
-		lexer.TOKEN_GT, lexer.TOKEN_GTE, lexer.TOKEN_IS, lexer.TOKEN_IN) {
+	for {
+		// Handle "not in" as a compound operator
+		if p.check(lexer.TOKEN_NOT) && p.peekAt(1).Type == lexer.TOKEN_IN {
+			p.advance() // consume not
+			p.advance() // consume in
+			right := p.v2ParseAddSub()
+			left = &BinaryExpr{Left: left, Op: "not in", Right: right}
+			continue
+		}
+		// Handle "is not" as a compound operator
+		if p.check(lexer.TOKEN_IS) && p.peekAt(1).Type == lexer.TOKEN_NOT {
+			p.advance() // consume is
+			p.advance() // consume not
+			right := p.v2ParseAddSub()
+			left = &BinaryExpr{Left: left, Op: "is not", Right: right}
+			continue
+		}
+		if !p.match(lexer.TOKEN_EQ, lexer.TOKEN_NEQ, lexer.TOKEN_LT, lexer.TOKEN_LTE,
+			lexer.TOKEN_GT, lexer.TOKEN_GTE, lexer.TOKEN_IS, lexer.TOKEN_IN) {
+			break
+		}
 		op := p.advance().Literal
 		right := p.v2ParseAddSub()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
@@ -822,7 +854,7 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_BOOL_LIT:
 		p.advance()
 		return &BoolLit{Value: tok.Literal == "true"}
-	case lexer.TOKEN_NULL:
+	case lexer.TOKEN_NULL, lexer.TOKEN_NONE:
 		p.advance()
 		return &NullLit{}
 	case lexer.TOKEN_IDENT:
@@ -943,27 +975,47 @@ func (p *Parser) v2ParseListLit() Expr {
 	return &ListLit{Elements: elems}
 }
 
-// v2ParseDictLit: {key: val, ...}
+// v2ParseDictLit: {key: val, ...}  OR  {keyExpr: valExpr for var in iterable [if cond]}
 func (p *Parser) v2ParseDictLit() Expr {
 	p.advance() // consume {
-	var keys, vals []Expr
-	if !p.check(lexer.TOKEN_RBRACE) {
-		k := p.v2ParseExpr()
+	if p.check(lexer.TOKEN_RBRACE) {
+		p.advance()
+		return &MapLit{}
+	}
+
+	// Parse first key: value
+	k := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	v := p.v2ParseExpr()
+
+	// Check for dict comprehension: {k: v for var in iterable}
+	if p.check(lexer.TOKEN_FOR) {
+		p.advance()
+		varName := p.expect(lexer.TOKEN_IDENT).Literal
+		p.expect(lexer.TOKEN_IN)
+		iter := p.v2ParseExpr()
+		var cond Expr
+		if p.check(lexer.TOKEN_IF) {
+			p.advance()
+			cond = p.v2ParseExpr()
+		}
+		p.expect(lexer.TOKEN_RBRACE)
+		return &DictComprehensionExpr{Key: k, Val: v, Var: varName, Iter: iter, Cond: cond}
+	}
+
+	// Regular dict literal
+	keys := []Expr{k}
+	vals := []Expr{v}
+	for p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		if p.check(lexer.TOKEN_RBRACE) {
+			break
+		}
+		k = p.v2ParseExpr()
 		p.expect(lexer.TOKEN_COLON)
-		v := p.v2ParseExpr()
+		v = p.v2ParseExpr()
 		keys = append(keys, k)
 		vals = append(vals, v)
-		for p.check(lexer.TOKEN_COMMA) {
-			p.advance()
-			if p.check(lexer.TOKEN_RBRACE) {
-				break
-			}
-			k = p.v2ParseExpr()
-			p.expect(lexer.TOKEN_COLON)
-			v = p.v2ParseExpr()
-			keys = append(keys, k)
-			vals = append(vals, v)
-		}
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return &MapLit{Keys: keys, Values: vals}

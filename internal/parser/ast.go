@@ -693,6 +693,18 @@ type RangeExpr struct {
 func (*RangeExpr) nodeTag() {}
 func (*RangeExpr) exprTag() {}
 
+// DictComprehensionExpr: {keyExpr: valExpr for var in iterable [if cond]}
+type DictComprehensionExpr struct {
+	Key  Expr   // key expression
+	Val  Expr   // value expression
+	Var  string // loop variable name
+	Iter Expr   // iterable
+	Cond Expr   // optional filter (nil if no if-clause)
+}
+
+func (*DictComprehensionExpr) nodeTag() {}
+func (*DictComprehensionExpr) exprTag() {}
+
 // ComprehensionExpr: [expr for var in iterable [if cond]]
 type ComprehensionExpr struct {
 	Expr     Expr   // the output expression

@@ -72,6 +72,7 @@ const (
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
+	TOKEN_NONE  // none (Python-style null)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -171,6 +172,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
 	TOKEN_FROM:      "from",
+	TOKEN_NONE:      "none",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -278,6 +280,7 @@ var keywords = map[string]TokenType{
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,
 	"from":      TOKEN_FROM,
+	"none":      TOKEN_NONE,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

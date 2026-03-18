@@ -30,6 +30,8 @@ type Generator struct {
 	indent        int
 	neededImports map[string]bool // e.g. "functools"
 	classNames    map[string]bool
+	// v2: auto-self injection — field names of current class being emitted
+	currentClassFields map[string]bool
 }
 
 // New creates a Python Generator.
