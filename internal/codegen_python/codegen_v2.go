@@ -78,6 +78,10 @@ func (g *Generator) GenerateV2(prog *parser.Program) string {
 
 	// Prepend auto-detected imports and runtime
 	var out strings.Builder
+	if g.needsCollectionsRuntime {
+		out.WriteString(ZincCollectionsRuntime)
+		out.WriteString("\n")
+	}
 	if g.needsResultRuntime {
 		out.WriteString(ZincResultRuntime)
 		out.WriteString("\n")
@@ -690,7 +694,12 @@ var generatorFriendly = map[string]bool{
 func (g *Generator) emitV2CallExpr(e *parser.CallExpr) string {
 	callee := g.emitV2Expr(e.Callee)
 
-	// Handle collection methods: .filter(), .map(), etc.
+	// Chained collection operations (2+) → use _zinc_collect() dispatch
+	if g.isCollectionChain(e) {
+		return g.emitV2ChainedCollection(e)
+	}
+
+	// Single collection method → inline comprehension (fast path)
 	if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
 		if result, handled := g.emitV2CollectionMethod(sel, e); handled {
 			return result
@@ -712,6 +721,74 @@ func (g *Generator) emitV2CallExpr(e *parser.CallExpr) string {
 		parts = append(parts, fmt.Sprintf("%s=%s", na.Name, g.emitV2Expr(na.Value)))
 	}
 	return fmt.Sprintf("%s(%s)", callee, strings.Join(parts, ", "))
+}
+
+// collectionMethods lists methods that are collection operations.
+var collectionMethods = map[string]bool{
+	"filter": true, "map": true, "sum": true, "min": true, "max": true,
+	"sort": true, "sort_by": true, "take": true, "skip": true,
+	"first": true, "any": true, "all": true, "distinct": true,
+	"flat_map": true, "group_by": true, "reduce": true,
+	"to_list": true, "to_dict": true, "append": true,
+}
+
+// isCollectionChain checks if an expression is a chained collection operation (2+ methods).
+func (g *Generator) isCollectionChain(e *parser.CallExpr) bool {
+	sel, ok := e.Callee.(*parser.SelectorExpr)
+	if !ok || !collectionMethods[sel.Field] {
+		return false
+	}
+	// Check if the object is itself a collection method call (chain depth ≥ 2)
+	if innerCall, ok := sel.Object.(*parser.CallExpr); ok {
+		if innerSel, ok := innerCall.Callee.(*parser.SelectorExpr); ok {
+			return collectionMethods[innerSel.Field]
+		}
+	}
+	return false
+}
+
+// emitV2ChainedCollection emits a collection chain using _zinc_collect().
+func (g *Generator) emitV2ChainedCollection(e *parser.CallExpr) string {
+	g.needsCollectionsRuntime = true
+
+	// Walk up the chain to find the root object
+	var chain []struct {
+		method string
+		call   *parser.CallExpr
+	}
+	current := e
+	for {
+		sel, ok := current.Callee.(*parser.SelectorExpr)
+		if !ok || !collectionMethods[sel.Field] {
+			break
+		}
+		chain = append([]struct {
+			method string
+			call   *parser.CallExpr
+		}{{method: sel.Field, call: current}}, chain...)
+
+		if innerCall, ok := sel.Object.(*parser.CallExpr); ok {
+			current = innerCall
+		} else {
+			// Root object — wrap in _zinc_collect()
+			root := g.emitV2Expr(sel.Object)
+			result := fmt.Sprintf("_zinc_collect(%s)", root)
+			for _, link := range chain {
+				var args []string
+				for _, a := range link.call.Args {
+					args = append(args, g.emitV2Expr(a))
+				}
+				for _, na := range link.call.NamedArgs {
+					args = append(args, fmt.Sprintf("%s=%s", na.Name, g.emitV2Expr(na.Value)))
+				}
+				result += fmt.Sprintf(".%s(%s)", link.method, strings.Join(args, ", "))
+			}
+			return result
+		}
+	}
+
+	// Fallback — shouldn't reach here
+	return g.emitV2Expr(e.Callee) + "()"
 }
 
 // emitV2CollectionMethod handles Zinc v2 collection chain methods → Python.

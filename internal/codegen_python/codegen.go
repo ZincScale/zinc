@@ -33,8 +33,9 @@ type Generator struct {
 	// v2: auto-self injection — field names of current class being emitted
 	currentClassFields map[string]bool
 	// v2: Result type tracking
-	needsResultRuntime bool // true if any function uses Result[T]
-	inResultFn         bool // true when emitting body of a Result-returning function
+	needsResultRuntime      bool // true if any function uses Result[T]
+	inResultFn              bool // true when emitting body of a Result-returning function
+	needsCollectionsRuntime bool // true if smart collection dispatch is used
 }
 
 // New creates a Python Generator.

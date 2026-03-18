@@ -626,6 +626,36 @@ end
 	)
 }
 
+func TestV2SmartDispatchChain(t *testing.T) {
+	// Chain of 2+ collection methods → uses _zinc_collect() dispatch
+	result := transpileV2(`
+var result = orders.filter(o -> o.status == "active").map(o -> o.amount).sum()
+`)
+	if !strings.Contains(result, "_zinc_collect(orders)") {
+		t.Errorf("expected _zinc_collect dispatch for chain, got:\n%s", result)
+	}
+	if !strings.Contains(result, ".filter(") {
+		t.Errorf("expected .filter() in chain, got:\n%s", result)
+	}
+	if !strings.Contains(result, ".sum()") {
+		t.Errorf("expected .sum() in chain, got:\n%s", result)
+	}
+	if !strings.Contains(result, "_ZincCollection") {
+		t.Errorf("expected collections runtime to be inlined, got:\n%s", result)
+	}
+}
+
+func TestV2SingleMethodNoDispatch(t *testing.T) {
+	// Single collection method → inline comprehension (no dispatch overhead)
+	result := transpileV2(`var evens = items.filter(x -> x > 0)`)
+	if strings.Contains(result, "_zinc_collect") {
+		t.Errorf("single method should NOT use dispatch, got:\n%s", result)
+	}
+	if !strings.Contains(result, "for x in items if") {
+		t.Errorf("expected inline comprehension, got:\n%s", result)
+	}
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
