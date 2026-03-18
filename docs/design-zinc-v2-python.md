@@ -526,6 +526,67 @@ No `zinc init`, no `zinc build` for v2. Just files that run.
 print("Hello from zinc!")
 ```
 
+### Packaging & Deployment
+
+Sometimes you need to ship a single binary or a self-contained package — not everyone has Python installed, and you don't want to hand someone a `.zn` file and a requirements list.
+
+```bash
+zinc pack script.zn                  # single-file executable (default: PyInstaller)
+zinc pack script.zn --format docker  # Dockerfile with slim Python image
+zinc pack script.zn --format pex     # PEX archive (Python EXecutable)
+```
+
+`zinc pack` transpiles to `.py`, resolves dependencies, and packages:
+
+| Tool | Output | Size | Startup | Best for |
+|---|---|---|---|---|
+| **PyInstaller** | Single binary (--onefile) | 15-50 MB | ~1s | Desktop tools, CLI distribution |
+| **Nuitka** | Compiled binary | 10-30 MB | Fast | Performance-sensitive, smaller binaries |
+| **PyOxidizer** | Rust-wrapped binary | 15-40 MB | Fast | Hermetic builds, no temp extraction |
+| **PEX** | Zip archive (.pex) | Small | Fast | Server deploys where Python exists |
+| **Shiv** | Zip archive (.shiv) | Small | Fast | Similar to PEX, simpler |
+| **Docker** | Container image | Varies | N/A | Microservices, cloud deploys |
+
+**Default:** PyInstaller `--onefile` — most universal, handles most dependencies. Zinc auto-detects imports and adds hidden imports for common gotchas (numpy, pandas, etc.).
+
+**Example — ship a CLI tool:**
+
+```zinc
+// greet.zn
+import sys
+
+var name = sys.argv[1] if len(sys.argv) > 1 else "world"
+print("Hello, {name}!")
+```
+
+```bash
+zinc pack greet.zn
+# produces: dist/greet (Linux/Mac) or dist/greet.exe (Windows)
+./dist/greet Alice
+# Hello, Alice!
+```
+
+**Example — deploy a data processor:**
+
+```zinc
+// process.zn
+import polars as pl
+
+var df = pl.read_csv(sys.argv[1])
+var result = df.filter(pl.col("status") == "active").group_by("region").agg(pl.col("revenue").sum())
+result.write_csv("output.csv")
+print("Processed {len(df)} rows -> {len(result)} regions")
+```
+
+```bash
+zinc pack process.zn --format docker
+# produces: Dockerfile + process.py
+docker build -t processor .
+docker run -v ./data:/data processor /data/input.csv
+```
+
+**Future:** If Nuitka or PyOxidizer mature further for free-threaded Python, they become the preferred default — faster startup and smaller binaries than PyInstaller.
+
 ---
 
 ## Python Version Target
