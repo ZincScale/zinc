@@ -159,14 +159,14 @@ fn parse_age(input: str): Result[int]
     return int(input)            // auto-wrapped in Ok()
 end
 
-// Default value
-var age = parse_age(input) Err { 0 }
+// Default value (single expression, no end needed)
+var age = parse_age(input) Err 0
 
 // Handler block
-var age = parse_age(input) Err {
+var age = parse_age(input) Err
     print("bad: {err}")
     return
-}
+end
 ```
 
 ### Track 2 — Exceptions for unexpected failures

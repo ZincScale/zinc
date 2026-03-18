@@ -117,7 +117,7 @@ fn parse_port(s: str): Result[int]
     return int(s)
 end
 
-var port = parse_port("8080") Err { 80 }
+var port = parse_port("8080") Err 80
 ```
 
 **Unexpected errors** (network down, disk full) use exceptions:

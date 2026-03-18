@@ -507,10 +507,10 @@ end
 
 func TestV2ErrHandlerBlock(t *testing.T) {
 	assertV2Contains(t, `
-var age = parse_age(input) Err {
+var age = parse_age(input) Err
     print("bad age")
     return
-}
+end
 `,
 		"_result = parse_age(input)",
 		"if _result.is_err():",
@@ -520,7 +520,7 @@ var age = parse_age(input) Err {
 }
 
 func TestV2ErrHandlerDefault(t *testing.T) {
-	assertV2Contains(t, `var age = parse_age(input) Err { 0 }`,
+	assertV2Contains(t, `var age = parse_age(input) Err 0`,
 		"_result = parse_age(input)",
 		"_result.value if _result.is_ok() else 0",
 	)
@@ -562,7 +562,7 @@ fn parse_port(s: str): Result[int]
     return port
 end
 
-var port = parse_port("8080") Err { 80 }
+var port = parse_port("8080") Err 80
 print("Using port: {port}")
 
 try

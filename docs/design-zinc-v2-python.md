@@ -333,21 +333,21 @@ fn parse_age(input: str): Result[int]
 end
 
 // Handle error inline — no ceremony on the happy path
-var age = parse_age(input) Err {
+var age = parse_age(input) Err
     print("bad age: {err}")
     return
-}
+end
 print("Age: {age}")  // age is an int, just keep going
 
-// Provide a default
-var age = parse_age(input) Err { 0 }
+// Provide a default (single expression, no end needed)
+var age = parse_age(input) Err 0
 
 // Skip bad records in a batch
 for i, record in enumerate(records)
-    var age = parse_age(record["age"]) Err {
+    var age = parse_age(record["age"]) Err
         errors.append("record {i}: {err}")
         continue
-    }
+    end
     users.append(User(record["name"], age))
 end
 ```

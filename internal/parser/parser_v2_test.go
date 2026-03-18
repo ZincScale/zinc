@@ -791,10 +791,10 @@ end
 
 func TestV2ErrHandlerBlock(t *testing.T) {
 	prog, errs := parseV2(`
-var age = parse_age(input) Err {
+var age = parse_age(input) Err
     print("bad age")
     return
-}
+end
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -809,7 +809,7 @@ var age = parse_age(input) Err {
 }
 
 func TestV2ErrHandlerDefault(t *testing.T) {
-	prog, errs := parseV2(`var age = parse_age(input) Err { 0 }`)
+	prog, errs := parseV2(`var age = parse_age(input) Err 0`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

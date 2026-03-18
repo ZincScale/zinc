@@ -113,7 +113,7 @@ fn parse_port(s: str): Result[int]
     end
     return int(s)
 end
-var port = parse_port("8080") Err { 80 }
+var port = parse_port("8080") Err 80
 
 // Collection methods → comprehensions
 var active = orders.filter(o -> o.status == "active")
@@ -144,7 +144,7 @@ See [`examples/v2/`](examples/v2/) for working examples:
 - [`hello.zn`](examples/v2/hello.zn) — hello world with functions
 - [`data_processing.zn`](examples/v2/data_processing.zn) — comprehensions, filtering
 - [`classes.zn`](examples/v2/classes.zn) — classes, inheritance, data classes
-- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err {}, try/catch
+- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err/end, try/catch
 - [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
 
 ---

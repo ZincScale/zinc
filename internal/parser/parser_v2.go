@@ -203,25 +203,56 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
-// v2ParseErrHandler checks for `Err { ... }` after a failable call.
-// Uses braces (not end) since it's an inline handler on the same statement.
-// Returns nil if no Err block follows.
+// v2ParseErrHandler checks for `Err` after a failable call.
+// Two forms:
+//   var x = call() Err 0              — single-expression default (same line)
+//   var x = call() Err ... end        — multi-statement handler block
+// Returns nil if no Err follows.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
-	// Look for IDENT "Err" followed by LBRACE
 	if !p.check(lexer.TOKEN_IDENT) || p.peek().Literal != "Err" {
 		return nil
 	}
-	if p.peekAt(1).Type != lexer.TOKEN_LBRACE {
-		return nil
-	}
 	p.advance() // consume "Err"
-	p.advance() // consume "{"
 
-	// Parse statements inside braces — use v2ParseBody with RBRACE as terminator
-	body := p.v2ParseBody(lexer.TOKEN_RBRACE)
-	p.expect(lexer.TOKEN_RBRACE)
+	if p.check(lexer.TOKEN_END) {
+		p.advance()
+		return &OrHandler{Body: &BlockStmt{}}
+	}
 
-	return &OrHandler{Body: body}
+	// Simple heuristic: parse one expression. If END follows immediately,
+	// it was a single-statement block. If not, it's a single-expression default.
+	// But first check for obvious block starters (return, continue, break, var, if, etc.)
+	if p.v2IsBlockStarter() {
+		body := p.v2ParseBody(lexer.TOKEN_END)
+		p.expect(lexer.TOKEN_END)
+		return &OrHandler{Body: body}
+	}
+
+	// Parse as expression (could be default value or single-statement call)
+	expr := p.v2ParseExpr()
+	if p.check(lexer.TOKEN_END) {
+		// Single-statement block: Err print("bad") end
+		p.advance()
+		return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
+	}
+	// Single-expression default: Err 0
+	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
+}
+
+// v2IsBlockStarter returns true if the current token starts a statement (not an expression default).
+func (p *Parser) v2IsBlockStarter() bool {
+	tok := p.peek()
+	switch tok.Type {
+	case lexer.TOKEN_VAR, lexer.TOKEN_IF, lexer.TOKEN_FOR, lexer.TOKEN_WHILE,
+		lexer.TOKEN_TRY, lexer.TOKEN_RETURN, lexer.TOKEN_RAISE, lexer.TOKEN_WITH,
+		lexer.TOKEN_MATCH, lexer.TOKEN_BREAK, lexer.TOKEN_CONTINUE, lexer.TOKEN_FN,
+		lexer.TOKEN_PRINT:
+		return true
+	case lexer.TOKEN_IDENT:
+		// "assert", "del", "yield" are statement starters
+		return tok.Literal == "assert" || tok.Literal == "del" || tok.Literal == "yield"
+	}
+	return false
 }
 
 func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
