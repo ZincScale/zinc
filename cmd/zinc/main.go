@@ -39,6 +39,7 @@ Usage:
   zinc <file.zn> [flags]   Transpile a single file
   zinc build [dir]         Transpile + compile (native AOT binary)
   zinc run [dir]           Transpile + run
+  zinc test [dir]          Discover and run test_* functions
   zinc init [name]         Initialize a new Zinc project (creates zinc.toml + main.zn)
   zinc repl                Launch interactive REPL
 
@@ -149,6 +150,33 @@ func main() {
 					errs.Error(err.Error())
 					os.Exit(1)
 				}
+			}
+			return
+		case a == "test":
+			dir := "."
+			verboseTest := false
+			filterFn := ""
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "-v" || args[j] == "--verbose" {
+					verboseTest = true
+				} else if (args[j] == "-f" || args[j] == "--filter") && j+1 < len(args) {
+					filterFn = args[j+1]
+					j++
+				} else if !strings.HasPrefix(args[j], "-") && dir == "." {
+					dir = args[j]
+				}
+			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			if cfg == nil {
+				cfg = config.DefaultConfig("zinc-test")
+			}
+			if err := project.TestCSharp(dir, cfg, verboseTest, filterFn); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
 			}
 			return
 		case a == "-o" || a == "--o":

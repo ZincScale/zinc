@@ -75,6 +75,7 @@ type Generator struct {
 	errCounter     int
 	currentRecordFields map[string]bool       // non-nil inside a record method body
 	usesConcurrency     bool                  // set when spawn/parallel/Lock is used
+	testMode            bool                  // skip main() emission for test harness
 }
 
 // New creates a C# Generator for single-file mode.
@@ -114,6 +115,11 @@ func NewWithRegistry(reg *codegen.TypeRegistry) *Generator {
 // SetSourceFile enables #line directive emission for source mapping.
 func (g *Generator) SetSourceFile(path string) {
 	g.srcFile = path
+}
+
+// SetTestMode skips main() emission — the test harness provides its own entry point.
+func (g *Generator) SetTestMode(enabled bool) {
+	g.testMode = enabled
 }
 
 // SetTypeResolver attaches a CSharpTypeResolver for .NET type introspection.
@@ -220,7 +226,7 @@ func (g *Generator) Generate(prog *parser.Program) string {
 			g.write("\n")
 		}
 		g.neededUsings["static Functions"] = true
-		g.writeln("public static class Functions")
+		g.writeln("public static partial class Functions")
 		g.writeln("{")
 		g.push()
 		for i, fn := range fnDecls {
@@ -418,6 +424,10 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 }
 
 func (g *Generator) emitFnDecl(d *parser.FnDecl) {
+	if d.Name == "main" && g.testMode {
+		// In test mode, skip main() — the test harness provides its own entry point
+		return
+	}
 	if d.Name == "main" {
 		// C# entry point
 		g.writeln("public class Program")
@@ -472,7 +482,7 @@ func (g *Generator) emitFnBody(d *parser.FnDecl) {
 	g.emitAnnotations(d.Annotations)
 	retType := g.emitType(d.ReturnType)
 	vis := "private"
-	if d.IsPub {
+	if d.IsPub || g.testMode {
 		vis = "public"
 	}
 	params := g.formatParams(d.Params)
@@ -1134,6 +1144,11 @@ func (g *Generator) emitCallExpr(e *parser.CallExpr) string {
 	}
 
 	callee := g.emitExpr(e.Callee)
+	// Capitalize standalone function calls (non-builtin, non-class)
+	// to match C# PascalCase convention used in emitFnBody
+	if ident, ok := e.Callee.(*parser.Ident); ok && !g.classNames[ident.Name] {
+		callee = capitalize(callee)
+	}
 	args := g.formatCallArgs(e)
 	return fmt.Sprintf("%s(%s)", callee, args)
 }
@@ -1562,6 +1577,17 @@ func (g *Generator) emitBuiltinCall(name string, args []parser.Expr, typeArgs []
 		return fmt.Sprintf("Math.Max(%s)", argStr), true
 	case "min":
 		return fmt.Sprintf("Math.Min(%s)", argStr), true
+
+	// Test assertions
+	case "assert":
+		if len(args) >= 2 {
+			return fmt.Sprintf("if (!(%s)) throw new Exception(%s)", argStrs[0], argStrs[1]), true
+		}
+		return fmt.Sprintf("if (!(%s)) throw new Exception(\"Assertion failed: %s\")", argStrs[0], strings.ReplaceAll(argStrs[0], "\"", "\\\"")), true
+	case "assertEqual":
+		return fmt.Sprintf("if (!object.Equals(%s, %s)) throw new Exception($\"Expected {%s} but got {%s}\")", argStrs[0], argStrs[1], argStrs[1], argStrs[0]), true
+	case "assertNotEqual":
+		return fmt.Sprintf("if (object.Equals(%s, %s)) throw new Exception($\"Expected not equal to {%s}\")", argStrs[0], argStrs[1], argStrs[1]), true
 
 	// Control
 	case "panic":

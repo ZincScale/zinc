@@ -113,6 +113,17 @@ Zinc provides built-in functions that map to C#'s standard library. No imports n
 
 No `async`/`await`. No function coloring. Write normal code — the runtime handles threads.
 
+## Testing
+
+| Zinc | Behavior |
+|------|----------|
+| `assert(condition)` | Fails test if condition is false |
+| `assert(condition, message)` | Fails with custom message |
+| `assertEqual(actual, expected)` | Fails with "Expected X but got Y" |
+| `assertNotEqual(actual, expected)` | Fails if values are equal |
+
+See [Testing](testing.md) for full documentation.
+
 ```zinc
 // Spawn concurrent work, collect results
 var user = spawn { fetchUser(1) }

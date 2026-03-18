@@ -71,7 +71,7 @@ main() {
     print(x)
 }
 `)
-	assertContains(t, out, "public static class Functions")
+	assertContains(t, out, "public static partial class Functions")
 	assertContains(t, out, "int Add(int a, int b)")
 	assertContains(t, out, "return (a + b);")
 }
@@ -83,11 +83,11 @@ Int multiply(Int a, Int b) { return a * b }
 main() { print(add(1, 2)) }
 `)
 	// All functions should be in ONE Functions class
-	assertContains(t, out, "public static class Functions")
+	assertContains(t, out, "public static partial class Functions")
 	assertContains(t, out, "int Add(int a, int b)")
 	assertContains(t, out, "int Multiply(int a, int b)")
 	// Should NOT have multiple Functions class declarations
-	count := strings.Count(out, "public static class Functions")
+	count := strings.Count(out, "public static partial class Functions")
 	if count != 1 {
 		t.Errorf("expected exactly 1 Functions class, got %d\n--- output ---\n%s", count, out)
 	}
@@ -1107,6 +1107,47 @@ main() {
 }
 `)
 	assertContains(t, out, "public record Point(int X, int Y);")
+}
+
+// === Test Assertions ===
+
+func TestAssert_EmitsThrow(t *testing.T) {
+	out := transpile(`
+main() {
+    assert(1 == 1)
+}
+`)
+	assertContains(t, out, "if (!((1 == 1))) throw new Exception")
+}
+
+func TestAssertEqual_EmitsObjectEquals(t *testing.T) {
+	out := transpile(`
+main() {
+    assertEqual(2 + 2, 4)
+}
+`)
+	assertContains(t, out, "if (!object.Equals(")
+	assertContains(t, out, "Expected")
+}
+
+func TestTestMode_SkipsMain(t *testing.T) {
+	src := `
+main() {
+    print("hello")
+}
+test_something() {
+    assert(true)
+}
+`
+	l := lexer.New(src)
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	prog := p.Parse()
+	g := New()
+	g.SetTestMode(true)
+	out := g.Generate(prog)
+	assertNotContains(t, out, "static void Main(")
+	assertContains(t, out, "Test_something")
 }
 
 // === Concurrency ===

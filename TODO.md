@@ -35,11 +35,8 @@ zinc remove Newtonsoft.Json
 ```
 - **Effort:** Medium
 
-### P4 — `zinc test`
-```bash
-zinc test       # discovers and runs test functions
-```
-- **Effort:** Medium
+### ~~P4 — `zinc test`~~ DONE
+Moved to Completed (v0.12.0)
 
 ---
 
@@ -105,6 +102,13 @@ main() {
 | Supervised blocks | Only if in-process resilience demand emerges (K8s handles restarts) |
 
 ---
+
+## Completed (v0.12.0)
+- `use` keyword: `use System.Text.Json` replaces `import "System.Text.Json"` (no quotes, dotted identifiers)
+- `zinc test`: test discovery (`test_*` convention), assert builtins, test harness generation
+- Assert builtins: `assert`, `assertEqual`, `assertNotEqual`
+- Functions class is now `partial` for multi-file support
+- Function calls properly capitalize to match C# PascalCase conventions
 
 ## Completed (v0.11.0)
 - Concurrency: `spawn { }` → `Future<T>`, `parallel(list) { }` → `List<T>`, `Lock(value)` → thread-safe wrapper

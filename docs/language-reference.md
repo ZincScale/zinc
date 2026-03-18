@@ -15,6 +15,7 @@ Zinc compiles to native binaries via **C# AOT**. Convention over configuration â
 | [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
 | [Imports](imports.md) | .NET imports, NuGet dependencies, type detection |
 | [Built-in Functions](builtins.md) | All global builtins â€” I/O, math, JSON, HTTP, environment, control |
+| [Testing](testing.md) | `zinc test`, assert builtins, test conventions |
 
 ## Quick Syntax Overview
 
