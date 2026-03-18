@@ -169,14 +169,34 @@ func main() {
 					}
 				}
 				runArgs := append([]string{pyFile}, scriptArgs...)
-				cmd := exec.Command("python3", runArgs...)
+
+				// Find the best Python interpreter:
+				// 1. python3t (free-threaded) — preferred
+				// 2. python3 with PYTHON_GIL=0 — fallback
+				// 3. python3 — standard
+				pythonBin := findPython()
+				cmd := exec.Command(pythonBin, runArgs...)
+				if !strings.HasSuffix(pythonBin, "t") {
+					// Not a free-threaded binary — try env var
+					cmd.Env = append(os.Environ(), "PYTHON_GIL=0")
+				}
 				cmd.Stdout = os.Stdout
 				cmd.Stdin = os.Stdin
-				// Capture stderr to rewrite tracebacks
 				var stderrBuf strings.Builder
 				cmd.Stderr = &stderrBuf
-				if err := cmd.Run(); err != nil {
-					// Rewrite traceback: replace .py file/line with .zn file/line
+				runErr := cmd.Run()
+
+				// If GIL=0 isn't supported, retry without
+				if runErr != nil && strings.Contains(stderrBuf.String(), "Disabling the GIL is not supported") {
+					stderrBuf.Reset()
+					cmd = exec.Command(pythonBin, runArgs...)
+					cmd.Stdout = os.Stdout
+					cmd.Stdin = os.Stdin
+					cmd.Stderr = &stderrBuf
+					runErr = cmd.Run()
+				}
+
+				if runErr != nil {
 					stderr := stderrBuf.String()
 					stderr = rewriteTraceback(stderr, pyFile, target, sourceMap)
 					fmt.Fprint(os.Stderr, stderr)
@@ -401,6 +421,24 @@ func main() {
 }
 
 // transpileV2File transpiles a .zn file to .py using the v2 pipeline.
+// findPython finds the best Python interpreter, preferring free-threaded builds.
+func findPython() string {
+	for _, bin := range []string{"python3.14t", "python3.13t", "python3t"} {
+		if path, err := exec.LookPath(bin); err == nil {
+			return path
+		}
+	}
+	for _, path := range []string{
+		os.Getenv("HOME") + "/python3.14t/bin/python3",
+		"/usr/local/bin/python3t",
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return "python3"
+}
+
 func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (string, map[int]int, error) {
 	// Parse optimize option from opts
 	optimize := ""

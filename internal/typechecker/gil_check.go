@@ -22,13 +22,16 @@ import (
 )
 
 // GIL-dependent libraries — known to have issues with free-threaded Python.
+// Zinc runs with PYTHON_GIL=0 by default, so these are real concerns.
 // Status as of Python 3.13+.
 var gilDependentLibs = map[string]string{
-	"numba":       "Numba JIT relies on GIL internals — not yet free-thread safe",
-	"pandas":      "pandas has partial free-threading support — some operations not thread-safe",
-	"tkinter":     "tkinter is not thread-safe — use from main thread only",
-	"sqlite3":     "sqlite3 connections are not thread-safe — use one per thread",
+	"numba":          "Numba JIT relies on GIL internals — not yet free-thread safe",
+	"pandas":         "pandas has partial free-threading support — some operations not thread-safe, consider polars",
+	"tkinter":        "tkinter is not thread-safe — use from main thread only",
+	"sqlite3":        "sqlite3 connections are not thread-safe — use one connection per thread",
 	"multiprocessing": "multiprocessing uses fork — prefer threading with free-threaded Python",
+	"gevent":         "gevent monkey-patching conflicts with free-threaded Python",
+	"eventlet":       "eventlet monkey-patching conflicts with free-threaded Python",
 }
 
 // Libraries with verified free-threading support.
