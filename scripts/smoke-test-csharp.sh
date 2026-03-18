@@ -63,18 +63,8 @@ target = "csharp"
 optimize = false
 EOF
 
-# Examples that require .NET type resolver (NuGet imports, JsonSerializer, etc.)
-SKIP_EXAMPLES="annotations"
-
 for f in "$REPO_ROOT"/examples/csharp-only/*.zn; do
   name=$(basename "$f" .zn)
-
-  # Skip examples that need type resolver
-  if echo "$SKIP_EXAMPLES" | grep -qw "$name"; then
-    echo "  $name ... SKIP (requires type resolver)"
-    continue
-  fi
-
   echo -n "  $name ... "
 
   # Copy the .zn file as main.zn so zinc run finds it

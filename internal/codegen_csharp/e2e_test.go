@@ -219,27 +219,27 @@ main() {
 
 	// --- Import ---
 	{name: "ImportSystemTextJson", src: `
-import "System.Text.Json"
+use System.Text.Json
 main() {
     var s = JsonSerializer.Serialize(42)
     print(s)
 }`, mode: modeExact, expected: []string{"42"}},
 	{name: "ImportJsonShortcut", src: `
-import "json"
+use json
 main() {
     var s = JsonSerializer.Serialize("hello")
     print(s)
 }`, mode: modeExact, expected: []string{`"hello"`}},
 	{name: "ImportSystemDiagnostics", src: `
-import "System.Diagnostics"
+use System.Diagnostics
 main() {
     var sw = Stopwatch.StartNew()
     sw.Stop()
     print("ok")
 }`, mode: modeExact, expected: []string{"ok"}},
 	{name: "ImportMultiple", src: `
-import "System.Text.Json"
-import "System.IO"
+use System.Text.Json
+use System.IO
 main() {
     var j = JsonSerializer.Serialize(99)
     print(j)
@@ -261,7 +261,7 @@ main() {
 
 	// --- Resolver (need type introspection) ---
 	{name: "ResolverStopwatch", resolved: true, src: `
-import "System.Diagnostics"
+use System.Diagnostics
 main() {
     var sw = Stopwatch()
     sw.Start()
@@ -269,13 +269,13 @@ main() {
     print("ok")
 }`, mode: modeExact, expected: []string{"ok"}},
 	{name: "ResolverHttpClient", resolved: true, src: `
-import "http"
+use http
 main() {
     var client = HttpClient()
     print("created")
 }`, mode: modeExact, expected: []string{"created"}},
 	{name: "ResolverStringBuilder", resolved: true, src: `
-import "System.Text"
+use System.Text
 main() {
     var sb = StringBuilder()
     sb.Append("hello")
@@ -302,8 +302,8 @@ main() {
     print(u.greet())
 }`, mode: modeExact, expected: []string{"Hi, Alice"}},
 	{name: "AnnotationJsonPropertyName", resolved: true, src: `
-import "System.Text.Json"
-import "System.Text.Json.Serialization"
+use System.Text.Json
+use System.Text.Json.Serialization
 User {
     @JsonInclude
     @JsonPropertyName("user_name")

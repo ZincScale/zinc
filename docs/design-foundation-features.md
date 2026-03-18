@@ -21,24 +21,24 @@ Five features that complete Zinc's foundation for enterprise development. Each i
 
 ### Problem
 
-`import "System.Text.Json"` uses Go-style string imports. Zinc no longer targets Go. The quotes add noise and suggest file paths, but these are .NET namespaces.
+`import "System.Text.Json"` used Go-style string imports. Zinc no longer targets Go. The quotes added noise and suggested file paths, but these are .NET namespaces.
 
 ### Design
 
 ```zinc
-// Before
+// Before (deprecated)
 import "System.Text.Json"
 import "http"
 import "Newtonsoft.Json" as nj
 
-// After
+// After (current)
 use System.Text.Json
 use http
 use Newtonsoft.Json as nj
 ```
 
 Rules:
-- `use` replaces `import` everywhere
+- `use` replaces `import` for .NET namespace imports
 - No quotes — namespace is parsed as a dotted identifier sequence
 - Short aliases still work: `use http` → `System.Net.Http`
 - `as` alias still works: `use Foo.Bar as fb`

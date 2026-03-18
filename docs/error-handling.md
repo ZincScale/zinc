@@ -64,7 +64,7 @@ var body = httpGet("https://api.example.com/data") or {
 The `with` statement is Zinc's equivalent of Java's try-with-resources, Python's `with`, and C#'s `using`. Any `IDisposable` resource is automatically closed when the block exits:
 
 ```zinc
-import "io"
+use io
 
 main() {
     with (stream = File.OpenRead("data.txt")) {

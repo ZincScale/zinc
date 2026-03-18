@@ -75,10 +75,10 @@ Add NuGet packages in `zinc.toml`:
 
 These are automatically included in the build — no `dotnet add package` or XML editing needed.
 
-Then import and use them in your Zinc code:
+Then use them in your Zinc code:
 
 ```zinc
-import "Newtonsoft.Json"
+use Newtonsoft.Json
 
 main() {
     var json = JsonConvert.SerializeObject(42)
@@ -88,19 +88,19 @@ main() {
 
 Zinc also provides short aliases for common .NET namespaces:
 
-| Zinc Import | C# Namespace |
+| Zinc | C# Namespace |
 |-------------|-------------|
-| `import "http"` | `System.Net.Http` |
-| `import "json"` | `System.Text.Json` |
-| `import "io"` | `System.IO` |
-| `import "regex"` | `System.Text.RegularExpressions` |
-| `import "threading"` | `System.Threading` |
-| `import "tasks"` | `System.Threading.Tasks` |
-| `import "diagnostics"` | `System.Diagnostics` |
-| `import "net"` | `System.Net` |
-| `import "crypto"` | `System.Security.Cryptography` |
-| `import "text"` | `System.Text` |
-| `import "xml"` | `System.Xml` |
+| `use http` | `System.Net.Http` |
+| `use json` | `System.Text.Json` |
+| `use io` | `System.IO` |
+| `use regex` | `System.Text.RegularExpressions` |
+| `use threading` | `System.Threading` |
+| `use tasks` | `System.Threading.Tasks` |
+| `use diagnostics` | `System.Diagnostics` |
+| `use net` | `System.Net` |
+| `use crypto` | `System.Security.Cryptography` |
+| `use text` | `System.Text` |
+| `use xml` | `System.Xml` |
 
 When using `zinc build` or `zinc run`, the compiler runs a .NET type probe that discovers all available types from the BCL and your NuGet dependencies. This means constructor calls like `HttpClient()` and `Stopwatch()` automatically emit `new` — no extra configuration needed.
 
@@ -148,7 +148,7 @@ User {
 }
 ```
 
-**`main.zn`** — import and use:
+**`main.zn`** — import local packages and use them:
 
 ```
 import "myapp/utils"

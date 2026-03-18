@@ -1,8 +1,8 @@
 // Annotations — @Name maps directly to C# [Attribute]
 // Works with any C# attribute: serialization, web, ORM, validation, etc.
 
-import "System.Text.Json"
-import "System.Text.Json.Serialization"
+use System.Text.Json
+use System.Text.Json.Serialization
 
 @Serializable
 User {

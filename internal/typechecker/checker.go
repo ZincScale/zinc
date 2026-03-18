@@ -877,6 +877,12 @@ func (c *Checker) inferIdent(e *parser.Ident) Type {
 	if ct, ok := c.classes[e.Name]; ok {
 		return ct
 	}
+	// Uppercase identifiers not found in scope are assumed to be external .NET types.
+	// The C# compiler will catch any actual errors — the type checker is lenient here
+	// because it doesn't have full visibility into imported .NET namespaces.
+	if len(e.Name) > 0 && e.Name[0] >= 'A' && e.Name[0] <= 'Z' {
+		return TypeUnknown
+	}
 	c.errorf(c.currentLine, 0, "undefined variable %q", e.Name)
 	return TypeUnknown
 }

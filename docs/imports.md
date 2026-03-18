@@ -1,43 +1,43 @@
-# Imports and Dependencies
+# Use — Imports and Dependencies
 
 ## .NET Namespace Imports (C# Backend)
 
 ```zinc
-import "System.Text.Json"           // → using System.Text.Json;
-import "Newtonsoft.Json"             // → using Newtonsoft.Json;
-import "Serilog"                     // → using Serilog;
+use System.Text.Json           // → using System.Text.Json;
+use Newtonsoft.Json             // → using Newtonsoft.Json;
+use Serilog                     // → using Serilog;
 ```
 
 ### Short Aliases
 
 Common .NET namespaces have short aliases:
 
-| Zinc Import | C# Namespace |
+| Zinc | C# Namespace |
 |-------------|-------------|
-| `import "http"` | `System.Net.Http` |
-| `import "json"` | `System.Text.Json` |
-| `import "io"` | `System.IO` |
-| `import "regex"` | `System.Text.RegularExpressions` |
-| `import "threading"` | `System.Threading` |
-| `import "tasks"` | `System.Threading.Tasks` |
-| `import "diagnostics"` | `System.Diagnostics` |
-| `import "net"` | `System.Net` |
-| `import "crypto"` | `System.Security.Cryptography` |
-| `import "text"` | `System.Text` |
-| `import "xml"` | `System.Xml` |
-| `import "data"` | `System.Data` |
-| `import "reflection"` | `System.Reflection` |
-| `import "linq"` | `System.Linq` |
-| `import "collections"` | `System.Collections.Generic` |
+| `use http` | `System.Net.Http` |
+| `use json` | `System.Text.Json` |
+| `use io` | `System.IO` |
+| `use regex` | `System.Text.RegularExpressions` |
+| `use threading` | `System.Threading` |
+| `use tasks` | `System.Threading.Tasks` |
+| `use diagnostics` | `System.Diagnostics` |
+| `use net` | `System.Net` |
+| `use crypto` | `System.Security.Cryptography` |
+| `use text` | `System.Text` |
+| `use xml` | `System.Xml` |
+| `use data` | `System.Data` |
+| `use reflection` | `System.Reflection` |
+| `use linq` | `System.Linq` |
+| `use collections` | `System.Collections.Generic` |
 
 ### Automatic Type Detection
 
 The compiler runs a .NET type probe at transpile time that discovers 3,700+ BCL types. Imported constructable classes automatically emit `new`:
 
 ```zinc
-import "System.Diagnostics"
-import "http"
-import "System.Text"
+use System.Diagnostics
+use http
+use System.Text
 
 main() {
     var sw = Stopwatch()           // → new Stopwatch()
@@ -61,10 +61,10 @@ Declare NuGet packages in `zinc.toml`:
 "Serilog" = "4.0.0"
 ```
 
-These become `<PackageReference>` entries in the generated `.csproj`. Then import and use:
+These become `<PackageReference>` entries in the generated `.csproj`. Then use them in your code:
 
 ```zinc
-import "Newtonsoft.Json"
+use Newtonsoft.Json
 
 main() {
     var json = JsonConvert.SerializeObject(42)
@@ -74,7 +74,7 @@ main() {
 
 ## Same-Project Types (Auto-Discovery)
 
-All types (classes, interfaces, enums) defined anywhere in your project are **automatically visible** to all other files. No import needed:
+All types (classes, interfaces, enums) defined anywhere in your project are **automatically visible** to all other files. No `use` needed:
 
 ```
 myapp/
@@ -88,7 +88,7 @@ myapp/
 ```
 
 ```zinc
-// main.zn — no imports needed for project types
+// main.zn — no use statements needed for project types
 main() {
     var d = Dog("Rex")           // Dog from models/dog.zn
     var u = User("Alice", 30)    // User from models/user.zn
@@ -97,7 +97,7 @@ main() {
 }
 ```
 
-This matches how C#, Kotlin, and Swift work — all types in the same project/module are visible without imports.
+This matches how C#, Kotlin, and Swift work — all types in the same project/module are visible without `use` statements.
 
 > **Note:** Top-level functions across files are currently scoped to their file. For shared logic, use classes with static methods.
 

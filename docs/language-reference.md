@@ -13,7 +13,7 @@ Zinc compiles to native binaries via **C# AOT**. Convention over configuration �
 | [Collections](collections.md) | List/map literals, slicing, LINQ collection methods |
 | [Control Flow](control-flow.md) | If/else, loops, match/switch, safe navigation, concurrency (`spawn`, `parallel`, `Lock<T>`) |
 | [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
-| [Imports](imports.md) | .NET imports, NuGet dependencies, type detection |
+| [Imports](imports.md) | `use` keyword, .NET namespaces, NuGet dependencies, type detection |
 | [Built-in Functions](builtins.md) | All global builtins — I/O, math, JSON, HTTP, environment, control |
 | [Testing](testing.md) | `zinc test`, assert builtins, test conventions |
 
@@ -49,7 +49,7 @@ var content = readFile("data.txt") or {
 }
 
 // Imports
-import "System.Diagnostics"
+use System.Diagnostics
 var sw = Stopwatch()    // auto-emits new Stopwatch()
 
 // Concurrency — no async/await
