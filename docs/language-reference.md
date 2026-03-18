@@ -16,6 +16,7 @@ Zinc compiles to native binaries via **C# AOT**. Convention over configuration â
 | [Imports](imports.md) | `use` keyword, .NET namespaces, NuGet dependencies, type detection |
 | [Built-in Functions](builtins.md) | All global builtins â€” I/O, math, JSON, HTTP, environment, control |
 | [Testing](testing.md) | `zinc test`, assert builtins, test conventions |
+| [Configuration](configuration.md) | `zinc.toml`, dependencies, NuGet sources, private repos |
 
 ## Quick Syntax Overview
 

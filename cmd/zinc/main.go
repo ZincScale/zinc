@@ -184,19 +184,23 @@ func main() {
 			}
 			return
 		case a == "add":
-			// zinc add Serilog [AWSSDK.SQS ...] [--version X.Y.Z] [--source URL]
+			// zinc add Serilog [AWSSDK.SQS ...] [--version X.Y.Z] [--source name]
 			var packages []string
 			specVersion := ""
+			sourceName := ""
 			for j := i + 1; j < len(args); j++ {
 				if args[j] == "--version" && j+1 < len(args) {
 					specVersion = args[j+1]
+					j++
+				} else if args[j] == "--source" && j+1 < len(args) {
+					sourceName = args[j+1]
 					j++
 				} else if !strings.HasPrefix(args[j], "-") {
 					packages = append(packages, args[j])
 				}
 			}
 			if len(packages) == 0 {
-				errs.Error("usage: zinc add <package> [package...] [--version X.Y.Z]")
+				errs.Error("usage: zinc add <package> [package...] [--version X.Y.Z] [--source name]")
 				os.Exit(1)
 			}
 			dir := "."
@@ -213,14 +217,15 @@ func main() {
 				ver := specVersion
 				if ver == "" {
 					var resolved string
-					var err error
-					if cfg.NuGetSource != "" {
-						resolved, err = nuget.ResolveLatestFrom(cfg.NuGetSource, pkg)
+					var resolveErr error
+					sourceURL, authToken, authType := cfg.GetNuGetSource(sourceName)
+					if sourceURL != "" {
+						resolved, resolveErr = nuget.ResolveLatestFrom(sourceURL, pkg, authToken, authType)
 					} else {
-						resolved, err = nuget.ResolveLatest(pkg)
+						resolved, resolveErr = nuget.ResolveLatest(pkg)
 					}
-					if err != nil {
-						errs.Errorf("%s: %v", pkg, err)
+					if resolveErr != nil {
+						errs.Errorf("%s: %v", pkg, resolveErr)
 						os.Exit(1)
 					}
 					ver = resolved

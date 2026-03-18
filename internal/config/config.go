@@ -16,29 +16,62 @@
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
+
+// NuGetSource represents a named NuGet package source with optional auth.
+type NuGetSource struct {
+	Name string `toml:"name"`           // display name (e.g. "github", "artifactory")
+	URL  string `toml:"url"`            // flat container URL
+	Auth string `toml:"auth,omitempty"` // auth token reference (e.g. "env:GITHUB_TOKEN")
+	Type string `toml:"type,omitempty"` // auth type: "bearer" (default) or "basic"
+}
+
+// NuGetConfig holds NuGet package source configuration.
+type NuGetConfig struct {
+	Source  string        `toml:"source,omitempty"`  // default source URL (simple case)
+	Sources []NuGetSource `toml:"sources,omitempty"` // named sources with auth
+}
+
+// tomlFile is the raw TOML structure that maps directly to zinc.toml.
+type tomlFile struct {
+	Project      tomlProject       `toml:"project"`
+	Build        tomlBuild         `toml:"build"`
+	NuGet        NuGetConfig       `toml:"nuget"`
+	Dependencies map[string]string `toml:"dependencies,omitempty"`
+}
+
+type tomlProject struct {
+	Name    string `toml:"name"`
+	Version string `toml:"version"`
+}
+
+type tomlBuild struct {
+	Target   string `toml:"target"`
+	Optimize *bool  `toml:"optimize,omitempty"` // pointer so we can detect missing vs false
+}
 
 // Dependency represents a package dependency.
 type Dependency struct {
-	Name    string // package name (NuGet package or Go module)
-	Version string // version constraint
+	Name    string
+	Version string
 }
 
 // Config represents a zinc.toml project configuration.
 type Config struct {
-	Name         string       // project name
-	Version      string       // project version
+	Name         string
+	Version      string
 	Target       string       // "csharp" (default) or "go"
 	Optimize     bool         // AOT with full optimizations (default: true)
-	Release      bool         // strip symbols for production (default: false, set by --release)
-	NuGetSource  string       // custom NuGet source URL (default: nuget.org)
+	Release      bool         // strip symbols for production (set by --release flag, not in toml)
+	NuGet        NuGetConfig  // NuGet source configuration
 	Dependencies []Dependency // package dependencies
 }
 
@@ -56,93 +89,77 @@ func DefaultConfig(name string) *Config {
 // Returns nil if no zinc.toml exists.
 func Load(dir string) (*Config, error) {
 	path := filepath.Join(dir, "zinc.toml")
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	defer f.Close()
 
-	cfg := DefaultConfig("")
-	section := ""
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Section header
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(line[1 : len(line)-1])
-			continue
-		}
-
-		// Key = value
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("zinc.toml:%d: invalid line: %s", lineNum, line)
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		val = strings.Trim(val, `"`)
-
-		fullKey := key
-		if section != "" {
-			fullKey = section + "." + key
-		}
-
-		switch {
-		case fullKey == "project.name":
-			cfg.Name = val
-		case fullKey == "project.version":
-			cfg.Version = val
-		case fullKey == "build.target":
-			cfg.Target = val
-		case fullKey == "build.optimize":
-			cfg.Optimize = val == "true"
-		case fullKey == "nuget.source":
-			cfg.NuGetSource = val
-		case section == "dependencies":
-			cfg.Dependencies = append(cfg.Dependencies, Dependency{
-				Name:    strings.Trim(key, `"`),
-				Version: val,
-			})
-		}
+	var raw tomlFile
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("zinc.toml: %w", err)
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading zinc.toml: %w", err)
+	cfg := &Config{
+		Name:    raw.Project.Name,
+		Version: raw.Project.Version,
+		Target:  raw.Build.Target,
+		NuGet:   raw.NuGet,
 	}
+
+	// Default target
+	if cfg.Target == "" {
+		cfg.Target = "csharp"
+	}
+
+	// Default optimize to true unless explicitly set to false
+	if raw.Build.Optimize != nil {
+		cfg.Optimize = *raw.Build.Optimize
+	} else {
+		cfg.Optimize = true
+	}
+
+	// Convert dependencies map to slice
+	for name, version := range raw.Dependencies {
+		cfg.Dependencies = append(cfg.Dependencies, Dependency{Name: name, Version: version})
+	}
+	// Sort for deterministic ordering
+	sort.Slice(cfg.Dependencies, func(i, j int) bool {
+		return cfg.Dependencies[i].Name < cfg.Dependencies[j].Name
+	})
 
 	return cfg, nil
 }
 
 // Generate creates a zinc.toml file content from a Config.
 func Generate(cfg *Config) string {
-	var b strings.Builder
-	b.WriteString("[project]\n")
-	b.WriteString(fmt.Sprintf("name = \"%s\"\n", cfg.Name))
-	b.WriteString(fmt.Sprintf("version = \"%s\"\n", cfg.Version))
-	b.WriteString("\n")
-	b.WriteString("[build]\n")
-	b.WriteString(fmt.Sprintf("target = \"%s\"\n", cfg.Target))
-	b.WriteString(fmt.Sprintf("optimize = %t\n", cfg.Optimize))
+	raw := tomlFile{
+		Project: tomlProject{
+			Name:    cfg.Name,
+			Version: cfg.Version,
+		},
+		Build: tomlBuild{
+			Target:   cfg.Target,
+			Optimize: &cfg.Optimize,
+		},
+		NuGet: cfg.NuGet,
+	}
+
 	if len(cfg.Dependencies) > 0 {
-		b.WriteString("\n")
-		b.WriteString("[dependencies]\n")
+		raw.Dependencies = make(map[string]string)
 		for _, dep := range cfg.Dependencies {
-			b.WriteString(fmt.Sprintf("\"%s\" = \"%s\"\n", dep.Name, dep.Version))
+			raw.Dependencies[dep.Name] = dep.Version
 		}
 	}
-	return b.String()
+
+	data, err := toml.Marshal(raw)
+	if err != nil {
+		// Fallback — shouldn't happen
+		return fmt.Sprintf("# error marshaling config: %v\n", err)
+	}
+	return string(data)
 }
 
 // AddDependency adds or updates a dependency in the config.
@@ -173,11 +190,48 @@ func (c *Config) SaveToFile(dir string) error {
 	return os.WriteFile(path, []byte(Generate(c)), 0644)
 }
 
+// GetNuGetSource returns the URL and auth for a named source.
+// If sourceName is empty, returns the default source.
+func (c *Config) GetNuGetSource(sourceName string) (url, authToken, authType string) {
+	if sourceName == "" {
+		// Use default source
+		if c.NuGet.Source != "" {
+			return c.NuGet.Source, "", ""
+		}
+		// Check if there's a first named source
+		if len(c.NuGet.Sources) > 0 {
+			src := c.NuGet.Sources[0]
+			return src.URL, resolveAuth(src.Auth), src.Type
+		}
+		return "", "", ""
+	}
+
+	// Find named source
+	for _, src := range c.NuGet.Sources {
+		if strings.EqualFold(src.Name, sourceName) {
+			return src.URL, resolveAuth(src.Auth), src.Type
+		}
+	}
+	return "", "", ""
+}
+
+// resolveAuth resolves an auth reference to its value.
+// Supports "env:VARNAME" to read from environment variables.
+func resolveAuth(auth string) string {
+	if auth == "" {
+		return ""
+	}
+	if strings.HasPrefix(auth, "env:") {
+		return os.Getenv(strings.TrimPrefix(auth, "env:"))
+	}
+	return auth
+}
+
 // RuntimeID returns the .NET runtime identifier for the current platform.
 func RuntimeID() string {
-	os := runtime.GOOS
+	goos := runtime.GOOS
 	arch := runtime.GOARCH
-	switch os {
+	switch goos {
 	case "linux":
 		switch arch {
 		case "amd64":
@@ -200,7 +254,7 @@ func RuntimeID() string {
 			return "win-arm64"
 		}
 	}
-	return os + "-" + arch
+	return goos + "-" + arch
 }
 
 // GenerateCsproj creates a .csproj file for C# AOT compilation.
@@ -229,7 +283,6 @@ func GenerateCsproj(cfg *Config) string {
 
 	if len(cfg.Dependencies) > 0 {
 		b.WriteString("\n  <ItemGroup>\n")
-		// Sort for deterministic output
 		deps := make([]Dependency, len(cfg.Dependencies))
 		copy(deps, cfg.Dependencies)
 		sort.Slice(deps, func(i, j int) bool { return deps[i].Name < deps[j].Name })

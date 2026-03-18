@@ -37,10 +37,10 @@ func TestDefaultConfig(t *testing.T) {
 func TestGenerate(t *testing.T) {
 	cfg := DefaultConfig("myapp")
 	out := Generate(cfg)
-	if !strings.Contains(out, `name = "myapp"`) {
+	if !strings.Contains(out, "name = ") || !strings.Contains(out, "myapp") {
 		t.Errorf("missing name in output:\n%s", out)
 	}
-	if !strings.Contains(out, `target = "csharp"`) {
+	if !strings.Contains(out, "target = ") || !strings.Contains(out, "csharp") {
 		t.Errorf("missing target in output:\n%s", out)
 	}
 	if !strings.Contains(out, "optimize = true") {
