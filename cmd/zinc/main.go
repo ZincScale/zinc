@@ -448,6 +448,12 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 		fmt.Fprintf(os.Stderr, "[verbose] type check passed\n")
 	}
 
+	// GIL dependency warnings
+	gilWarnings := typechecker.CheckGILDependencies(prog)
+	for _, w := range gilWarnings {
+		fmt.Fprintf(os.Stderr, "%s\n", w)
+	}
+
 	// Code generation (Python)
 	gen := codegen_python.New()
 	gen.OptimizeBackend = optimize

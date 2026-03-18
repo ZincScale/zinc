@@ -71,11 +71,9 @@ Everything below is implemented, tested, and working end-to-end:
 - [x] ~~Doesn't verify all code paths return~~ — catches missing returns in if/else/match
 - [x] ~~No type narrowing~~ — `if x is str` narrows x in then-branch (generates isinstance)
 
-## Design Doc Over-Promises (Not Yet Implemented)
+## Design Doc — All Implemented
 
-These are in the design doc but not yet built:
-
-- [ ] Auto-parallelization of `.map()` on large collections
-- [ ] GIL-dependent library detection and warnings
-- [ ] Free-threaded Python auto-dispatch
-- [ ] Smart collection dispatch based on data shape (currently manual `--optimize` flag)
+- [x] ~~Auto-parallelization of `.map()`~~ — ThreadPoolExecutor on 1000+ items when GIL disabled
+- [x] ~~GIL-dependent library detection~~ — warns at transpile time for pandas, numba, etc.
+- [x] ~~Free-threaded Python auto-dispatch~~ — detects `sys._is_gil_enabled()` at runtime
+- [x] ~~Smart collection dispatch based on data shape~~ — list[dict]→Polars, list[numeric]→NumPy, auto

@@ -29,6 +29,11 @@ class _ZincCollection:
         return _ZincCollection([x for x in self._data if pred(x)])
 
     def map(self, fn):
+        # Auto-parallelize on free-threaded Python for large collections
+        if _FREE_THREADED and len(self._data) > 1000:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor() as pool:
+                return _ZincCollection(list(pool.map(fn, self._data)))
         return _ZincCollection([fn(x) for x in self._data])
 
     def sum(self):
@@ -108,6 +113,14 @@ class _ZincCollection:
     def __repr__(self):
         return repr(self._data)
 
+# Detect free-threaded Python (3.13t+)
+import sys
+_FREE_THREADED = False
+try:
+    _FREE_THREADED = not sys._is_gil_enabled()
+except AttributeError:
+    pass  # Python < 3.13
+
 # Try to enhance with Polars for structured data
 try:
     import polars as pl
@@ -123,6 +136,54 @@ except ImportError:
     _NUMPY = False
 
 def _zinc_collect(data):
-    """Wrap data for smart collection dispatch."""
+    """Wrap data for smart collection dispatch.
+    Auto-selects backend based on data shape:
+    - list[dict] + Polars available → Polars dispatch
+    - list[int/float] + NumPy available → NumPy dispatch
+    - otherwise → pure Python comprehensions
+    """
+    if _POLARS and len(data) > 0 and isinstance(data[0], dict):
+        return _ZincPolarsCollection(data)
+    if _NUMPY and len(data) > 0 and isinstance(data[0], (int, float)):
+        return _ZincNumpyCollection(data)
     return _ZincCollection(data)
+
+class _ZincPolarsCollection(_ZincCollection):
+    """Polars-backed collection for list[dict] data."""
+    def filter(self, pred):
+        # Fall back to Python filter — Polars needs column expressions
+        return _ZincPolarsCollection([x for x in self._data if pred(x)])
+
+    def map(self, fn):
+        return _ZincPolarsCollection([fn(x) for x in self._data])
+
+    def sum(self):
+        if _POLARS and len(self._data) > 0 and isinstance(self._data[0], (int, float)):
+            return pl.Series(self._data).sum()
+        return sum(self._data)
+
+    def sort_by(self, key, reverse=False):
+        return _ZincPolarsCollection(sorted(self._data, key=key, reverse=reverse))
+
+class _ZincNumpyCollection(_ZincCollection):
+    """NumPy-backed collection for numeric data."""
+    def __init__(self, data):
+        super().__init__(data)
+        self._arr = np.array(data)
+
+    def filter(self, pred):
+        mask = np.array([pred(x) for x in self._data])
+        return _ZincNumpyCollection(self._arr[mask].tolist())
+
+    def map(self, fn):
+        return _ZincNumpyCollection([fn(x) for x in self._data])
+
+    def sum(self):
+        return self._arr.sum()
+
+    def min(self):
+        return self._arr.min()
+
+    def max(self):
+        return self._arr.max()
 `
