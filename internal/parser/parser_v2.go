@@ -749,7 +749,18 @@ func (p *Parser) v2ParseUnary() Expr {
 		operand := p.v2ParseUnary()
 		return &UnaryExpr{Op: op, Operand: operand}
 	}
-	return p.v2ParsePostfix()
+	return p.v2ParsePower()
+}
+
+// v2ParsePower: base ** exponent (right-associative)
+func (p *Parser) v2ParsePower() Expr {
+	base := p.v2ParsePostfix()
+	if p.check(lexer.TOKEN_STAR_STAR) {
+		p.advance()
+		exp := p.v2ParseUnary() // right-associative
+		return &BinaryExpr{Left: base, Op: "**", Right: exp}
+	}
+	return base
 }
 
 // v2ParsePostfix: primary followed by .field, [index], (args)

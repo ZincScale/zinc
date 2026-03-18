@@ -573,6 +573,63 @@ func TestV2TupleUnpacking(t *testing.T) {
 	}
 }
 
+func TestV2PowerOperator(t *testing.T) {
+	prog, errs := parseV2(`var x = 2 ** 10`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	bin, ok := varStmt.Value.(*BinaryExpr)
+	if !ok || bin.Op != "**" {
+		t.Fatalf("expected ** op, got %T", varStmt.Value)
+	}
+}
+
+func TestV2PrivateConvention(t *testing.T) {
+	// _prefix fields should parse fine (just naming convention)
+	prog, errs := parseV2(`
+class Cache
+    var _data: dict = {}
+
+    fn _internal_method()
+        print("private")
+    end
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	cls := prog.Decls[0].(*ClassDecl)
+	if cls.Fields[0].Name != "_data" {
+		t.Errorf("expected '_data', got %q", cls.Fields[0].Name)
+	}
+	if cls.Methods[0].Name != "_internal_method" {
+		t.Errorf("expected '_internal_method', got %q", cls.Methods[0].Name)
+	}
+}
+
+func TestV2WithStatement(t *testing.T) {
+	prog, errs := parseV2(`
+with f = open("test.txt")
+    var content = f.read()
+    print(content)
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	withStmt, ok := prog.Stmts[0].(*WithStmt)
+	if !ok {
+		t.Fatalf("expected WithStmt, got %T", prog.Stmts[0])
+	}
+	if len(withStmt.Resources) != 1 || withStmt.Resources[0].Name != "f" {
+		t.Error("expected resource 'f'")
+	}
+	if len(withStmt.Body.Stmts) != 2 {
+		t.Errorf("expected 2 body stmts, got %d", len(withStmt.Body.Stmts))
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

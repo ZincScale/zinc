@@ -198,6 +198,10 @@ func (l *Lexer) NextToken() Token {
 		}
 		return l.makeToken(TOKEN_MINUS, "-", line, col)
 	case '*':
+		if l.peek() == '*' {
+			l.advance()
+			return l.makeToken(TOKEN_STAR_STAR, "**", line, col)
+		}
 		if l.peek() == '=' {
 			l.advance()
 			return l.makeToken(TOKEN_STAR_EQ, "*=", line, col)

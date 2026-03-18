@@ -114,6 +114,7 @@ const (
 	TOKEN_DOTDOTEQ           // ..=
 	TOKEN_DOTDOTDOT          // ...
 	TOKEN_COLONASSIGN        // :=
+	TOKEN_STAR_STAR          // **
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -213,6 +214,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_DOTDOTEQ:          "..=",
 	TOKEN_DOTDOTDOT:         "...",
 	TOKEN_COLONASSIGN:       ":=",
+	TOKEN_STAR_STAR:         "**",
 
 	TOKEN_EOF:     "EOF",
 	TOKEN_ILLEGAL: "ILLEGAL",

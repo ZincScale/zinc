@@ -353,6 +353,38 @@ end
 	)
 }
 
+func TestV2PowerOperator(t *testing.T) {
+	assertV2Contains(t,
+		`var x = 2 ** 10`,
+		`x = (2 ** 10)`,
+	)
+}
+
+func TestV2WithStatement(t *testing.T) {
+	assertV2Contains(t, `
+with f = open("test.txt")
+    var content = f.read()
+end
+`,
+		"with open(\"test.txt\") as f:",
+		"content = f.read()",
+	)
+}
+
+func TestV2PrivateFields(t *testing.T) {
+	assertV2Contains(t, `
+class Cache
+    var _data: dict = {}
+
+    fn get(key: str): str
+        return _data[key]
+    end
+end
+`,
+		"self._data",
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
