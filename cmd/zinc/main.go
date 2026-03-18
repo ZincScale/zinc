@@ -28,7 +28,7 @@ import (
 	"zinc/internal/typechecker"
 )
 
-var version = "2.0.0-dev"
+var version = "0.2.0"
 
 const usage = `Zinc — typed Python with explicit blocks.
 
