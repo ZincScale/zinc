@@ -65,6 +65,13 @@ const (
 	TOKEN_SPAWN
 	TOKEN_USE
 	TOKEN_READONLY
+	TOKEN_END   // end (block closer)
+	TOKEN_TRY   // try
+	TOKEN_CATCH // catch
+	TOKEN_RAISE // raise
+	TOKEN_NOT   // not (boolean negation)
+	TOKEN_AND   // and (boolean and)
+	TOKEN_FROM  // from (import support)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -157,6 +164,13 @@ var tokenNames = map[TokenType]string{
 	TOKEN_SPAWN:     "spawn",
 	TOKEN_USE:       "use",
 	TOKEN_READONLY:  "readonly",
+	TOKEN_END:       "end",
+	TOKEN_TRY:       "try",
+	TOKEN_CATCH:     "catch",
+	TOKEN_RAISE:     "raise",
+	TOKEN_NOT:       "not",
+	TOKEN_AND:       "and",
+	TOKEN_FROM:      "from",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -257,6 +271,13 @@ var keywords = map[string]TokenType{
 	"spawn":     TOKEN_SPAWN,
 	"use":       TOKEN_USE,
 	"readonly":  TOKEN_READONLY,
+	"end":       TOKEN_END,
+	"try":       TOKEN_TRY,
+	"catch":     TOKEN_CATCH,
+	"raise":     TOKEN_RAISE,
+	"not":       TOKEN_NOT,
+	"and":       TOKEN_AND,
+	"from":      TOKEN_FROM,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

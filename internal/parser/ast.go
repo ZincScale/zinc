@@ -27,6 +27,7 @@ type Program struct {
 	Package    *PackageDecl       // optional package declaration (nil = package main)
 	Imports    []*ImportDecl
 	Decls      []TopLevelDecl // ClassDecl | InterfaceDecl | FnDecl
+	Stmts      []Stmt         // v2: top-level script statements (script mode)
 }
 
 // PackageDecl: package "path/to/pkg"
@@ -407,6 +408,27 @@ type DeferStmt struct {
 
 func (d *DeferStmt) nodeTag() {}
 func (d *DeferStmt) stmtTag() {}
+
+// TryStmt: try ... catch err: ExType ... end
+type TryStmt struct {
+	Line      int
+	Body      *BlockStmt
+	CatchName string     // error variable name (e.g. "err")
+	CatchType string     // error type (e.g. "ConnectionError"), may be empty
+	CatchBody *BlockStmt
+}
+
+func (t *TryStmt) nodeTag() {}
+func (t *TryStmt) stmtTag() {}
+
+// RaiseStmt: raise expr
+type RaiseStmt struct {
+	Line  int
+	Value Expr
+}
+
+func (r *RaiseStmt) nodeTag() {}
+func (r *RaiseStmt) stmtTag() {}
 
 // WithResource is a single resource binding inside a with statement.
 type WithResource struct {
