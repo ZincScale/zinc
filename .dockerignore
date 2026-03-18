@@ -1,0 +1,7 @@
+*.zn
+*.go
+__pycache__
+.git
+dist
+build
+*.pyc
