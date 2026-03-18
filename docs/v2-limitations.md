@@ -57,8 +57,8 @@ Everything below is implemented, tested, and working end-to-end:
 
 ## CLI — Not Yet Implemented
 
-- [ ] No `zinc fmt` (formatter)
-- [ ] No `zinc repl` for v2
+- [x] ~~No `zinc fmt`~~ — implemented, reformats with consistent indentation
+- [x] ~~No `zinc repl`~~ — implemented, interactive with multi-line block support
 - [x] ~~No shebang support~~ — `#!/usr/bin/env zinc run` works
 
 ## Type System — Limitations

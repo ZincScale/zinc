@@ -42,11 +42,9 @@ const usage = `Zinc — typed Python with explicit blocks.
 Usage:
   zinc run <file.zn>           Transpile to Python and run
   zinc transpile <file.zn>     Output .py file
+  zinc fmt <file.zn>           Format Zinc source code
+  zinc repl                    Interactive Zinc REPL
   zinc <file.zn>               Transpile a single file (outputs .py)
-
-Legacy (v1 — C#/Go backends):
-  zinc build [dir]         Transpile + compile (native AOT binary)
-  zinc test [dir]          Discover and run test_* functions
 
 Flags:
   -o <file>              Output file (default: <input>.py)
@@ -101,7 +99,14 @@ func main() {
 			fmt.Println("  created main.zn")
 			return
 		case a == "repl":
-			runREPL()
+			runREPLV2()
+			return
+		case a == "fmt":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "usage: zinc fmt <file.zn>")
+				os.Exit(1)
+			}
+			runFmt(args[i+1])
 			return
 		case a == "build":
 			dir := "."

@@ -473,4 +473,6 @@ zinc run script.zn -- arg1 arg2       # pass args to script
 zinc run script.zn --optimize polars  # Polars for collection chains
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
+zinc fmt script.zn                    # format source code
+zinc repl                             # interactive REPL
 ```
