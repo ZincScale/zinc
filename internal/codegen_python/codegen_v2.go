@@ -190,6 +190,7 @@ func (g *Generator) emitV2Decl(d parser.TopLevelDecl) {
 }
 
 func (g *Generator) emitV2FnDecl(d *parser.FnDecl) {
+	g.mapLine(d.Line)
 	// Emit decorators
 	for _, a := range d.Annotations {
 		if len(a.Args) > 0 {
@@ -245,6 +246,7 @@ func (g *Generator) isResultType(t parser.TypeExpr) bool {
 }
 
 func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
+	g.mapLine(d.Line)
 	if len(d.Parents) > 0 {
 		g.writeln(fmt.Sprintf("class %s(%s):", d.Name, strings.Join(d.Parents, ", ")))
 	} else {
@@ -410,6 +412,34 @@ func (g *Generator) emitV2Block(block *parser.BlockStmt) {
 }
 
 func (g *Generator) emitV2Stmt(s parser.Stmt) {
+	// Map source line for debugging
+	switch st := s.(type) {
+	case *parser.VarStmt:
+		g.mapLine(st.Line)
+	case *parser.TupleVarStmt:
+		g.mapLine(st.Line)
+	case *parser.AssignStmt:
+		g.mapLine(st.Line)
+	case *parser.ReturnStmt:
+		g.mapLine(st.Line)
+	case *parser.IfStmt:
+		g.mapLine(st.Line)
+	case *parser.ForStmt:
+		g.mapLine(st.Line)
+	case *parser.WhileStmt:
+		g.mapLine(st.Line)
+	case *parser.ExprStmt:
+		g.mapLine(st.Line)
+	case *parser.TryStmt:
+		g.mapLine(st.Line)
+	case *parser.RaiseStmt:
+		g.mapLine(st.Line)
+	case *parser.MatchStmt:
+		g.mapLine(st.Line)
+	case *parser.WithStmt:
+		g.mapLine(st.Line)
+	}
+
 	switch s := s.(type) {
 	case *parser.VarStmt:
 		g.emitV2VarStmt(s)

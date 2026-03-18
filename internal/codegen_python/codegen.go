@@ -40,6 +40,10 @@ type Generator struct {
 	needsCollectionsRuntime bool // true if smart collection dispatch is used
 	// v2: optimize backend — "", "polars", "numpy"
 	OptimizeBackend string
+	// v2: source map — maps generated .py line → original .zn line
+	sourceMap    map[int]int // pyLine → znLine
+	currentPyLine int       // current line being written
+	SourceFile   string     // original .zn filename
 }
 
 // New creates a Python Generator.
@@ -47,7 +51,14 @@ func New() *Generator {
 	return &Generator{
 		neededImports: make(map[string]bool),
 		classNames:    make(map[string]bool),
+		sourceMap:     make(map[int]int),
+		currentPyLine: 1,
 	}
+}
+
+// GetSourceMap returns the py-line → zn-line mapping after generation.
+func (g *Generator) GetSourceMap() map[int]int {
+	return g.sourceMap
 }
 
 // Generate produces Python source from a Zinc AST.
@@ -91,12 +102,26 @@ func (g *Generator) Generate(prog *parser.Program) string {
 
 func (g *Generator) write(s string) {
 	g.buf.WriteString(s)
+	// Count newlines for source map tracking
+	for _, ch := range s {
+		if ch == '\n' {
+			g.currentPyLine++
+		}
+	}
 }
 
 func (g *Generator) writeln(s string) {
 	g.buf.WriteString(strings.Repeat("    ", g.indent))
 	g.buf.WriteString(s)
 	g.buf.WriteString("\n")
+	g.currentPyLine++
+}
+
+// mapLine records that the current Python output line corresponds to the given .zn source line.
+func (g *Generator) mapLine(znLine int) {
+	if znLine > 0 {
+		g.sourceMap[g.currentPyLine] = znLine
+	}
 }
 
 func (g *Generator) push() { g.indent++ }

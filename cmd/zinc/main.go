@@ -149,7 +149,7 @@ func main() {
 			if strings.HasSuffix(target, ".zn") {
 				// Transpile to temp file, run, clean up
 				tmpFile := filepath.Join(os.TempDir(), "zinc_run_"+filepath.Base(strings.TrimSuffix(target, ".zn"))+".py")
-				pyFile, err := transpileV2File(target, tmpFile, false, optimize)
+				pyFile, sourceMap, err := transpileV2File(target, tmpFile, false, optimize)
 				if err != nil {
 					errs.Error(err.Error())
 					os.Exit(1)
@@ -166,9 +166,15 @@ func main() {
 				runArgs := append([]string{pyFile}, scriptArgs...)
 				cmd := exec.Command("python3", runArgs...)
 				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
 				cmd.Stdin = os.Stdin
+				// Capture stderr to rewrite tracebacks
+				var stderrBuf strings.Builder
+				cmd.Stderr = &stderrBuf
 				if err := cmd.Run(); err != nil {
+					// Rewrite traceback: replace .py file/line with .zn file/line
+					stderr := stderrBuf.String()
+					stderr = rewriteTraceback(stderr, pyFile, target, sourceMap)
+					fmt.Fprint(os.Stderr, stderr)
 					if exitErr, ok := err.(*exec.ExitError); ok {
 						os.Exit(exitErr.ExitCode())
 					}
@@ -217,7 +223,7 @@ func main() {
 				errs.Error("usage: zinc transpile <file.zn>")
 				os.Exit(1)
 			}
-			pyFile, err := transpileV2File(target, localOut, localVerbose, localOptimize)
+			pyFile, _, err := transpileV2File(target, localOut, localVerbose, localOptimize)
 			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
@@ -372,7 +378,7 @@ func main() {
 	}
 
 	// Default: v2 transpile single file to Python
-	pyFile, err := transpileV2File(inFile, outFile, verbose)
+	pyFile, _, err := transpileV2File(inFile, outFile, verbose)
 	if err != nil {
 		errs.Error(err.Error())
 		os.Exit(1)
@@ -390,7 +396,7 @@ func main() {
 }
 
 // transpileV2File transpiles a .zn file to .py using the v2 pipeline.
-func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (string, error) {
+func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (string, map[int]int, error) {
 	// Parse optimize option from opts
 	optimize := ""
 	for _, o := range opts {
@@ -398,14 +404,14 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 	}
 	src, err := os.ReadFile(inFile)
 	if err != nil {
-		return "", fmt.Errorf("reading %s: %w", inFile, err)
+		return "", nil, fmt.Errorf("reading %s: %w", inFile, err)
 	}
 
 	// Lexer
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
-		return "", fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
+		return "", nil, fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
 	}
 
 	if verbose {
@@ -416,7 +422,7 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 	p := parser.New(tokens)
 	prog := p.ParseV2()
 	if len(p.Errors) > 0 {
-		return "", fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
+		return "", nil, fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
 	}
 
 	if verbose {
@@ -430,7 +436,7 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 		for _, e := range tcErrors {
 			msgs = append(msgs, e.String())
 		}
-		return "", fmt.Errorf("type errors in %s:\n%s", inFile, strings.Join(msgs, "\n"))
+		return "", nil, fmt.Errorf("type errors in %s:\n%s", inFile, strings.Join(msgs, "\n"))
 	}
 
 	if verbose {
@@ -440,6 +446,7 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 	// Code generation (Python)
 	gen := codegen_python.New()
 	gen.OptimizeBackend = optimize
+	gen.SourceFile = inFile
 	pySrc := gen.GenerateV2(prog)
 
 	// Determine output path
@@ -451,10 +458,64 @@ func transpileV2File(inFile, outFile string, verbose bool, opts ...string) (stri
 
 	// Write output
 	if err := os.WriteFile(outFile, []byte(pySrc), 0644); err != nil {
-		return "", fmt.Errorf("writing %s: %w", outFile, err)
+		return "", nil, fmt.Errorf("writing %s: %w", outFile, err)
 	}
 
-	return outFile, nil
+	return outFile, gen.GetSourceMap(), nil
+}
+
+// rewriteTraceback replaces .py file references with .zn file references in Python tracebacks.
+func rewriteTraceback(stderr, pyFile, znFile string, sourceMap map[int]int) string {
+	var result strings.Builder
+	for _, line := range strings.Split(stderr, "\n") {
+		// Python traceback lines look like:
+		//   File "/tmp/zinc_run_foo.py", line 15, in <module>
+		if strings.Contains(line, pyFile) && strings.Contains(line, ", line ") {
+			// Extract the Python line number after ", line "
+			idx := strings.Index(line, ", line ")
+			if idx >= 0 {
+				after := line[idx+7:] // skip ", line "
+				numStr := ""
+				for _, ch := range after {
+					if ch >= '0' && ch <= '9' {
+						numStr += string(ch)
+					} else {
+						break
+					}
+				}
+				if numStr != "" {
+					var pyLineNum int
+					fmt.Sscanf(numStr, "%d", &pyLineNum)
+					znLine := findClosestZnLine(pyLineNum, sourceMap)
+					if znLine > 0 {
+						line = strings.Replace(line, pyFile, znFile, 1)
+						line = strings.Replace(line, ", line "+numStr, fmt.Sprintf(", line %d", znLine), 1)
+					} else {
+						// No source map match — still replace filename
+						line = strings.Replace(line, pyFile, znFile, 1)
+					}
+				}
+			}
+		}
+		result.WriteString(line)
+		result.WriteString("\n")
+	}
+	return strings.TrimRight(result.String(), "\n") + "\n"
+}
+
+// findClosestZnLine finds the .zn line for a given .py line, searching backwards.
+func findClosestZnLine(pyLine int, sourceMap map[int]int) int {
+	// Exact match
+	if zn, ok := sourceMap[pyLine]; ok {
+		return zn
+	}
+	// Search backwards for the closest mapped line
+	for offset := 1; offset < 20; offset++ {
+		if zn, ok := sourceMap[pyLine-offset]; ok {
+			return zn
+		}
+	}
+	return 0
 }
 
 // Keep v1 imports referenced so they compile (used by legacy commands).
