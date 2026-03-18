@@ -16,6 +16,7 @@ Zinc transpiles `.zn` files to `.py` and runs on free-threaded Python (GIL disab
 |---|---|---|
 | `zinc run script.zn` | Runs immediately | Development, scripts |
 | `zinc pack script.zn` | PyInstaller binary | CLI tools, desktop apps |
+| `zinc pack script.zn --format nuitka` | Native compiled binary | Performance-critical, smaller |
 | `zinc pack script.zn --format docker` | Dockerfile + .py | Containers, microservices |
 | `zinc pack script.zn --format k8s` | Dockerfile + K8s manifest | Kubernetes deployments |
 
@@ -70,20 +71,57 @@ python3.14t script_pack.py
 
 ---
 
-## 3. Docker — Container Image
+## 3. Nuitka — Compiled Native Binary
 
-Generate a Dockerfile and build a container:
+Compile your Python to C, then to a native binary. 30-50% faster than CPython, smaller than PyInstaller:
 
 ```bash
-# Step 1: Generate Dockerfile
-zinc pack script.zn --format docker
+# Step 1: Package
+zinc pack script.zn --format nuitka
 
-# Step 2: Build
-docker build -t myapp .
+# Step 2: Build (runs Nuitka compiler)
+./build-script.sh
+# Or manually:
+python3.14t -m pip install nuitka
+python3.14t -m nuitka --onefile --output-filename=script --output-dir=dist --follow-imports script.py
 
 # Step 3: Run
+./dist/script
+```
+
+**What `zinc pack --format nuitka` generates:**
+- `script.py` — transpiled Python source
+- `build-script.sh` — build script that installs Nuitka and compiles
+
+**How it works:** Nuitka transpiles Python → C, then compiles with GCC/Clang → native binary. Full Python compatibility — NumPy, Polars, requests all work.
+
+**Requirements:** C compiler (gcc, clang, or msvc)
+
+**When to use:** Performance-critical deployments, smaller binaries than PyInstaller, when you want true compiled speed.
+
+| | PyInstaller | Nuitka |
+|---|---|---|
+| Binary size | 15-50 MB | 10-30 MB |
+| Startup | ~1s (extracts) | Fast (native) |
+| Runtime speed | Same as Python | 30-50% faster |
+| Compilation | Fast | Slow (first build) |
+
+---
+
+## 4. Docker — Container Image (Single File or Project)
+
+Works with a single file or an entire project directory:
+
+```bash
+# Single file
+zinc pack script.zn --format docker
+
+# Entire project — transpiles all .zn files, detects entry point
+zinc pack myproject/ --format docker
+
+# Build and run
+docker build -t myapp .
 docker run myapp
-docker run myapp -- arg1 arg2
 ```
 
 **What `zinc pack --format docker` generates:**
@@ -126,13 +164,14 @@ The Dockerfile auto-installs them during build.
 
 ---
 
-## 4. Kubernetes — Full Deployment
+## 5. Kubernetes — Full Deployment
 
-Generate a Docker image + K8s deployment manifest:
+Generate a Docker image + K8s deployment manifest. Works with single files or project directories:
 
 ```bash
-# Step 1: Generate everything
+# Single file or project directory
 zinc pack script.zn --format k8s
+zinc pack myproject/ --format k8s
 
 # Step 2: Build and push the Docker image
 docker build -t myregistry/myapp:latest .
@@ -195,7 +234,7 @@ spec:
 
 ---
 
-## 5. Shebang — Executable Scripts
+## 6. Shebang — Executable Scripts
 
 Make `.zn` files directly executable on Unix:
 

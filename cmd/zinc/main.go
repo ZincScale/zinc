@@ -43,7 +43,7 @@ Usage:
   zinc run <file.zn>           Transpile to Python and run
   zinc transpile <file.zn>     Output .py file
   zinc fmt <file.zn>           Format Zinc source code
-  zinc pack <file.zn>         Package for deployment (pyinstaller, docker, k8s)
+  zinc pack <file.zn|dir>     Package for deployment (pyinstaller, nuitka, docker, k8s)
   zinc repl                    Interactive Zinc REPL
   zinc <file.zn>               Transpile a single file (outputs .py)
 
