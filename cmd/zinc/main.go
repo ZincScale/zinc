@@ -429,6 +429,7 @@ func findPython() string {
 		}
 	}
 	for _, path := range []string{
+		os.Getenv("HOME") + "/python3.14t/bin/python3.14t",
 		os.Getenv("HOME") + "/python3.14t/bin/python3",
 		"/usr/local/bin/python3t",
 	} {
