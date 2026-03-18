@@ -1,9 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:  # disabled auto-triggers — GitHub Actions quota exceeded
+  # push:
+  #   tags:
+  #     - 'v*'
 
 permissions:
   contents: write
