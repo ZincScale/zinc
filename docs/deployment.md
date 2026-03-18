@@ -37,6 +37,27 @@ zinc pack myproject/ --format k8s
 
 Entry point auto-detected: `main.zn` > `app.zn` > first file found.
 
+### Dependencies
+
+`zinc pack` auto-generates `requirements.txt` from your `.zn` imports:
+
+```bash
+# Your code imports polars, requests, flask
+# → requirements.txt generated with: polars, requests, flask
+# stdlib (json, os, sys) is excluded automatically
+```
+
+Additionally, `polars` and `numpy` are always included because the smart dispatch runtime uses them automatically for collection chains.
+
+If you already have a `requirements.txt`, zinc respects it and won't overwrite.
+
+| Context | How deps are handled |
+|---|---|
+| `zinc run` | Smart dispatch auto-installs polars/numpy on first use |
+| `zinc pack` | requirements.txt auto-generated with all deps |
+| Docker / K8s | `pip install -r requirements.txt` at image build time |
+| PyInstaller / Nuitka | requirements.txt available for hidden imports |
+
 ---
 
 ## 1. Run Directly

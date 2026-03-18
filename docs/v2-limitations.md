@@ -20,8 +20,11 @@ Everything below is implemented, tested, and working end-to-end:
 - List/dict comprehensions (auto list vs generator promotion)
 - Collection methods: `.filter()`, `.map()`, `.sum()`, `.sort_by()`, `.take()`, etc.
 - Smart dispatch: single method → comprehension, chains → `_zinc_collect()` runtime
-- Smart data shape dispatch: list[dict]→Polars, list[numeric]→NumPy (auto)
-- Type checker: type mismatches, undefined variables, return types, arg types, break outside loop
+- Smart data shape dispatch: list[dict]→Polars, list[numeric]→NumPy (auto-install if needed)
+- Free-threaded Python by default (GIL disabled), auto-parallelize `.map()` on 1000+ items
+- GIL-dependent library warnings at transpile time
+- Type checker: mismatches, return types, arg types, all-paths-return, type narrowing
+- `is` type checks: `x is str` → isinstance, `x is none` → identity, with type narrowing
 - Source maps: Python errors show .zn file and line numbers
 - `yield` / generator functions, nested functions
 - `del`, `assert`, `with` context managers
@@ -30,7 +33,9 @@ Everything below is implemented, tested, and working end-to-end:
 - Shebang: `#!/usr/bin/env zinc run`
 - `**` power operator, `match`, `break`/`continue`
 - `data` is a contextual keyword — fully usable as variable name
-- CLI: `zinc run`, `zinc transpile`, `zinc fmt`, `zinc repl`, temp file cleanup
+- CLI: `zinc run`, `zinc transpile`, `zinc fmt`, `zinc repl`, `zinc pack`
+- `zinc pack`: PyInstaller, Nuitka, Docker, K8s — all with free-threaded Python
+- Auto-generated requirements.txt from imports (polars/numpy always included)
 
 ## Parser — Not Yet Implemented
 
@@ -44,35 +49,19 @@ Everything below is implemented, tested, and working end-to-end:
 - [x] ~~No tuple literals~~ — implemented: `(1, 2, 3)`, `return a, b`
 - [x] ~~No `@property`~~ — works via decorator pass-through
 
-## Codegen — Not Yet Implemented
+## Remaining Limitations
 
-- [x] ~~Auto-self doesn't track inherited fields~~ — fixed, registry resolves parents
-- [x] ~~No super() auto-gen~~ — classes with parents generate super().__init__(**kwargs)
-- [x] ~~Nested quotes in string interpolation~~ — `"{data["key"]}"` works
+### Parser
+- [ ] No chained comparisons (`0 < x < 10`)
+- [ ] No walrus operator (`:=`)
+- [ ] No `async` / `await`
+- [ ] No `global` / `nonlocal`
+- [ ] No `type` aliases
+- [ ] No star import (`from module import *`)
+
+### Codegen
 - [ ] `match` emits Python 3.10+ syntax — no fallback for older Python
-- [x] ~~No source map / line number tracking~~ — errors show .zn file and line numbers
-- [ ] Fast serialization builtins (json_load, csv_load) — use imports directly
-- [ ] `.parallel_map()` — not implemented (use threads/multiprocessing directly)
 
-## CLI — Not Yet Implemented
-
-- [x] ~~No `zinc fmt`~~ — implemented, reformats with consistent indentation
-- [x] ~~No `zinc repl`~~ — implemented, interactive with multi-line block support
-- [x] ~~No shebang support~~ — `#!/usr/bin/env zinc run` works
-
-## Type System — Limitations
-
-- [x] ~~Function return type checking~~ — catches `return "hello"` when fn returns int
-- [x] ~~Function call arg checking~~ — catches wrong arg types and counts
-- [x] ~~break/continue outside loop~~ — caught at transpile time
+### Type System
 - [ ] No generic type constraints
 - [ ] No Protocol support
-- [x] ~~Doesn't verify all code paths return~~ — catches missing returns in if/else/match
-- [x] ~~No type narrowing~~ — `if x is str` narrows x in then-branch (generates isinstance)
-
-## Design Doc — All Implemented
-
-- [x] ~~Auto-parallelization of `.map()`~~ — ThreadPoolExecutor on 1000+ items when GIL disabled
-- [x] ~~GIL-dependent library detection~~ — warns at transpile time for pandas, numba, etc.
-- [x] ~~Free-threaded Python auto-dispatch~~ — detects `sys._is_gil_enabled()` at runtime
-- [x] ~~Smart collection dispatch based on data shape~~ — list[dict]→Polars, list[numeric]→NumPy, auto

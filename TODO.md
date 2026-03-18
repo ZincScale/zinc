@@ -1,53 +1,79 @@
 # Zinc v2 Roadmap
 
-Typed Python with explicit blocks. Transpiles `.zn` → `.py`.
+Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Python by default.
 
 ---
 
 ## Completed (v2.0-dev)
 
-- [x] Lexer: v2 tokens (try, catch, raise, not, and, from, none, **)
-- [x] Parser: brace-block syntax `{ }`, fn keyword, colon return types, script mode
-- [x] Python codegen: full transpilation pipeline
-- [x] CLI: `zinc run`, `zinc transpile`, `--optimize polars`
-- [x] Data classes → `@dataclass`
-- [x] Enums → `enum.Enum`
+### Language
+- [x] Brace-block syntax `{ }`, `fn` keyword, colon return types, script mode
+- [x] Data classes → `@dataclass`, enums → `enum.Enum`
 - [x] Classes with inheritance, auto-self injection (including inherited fields), dunder mapping
-- [x] Two-track error handling: Result[T] / Err + try/catch
-- [x] and/or/not, not in, is not, none
+- [x] `@staticmethod`, `@classmethod`, `@property`, general decorator pass-through
+- [x] Two-track error handling: `Result[T]` / `Err` + `try`/`catch`
+- [x] `raise X from Y` (exception chaining)
+- [x] `and`/`or`/`not`, `not in`, `is not`, `none`
+- [x] `is` type checks: `x is str` → `isinstance()`, `x is none` → identity
 - [x] Expression if (condition-first ternary)
-- [x] Lambdas (x -> expr), *args/**kwargs, default args
+- [x] Lambdas (`x -> expr`), `*args`/`**kwargs`, default args
+- [x] Tuple literals `(1, 2, 3)`, `return a, b`
 - [x] Comprehensions (auto list/generator), dict comprehensions
-- [x] Collection methods (.filter, .map, .sum, .sort_by, etc.)
-- [x] Smart dispatch: single method → comprehension, chains → _zinc_collect() runtime
-- [x] `--optimize polars` → Polars lazy frame pipelines at transpile time
-- [x] Decorators (@cache, @staticmethod, @classmethod, @property)
-- [x] yield / generator functions, nested functions
-- [x] Tuple literals (1, 2, 3), return a, b
-- [x] del, assert, with context managers
-- [x] raise X from Y (exception chaining)
-- [x] Single-quote strings (literal), double-quote (interpolation), triple-quote (multi-line)
-- [x] ** power operator, match/case
-- [x] Type checker: catches type mismatches, undefined variables at transpile time
+- [x] Collection methods (`.filter`, `.map`, `.sum`, `.sort_by`, etc.)
+- [x] `yield` / generator functions, nested functions
+- [x] `del`, `assert`, `with` context managers
+- [x] Single-quote (literal), double-quote (interpolation), triple-quote (multi-line)
+- [x] Nested string interpolation: `"{data["key"]}"`
+- [x] `**` power operator, `match`/`case`, `break`/`continue`
+- [x] `data` contextual keyword — fully usable as variable name
+- [x] Shebang: `#!/usr/bin/env zinc run`
+
+### Type System
+- [x] Type mismatches: `var x: int = "hello"` → error
+- [x] Return type verification: all code paths must return
+- [x] Function call arg type and count checking
+- [x] Type narrowing after `is` checks
+- [x] `break`/`continue` outside loop detection
+- [x] Undefined variable detection
+- [x] GIL-dependent library warnings at transpile time
+
+### Smart Dispatch
+- [x] Single method → inline comprehension (zero overhead)
+- [x] Chained methods → `_zinc_collect()` runtime
+- [x] Auto data shape detection: `list[dict]` → Polars, `list[numeric]` → NumPy
+- [x] Auto-install polars/numpy on first use if not installed
+- [x] Free-threaded auto-parallelize: `.map()` on 1000+ items uses ThreadPoolExecutor
+
+### CLI & Tooling
+- [x] `zinc run` — free-threaded Python by default (finds python3.14t)
+- [x] `zinc transpile` — output .py file
+- [x] `zinc fmt` — format source code
+- [x] `zinc repl` — interactive REPL with multi-line support
+- [x] `zinc pack` — PyInstaller binary
+- [x] `zinc pack --format nuitka` — compiled native binary (30-50% faster)
+- [x] `zinc pack --format docker` — Dockerfile with free-threaded Python from source
+- [x] `zinc pack --format k8s` — Dockerfile + K8s deployment manifest
+- [x] Project directory support: `zinc pack myproject/`
+- [x] Auto-generated `requirements.txt` from imports (polars/numpy always included)
 - [x] Source maps: Python errors show .zn file and line numbers
-- [x] `data` keyword: contextual — works as variable name in all contexts
-- [x] super().__init__(**kwargs) auto-generated for child classes
-- [x] from x import a, b (consolidated on one line)
-- [x] 115+ v2 tests (parser + codegen + type checker)
+- [x] 115+ tests (parser + codegen + type checker)
 
 ## Next
 
 - [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design doc)
 - [ ] Chained comparisons (`0 < x < 10`)
 - [ ] async / await
-- [ ] zinc fmt (formatter)
-- [ ] zinc repl for v2
+- [ ] Generic type constraints
+- [ ] Protocol support
 
-## Design Docs
+## Docs
 
-- [Zinc Flow](docs/design-zinc-flow.md) — NiFi replacement, processor graph processing
-- [v2 Design](docs/design-zinc-v2-python.md) — language philosophy and decisions
-- [Known Limitations](docs/v2-limitations.md) — what's not yet implemented
+- [Getting Started](docs/getting-started.md) — install, hello world, key concepts
+- [Language Reference](docs/language-reference.md) — complete syntax guide
+- [Deployment Guide](docs/deployment.md) — Docker, K8s, PyInstaller, Nuitka, CI/CD
+- [Design Doc](docs/design-zinc-v2-python.md) — philosophy and decisions
+- [Zinc Flow](docs/design-zinc-flow.md) — NiFi replacement design
+- [Known Limitations](docs/v2-limitations.md) — what's not yet done
 
 ## v1 Archive
 
