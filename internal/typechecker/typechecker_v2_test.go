@@ -196,6 +196,79 @@ fn parse(s: str): Result[int] {
 	}
 }
 
+func TestV2AllPathsReturn(t *testing.T) {
+	errs := checkV2(`
+fn classify(x: int): str {
+    if x > 0 {
+        return "positive"
+    }
+}
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, "not all code paths return") {
+		t.Errorf("expected all-paths error, got: %s", errs[0].Message)
+	}
+}
+
+func TestV2AllPathsReturnOk(t *testing.T) {
+	errs := checkV2(`
+fn classify(x: int): str {
+    if x > 0 {
+        return "positive"
+    } else {
+        return "non-positive"
+    }
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got: %v", errs)
+	}
+}
+
+func TestV2AllPathsReturnMatch(t *testing.T) {
+	errs := checkV2(`
+fn describe(x: int): str {
+    match x {
+        case 1 -> return "one"
+        case 2 -> return "two"
+        case _ -> return "other"
+    }
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got: %v", errs)
+	}
+}
+
+func TestV2TypeNarrowing(t *testing.T) {
+	// After "x is str", x should be narrowed to str in the then-branch
+	errs := checkV2(`
+fn process(x: any) {
+    if x is str {
+        var y: str = x
+    }
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors (type narrowed to str), got: %v", errs)
+	}
+}
+
+func TestV2TypeNarrowingIsinstance(t *testing.T) {
+	errs := checkV2(`
+fn process(x: any) {
+    if isinstance(x, int) {
+        var y: int = x
+    }
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors (narrowed via isinstance), got: %v", errs)
+	}
+}
+
 func TestV2ValidScript(t *testing.T) {
 	errs := checkV2(`
 import json

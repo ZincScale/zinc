@@ -68,8 +68,8 @@ Everything below is implemented, tested, and working end-to-end:
 - [x] ~~break/continue outside loop~~ — caught at transpile time
 - [ ] No generic type constraints
 - [ ] No Protocol support
-- [ ] Doesn't verify all code paths return a value
-- [ ] No type narrowing after `isinstance` checks
+- [x] ~~Doesn't verify all code paths return~~ — catches missing returns in if/else/match
+- [x] ~~No type narrowing~~ — `if x is str` and `isinstance(x, T)` narrow x in then-branch
 
 ## Design Doc Over-Promises (Not Yet Implemented)
 

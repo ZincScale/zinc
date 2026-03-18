@@ -189,10 +189,62 @@ func (c *V2Checker) checkFnDecl(d *parser.FnDecl) {
 
 	if d.Body != nil {
 		c.checkBlock(d.Body)
+
+		// Check all paths return if function has a return type
+		if d.ReturnType != nil && retType.Name != "any" && !c.blockReturns(d.Body) {
+			c.errorf(d.Line, "function %q: not all code paths return a value", d.Name)
+		}
 	}
 
 	c.fnReturnType = nil
 	c.scope = prevScope
+}
+
+// blockReturns checks if a block definitely returns on all execution paths.
+func (c *V2Checker) blockReturns(block *parser.BlockStmt) bool {
+	if len(block.Stmts) == 0 {
+		return false
+	}
+	last := block.Stmts[len(block.Stmts)-1]
+	return c.stmtReturns(last)
+}
+
+// stmtReturns checks if a statement definitely returns.
+func (c *V2Checker) stmtReturns(s parser.Stmt) bool {
+	switch s := s.(type) {
+	case *parser.ReturnStmt:
+		return true
+	case *parser.RaiseStmt:
+		return true
+	case *parser.IfStmt:
+		// Both branches must return
+		if s.ElseStmt == nil {
+			return false // no else → not all paths covered
+		}
+		thenReturns := c.blockReturns(s.Then)
+		var elseReturns bool
+		if block, ok := s.ElseStmt.(*parser.BlockStmt); ok {
+			elseReturns = c.blockReturns(block)
+		} else if ifStmt, ok := s.ElseStmt.(*parser.IfStmt); ok {
+			elseReturns = c.stmtReturns(ifStmt)
+		}
+		return thenReturns && elseReturns
+	case *parser.MatchStmt:
+		// All cases must return, and there must be a wildcard
+		hasWildcard := false
+		for _, mc := range s.Cases {
+			if mc.Pattern == nil {
+				hasWildcard = true
+			}
+			if !c.blockReturns(mc.Body) {
+				return false
+			}
+		}
+		return hasWildcard
+	case *parser.BlockStmt:
+		return c.blockReturns(s)
+	}
+	return false
 }
 
 func (c *V2Checker) checkClassDecl(d *parser.ClassDecl) {
@@ -268,7 +320,16 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		}
 	case *parser.IfStmt:
 		c.inferType(s.Cond)
-		c.checkBlock(s.Then)
+		// Type narrowing: if x is Type, narrow x in then-branch
+		narrowedScope := c.tryNarrow(s.Cond)
+		if narrowedScope != nil {
+			prevScope := c.scope
+			c.scope = narrowedScope
+			c.checkBlock(s.Then)
+			c.scope = prevScope
+		} else {
+			c.checkBlock(s.Then)
+		}
 		if s.ElseStmt != nil {
 			if block, ok := s.ElseStmt.(*parser.BlockStmt); ok {
 				c.checkBlock(block)
@@ -497,6 +558,39 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	default:
 		return typeAny
 	}
+}
+
+// tryNarrow checks if a condition narrows a variable's type.
+// Supports: x is Type, isinstance(x, Type)
+// Returns a new scope with the narrowed type, or nil.
+func (c *V2Checker) tryNarrow(cond parser.Expr) *V2Scope {
+	switch e := cond.(type) {
+	case *parser.BinaryExpr:
+		// x is Type → narrow x to Type
+		if e.Op == "is" {
+			if ident, ok := e.Left.(*parser.Ident); ok {
+				if typeIdent, ok := e.Right.(*parser.Ident); ok {
+					narrowed := newV2Scope(c.scope)
+					narrowed.set(ident.Name, V2Type{Name: typeIdent.Name})
+					return narrowed
+				}
+			}
+		}
+	case *parser.CallExpr:
+		// isinstance(x, Type) → narrow x to Type
+		if callee, ok := e.Callee.(*parser.Ident); ok && callee.Name == "isinstance" {
+			if len(e.Args) == 2 {
+				if ident, ok := e.Args[0].(*parser.Ident); ok {
+					if typeIdent, ok := e.Args[1].(*parser.Ident); ok {
+						narrowed := newV2Scope(c.scope)
+						narrowed.set(ident.Name, V2Type{Name: typeIdent.Name})
+						return narrowed
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // isResultReturn checks if a return type is Result[T].
