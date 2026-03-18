@@ -1,0 +1,217 @@
+#!/usr/bin/env zinc run
+// flowfile_packager.zn — NiFi FlowFile V3 packager/unpackager
+//
+// Compatible with org.apache.nifi.util.FlowFilePackagerV3
+// Binary format: [NiFiFF3 magic][attrs][content] per flowfile
+//
+// Usage:
+//   zinc run flowfile_packager.zn pack input.json output.bin
+//   zinc run flowfile_packager.zn unpack output.bin [output_dir]
+
+import struct
+import sys
+import json
+import os
+
+// Magic header bytes for FlowFile V3 format
+var MAGIC = "NiFiFF3".encode("utf-8")
+var MAX_VALUE_2_BYTES = 65535
+
+// --- Encoding helpers ---
+
+fn write_field_length(value: int) {
+    if value < MAX_VALUE_2_BYTES {
+        return struct.pack(">H", value)
+    } else {
+        return bytes([255, 255]) + struct.pack(">I", value)
+    }
+}
+
+fn read_field_length(data: bytes, offset: int) {
+    var val = struct.unpack(">H", data[offset:offset + 2])[0]
+    if val < MAX_VALUE_2_BYTES {
+        return val, offset + 2
+    }
+    var big = struct.unpack(">I", data[offset + 2:offset + 6])[0]
+    return big, offset + 6
+}
+
+// --- Packager ---
+
+fn package_flowfile(attributes: dict, content: bytes) {
+    var buf = bytearray()
+
+    // Magic header
+    buf.extend(MAGIC)
+
+    // Attribute count
+    var count = len(attributes)
+    if count == 0 {
+        raise ValueError("FlowFile must have at least one attribute")
+    }
+    buf.extend(write_field_length(count))
+
+    // Attributes — key/value pairs, length-prefixed UTF-8
+    for item in attributes.items() {
+        var key = item[0]
+        var value = item[1]
+        var key_bytes = key.encode("utf-8")
+        var val_bytes = if value is not none: str(value).encode("utf-8") else: bytes()
+        buf.extend(write_field_length(len(key_bytes)))
+        buf.extend(key_bytes)
+        buf.extend(write_field_length(len(val_bytes)))
+        buf.extend(val_bytes)
+    }
+
+    // Content length (8-byte big-endian) + content
+    buf.extend(struct.pack(">q", len(content)))
+    buf.extend(content)
+
+    return bytes(buf)
+}
+
+fn package_multiple(flowfiles: list) {
+    var buf = bytearray()
+    for ff in flowfiles {
+        buf.extend(package_flowfile(ff["attributes"], ff["content"]))
+    }
+    return bytes(buf)
+}
+
+// --- Unpackager ---
+
+fn unpackage_flowfile(data: bytes, offset: int) {
+    // Verify magic header
+    if data[offset:offset + 7] != MAGIC {
+        raise ValueError("Invalid FlowFile V3 magic at offset {offset}")
+    }
+    var pos = offset + 7
+
+    // Read attribute count
+    var result = read_field_length(data, pos)
+    var count = result[0]
+    pos = result[1]
+
+    // Read attributes
+    var attributes = {}
+    for _ in range(count) {
+        result = read_field_length(data, pos)
+        var key_len = result[0]
+        pos = result[1]
+        var key = data[pos:pos + key_len].decode("utf-8")
+        pos = pos + key_len
+
+        result = read_field_length(data, pos)
+        var val_len = result[0]
+        pos = result[1]
+        var val = data[pos:pos + val_len].decode("utf-8")
+        pos = pos + val_len
+
+        attributes[key] = val
+    }
+
+    // Read content
+    var content_len = struct.unpack(">q", data[pos:pos + 8])[0]
+    pos = pos + 8
+    var content = data[pos:pos + content_len]
+    pos = pos + content_len
+
+    return attributes, content, pos
+}
+
+fn unpackage_all(data: bytes) {
+    var flowfiles = []
+    var pos = 0
+    while pos < len(data) {
+        var result = unpackage_flowfile(data, pos)
+        flowfiles.append({"attributes": result[0], "content": result[1]})
+        pos = result[2]
+    }
+    return flowfiles
+}
+
+// --- CLI ---
+
+fn print_usage() {
+    print("Usage:")
+    print("  zinc run flowfile_packager.zn pack <json_file> <output_file>")
+    print("  zinc run flowfile_packager.zn unpack <flowfile> [output_dir]")
+    print("")
+    print("Pack JSON format:")
+    print('  [{"attributes": {"filename": "test.txt"}, "content": "Hello"}]')
+}
+
+if len(sys.argv) < 3 {
+    print_usage()
+    sys.exit(1)
+}
+
+var command = sys.argv[1]
+
+if command == "pack" {
+    if len(sys.argv) < 4 {
+        print_usage()
+        sys.exit(1)
+    }
+    var json_path = sys.argv[2]
+    var out_path = sys.argv[3]
+
+    var raw = open(json_path).read()
+    var flowfiles = json.loads(raw)
+
+    // Convert string content to bytes
+    var prepared = []
+    for ff in flowfiles {
+        var content = ff["content"]
+        if content is str {
+            content = content.encode("utf-8")
+        }
+        prepared.append({"attributes": ff["attributes"], "content": content})
+    }
+
+    var packed = package_multiple(prepared)
+    with f = open(out_path, "wb") {
+        f.write(packed)
+    }
+    print("Packed {len(prepared)} flowfile(s) -> {out_path} ({len(packed)} bytes)")
+
+} else if command == "unpack" {
+    var ff_path = sys.argv[2]
+    var out_dir = if len(sys.argv) > 3: sys.argv[3] else: "."
+
+    var data = open(ff_path, "rb").read()
+    var flowfiles = unpackage_all(data)
+
+    print("Unpacked {len(flowfiles)} flowfile(s):")
+    for i, ff in flowfiles {
+        var attrs = ff["attributes"]
+        var content = ff["content"]
+        var filename = attrs.get("filename", "flowfile_{i}")
+
+        print("  [{i}] {filename} ({len(content)} bytes, {len(attrs)} attrs)")
+        for item in attrs.items() {
+            print("       {item[0]} = {item[1]}")
+        }
+
+        var file_path = os.path.join(out_dir, filename)
+        with f = open(file_path, "wb") {
+            f.write(content)
+        }
+    }
+
+    // Write attributes as sidecar JSON
+    var meta = []
+    for ff in flowfiles {
+        meta.append({"attributes": ff["attributes"], "content_size": len(ff["content"])})
+    }
+    var meta_path = os.path.join(out_dir, "flowfile_attributes.json")
+    with f = open(meta_path, "w") {
+        json.dump(meta, f, indent=2)
+    }
+    print("Attributes written to {meta_path}")
+
+} else {
+    print("Unknown command: {command}")
+    print_usage()
+    sys.exit(1)
+}
