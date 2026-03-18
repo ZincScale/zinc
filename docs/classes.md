@@ -55,34 +55,53 @@ public class Dog
 }
 ```
 
-### Readonly Fields
+### Fields, Properties, and Readonly
 
-Use `readonly` for fields that are set in the constructor and never change:
+Zinc has four field modifiers that control visibility and mutability:
 
 ```zinc
 User {
-    pub readonly String name       // set once in constructor, then immutable
-    pub readonly String email
-    pub Int loginCount             // mutable — can be updated after construction
+    pub String nickname              // public, mutable — anyone can read and write
+    pub readonly String name         // public, immutable — set in constructor, read-only after
+    readonly String hashedPassword   // private, immutable — internal, set once, never changes
+    String sessionToken              // private, mutable — internal, can be updated
 
-    new(String name, String email) {
+    new(String name, String nickname, String password) {
         this.name = name
-        this.email = email
-        this.loginCount = 0
+        this.nickname = nickname
+        this.hashedPassword = hash(password)
+        this.sessionToken = ""
     }
+
+    pub updateNickname(String newName) {
+        this.nickname = newName          // OK — pub, mutable
+        // this.name = "other"           // ERROR — readonly, can't change after construction
+    }
+}
+
+main() {
+    var u = User("Alice", "Ali", "secret123")
+    print(u.name)                        // OK — pub, can read
+    u.nickname = "Ally"                  // OK — pub, mutable
+    // u.name = "Bob"                    // ERROR — readonly
+    // print(u.hashedPassword)           // ERROR — private
 }
 ```
 
-**Generated C#:**
+**How each modifier maps to C#:**
 
-| Zinc | C# |
-|------|-----|
-| `pub String name` | `public string Name { get; set; }` |
-| `pub readonly String name` | `public string Name { get; init; }` |
-| `String name` | `private string _name;` |
-| `readonly String name` | `private readonly string _name;` |
+| Zinc | C# Output | Visible | Mutable |
+|------|-----------|---------|---------|
+| `pub String name` | `public string Name { get; set; }` | Yes | Yes |
+| `pub readonly String name` | `public string Name { get; init; }` | Yes | Only in constructor |
+| `readonly String name` | `private readonly string _name;` | No | Only in constructor |
+| `String name` | `private string _name;` | No | Yes (internally) |
 
-`pub readonly` maps to C# `{ get; init; }` — settable in the constructor, readonly after that. This is the proper OO pattern: most fields should be readonly, with mutation only where explicitly needed.
+**Guidelines:**
+- Use `pub readonly` for identity fields (name, id, email) — set once, never changes
+- Use `pub` for fields that external code needs to modify (settings, counters)
+- Use `readonly` for internal state that must not change after construction (hashed values, computed fields)
+- Use bare type for internal mutable state (caches, session data)
 
 **Constants and functions follow the same rule:**
 
