@@ -481,10 +481,7 @@ func (g *Generator) emitAnnotations(annotations []*parser.Annotation) {
 func (g *Generator) emitFnBody(d *parser.FnDecl) {
 	g.emitAnnotations(d.Annotations)
 	retType := g.emitType(d.ReturnType)
-	vis := "private"
-	if d.IsPub || g.testMode {
-		vis = "public"
-	}
+	vis := "public"
 	params := g.formatParams(d.Params)
 	typeParams := g.formatTypeParams(d.TypeParams)
 	g.writeln(fmt.Sprintf("%s static %s %s%s(%s)", vis, retType, capitalize(d.Name), typeParams, params))
