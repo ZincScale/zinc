@@ -38,6 +38,7 @@ type Config struct {
 	Target       string       // "csharp" (default) or "go"
 	Optimize     bool         // AOT with full optimizations (default: true)
 	Release      bool         // strip symbols for production (default: false, set by --release)
+	NuGetSource  string       // custom NuGet source URL (default: nuget.org)
 	Dependencies []Dependency // package dependencies
 }
 
@@ -107,6 +108,8 @@ func Load(dir string) (*Config, error) {
 			cfg.Target = val
 		case fullKey == "build.optimize":
 			cfg.Optimize = val == "true"
+		case fullKey == "nuget.source":
+			cfg.NuGetSource = val
 		case section == "dependencies":
 			cfg.Dependencies = append(cfg.Dependencies, Dependency{
 				Name:    strings.Trim(key, `"`),
@@ -140,6 +143,34 @@ func Generate(cfg *Config) string {
 		}
 	}
 	return b.String()
+}
+
+// AddDependency adds or updates a dependency in the config.
+func (c *Config) AddDependency(name, version string) {
+	for i, dep := range c.Dependencies {
+		if strings.EqualFold(dep.Name, name) {
+			c.Dependencies[i].Version = version
+			return
+		}
+	}
+	c.Dependencies = append(c.Dependencies, Dependency{Name: name, Version: version})
+}
+
+// RemoveDependency removes a dependency by name. Returns true if found.
+func (c *Config) RemoveDependency(name string) bool {
+	for i, dep := range c.Dependencies {
+		if strings.EqualFold(dep.Name, name) {
+			c.Dependencies = append(c.Dependencies[:i], c.Dependencies[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// SaveToFile writes the config back to zinc.toml in the given directory.
+func (c *Config) SaveToFile(dir string) error {
+	path := filepath.Join(dir, "zinc.toml")
+	return os.WriteFile(path, []byte(Generate(c)), 0644)
 }
 
 // RuntimeID returns the .NET runtime identifier for the current platform.

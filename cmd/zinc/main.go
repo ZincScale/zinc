@@ -25,6 +25,7 @@ import (
 	"zinc/internal/config"
 	"zinc/internal/errs"
 	"zinc/internal/lexer"
+	"zinc/internal/nuget"
 	"zinc/internal/parser"
 	"zinc/internal/project"
 	"zinc/internal/typechecker"
@@ -40,6 +41,9 @@ Usage:
   zinc build [dir]         Transpile + compile (native AOT binary)
   zinc run [dir]           Transpile + run
   zinc test [dir]          Discover and run test_* functions
+  zinc add <pkg> [...]     Add NuGet dependency (latest version)
+  zinc remove <pkg>        Remove a dependency
+  zinc deps                List current dependencies
   zinc init [name]         Initialize a new Zinc project (creates zinc.toml + main.zn)
   zinc repl                Launch interactive REPL
 
@@ -177,6 +181,98 @@ func main() {
 			if err := project.TestCSharp(dir, cfg, verboseTest, filterFn); err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
+			}
+			return
+		case a == "add":
+			// zinc add Serilog [AWSSDK.SQS ...] [--version X.Y.Z] [--source URL]
+			var packages []string
+			specVersion := ""
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "--version" && j+1 < len(args) {
+					specVersion = args[j+1]
+					j++
+				} else if !strings.HasPrefix(args[j], "-") {
+					packages = append(packages, args[j])
+				}
+			}
+			if len(packages) == 0 {
+				errs.Error("usage: zinc add <package> [package...] [--version X.Y.Z]")
+				os.Exit(1)
+			}
+			dir := "."
+			cfg, err := config.Load(dir)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			if cfg == nil {
+				errs.Error("no zinc.toml found — run 'zinc init' first")
+				os.Exit(1)
+			}
+			for _, pkg := range packages {
+				ver := specVersion
+				if ver == "" {
+					var resolved string
+					var err error
+					if cfg.NuGetSource != "" {
+						resolved, err = nuget.ResolveLatestFrom(cfg.NuGetSource, pkg)
+					} else {
+						resolved, err = nuget.ResolveLatest(pkg)
+					}
+					if err != nil {
+						errs.Errorf("%s: %v", pkg, err)
+						os.Exit(1)
+					}
+					ver = resolved
+				}
+				cfg.AddDependency(pkg, ver)
+				fmt.Printf("  added %s %s\n", pkg, ver)
+			}
+			if err := cfg.SaveToFile(dir); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			return
+		case a == "remove":
+			if i+1 >= len(args) {
+				errs.Error("usage: zinc remove <package>")
+				os.Exit(1)
+			}
+			pkg := args[i+1]
+			dir := "."
+			cfg, err := config.Load(dir)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			if cfg == nil {
+				errs.Error("no zinc.toml found")
+				os.Exit(1)
+			}
+			if cfg.RemoveDependency(pkg) {
+				if err := cfg.SaveToFile(dir); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+				fmt.Printf("  removed %s\n", pkg)
+			} else {
+				fmt.Printf("  %s not found in dependencies\n", pkg)
+			}
+			return
+		case a == "deps":
+			dir := "."
+			cfg, err := config.Load(dir)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			if cfg == nil || len(cfg.Dependencies) == 0 {
+				fmt.Println("no dependencies")
+				return
+			}
+			fmt.Println("Dependencies:")
+			for _, dep := range cfg.Dependencies {
+				fmt.Printf("  %-30s %s\n", dep.Name, dep.Version)
 			}
 			return
 		case a == "-o" || a == "--o":
