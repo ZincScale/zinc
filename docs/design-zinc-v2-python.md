@@ -23,7 +23,7 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 2. **Prevent footguns** — enforced types, exhaustive match, null safety, unused variable warnings. The compiler catches what Python lets slip to runtime.
 3. **The transpiler works for you** — auto-inject `self`, translate clean method names to dunders, dispatch collections to fast backends, parallelize where safe. You write the intent, Zinc handles the mechanics.
 4. **It's just Python underneath** — full pip ecosystem, all Python libraries work. The output is readable `.py` you can hand to anyone.
-5. **Explicit blocks** — braces `{}` eliminate whitespace confusion. Copy-paste safely, refactor without counting spaces.
+5. **Explicit blocks** — `end` keyword eliminates whitespace confusion. Copy-paste safely, refactor without counting spaces. Natural for the sci/data crowd (Julia, Crystal, Ruby).
 6. **Quick changes in prod** — change a `.zn` file, `zinc run`, done. No compile wait, no deploy pipeline for a one-line fix. But the type checker still has your back.
 
 ### What the transpiler does for you
@@ -33,10 +33,10 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 | `fn str() -> str` | Generates `def __str__(self)` |
 | `items.filter(x -> x > 0)` | Dispatches to Polars/NumPy/comprehension based on data shape and available deps |
 | Field access: `name` | Injects `self.name` |
-| `data User { name: str }` | Full `@dataclass` with `__init__`, `__repr__`, `__eq__` |
+| `data User ... end` | Full `@dataclass` with `__init__`, `__repr__`, `__eq__` |
 | `var x = 5` | Infers type, enforces it everywhere `x` is used |
 | `.map(x -> process(x))` on large collections | Auto-parallelizes with thread pool (free-threaded Python) |
-| `match status { ... }` | Warns if cases aren't exhaustive |
+| `match status ... end` | Warns if cases aren't exhaustive |
 | Imports a GIL-dependent library | Warns and falls back gracefully |
 
 ### Non-goals
@@ -49,29 +49,88 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 
 ## Syntax
 
-### Block Delimiters
+### Block Delimiters — `end` Keyword
 
-Two options (choose one):
+Zinc uses `end` to close blocks — like Julia, Crystal, Ruby, and Lua. No braces, no significant whitespace. Indentation is for readability only (enforced by `zinc fmt`, ignored by the compiler).
 
-**Option A — Braces** (familiar to most developers):
 ```zinc
-if x > 10 {
-    print("big")
-} else {
-    print("small")
-}
-```
-
-**Option B — do/end** (Ruby-like, avoids shift key):
-```zinc
-if x > 10 do
+if x > 10
     print("big")
 else
     print("small")
 end
+
+fn process(items: list[dict]) -> list[dict]
+    var result = items.filter(x -> x["status"] == "active")
+    if len(result) > 100
+        result = result.sort_by(x -> x["priority"]).take(100)
+    end
+    return result
+end
 ```
 
-**Recommendation:** Braces. They're universal, every editor handles them, and the user has ergonomic keyboard concerns but braces are a single keystroke on most layouts. `do/end` adds verbosity without much gain.
+Why `end` over braces:
+- No shift key needed — pure alpha keys
+- Natural for the sci/data audience (Julia, Crystal, Ruby, Matlab, Lua)
+- Reads like pseudocode
+- Less visual noise than `}` stacking
+- Still explicit — no whitespace ambiguity
+
+### Multi-line Statements
+
+Long lines are a fact of life with data processing. Zinc handles line continuation naturally — **a statement continues on the next line if it's obviously incomplete:**
+
+**Automatic continuation** — the line ends with an operator, comma, `and`, `or`, or open bracket:
+
+```zinc
+var result = orders
+    .filter(x -> x.status == "active" and
+                 x.amount > 1000)
+    .sort_by(x -> x.created_at)
+    .take(50)
+
+var config = {
+    "host": "localhost",
+    "port": 8080,
+    "debug": true,
+    "tags": [
+        "production",
+        "us-east-1",
+    ],
+}
+
+if user.is_active and
+   user.role == "admin" and
+   user.last_login > cutoff_date
+    grant_access(user)
+end
+```
+
+**Rules (same as Ruby/Julia):**
+
+1. Line ends with `.` → continues (method chaining)
+2. Line ends with binary operator (`+`, `-`, `*`, `and`, `or`, `==`, `>`, etc.) → continues
+3. Line ends with `,` → continues (function args, collections)
+4. Unmatched `(`, `[`, or `{` → continues until closed
+5. Line ends with `\` → explicit continuation (escape hatch, rarely needed)
+
+This means **no backslash hell** like Python for multi-line conditions, and **no parenthesizing tricks** to avoid `\`. The parser knows from context.
+
+```zinc
+// Python forces this:
+//   if (user.is_active and
+//       user.role == "admin"):
+//
+// Or this:
+//   if user.is_active and \
+//      user.role == "admin":
+//
+// Zinc — just write it:
+if user.is_active and
+   user.role == "admin"
+    do_thing()
+end
+```
 
 ### Variables
 
@@ -91,11 +150,11 @@ scores: list[int] = []
 ### Functions
 
 ```zinc
-fn greet(name: str) -> str {
+fn greet(name: str) -> str
     return "Hello, {name}!"
-}
+end
 
-// Single-expression shorthand
+// Single-expression shorthand — no end needed
 fn double(x: int) -> int = x * 2
 ```
 
@@ -165,29 +224,29 @@ Python's `__dunder__` methods are powerful but ugly and hard to remember. Zinc r
 Example:
 
 ```zinc
-class Stack {
+class Stack
     var items: list[int] = []
 
-    fn push(item: int) {
+    fn push(item: int)
         items.append(item)
-    }
+    end
 
-    fn pop() -> int {
+    fn pop() -> int
         return items.pop()
-    }
+    end
 
-    fn len() -> int {
+    fn len() -> int
         return len(items)
-    }
+    end
 
-    fn str() -> str {
+    fn str() -> str
         return "Stack({items})"
-    }
+    end
 
-    fn iter() {
+    fn iter()
         return iter(items)
-    }
-}
+    end
+end
 ```
 
 Transpiles to:
@@ -217,11 +276,11 @@ The transpiler also auto-injects `self` — no need to write it in Zinc. Fields 
 ### Data Classes
 
 ```zinc
-data User {
+data User
     name: str
     email: str
     age: int = 0
-}
+end
 ```
 
 Transpiles to:
@@ -238,11 +297,11 @@ class User:
 ### Enums
 
 ```zinc
-enum Color {
+enum Color
     Red
     Green
     Blue
-}
+end
 ```
 
 Transpiles to:
@@ -261,16 +320,16 @@ Python's exception model, with braces and transpiler guardrails. No invented abs
 
 ```zinc
 // Full try/catch for when you need specificity
-try {
+try
     var data = open("config.json").read()
     var config = json.loads(data)
-} catch err: FileNotFoundError {
+catch err: FileNotFoundError
     print("Config not found, using defaults")
     var config = {}
-} catch err: json.JSONDecodeError {
+catch err: json.JSONDecodeError
     print("Bad JSON: {err}")
     exit(1)
-}
+end
 
 // or {} shorthand for scripts — catch and handle inline
 var data = open("config.json").read() or {
@@ -282,11 +341,15 @@ var data = open("config.json").read() or {
 var port = int(os.getenv("PORT")) or { 8080 }
 
 // raise works as expected
-fn divide(a: int, b: int) -> int {
-    if b == 0 { raise ValueError("division by zero") }
+fn divide(a: int, b: int) -> int
+    if b == 0
+        raise ValueError("division by zero")
+    end
     return a / b
-}
+end
 ```
+
+Note: `or {}` keeps braces — it's an inline expression, not a block. Think of it as a catch clause attached to a single expression.
 
 **Transpiler safety:** bare `except:` not allowed (must specify type), warns on empty catch blocks, warns on unhandled failable calls. See `error-handling.md` for full details.
 
@@ -304,39 +367,39 @@ Transpiles directly — no transformation needed. This is critical: **Zinc doesn
 ### Conditionals
 
 ```zinc
-if x > 0 {
+if x > 0
     print("positive")
-} elif x == 0 {
+elif x == 0
     print("zero")
-} else {
+else
     print("negative")
-}
+end
 ```
 
 ### Loops
 
 ```zinc
-for item in items {
+for item in items
     print(item)
-}
+end
 
-for i in range(10) {
+for i in range(10)
     print(i)
-}
+end
 
-while running {
+while running
     process_next()
-}
+end
 ```
 
-### Match (Python 3.10+)
+### Match
 
 ```zinc
-match command {
+match command
     case "start" -> start_server()
     case "stop" -> stop_server()
     case other -> print("Unknown: {other}")
-}
+end
 ```
 
 Transpiles to:
@@ -395,13 +458,13 @@ Real data pipelines process JSON records, Avro messages, NiFi flowfiles, CSV row
 
 ```zinc
 // Processing NiFi flowfiles, JSON records, Avro messages
-data Order {
+data Order
     id: str
     customer: str
     amount: float
     status: str
     items: list[dict]
-}
+end
 
 var orders = json.loads(read_file("orders.json"))
 
@@ -496,7 +559,7 @@ Use Pythonic names, not LINQ:
 | Feature | Why |
 |---|---|
 | **Enforced type checking** | The killer feature — Python's types are suggestions, Zinc's are real |
-| **Braces for blocks** | The other killer feature — no whitespace wars |
+| **`end` blocks** | The other killer feature — no whitespace wars, no braces |
 | **String interpolation `{}`** | Better than f-string prefix |
 | **`data` classes** | Cleaner than Python's dataclass decorator |
 | **`var` inference** | Less noise than explicit types everywhere |
@@ -634,19 +697,19 @@ var results = items.parallel_map(item -> process(item), workers=4)
 var counts = {}
 var lock = threading.Lock()
 
-fn count_words(chunk: list[str]) {
+fn count_words(chunk: list[str])
     var local_counts = {}
-    for line in chunk {
-        for word in line.split() {
+    for line in chunk
+        for word in line.split()
             local_counts[word] = local_counts.get(word, 0) + 1
-        }
-    }
-    with lock {
-        for word, count in local_counts.items() {
+        end
+    end
+    with lock
+        for word, count in local_counts.items()
             counts[word] = counts.get(word, 0) + count
-        }
-    }
-}
+        end
+    end
+end
 ```
 
 **Future potential:** The transpiler could auto-detect pure `.map()` / `.filter()` chains on large collections and generate parallel dispatch code using thread pools. The developer writes sequential-looking code, Zinc makes it parallel.
@@ -670,16 +733,16 @@ fn count_words(chunk: list[str]) {
 import os
 
 var total = 0
-for root, dirs, files in os.walk(".") {
-    for f in files {
-        if f.endswith(".py") {
+for root, dirs, files in os.walk(".")
+    for f in files
+        if f.endswith(".py")
             var path = os.path.join(root, f)
             var lines = len(open(path).readlines())
             print("{path}: {lines}")
             total += lines
-        }
-    }
-}
+        end
+    end
+end
 print("\nTotal: {total} lines")
 ```
 
@@ -712,35 +775,43 @@ print("Above average: {len(big)}")
 import requests
 import json
 
-fn get_issues(repo: str) -> list[dict] {
+fn get_issues(repo: str) -> list[dict]
     var resp = requests.get("https://api.github.com/repos/{repo}/issues")
     resp.raise_for_status()
     return resp.json()
-}
+end
 
 var issues = get_issues("python/cpython")
-for issue in issues[:10] {
+for issue in issues[:10]
     print("#{issue['number']}: {issue['title']}")
-}
+end
 ```
 
 ---
 
+## Decisions Made
+
+1. **`end` blocks** — decided. Matches Julia/Crystal/Ruby, natural for sci/data crowd, no shift key needed.
+
+2. **Multi-line continuation** — implicit via trailing operators, commas, open brackets. No backslash hell.
+
+3. **Python exceptions** — `try/catch/end` with braces-free syntax, `or {}` kept for inline shorthand.
+
+4. **No dunders** — clean method names (`fn str()`, `fn len()`, etc.), transpiler maps to `__dunder__`.
+
+5. **Auto-inject `self`** — fields accessed by name, transpiler adds `self.` prefix.
+
 ## Open Questions
 
-1. **Braces vs do/end?** — Leaning braces. Simpler, universal.
+1. **Method chaining vs comprehensions?** — Could support both. Comprehensions pass through to Python naturally. Method chaining (`.filter().map()`) is more readable for long pipelines and enables smart dispatch. Leaning: support both.
 
-2. **Method chaining vs comprehensions?** — Could support both. Comprehensions pass through to Python naturally. Method chaining needs `.map()` / `.filter()` which aren't idiomatic Python. Maybe just embrace comprehensions.
+2. **How much OO to keep?** — `data` for data classes is great. Full `class` with methods for when you need it. But discourage deep inheritance. No interfaces — use Python's Protocol if needed.
 
-3. **How much OO to keep?** — `data` for data classes is great. Full `class` with methods for when you need it. But discourage deep inheritance. No interfaces — use Python's Protocol if needed.
+3. **Zinc runtime library?** — Ideally zero. Builtins like `exec()`, `read_file()` could inline their Python equivalents. But a tiny `zinc.py` runtime for collection dispatch and parallel_map might be practical.
 
-4. **`or {}` error handling?** — Nice for scripts, but adds transpiler complexity. Could start without it and add later if missed.
+4. **Type system depth?** — Start with Python's type syntax (str, int, list[str], dict[str, int], Optional[str], Union[str, int]). Zinc enforces them at transpile time. Generics and protocols can come later.
 
-5. **Zinc runtime library?** — Ideally zero. Builtins like `exec()`, `read_file()` could inline their Python equivalents. But a tiny `zinc.py` runtime for common helpers might be practical.
-
-6. **Type system depth?** — Start with Python's type syntax (str, int, list[str], dict[str, int], Optional[str], Union[str, int]). Zinc enforces them at transpile time. Generics and protocols can come later.
-
-7. **Async?** — Python's async/await is powerful but adds complexity. Defer to v2.1?
+5. **Async?** — Python's async/await is powerful but adds complexity. Free-threading may reduce the need. Defer to v2.1?
 
 ---
 
@@ -748,7 +819,8 @@ for issue in issues[:10] {
 
 ### Phase 1 — Minimum Viable Transpiler
 - Lexer/parser for: `var`, `fn`, `if/elif/else`, `for`, `while`, `return`, `print`
-- Braces → indentation conversion
+- `end` blocks → indentation conversion
+- Multi-line statement continuation
 - String interpolation → f-strings
 - Type inference for `var`
 - Type checking (basic: int, str, float, bool, list, dict)

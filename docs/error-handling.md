@@ -8,24 +8,24 @@ Python exceptions are fine. The problem isn't the mechanism — it's that Python
 
 1. **Failable calls must be handled** — the transpiler knows which functions raise and warns if you ignore them.
 2. **Typed catch blocks** — catch specific exceptions, not bare `except:`.
-3. **Clean syntax** — braces instead of indentation, no colon clutter.
+3. **Clean syntax** — `end` blocks instead of indentation, no colon clutter.
 4. **`or {}` shorthand** — for quick scripts where you don't need full try/catch.
 
 ## Try / Catch / Finally
 
 ```zinc
-try {
+try
     var data = open("config.json").read()
     var config = json.loads(data)
-} catch err: FileNotFoundError {
+catch err: FileNotFoundError
     print("Config not found, using defaults")
     var config = {}
-} catch err: json.JSONDecodeError {
+catch err: json.JSONDecodeError
     print("Bad JSON: {err}")
     exit(1)
-} finally {
+finally
     print("done")
-}
+end
 ```
 
 Transpiles to:
@@ -85,12 +85,12 @@ The last expression in the `or` block becomes the fallback value.
 ## Raising Exceptions
 
 ```zinc
-fn divide(a: int, b: int) -> int {
-    if b == 0 {
+fn divide(a: int, b: int) -> int
+    if b == 0
         raise ValueError("division by zero")
-    }
+    end
     return a / b
-}
+end
 ```
 
 Transpiles to:
@@ -104,16 +104,16 @@ def divide(a: int, b: int) -> int:
 ## Custom Exceptions
 
 ```zinc
-class AppError(Exception) {
-    fn init(message: str, code: int) {
+class AppError(Exception)
+    fn init(message: str, code: int)
         super().init(message)
         this.code = code
-    }
+    end
 
-    fn str() -> str {
+    fn str() -> str
         return "AppError({code}): {message}"
-    }
-}
+    end
+end
 
 // Usage
 raise AppError("not found", 404)
@@ -133,15 +133,15 @@ class AppError(Exception):
 ## With (Context Managers)
 
 ```zinc
-with open("data.txt") as f {
+with open("data.txt") as f
     var content = f.read()
     print(content)
-}
+end
 
 // Multiple context managers
-with open("in.txt") as src, open("out.txt", "w") as dst {
+with open("in.txt") as src, open("out.txt", "w") as dst
     dst.write(src.read())
-}
+end
 ```
 
 Transpiles to:
@@ -169,11 +169,11 @@ The transpiler helps prevent common Python error handling mistakes:
 
 | Zinc | Python |
 |---|---|
-| `try { }` | `try:` |
-| `catch err: TypeError { }` | `except TypeError as err:` |
-| `catch { }` (no type) | Not allowed — must specify type |
-| `finally { }` | `finally:` |
+| `try ... end` | `try:` |
+| `catch err: TypeError` | `except TypeError as err:` |
+| `catch` (no type) | Not allowed — must specify type |
+| `finally` | `finally:` |
 | `or { }` | `try: ... except Exception:` |
 | `raise` | `raise` |
-| `with x as y { }` | `with x as y:` |
+| `with x as y ... end` | `with x as y:` |
 | `err` in `or` block | `str(exception)` |
