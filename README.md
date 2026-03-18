@@ -128,6 +128,15 @@ var total = sum([o.amount for o in active])
 // Expression if
 var label = if count == 1: "item" else: "items"
 
+// Threading — real parallelism (no GIL)
+parallel for item in items {
+    process(item)
+}
+
+var future = spawn {
+    expensive_computation()
+}
+
 // Generators
 fn fibonacci(limit: int) {
     var a = 0
@@ -158,6 +167,7 @@ See [`examples/v2/`](examples/v2/) for working examples:
 - [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err, try/catch
 - [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
 - [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with smart dispatch
+- [`threading.zn`](examples/v2/threading.zn) — parallel for, spawn, 8.5x speedup
 - [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, `is` type checks, none
 - [`variadic.zn`](examples/v2/variadic.zn) — *args and **kwargs
 

@@ -43,6 +43,9 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Pyt
 - [x] Auto data shape detection: `list[dict]` → Polars, `list[numeric]` → NumPy
 - [x] Auto-install polars/numpy on first use if not installed
 - [x] Free-threaded auto-parallelize: `.map()` on 1000+ items uses ThreadPoolExecutor
+- [x] `spawn { }` — background thread, returns Future
+- [x] `parallel for` — process items across thread pool (8.5x speedup measured)
+- [x] `with lock { }` — thread-safe critical sections
 
 ### CLI & Tooling
 - [x] `zinc run` — free-threaded Python by default (finds python3.14t)

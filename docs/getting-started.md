@@ -142,6 +142,23 @@ from pathlib import Path
 from requests import get as http_get
 ```
 
+## Threading
+
+Zinc runs on free-threaded Python — threads are real parallelism, no GIL:
+
+```zinc
+// Process items in parallel
+parallel for item in items {
+    process(item)
+}
+
+// Run in background
+var future = spawn {
+    expensive_computation()
+}
+var result = future.result()
+```
+
 ## Type Safety
 
 Type errors are caught automatically during transpilation:

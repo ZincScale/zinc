@@ -33,6 +33,7 @@ Everything below is implemented, tested, and working end-to-end:
 - Shebang: `#!/usr/bin/env zinc run`
 - `**` power operator, `match`, `break`/`continue`
 - `data` is a contextual keyword — fully usable as variable name
+- `spawn { }` background threads, `parallel for` thread pool, `with lock { }` critical sections
 - CLI: `zinc run`, `zinc transpile`, `zinc fmt`, `zinc repl`, `zinc pack`
 - `zinc pack`: PyInstaller, Nuitka, Docker, K8s — all with free-threaded Python
 - Auto-generated requirements.txt from imports (polars/numpy always included)

@@ -451,6 +451,37 @@ fn process(x: any) {
 }
 ```
 
+## Threading
+
+Zinc runs on free-threaded Python (GIL disabled). Threads are real parallelism.
+
+```zinc
+// Spawn — run in background, returns a Future
+var future = spawn {
+    expensive_computation()
+}
+print("main continues...")
+var result = future.result()  // wait for result
+
+// Parallel for — process items across thread pool
+parallel for item in items {
+    process(item)
+}
+
+// Thread-safe critical section
+import threading
+var lock = threading.Lock()
+var counter = 0
+parallel for item in items {
+    var result = compute(item)
+    with lock {
+        counter = counter + result
+    }
+}
+```
+
+On free-threaded Python 3.14+, `parallel for` achieves real speedup (8-10x on 10 items).
+
 ## Shebang
 
 ```zinc
