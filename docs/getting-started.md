@@ -142,6 +142,33 @@ from pathlib import Path
 from requests import get as http_get
 ```
 
+## Type Safety
+
+Type errors are caught automatically during transpilation:
+
+```bash
+$ zinc run broken.zn
+error: type errors in broken.zn:
+  line 2: return type mismatch: expected int, got str
+  argument 1 of "greet": expected str, got int
+```
+
+No separate `check` command — checking IS transpilation.
+
+## Shebang
+
+Make .zn files directly executable:
+
+```zinc
+#!/usr/bin/env zinc run
+print("Hello from zinc!")
+```
+
+```bash
+chmod +x script.zn
+./script.zn
+```
+
 ## CLI
 
 ```bash
@@ -151,8 +178,6 @@ zinc run script.zn --optimize polars  # use Polars for collection chains
 zinc transpile script.zn              # output .py file
 zinc transpile script.zn -o out.py    # specify output path
 ```
-
-Type errors are caught automatically during transpilation — no separate `check` command needed.
 
 ## Next Steps
 

@@ -37,6 +37,7 @@ fn connect(host: str, port: int = 80) // default args
 
 ```zinc
 "Hello, {name}!"        // double quotes: interpolation with {}
+"{data["key"]}"         // nested quotes in interpolation — works
 'no {interpolation}'    // single quotes: literal strings
 """multi-line
 string"""               // triple quotes: multi-line
@@ -276,4 +277,37 @@ class MyClass {
         return MyClass()
     }
 }
+```
+
+## Type Safety
+
+Types are enforced at transpile time — errors block `.py` output:
+
+```
+// These are caught before your code runs:
+var x: int = "hello"           // type mismatch: expected int, got str
+fn add(): int { return "bad" } // return type mismatch: expected int, got str
+greet(42)                      // argument 1: expected str, got int
+greet("a", "b")                // expects 1 args, got 2
+break                          // 'break' outside of loop
+y = 10                         // undefined variable "y"
+```
+
+## Shebang
+
+```zinc
+#!/usr/bin/env zinc run
+print("directly executable!")
+```
+
+## Tuples
+
+```zinc
+var point = (3, 5)
+var rgb = (255, 128, 0)
+
+fn swap(a: int, b: int) {
+    return b, a
+}
+var x, y = swap(1, 2)
 ```

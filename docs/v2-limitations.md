@@ -7,24 +7,29 @@ Last updated: 2026-03-18
 Everything below is implemented, tested, and working end-to-end:
 
 - Script mode (top-level statements, no main required)
-- `fn` with colon return types, `end` blocks, `else if`
+- `fn` with colon return types, `{ }` brace blocks, `else if`
 - `data` classes → `@dataclass`, `enum` → `enum.Enum`
-- Classes with inheritance, auto-self injection, dunder mapping
-- `@staticmethod`, `@classmethod`, general decorator pass-through
-- Two-track error handling: `Result[T]` / `Err {}` + `try`/`catch`/`end`
+- Classes with inheritance, auto-self injection (including inherited fields), dunder mapping
+- `@staticmethod`, `@classmethod`, `@property`, general decorator pass-through
+- Two-track error handling: `Result[T]` / `Err` + `try`/`catch`
 - `raise X from Y` (exception chaining)
 - `and`/`or`/`not`, `not in`, `is not`, `none`
 - Expression if (condition-first ternary)
 - Lambdas (`x -> x * 2`), `*args`/`**kwargs`, default args
+- Tuple literals `(1, 2, 3)`, `return a, b`
 - List/dict comprehensions (auto list vs generator promotion)
 - Collection methods: `.filter()`, `.map()`, `.sum()`, `.sort_by()`, `.take()`, etc.
 - Smart dispatch: single method → comprehension, chains → `_zinc_collect()` runtime
 - `--optimize polars` → Polars lazy frame pipelines at transpile time
-- Type checker: catches type mismatches, undefined variables at transpile time
+- Type checker: type mismatches, undefined variables, return types, arg types, break outside loop
+- Source maps: Python errors show .zn file and line numbers
 - `yield` / generator functions, nested functions
-- `del`, `assert`, `with`/`end` context managers
+- `del`, `assert`, `with` context managers
 - `import`, `from x import a, b` (consolidated), single/double/triple-quote strings
-- `**` power operator, `match`/`end`, `break`/`continue`
+- Nested string interpolation: `"{data["key"]}"` works
+- Shebang: `#!/usr/bin/env zinc run`
+- `**` power operator, `match`, `break`/`continue`
+- `data` is a contextual keyword — fully usable as variable name
 - CLI: `zinc run`, `zinc transpile`, `--optimize`, temp file cleanup
 
 ## Parser — Not Yet Implemented

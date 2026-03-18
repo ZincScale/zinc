@@ -27,11 +27,12 @@ Hello, Alice!
 
 Python is the best language for getting things done fast. But it has pain points: whitespace bugs, optional types, `self` boilerplate, dunder ceremonies. Zinc fixes these while keeping Python's ecosystem.
 
-- **Enforced types** — catch `TypeError` at transpile time, not in production
-- **`end` blocks** — no whitespace ambiguity, copy-paste safely
+- **Enforced types** — catch wrong types, bad args, missing returns at transpile time
+- **Brace blocks `{ }`** — no whitespace ambiguity, familiar C-family syntax
 - **Zero boilerplate** — no `self`, no dunders, no `f""` prefix
 - **It's just Python** — full pip ecosystem, readable `.py` output
 - **Two-track errors** — `Result[T]` for expected failures, exceptions for exceptional ones
+- **Source maps** — Python errors show your `.zn` file and line numbers
 - **Smart transpiler** — auto-injects `self`, maps dunder methods, optimizes collection chains
 
 ---
