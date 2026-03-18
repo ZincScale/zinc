@@ -23,7 +23,7 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 2. **Prevent footguns** — enforced types, exhaustive match, null safety, unused variable warnings. The compiler catches what Python lets slip to runtime.
 3. **The transpiler works for you** — auto-inject `self`, translate clean method names to dunders, dispatch collections to fast backends, parallelize where safe. You write the intent, Zinc handles the mechanics.
 4. **It's just Python underneath** — full pip ecosystem, all Python libraries work. The output is readable `.py` you can hand to anyone.
-5. **Explicit blocks** — `end` keyword eliminates whitespace confusion. Copy-paste safely, refactor without counting spaces. Natural for the sci/data crowd (Julia, Crystal, Ruby).
+5. **Explicit blocks** — braces `{ }` eliminate whitespace confusion. Copy-paste safely, refactor without counting spaces. Familiar to every developer.
 6. **Quick changes in prod** — change a `.zn` file, `zinc run`, done. No compile wait, no deploy pipeline for a one-line fix. But the type checker still has your back.
 
 ### What the transpiler does for you
@@ -49,9 +49,9 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 
 ## Syntax
 
-### Block Delimiters — `end` Keyword
+### Block Delimiters — Braces `{ }`
 
-Zinc uses `end` to close blocks — like Julia, Crystal, Ruby, and Lua. Indentation is for readability only. Indentation is for readability only (enforced by `zinc fmt`, ignored by the compiler).
+Zinc uses braces to delimit blocks — familiar C-family syntax. Indentation is for readability only (enforced by `zinc fmt`, ignored by the compiler).
 
 ```zinc
 if x > 10 {
@@ -69,11 +69,11 @@ fn process(items: list[dict]): list[dict] {
 }
 ```
 
-Why `end` over braces:
-- No shift key needed — pure alpha keys
-- Natural for the sci/data audience (Julia, Crystal, Ruby, Matlab, Lua)
-- Reads like pseudocode
-- Less visual noise than `}` stacking
+Why braces:
+- Universal — every developer knows `{ }`
+- Familiar from C, Java, Go, Rust, JavaScript
+- No ambiguity — opening and closing are visually distinct
+- Editors auto-match and indent
 - Still explicit — no whitespace ambiguity
 
 ### Multi-line Statements
@@ -593,7 +593,7 @@ Use Pythonic names, not LINQ:
 | Feature | Why |
 |---|---|
 | **Enforced type checking** | The killer feature — Python's types are suggestions, Zinc's are real |
-| **`end` blocks** | The other killer feature — no whitespace wars, no braces |
+| **Brace blocks `{ }`** | No whitespace wars, familiar C-family syntax |
 | **String interpolation `{}`** | Better than f-string prefix |
 | **`data` classes** | Cleaner than Python's dataclass decorator |
 | **`var` inference** | Less noise than explicit types everywhere |
@@ -825,7 +825,7 @@ for issue in issues[:10] {
 
 ## Decisions Made
 
-1. **`end` blocks** — decided. Matches Julia/Crystal/Ruby, natural for sci/data crowd, no shift key needed.
+1. **Brace blocks `{ }`** — decided. Universal C-family syntax, every editor supports it.
 
 2. **Multi-line continuation** — implicit via trailing operators, commas, open brackets. No backslash hell.
 
@@ -859,7 +859,7 @@ for issue in issues[:10] {
 
 ### Phase 1 — Minimum Viable Transpiler
 - Lexer/parser for: `var`, `fn`, `if/else if/else`, `for`, `while`, `return`, `print`
-- `end` blocks → indentation conversion
+- `{ }` blocks → Python indentation conversion
 - Multi-line statement continuation
 - String interpolation → f-strings
 - Type inference for `var`

@@ -52,16 +52,16 @@ class Stack {
         items.append(item)       // auto-injects self.items
     }
 
-    fn len(): int                // → __len__(self) {
+    fn len(): int {              // → __len__(self)
         return len(items)
     }
 
-    fn str(): str                // → __str__(self) {
+    fn str(): str {              // → __str__(self)
         return "Stack({items})"
     }
 }
 
-class Dog(Animal)                // inheritance {
+class Dog(Animal) {              // inheritance
     var breed: str
 
     @staticmethod
@@ -130,7 +130,7 @@ for item in items {
     print(item)
 }
 
-for i, item in items        // with index (enumerate) {
+for i, item in items {       // with index (enumerate)
     print("{i}: {item}")
 }
 

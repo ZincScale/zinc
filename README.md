@@ -45,13 +45,11 @@ Python is the best language for getting things done fast. But it has pain points
 | [Design Doc](docs/design-zinc-v2-python.md) | Philosophy, decisions, rationale |
 | [Known Limitations](docs/v2-limitations.md) | What's not yet implemented |
 
-### Explorations
+### Design
 
 | Document | Description |
 |----------|-------------|
-| [Dagster Pipelines](docs/exploration-dagster-pipelines.md) | Batch orchestration |
-| [Pathway Streaming](docs/exploration-pathway-pipelines.md) | Real-time streaming |
-| [PyFlink](docs/exploration-pyflink-pipelines.md) | Enterprise stream processing |
+| [Zinc Flow](docs/design-zinc-flow.md) | NiFi-inspired flow processing |
 
 ---
 
@@ -101,7 +99,7 @@ class Stack {
     fn push(item: int) {
         items.append(item)     // → self.items.append(item)
     }
-    fn len(): int              // → __len__(self) {
+    fn len(): int {            // → __len__(self)
         return len(items)
     }
 }

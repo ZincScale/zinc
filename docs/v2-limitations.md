@@ -29,7 +29,7 @@ Everything below is implemented, tested, and working end-to-end:
 
 ## Parser — Not Yet Implemented
 
-- [ ] `data` keyword conflicts with variable names in some contexts
+- [x] ~~`data` keyword conflicts~~ — contextual keyword, fully usable as variable name
 - [ ] No chained comparisons (`0 < x < 10` — parses but wrong semantics)
 - [ ] No walrus operator (`:=` assignment expression)
 - [ ] No `async` / `await`
@@ -46,7 +46,7 @@ Everything below is implemented, tested, and working end-to-end:
 - [ ] Nested quotes in string interpolation (`"{data["key"]}"` — use temp var)
 - [ ] `match` emits Python 3.10+ syntax — no fallback for older Python
 - [ ] No NumPy-specific `--optimize numpy` codegen (Polars works)
-- [ ] No source map / line number tracking in generated .py
+- [x] ~~No source map / line number tracking~~ — errors show .zn file and line numbers
 - [ ] Fast serialization builtins (json_load, csv_load) — use imports directly
 - [ ] `.parallel_map()` — not implemented (use threads/multiprocessing directly)
 

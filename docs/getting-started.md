@@ -48,7 +48,7 @@ zinc run greet.zn -- Alice
 | Python | Zinc | Why |
 |---|---|---|
 | `def greet(name: str) -> str:` | `fn greet(name: str): str` | Shorter, colon for return type |
-| Indentation-based blocks | `end` keyword closes blocks | No whitespace bugs |
+| Indentation-based blocks | `{ }` braces close blocks | No whitespace bugs |
 | `f"Hello, {name}"` | `"Hello, {name}"` | All double-quoted strings interpolate |
 | Types optional | Types enforced | Catch errors at transpile time |
 | `self.name` everywhere | Just `name` in methods | Auto-injected by transpiler |
