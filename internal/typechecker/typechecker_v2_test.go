@@ -71,16 +71,14 @@ func TestV2IntToFloatOk(t *testing.T) {
 
 func TestV2FnTypeChecked(t *testing.T) {
 	errs := checkV2(`
-fn add(a: int, b: int): int
+fn add(a: int, b: int): int {
     var result: str = a + b
     return result
-end
+}
 `)
-	if len(errs) != 1 {
-		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
-	}
-	if !strings.Contains(errs[0].Message, "type mismatch") {
-		t.Errorf("expected type mismatch, got: %s", errs[0].Message)
+	// Catches both: var type mismatch AND return type mismatch
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %v", len(errs), errs)
 	}
 }
 
@@ -99,10 +97,10 @@ y = 20
 
 func TestV2DataClassFieldTypes(t *testing.T) {
 	errs := checkV2(`
-data User
+data User {
     name: str
     age: int
-end
+}
 `)
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
@@ -113,12 +111,88 @@ func TestV2ClassFieldNoType(t *testing.T) {
 	// This test verifies fields without types get flagged
 	// (var fields always have types in v2, bare fields require colon)
 	errs := checkV2(`
-fn example()
+fn example() {
     var x: int = "bad"
-end
+}
 `)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestV2ReturnTypeMismatch(t *testing.T) {
+	errs := checkV2(`
+fn add(a: int, b: int): int {
+    return "hello"
+}
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, "return type mismatch") {
+		t.Errorf("expected return type mismatch, got: %s", errs[0].Message)
+	}
+}
+
+func TestV2FnCallArgCount(t *testing.T) {
+	errs := checkV2(`
+fn greet(name: str): str {
+    return "hello"
+}
+greet("Alice", "extra")
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, "expects 1 args, got 2") {
+		t.Errorf("expected arg count error, got: %s", errs[0].Message)
+	}
+}
+
+func TestV2FnCallArgType(t *testing.T) {
+	errs := checkV2(`
+fn greet(name: str): str {
+    return "hello"
+}
+greet(42)
+`)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, "expected str, got int") {
+		t.Errorf("expected arg type error, got: %s", errs[0].Message)
+	}
+}
+
+func TestV2BreakOutsideLoop(t *testing.T) {
+	errs := checkV2(`break`)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, "outside of loop") {
+		t.Errorf("expected 'outside of loop', got: %s", errs[0].Message)
+	}
+}
+
+func TestV2BreakInsideLoopOk(t *testing.T) {
+	errs := checkV2(`
+for x in items {
+    break
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got: %v", errs)
+	}
+}
+
+func TestV2ResultErrReturnOk(t *testing.T) {
+	errs := checkV2(`
+fn parse(s: str): Result[int] {
+    return Err("bad")
+}
+`)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for Err return, got: %v", errs)
 	}
 }
 
@@ -126,18 +200,18 @@ func TestV2ValidScript(t *testing.T) {
 	errs := checkV2(`
 import json
 
-fn greet(name: str): str
+fn greet(name: str): str {
     return "Hello, {name}!"
-end
+}
 
 var msg = greet("Alice")
 print(msg)
 
 var numbers = [1, 2, 3]
 var total: int = 0
-for n in numbers
+for n in numbers {
     total = total + n
-end
+}
 print("Total: {total}")
 `)
 	if len(errs) > 0 {

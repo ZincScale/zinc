@@ -63,6 +63,15 @@ func (l *Lexer) advance() rune {
 	return ch
 }
 
+// skipShebang skips a #!/... line at the start of the file.
+func (l *Lexer) skipShebang() {
+	if l.pos == 0 && l.peek() == '#' && l.peekAt(1) == '!' {
+		for l.peek() != '\n' && l.peek() != 0 {
+			l.advance()
+		}
+	}
+}
+
 func (l *Lexer) skipWhitespaceAndComments() {
 	for {
 		ch := l.peek()
@@ -97,6 +106,7 @@ func (l *Lexer) makeToken(t TokenType, lit string, line, col int) Token {
 
 // NextToken returns the next token from the source.
 func (l *Lexer) NextToken() Token {
+	l.skipShebang()
 	l.skipWhitespaceAndComments()
 
 	line, col := l.line, l.col
@@ -290,11 +300,36 @@ func (l *Lexer) readStringWithQuote(quote rune, line, col int) Token {
 			hasInterp = true
 			sb.WriteRune('{')
 			l.advance()
-			continue
-		}
-		if ch == '}' {
-			sb.WriteRune('}')
-			l.advance()
+			// Scan the interpolation expression, tracking nested braces and quotes
+			depth := 1
+			for depth > 0 && l.peek() != 0 {
+				ic := l.peek()
+				if ic == '{' {
+					depth++
+				} else if ic == '}' {
+					depth--
+					if depth == 0 {
+						sb.WriteRune('}')
+						l.advance()
+						break
+					}
+				} else if ic == '"' || ic == '\'' {
+					// Nested string inside interpolation — consume it whole
+					q := ic
+					sb.WriteRune(l.advance()) // opening quote
+					for l.peek() != 0 && l.peek() != q {
+						if l.peek() == '\\' {
+							sb.WriteRune(l.advance())
+						}
+						sb.WriteRune(l.advance())
+					}
+					if l.peek() == q {
+						sb.WriteRune(l.advance()) // closing quote
+					}
+					continue
+				}
+				sb.WriteRune(l.advance())
+			}
 			continue
 		}
 		if ch == '\\' {

@@ -43,7 +43,7 @@ Everything below is implemented, tested, and working end-to-end:
 
 - [x] ~~Auto-self doesn't track inherited fields~~ — fixed, registry resolves parents
 - [x] ~~No super() auto-gen~~ — classes with parents generate super().__init__(**kwargs)
-- [ ] Nested quotes in string interpolation (`"{data["key"]}"` — use temp var)
+- [x] ~~Nested quotes in string interpolation~~ — `"{data["key"]}"` works
 - [ ] `match` emits Python 3.10+ syntax — no fallback for older Python
 - [ ] No NumPy-specific `--optimize numpy` codegen (Polars works)
 - [x] ~~No source map / line number tracking~~ — errors show .zn file and line numbers
@@ -54,15 +54,17 @@ Everything below is implemented, tested, and working end-to-end:
 
 - [ ] No `zinc fmt` (formatter)
 - [ ] No `zinc repl` for v2
-- [ ] No shebang support (`#!/usr/bin/env zinc run`)
+- [x] ~~No shebang support~~ — `#!/usr/bin/env zinc run` works
 
 ## Type System — Limitations
 
-- [ ] Basic type inference only (int, str, float, bool, list, dict)
+- [x] ~~Function return type checking~~ — catches `return "hello"` when fn returns int
+- [x] ~~Function call arg checking~~ — catches wrong arg types and counts
+- [x] ~~break/continue outside loop~~ — caught at transpile time
 - [ ] No generic type constraints
 - [ ] No union types (`str | int`)
 - [ ] No Protocol support
-- [ ] Function return type checking is limited (doesn't verify all paths return)
+- [ ] Doesn't verify all code paths return a value
 - [ ] No type narrowing after `isinstance` checks
 
 ## Design Doc Over-Promises (Not Yet Implemented)

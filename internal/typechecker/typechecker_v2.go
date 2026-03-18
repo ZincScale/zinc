@@ -16,6 +16,7 @@ package typechecker
 
 import (
 	"fmt"
+	"strings"
 
 	"zinc/internal/parser"
 )
@@ -87,18 +88,28 @@ func (s *V2Scope) lookup(name string) (V2Type, bool) {
 	return typeAny, false
 }
 
+// V2FnSig stores a function's parameter and return types.
+type V2FnSig struct {
+	Params     []V2Type
+	ParamNames []string
+	ReturnType V2Type
+}
+
 // V2Checker performs type checking on a v2 AST.
 type V2Checker struct {
-	errors []V2Error
-	scope  *V2Scope
-	fnReturnType *V2Type // current function's return type (nil if no return type)
+	errors       []V2Error
+	scope        *V2Scope
+	fnReturnType *V2Type            // current function's return type
+	fnSigs       map[string]V2FnSig // function signatures for call checking
+	inLoop       bool               // tracking if inside a loop for break/continue
 }
 
 // CheckV2 runs the v2 type checker on a parsed program.
 // Returns errors found. Empty slice = all good.
 func CheckV2(prog *parser.Program) []V2Error {
 	c := &V2Checker{
-		scope: newV2Scope(nil),
+		scope:  newV2Scope(nil),
+		fnSigs: make(map[string]V2FnSig),
 	}
 
 	// Register top-level declarations
@@ -131,9 +142,16 @@ func (c *V2Checker) errorf(line int, format string, args ...any) {
 func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 	switch d := d.(type) {
 	case *parser.FnDecl:
-		// Register function in scope with its return type
 		retType := c.resolveTypeExpr(d.ReturnType)
 		c.scope.set(d.Name, retType)
+		// Store full signature for call checking
+		var paramTypes []V2Type
+		var paramNames []string
+		for _, p := range d.Params {
+			paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+			paramNames = append(paramNames, p.Name)
+		}
+		c.fnSigs[d.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
 	case *parser.ClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 	case *parser.DataClassDecl:
@@ -237,7 +255,16 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		c.checkAssignStmt(s)
 	case *parser.ReturnStmt:
 		if s.Value != nil {
-			c.inferType(s.Value)
+			valType := c.inferType(s.Value)
+			// Check return value matches declared return type
+			if c.fnReturnType != nil && c.fnReturnType.Name != "any" && valType.Name != "any" {
+				// For Result[T], Err() returns are always valid
+				if c.isResultReturn(c.fnReturnType) && c.isErrCall(s.Value) {
+					// OK — Err("msg") is valid for Result[T]
+				} else if !c.compatible(*c.fnReturnType, valType) {
+					c.errorf(s.Line, "return type mismatch: expected %s, got %s", c.fnReturnType, valType)
+				}
+			}
 		}
 	case *parser.IfStmt:
 		c.inferType(s.Cond)
@@ -257,13 +284,19 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 				inner.set(s.IndexVar, typeInt)
 			}
 			prevScope := c.scope
+			prevLoop := c.inLoop
 			c.scope = inner
+			c.inLoop = true
 			c.checkBlock(s.Body)
 			c.scope = prevScope
+			c.inLoop = prevLoop
 		}
 	case *parser.WhileStmt:
 		c.inferType(s.Cond)
+		prevLoop := c.inLoop
+		c.inLoop = true
 		c.checkBlock(s.Body)
+		c.inLoop = prevLoop
 	case *parser.ExprStmt:
 		c.inferType(s.Expr)
 	case *parser.TryStmt:
@@ -287,6 +320,38 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		c.checkFnDecl(s)
 	case *parser.BlockStmt:
 		c.checkBlock(s)
+	case *parser.TupleVarStmt:
+		c.inferType(s.Value)
+		for _, name := range s.Names {
+			c.scope.set(name, typeAny)
+		}
+	case *parser.BreakStmt:
+		if !c.inLoop {
+			c.errorf(0, "'break' outside of loop")
+		}
+	case *parser.ContinueStmt:
+		if !c.inLoop {
+			c.errorf(0, "'continue' outside of loop")
+		}
+	case *parser.YieldStmt:
+		if s.Value != nil {
+			c.inferType(s.Value)
+		}
+	case *parser.AssertStmt:
+		c.inferType(s.Cond)
+	case *parser.DelStmt:
+		c.inferType(s.Target)
+	case *parser.RaiseStmt:
+		c.inferType(s.Value)
+	case *parser.WithStmt:
+		inner := newV2Scope(c.scope)
+		for _, r := range s.Resources {
+			inner.set(r.Name, typeAny)
+		}
+		prevScope := c.scope
+		c.scope = inner
+		c.checkBlock(s.Body)
+		c.scope = prevScope
 	}
 }
 
@@ -360,10 +425,36 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		return operand
 	case *parser.CallExpr:
 		c.inferType(e.Callee)
+		var argTypes []V2Type
 		for _, a := range e.Args {
-			c.inferType(a)
+			argTypes = append(argTypes, c.inferType(a))
 		}
-		return typeAny // would need function signature lookup
+		// Check function call argument types against signature
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			if sig, found := c.fnSigs[ident.Name]; found {
+				// Check arg count (skip if *args/**kwargs)
+				if len(argTypes) != len(sig.Params) && len(sig.Params) > 0 {
+					hasVariadic := false
+					for _, pn := range sig.ParamNames {
+						if strings.HasPrefix(pn, "**") || strings.HasPrefix(pn, "*") {
+							hasVariadic = true
+						}
+					}
+					if !hasVariadic && len(argTypes) > len(sig.Params) {
+						c.errorf(0, "function %q expects %d args, got %d", ident.Name, len(sig.Params), len(argTypes))
+					}
+				}
+				// Check arg types
+				for i, argT := range argTypes {
+					if i < len(sig.Params) && !c.compatible(sig.Params[i], argT) {
+						c.errorf(0, "argument %d of %q: expected %s, got %s",
+							i+1, ident.Name, sig.Params[i], argT)
+					}
+				}
+				return sig.ReturnType
+			}
+		}
+		return typeAny
 	case *parser.SelectorExpr:
 		c.inferType(e.Object)
 		return typeAny
@@ -391,9 +482,36 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		return thenType
 	case *parser.ComprehensionExpr:
 		return V2Type{Name: "list"}
+	case *parser.DictComprehensionExpr:
+		return V2Type{Name: "dict"}
+	case *parser.TupleLit:
+		for _, el := range e.Elements {
+			c.inferType(el)
+		}
+		return V2Type{Name: "tuple"}
+	case *parser.SliceExpr:
+		c.inferType(e.Object)
+		return typeAny
+	case *parser.SpreadExpr:
+		return c.inferType(e.Expr)
 	default:
 		return typeAny
 	}
+}
+
+// isResultReturn checks if a return type is Result[T].
+func (c *V2Checker) isResultReturn(t *V2Type) bool {
+	return t != nil && t.Name == "Result"
+}
+
+// isErrCall checks if an expression is a call to Err().
+func (c *V2Checker) isErrCall(e parser.Expr) bool {
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Callee.(*parser.Ident)
+	return ok && ident.Name == "Err"
 }
 
 func (c *V2Checker) inferBinaryType(op string, left, right V2Type) V2Type {
