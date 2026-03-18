@@ -442,11 +442,272 @@ success: true
 - Route inference from method signatures
 - **Effort:** Large — needs ASP.NET Core integration
 
-### Phase 4 — AWS Lambda handler
+### Phase 4 — Aspects (cross-cutting concerns)
+- AST: `AspectDecl` node with `before`, `after`, `error` blocks
+- Parser: `aspect name { before { } after { } error { } }`
+- Codegen: inline aspect code into service methods at compile time
+- Built-in aspects: `@logged`, `@timed`, `@authorized`, `@retry`, `@cached`, `@timeout`
+- **Effort:** Medium
+
+### Phase 5 — AWS Lambda handler
 - `zinc deploy` or `zinc lambda` command
 - Generates Lambda handler wrapping the service graph
 - Produces a deployment-ready zip
 - **Effort:** Medium
+
+## Aspects — Cross-Cutting Concerns
+
+### Problem
+
+Enterprise services need logging, metrics, auth, retries, caching, and timeouts on every method. In Spring Boot this is AOP — runtime proxies and bytecode manipulation that's invisible in the code and impossible to debug:
+
+```java
+// Spring AOP — magic that wraps your class at runtime
+@Aspect
+@Component
+public class LoggingAspect {
+    @Around("execution(* com.myapp.services.*.*(..))")
+    public Object logMethod(ProceedingJoinPoint jp) throws Throwable {
+        log.info("{} called", jp.getSignature());
+        long start = System.currentTimeMillis();
+        try {
+            Object result = jp.proceed();
+            log.info("{} completed in {}ms", jp.getSignature(), System.currentTimeMillis() - start);
+            return result;
+        } catch (Throwable t) {
+            log.error("{} failed: {}", jp.getSignature(), t.getMessage());
+            throw t;
+        }
+    }
+}
+// Now good luck figuring out why your stack trace has 15 proxy frames
+```
+
+### Design
+
+Zinc aspects are **compile-time code generation**. The compiler reads the aspect definition and inlines the cross-cutting code directly into the service methods. No proxies. No bytecode weaving. The generated C# shows exactly what runs.
+
+#### Defining aspects
+
+```zinc
+aspect logged {
+    before {
+        log.info("{method} called", args: args)
+    }
+    after {
+        log.info("{method} completed", duration: elapsed)
+    }
+    error {
+        log.error("{method} failed: {err}", duration: elapsed)
+    }
+}
+
+aspect timed {
+    after {
+        metrics.record("{service}.{method}", elapsed)
+    }
+}
+
+aspect authorized(String role) {
+    before {
+        if !context.hasRole(role) {
+            panic("unauthorized: requires {role}")
+        }
+    }
+}
+
+aspect retry(Int times, Int delayMs) {
+    around {
+        var attempts = 0
+        while attempts < times {
+            attempts = attempts + 1
+            var result = proceed() or {
+                if attempts == times {
+                    panic("failed after {times} attempts: {err}")
+                }
+                log.warn("{method} attempt {attempts} failed: {err}")
+                sleep(delayMs)
+                continue
+            }
+            return result
+        }
+    }
+}
+
+aspect cached(Int ttlMs) {
+    around {
+        var key = "{service}.{method}.{args}"
+        var hit = cache.get(key)
+        if hit != null { return hit }
+        var result = proceed()
+        cache.set(key, result, ttlMs)
+        return result
+    }
+}
+
+aspect timeout(Int ms) {
+    around {
+        var result = spawn { proceed() }
+        result.value or {
+            panic("{method} timed out after {ms}ms")
+        }
+    }
+}
+```
+
+#### Built-in variables available in aspects
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `method` | String | Name of the method being called |
+| `service` | String | Name of the service class |
+| `args` | dynamic | The method arguments |
+| `elapsed` | Int | Milliseconds elapsed (available in `after` and `error`) |
+| `err` | String | Error message (available in `error` block) |
+| `proceed()` | dynamic | Execute the actual method (available in `around`) |
+
+#### Applying aspects
+
+Apply to an entire service (all public methods):
+
+```zinc
+@logged @timed
+service OrderService {
+    pub ProcessResult checkout(Int userId, Float amount) {
+        // every call is logged and timed automatically
+    }
+}
+```
+
+Apply to specific methods:
+
+```zinc
+service PaymentService {
+    @timeout(5000)
+    @cached(60000)
+    pub ExchangeRate getRate(String currency) {
+        httpGet("https://api.exchange.com/rates/{currency}")
+    }
+
+    @authorized("finance")
+    @retry(3, 1000)
+    pub ProcessResult charge(Order order) {
+        // retries up to 3 times, requires finance role
+    }
+
+    pub String healthCheck() {
+        // no aspects — just a simple method
+        "ok"
+    }
+}
+```
+
+#### What the compiler generates
+
+```zinc
+@logged @timed
+service UserService {
+    readonly UserRepository users
+    new(UserRepository users) { this.users = users }
+
+    pub User getById(Int id) {
+        users.getById(id)
+    }
+}
+```
+
+The compiler inlines the aspect code into each public method:
+
+```csharp
+public class UserService
+{
+    private readonly UserRepository _users;
+    public UserService(UserRepository users) { _users = users; }
+
+    public User GetById(int id)
+    {
+        // @logged — before
+        Log.Information("GetById called {@Args}", new { id });
+        var _sw = Stopwatch.StartNew();
+        try
+        {
+            // actual method body
+            var _result = _users.GetById(id);
+
+            _sw.Stop();
+            // @logged — after
+            Log.Information("GetById completed {@Duration}ms", _sw.ElapsedMilliseconds);
+            // @timed — after
+            Metrics.Record("UserService.GetById", _sw.ElapsedMilliseconds);
+            return _result;
+        }
+        catch (Exception _ex)
+        {
+            _sw.Stop();
+            // @logged — error
+            Log.Error("GetById failed: {Error} {@Duration}ms", _ex.Message, _sw.ElapsedMilliseconds);
+            throw;
+        }
+    }
+}
+```
+
+**Key point:** this is the actual generated code. No proxies, no hidden behavior. You can read the `.cs` file in `.zinc-build/` and see exactly what runs. Stack traces show normal method calls, not 15 layers of proxy/interceptor frames.
+
+#### Built-in aspects that ship with Zinc
+
+| Aspect | Parameters | What it does |
+|--------|-----------|-------------|
+| `@logged` | none | Log entry, exit, errors with timing for every method |
+| `@timed` | none | Record method execution time to metrics |
+| `@authorized(role)` | role name | Check permissions before execution |
+| `@retry(times, delay)` | attempts, delay in ms | Retry on failure with delay between attempts |
+| `@cached(ttl)` | TTL in ms | Cache return value, serve from cache if fresh |
+| `@timeout(ms)` | max duration in ms | Fail if method exceeds time limit |
+
+#### Comparison
+
+| | Spring AOP | ASP.NET Middleware | Zinc Aspects |
+|---|---|---|---|
+| Mechanism | Runtime proxies + bytecode | Request pipeline | **Compile-time code generation** |
+| Visibility | Hidden — can't see what runs | Partially visible | **Fully visible in generated C#** |
+| Debugging | Proxy stack traces | Middleware chain | **Normal stack traces** |
+| Performance | Proxy overhead per call | Pipeline overhead | **Zero overhead — inlined** |
+| Scope | Class-level or method-level | Request-level only | **Class-level or method-level** |
+| Apply | `@Aspect` + pointcut expressions | `app.Use()` ordering | **`@name` on service or method** |
+
+#### Complete example
+
+```zinc
+@logged
+service OrderApi {
+    readonly OrderService orders
+    readonly PaymentProvider payments
+
+    new(OrderService orders, PaymentProvider payments) {
+        this.orders = orders
+        this.payments = payments
+    }
+
+    @timed
+    pub Order getById(Int id) {
+        orders.getById(id)
+    }
+
+    @timed @authorized("customer")
+    pub ProcessResult checkout(Int userId, Float amount) {
+        var order = orders.create(userId, amount)
+        payments.charge(order)
+    }
+
+    @cached(30000) @timeout(5000)
+    pub List<Order> getRecent() {
+        orders.recentOrders(100)
+    }
+}
+```
+
+This is 25 lines. The equivalent Spring Boot code (controller + aspect classes + security config + cache config) is 80-100 lines across 4 files.
 
 ## Design Decisions
 
@@ -460,3 +721,6 @@ success: true
 | Named args for test overrides | `UserService(users: mockRepo)` | Clear, explicit, no test framework needed. Consistent with Zinc's named arg syntax. |
 | `api` separate from `service` | Different concerns | Services contain business logic. APIs define HTTP boundaries. Separation of concerns. |
 | Convention routing | Method name → HTTP verb | Zero annotation ceremony. Matches the "clear intent" philosophy. |
+| Compile-time aspects | Inlined code generation | No proxies, no bytecode weaving, normal stack traces, zero runtime overhead. |
+| Built-in aspects | `@logged`, `@timed`, `@retry`, etc. | Most common cross-cutting concerns pre-built. One annotation instead of a separate aspect class. |
+| Aspect visibility | Generated C# shows inlined code | "Clearer Spring" — you can always see what runs by reading the generated code. |
