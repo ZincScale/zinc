@@ -47,13 +47,42 @@ main() {
 ```csharp
 public class Dog
 {
-    public string Name;        // pub → public
-    private string _secret;    // no pub → private, underscore prefix
+    public string Name { get; set; }   // pub → C# property
+    private string _secret;            // no pub → private field
 
-    public string Bark() { ... }     // pub → public
-    private string Helper() { ... }  // no pub → private
+    public string Bark() { ... }      // pub → public
+    private string Helper() { ... }   // no pub → private
 }
 ```
+
+### Readonly Fields
+
+Use `readonly` for fields that are set in the constructor and never change:
+
+```zinc
+User {
+    pub readonly String name       // set once in constructor, then immutable
+    pub readonly String email
+    pub Int loginCount             // mutable — can be updated after construction
+
+    new(String name, String email) {
+        this.name = name
+        this.email = email
+        this.loginCount = 0
+    }
+}
+```
+
+**Generated C#:**
+
+| Zinc | C# |
+|------|-----|
+| `pub String name` | `public string Name { get; set; }` |
+| `pub readonly String name` | `public string Name { get; init; }` |
+| `String name` | `private string _name;` |
+| `readonly String name` | `private readonly string _name;` |
+
+`pub readonly` maps to C# `{ get; init; }` — settable in the constructor, readonly after that. This is the proper OO pattern: most fields should be readonly, with mutation only where explicitly needed.
 
 **Constants and functions follow the same rule:**
 

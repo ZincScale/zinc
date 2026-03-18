@@ -126,7 +126,7 @@ main() {
 }
 `)
 	assertContains(t, out, "public class Dog")
-	assertContains(t, out, "public string Name;")
+	assertContains(t, out, "public string Name { get; set; }")
 	assertContains(t, out, "private int _age = 0;")
 	assertContains(t, out, "public Dog(string name, int age = 0)")
 	assertContains(t, out, "public string Bark()")
@@ -492,7 +492,7 @@ main() {
 }
 `)
 	assertContains(t, out, "public class Box<T>")
-	assertContains(t, out, "public T Value;")
+	assertContains(t, out, "public T Value { get; set; }")
 	assertContains(t, out, "public T Get()")
 }
 
@@ -924,7 +924,7 @@ User {
 main() { print("ok") }
 `)
 	assertContains(t, out, `[JsonPropertyName("user_name")]`)
-	assertContains(t, out, "public string Name;")
+	assertContains(t, out, "public string Name { get; set; }")
 }
 
 func TestAnnotationOnMethod(t *testing.T) {
@@ -1107,6 +1107,53 @@ main() {
 }
 `)
 	assertContains(t, out, "public record Point(int X, int Y);")
+}
+
+// === Properties and Readonly ===
+
+func TestPubField_EmitsProperty(t *testing.T) {
+	out := transpile(`
+Dog {
+    pub String name
+    new(String name) { this.name = name }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "public string Name { get; set; }")
+}
+
+func TestReadonlyField_EmitsGetInit(t *testing.T) {
+	out := transpile(`
+Dog {
+    pub readonly String breed
+    new(String breed) { this.breed = breed }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "{ get; init; }")
+}
+
+func TestPrivateField_EmitsField(t *testing.T) {
+	out := transpile(`
+Dog {
+    String secret
+    new(String secret) { this.secret = secret }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "private string _secret;")
+	assertNotContains(t, out, "{ get;")
+}
+
+func TestPrivateReadonly_EmitsReadonlyField(t *testing.T) {
+	out := transpile(`
+Dog {
+    readonly String id
+    new(String id) { this.id = id }
+}
+main() { print("ok") }
+`)
+	assertContains(t, out, "private readonly string _id;")
 }
 
 // === Test Assertions ===

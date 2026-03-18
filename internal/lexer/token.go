@@ -64,6 +64,7 @@ const (
 	TOKEN_DATA
 	TOKEN_SPAWN
 	TOKEN_USE
+	TOKEN_READONLY
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -155,6 +156,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_DATA:      "data",
 	TOKEN_SPAWN:     "spawn",
 	TOKEN_USE:       "use",
+	TOKEN_READONLY:  "readonly",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -254,6 +256,7 @@ var keywords = map[string]TokenType{
 	"data":      TOKEN_DATA,
 	"spawn":     TOKEN_SPAWN,
 	"use":       TOKEN_USE,
+	"readonly":  TOKEN_READONLY,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

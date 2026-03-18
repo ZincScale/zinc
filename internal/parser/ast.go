@@ -168,10 +168,11 @@ type Annotation struct {
 
 func (a *Annotation) nodeTag() {}
 
-// FieldDecl: [@annotations] [pub] Type name [= expr]
+// FieldDecl: [@annotations] [pub] [readonly] Type name [= expr]
 type FieldDecl struct {
 	Name        string
 	IsPub       bool
+	IsReadonly  bool
 	Type        TypeExpr
 	Default     Expr // may be nil
 	Annotations []*Annotation

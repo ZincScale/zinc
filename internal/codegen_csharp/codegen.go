@@ -516,19 +516,31 @@ func (g *Generator) emitClassDecl(d *parser.ClassDecl) {
 	g.writeln("{")
 	g.push()
 
-	// Fields
+	// Fields: pub → C# property, pub readonly → get/init, private → field
 	for _, f := range d.Fields {
 		g.emitAnnotations(f.Annotations)
 		fieldType := g.emitType(f.Type)
-		vis := "private"
-		if f.IsPub {
-			vis = "public"
-		}
 		fname := g.fieldName(f.Name, f.IsPub)
-		if f.Default != nil {
-			g.writeln(fmt.Sprintf("%s %s %s = %s;", vis, fieldType, fname, g.emitExpr(f.Default)))
+		if f.IsPub {
+			accessor := "{ get; set; }"
+			if f.IsReadonly {
+				accessor = "{ get; init; }"
+			}
+			if f.Default != nil {
+				g.writeln(fmt.Sprintf("public %s %s %s = %s;", fieldType, fname, accessor, g.emitExpr(f.Default)))
+			} else {
+				g.writeln(fmt.Sprintf("public %s %s %s", fieldType, fname, accessor))
+			}
 		} else {
-			g.writeln(fmt.Sprintf("%s %s %s;", vis, fieldType, fname))
+			prefix := "private"
+			if f.IsReadonly {
+				prefix = "private readonly"
+			}
+			if f.Default != nil {
+				g.writeln(fmt.Sprintf("%s %s %s = %s;", prefix, fieldType, fname, g.emitExpr(f.Default)))
+			} else {
+				g.writeln(fmt.Sprintf("%s %s %s;", prefix, fieldType, fname))
+			}
 		}
 	}
 

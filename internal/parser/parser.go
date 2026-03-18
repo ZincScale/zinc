@@ -1335,7 +1335,12 @@ func (p *Parser) parseAnnotations() []*Annotation {
 }
 
 func (p *Parser) parseFieldDecl(isPub bool) *FieldDecl {
-	// [pub] Type name [= default]
+	// [pub] [readonly] Type name [= default]
+	isReadonly := false
+	if p.check(lexer.TOKEN_READONLY) {
+		isReadonly = true
+		p.advance()
+	}
 	typ := p.parseType()
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	var def Expr
@@ -1343,7 +1348,7 @@ func (p *Parser) parseFieldDecl(isPub bool) *FieldDecl {
 		p.advance()
 		def = p.parseExpr()
 	}
-	return &FieldDecl{Name: name, IsPub: isPub, Type: typ, Default: def}
+	return &FieldDecl{Name: name, IsPub: isPub, IsReadonly: isReadonly, Type: typ, Default: def}
 }
 
 func (p *Parser) parseParam() *ParamDecl {
@@ -1529,11 +1534,22 @@ func (p *Parser) parseClassDecl() *ClassDecl {
 			m := p.parseMethodDecl()
 			m.Annotations = annots
 			methods = append(methods, m)
+		case tok.Type == lexer.TOKEN_READONLY:
+			// readonly field (private readonly)
+			f := p.parseFieldDecl(false)
+			f.Annotations = annots
+			fields = append(fields, f)
 		case tok.Type == lexer.TOKEN_PUB:
 			// pub can prefix methods or fields
 			// Peek past pub to disambiguate
 			next := p.peekAt(1)
-			if next.Type == lexer.TOKEN_STATIC {
+			if next.Type == lexer.TOKEN_READONLY {
+				// pub readonly — field
+				p.advance() // consume pub
+				f := p.parseFieldDecl(true)
+				f.Annotations = annots
+				fields = append(fields, f)
+			} else if next.Type == lexer.TOKEN_STATIC {
 				// pub static — always a method
 				m := p.parseMethodDecl()
 				m.Annotations = annots
