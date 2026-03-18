@@ -36,13 +36,13 @@ Everything below is implemented, tested, and working end-to-end:
 - [ ] No `global` / `nonlocal` keywords
 - [ ] No `type` aliases
 - [ ] No star import (`from module import *`)
-- [ ] No tuple literals (`(1, 2, 3)` as expression — use `[1, 2, 3]` for now)
-- [ ] No `@property` decorator (use regular methods)
+- [x] ~~No tuple literals~~ — implemented: `(1, 2, 3)`, `return a, b`
+- [x] ~~No `@property`~~ — works via decorator pass-through
 
 ## Codegen — Not Yet Implemented
 
-- [ ] Auto-self injection doesn't track inherited fields (use `self.field` explicitly)
-- [ ] No `__init__` generation from inherited parent fields (no super() auto-gen)
+- [x] ~~Auto-self doesn't track inherited fields~~ — fixed, registry resolves parents
+- [x] ~~No super() auto-gen~~ — classes with parents generate super().__init__(**kwargs)
 - [ ] Nested quotes in string interpolation (`"{data["key"]}"` — use temp var)
 - [ ] `match` emits Python 3.10+ syntax — no fallback for older Python
 - [ ] No NumPy-specific `--optimize numpy` codegen (Polars works)
