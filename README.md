@@ -3,159 +3,146 @@
 
 # Zinc
 
-**Zinc** is a convention-over-configuration language that compiles to native binaries via C# AOT. Less typing, less ceremony, optimized native output — think Spring Boot for compiled apps.
+**Zinc** is typed Python with explicit blocks. Write `.zn` files, get type safety, clean syntax, and the full Python ecosystem. The transpiler catches mistakes, generates clean `.py` files, and stays out of your way.
 
-```
-main() {
-    var name = "World"
-    print("Hello, {name}!")
-}
+```zinc
+import sys
+
+fn greet(name: str): str
+    return "Hello, {name}!"
+end
+
+var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
+print(greet(name))
 ```
 
 ```bash
-$ zinc build
-  built hello (AOT native binary, 1.3 MB)
-
-$ ./hello
-  Hello, World!
+$ zinc run hello.zn -- Alice
+Hello, Alice!
 ```
 
 ---
 
 ## Why Zinc?
 
-Enterprise developers want **familiar OO syntax** without **ceremony**. Zinc gives you classes, interfaces, generics, LINQ-style collection methods, and error handling — then compiles to a **1-2 MB native binary** with zero runtime dependencies.
+Python is the best language for getting things done fast. But it has pain points: whitespace bugs, optional types, `self` boilerplate, dunder ceremonies. Zinc fixes these while keeping Python's ecosystem.
 
-- **No boilerplate** — no `public static void Main`, no `using` statements, no XML project files
-- **Familiar syntax** — classes, interfaces, inheritance, generics, lambdas, `match`
-- **LINQ collection methods** — `Where`, `Select`, `OrderBy`, `Aggregate`, `First`, and more
-- **Clean error handling** — `or {}` handlers instead of 6-line try/catch blocks
-- **Native AOT binaries** — 1-2 MB, ~9ms startup, fully tree-shaken and optimized
-- **Zero config** — `zinc.toml` replaces XML; `zinc build` does the rest
-- **Native AOT** — compiles to optimized native binaries via C# AOT
+- **Enforced types** — catch `TypeError` at transpile time, not in production
+- **`end` blocks** — no whitespace ambiguity, copy-paste safely
+- **Zero boilerplate** — no `self`, no dunders, no `f""` prefix
+- **It's just Python** — full pip ecosystem, readable `.py` output
+- **Two-track errors** — `Result[T]` for expected failures, exceptions for exceptional ones
+- **Smart transpiler** — auto-injects `self`, maps dunder methods, optimizes collection chains
 
 ---
 
 ## Documentation
 
-### User Guide
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Install, hello world, key concepts |
+| [Language Reference](docs/language-reference.md) | Full syntax guide |
+| [Design Doc](docs/design-zinc-v2-python.md) | Philosophy, decisions, rationale |
+| [Known Limitations](docs/v2-limitations.md) | What's not yet implemented |
+
+### Explorations
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation, CLI, project setup, dependencies |
-| [Language Reference](docs/language-reference.md) | Quick syntax overview and doc index |
-
-### Language
-
-| Document | Description |
-|----------|-------------|
-| [Types and Variables](docs/types.md) | Variables, constants, type system, enums, null safety, casting |
-| [Functions](docs/functions.md) | Functions, defaults, named args, generics, variadic, closures |
-| [Classes and OOP](docs/classes.md) | Classes, interfaces, inheritance, polymorphism |
-| [Collections](docs/collections.md) | List/map literals, slicing, LINQ methods |
-| [Control Flow](docs/control-flow.md) | If/else, loops, match, labeled loops, safe navigation |
-| [Error Handling](docs/error-handling.md) | Errors as values, `or` handlers, `with` resource management |
-| [Imports](docs/imports.md) | .NET imports, NuGet dependencies, type detection |
-| [Built-in Functions](docs/builtins.md) | I/O, math, JSON, HTTP, environment, control |
-
-### Design Docs
-
-| Document | Status |
-|----------|--------|
-| [C# AOT Backend](docs/design-csharp-aot-backend.md) | Implemented |
-| [Pointer Inference](docs/design-pointer-inference.md) | Implemented |
-| [Annotations & Serialization](docs/design-annotations-serialization.md) | Planned |
-| [Concurrency](docs/design-concurrency.md) | Implemented |
-| [Syntax Simplification](docs/design-syntax-simplification.md) | Complete |
-| [Type-Before-Name](docs/design-type-before-name.md) | Complete |
+| [Dagster Pipelines](docs/exploration-dagster-pipelines.md) | Batch orchestration |
+| [Pathway Streaming](docs/exploration-pathway-pipelines.md) | Real-time streaming |
+| [PyFlink](docs/exploration-pyflink-pipelines.md) | Enterprise stream processing |
 
 ---
 
-## Installation
-
-**From source** (requires Go 1.26+):
+## Install
 
 ```bash
 go install github.com/victorybhg/zinc/cmd/zinc@latest
 ```
 
-**Pre-built binaries**: download from [GitHub Releases](https://github.com/victorybhg/zinc/releases).
-
-**Prerequisites**: .NET 10+ SDK for building Zinc projects.
+Requires: Go 1.21+ and Python 3.13+
 
 ---
 
 ## Quick Start
 
 ```bash
-# start a project
-mkdir myapp && cd myapp
-zinc init myapp
-zinc build        # → native AOT binary (debug info included)
-./myapp           # → "Hello from Zinc!"
+# Write a script
+echo 'print("Hello from Zinc!")' > hello.zn
 
-# or just run it
-zinc run
+# Run it
+zinc run hello.zn
 
-# production build (stripped, smaller)
-zinc build --release
+# Or transpile to Python
+zinc transpile hello.zn    # → hello.py
 ```
 
-`zinc init` creates a `zinc.toml` project config and `main.zn` entry point. No XML, no `.csproj`, no ceremony.
-
-See the [Getting Started](docs/getting-started.md) guide for multi-file projects, dependencies, and full CLI reference.
+No project setup, no config, no boilerplate. Single files just run.
 
 ---
 
 ## Feature Highlights
 
-- Classes, interfaces, and inheritance (1:1 mapping to C#)
-- Generic functions and classes
-- LINQ collection methods (`Where`, `Select`, `OrderBy`, `First`, `Sum`, `Aggregate`, etc.)
-- Field and constant visibility (`pub` / private by default)
-- Null safety with `?.` safe navigation
-- Errors as values with auto-propagation and `or` handlers
-- `with` resource management (auto-dispose)
-- Concurrency primitives — `spawn`, `parallel`, `Lock<T>` with no function coloring
-- Closures and higher-order functions (`Fn` types)
-- Enums with `match` expressions
-- Implicit return — last expression is the return value
-- Expression `if` and `match` — use in assignments
-- Range loops — `for i in 0..10`, `for i in 1..=5`
-- String interpolation
-- Default parameters and named arguments
-- Variadic functions and spread operator
-- `zinc.toml` project config — no XML
-- Native AOT compilation with full optimizations (tree shaking, speed)
-- Interactive REPL
+```zinc
+// Data classes
+data User
+    name: str
+    email: str
+    age: int = 0
+end
+
+// Classes with auto-self and dunder mapping
+class Stack
+    var items: list[int] = []
+    fn push(item: int)
+        items.append(item)     // → self.items.append(item)
+    end
+    fn len(): int              // → __len__(self)
+        return len(items)
+    end
+end
+
+// Two-track error handling
+fn parse_port(s: str): Result[int]
+    if not s.isdigit()
+        return Err("not a number")
+    end
+    return int(s)
+end
+var port = parse_port("8080") Err { 80 }
+
+// Collection methods → comprehensions
+var active = orders.filter(o -> o.status == "active")
+var total = sum([o.amount for o in active])
+
+// Expression if
+var label = if count == 1: "item" else: "items"
+
+// Generators
+fn fibonacci(limit: int)
+    var a = 0
+    var b = 1
+    while a < limit
+        yield a
+        var temp = a
+        a = b
+        b = temp + b
+    end
+end
+```
 
 ---
 
-## Example
+## Examples
 
-```
-Dog {
-    pub String name
+See [`examples/v2/`](examples/v2/) for working examples:
 
-    new(String name) {
-        this.name = name
-    }
-
-    pub String bark() {
-        return "{this.name} says Woof!"
-    }
-}
-
-main() {
-    var dogs = [Dog("Rex"), Dog("Buddy"), Dog("Max")]
-    var names = dogs.Select((Dog d) -> d.name).OrderBy((String s) -> s)
-    for name in names {
-        print(name)
-    }
-}
-```
-
-Output: `Buddy`, `Max`, `Rex`
+- [`hello.zn`](examples/v2/hello.zn) — hello world with functions
+- [`data_processing.zn`](examples/v2/data_processing.zn) — comprehensions, filtering
+- [`classes.zn`](examples/v2/classes.zn) — classes, inheritance, data classes
+- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err {}, try/catch
+- [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
 
 ---
 

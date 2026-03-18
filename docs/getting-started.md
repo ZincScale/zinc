@@ -1,238 +1,158 @@
-# Getting Started
+# Getting Started with Zinc
 
-## Installation
+Zinc is typed Python with explicit blocks. Write `.zn` files, run them with `zinc run`. The transpiler catches type errors, generates clean `.py` files, and stays out of your way.
+
+## Install
 
 ```bash
 go install github.com/victorybhg/zinc/cmd/zinc@latest
 ```
 
-Or build from source:
+Requires: Go 1.21+ and Python 3.13+
 
-```bash
-git clone https://github.com/victorybhg/zinc
-cd zinc
-go build -o zinc ./cmd/zinc/
-```
-
-Requires **Go 1.26+** for building the compiler from source, and **.NET 10+ SDK** for building Zinc projects.
-
-## Quick Start
-
-Create a project and run it:
-
-```bash
-mkdir myapp && cd myapp
-zinc init myapp
-zinc run
-```
-
-This creates:
-
-```
-myapp/
-  zinc.toml     # Project config (target, dependencies, optimization)
-  main.zn       # Entry point
-```
-
-The generated `zinc.toml`:
-
-```toml
-[project]
-name = "myapp"
-version = "0.1.0"
-
-[build]
-target = "csharp"
-optimize = true      # AOT with full optimizations
-```
-
-The generated `main.zn`:
-
-```
-main() {
-    print("Hello from Zinc!")
-}
-```
-
-## Building
-
-```bash
-zinc build          # → native AOT binary (C# target)
-./myapp             # run the binary
-```
-
-`zinc build` reads `zinc.toml`, transpiles `.zn` → `.cs`, generates a `.csproj` internally (you never see it), and runs `dotnet publish` with AOT. The native binary is copied to your project root.
-
-## Adding Dependencies
-
-Add NuGet packages in `zinc.toml`:
-
-```toml
-[dependencies]
-"Newtonsoft.Json" = "13.0.3"
-"Serilog" = "4.0.0"
-```
-
-These are automatically included in the build — no `dotnet add package` or XML editing needed.
-
-Then use them in your Zinc code:
+## Hello World
 
 ```zinc
-use Newtonsoft.Json
-
-main() {
-    var json = JsonConvert.SerializeObject(42)
-    print(json)
-}
+// hello.zn
+print("Hello, world!")
 ```
 
-Zinc also provides short aliases for common .NET namespaces:
-
-| Zinc | C# Namespace |
-|-------------|-------------|
-| `use http` | `System.Net.Http` |
-| `use json` | `System.Text.Json` |
-| `use io` | `System.IO` |
-| `use regex` | `System.Text.RegularExpressions` |
-| `use threading` | `System.Threading` |
-| `use tasks` | `System.Threading.Tasks` |
-| `use diagnostics` | `System.Diagnostics` |
-| `use net` | `System.Net` |
-| `use crypto` | `System.Security.Cryptography` |
-| `use text` | `System.Text` |
-| `use xml` | `System.Xml` |
-
-When using `zinc build` or `zinc run`, the compiler runs a .NET type probe that discovers all available types from the BCL and your NuGet dependencies. This means constructor calls like `HttpClient()` and `Stopwatch()` automatically emit `new` — no extra configuration needed.
-
-## Multi-File Projects
-
-Create subdirectories for packages:
-
-```
-myapp/
-  zinc.toml
-  main.zn
-  models/
-    user.zn
-  utils/
-    math.zn
+```bash
+zinc run hello.zn
+# Hello, world!
 ```
 
-**`utils/math.zn`** — helper functions:
+That's it. No main function, no project setup. Top-level code just runs.
 
+## Your First Script
+
+```zinc
+// greet.zn
+import sys
+
+fn greet(name: str): str
+    return "Hello, {name}!"
+end
+
+var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
+print(greet(name))
 ```
-package "myapp/utils"
 
-pub Int add(Int a, Int b) {
+```bash
+zinc run greet.zn -- Alice
+# Hello, Alice!
+```
+
+## Key Differences from Python
+
+| Python | Zinc | Why |
+|---|---|---|
+| `def greet(name: str) -> str:` | `fn greet(name: str): str` | Shorter, colon for return type |
+| Indentation-based blocks | `end` keyword closes blocks | No whitespace bugs |
+| `f"Hello, {name}"` | `"Hello, {name}"` | All double-quoted strings interpolate |
+| Types optional | Types enforced | Catch errors at transpile time |
+| `self.name` everywhere | Just `name` in methods | Auto-injected by transpiler |
+| `__init__`, `__str__` | `fn init()`, `fn str()` | Clean names, transpiler maps to dunders |
+
+## Variables
+
+```zinc
+var name = "Alice"          // type inferred
+var age: int = 30           // explicit type
+var scores: list[int] = []  // generic type
+```
+
+## Functions
+
+```zinc
+fn add(a: int, b: int): int
     return a + b
-}
+end
+
+// Single-expression shorthand
+fn double(x: int): int = x * 2
 ```
 
-**`models/user.zn`** — a class:
+## Control Flow
 
-```
-package "myapp/models"
+```zinc
+if x > 0
+    print("positive")
+else if x == 0
+    print("zero")
+else
+    print("negative")
+end
 
-User {
-    String name
-    Int age
+for item in items
+    print(item)
+end
 
-    new(String name, Int age) {
-        this.name = name
-        this.age = age
-    }
-
-    pub String greet() {
-        return "Hi, I'm {this.name}!"
-    }
-}
-```
-
-**`main.zn`** — import local packages and use them:
-
-```
-import "myapp/utils"
-import "myapp/models"
-
-main() {
-    var sum = utils.add(2, 3)
-    print(sum)
-
-    var user = models.User("Alice", 30)
-    print(user.greet())
-}
+while running
+    process()
+end
 ```
 
-Then build and run:
+## Data Classes
+
+```zinc
+data User
+    name: str
+    email: str
+    age: int = 0
+end
+
+var u = User("Alice", "alice@example.com")
+```
+
+## Error Handling — Two Tracks
+
+**Expected errors** (validation, parsing) use `Result[T]`:
+
+```zinc
+fn parse_port(s: str): Result[int]
+    if not s.isdigit()
+        return Err("not a number")
+    end
+    return int(s)
+end
+
+var port = parse_port("8080") Err { 80 }
+```
+
+**Unexpected errors** (network down, disk full) use exceptions:
+
+```zinc
+try
+    var conn = db.connect(url)
+catch err: ConnectionError
+    print("Failed: {err}")
+    exit(1)
+end
+```
+
+## Imports
+
+Use Python's ecosystem directly:
+
+```zinc
+import json
+import os
+from pathlib import Path
+from requests import get as http_get
+```
+
+## CLI
 
 ```bash
-zinc run
+zinc run script.zn              # transpile + run
+zinc run script.zn -- arg1      # pass args to script
+zinc transpile script.zn        # output .py file
+zinc transpile script.zn -o out.py  # specify output path
 ```
 
-## CLI Reference
+## Next Steps
 
-```bash
-zinc <file.zn>               # transpile a single file
-zinc <file.zn> -o out.cs      # specify output file
-zinc <file.zn> --run          # transpile and run immediately
-zinc <file.zn> --watch        # watch for changes, re-transpile automatically
-zinc <file.zn> --verbose      # show token/AST debug info
-zinc init [name]              # initialize a new project (creates zinc.toml + main.zn)
-zinc build [dir]              # transpile + compile (native AOT binary, debug info included)
-zinc build [dir] --release    # production build (stripped symbols, smaller binary)
-zinc run [dir]                # transpile + run
-zinc repl                     # launch interactive REPL
-zinc --version                # print version
-```
-
-### Project Commands
-
-| Command | What it does |
-|---------|-------------|
-| `zinc init [name]` | Scaffold a new project (`zinc.toml` + `main.zn`) |
-| `zinc build [dir]` | Transpile + compile to native binary (debug info embedded) |
-| `zinc build [dir] --release` | Production build (symbols stripped, smaller binary) |
-| `zinc run [dir]` | Transpile + run |
-| `zinc repl` | Launch the interactive REPL |
-
-### Single-File Commands
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--run` | `-r` | Transpile and run |
-| `--watch` | `-w` | Watch mode (re-transpile on save) |
-| `--verbose` | `-v` | Debug output |
-| `--version` | `-V` | Print version |
-| `-o <file>` | | Output file path |
-
-### Source Maps
-
-Zinc emits `#line` directives in the generated C# code. Both compile-time and runtime errors point back to your `.zn` source file and line number — you debug in Zinc, not in C#.
-
-By default, `zinc build` embeds debug info so runtime stack traces show `.zn` line numbers. Use `--release` for production builds that strip symbols for a smaller binary.
-
-## Running Examples
-
-The [`examples/`](../examples/) directory contains working Zinc programs:
-
-| Example | Description |
-|---------|-------------|
-| [`hello.zn`](../examples/hello.zn) | Hello World |
-| [`classes.zn`](../examples/classes.zn) | Classes, interfaces, inheritance, polymorphism |
-| [`closures.zn`](../examples/closures.zn) | Lambdas, closures, higher-order functions |
-| [`enums.zn`](../examples/enums.zn) | Enums + match |
-| [`builtins.zn`](../examples/builtins.zn) | Built-in functions — toString, abs, sqrt, jsonEncode, readFile, getEnv |
-| [`errors.zn`](../examples/errors.zn) | Error handling with `or` |
-| [`generics.zn`](../examples/generics.zn) | Generic functions and classes |
-| [`collections.zn`](../examples/collections.zn) | Lists, maps, slicing |
-| [`csharp-only/linq.zn`](../examples/csharp-only/linq.zn) | LINQ methods — Where, Select, OrderBy, First, Sum, Aggregate, chaining (C# backend) |
-| [`csharp-only/annotations.zn`](../examples/csharp-only/annotations.zn) | Annotations — @JsonPropertyName, @Serializable, C# attributes |
-| [`csharp-only/expressions.zn`](../examples/csharp-only/expressions.zn) | Expression if, expression match, implicit return |
-| [`csharp-only/ranges.zn`](../examples/csharp-only/ranges.zn) | Range loops — `for i in 0..10`, `for i in 1..=5` |
-| [`csharp-only/concurrency.zn`](../examples/csharp-only/concurrency.zn) | Concurrency — `spawn`, `parallel`, `Lock<T>` |
-
-Run any example:
-
-```bash
-zinc run
-```
+- [Language Reference](language-reference.md) — full syntax guide
+- [Design Doc](design-zinc-v2-python.md) — philosophy and decisions
+- [Examples](../examples/v2/) — working examples

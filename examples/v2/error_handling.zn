@@ -1,0 +1,51 @@
+// error_handling.zn — Two-track error handling in Zinc v2
+
+// Track 1: Result[T] for expected failures
+fn parse_int(s: str): Result[int]
+    if not s.isdigit()
+        return Err("not a number: {s}")
+    end
+    var n = int(s)
+    if n < 0
+        return Err("negative: {n}")
+    end
+    return n
+end
+
+// Default value on error
+var port = parse_int("8080") Err { 80 }
+print("Port: {port}")
+
+// Handle error with logic
+var age = parse_int("abc") Err {
+    print("Bad input: {err}")
+    age = 0
+}
+print("Age: {age}")
+
+// Process batch — skip bad records
+var inputs = ["10", "abc", "20", "xyz", "30"]
+var values: list = []
+for s in inputs
+    var n = parse_int(s) Err {
+        print("Skipping bad input: {s} ({err})")
+        continue
+    }
+    values.append(n)
+end
+print("Valid values: {values}")
+
+// Track 2: Exceptions for unexpected failures
+fn connect(host: str)
+    if host == "bad-host"
+        raise ConnectionError("cannot reach {host}")
+    end
+    print("Connected to {host}")
+end
+
+try
+    connect("localhost")
+    connect("bad-host")
+catch err: ConnectionError
+    print("Connection failed: {err}")
+end

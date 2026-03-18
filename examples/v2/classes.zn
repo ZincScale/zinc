@@ -1,0 +1,51 @@
+// classes.zn — Zinc v2 class examples
+
+class Animal
+    var name: str
+    var sound: str
+
+    fn speak(): str
+        return "{name} says {sound}"
+    end
+
+    fn str(): str
+        return "Animal({name})"
+    end
+end
+
+class Dog(Animal)
+    var breed: str
+
+    fn fetch(): str
+        return "{self.name} fetches the ball!"
+    end
+end
+
+// Data class — auto-generates __init__, __repr__, __eq__
+data Point
+    x: float
+    y: float
+end
+
+fn distance(a: Point, b: Point): float
+    return ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5
+end
+
+// Enum
+enum Direction
+    North
+    South
+    East
+    West
+end
+
+// Usage
+var dog = Dog("Lab")
+dog.name = "Rex"
+dog.sound = "Woof"
+print(dog.speak())
+print(dog.fetch())
+
+var p1 = Point(0.0, 0.0)
+var p2 = Point(3.0, 4.0)
+print("Distance: {distance(p1, p2)}")

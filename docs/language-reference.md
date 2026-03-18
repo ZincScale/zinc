@@ -1,80 +1,275 @@
-# Language Reference
+# Zinc v2 — Language Reference
 
-Zinc compiles to native binaries via **C# AOT**. Convention over configuration — less typing, less ceremony, optimized native output.
+## Blocks
 
-## Table of Contents
-
-| Topic | Description |
-|-------|-------------|
-| [Getting Started](getting-started.md) | Installation, CLI, project setup |
-| [Types and Variables](types.md) | Variables, constants, type system, enums, null safety, type casting, string interpolation |
-| [Functions](functions.md) | Functions, default/named args, generics, variadic, closures, `Fn` types |
-| [Classes and OOP](classes.md) | Classes, interfaces, inheritance, polymorphism, generics, annotations |
-| [Collections](collections.md) | List/map literals, slicing, LINQ collection methods |
-| [Control Flow](control-flow.md) | If/else, loops, match/switch, safe navigation, concurrency (`spawn`, `parallel`, `Lock<T>`) |
-| [Error Handling](error-handling.md) | Errors as values, `or` handlers, failable functions, `with` resources |
-| [Imports](imports.md) | `use` keyword, .NET namespaces, NuGet dependencies, type detection |
-| [Built-in Functions](builtins.md) | All global builtins — I/O, math, JSON, HTTP, environment, control |
-| [Testing](testing.md) | `zinc test`, assert builtins, test conventions |
-| [Configuration](configuration.md) | `zinc.toml`, dependencies, NuGet sources, private repos |
-
-## Quick Syntax Overview
+All blocks close with `end`. No braces, no significant whitespace.
 
 ```zinc
-// Variables and constants
-var x = 42
-pub const String APP = "Zinc"
+fn example()
+    if true
+        print("yes")
+    end
+end
+```
 
-// Functions
-Int add(Int a, Int b) { return a + b }
+## Variables
 
-// Classes
-Dog {
-    pub String name
-    new(String name) { this.name = name }
-    pub String bark() { return "{this.name} says Woof!" }
-}
+```zinc
+var x = 42                  // inferred type
+var name: str = "Alice"     // explicit type
+var items: list[int] = []   // generic type
+var a, b = divmod(10, 3)    // tuple unpacking
+```
 
-// Interfaces and inheritance
-interface Speaker { pub String speak() }
-Cat : Speaker { pub String speak() { return "Meow!" } }
+## Functions
 
-// Collections + LINQ (C# backend)
-var nums = [5, 3, 8, 1, 9]
-var big = nums.Where((Int x) -> x > 3).OrderBy((Int x) -> x)
+```zinc
+fn greet(name: str): str
+    return "Hello, {name}!"
+end
 
-// Error handling
-var content = readFile("data.txt") or {
-    print("Error: {err}")
-    exit(1)
-}
+fn double(x: int): int = x * 2       // single-expression
+fn log(*args, **kwargs)               // variadic
+fn connect(host: str, port: int = 80) // default args
+```
 
-// Imports
-use System.Diagnostics
-var sw = Stopwatch()    // auto-emits new Stopwatch()
+## Strings
 
-// Concurrency — no async/await
-var result = spawn { fetchData() }
-var items = parallel(ids) { process(it) }
-print(result.value)
+```zinc
+"Hello, {name}!"        // double quotes: interpolation with {}
+'no {interpolation}'    // single quotes: literal strings
+"""multi-line
+string"""               // triple quotes: multi-line
+```
 
-// Entry point
-main() {
-    print("Hello, Zinc!")
+## Classes
+
+```zinc
+class Stack
+    var items: list[int] = []
+
+    fn push(item: int)
+        items.append(item)       // auto-injects self.items
+    end
+
+    fn len(): int                // → __len__(self)
+        return len(items)
+    end
+
+    fn str(): str                // → __str__(self)
+        return "Stack({items})"
+    end
+end
+
+class Dog(Animal)                // inheritance
+    var breed: str
+
+    @staticmethod
+    fn species(): str
+        return "Canis lupus"
+    end
+end
+```
+
+### Dunder Mapping
+
+| Zinc | Python |
+|---|---|
+| `fn init(...)` | `__init__` |
+| `fn str()` | `__str__` |
+| `fn repr()` | `__repr__` |
+| `fn eq(other)` | `__eq__` |
+| `fn len()` | `__len__` |
+| `fn iter()` | `__iter__` |
+| `fn contains(item)` | `__contains__` |
+| `fn get(key)` | `__getitem__` |
+| `fn set(key, val)` | `__setitem__` |
+| `fn add(other)` | `__add__` |
+| `fn lt(other)` | `__lt__` |
+| `fn call(...)` | `__call__` |
+
+## Data Classes
+
+```zinc
+data User
+    name: str
+    email: str
+    age: int = 0
+end
+```
+
+Transpiles to `@dataclass class User`.
+
+## Enums
+
+```zinc
+enum Color
+    Red
+    Green
+    Blue
+end
+```
+
+## Control Flow
+
+```zinc
+// if / else if / else
+if x > 0
+    print("positive")
+else if x == 0
+    print("zero")
+else
+    print("negative")
+end
+
+// expression if (ternary)
+var label = if count == 1: "item" else: "items"
+
+// for loop
+for item in items
+    print(item)
+end
+
+for i, item in items        // with index (enumerate)
+    print("{i}: {item}")
+end
+
+// while
+while running
+    process()
+end
+
+// match
+match command
+    case "start" -> start()
+    case "stop" -> stop()
+    case _ -> print("unknown")
+end
+```
+
+## Error Handling
+
+### Track 1 — Result[T] for expected failures
+
+```zinc
+fn parse_age(input: str): Result[int]
+    if not input.isdigit()
+        return Err("not a number")
+    end
+    return int(input)            // auto-wrapped in Ok()
+end
+
+// Default value
+var age = parse_age(input) Err { 0 }
+
+// Handler block
+var age = parse_age(input) Err {
+    print("bad: {err}")
+    return
 }
 ```
 
-## Backend
+### Track 2 — Exceptions for unexpected failures
 
-Zinc targets **C# AOT** (Native AOT via .NET). The compiler transpiles `.zn` → `.cs`, generates a `.csproj` internally, and runs `dotnet publish` with AOT to produce a native binary.
+```zinc
+try
+    var conn = db.connect(url)
+catch err: ConnectionError
+    print("down: {err}")
+end
 
-| Property | Value |
-|----------|-------|
-| Binary size | ~1.6 MB |
-| Startup | ~9 ms |
-| Concurrency | `spawn`, `parallel`, `Lock<T>` |
-| Collection methods | LINQ (Where, Select, OrderBy, ...) |
-| Error handling | try/catch (generated from `or { }`) |
-| Type detection | .NET reflection probe |
-| Ecosystem | NuGet packages |
-| Config | `zinc.toml` |
+raise ValueError("bad") from original
+```
+
+## Imports
+
+```zinc
+import json
+import os.path
+from pathlib import Path
+from os.path import join, exists
+```
+
+## Operators
+
+```zinc
+// Arithmetic
++ - * / % **
+
+// Comparison
+== != < <= > >=
+
+// Boolean
+and  or  not
+
+// Membership
+in   not in
+
+// Identity
+is   is not
+
+// None
+none
+```
+
+## Collection Methods
+
+```zinc
+items.filter(x -> x > 0)        // → [x for x in items if (x > 0)]
+items.map(x -> x * 2)           // → [(x * 2) for x in items]
+items.sum()                      // → sum(items)
+items.sort_by(x -> x.age)       // → sorted(items, key=...)
+items.take(10)                   // → items[:10]
+items.first(x -> x > 10)        // → next(x for x in items if ...)
+items.any(x -> x > 0)           // → any(...)
+items.group_by(x -> x.category) // → itertools.groupby(...)
+
+// Comprehensions (transpiler auto-picks list vs generator)
+var squares = [x * x for x in range(10)]
+var total = sum([x for x in items])   // auto-stripped to generator
+var lengths = {w: len(w) for w in words}
+```
+
+## Generators
+
+```zinc
+fn fibonacci(limit: int)
+    var a = 0
+    var b = 1
+    while a < limit
+        yield a
+        var temp = a
+        a = b
+        b = temp + b
+    end
+end
+```
+
+## Context Managers
+
+```zinc
+with f = open("data.txt")
+    var content = f.read()
+end
+```
+
+## Decorators
+
+```zinc
+@cache
+fn expensive(n: int): int
+    return compute(n)
+end
+
+class MyClass
+    @staticmethod
+    fn create(): MyClass
+        return MyClass()
+    end
+
+    @classmethod
+    fn from_dict(d: dict): MyClass
+        return MyClass()
+    end
+end
+```
