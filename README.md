@@ -76,6 +76,9 @@ zinc run hello.zn
 
 # Or transpile to Python
 zinc transpile hello.zn    # → hello.py
+
+# Optimize for Polars (large data pipelines)
+zinc run pipeline.zn --optimize polars
 ```
 
 No project setup, no config, no boilerplate. Single files just run.

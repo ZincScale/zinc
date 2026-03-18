@@ -228,6 +228,10 @@ items.group_by(x -> x.category) // → itertools.groupby(...)
 var squares = [x * x for x in range(10)]
 var total = sum([x for x in items])   // auto-stripped to generator
 var lengths = {w: len(w) for w in words}
+
+// With --optimize polars, chains become Polars lazy frames:
+// orders.filter(o -> o["status"] == "active").map(o -> o["amount"]).sum()
+// → pl.DataFrame(orders).lazy().filter(pl.col("status") == "active").select("amount").sum().collect().item()
 ```
 
 ## Generators

@@ -31,13 +31,13 @@ The transpiler is your co-pilot. It catches mistakes before they hit production,
 | You write | Zinc handles |
 |---|---|
 | `fn str(): str` | Generates `def __str__(self)` |
-| `items.filter(x -> x > 0)` | Dispatches to Polars/NumPy/comprehension based on data shape and available deps |
+| `items.filter(x -> x > 0)` | Comprehension (default) or Polars lazy frame (`--optimize polars`) |
 | Field access: `name` | Injects `self.name` |
 | `data User ... end` | Full `@dataclass` with `__init__`, `__repr__`, `__eq__` |
-| `var x = 5` | Infers type, enforces it everywhere `x` is used |
-| `.map(x -> process(x))` on large collections | Auto-parallelizes with thread pool (free-threaded Python) |
-| `match status ... end` | Warns if cases aren't exhaustive |
-| Imports a GIL-dependent library | Warns and falls back gracefully |
+| `var x = 5` | Infers type, enforces it at transpile time |
+| `var x: int = "bad"` | Type error — caught before running |
+| `match status ... end` | Generates Python `match/case` |
+| `fn parse(s): Result[int]` | Auto-wraps returns in `Ok()`, `Err {}` handlers |
 
 ### Non-goals
 

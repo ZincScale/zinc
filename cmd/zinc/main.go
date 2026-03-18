@@ -49,9 +49,10 @@ Legacy (v1 — C#/Go backends):
   zinc test [dir]          Discover and run test_* functions
 
 Flags:
-  -o <file>       Output file (default: <input>.py)
-  --verbose       Print tokens and AST summary after transpiling
-  --version       Print version and exit
+  -o <file>              Output file (default: <input>.py)
+  --optimize <backend>   Collection dispatch backend: polars, numpy (default: pure Python)
+  --verbose              Print tokens and AST summary after transpiling
+  --version              Print version and exit
 `
 
 func main() {

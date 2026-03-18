@@ -34,10 +34,11 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`.
 - [x] data keyword usable as variable name
 - [x] 104 v2 tests (parser + codegen)
 
-## In Progress
+## Completed (continued)
 
-- [ ] **Type checker** — enforce types at transpile time (the #1 differentiator)
-- [ ] **Smart collection dispatch** — Polars for structured, NumPy for numeric
+- [x] Type checker — enforce types at transpile time, blocks bad code
+- [x] Smart collection dispatch — `--optimize polars` for Polars lazy frames
+- [x] Collection runtime — `_zinc_collect()` for chained methods (pure Python fallback)
 
 ## Next
 
