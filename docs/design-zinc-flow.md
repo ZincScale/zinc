@@ -294,6 +294,43 @@ This means passing a 4MB FlowFile between processors costs ~200 bytes (the refer
 
 ---
 
+## Research Findings (2026-03-18)
+
+### Architecture Decision: Pure Python
+
+Benchmarked free-threaded Python queue throughput: **301K msg/sec** — comparable to NiFi (100K-500K). No need for Go/Rust runtime. Stay pure Python.
+
+### Key Insight: FlowFile = list[dict] = Polars DataFrame
+
+Everything maps to `list[dict]`, which Polars auto-accelerates:
+
+```
+NiFi FlowFile       → dict (attributes + content)
+Batch of FlowFiles  → list[dict]
+list[dict]          → Polars DataFrame (auto, Rust engine)
+
+Avro records        → list[dict] (fastavro)
+JSON array          → list[dict] (orjson/json)
+CSV rows            → list[dict] (polars.read_csv)
+Parquet             → list[dict] (polars.read_parquet)
+Database rows       → list[dict] (SQLAlchemy)
+Kafka messages      → list[dict] (confluent-kafka)
+```
+
+The smart dispatch already built into Zinc auto-promotes `list[dict]` chains to Polars. Processors that filter/map/aggregate FlowFiles are automatically Polars-accelerated.
+
+FlowFile V3 binary format is only needed for NiFi wire compatibility (import/export), not for internal processing.
+
+### Stack
+
+```
+Zinc Flow (Python)      — orchestration, queues, routing, lifecycle
+Polars (Rust)           — heavy data processing inside processors
+NumPy (C)               — numeric computation
+Free-threaded Python    — real parallelism between processors
+Single binary           — zinc pack bundles everything
+```
+
 ## Open Questions
 
 1. **Queue technology** — Redis Streams? Kafka? Custom? Should be pluggable.
