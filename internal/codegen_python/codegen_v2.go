@@ -418,6 +418,12 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 		} else {
 			g.writeln(fmt.Sprintf("raise %s", g.emitV2Expr(s.Value)))
 		}
+	case *parser.YieldStmt:
+		if s.Value != nil {
+			g.writeln(fmt.Sprintf("yield %s", g.emitV2Expr(s.Value)))
+		} else {
+			g.writeln("yield")
+		}
 	case *parser.DelStmt:
 		g.writeln(fmt.Sprintf("del %s", g.emitV2Expr(s.Target)))
 	case *parser.AssertStmt:

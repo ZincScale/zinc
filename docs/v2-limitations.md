@@ -5,17 +5,17 @@ Track issues to fix before v2 is production-ready.
 ## Parser
 
 - [ ] `data` keyword conflicts with variable names (can't use `data` as identifier)
-- [ ] No multi-line string literals (triple quotes)
+- [x] ~~No multi-line string literals~~ — triple quotes implemented
 - [ ] No chained comparisons (`0 < x < 10`)
 - [ ] No walrus operator (`:=` assignment expression)
-- [ ] No `yield` / generator functions
+- [x] ~~No `yield` / generator functions~~ — implemented
 - [ ] No `async` / `await`
 - [ ] No `global` / `nonlocal` keywords
-- [ ] No `del` statement
+- [x] ~~No `del` statement~~ — implemented
 - [x] ~~No `assert` statement~~ — implemented
 - [ ] No `type` aliases
 - [x] ~~No decorators~~ — general decorator pass-through implemented
-- [ ] No nested function definitions
+- [x] ~~No nested function definitions~~ — implemented
 - [x] ~~`from x import a, b`~~ — multiple names implemented (but generates separate lines)
 - [ ] No star import (`from module import *`)
 - [x] ~~No `@staticmethod` / `@classmethod` / `@property`~~ — staticmethod/classmethod implemented

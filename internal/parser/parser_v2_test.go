@@ -890,6 +890,25 @@ end
 	}
 }
 
+func TestV2Yield(t *testing.T) {
+	prog, errs := parseV2(`
+fn count_up(n: int)
+    for i in range(n)
+        yield i
+    end
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	forStmt := fn.Body.Stmts[0].(*ForStmt)
+	_, ok := forStmt.Body.Stmts[0].(*YieldStmt)
+	if !ok {
+		t.Fatalf("expected YieldStmt, got %T", forStmt.Body.Stmts[0])
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

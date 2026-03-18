@@ -145,6 +145,9 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "del" {
 			return p.v2ParseDelStmt()
 		}
+		if tok.Literal == "yield" {
+			return p.v2ParseYieldStmt()
+		}
 	case lexer.TOKEN_DATA, lexer.TOKEN_CLASS, lexer.TOKEN_ENUM:
 		// Allow data/class/enum inside function bodies (local types)
 		// For now, skip — treat as top-level only
@@ -410,6 +413,18 @@ func (p *Parser) v2ParseRaiseStmt() *RaiseStmt {
 		from = p.v2ParseExpr()
 	}
 	return &RaiseStmt{Line: line, Value: val, From: from}
+}
+
+// v2ParseYieldStmt: yield [expr]
+func (p *Parser) v2ParseYieldStmt() *YieldStmt {
+	line := p.peek().Line
+	p.advance() // consume "yield" ident
+	// Bare yield if next is end/else/rbrace/EOF
+	if p.check(lexer.TOKEN_END) || p.check(lexer.TOKEN_ELSE) ||
+		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
+		return &YieldStmt{Line: line}
+	}
+	return &YieldStmt{Line: line, Value: p.v2ParseExpr()}
 }
 
 // v2ParseFnDeclAsStmt parses a nested function definition as a statement.

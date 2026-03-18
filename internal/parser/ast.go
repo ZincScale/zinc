@@ -432,6 +432,15 @@ type RaiseStmt struct {
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
 
+// YieldStmt: yield expr  OR  yield (bare)
+type YieldStmt struct {
+	Line  int
+	Value Expr // nil for bare yield
+}
+
+func (y *YieldStmt) nodeTag() {}
+func (y *YieldStmt) stmtTag() {}
+
 // DelStmt: del expr
 type DelStmt struct {
 	Line   int

@@ -614,6 +614,18 @@ func TestV2TripleQuoteString(t *testing.T) {
 	}
 }
 
+func TestV2Yield(t *testing.T) {
+	assertV2Contains(t, `
+fn count_up(n: int)
+    for i in range(n)
+        yield i
+    end
+end
+`,
+		"yield i",
+	)
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json
