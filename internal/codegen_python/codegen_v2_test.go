@@ -483,6 +483,112 @@ func TestV2PrintMultiArg(t *testing.T) {
 	)
 }
 
+func TestV2ResultFnOkWrap(t *testing.T) {
+	// Bare return in Result function → wrapped in Ok()
+	assertV2Contains(t, `
+fn parse_age(input: str): Result[int]
+    return 42
+end
+`,
+		"return Ok(42)",
+	)
+}
+
+func TestV2ResultFnErrPassthrough(t *testing.T) {
+	// Err() return stays as-is (not double-wrapped)
+	assertV2Contains(t, `
+fn parse_age(input: str): Result[int]
+    return Err("bad input")
+end
+`,
+		`return Err("bad input")`,
+	)
+}
+
+func TestV2ErrHandlerBlock(t *testing.T) {
+	assertV2Contains(t, `
+var age = parse_age(input) Err {
+    print("bad age")
+    return
+}
+`,
+		"_result = parse_age(input)",
+		"if _result.is_err():",
+		"err = _result.error",
+		"age = _result.value",
+	)
+}
+
+func TestV2ErrHandlerDefault(t *testing.T) {
+	assertV2Contains(t, `var age = parse_age(input) Err { 0 }`,
+		"_result = parse_age(input)",
+		"_result.value if _result.is_ok() else 0",
+	)
+}
+
+func TestV2ResultRuntime(t *testing.T) {
+	// When Result types are used, runtime is inlined
+	result := transpileV2(`
+fn validate(x: int): Result[int]
+    return x
+end
+`)
+	if !strings.Contains(result, "class _Ok:") {
+		t.Error("expected Result runtime to be inlined")
+	}
+	if !strings.Contains(result, "def Ok(value)") {
+		t.Error("expected Ok() function in runtime")
+	}
+}
+
+func TestV2RaiseFrom(t *testing.T) {
+	assertV2Contains(t,
+		`raise ValueError("bad") from original`,
+		`raise ValueError("bad") from original`,
+	)
+}
+
+func TestV2TwoTrackErrorStory(t *testing.T) {
+	// Full two-track test: Result for expected, try/catch for exceptional
+	result := transpileV2(`
+fn parse_port(s: str): Result[int]
+    if not s.isdigit()
+        return Err("not a number: {s}")
+    end
+    var port = int(s)
+    if port < 1 or port > 65535
+        return Err("out of range: {port}")
+    end
+    return port
+end
+
+var port = parse_port("8080") Err { 80 }
+print("Using port: {port}")
+
+try
+    var conn = connect(host, port)
+catch err: ConnectionError
+    print("Connection failed: {err}")
+    exit(1)
+end
+`)
+	expected := []string{
+		"def parse_port(s: str) -> Result[int]:",
+		`return Err(f"not a number: {s}")`,
+		`return Err(f"out of range: {port}")`,
+		"return Ok(port)",
+		"_result = parse_port(\"8080\")",
+		"_result.value if _result.is_ok() else 80",
+		"try:",
+		"except ConnectionError as err:",
+	}
+	for _, exp := range expected {
+		if !strings.Contains(result, exp) {
+			t.Errorf("expected output to contain %q\ngot:\n%s", exp, result)
+		}
+	}
+}
+
 func TestV2FullScript(t *testing.T) {
 	result := transpileV2(`
 import json

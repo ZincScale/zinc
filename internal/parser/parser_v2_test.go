@@ -766,6 +766,73 @@ func TestV2PrintMultiArg(t *testing.T) {
 	}
 }
 
+func TestV2ResultFn(t *testing.T) {
+	prog, errs := parseV2(`
+fn parse_age(input: str): Result[int]
+    if not input.isdigit()
+        return Err("must be a number")
+    end
+    var age = int(input)
+    return age
+end
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if fn.ReturnType == nil {
+		t.Fatal("expected return type")
+	}
+	gt, ok := fn.ReturnType.(*GenericType)
+	if !ok || gt.Name != "Result" {
+		t.Errorf("expected Result[int] return type, got %T", fn.ReturnType)
+	}
+}
+
+func TestV2ErrHandlerBlock(t *testing.T) {
+	prog, errs := parseV2(`
+var age = parse_age(input) Err {
+    print("bad age")
+    return
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.OrHandler == nil {
+		t.Fatal("expected Err handler")
+	}
+	if len(varStmt.OrHandler.Body.Stmts) != 2 {
+		t.Errorf("expected 2 handler stmts, got %d", len(varStmt.OrHandler.Body.Stmts))
+	}
+}
+
+func TestV2ErrHandlerDefault(t *testing.T) {
+	prog, errs := parseV2(`var age = parse_age(input) Err { 0 }`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.OrHandler == nil {
+		t.Fatal("expected Err handler")
+	}
+	if len(varStmt.OrHandler.Body.Stmts) != 1 {
+		t.Errorf("expected 1 handler stmt (default expr), got %d", len(varStmt.OrHandler.Body.Stmts))
+	}
+}
+
+func TestV2RaiseFrom(t *testing.T) {
+	prog, errs := parseV2(`raise ValueError("bad") from original`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	raiseStmt := prog.Stmts[0].(*RaiseStmt)
+	if raiseStmt.From == nil {
+		t.Fatal("expected 'from' clause")
+	}
+}
+
 func TestV2SingleQuoteString(t *testing.T) {
 	prog, errs := parseV2(`var x = 'hello'`)
 	if len(errs) > 0 {

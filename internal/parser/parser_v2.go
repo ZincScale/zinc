@@ -146,7 +146,7 @@ func (p *Parser) v2ParseStmt() Stmt {
 	return p.v2ParseExprOrAssignStmt()
 }
 
-// v2ParseVarStmt: var name = expr  OR  var name: type = expr  OR  var a, b = expr
+// v2ParseVarStmt: var name = expr [Err { handler }]  OR  var name: type = expr  OR  var a, b = expr
 func (p *Parser) v2ParseVarStmt() Stmt {
 	line := p.peek().Line
 	p.advance() // consume var
@@ -177,14 +177,39 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 		val = p.v2ParseExpr()
 	}
 
-	return &VarStmt{Line: line, Name: name, Type: typ, Value: val}
+	// Check for Err { handler } block
+	handler := p.v2ParseErrHandler()
+
+	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
+}
+
+// v2ParseErrHandler checks for `Err { ... }` after a failable call.
+// Uses braces (not end) since it's an inline handler on the same statement.
+// Returns nil if no Err block follows.
+func (p *Parser) v2ParseErrHandler() *OrHandler {
+	// Look for IDENT "Err" followed by LBRACE
+	if !p.check(lexer.TOKEN_IDENT) || p.peek().Literal != "Err" {
+		return nil
+	}
+	if p.peekAt(1).Type != lexer.TOKEN_LBRACE {
+		return nil
+	}
+	p.advance() // consume "Err"
+	p.advance() // consume "{"
+
+	// Parse statements inside braces — use v2ParseBody with RBRACE as terminator
+	body := p.v2ParseBody(lexer.TOKEN_RBRACE)
+	p.expect(lexer.TOKEN_RBRACE)
+
+	return &OrHandler{Body: body}
 }
 
 func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
 	line := p.peek().Line
 	p.advance() // consume return
-	// Return with no value if next token is end/else/EOF/newline-equivalent
-	if p.check(lexer.TOKEN_END) || p.check(lexer.TOKEN_ELSE) || p.check(lexer.TOKEN_EOF) {
+	// Return with no value if next token is a block terminator
+	if p.check(lexer.TOKEN_END) || p.check(lexer.TOKEN_ELSE) ||
+		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
 		return &ReturnStmt{Line: line}
 	}
 	return &ReturnStmt{Line: line, Value: p.v2ParseExpr()}
@@ -357,12 +382,17 @@ func (p *Parser) v2ParseTryStmt() Stmt {
 	}
 }
 
-// v2ParseRaiseStmt: raise expr
+// v2ParseRaiseStmt: raise expr [from expr]
 func (p *Parser) v2ParseRaiseStmt() *RaiseStmt {
 	line := p.peek().Line
 	p.advance() // consume raise
 	val := p.v2ParseExpr()
-	return &RaiseStmt{Line: line, Value: val}
+	var from Expr
+	if p.check(lexer.TOKEN_FROM) {
+		p.advance()
+		from = p.v2ParseExpr()
+	}
+	return &RaiseStmt{Line: line, Value: val, From: from}
 }
 
 // v2ParseAssertStmt: assert expr [, "message"]

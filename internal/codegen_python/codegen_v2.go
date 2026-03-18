@@ -76,8 +76,12 @@ func (g *Generator) GenerateV2(prog *parser.Program) string {
 		}
 	}
 
-	// Prepend auto-detected imports
+	// Prepend auto-detected imports and runtime
 	var out strings.Builder
+	if g.needsResultRuntime {
+		out.WriteString(ZincResultRuntime)
+		out.WriteString("\n")
+	}
 	if len(g.neededImports) > 0 {
 		for imp := range g.neededImports {
 			out.WriteString(fmt.Sprintf("import %s\n", imp))
@@ -166,6 +170,13 @@ func (g *Generator) emitV2FnDecl(d *parser.FnDecl) {
 			g.writeln(fmt.Sprintf("@%s", a.Name))
 		}
 	}
+
+	// Check if this function returns Result[T]
+	isResultFn := g.isResultType(d.ReturnType)
+	if isResultFn {
+		g.needsResultRuntime = true
+	}
+
 	params := g.v2FormatParams(d.Params)
 	retAnnotation := ""
 	if d.ReturnType != nil {
@@ -173,12 +184,36 @@ func (g *Generator) emitV2FnDecl(d *parser.FnDecl) {
 	}
 	g.writeln(fmt.Sprintf("def %s(%s)%s:", d.Name, params, retAnnotation))
 	g.push()
+
+	prevResultFn := g.inResultFn
+	g.inResultFn = isResultFn
+
 	if d.Body != nil && len(d.Body.Stmts) > 0 {
 		g.emitV2Block(d.Body)
 	} else {
 		g.writeln("pass")
 	}
+
+	g.inResultFn = prevResultFn
 	g.pop()
+}
+
+// isErrCall checks if an expression is a call to Err().
+func (g *Generator) isErrCall(e parser.Expr) bool {
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Callee.(*parser.Ident)
+	return ok && ident.Name == "Err"
+}
+
+// isResultType checks if a type expression is Result[T].
+func (g *Generator) isResultType(t parser.TypeExpr) bool {
+	if gt, ok := t.(*parser.GenericType); ok {
+		return gt.Name == "Result"
+	}
+	return false
 }
 
 func (g *Generator) emitV2ClassDecl(d *parser.ClassDecl) {
@@ -343,7 +378,14 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 		g.writeln(fmt.Sprintf("%s %s %s", g.emitV2Expr(s.Target), s.Op, g.emitV2Expr(s.Value)))
 	case *parser.ReturnStmt:
 		if s.Value != nil {
-			g.writeln(fmt.Sprintf("return %s", g.emitV2Expr(s.Value)))
+			val := g.emitV2Expr(s.Value)
+			// In Result-returning functions, wrap bare returns in Ok()
+			// but don't double-wrap Err() calls
+			if g.inResultFn && !g.isErrCall(s.Value) {
+				g.writeln(fmt.Sprintf("return Ok(%s)", val))
+			} else {
+				g.writeln(fmt.Sprintf("return %s", val))
+			}
 		} else {
 			g.writeln("return")
 		}
@@ -371,7 +413,11 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 	case *parser.TryStmt:
 		g.emitV2TryStmt(s)
 	case *parser.RaiseStmt:
-		g.writeln(fmt.Sprintf("raise %s", g.emitV2Expr(s.Value)))
+		if s.From != nil {
+			g.writeln(fmt.Sprintf("raise %s from %s", g.emitV2Expr(s.Value), g.emitV2Expr(s.From)))
+		} else {
+			g.writeln(fmt.Sprintf("raise %s", g.emitV2Expr(s.Value)))
+		}
 	case *parser.AssertStmt:
 		if s.Message != nil {
 			g.writeln(fmt.Sprintf("assert %s, %s", g.emitV2Expr(s.Cond), g.emitV2Expr(s.Message)))
@@ -391,6 +437,35 @@ func (g *Generator) emitV2Stmt(s parser.Stmt) {
 }
 
 func (g *Generator) emitV2VarStmt(s *parser.VarStmt) {
+	if s.Value != nil && s.OrHandler != nil {
+		// Err {} handler: var x = call() Err { handler }
+		g.needsResultRuntime = true
+		val := g.emitV2Expr(s.Value)
+		g.writeln(fmt.Sprintf("_result = %s", val))
+
+		// Check if handler is a single expression (default value)
+		if len(s.OrHandler.Body.Stmts) == 1 {
+			if es, ok := s.OrHandler.Body.Stmts[0].(*parser.ExprStmt); ok {
+				// Single expression default: var x = call() Err { 0 }
+				def := g.emitV2Expr(es.Expr)
+				g.writeln(fmt.Sprintf("%s = _result.value if _result.is_ok() else %s", s.Name, def))
+				return
+			}
+		}
+
+		// Multi-statement handler: var x = call() Err { print("bad"); return }
+		g.writeln("if _result.is_err():")
+		g.push()
+		g.writeln("err = _result.error")
+		g.emitV2Block(s.OrHandler.Body)
+		g.pop()
+		g.writeln("else:")
+		g.push()
+		g.writeln(fmt.Sprintf("%s = _result.value", s.Name))
+		g.pop()
+		return
+	}
+
 	if s.Value != nil {
 		val := g.emitV2Expr(s.Value)
 		if s.Type != nil {

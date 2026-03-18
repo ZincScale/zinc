@@ -27,8 +27,8 @@ Track issues to fix before v2 is production-ready.
 - [ ] **Smart collection dispatch** — Polars/NumPy/Numba tiers not implemented, only comprehensions
 - [ ] **Fast serialization builtins** — json_load(), csv_load(), avro_load() not implemented
 - [ ] **.parallel_map()** — free-threaded parallel dispatch not implemented
-- [ ] `from x import a, b` generates separate lines instead of consolidated
-- [ ] `.filter()` with lambdas generates awkward `(lambda x: ...)(x)` pattern
+- [x] ~~`from x import a, b` generates separate lines~~ — consolidated now
+- [x] ~~`.filter()` with lambdas awkward pattern~~ — inlines lambda body directly
 
 ## Codegen (Other)
 
@@ -42,7 +42,7 @@ Track issues to fix before v2 is production-ready.
 
 ## CLI
 
-- [ ] `zinc run` leaves generated .py file in working directory
+- [x] ~~`zinc run` leaves generated .py file~~ — uses temp file, cleans up
 - [ ] No `zinc check` (type checking without running)
 - [ ] No `zinc fmt` (formatter)
 - [ ] No `zinc repl` for v2

@@ -421,10 +421,11 @@ type TryStmt struct {
 func (t *TryStmt) nodeTag() {}
 func (t *TryStmt) stmtTag() {}
 
-// RaiseStmt: raise expr
+// RaiseStmt: raise expr [from expr]
 type RaiseStmt struct {
 	Line  int
 	Value Expr
+	From  Expr // optional: raise X from Y (exception chaining)
 }
 
 func (r *RaiseStmt) nodeTag() {}
