@@ -257,40 +257,38 @@ class Color(Enum):
 
 ### Error Handling
 
-Python uses exceptions. Zinc should embrace that, not fight it.
+Python's exception model, with braces and transpiler guardrails. No invented abstractions.
 
-**Option A — Python-style try/catch with braces:**
 ```zinc
+// Full try/catch for when you need specificity
 try {
-    var data = read_file("config.json")
+    var data = open("config.json").read()
     var config = json.loads(data)
 } catch err: FileNotFoundError {
     print("Config not found, using defaults")
-    var config = default_config()
-} catch err: Exception {
-    print("Error: {err}")
+    var config = {}
+} catch err: json.JSONDecodeError {
+    print("Bad JSON: {err}")
     exit(1)
 }
-```
 
-**Option B — `or` blocks for simple cases (keep from v1):**
-```zinc
-var data = read_file("config.json") or {
+// or {} shorthand for scripts — catch and handle inline
+var data = open("config.json").read() or {
     print("Config not found")
     exit(1)
 }
+
+// or {} with default value
+var port = int(os.getenv("PORT")) or { 8080 }
+
+// raise works as expected
+fn divide(a: int, b: int) -> int {
+    if b == 0 { raise ValueError("division by zero") }
+    return a / b
+}
 ```
 
-The `or` block could transpile to a try/except wrapper:
-```python
-try:
-    data = open("config.json").read()
-except Exception as __err:
-    print("Config not found")
-    exit(1)
-```
-
-**Recommendation:** Support both. `or {}` for quick scripts, `try/catch` for when you need specificity.
+**Transpiler safety:** bare `except:` not allowed (must specify type), warns on empty catch blocks, warns on unhandled failable calls. See `error-handling.md` for full details.
 
 ### Imports — Use Python's Ecosystem Directly
 
