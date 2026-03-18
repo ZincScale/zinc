@@ -640,7 +640,84 @@ end
 
 ---
 
-## 8. Implementation Considerations
+## 8. Large Payload Efficiency — Zero-Copy at NiFi FlowFile Scale
+
+A critical concern for NiFi-style workloads: FlowFiles are typically 1-8MB each. Copying
+that data between pipeline stages would consume enormous time and memory. BEAM handles
+this natively.
+
+### BEAM Refc Binaries — Pointer Passing, Not Copying
+
+Binaries larger than 64 bytes are stored on a **shared process-independent heap**. When
+sent between processes, only an 8-byte pointer is copied — not the data:
+
+```
+Process A (Stage 1)          Shared Binary Heap
+┌──────────┐                ┌─────────────────┐
+│ ptr ──────┼───────────────│ 4MB FlowFile     │
+└──────────┘       ┌───────│ content          │
+Process B (Stage 2)│        └─────────────────┘
+┌──────────┐       │
+│ ptr ──────┼──────┘        Reference counted —
+└──────────┘                freed when count = 0
+```
+
+Sending a 4MB FlowFile between pipeline stages costs ~8 bytes, not 4MB. Sub-binaries
+(slicing) are also zero-copy — a slice creates a pointer+offset into the original allocation.
+
+### Techniques at Scale
+
+| Technique | How | Best for |
+|---|---|---|
+| **Refc binaries** (BEAM built-in) | Shared heap, pointer passing | 64B-100MB payloads |
+| **ETS tables** | Shared-memory hash tables, all processes read/write | Lookup tables, state sharing |
+| **Persistent terms** | Global immutable storage, zero-copy reads | Config, schemas, routing tables |
+| **Content repository** (NiFi's approach) | Payload on disk, pass claim ID | >100MB, durability needed |
+| **Apache Arrow / IPC** | Columnar memory layout, mmap | Structured/tabular data |
+| **io_uring / sendfile** | Kernel zero-copy I/O | File→network without userspace copy |
+
+### FlowFile Architecture on BEAM
+
+```
+FlowFile = {attributes (small dict), content_ref (pointer to refc binary)}
+
+Stage 1 → Stage 2 → Stage 3
+  Only attributes + 8-byte pointer move between stages
+  Content stays in shared heap or on disk
+  Each stage reads content via the ref, never copies it
+```
+
+This mirrors NiFi's own architecture — NiFi stores FlowFile content in a content repository
+(disk-backed) and processors pass around `ContentClaim` objects (pointers). BEAM gives
+the same pattern but **in-memory** with refc binaries, which is faster for sub-100MB payloads.
+
+### The Python Problem
+
+This is where Python struggles for pipeline workloads:
+
+- **multiprocessing**: serializes (pickles) data between processes — full copies every time
+- **threading (GIL)**: shared memory but no parallelism (until free-threaded 3.13+)
+- **free-threaded Python**: shared memory threads with real parallelism, but loses BEAM's
+  fault isolation (one bad thread can corrupt shared state)
+
+A **hybrid architecture** could combine the best of both:
+
+```
+BEAM (orchestration, routing, fault tolerance)
+  │
+  ├─ Python workers via Ports (for ML/AI/data science libs)
+  │   └─ Data passed via shared memory or Arrow buffers (zero-copy)
+  │
+  └─ BEAM processes (for routing, filtering, enrichment)
+      └─ Data passed via refc binaries (zero-copy)
+```
+
+This gives BEAM's supervision and backpressure for pipeline orchestration, while Python
+workers handle the heavy computation with access to NumPy/Polars/ML libraries.
+
+---
+
+## 9. Implementation Considerations
 
 ### Dual Backend Architecture
 
