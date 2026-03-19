@@ -65,6 +65,7 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Pyt
 
 - [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design docs)
 - [ ] `data` classes with methods — `data` auto-generates `__init__`, `__repr__`, `__eq__`, `__hash__`, `copy()` from fields; all fields frozen (immutable); methods and everything else work same as `class`. Transpiles to `@dataclass(frozen=True)` + `copy()` via `dataclasses.replace()`
+- [ ] Nullable types — `Type?` syntax, transpiles to `Optional[Type]`. Safe navigation `?.` operator (short-circuits to `none` if left side is `none`). Kotlin/Dart/Swift-style.
 - [ ] Dict merge with `+` operator — `a + b` returns new dict (Kotlin-style), transpiles to Python `a | b`
 - [ ] Chained comparisons (`0 < x < 10`)
 - [ ] async / await
