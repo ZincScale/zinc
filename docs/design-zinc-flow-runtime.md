@@ -789,7 +789,101 @@ fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
 
 Services are shared across all processors in a group (same process, same connection pool). Between groups, each group has its own service instances.
 
-### 2. Secrets Management
+### 2. Processor Configuration
+
+Processors need configuration (API URLs, thresholds, batch sizes, feature flags) that's separate from their code and changeable without redeployment.
+
+#### Three Sources, Priority Order
+
+| Priority | Source | When it's set | Example |
+|----------|--------|--------------|---------|
+| **Highest** | State store (live overrides) | Operator changes in production via CLI/API | `zinc flow config set enrich timeout_sec 60` |
+| **Medium** | Pipeline definition | Developer sets at wiring time | `group.add_processor("enrich", enrich, config={...})` |
+| **Lowest** | Processor defaults | Developer declares in decorator | `@flow.processor(config={"timeout_sec": 30})` |
+
+Resolution: state store override > pipeline definition > processor defaults. Secrets (`${secrets.KEY}`) resolved separately via `SecretsProvider` after config merge.
+
+```zinc
+// Processor declares config with defaults
+@flow.processor(config={
+    "batch_size": 100,
+    "api_url": "https://api.example.com",
+    "timeout_sec": 30,
+    "retry_count": 3,
+    "api_key": "${secrets.ENRICHMENT_API_KEY}",
+})
+fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
+    var url = ctx.config["api_url"]        // resolved from 3-layer merge
+    var timeout = ctx.config["timeout_sec"]
+    var key = ctx.config["api_key"]        // resolved from secrets provider
+    var result = http_get(url, headers={"Authorization": key}, timeout=timeout)
+    return ff.with_content(result)
+}
+
+// Pipeline overrides at wiring time
+group.add_processor("enrich", enrich, config={
+    "api_url": "https://api-staging.example.com",
+    "batch_size": 50,
+})
+```
+
+#### Live Config Changes
+
+Operators update config in production — takes effect immediately, no restart:
+
+```bash
+# Set a config value — immediate, versioned
+zinc flow config set enrich timeout_sec 60
+zinc flow config set enrich api_url https://api-v2.example.com
+
+# View current config (merged from all 3 sources)
+zinc flow config show enrich
+  batch_size:   50         (pipeline)
+  api_url:      https://api-v2.example.com  (state store override)
+  timeout_sec:  60         (state store override)
+  retry_count:  3          (processor default)
+  api_key:      ********   (secret)
+
+# View config history
+zinc flow config history enrich
+  Rev 12  2026-03-19 14:30  vrjoshi  set timeout_sec=60
+  Rev 11  2026-03-19 14:25  vrjoshi  set api_url=https://api-v2.example.com
+
+# Reset an override — fall back to pipeline/default value
+zinc flow config reset enrich timeout_sec
+```
+
+Config changes are versioned in the state store — same audit trail as processor swaps and routing changes. Rollback works across all of them.
+
+#### Implementation
+
+The `ProcessorWorker` reads config on initialization and when notified of changes. The worker doesn't need to restart — it reads `ctx.config` on each invocation, which is a reference to the merged config dict. When the state store changes, the runtime updates the dict in place (thread-safe swap of the reference).
+
+```zinc
+class ProcessorConfig {
+    var defaults: dict[str, Any]        // from @flow.processor decorator
+    var pipeline_config: dict[str, Any] // from group.add_processor()
+    var overrides: dict[str, Any]       // from state store (live changes)
+
+    fn resolve(secrets: SecretsProvider): dict[str, Any] {
+        // Merge: defaults < pipeline < overrides
+        var merged = dict(defaults)
+        merged.update(pipeline_config)
+        merged.update(overrides)
+
+        // Resolve ${secrets.KEY} references
+        for key, value in merged.items() {
+            if value is str and value.starts_with("${secrets.") {
+                var secret_key = value[10:-1]  // strip ${secrets. and }
+                merged[key] = secrets.get(secret_key)
+            }
+        }
+        return merged
+    }
+}
+```
+
+### 3. Secrets Management
 
 Processors need credentials — API keys, database passwords, TLS certs. These must never be hardcoded or stored in the pipeline definition.
 
