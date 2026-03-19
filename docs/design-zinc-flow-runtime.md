@@ -36,6 +36,23 @@ fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
 
 This applies to all wiring in the runtime: `Pipeline` holds `FlowQueue` references (not `LocalQueue`), `ProcessorWorker` takes a `FlowQueue` (not `NatsQueue`), `Router` is an interface the runtime calls (not hardcoded NATS subject logic).
 
+### Dogfood Zinc — Never Fall Back to Raw Python
+
+Zinc Flow is written in Zinc. This is a deliberate test of the language design.
+
+When we hit something awkward or missing while building the runtime — a pattern that's clunky, a feature that's needed, a transpiler optimization that would help — **that's a signal to improve Zinc, not to drop into raw Python.**
+
+Examples of things we might discover we need:
+- Interface/abstract class syntax (for the core interfaces above)
+- Decorator arguments (`@flow.processor(outputs=["a", "b"])`)
+- Generic types (`FlowQueue[FlowFile]`)
+- Async/await support (for NATS client, HTTP source)
+- Thread spawning ergonomics
+- Pattern matching on types (for `_route_output`)
+- Context manager improvements (for `with` blocks around services)
+
+Each gap found is a language improvement tracked in `TODO.md`. The runtime is the proving ground — if Zinc can build a production data flow engine, it can build anything.
+
 ---
 
 ## Architecture Decision
