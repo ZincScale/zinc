@@ -1,6 +1,6 @@
 # Design: Zinc Flow — Lightweight NiFi-Inspired Flow Processing
 
-> **Status**: REQUIREMENTS GATHERING — collecting ideas, constraints, prior art analysis
+> **Status**: REQUIREMENTS COMPLETE — see `design-zinc-flow-runtime.md` for architecture and implementation design
 
 ## The Problem
 
@@ -204,56 +204,37 @@ Options:
 
 ## Architecture Options
 
-### Option A — Process-per-Processor with Message Queue
+### Decision: Processor Groups (evolved from Option C)
+
+Neither NiFi's monolith nor DeltaFi's container-per-processor. The developer chooses group boundaries.
+
+- A **Processor Group** = unit of deployment (one pod, one process)
+- Within a group: threads + `queue.Queue` (in-memory, 100K+ msgs/sec)
+- Between groups: NATS JetStream (serialization only at boundaries)
+- Local dev: all groups collapse into one process
 
 ```
-                    ┌─────────────┐
-                    │  Queue (Redis│
-                    │  / Kafka /  │
-                    │  in-memory) │
-                    └──────┬──────┘
-                           │
-    ┌──────────┐    ┌──────┴──────┐    ┌──────────┐
-    │Processor │───>│   Queue     │───>│Processor │
-    │  (proc)  │    │             │    │  (proc)  │
-    └──────────┘    └─────────────┘    └──────────┘
+Pod 1 (ingest-group, 1 replica):
+  [http-source] -> [parse] -> [validate]     ← threads, in-memory queues
+                                    |
+                             NATS JetStream   ← cross-group boundary
+                                    |
+Pod 2 (enrich-group, 10 replicas):            ← slow, scaled out
+  [enrich] -> [lookup]                        ← threads, in-memory queues
+                  |
+             NATS JetStream
+                  |
+Pod 3 (output-group, 2 replicas):
+  [format] -> [kafka-sink]                    ← threads, in-memory queues
 ```
 
-- Each processor is an OS process (or K8s pod)
-- Processors communicate via message queues
-- Queue = Redis Streams, Kafka, or in-process (for local dev)
-- **Pro**: True isolation, independent scaling, crash recovery
-- **Con**: Queue overhead, latency between processors
-
-### Option B — Thread-per-Processor with Shared Memory
-
-```
-    ┌─────────────────────────────────┐
-    │         Zinc Flow Runtime       │
-    │  ┌────────┐  ┌────────┐  ┌───┐ │
-    │  │Proc A  │─>│Queue   │─>│B  │ │
-    │  │(thread)│  │(deque) │  │   │ │
-    │  └────────┘  └────────┘  └───┘ │
-    └─────────────────────────────────┘
+```bash
+zinc flow run pipeline.zn                                    # local, all in one process
+zinc flow run pipeline.zn --mode distributed --nats nats://localhost:4222  # distributed
+zinc flow deploy pipeline.zn --namespace prod --nats nats://nats:4222     # K8s
 ```
 
-- All processors run as threads in one process (free-threaded Python 3.13+)
-- Queues are `collections.deque` or `queue.Queue` (shared memory)
-- **Pro**: Low latency, no serialization, simple deployment
-- **Con**: One process crash kills all processors, scaling = scaling the whole thing
-
-### Option C — Hybrid (Recommended)
-
-- **Local dev**: Thread-per-processor (fast, simple, single process)
-- **Production**: Process-per-processor or pod-per-processor
-- Same Zinc pipeline definition works in both modes
-- Switch via config: `zinc-flow run pipeline.zn --mode local|distributed`
-
-```
-Local:   zinc-flow run pipeline.zn                    # threads, in-memory queues
-Prod:    zinc-flow run pipeline.zn --mode distributed  # processes, Redis/Kafka queues
-K8s:     zinc-flow deploy pipeline.zn                  # generates K8s manifests
-```
+See `design-zinc-flow-runtime.md` for full architecture details.
 
 ---
 
@@ -294,11 +275,17 @@ This means passing a 4MB FlowFile between processors costs ~200 bytes (the refer
 
 ---
 
-## Research Findings (2026-03-18)
+## Research Findings (2026-03-18, updated 2026-03-19)
 
 ### Architecture Decision: Pure Python
 
-Benchmarked free-threaded Python queue throughput: **301K msg/sec** — comparable to NiFi (100K-500K). No need for Go/Rust runtime. Stay pure Python.
+Benchmarked free-threaded Python 3.14t queue throughput vs .NET 10 (see `benchmarks/RESULTS.md`):
+- **Queue 100KB FlowFiles**: Python 100-142K msgs/sec — **2-5x faster than .NET** (refcounted bytes, zero-copy)
+- **Queue 1MB FlowFiles**: Python 30K msgs/sec (4-thread fanout) = **30 GB/s**
+- **Queue 1KB FlowFiles**: Python 88-188K msgs/sec (adequate, .NET faster at small sizes)
+- **HTTP ingress**: Python 4-6K msgs/sec at 100KB (competitive with Kestrel)
+
+Python dominates at typical NiFi FlowFile sizes (10KB-1MB). No need for Go/Rust runtime.
 
 ### Key Insight: FlowFile = list[dict] = Polars DataFrame
 
@@ -331,54 +318,55 @@ Free-threaded Python    — real parallelism between processors
 Single binary           — zinc pack bundles everything
 ```
 
-## Open Questions
+## Open Questions — Resolved
 
-1. **Queue technology** — Redis Streams? Kafka? Custom? Should be pluggable.
-2. **GUI framework** — Web UI vs TUI vs both? REST API first, UI second.
-3. **Processor discovery** — how does the runtime find and load processor functions?
-4. **Versioning** — how to version processors for hot-swap?
-5. **Schema enforcement** — should FlowFile content have typed schemas?
-6. **Multi-tenancy** — multiple pipelines sharing infrastructure?
-7. **Expression language** — NiFi has expression language for attribute routing. Do we need one, or is Zinc expressive enough?
-8. **Monitoring** — Prometheus metrics? OpenTelemetry? Built-in dashboard?
-9. **State management** — some processors need state (counters, windows, dedup). Where does state live?
-10. **Ordering guarantees** — FIFO per key? Per partition? Best-effort?
+All resolved in `design-zinc-flow-runtime.md`. Summary:
+
+1. **Queue technology** — NATS JetStream for cross-group messaging. etcd/PostgreSQL for state. Filesystem for large content. Pluggable interface. Never Rook/Ceph.
+2. **GUI framework** — REST API first, TUI second, web UI later once validated.
+3. **Processor discovery** — Static imports for dev. Processor catalog (in state store) for prod with hot-swap via `importlib.reload()`.
+4. **Versioning** — Processor catalog with name@version. Every flow change creates a revision with audit trail. Instant rollback.
+5. **Schema enforcement** — No. Content is opaque `bytes`. Validation is processor logic, up to the dataflow developer.
+6. **Multi-tenancy** — Namespace isolation per pipeline on shared infrastructure.
+7. **Expression language** — Zinc IS the expression language. Low-code UI: simple mode (form-based) + advanced mode (Zinc expressions validated by transpiler).
+8. **Monitoring** — Terminal stats Phase 1, Prometheus `/metrics` Phase 2, OpenTelemetry tracing Phase 3.
+9. **State management** — External state stores (etcd, PostgreSQL). Processors are stateless from the runtime's perspective.
+10. **Ordering guarantees** — Best-effort FIFO. FlowFiles are independent units, ordering is a non-issue for typical use cases.
 
 ---
 
 ## Implementation Phases
 
+See `design-zinc-flow-runtime.md` for detailed phase breakdown.
+
 ### Phase 1 — MVP (Local Dev)
-- FlowFile data class
-- Processor decorator (`@processor`)
-- Pipeline definition DSL
-- In-memory queues (thread-safe deques)
-- Thread-per-processor execution
-- `zinc-flow run pipeline.zn`
-- Basic CLI: start/stop processors
+- FlowFile data class, `@flow.processor` decorator
+- LocalQueue (`queue.Queue`), ProcessorWorker (thread-based)
+- ProcessorGroup with start/stop/scale
+- Pipeline with explicit wiring (no DSL yet)
+- HTTP source, filesystem sink
+- CLI: `zinc flow run pipeline.zn`
+- Terminal stats (msgs/sec, queue depth, errors)
 
 ### Phase 2 — Production Ready
-- Redis Streams as queue backend
-- Process-per-processor mode
-- Content repository (filesystem)
-- Back-pressure and queue depth limits
-- Dead letter queues
-- Retry/circuit breaker
-- REST API for management
-- Basic web UI (pipeline graph, queue depths)
+- Pipeline DSL with `->` chaining and group definitions
+- NATS JetStream for cross-group messaging
+- Filesystem content store for large FlowFiles crossing groups
+- etcd/PostgreSQL state store (processor catalog, flow graph, audit trail)
+- REST management API (start/stop/scale/swap/config)
+- Processor catalog with hot-swap and rollback
+- Prometheus `/metrics` endpoint
 
 ### Phase 3 — Cloud Native
-- K8s operator for pipeline deployment
-- Auto-scaling based on queue depth
-- S3/MinIO content repository
-- Kafka source/sink connectors
-- Prometheus metrics export
-- Hot-swap processor versions
+- K8s operator: `zinc flow deploy` generates Deployments per group
+- Auto-scaling groups based on NATS consumer lag
+- Kafka queue backend option (pluggable)
+- OpenTelemetry tracing
+- TUI dashboard
 
 ### Phase 4 — Enterprise
-- Provenance tracking and lineage
-- Schema registry integration
-- Role-based access control
+- Provenance tracking and lineage visualization
+- Role-based access control on management API
 - Audit logging
 - Multi-pipeline management
-- Expression language for routing
+- Low-code web UI with Zinc expression validation
