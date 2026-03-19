@@ -568,6 +568,343 @@ No spill-to-disk in Phase 1. The bounded queue is sufficient — it's exactly ho
 
 ---
 
+## Routing Model
+
+Routing determines which queue a FlowFile goes to after a processor finishes with it. Two levels:
+
+### Within a Group — Direct Queue Routing
+
+Inside a group, routing is local — the worker loop pushes to the right output queue based on the processor's return value. Fast, no network, no serialization.
+
+```zinc
+// Processor returns a route tag
+@flow.processor(outputs=["valid", "invalid", "retry"])
+fn validate(ff: FlowFile): tuple[str, FlowFile] {
+    if not ff.attributes.get("order_id") {
+        return "invalid", ff
+    }
+    return "valid", ff
+}
+// Worker loop pushes to output_queues["valid"] or output_queues["invalid"]
+```
+
+This handles static routing within a group. No routing table needed — the wiring is defined when you `group.connect()`.
+
+### Between Groups — NATS Subject-Based Routing
+
+Cross-group routing uses NATS subjects. This is where NATS shines — subjects are hierarchical and support wildcards, giving us content-based routing for free.
+
+```
+Subject hierarchy:
+  zinc-flow.{pipeline}.{group}.{route}
+
+Examples:
+  zinc-flow.orders.enrich.high-priority
+  zinc-flow.orders.enrich.default
+  zinc-flow.orders.archive.csv
+  zinc-flow.orders.archive.json
+```
+
+A **routing table** in the state store maps FlowFile attributes to NATS subjects. This table is updatable in production without redeploying processors.
+
+```zinc
+data RoutingRule {
+    name: str
+    condition: str        // Zinc expression evaluated against FlowFile
+    target_subject: str   // NATS subject to publish to
+    priority: int = 0     // higher priority rules evaluated first
+}
+
+// Example routing table (stored in state store, editable via API/TUI)
+var rules = [
+    RoutingRule(
+        name="high-priority",
+        condition='ff.attributes["priority"] == "high"',
+        target_subject="zinc-flow.orders.enrich.high",
+        priority=10,
+    ),
+    RoutingRule(
+        name="csv-files",
+        condition='ff.attributes["mime.type"] == "text/csv"',
+        target_subject="zinc-flow.orders.csv-processing.default",
+        priority=5,
+    ),
+    RoutingRule(
+        name="default",
+        condition="true",
+        target_subject="zinc-flow.orders.enrich.default",
+        priority=0,
+    ),
+]
+```
+
+Consumer groups subscribe with wildcards for natural scaling:
+- `enrich-group` subscribes to `zinc-flow.orders.enrich.>` — receives all enrich traffic
+- All 10 replicas compete for messages via NATS consumer groups
+- Adding a new route just means publishing to a new subject — consumers pick it up automatically if the wildcard matches
+
+### Route Evaluation
+
+The runtime evaluates routing rules when a FlowFile exits a group's last processor:
+
+```zinc
+class Router {
+    var rules: list[RoutingRule]
+
+    fn route(ff: FlowFile): str {
+        // Rules sorted by priority (highest first)
+        for rule in rules {
+            if evaluate_condition(rule.condition, ff) {
+                return rule.target_subject
+            }
+        }
+        return default_subject
+    }
+
+    fn evaluate_condition(condition: str, ff: FlowFile): bool {
+        // Condition is a Zinc expression — validated at save time by transpiler
+        // Evaluated at runtime against the FlowFile
+        return eval_zinc_expr(condition, {"ff": ff})
+    }
+}
+```
+
+### Dynamic Routing Changes
+
+Routing rules live in the state store and can be changed in production:
+
+```bash
+# Add a new routing rule — takes effect immediately
+zinc flow route add --name "eu-traffic" \
+    --condition 'ff.attributes["region"] == "eu"' \
+    --target "zinc-flow.orders.eu-processing.default" \
+    --priority 8
+
+# List current rules
+zinc flow routes
+  [10] high-priority  → zinc-flow.orders.enrich.high
+  [ 8] eu-traffic     → zinc-flow.orders.eu-processing.default
+  [ 5] csv-files      → zinc-flow.orders.csv-processing.default
+  [ 0] default        → zinc-flow.orders.enrich.default
+
+# Remove a rule
+zinc flow route remove eu-traffic
+
+# All changes are versioned in the state store — rollback works
+```
+
+---
+
+## Cross-Cutting Concerns
+
+Three categories of cross-cutting concerns that span all processors:
+
+### 1. Shared Services
+
+Processors often need shared infrastructure — database connections, HTTP clients, SSL contexts. Instead of each processor managing its own, a service registry provides shared instances.
+
+```zinc
+class ServiceRegistry {
+    var services: dict[str, Any] = {}
+
+    fn register(name: str, service: Any) {
+        services[name] = service
+    }
+
+    fn get(name: str): Any {
+        return services[name]
+    }
+}
+
+// Register shared services at pipeline startup
+var services = flow.ServiceRegistry()
+services.register("db", PostgresPool(url=secrets.get("DB_URL"), max_connections=10))
+services.register("http", HttpClient(timeout=30, ssl_context=secrets.get("TLS_CERT")))
+services.register("cache", RedisClient(url=secrets.get("REDIS_URL")))
+```
+
+Processors access services via their context:
+
+```zinc
+@flow.processor
+fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
+    var db = ctx.service("db")
+    var result = db.query("SELECT region FROM customers WHERE id = ?", ff.attributes["customer_id"])
+    return ff.with_attribute("region", result["region"])
+}
+```
+
+Services are shared across all processors in a group (same process, same connection pool). Between groups, each group has its own service instances.
+
+### 2. Secrets Management
+
+Processors need credentials — API keys, database passwords, TLS certs. These must never be hardcoded or stored in the pipeline definition.
+
+A pluggable **secrets provider** resolves secret references at runtime:
+
+```zinc
+class SecretsProvider {
+    fn get(key: str): str { ... }
+}
+
+// Implementations
+class EnvSecrets(SecretsProvider) {
+    // Reads from environment variables — simplest, K8s-native
+    fn get(key: str): str {
+        return os.environ[key]
+    }
+}
+
+class FileSecrets(SecretsProvider) {
+    // Reads from files — mounted K8s secrets
+    var base_path: str = "/var/run/secrets"
+
+    fn get(key: str): str {
+        return open(os.path.join(base_path, key)).read().strip()
+    }
+}
+
+class VaultSecrets(SecretsProvider) {
+    // Reads from HashiCorp Vault
+    var client: VaultClient
+
+    fn get(key: str): str {
+        return client.read("secret/data/zinc-flow/{key}")["data"]["value"]
+    }
+}
+```
+
+Processor config references secrets with `${secrets.KEY}` syntax, resolved at startup:
+
+```zinc
+@flow.processor(config={
+    "api_key": "${secrets.ENRICHMENT_API_KEY}",
+    "db_url": "${secrets.DB_URL}",
+})
+fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
+    var key = ctx.config["api_key"]   // resolved from secrets provider
+    var result = http_get("https://api.example.com/enrich", headers={"Authorization": key})
+    return ff.with_content(result)
+}
+```
+
+Provider chain: try Vault first, fall back to file secrets, fall back to env vars. Configurable per deployment.
+
+```bash
+# Local dev — env vars
+export ENRICHMENT_API_KEY=dev-key-123
+zinc flow run pipeline.zn
+
+# K8s — mounted secrets
+zinc flow run pipeline.zn --secrets file:///var/run/secrets
+
+# Prod — Vault
+zinc flow run pipeline.zn --secrets vault://vault:8200/secret/zinc-flow
+```
+
+### 3. Observability (Logging, Metrics, Telemetry)
+
+Observability is **automatic** — the runtime handles it. Processors don't need to add logging or metrics code. The worker loop instruments everything.
+
+#### Logging
+
+Every FlowFile enter/exit is logged automatically by the worker loop:
+
+```zinc
+// Inside ProcessorWorker._run_loop() — automatic, not user code
+fn _run_loop() {
+    while state == "running" {
+        var ff = input_queue.get(timeout=0.1)
+        if ff is none { continue }
+
+        log.debug("processor={name} action=enter flowfile={ff.id} attrs={ff.attributes}")
+
+        var start_time = time.perf_counter()
+        var result = _execute(ff) or {
+            log.error("processor={name} action=error flowfile={ff.id} error={err}")
+            _handle_failure(ff, err)
+            continue
+        }
+
+        var elapsed = time.perf_counter() - start_time
+        log.debug("processor={name} action=exit flowfile={ff.id} elapsed_ms={elapsed*1000:.1f}")
+
+        stats.record(elapsed, ff.content_size())
+        _route_output(result)
+    }
+}
+```
+
+Structured logging (JSON) by default. Log level configurable per processor:
+
+```bash
+zinc flow log-level parse_json DEBUG    # verbose for one processor
+zinc flow log-level enrich ERROR        # quiet for another
+```
+
+#### Metrics
+
+Automatic Prometheus metrics emitted by the worker loop — zero processor code needed:
+
+```
+# Counters
+zinc_flow_processed_total{pipeline="orders", group="main", processor="enrich"}
+zinc_flow_errors_total{pipeline="orders", group="main", processor="enrich"}
+zinc_flow_bytes_total{pipeline="orders", group="main", processor="enrich"}
+
+# Gauges
+zinc_flow_queue_depth{pipeline="orders", group="main", queue="enrich_input"}
+zinc_flow_processor_state{pipeline="orders", group="main", processor="enrich"}  # 0=stopped, 1=running
+zinc_flow_replicas{pipeline="orders", group="main", processor="enrich"}
+
+# Histograms
+zinc_flow_processing_duration_seconds{pipeline="orders", group="main", processor="enrich"}
+zinc_flow_flowfile_size_bytes{pipeline="orders", group="main", processor="enrich"}
+```
+
+Exposed via `/metrics` endpoint on the management API. Plugs into existing Grafana/alerting stacks.
+
+#### Distributed Tracing (Phase 3)
+
+FlowFiles carry a trace context in their attributes as they move through the pipeline:
+
+```zinc
+// Automatic — runtime adds trace context to every FlowFile
+ff.attributes["trace.id"] = "abc123"
+ff.attributes["trace.span.id"] = "def456"
+ff.attributes["trace.parent.id"] = "ghi789"
+```
+
+When a FlowFile crosses a group boundary (via NATS), the trace context propagates. OpenTelemetry exporter sends spans to Jaeger/Zipkin/etc. You can trace a single FlowFile's journey through the entire pipeline across groups and pods.
+
+### Interceptor Model
+
+All three concerns (services, secrets, observability) are implemented as **interceptors** on the worker loop — not as processor code. The processor function stays clean:
+
+```zinc
+// What the developer writes — clean business logic only
+@flow.processor
+fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
+    var db = ctx.service("db")
+    var data = json.loads(ff.content)
+    data["region"] = db.query("SELECT region FROM zip WHERE code = ?", data["zip"])
+    return ff.with_content(json.dumps(data).encode())
+}
+
+// What the runtime wraps it with — automatic
+//   → resolve secrets into config
+//   → inject services via ctx
+//   → log enter/exit
+//   → emit metrics
+//   → propagate trace context
+//   → handle errors → DLQ
+//   → record stats
+```
+
+The developer writes business logic. The runtime handles everything else.
+
+---
+
 ## Sources and Sinks
 
 Sources produce FlowFiles into the pipeline. Sinks consume them out. Both run on their own thread within their group.
