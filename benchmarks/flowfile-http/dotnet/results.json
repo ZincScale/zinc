@@ -1,0 +1,114 @@
+[
+  {
+    "Test": "http-post-c10-1KB",
+    "Count": 20000,
+    "ElapsedSec": 0.872,
+    "MsgsPerSec": 22940,
+    "MbPerSec": 25.6
+  },
+  {
+    "Test": "http-roundtrip-c10-1KB",
+    "Count": 20000,
+    "ElapsedSec": 0.522,
+    "MsgsPerSec": 38282,
+    "MbPerSec": 37.4
+  },
+  {
+    "Test": "http-post-c50-1KB",
+    "Count": 20000,
+    "ElapsedSec": 0.654,
+    "MsgsPerSec": 30563,
+    "MbPerSec": 34.1
+  },
+  {
+    "Test": "http-roundtrip-c50-1KB",
+    "Count": 20000,
+    "ElapsedSec": 0.318,
+    "MsgsPerSec": 62932,
+    "MbPerSec": 61.5
+  },
+  {
+    "Test": "http-post-c10-10KB",
+    "Count": 10000,
+    "ElapsedSec": 0.51,
+    "MsgsPerSec": 19624,
+    "MbPerSec": 194.4
+  },
+  {
+    "Test": "http-roundtrip-c10-10KB",
+    "Count": 10000,
+    "ElapsedSec": 0.363,
+    "MsgsPerSec": 27574,
+    "MbPerSec": 269.3
+  },
+  {
+    "Test": "http-post-c50-10KB",
+    "Count": 10000,
+    "ElapsedSec": 0.331,
+    "MsgsPerSec": 30256,
+    "MbPerSec": 299.6
+  },
+  {
+    "Test": "http-roundtrip-c50-10KB",
+    "Count": 10000,
+    "ElapsedSec": 0.191,
+    "MsgsPerSec": 52414,
+    "MbPerSec": 511.9
+  },
+  {
+    "Test": "http-post-c10-100KB",
+    "Count": 2000,
+    "ElapsedSec": 0.328,
+    "MsgsPerSec": 6089,
+    "MbPerSec": 595.5
+  },
+  {
+    "Test": "http-roundtrip-c10-100KB",
+    "Count": 2000,
+    "ElapsedSec": 0.218,
+    "MsgsPerSec": 9193,
+    "MbPerSec": 897.8
+  },
+  {
+    "Test": "http-post-c50-100KB",
+    "Count": 2000,
+    "ElapsedSec": 0.67,
+    "MsgsPerSec": 2987,
+    "MbPerSec": 292.1
+  },
+  {
+    "Test": "http-roundtrip-c50-100KB",
+    "Count": 2000,
+    "ElapsedSec": 0.4,
+    "MsgsPerSec": 4993,
+    "MbPerSec": 487.7
+  },
+  {
+    "Test": "http-post-c10-1MB",
+    "Count": 500,
+    "ElapsedSec": 1.128,
+    "MsgsPerSec": 443,
+    "MbPerSec": 443.2
+  },
+  {
+    "Test": "http-roundtrip-c10-1MB",
+    "Count": 500,
+    "ElapsedSec": 0.731,
+    "MsgsPerSec": 683,
+    "MbPerSec": 683.9
+  },
+  {
+    "Test": "http-post-c50-1MB",
+    "Count": 500,
+    "ElapsedSec": 1.885,
+    "MsgsPerSec": 265,
+    "MbPerSec": 265.2
+  },
+  {
+    "Test": "http-roundtrip-c50-1MB",
+    "Count": 500,
+    "ElapsedSec": 0.549,
+    "MsgsPerSec": 911,
+    "MbPerSec": 911.5
+  }
+]

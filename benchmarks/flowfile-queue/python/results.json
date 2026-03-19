@@ -1,0 +1,114 @@
+[
+  {
+    "test": "threading-1KB",
+    "count": 100000,
+    "elapsed_sec": 1.132,
+    "msgs_per_sec": 88370,
+    "mb_per_sec": 86.3
+  },
+  {
+    "test": "asyncio-1KB",
+    "count": 100000,
+    "elapsed_sec": 0.622,
+    "msgs_per_sec": 160791,
+    "mb_per_sec": 157.0
+  },
+  {
+    "test": "multiproc-1KB",
+    "count": 100000,
+    "elapsed_sec": 1.793,
+    "msgs_per_sec": 55763,
+    "mb_per_sec": 54.5
+  },
+  {
+    "test": "threading-fanout-4c-1KB",
+    "count": 100000,
+    "elapsed_sec": 0.648,
+    "msgs_per_sec": 154427,
+    "mb_per_sec": 150.8
+  },
+  {
+    "test": "threading-10KB",
+    "count": 50000,
+    "elapsed_sec": 0.541,
+    "msgs_per_sec": 92397,
+    "mb_per_sec": 902.3
+  },
+  {
+    "test": "asyncio-10KB",
+    "count": 50000,
+    "elapsed_sec": 0.274,
+    "msgs_per_sec": 182431,
+    "mb_per_sec": 1781.6
+  },
+  {
+    "test": "multiproc-10KB",
+    "count": 50000,
+    "elapsed_sec": 1.214,
+    "msgs_per_sec": 41199,
+    "mb_per_sec": 402.3
+  },
+  {
+    "test": "threading-fanout-4c-10KB",
+    "count": 50000,
+    "elapsed_sec": 0.392,
+    "msgs_per_sec": 127535,
+    "mb_per_sec": 1245.5
+  },
+  {
+    "test": "threading-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.175,
+    "msgs_per_sec": 57153,
+    "mb_per_sec": 5581.3
+  },
+  {
+    "test": "asyncio-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.099,
+    "msgs_per_sec": 100584,
+    "mb_per_sec": 9822.6
+  },
+  {
+    "test": "multiproc-100KB",
+    "count": 10000,
+    "elapsed_sec": 1.015,
+    "msgs_per_sec": 9854,
+    "mb_per_sec": 962.3
+  },
+  {
+    "test": "threading-fanout-4c-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.07,
+    "msgs_per_sec": 141857,
+    "mb_per_sec": 13853.2
+  },
+  {
+    "test": "threading-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.177,
+    "msgs_per_sec": 11315,
+    "mb_per_sec": 11315.3
+  },
+  {
+    "test": "asyncio-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.153,
+    "msgs_per_sec": 13063,
+    "mb_per_sec": 13062.6
+  },
+  {
+    "test": "multiproc-1MB",
+    "count": 2000,
+    "elapsed_sec": 2.594,
+    "msgs_per_sec": 771,
+    "mb_per_sec": 771.0
+  },
+  {
+    "test": "threading-fanout-4c-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.065,
+    "msgs_per_sec": 30649,
+    "mb_per_sec": 30649.4
+  }
+]

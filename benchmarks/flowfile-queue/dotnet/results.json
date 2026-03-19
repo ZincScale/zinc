@@ -1,0 +1,86 @@
+[
+  {
+    "Test": "channel-1KB",
+    "Count": 100000,
+    "ElapsedSec": 0.184,
+    "MsgsPerSec": 542689,
+    "MbPerSec": 530
+  },
+  {
+    "Test": "blocking-coll-1KB",
+    "Count": 100000,
+    "ElapsedSec": 0.145,
+    "MsgsPerSec": 687344,
+    "MbPerSec": 671.2
+  },
+  {
+    "Test": "channel-fanout-4c-1KB",
+    "Count": 100000,
+    "ElapsedSec": 0.096,
+    "MsgsPerSec": 1043209,
+    "MbPerSec": 1018.8
+  },
+  {
+    "Test": "channel-10KB",
+    "Count": 50000,
+    "ElapsedSec": 0.156,
+    "MsgsPerSec": 321429,
+    "MbPerSec": 3139
+  },
+  {
+    "Test": "blocking-coll-10KB",
+    "Count": 50000,
+    "ElapsedSec": 0.117,
+    "MsgsPerSec": 427246,
+    "MbPerSec": 4172.3
+  },
+  {
+    "Test": "channel-fanout-4c-10KB",
+    "Count": 50000,
+    "ElapsedSec": 0.129,
+    "MsgsPerSec": 388638,
+    "MbPerSec": 3795.3
+  },
+  {
+    "Test": "channel-100KB",
+    "Count": 10000,
+    "ElapsedSec": 0.341,
+    "MsgsPerSec": 29341,
+    "MbPerSec": 2865.4
+  },
+  {
+    "Test": "blocking-coll-100KB",
+    "Count": 10000,
+    "ElapsedSec": 0.478,
+    "MsgsPerSec": 20941,
+    "MbPerSec": 2045
+  },
+  {
+    "Test": "channel-fanout-4c-100KB",
+    "Count": 10000,
+    "ElapsedSec": 0.363,
+    "MsgsPerSec": 27538,
+    "MbPerSec": 2689.3
+  },
+  {
+    "Test": "channel-1MB",
+    "Count": 2000,
+    "ElapsedSec": 0.407,
+    "MsgsPerSec": 4913,
+    "MbPerSec": 4913.3
+  },
+  {
+    "Test": "blocking-coll-1MB",
+    "Count": 2000,
+    "ElapsedSec": 0.408,
+    "MsgsPerSec": 4903,
+    "MbPerSec": 4903.6
+  },
+  {
+    "Test": "channel-fanout-4c-1MB",
+    "Count": 2000,
+    "ElapsedSec": 0.242,
+    "MsgsPerSec": 8277,
+    "MbPerSec": 8277.4
+  }
+]
