@@ -1337,8 +1337,16 @@ zinc-flow/
         worker.zn            # ProcessorWorker, run loop
         queue.zn             # FlowQueue interface, LocalQueue
         queue_nats.zn        # NatsQueue — NATS JetStream (Phase 2)
+        router.zn            # Router interface, routing rules
+        content_store.zn     # ContentStore interface, FileContentStore
+        state_store.zn       # StateStore interface (Phase 2)
+        services.zn          # ServiceRegistry, SecretsProvider
         stats.zn             # ProcessorStats, throughput tracking
         serialization.zn     # FlowFile serialization for cross-group transport
+        test/
+            __init__.zn      # @flow.test decorator, assertions
+            harness.zn       # PipelineHarness — in-memory test pipeline
+            mocks.zn         # MockSource, MockSink, MockServiceRegistry, MockSecretsProvider
         sources/
             http.zn          # HTTP source (aiohttp)
             kafka.zn         # Kafka consumer source
@@ -1347,63 +1355,277 @@ zinc-flow/
             http.zn          # HTTP POST sink
             kafka.zn         # Kafka producer sink
             filesystem.zn    # File writer sink
-            s3.zn            # S3 object writer sink
+            s3.zn            # S3-compatible object writer sink
     cli/
-        flow_cmd.zn          # zinc flow run/status/processor/queues
+        flow_cmd.zn          # zinc flow run/status/processor/queues/test
     tests/
-        test_flowfile.zn
-        test_pipeline.zn
-        test_worker.zn
-        test_queue.zn
-        test_e2e.zn          # full pipeline integration tests
+        test_flowfile.zn     # Phase 1a
+        test_processor.zn    # Phase 1b
+        test_queue.zn        # Phase 1c
+        test_worker.zn       # Phase 1d
+        test_group.zn        # Phase 1e
+        test_pipeline.zn     # Phase 1f
+        test_source_sink.zn  # Phase 1g
+        test_e2e.zn          # Phase 1h
+        test_performance.zn  # Phase 1j
+        test_routing.zn      # Phase 2f
+        test_secrets.zn      # Phase 2h
 ```
+
+---
+
+## Testing Strategy
+
+Testing grows with the system — each vertical gets tests as it's built. No big bang test phase.
+
+### Testing Levels
+
+| Level | What | How | When |
+|-------|------|-----|------|
+| **Unit** | Single processor function | Mock FlowFile in, assert FlowFile out | Every processor |
+| **Queue** | Queue behavior | Put/get, backpressure, ordering, thread safety | When queue is built |
+| **Routing** | Routing rules | Assert FlowFile matches correct route | When routing is built |
+| **Integration** | Mini pipeline end-to-end | Spin up in-memory pipeline, push FlowFiles, assert output | When pipeline wiring works |
+| **Performance** | Throughput/latency regression | Benchmarks with known baselines (we already have these) | Before each release |
+
+### Test Harness — `zinc flow test`
+
+Built-in test runner that understands FlowFile pipelines:
+
+```zinc
+import flow.test
+
+// Unit test — test a processor in isolation
+@flow.test
+fn test_parse_json() {
+    var input = FlowFile(
+        id="test-1",
+        attributes={"source": "test"},
+        content='{"type": "order", "id": 123}'.encode(),
+        timestamp=0.0,
+    )
+
+    var output = parse_json(input)
+
+    assert output.attributes["record_type"] == "order"
+    assert "id" in json.loads(output.content)
+}
+
+// Unit test — test routing
+@flow.test
+fn test_validate_routes_invalid() {
+    var input = FlowFile(
+        id="test-2",
+        attributes={},
+        content='{"no_id": true}'.encode(),
+        timestamp=0.0,
+    )
+
+    var route, output = validate(input)
+
+    assert route == "invalid"
+    assert output.attributes["error"] == "missing required fields"
+}
+
+// Integration test — test a mini pipeline
+@flow.test
+fn test_ingest_pipeline() {
+    var harness = flow.test.PipelineHarness()
+
+    // Build a test pipeline with in-memory source/sink
+    var source = flow.test.MockSource()
+    var sink = flow.test.MockSink()
+
+    harness.add_source(source)
+    harness.add_processor("parse", parse_json)
+    harness.add_processor("validate", validate)
+    harness.add_sink("output", sink, route="valid")
+    harness.connect("source", "parse")
+    harness.connect("parse", "validate")
+    harness.connect("validate", "output", route="valid")
+
+    // Push test data and run
+    source.send(FlowFile(
+        id="test-3",
+        attributes={},
+        content='{"id": 1, "type": "order"}'.encode(),
+        timestamp=0.0,
+    ))
+
+    harness.run_until_idle(timeout=5.0)
+
+    // Assert what came out
+    assert len(sink.received) == 1
+    assert sink.received[0].attributes["record_type"] == "order"
+}
+
+// Queue test — verify backpressure
+@flow.test
+fn test_queue_backpressure() {
+    var q = LocalQueue(maxsize=5)
+
+    // Fill the queue
+    for i in range(5) {
+        q.put(FlowFile(id="ff-{i}", attributes={}, content=b"x", timestamp=0.0))
+    }
+
+    assert q.qsize() == 5
+
+    // Next put should block (or timeout)
+    var result = q.put_nowait(FlowFile(id="ff-6", attributes={}, content=b"x", timestamp=0.0))
+    assert result is none  // queue full, rejected
+}
+
+// Routing rule test
+@flow.test
+fn test_routing_rules() {
+    var router = Router(rules=[
+        RoutingRule(name="high", condition='ff.attributes["priority"] == "high"', target_subject="enrich.high", priority=10),
+        RoutingRule(name="default", condition="true", target_subject="enrich.default", priority=0),
+    ])
+
+    var high_ff = FlowFile(id="1", attributes={"priority": "high"}, content=b"", timestamp=0.0)
+    var low_ff = FlowFile(id="2", attributes={"priority": "low"}, content=b"", timestamp=0.0)
+
+    assert router.route(high_ff) == "enrich.high"
+    assert router.route(low_ff) == "enrich.default"
+}
+
+// Performance test — verify throughput hasn't regressed
+@flow.test(performance=true)
+fn test_queue_throughput() {
+    var q = LocalQueue(maxsize=10_000)
+    var ff = FlowFile(id="perf", attributes={}, content=os.urandom(10 * 1024), timestamp=0.0)
+
+    var start = time.perf_counter()
+    for i in range(50_000) {
+        q.put(ff)
+        q.get()
+    }
+    var elapsed = time.perf_counter() - start
+    var msgs_per_sec = 50_000 / elapsed
+
+    assert msgs_per_sec > 50_000, "Queue throughput regression: {msgs_per_sec} msgs/sec"
+}
+```
+
+```bash
+# Run all tests
+zinc flow test
+
+# Run unit tests only
+zinc flow test --unit
+
+# Run integration tests
+zinc flow test --integration
+
+# Run performance tests
+zinc flow test --performance
+
+# Run tests for a specific vertical
+zinc flow test tests/test_processor.zn
+zinc flow test tests/test_routing.zn
+```
+
+### Test Helpers
+
+The `flow.test` module provides:
+
+```zinc
+class MockSource {
+    // Programmatically inject FlowFiles into a pipeline
+    fn send(ff: FlowFile) { ... }
+    fn send_batch(ffs: list[FlowFile]) { ... }
+}
+
+class MockSink {
+    // Capture FlowFiles that exit a pipeline
+    var received: list[FlowFile] = []
+    fn reset() { received.clear() }
+}
+
+class PipelineHarness {
+    // Spin up an in-memory pipeline for testing
+    // All queues are LocalQueue, no external dependencies
+    fn add_source(source: MockSource) { ... }
+    fn add_processor(name: str, fn: Callable) { ... }
+    fn add_sink(name: str, sink: MockSink, route: str = "default") { ... }
+    fn connect(source: str, target: str, route: str = "default") { ... }
+    fn run_until_idle(timeout: float = 5.0) { ... }
+    fn run_for(seconds: float) { ... }
+}
+
+class MockServiceRegistry(ServiceRegistry) {
+    // Inject mock services for testing (mock DB, mock HTTP, etc.)
+}
+
+class MockSecretsProvider(SecretsProvider) {
+    // Return test secrets without Vault/env/file
+    var secrets: dict[str, str] = {}
+    fn get(key: str): str { return secrets[key] }
+}
+```
+
+All mocks implement the same interfaces as production components (design-by-interface pays off here).
 
 ---
 
 ## Implementation Phases
 
+Each phase is broken into verticals. Tests are built alongside each vertical — not after.
+
 ### Phase 1 — MVP (Local Dev)
 
-1. **FlowFile** data class with `with_content()`, `with_attribute()`
-2. **`@flow.processor` decorator** — wraps a function for pipeline use
-3. **LocalQueue** — `queue.Queue` wrapper with stats
-4. **ProcessorWorker** — thread-based consumer loop with retry and DLQ
-5. **ProcessorGroup** — group of workers with start/stop/scale
-6. **Pipeline** — connect groups, run all workers in local mode
-7. **HTTP source** — accept POSTs, emit FlowFiles
-8. **File sink** — write FlowFiles to disk
-9. **CLI** — `zinc flow run pipeline.zn`
-10. **Stats** — msgs/sec, queue depth, errors printed to terminal every 5s
+| Vertical | Build | Test |
+|----------|-------|------|
+| **1a. FlowFile** | `data FlowFile` with `with_content()`, `with_attribute()` | Unit: create, transform, immutability |
+| **1b. Processor** | `@flow.processor` decorator, return types (single, list, none, routed) | Unit: processor in/out, all return types, error handling |
+| **1c. Queue** | `FlowQueue` interface, `LocalQueue` implementation | Unit: put/get, thread safety, backpressure, ordering |
+| **1d. Worker** | `ProcessorWorker` — thread-based consumer loop, retry, DLQ | Unit: consume from queue, route output, retry logic, DLQ |
+| **1e. Group** | `ProcessorGroup` — start/stop/scale workers | Unit: lifecycle, scaling threads |
+| **1f. Pipeline** | `Pipeline` — connect groups, run all workers in local mode | Integration: multi-processor pipeline end-to-end |
+| **1g. Source/Sink** | HTTP source, filesystem sink | Integration: POST a FlowFile, verify it reaches disk |
+| **1h. CLI** | `zinc flow run pipeline.zn` | E2E: run a pipeline, POST data, check output files |
+| **1i. Stats** | Terminal stats (msgs/sec, queue depth, errors) | Manual verification |
+| **1j. Performance** | Throughput baselines | Performance: assert no regression from benchmarks |
 
-**Not in Phase 1**: Pipeline DSL (`->` syntax), distributed queues, content repository, management REST API, K8s deploy, hot-swap, Prometheus metrics.
+**Not in Phase 1**: Pipeline DSL (`->` syntax), distributed queues, content store, management REST API, K8s deploy, hot-swap, Prometheus metrics.
 
 ### Phase 2 — Production Ready
 
-- Pipeline DSL with `->` chaining and group definitions
-- NATS JetStream as cross-group queue backend
-- Shared filesystem (NFS or K8s PVC) for large FlowFile content crossing group boundaries
-- etcd or PostgreSQL for state store (flow graph, audit trail, processor state)
-- REST management API (start/stop/scale/swap/config)
-- Prometheus `/metrics` endpoint
-- Back-pressure via NATS stream limits
-- `zinc flow deploy` generates Docker Compose for multi-group
+| Vertical | Build | Test |
+|----------|-------|------|
+| **2a. Pipeline DSL** | `->` chaining and group definitions | Unit: parse DSL, verify wiring matches explicit API |
+| **2b. NATS Queue** | `NatsQueue` implementation of `FlowQueue` | Integration: put/get through real NATS, consumer groups |
+| **2c. Content Store** | `FileContentStore`, large FlowFile handoff | Integration: store/retrieve/delete, verify cleanup |
+| **2d. State Store** | etcd/PostgreSQL `StateStore` implementation | Integration: CRUD, revision history, rollback |
+| **2e. Processor Catalog** | Publish, discover, hot-swap processors | Integration: publish, swap, verify queue bridges gap |
+| **2f. Routing** | `Router` with NATS subject-based routing, routing table in state store | Unit: rule evaluation. Integration: dynamic rule changes |
+| **2g. REST API** | Management API (start/stop/scale/swap/config) | Integration: API calls, verify pipeline state changes |
+| **2h. Secrets** | `SecretsProvider` chain (env, file, Vault) | Unit: resolution, fallback chain |
+| **2i. Observability** | Prometheus `/metrics`, structured logging | Integration: verify metrics emitted, log format |
+| **2j. Back-pressure** | NATS stream limits, cross-group backpressure | Integration: fill queue, verify upstream slows |
+| **2k. Docker Compose** | `zinc flow deploy` generates Compose for multi-group | E2E: deploy, send data, verify cross-group routing |
 
 ### Phase 3 — Cloud Native
 
-- K8s operator: `zinc flow deploy` generates Deployments per group
-- Auto-scaling groups based on queue depth (HPA with custom metrics from NATS consumer lag)
-- Kafka queue backend option (pluggable alternative)
-- OpenTelemetry tracing (FlowFile lineage across groups)
-- TUI dashboard
+| Vertical | Build | Test |
+|----------|-------|------|
+| **3a. K8s Operator** | `zinc flow deploy` generates Deployments per group | E2E: deploy to K8s, verify pods, cross-group NATS |
+| **3b. Auto-scaling** | HPA with NATS consumer lag metrics | Load: sustained traffic, verify scale-up/down |
+| **3c. Kafka Backend** | `KafkaQueue` pluggable alternative | Integration: same tests as NatsQueue, different backend |
+| **3d. Tracing** | OpenTelemetry, trace FlowFile across groups | Integration: verify trace context propagation |
+| **3e. TUI** | Terminal dashboard via REST API | Manual verification |
 
 ### Phase 4 — Enterprise
 
-- Provenance tracking and lineage visualization
-- Schema validation (optional per-processor)
-- Role-based access control on management API
-- Audit logging
-- Multi-pipeline management
-- Web UI
+| Vertical | Build | Test |
+|----------|-------|------|
+| **4a. Provenance** | FlowFile lineage tracking and visualization | Integration: trace FlowFile history |
+| **4b. RBAC** | Role-based access on management API | Unit: permission checks. Integration: API auth |
+| **4c. Audit** | Audit logging for all management actions | Integration: verify log entries |
+| **4d. Multi-pipeline** | Multiple pipelines on shared infrastructure | Integration: namespace isolation, no cross-talk |
+| **4e. Web UI** | Low-code UI with Zinc expression validation | E2E: UI tests |
 
 ---
 
