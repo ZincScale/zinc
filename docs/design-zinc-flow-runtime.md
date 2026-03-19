@@ -2,6 +2,42 @@
 
 > **Status**: DESIGN — architecture validated by benchmarks, ready for Phase 1 implementation
 
+## Design Principles
+
+### Program to Interfaces, Not Implementations
+
+Every major component in Zinc Flow is defined as an interface (abstract class). Implementations are pluggable. Code depends on the interface, never on a concrete implementation.
+
+This is a hard requirement — not a nice-to-have. It's what makes the system pluggable (swap NATS for Kafka), testable (mock the queue in unit tests), and evolvable (replace the content store without touching processors).
+
+Core interfaces:
+
+| Interface | Purpose | Implementations |
+|-----------|---------|----------------|
+| `FlowQueue` | Message passing between processors | `LocalQueue`, `NatsQueue`, `KafkaQueue` |
+| `ContentStore` | Large FlowFile content storage | `FileContentStore`, `S3ContentStore` |
+| `StateStore` | Flow graph, catalog, audit trail | `EtcdStateStore`, `PostgresStateStore`, `LocalStateStore` |
+| `SecretsProvider` | Credential resolution | `EnvSecrets`, `FileSecrets`, `VaultSecrets` |
+| `Router` | FlowFile routing between groups | `LocalRouter`, `NatsSubjectRouter` |
+| `MetricsExporter` | Observability output | `ConsoleMetrics`, `PrometheusMetrics` |
+
+Processors, sources, and sinks also program to interfaces — a processor takes a `FlowFile` and returns a `FlowFile`. It never knows whether the queue is in-memory or NATS, whether content is on local disk or NFS, whether secrets come from env vars or Vault.
+
+```zinc
+// Processor only depends on FlowFile and ProcessorContext — both interfaces
+@flow.processor
+fn enrich(ff: FlowFile, ctx: ProcessorContext): FlowFile {
+    var db = ctx.service("db")       // doesn't know if it's Postgres, MySQL, or a mock
+    var data = json.loads(ff.content) // doesn't know if content was inline or from content store
+    data["region"] = db.query(...)
+    return ff.with_content(json.dumps(data).encode())
+}
+```
+
+This applies to all wiring in the runtime: `Pipeline` holds `FlowQueue` references (not `LocalQueue`), `ProcessorWorker` takes a `FlowQueue` (not `NatsQueue`), `Router` is an interface the runtime calls (not hardcoded NATS subject logic).
+
+---
+
 ## Architecture Decision
 
 **Processor Groups** — the middle ground between NiFi's monolith and DeltaFi's container-per-processor.
