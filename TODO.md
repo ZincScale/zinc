@@ -63,11 +63,12 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Pyt
 
 ## Next
 
-- [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design doc)
+- [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design docs)
+- [ ] `data` classes with methods — `data` auto-generates `__init__`, `__repr__`, `__eq__`, `__hash__` from fields; methods and everything else work same as `class`
 - [ ] Chained comparisons (`0 < x < 10`)
 - [ ] async / await
 - [ ] Generic type constraints
-- [ ] Protocol support
+- [ ] Protocol support (interfaces for design-by-interface pattern)
 
 ## Docs
 
