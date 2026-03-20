@@ -36,7 +36,7 @@ func (e V2Error) String() string {
 
 // V2Type represents a resolved type in the v2 type system.
 type V2Type struct {
-	Name     string   // "int", "str", "List", "Map", "none", "any"
+	Name     string   // "int", "String", "List", "Map", "none", "any"
 	Args     []V2Type // generic args: list[int] → Args=[int]
 	Nullable bool     // Optional[T]
 }
@@ -56,12 +56,12 @@ func (t V2Type) String() string {
 }
 
 var (
-	typeInt    = V2Type{Name: "int"}
-	typeFloat  = V2Type{Name: "float"}
-	typeStr    = V2Type{Name: "str"}
-	typeBool   = V2Type{Name: "bool"}
-	typeNone   = V2Type{Name: "none"}
-	typeAny    = V2Type{Name: "any"}
+	typeInt     = V2Type{Name: "int"}
+	typeDouble  = V2Type{Name: "double"}
+	typeStr     = V2Type{Name: "String"}
+	typeBool    = V2Type{Name: "boolean"}
+	typeNone    = V2Type{Name: "none"}
+	typeAny     = V2Type{Name: "any"}
 )
 
 // V2Scope tracks variable types in a scope.
@@ -461,7 +461,7 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	case *parser.IntLit:
 		return typeInt
 	case *parser.FloatLit:
-		return typeFloat
+		return typeDouble
 	case *parser.StringLit, *parser.StringInterpLit, *parser.RawStringLit:
 		return typeStr
 	case *parser.BoolLit:
@@ -611,13 +611,13 @@ func (c *V2Checker) isErrCall(e parser.Expr) bool {
 func (c *V2Checker) inferBinaryType(op string, left, right V2Type) V2Type {
 	switch op {
 	case "+", "-", "*", "/", "%", "**":
-		if left.Name == "float" || right.Name == "float" {
-			return typeFloat
+		if left.Name == "double" || right.Name == "double" {
+			return typeDouble
 		}
 		if left.Name == "int" && right.Name == "int" {
 			return typeInt
 		}
-		if left.Name == "str" && op == "+" {
+		if left.Name == "String" && op == "+" {
 			return typeStr
 		}
 		return typeAny
@@ -640,7 +640,7 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 		return true
 	}
 	// int → float is OK
-	if declared.Name == "float" && actual.Name == "int" {
+	if declared.Name == "double" && actual.Name == "int" {
 		return true
 	}
 	// none is compatible with Optional

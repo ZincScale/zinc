@@ -83,21 +83,21 @@ func TestVarExplicitType(t *testing.T) {
 
 func TestVarStringType(t *testing.T) {
 	assertContains(t,
-		`var str greeting = "hi"`,
+		`var String greeting = "hi"`,
 		`String greeting = "hi";`,
 	)
 }
 
 func TestVarBoolType(t *testing.T) {
 	assertContains(t,
-		`var bool active = true`,
+		`var boolean active = true`,
 		`boolean active = true;`,
 	)
 }
 
 func TestVarFloatType(t *testing.T) {
 	assertContains(t,
-		`var float pi = 3.14`,
+		`var double pi = 3.14`,
 		`double pi = 3.14;`,
 	)
 }
@@ -118,7 +118,7 @@ func TestVarGenericList(t *testing.T) {
 
 func TestVarGenericMap(t *testing.T) {
 	assertContains(t,
-		`var Map<str, int> lookup = {}`,
+		`var Map<String, int> lookup = {}`,
 		`Map<String, Integer> lookup = new java.util.HashMap<>();`,
 	)
 }
@@ -142,7 +142,7 @@ print("Hello, {name}!")
 
 func TestFnBasic(t *testing.T) {
 	assertContains(t, `
-fn greet(str name) str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 `,
@@ -338,11 +338,11 @@ if item in items {
 
 func TestIsOperator(t *testing.T) {
 	assertContains(t, `
-if x is str {
+if x is String {
     print("string")
 }
 `,
-		`x instanceof str`,
+		`x instanceof String`,
 	)
 }
 
@@ -353,7 +353,7 @@ if x is str {
 func TestDataClass(t *testing.T) {
 	assertContains(t, `
 data User {
-    var str name
+    var String name
     var int age
 }
 `,
@@ -364,8 +364,8 @@ data User {
 func TestDataClassFloat(t *testing.T) {
 	assertContains(t, `
 data Point {
-    var float x
-    var float y
+    var double x
+    var double y
 }
 `,
 		`public record Point(double x, double y) {`,
@@ -398,10 +398,10 @@ enum Color {
 func TestClassBasic(t *testing.T) {
 	assertContains(t, `
 class Dog {
-    var str name
-    var str breed
+    var String name
+    var String breed
 
-    fn speak() str {
+    fn speak() String {
         return "Woof!"
     }
 }
@@ -417,7 +417,7 @@ class Dog {
 func TestClassWithDefault(t *testing.T) {
 	assertContains(t, `
 class Config {
-    var str host = "localhost"
+    var String host = "localhost"
     var int port = 8080
 }
 `,
@@ -429,9 +429,9 @@ class Config {
 func TestClassInheritance(t *testing.T) {
 	assertContains(t, `
 class Puppy : Dog {
-    var str name
+    var String name
 
-    fn speak() str {
+    fn speak() String {
         return "yap!"
     }
 }
@@ -445,8 +445,8 @@ class Puppy : Dog {
 func TestClassInitFields(t *testing.T) {
 	assertContains(t, `
 class User {
-    init str name
-    init str email
+    init String name
+    init String email
 }
 `,
 		`private final String name;`,
@@ -457,7 +457,7 @@ class User {
 func TestClassMethodDirect(t *testing.T) {
 	assertContains(t, `
 class Foo {
-    fn toString() str {
+    fn toString() String {
         return "Foo"
     }
 }
@@ -467,7 +467,7 @@ class Foo {
 	)
 	assertNotContains(t, `
 class Foo {
-    fn toString() str {
+    fn toString() String {
         return "Foo"
     }
 }

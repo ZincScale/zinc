@@ -20,7 +20,7 @@ class Stack {
         return items.size()
     }
 
-    override fn toString() str {
+    override fn toString() String {
         return "Stack({items})"
     }
 }
@@ -65,19 +65,19 @@ Fields are **private** by default. Use `pub` or `read` to control access:
 
 | Declaration | Generated Java | Accessors |
 |---|---|---|
-| `var str name` | `private String name;` | None — internal only |
-| `pub var str name` | `private String name;` + `getName()` + `setName()` | Getter + setter |
-| `read var str name` | `private String name;` + `getName()` | Getter only |
-| `init str name` | `private final String name;` + `getName()` | Getter only (final) |
-| `const str NAME = "x"` | `public static final String NAME = "x";` | Direct access (constant) |
+| `var String name` | `private String name;` | None — internal only |
+| `pub var String name` | `private String name;` + `getName()` + `setName()` | Getter + setter |
+| `read var String name` | `private String name;` + `getName()` | Getter only |
+| `init String name` | `private final String name;` + `getName()` | Getter only (final) |
+| `const String NAME = "x"` | `public static final String NAME = "x";` | Direct access (constant) |
 
 ```zinc
 class User {
-    init str id                      // private final + getter
-    pub var str name                 // private + getter + setter
-    read var str email               // private + getter only
+    init String id                      // private final + getter
+    pub var String name                 // private + getter + setter
+    read var String email               // private + getter only
     var int loginCount = 0           // private, no accessors
-    const str TABLE = "users"        // public static final
+    const String TABLE = "users"        // public static final
 }
 ```
 
@@ -105,7 +105,7 @@ Methods are **private** by default. Use `pub` to make them public:
 
 ```zinc
 class OrderService {
-    fn validate(Order order) bool {   // private — internal helper
+    fn validate(Order order) boolean {   // private — internal helper
         return order.total > 0
     }
 
@@ -128,15 +128,15 @@ Use the `override` keyword before `fn` when overriding a parent method. The tran
 
 ```zinc
 class Dog : Animal {
-    override fn speak() str {
+    override fn speak() String {
         return "Woof!"
     }
 
-    override fn toString() str {
+    override fn toString() String {
         return "Dog({name})"
     }
 
-    override fn equals(Object other) bool {
+    override fn equals(Object other) boolean {
         if other is Dog {
             return name == other.name
         }
@@ -185,9 +185,9 @@ Fields use `var` (mutable), `const` (immutable), or `init` (set once in construc
 
 ```zinc
 class Config {
-    var str host = "localhost"        // private, mutable, has default
+    var String host = "localhost"        // private, mutable, has default
     var int port = 8080              // private, mutable, has default
-    const str VERSION = "1.0"        // public static final
+    const String VERSION = "1.0"        // public static final
 }
 ```
 
@@ -197,8 +197,8 @@ Use `init` for fields that must be set in the constructor and cannot be changed 
 
 ```zinc
 class User {
-    init str name                    // private final + getter
-    init str email                   // private final + getter
+    init String name                    // private final + getter
+    init String email                   // private final + getter
     var int loginCount = 0           // private, mutable
 }
 ```
@@ -209,10 +209,10 @@ Use `Type?` for fields that can be null:
 
 ```zinc
 class Order {
-    init str id
-    pub var str? shippingAddress = null
-    pub var str? trackingNumber = null
-    pub var str status = "pending"
+    init String id
+    pub var String? shippingAddress = null
+    pub var String? trackingNumber = null
+    pub var String status = "pending"
 }
 ```
 
@@ -230,10 +230,10 @@ Use `fn init(...)` to define a constructor:
 
 ```zinc
 class Dog {
-    var str name
-    var str breed
+    var String name
+    var String breed
 
-    fn init(str name, str breed) {
+    fn init(String name, String breed) {
         this.name = name
         this.breed = breed
     }
@@ -248,18 +248,18 @@ Use a colon after the class name to specify a parent class or interfaces:
 
 ```zinc
 class Animal {
-    pub var str name
-    pub var str sound
+    pub var String name
+    pub var String sound
 
-    pub fn speak() str {
+    pub fn speak() String {
         return "{name} says {sound}"
     }
 }
 
 class Dog : Animal {
-    pub var str breed
+    pub var String breed
 
-    pub fn fetch() str {
+    pub fn fetch() String {
         return "{name} fetches!"
     }
 }
@@ -279,7 +279,7 @@ Java annotations work directly in Zinc:
 
 ```zinc
 @Deprecated
-pub fn oldMethod() str {
+pub fn oldMethod() String {
     return "use newMethod"
 }
 
@@ -299,8 +299,8 @@ Use `data` for immutable value types. Each `data` declaration generates a separa
 
 ```zinc
 data User {
-    var str name
-    var str email
+    var String name
+    var String email
     var int age = 0
 }
 
@@ -324,10 +324,10 @@ A single `.zn` file can contain multiple `data` declarations — each produces i
 
 ```zinc
 data Point {
-    var float x
-    var float y
+    var double x
+    var double y
 
-    pub fn distance(Point other) float {
+    pub fn distance(Point other) double {
         return Math.sqrt((x - other.x) ** 2 + (y - other.y) ** 2)
     }
 }

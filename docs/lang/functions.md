@@ -5,7 +5,7 @@
 Functions are declared with `fn`. Parameters use type-first syntax: `type name`. Return type follows the parameter list.
 
 ```zinc
-fn greet(str name) str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 
@@ -27,7 +27,7 @@ For short functions, use `=` to define the body as a single expression:
 ```zinc
 fn double(int x) int = x * 2
 fn square(int n) int = n * n
-fn fullName(str first, str last) str = "{first} {last}"
+fn fullName(String first, String last) String = "{first} {last}"
 ```
 
 ## Default Arguments
@@ -35,7 +35,7 @@ fn fullName(str first, str last) str = "{first} {last}"
 Parameters can have default values:
 
 ```zinc
-fn connect(str host, int port = 80, bool ssl = false) {
+fn connect(String host, int port = 80, boolean ssl = false) {
     print("Connecting to {host}:{port}")
 }
 
@@ -59,7 +59,7 @@ Named arguments work with any function — they are a call-site feature, not a d
 Use `...` suffix for variadic parameters (Java varargs):
 
 ```zinc
-fn log(str... messages) {
+fn log(String... messages) {
     for msg in messages {
         print(msg)
     }
@@ -128,11 +128,11 @@ items.forEach(x -> {
 The return type comes after the closing parenthesis of the parameter list:
 
 ```zinc
-fn parse(str input) int {
+fn parse(String input) int {
     return int(input)
 }
 
-fn divide(float a, float b) Result<float> {
+fn divide(double a, double b) Result<double> {
     if b == 0 {
         return Error("division by zero")
     }

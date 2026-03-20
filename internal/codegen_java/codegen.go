@@ -681,24 +681,25 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 
 // zincToJavaType maps Zinc primitive/collection type names to Java equivalents.
 var zincToJavaType = map[string]string{
-	"int":    "int",
-	"float":  "double",
-	"str":    "String",
-	"bool":   "boolean",
-	"bytes":  "byte[]",
-	"none":   "void",
-	"List":   "List",
-	"Map":    "Map",
-	"Set":    "Set",
-	"String": "String", // pass-through if already Java-style
+	"int":     "int",
+	"double":  "double",
+	"String":  "String",
+	"boolean": "boolean",
+	"char":    "char",
+	"long":    "long",
+	"byte[]":  "byte[]",
+	"List":    "List",
+	"Map":     "Map",
+	"Set":     "Set",
 }
 
 // zincToJavaBoxed maps Zinc primitives to their boxed Java equivalents (for generics).
 var zincToJavaBoxed = map[string]string{
-	"int":   "Integer",
-	"float": "Double",
-	"str":   "String",
-	"bool":  "Boolean",
+	"int":     "Integer",
+	"double":  "Double",
+	"boolean": "Boolean",
+	"char":    "Character",
+	"long":    "Long",
 }
 
 func (g *Generator) formatType(t parser.TypeExpr) string {

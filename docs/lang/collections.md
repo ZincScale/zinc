@@ -70,7 +70,7 @@ var int total = orders
     .map(o -> o.amount)
     .sum()
 
-var List<str> topNames = users
+var List<String> topNames = users
     .filter(u -> u.isActive)
     .sortBy(u -> u.lastName)
     .limit(10)
@@ -80,11 +80,11 @@ var List<str> topNames = users
 ## Working with Lists
 
 ```zinc
-var List<str> names = ["Alice", "Bob", "Charlie"]
+var List<String> names = ["Alice", "Bob", "Charlie"]
 names.add("Dave")
 names.addAll(["Eve", "Frank"])
 var int count = names.size()
-var str first = names.get(0)
+var String first = names.get(0)
 names.set(0, "Alicia")
 names.remove("Bob")
 
@@ -94,17 +94,17 @@ if "Alice" in names {
 }
 
 // Slicing
-var List<str> firstTwo = names.limit(2)
-var List<str> rest = names.skip(1)
+var List<String> firstTwo = names.limit(2)
+var List<String> rest = names.skip(1)
 ```
 
 ## Working with Maps
 
 ```zinc
-var Map<str, int> ages = {"Alice": 30, "Bob": 25}
+var Map<String, int> ages = {"Alice": 30, "Bob": 25}
 ages.put("Charlie", 35)
 var int age = ages.get("Alice")
-var bool has = ages.containsKey("Alice")
+var boolean has = ages.containsKey("Alice")
 
 // Iterate
 for entry in ages.entrySet() {
@@ -121,12 +121,12 @@ var int val = ages.getOrDefault("Unknown", 0)
 ## Working with Sets
 
 ```zinc
-var Set<str> tags = Set.of("java", "zinc", "flow")
+var Set<String> tags = Set.of("java", "zinc", "flow")
 tags.add("quarkus")
-var bool has = tags.contains("java")
+var boolean has = tags.contains("java")
 
 // Set operations
-var Set<str> union = Set.copyOf(a)
+var Set<String> union = Set.copyOf(a)
 union.addAll(b)
 ```
 
@@ -137,7 +137,7 @@ Zinc has built-in tuple types for lightweight groupings. Each tuple arity genera
 ```zinc
 var point = (3, 5)                   // Tuple2<int, int>
 var rgb = (255, 128, 0)              // Tuple3<int, int, int>
-var entry = ("Alice", 30, true)      // Tuple3<str, int, bool>
+var entry = ("Alice", 30, true)      // Tuple3<String, int, boolean>
 ```
 
 ### Tuple Access
@@ -190,13 +190,13 @@ var hi = result._1();
 ### Typed Tuples
 
 ```zinc
-var (str name, int age) = getUser()  // typed destructuring
+var (String name, int age) = getUser()  // typed destructuring
 ```
 
 ### Tuples in Collections
 
 ```zinc
-var List<(str, int)> pairs = [("Alice", 30), ("Bob", 25)]
+var List<(String, int)> pairs = [("Alice", 30), ("Bob", 25)]
 
 for (name, age) in pairs {
     print("{name} is {age}")

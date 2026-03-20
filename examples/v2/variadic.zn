@@ -19,7 +19,7 @@ fn create_user(**kwargs) {
 create_user(name="Alice", age=30, role="admin")
 
 // Mixed — required + *args + **kwargs
-fn log(str level, *args, **kwargs) {
+fn log(String level, *args, **kwargs) {
     var message = " ".join([str(a) for a in args])
     print("[{level}] {message} {kwargs}")
 }

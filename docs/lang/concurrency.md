@@ -184,8 +184,8 @@ Scoped values for implicit context propagation — no parameter drilling:
 
 ```zinc
 context RequestContext {
-    str traceId
-    str tenantId
+    String traceId
+    String tenantId
 }
 
 // Bind at entry point
@@ -207,8 +207,8 @@ Context automatically propagates to child threads spawned with `concurrent` or `
 A parallel web scraper with rate limiting and timeout:
 
 ```zinc
-fn scrapeUrls(List<str> urls) List<str> {
-    var results = Channel<str>(1000)
+fn scrapeUrls(List<String> urls) List<String> {
+    var results = Channel<String>(1000)
     var limiter = Rate(10.perSecond)
 
     parallel(max: 4) for url in urls {
@@ -224,7 +224,7 @@ fn scrapeUrls(List<str> urls) List<str> {
     }
     results.close()
 
-    var List<str> titles = []
+    var List<String> titles = []
     for title in results {
         titles.add(title)
     }

@@ -13,7 +13,7 @@ enum Color {
     Blue
 }
 
-fn describe_direction(Direction d) str {
+fn describe_direction(Direction d) String {
     match d {
         case Direction.North -> return "heading north"
         case Direction.South -> return "heading south"

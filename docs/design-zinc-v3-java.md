@@ -25,12 +25,12 @@ Kotlin succeeded where Groovy failed — static types, null safety, JetBrains to
 
 | You write | Zinc generates |
 |---|---|
-| `data User { str name, int age }` | `record User(String name, int age) {}` |
+| `data User { String name, int age }` | `record User(String name, int age) {}` |
 | `items.filter(x -> x > 0)` | `items.stream().filter(x -> x > 0).toList()` |
 | `"Hello, {name}!"` | `"Hello, " + name + "!"` |
 | `match shape { case Circle c -> ... }` | `switch (shape) { case Circle c -> ... }` |
 | `spawn { task() }` | `Thread.startVirtualThread(() -> { task(); })` |
-| `fn str() str` | `@Override public String toString()` |
+| `fn String() String` | `@Override public String toString()` |
 | `var x = 5` | `var x = 5;` |
 | `items.map(it * 2)` | `items.stream().map(x -> x * 2).toList()` |
 
@@ -82,10 +82,10 @@ var result = orders
 ### Variables
 
 ```zinc
-var name = "Alice"          // type inferred as str
+var name = "Alice"          // type inferred as String
 var int age = 30             // explicit type
 var List<int> scores = []    // explicit generic
-const float PI = 3.14159    // immutable
+const double PI = 3.14159   // immutable
 ```
 
 Transpiles to:
@@ -99,7 +99,7 @@ final double PI = 3.14159;
 ### Functions
 
 ```zinc
-fn greet(str name) str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 
@@ -107,7 +107,7 @@ fn greet(str name) str {
 fn double(int x) int = x * 2
 
 // No return type = void
-fn log(str msg) {
+fn log(String msg) {
     System.out.println(msg)
 }
 ```
@@ -148,7 +148,7 @@ Top-level statements are wrapped in a generated `main()`. Class name derived fro
 ### Named Arguments
 
 ```zinc
-fn connect(str host, int port = 5432, bool ssl = true) Connection {
+fn connect(String host, int port = 5432, boolean ssl = true) Connection {
     // ...
 }
 
@@ -175,10 +175,10 @@ var user = User(name: "Alice", age: 30, role: "admin")
 | Zinc | Java | Notes |
 |---|---|---|
 | `int` | `int` / `Integer` | Primitive when possible, boxed in generics |
-| `float` | `double` / `Double` | 64-bit (Java `double`). No 32-bit `float` in Zinc. |
-| `str` | `String` | |
-| `bool` | `boolean` / `Boolean` | |
-| `bytes` | `byte[]` | Mutable in Java, Zinc tracks this |
+| `double` | `double` / `Double` | 64-bit (Java `double`). No 32-bit `float` in Zinc. |
+| `String` | `String` | |
+| `boolean` | `boolean` / `Boolean` | |
+| `byte[]` | `byte[]` | Mutable in Java, Zinc tracks this |
 
 ### Collection Types
 
@@ -192,7 +192,7 @@ var user = User(name: "Alice", age: 30, role: "admin")
 ### Nullable Types
 
 ```zinc
-var str? name = null             // nullable
+var String? name = null             // nullable
 var int age = 42                 // non-nullable, compiler enforced
 
 fn find(int id) User? {          // may return null
@@ -235,9 +235,9 @@ Transpiles directly to Java generics.
 
 ```zinc
 data User {
-    str name
+    String name
     int age
-    str role = "user"
+    String role = "user"
 }
 ```
 
@@ -256,10 +256,10 @@ Auto-generates: constructor, `equals()`, `hashCode()`, `toString()`. Zinc's `dat
 
 ```zinc
 data Point {
-    float x
-    float y
+    double x
+    double y
 
-    fn distance(Point other) float {
+    fn distance(Point other) double {
         return Math.sqrt((x - other.x) ** 2 + (y - other.y) ** 2)
     }
 }
@@ -269,12 +269,12 @@ data Point {
 
 ```zinc
 sealed class Shape {
-    data Circle { float radius }
-    data Rect { float width, float height }
-    data Triangle { float base, float height }
+    data Circle { double radius }
+    data Rect { double width, double height }
+    data Triangle { double base, double height }
 }
 
-fn area(Shape shape) float {
+fn area(Shape shape) double {
     return match shape {
         case Circle c -> Math.PI * c.radius ** 2
         case Rect r -> r.width * r.height
@@ -312,7 +312,7 @@ enum HttpStatus {
     NotFound = 404
     ServerError = 500
 
-    fn isError() bool = this.value >= 400
+    fn isError() boolean = this.value >= 400
 }
 ```
 
@@ -322,26 +322,26 @@ enum HttpStatus {
 
 ```zinc
 class Dog {
-    var str name
-    var str breed
+    var String name
+    var String breed
     pub var int age = 0
 
-    fn init(str name, str breed) {
+    fn init(String name, String breed) {
         this.name = name
         this.breed = breed
     }
 
-    fn speak() str = "{name} says woof!"
+    fn speak() String = "{name} says woof!"
 
-    fn str() str = "Dog({name}, {breed}, age={age})"
+    fn String() String = "Dog({name}, {breed}, age={age})"
 }
 
 class Puppy : Dog {
-    fn init(str name) {
+    fn init(String name) {
         super(name, "Mixed")
     }
 
-    fn speak() str = "{name} says yap!"
+    fn speak() String = "{name} says yap!"
 }
 ```
 
@@ -369,16 +369,16 @@ public class Dog {
 
 ```zinc
 interface Speakable {
-    fn speak() str
+    fn speak() String
 }
 
 interface Serializable {
-    fn toBytes() bytes
-    fn fromBytes(bytes data) this   // static factory
+    fn toBytes() byte[]
+    fn fromBytes(byte[] data) this   // static factory
 }
 
 class Dog : Speakable {
-    fn speak() str = "Woof!"
+    fn speak() String = "Woof!"
 }
 ```
 
@@ -473,7 +473,7 @@ Transpiles to stream chains. Comprehensions are syntax sugar for `.filter().map(
 For operations that can fail in normal use (parsing, I/O, network calls):
 
 ```zinc
-fn parseInt(str s) Result<int> {
+fn parseInt(String s) Result<int> {
     try {
         return s.toInt()
     } catch NumberFormatException e {
@@ -612,10 +612,10 @@ Transpiler hoists all imports to top of generated `.java` file regardless of whe
 
 ```zinc
 @Deprecated
-fn oldMethod() str = "use newMethod instead"
+fn oldMethod() String = "use newMethod instead"
 
 @Override
-fn toString() str = "MyClass"
+fn toString() String = "MyClass"
 
 // Quarkus endpoint
 @Path("/users")

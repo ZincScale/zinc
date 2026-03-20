@@ -29,16 +29,16 @@ These translate directly with minimal or no transformation:
 | Zinc | Java | Notes |
 |---|---|---|
 | `var x = 5` | `var x = 5;` | Java has `var` since 11. Identical semantics. |
-| `var str name = "hi"` | `String name = "hi";` | Explicit type annotation |
+| `var String name = "hi"` | `String name = "hi";` | Explicit type annotation |
 | `const PI = 3.14` | `final var PI = 3.14;` | `const` → `final` |
 
 ### Data Classes → Records
 
 | Zinc | Java |
 |---|---|
-| `data User { str name, int age }` | `record User(String name, int age) {}` |
-| `data Point { float x, float y }` | `record Point(double x, double y) {}` |
-| `data frozen Config { str host }` | `record Config(String host) {}` (records are already immutable) |
+| `data User { String name, int age }` | `record User(String name, int age) {}` |
+| `data Point { double x, double y }` | `record Point(double x, double y) {}` |
+| `data frozen Config { String host }` | `record Config(String host) {}` (records are already immutable) |
 
 Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`. Zinc's `data` was designed for this.
 
@@ -53,7 +53,7 @@ Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`
 
 | Zinc | Java |
 |---|---|
-| `fn greet(str name) str { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
+| `fn greet(String name) String { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
 | `fn double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
 | `fn process() none { ... }` | `static void process() { ... }` |
 
@@ -95,11 +95,11 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 
 | Zinc | Java |
 |---|---|
-| `class Dog { var str name }` | `class Dog { private String name; }` |
-| `pub str name` | `public String name;` |
-| `fn init(str name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
+| `class Dog { var String name }` | `class Dog { private String name; }` |
+| `pub String name` | `public String name;` |
+| `fn init(String name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
 | `class Puppy : Dog { ... }` | `class Puppy extends Dog { ... }` |
-| `interface Speaker { fn speak() str }` | `interface Speaker { String speak(); }` |
+| `interface Speaker { fn speak() String }` | `interface Speaker { String speak(); }` |
 | `static fn create() Dog` | `static Dog create()` |
 
 ### Concurrency → Virtual Threads
@@ -124,7 +124,7 @@ These were added during the Python pivot and need rethinking for Java:
 ### 1. `bytes` type
 - **Python**: first-class `bytes` type with slicing, immutable
 - **Java**: `byte[]` (mutable), `ByteBuffer`, or `ReadOnlyMemory` equivalent
-- **Zinc decision**: `bytes` maps to `byte[]`. For flow engine, use `ByteBuffer` or `MemorySegment` (Panama API). Hide behind Zinc's `bytes` type.
+- **Zinc decision**: `byte[]` maps to `byte[]`. For flow engine, use `ByteBuffer` or `MemorySegment` (Panama API). Hide behind Zinc's `byte[]` type.
 
 ### 2. `**kwargs` / named arguments
 - **Python**: native keyword arguments
@@ -153,7 +153,7 @@ These were added during the Python pivot and need rethinking for Java:
 
 | Zinc | Python | Java |
 |---|---|---|
-| `fn str()` | `__str__` | `toString()` |
+| `fn String()` | `__str__` | `toString()` |
 | `fn eq(other)` | `__eq__` | `equals(Object other)` |
 | `fn hash()` | `__hash__` | `hashCode()` |
 | `fn len()` | `__len__` | `size()` |
@@ -178,7 +178,7 @@ These were added during the Python pivot and need rethinking for Java:
 ### 9. Multiple return values
 - **Python**: `return a, b` → tuple
 - **Java**: no tuples. Return a record or use out-parameters.
-- **Zinc decision**: `fn split() (str, str)` transpiles to a generated record: `record SplitResult(String first, String second)`. Tuple unpacking at call site: `(a, b) = split()` → `var result = split(); var a = result.first(); var b = result.second();`
+- **Zinc decision**: `fn split() (String, String)` transpiles to a generated record: `record SplitResult(String first, String second)`. Tuple unpacking at call site: `(a, b) = split()` → `var result = split(); var a = result.first(); var b = result.second();`
 
 ### 10. Dynamic imports
 - **Python**: `import json` at any point in the file
@@ -201,8 +201,8 @@ These were added during the Python pivot and need rethinking for Java:
 #### 1. Sealed types (for exhaustive match)
 ```zinc
 sealed class Shape {
-    data Circle { float radius }
-    data Rect { float width, float height }
+    data Circle { double radius }
+    data Rect { double width, double height }
 }
 
 // Compiler enforces all cases handled:
@@ -283,10 +283,10 @@ The transpiler should be smart about terminal operations:
 | Zinc | Java | Notes |
 |---|---|---|
 | `int` | `int` / `Integer` | Primitive when possible, boxed in generics |
-| `float` | `double` / `Double` | Java `float` is 32-bit; Zinc `float` = Java `double` (64-bit) |
-| `str` | `String` | |
-| `bool` | `boolean` / `Boolean` | |
-| `bytes` | `byte[]` | |
+| `double` | `double` / `Double` | Java `float` is 32-bit; Zinc `double` = Java `double` (64-bit) |
+| `String` | `String` | |
+| `boolean` | `boolean` / `Boolean` | |
+| `byte[]` | `byte[]` | |
 | `List<T>` | `List<T>` | `java.util.List` |
 | `Map<K, V>` | `Map<K, V>` | `java.util.Map` |
 | `Set<T>` | `Set<T>` | `java.util.Set` |

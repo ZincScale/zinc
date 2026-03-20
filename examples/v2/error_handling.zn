@@ -1,7 +1,7 @@
 // error_handling.zn — Two-track error handling in Zinc v2
 
 // Track 1: Result<T> for expected failures
-fn parse_int(str s) Result<int> {
+fn parse_int(String s) Result<int> {
     if not s.isdigit() {
         return Err("not a number: {s}")
     }
@@ -36,7 +36,7 @@ for s in inputs {
 print("Valid values: {values}")
 
 // Track 2: Exceptions for unexpected failures
-fn connect(str host) {
+fn connect(String host) {
     if host == "bad-host" {
         raise ConnectionError("cannot reach {host}")
     }

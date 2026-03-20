@@ -163,7 +163,7 @@ if command == "pack" {
     var prepared = []
     for ff in flowfiles {
         var content = ff["content"]
-        if content is str {
+        if content is String {
             content = content.encode("utf-8")
         }
         prepared.append({"attributes": ff["attributes"], "content": content})

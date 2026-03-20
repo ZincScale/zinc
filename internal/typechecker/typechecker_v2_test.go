@@ -52,7 +52,7 @@ func TestV2TypeMismatch(t *testing.T) {
 }
 
 func TestV2TypeMismatchBool(t *testing.T) {
-	errs := checkV2(`var str x = true`)
+	errs := checkV2(`var String x = true`)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
@@ -61,18 +61,18 @@ func TestV2TypeMismatchBool(t *testing.T) {
 	}
 }
 
-func TestV2IntToFloatOk(t *testing.T) {
-	// int → float is allowed
-	errs := checkV2(`var float x = 42`)
+func TestV2IntToDoubleOk(t *testing.T) {
+	// int → double is allowed
+	errs := checkV2(`var double x = 42`)
 	if len(errs) > 0 {
-		t.Errorf("expected no errors (int→float), got: %v", errs)
+		t.Errorf("expected no errors (int→double), got: %v", errs)
 	}
 }
 
 func TestV2FnTypeChecked(t *testing.T) {
 	errs := checkV2(`
 fn add(int a, int b) int {
-    var str result = a + b
+    var String result = a + b
     return result
 }
 `)
@@ -98,7 +98,7 @@ y = 20
 func TestV2DataClassFieldTypes(t *testing.T) {
 	errs := checkV2(`
 data User {
-    var str name
+    var String name
     var int age
 }
 `)
@@ -135,7 +135,7 @@ fn add(int a, int b) int {
 
 func TestV2FnCallArgCount(t *testing.T) {
 	errs := checkV2(`
-fn greet(str name) str {
+fn greet(String name) String {
     return "hello"
 }
 greet("Alice", "extra")
@@ -150,7 +150,7 @@ greet("Alice", "extra")
 
 func TestV2FnCallArgType(t *testing.T) {
 	errs := checkV2(`
-fn greet(str name) str {
+fn greet(String name) String {
     return "hello"
 }
 greet(42)
@@ -158,7 +158,7 @@ greet(42)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
-	if !strings.Contains(errs[0].Message, "expected str, got int") {
+	if !strings.Contains(errs[0].Message, "expected String, got int") {
 		t.Errorf("expected arg type error, got: %s", errs[0].Message)
 	}
 }
@@ -186,7 +186,7 @@ for x in items {
 
 func TestV2ResultErrReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn parse(str s) Result<int> {
+fn parse(String s) Result<int> {
     return Err("bad")
 }
 `)
@@ -197,7 +197,7 @@ fn parse(str s) Result<int> {
 
 func TestV2AllPathsReturn(t *testing.T) {
 	errs := checkV2(`
-fn classify(int x) str {
+fn classify(int x) String {
     if x > 0 {
         return "positive"
     }
@@ -213,7 +213,7 @@ fn classify(int x) str {
 
 func TestV2AllPathsReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn classify(int x) str {
+fn classify(int x) String {
     if x > 0 {
         return "positive"
     } else {
@@ -228,7 +228,7 @@ fn classify(int x) str {
 
 func TestV2AllPathsReturnMatch(t *testing.T) {
 	errs := checkV2(`
-fn describe(int x) str {
+fn describe(int x) String {
     match x {
         case 1 -> return "one"
         case 2 -> return "two"
@@ -242,16 +242,16 @@ fn describe(int x) str {
 }
 
 func TestV2TypeNarrowing(t *testing.T) {
-	// After "x is str", x should be narrowed to str in the then-branch
+	// After "x is String", x should be narrowed to String in the then-branch
 	errs := checkV2(`
 fn process(any x) {
-    if x is str {
-        var str y = x
+    if x is String {
+        var String y = x
     }
 }
 `)
 	if len(errs) > 0 {
-		t.Errorf("expected no errors (type narrowed to str), got: %v", errs)
+		t.Errorf("expected no errors (type narrowed to String), got: %v", errs)
 	}
 }
 
@@ -272,7 +272,7 @@ func TestV2ValidScript(t *testing.T) {
 	errs := checkV2(`
 import json
 
-fn greet(str name) str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 

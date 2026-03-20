@@ -4,11 +4,11 @@ const PI = 3.14159
 const MAX_RETRIES = 3
 const APP_NAME = "zinc-app"
 
-fn circle_area(float radius) float {
+fn circle_area(double radius) double {
     return PI * radius ** 2
 }
 
-fn circle_circumference(float radius) float {
+fn circle_circumference(double radius) double {
     return 2 * PI * radius
 }
 

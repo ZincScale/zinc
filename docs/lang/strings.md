@@ -9,7 +9,7 @@ Zinc has three string literal forms, each with different behavior.
 Double-quoted strings support interpolation with `{}`:
 
 ```zinc
-var str name = "Alice"
+var String name = "Alice"
 var int age = 30
 print("Hello, {name}!")              // Hello, Alice!
 print("{name} is {age} years old")   // Alice is 30 years old
@@ -27,15 +27,15 @@ print("upper: {name.toUpperCase()}")  // upper: ALICE
 Single-quoted strings are literal — no interpolation:
 
 ```zinc
-var str pattern = 'no {interpolation} here'
+var String pattern = 'no {interpolation} here'
 print(pattern)                       // no {interpolation} here
 ```
 
 Use single quotes for regex patterns, format strings, or any text where braces are literal:
 
 ```zinc
-var str regex = '[a-zA-Z0-9_]+'
-var str template = '{user}: {message}'
+var String regex = '[a-zA-Z0-9_]+'
+var String template = '{user}: {message}'
 ```
 
 ### Triple-Quoted Strings (Multi-Line)
@@ -43,14 +43,14 @@ var str template = '{user}: {message}'
 Triple quotes for multi-line strings:
 
 ```zinc
-var str query = """
+var String query = """
 SELECT name, age
 FROM users
 WHERE active = true
 ORDER BY name
 """
 
-var str message = """Dear {name},
+var String message = """Dear {name},
 
 Thank you for your order #{orderId}.
 Your items will ship on {shipDate}.
@@ -64,7 +64,7 @@ Triple-quoted strings support interpolation (like double-quoted strings).
 ## Common String Operations
 
 ```zinc
-var str s = "Hello, World!"
+var String s = "Hello, World!"
 
 // Methods (Java String methods)
 s.toUpperCase()                      // "HELLO, WORLD!"
@@ -92,10 +92,10 @@ if "World" in s {
 Convert values to strings with `String.valueOf()` or interpolation:
 
 ```zinc
-var str numStr = String.valueOf(42)   // "42"
-var str piStr = String.valueOf(3.14)  // "3.14"
+var String numStr = String.valueOf(42)   // "42"
+var String piStr = String.valueOf(3.14)  // "3.14"
 
 // Or just use interpolation — cleaner:
 var int count = 5
-var str label = "{count} items"       // "5 items"
+var String label = "{count} items"       // "5 items"
 ```

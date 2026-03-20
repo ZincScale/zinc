@@ -7,7 +7,7 @@ Zinc uses a two-track error model: `Result<T>` for expected failures and excepti
 Use `Result<T>` for validation, parsing, missing data — anything that can fail in normal business logic:
 
 ```zinc
-fn parsePort(str s) Result<int> {
+fn parsePort(String s) Result<int> {
     if not s.isDigit() {
         return Error("not a number: {s}")
     }
@@ -47,8 +47,8 @@ The `or { }` block must produce a value of the same type — it's the fallback p
 Use `return` in an `or` block to exit the enclosing function early:
 
 ```zinc
-fn loadConfig(str path) Config {
-    var str content = readFile(path) or {
+fn loadConfig(String path) Config {
+    var String content = readFile(path) or {
         log.error("cannot read config: {err}")
         return Config.defaults()     // exits loadConfig, returns default
     }
@@ -75,14 +75,14 @@ for record in records {
 Return a bare value for success (auto-wrapped in `Ok`) or `Error(message)` for failure:
 
 ```zinc
-fn divide(float a, float b) Result<float> {
+fn divide(double a, double b) Result<double> {
     if b == 0 {
         return Error("division by zero")
     }
     return a / b
 }
 
-fn findUser(str id) Result<User> {
+fn findUser(String id) Result<User> {
     var user = db.get(id)
     if user == null {
         return Error("user not found: {id}")
@@ -96,7 +96,7 @@ fn findUser(str id) Result<User> {
 Chain multiple failable operations — each `or` handles its own failure:
 
 ```zinc
-fn processOrder(str orderId) Result<Receipt> {
+fn processOrder(String orderId) Result<Receipt> {
     var order = findOrder(orderId) or {
         return Error("order not found: {err}")
     }

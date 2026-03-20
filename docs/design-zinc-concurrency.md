@@ -340,18 +340,18 @@ In a flow engine, every FlowFile carries context: trace ID, provenance chain, te
 
 ```zinc
 // BAD: context parameter drilling
-fn enrich(FlowFile flow, str traceId, str tenantId) FlowFile { ... }
-fn validate(FlowFile flow, str traceId, str tenantId) FlowFile { ... }
-fn transform(FlowFile flow, str traceId, str tenantId) FlowFile { ... }
+fn enrich(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
+fn validate(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
+fn transform(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
 ```
 
 ### The Solution: `context`
 
 ```zinc
 context FlowContext {
-    str traceId
-    str tenantId
-    List<str> provenance
+    String traceId
+    String tenantId
+    List<String> provenance
 }
 
 // Set once at pipeline entry
@@ -616,7 +616,7 @@ print("Processed {results.count()} files")
 ### Web scraper: Producer/consumer with rate limiting
 
 ```zinc
-var urls = Channel<str>(1000)
+var urls = Channel<String>(1000)
 var results = Channel<Page>(1000)
 var limiter = Rate(10.perSecond)
 
@@ -666,16 +666,16 @@ fn enrichUser(User user) User {
 
 ```zinc
 context RequestContext {
-    str traceId
-    str tenantId
-    str? principal
+    String traceId
+    String tenantId
+    String? principal
 }
 
 @Path("/api")
 class ApiResource {
     @GET
-    fn handle(@HeaderParam("X-Trace-Id") str traceId,
-              @HeaderParam("X-Tenant") str tenantId) Response {
+    fn handle(@HeaderParam("X-Trace-Id") String traceId,
+              @HeaderParam("X-Tenant") String tenantId) Response {
         with RequestContext(traceId: traceId, tenantId: tenantId) {
             // Every service call in this scope sees the context
             var data = dataService.fetch()

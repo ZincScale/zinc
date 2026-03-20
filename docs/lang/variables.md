@@ -7,7 +7,7 @@ Use `var` to declare variables. Zinc supports type inference, explicit types, an
 ```zinc
 var x = 42                      // inferred as int
 var int x = 42                  // explicit type
-var str name = "Alice"          // explicit type
+var String name = "Alice"          // explicit type
 var List<int> items = []        // generic type
 var a, b = swap(1, 2)          // tuple unpacking
 ```
@@ -18,10 +18,10 @@ When you omit the type, Zinc infers it from the right-hand side:
 
 ```zinc
 var count = 0                   // int
-var name = "Bob"                // str
-var ratio = 3.14                // float
-var active = true               // bool
-var tags = ["a", "b", "c"]     // List<str>
+var name = "Bob"                // String
+var ratio = 3.14                // double
+var active = true               // boolean
+var tags = ["a", "b", "c"]     // List<String>
 ```
 
 ### Explicit Types
@@ -30,11 +30,11 @@ Place the type before the variable name:
 
 ```zinc
 var int count = 0
-var str name = "Bob"
-var float ratio = 3.14
-var bool active = true
-var List<str> tags = []
-var Map<str, int> scores = {}
+var String name = "Bob"
+var double ratio = 3.14
+var boolean active = true
+var List<String> tags = []
+var Map<String, int> scores = {}
 ```
 
 ### Tuple Unpacking
@@ -75,7 +75,7 @@ Use `const` for immutable bindings. Constants must be initialized and cannot be 
 ```zinc
 const PI = 3.14159
 const int MAX_RETRIES = 3
-const str APP_NAME = "zinc-app"
+const String APP_NAME = "zinc-app"
 ```
 
 ### Constant Parameters
@@ -83,7 +83,7 @@ const str APP_NAME = "zinc-app"
 Parameters can be marked `const` to prevent reassignment inside the function body:
 
 ```zinc
-fn greet(const str name) str {
+fn greet(const String name) String {
     // name = "other"           // compile error: cannot reassign const parameter
     return "Hello, {name}!"
 }
@@ -93,7 +93,7 @@ fn greet(const str name) str {
 
 ```zinc
 class Config {
-    const str NAME = "default"
+    const String NAME = "default"
     const int VERSION = 1
 }
 ```
@@ -114,10 +114,10 @@ Use `init` for fields that must be set in the constructor and are frozen after c
 
 ```zinc
 class User {
-    init str name               // must be set in constructor
-    init str email              // frozen after construction
+    init String name               // must be set in constructor
+    init String email              // frozen after construction
 
-    fn init(str name, str email) {
+    fn init(String name, String email) {
         this.name = name
         this.email = email
     }
