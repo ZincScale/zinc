@@ -217,13 +217,20 @@ func (g *Generator) emitClassDeclTopLevel(cls *parser.ClassDecl) {
 
 // --- Imports -----------------------------------------------------------------
 
+// Standard imports always included — these are used by generated code.
+var autoImports = []string{
+	"java.util.*",
+	"java.util.stream.*",
+}
+
 func (g *Generator) emitImports(imports []*parser.ImportDecl) {
+	for _, imp := range autoImports {
+		g.writeln("import %s;", imp)
+	}
 	for _, imp := range imports {
 		g.writeln("import %s;", imp.Path)
 	}
-	if len(imports) > 0 {
-		g.writeln("")
-	}
+	g.writeln("")
 }
 
 // --- Declarations ------------------------------------------------------------
@@ -804,7 +811,149 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	}
 }
 
+// streamMethods are collection methods that need .stream() wrapping.
+var streamIntermediateOps = map[string]bool{
+	"filter": true, "map": true, "flatMap": true, "sortBy": true,
+	"distinct": true, "limit": true, "skip": true,
+}
+
+var streamTerminalOps = map[string]bool{
+	"findFirst": true, "anyMatch": true, "allMatch": true, "noneMatch": true,
+	"count": true, "sum": true, "min": true, "max": true,
+	"reduce": true, "forEach": true, "toList": true, "toSet": true,
+	"toMap": true, "groupBy": true,
+}
+
+// collectStreamChain walks a CallExpr chain and collects stream method calls.
+// Returns (root object, list of method+args pairs, true) if it's a stream chain.
+type streamCall struct {
+	method string
+	args   []parser.Expr
+}
+
+func (g *Generator) collectStreamChain(c *parser.CallExpr) (parser.Expr, []streamCall, bool) {
+	var chain []streamCall
+
+	current := c
+	for {
+		sel, ok := current.Callee.(*parser.SelectorExpr)
+		if !ok {
+			break
+		}
+		method := sel.Field
+		if !streamIntermediateOps[method] && !streamTerminalOps[method] {
+			break
+		}
+		chain = append([]streamCall{{method: method, args: current.Args}}, chain...)
+
+		// Check if the object is another call in the chain
+		if nextCall, ok := sel.Object.(*parser.CallExpr); ok {
+			current = nextCall
+		} else {
+			// Root object found
+			return sel.Object, chain, len(chain) > 0
+		}
+	}
+
+	return nil, nil, false
+}
+
+func (g *Generator) formatStreamChain(root parser.Expr, chain []streamCall) string {
+	var sb strings.Builder
+	sb.WriteString(g.formatExpr(root))
+	sb.WriteString(".stream()")
+
+	for _, sc := range chain {
+		arg := g.formatStreamArg(sc.args)
+		switch sc.method {
+		case "filter":
+			sb.WriteString(fmt.Sprintf(".filter(%s)", arg))
+		case "map":
+			sb.WriteString(fmt.Sprintf(".map(%s)", arg))
+		case "flatMap":
+			sb.WriteString(fmt.Sprintf(".flatMap(%s)", arg))
+		case "sortBy":
+			sb.WriteString(fmt.Sprintf(".sorted(java.util.Comparator.comparing(%s))", arg))
+		case "distinct":
+			sb.WriteString(".distinct()")
+		case "limit":
+			sb.WriteString(fmt.Sprintf(".limit(%s)", arg))
+		case "skip":
+			sb.WriteString(fmt.Sprintf(".skip(%s)", arg))
+		case "findFirst":
+			if arg != "" {
+				sb.WriteString(fmt.Sprintf(".filter(%s)", arg))
+			}
+			sb.WriteString(".findFirst().orElse(null)")
+			return sb.String()
+		case "anyMatch":
+			sb.WriteString(fmt.Sprintf(".anyMatch(%s)", arg))
+			return sb.String()
+		case "allMatch":
+			sb.WriteString(fmt.Sprintf(".allMatch(%s)", arg))
+			return sb.String()
+		case "noneMatch":
+			sb.WriteString(fmt.Sprintf(".noneMatch(%s)", arg))
+			return sb.String()
+		case "count":
+			sb.WriteString(".count()")
+			return sb.String()
+		case "sum":
+			sb.WriteString(".mapToInt(Integer::intValue).sum()")
+			return sb.String()
+		case "min":
+			sb.WriteString(".min(java.util.Comparator.naturalOrder()).orElse(null)")
+			return sb.String()
+		case "max":
+			sb.WriteString(".max(java.util.Comparator.naturalOrder()).orElse(null)")
+			return sb.String()
+		case "reduce":
+			sb.WriteString(fmt.Sprintf(".reduce(%s)", arg))
+			return sb.String()
+		case "forEach":
+			sb.WriteString(fmt.Sprintf(".forEach(%s)", arg))
+			return sb.String()
+		case "toList":
+			sb.WriteString(".toList()")
+			return sb.String()
+		case "toSet":
+			sb.WriteString(".collect(java.util.stream.Collectors.toSet())")
+			return sb.String()
+		case "groupBy":
+			sb.WriteString(fmt.Sprintf(".collect(java.util.stream.Collectors.groupingBy(%s))", arg))
+			return sb.String()
+		case "toMap":
+			sb.WriteString(fmt.Sprintf(".collect(java.util.stream.Collectors.toMap(%s))", arg))
+			return sb.String()
+		}
+	}
+
+	// If chain ends with intermediate ops, add .toList() as default terminal
+	sb.WriteString(".toList()")
+	return sb.String()
+}
+
+func (g *Generator) formatStreamArg(args []parser.Expr) string {
+	if len(args) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, arg := range args {
+		if containsIt(arg) {
+			parts = append(parts, "_it -> "+g.formatExprIt(arg))
+		} else {
+			parts = append(parts, g.formatExpr(arg))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
+	// Check for stream chain: items.filter(x).map(y).sum()
+	if root, chain, ok := g.collectStreamChain(c); ok {
+		return g.formatStreamChain(root, chain)
+	}
+
 	callee := g.formatExpr(c.Callee)
 	args := g.formatExprList(c.Args)
 	// Add named args as positional (Java doesn't have named args)

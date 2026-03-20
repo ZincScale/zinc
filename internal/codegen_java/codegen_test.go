@@ -576,6 +576,101 @@ var c = Color.Red
 	}
 }
 
+// =============================================================================
+// Stream API codegen
+// =============================================================================
+
+func TestStreamFilter(t *testing.T) {
+	assertContains(t,
+		`items.filter(x -> x > 0)`,
+		`.stream().filter(x -> x > 0).toList()`,
+	)
+}
+
+func TestStreamMap(t *testing.T) {
+	assertContains(t,
+		`items.map(x -> x * 2)`,
+		`.stream().map(x -> x * 2).toList()`,
+	)
+}
+
+func TestStreamFilterMap(t *testing.T) {
+	assertContains(t,
+		`items.filter(x -> x > 0).map(x -> x * 2)`,
+		`.stream().filter(x -> x > 0).map(x -> x * 2).toList()`,
+	)
+}
+
+func TestStreamSortBy(t *testing.T) {
+	assertContains(t,
+		`users.sortBy(u -> u.age)`,
+		`.stream().sorted(java.util.Comparator.comparing(u -> u.age)).toList()`,
+	)
+}
+
+func TestStreamLimit(t *testing.T) {
+	assertContains(t,
+		`items.limit(10)`,
+		`.stream().limit(10).toList()`,
+	)
+}
+
+func TestStreamSum(t *testing.T) {
+	assertContains(t,
+		`numbers.sum()`,
+		`.stream().mapToInt(Integer::intValue).sum()`,
+	)
+}
+
+func TestStreamAnyMatch(t *testing.T) {
+	assertContains(t,
+		`items.anyMatch(x -> x > 0)`,
+		`.stream().anyMatch(x -> x > 0)`,
+	)
+}
+
+func TestStreamChainFilterMapSum(t *testing.T) {
+	assertContains(t,
+		`orders.filter(o -> o.active).map(o -> o.amount).sum()`,
+		`.stream().filter(o -> o.active).map(o -> o.amount).mapToInt(Integer::intValue).sum()`,
+	)
+}
+
+func TestStreamDistinct(t *testing.T) {
+	assertContains(t,
+		`items.distinct()`,
+		`.stream().distinct().toList()`,
+	)
+}
+
+func TestStreamForEach(t *testing.T) {
+	assertContains(t,
+		`items.forEach(x -> print(x))`,
+		`.stream().forEach(x -> System.out.println(x))`,
+	)
+}
+
+func TestStreamFilterWithIt(t *testing.T) {
+	assertContains(t,
+		`items.filter(it > 0)`,
+		`.stream().filter(_it -> _it > 0).toList()`,
+	)
+}
+
+func TestStreamGroupBy(t *testing.T) {
+	assertContains(t,
+		`users.groupBy(u -> u.role)`,
+		`.stream().collect(java.util.stream.Collectors.groupingBy(u -> u.role))`,
+	)
+}
+
+func TestStreamFindFirst(t *testing.T) {
+	assertContains(t,
+		`items.findFirst(x -> x > 10)`,
+		`.stream().filter(x -> x > 10).findFirst().orElse(null)`,
+	)
+}
+
 func TestOverrideGeneratesAnnotation(t *testing.T) {
 	assertContains(t, `
 class Dog : Animal {
