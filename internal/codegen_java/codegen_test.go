@@ -823,6 +823,67 @@ func TestSafeNavMethod(t *testing.T) {
 // Sealed classes
 // =============================================================================
 
+// =============================================================================
+// Concurrency
+// =============================================================================
+
+func TestSpawnExpr(t *testing.T) {
+	assertContains(t, `
+spawn {
+    print("background")
+}
+`,
+		`Thread.startVirtualThread(() -> {`,
+	)
+}
+
+func TestSpawnAsExpr(t *testing.T) {
+	assertContains(t, `
+var future = spawn {
+    compute()
+}
+`,
+		`Thread.startVirtualThread(() -> {`,
+	)
+}
+
+func TestParallelFor(t *testing.T) {
+	assertContains(t, `
+parallel for item in items {
+    process(item)
+}
+`,
+		`new java.util.concurrent.StructuredTaskScope.ShutdownOnFailure()`,
+		`for (var item : items)`,
+		`_scope.fork(() -> {`,
+		`_scope.join()`,
+		`_scope.throwIfFailed()`,
+	)
+}
+
+func TestLockStmt(t *testing.T) {
+	assertContains(t, `
+lock mu {
+    counter = counter + 1
+}
+`,
+		`mu.lock();`,
+		`try {`,
+		`} finally {`,
+		`mu.unlock();`,
+	)
+}
+
+func TestWithStmt(t *testing.T) {
+	assertContains(t, `
+with f = FileReader("data.txt") {
+    print("reading")
+}
+`,
+		`try (var f = new FileReader("data.txt"))`,
+	)
+}
+
 func TestSealedClass(t *testing.T) {
 	src := `
 sealed class Shape {

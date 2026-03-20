@@ -205,6 +205,9 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "yield" {
 			return p.v2ParseYieldStmt()
 		}
+		if tok.Literal == "lock" && p.peekAt(1).Type == lexer.TOKEN_IDENT {
+			return p.v2ParseLockStmt()
+		}
 	case lexer.TOKEN_DATA:
 		// data as variable name (data = ..., data["key"], data.field)
 		// vs data class declaration (data Name { ... })
@@ -502,6 +505,20 @@ func (p *Parser) v2ParseYieldStmt() *YieldStmt {
 }
 
 // v2ParseSpawnStmt: spawn { body } or var x = spawn { expr }
+// v2ParseLockStmt: lock mu { body }
+func (p *Parser) v2ParseLockStmt() Stmt {
+	line := p.peek().Line
+	p.advance() // consume "lock"
+	lockName := p.expect(lexer.TOKEN_IDENT).Literal
+	body := p.v2ParseBlock()
+	// Reuse WithStmt — single resource with the lock name
+	return &WithStmt{
+		Line: line,
+		Resources: []*WithResource{{Name: "_lock", Value: &Ident{Name: lockName}}},
+		Body: body,
+	}
+}
+
 func (p *Parser) v2ParseSpawnStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_SPAWN)

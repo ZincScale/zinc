@@ -628,6 +628,17 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitFnDecl(stmt)
 	case *parser.TupleVarStmt:
 		g.emitTupleVarStmt(stmt)
+	case *parser.WithStmt:
+		g.emitWithStmt(stmt)
+	case *parser.ParallelForStmt:
+		g.emitParallelForStmt(stmt)
+	case *parser.GoStmt:
+		// go { body } → Thread.startVirtualThread
+		g.writeln("Thread.startVirtualThread(() -> {")
+		g.indent++
+		g.emitBlock(stmt.Body)
+		g.indent--
+		g.writeln("});")
 	case *parser.AssertStmt:
 		g.emitAssertStmt(stmt)
 	}
@@ -769,6 +780,58 @@ func (g *Generator) emitRaiseStmt(r *parser.RaiseStmt) {
 	g.writeln("throw %s;", g.formatExpr(r.Value))
 }
 
+func (g *Generator) emitWithStmt(w *parser.WithStmt) {
+	if len(w.Resources) == 1 && w.Resources[0].Name == "_lock" {
+		// lock mu { body } → mu.lock(); try { body } finally { mu.unlock(); }
+		lockExpr := g.formatExpr(w.Resources[0].Value)
+		g.writeln("%s.lock();", lockExpr)
+		g.writeln("try {")
+		g.indent++
+		g.emitBlock(w.Body)
+		g.indent--
+		g.writeln("} finally {")
+		g.indent++
+		g.writeln("%s.unlock();", lockExpr)
+		g.indent--
+		g.writeln("}")
+		return
+	}
+	// General with → try-with-resources
+	var resources []string
+	for _, r := range w.Resources {
+		resources = append(resources, fmt.Sprintf("var %s = %s", r.Name, g.formatExpr(r.Value)))
+	}
+	g.writeln("try (%s) {", strings.Join(resources, "; "))
+	g.indent++
+	g.emitBlock(w.Body)
+	g.indent--
+	g.writeln("}")
+}
+
+func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
+	// parallel for item in items { body }
+	// → try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+	//       for (var item : items) { scope.fork(() -> { body; return null; }); }
+	//       scope.join(); scope.throwIfFailed();
+	//   }
+	g.writeln("try (var _scope = new java.util.concurrent.StructuredTaskScope.ShutdownOnFailure()) {")
+	g.indent++
+	g.writeln("for (var %s : %s) {", p.Item, g.formatExpr(p.Range))
+	g.indent++
+	g.writeln("_scope.fork(() -> {")
+	g.indent++
+	g.emitBlock(p.Body)
+	g.writeln("return null;")
+	g.indent--
+	g.writeln("});")
+	g.indent--
+	g.writeln("}")
+	g.writeln("_scope.join();")
+	g.writeln("_scope.throwIfFailed();")
+	g.indent--
+	g.writeln("}")
+}
+
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
 	g.writeln("var _tuple = %s;", g.formatExpr(t.Value))
 	for i, name := range t.Names {
@@ -862,7 +925,14 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.tupleTypes[n] = true
 		return fmt.Sprintf("new Tuple%d(%s)", n, g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
-		return "Thread.startVirtualThread(() -> { /* spawn body */ })"
+		var body strings.Builder
+		if expr.Body != nil {
+			for _, s := range expr.Body.Stmts {
+				body.WriteString(g.formatStmtInline(s))
+				body.WriteString(" ")
+			}
+		}
+		return fmt.Sprintf("Thread.startVirtualThread(() -> { %s})", body.String())
 	case *parser.IfExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.RangeExpr:
