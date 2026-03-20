@@ -51,14 +51,59 @@ class Counter {
 
 ## Fields
 
-Fields use `var` (mutable) or `const` (immutable) with type-first syntax:
+Fields use `var` (mutable), `const` (immutable), or `init` (set once in constructor) with type-first syntax:
 
 ```zinc
 class Config {
     var str host = "localhost"        // mutable, has default
     var int port = 8080              // mutable, has default
-    const str version = "1.0"        // immutable (static final)
+    const str VERSION = "1.0"        // immutable (static final)
 }
+```
+
+### Init Fields (final)
+
+Use `init` for fields that must be set in the constructor and cannot be changed after:
+
+```zinc
+class User {
+    init str name                    // must be set in constructor
+    init str email                   // frozen after construction
+    var int loginCount = 0           // mutable, has default
+}
+```
+
+Transpiles to `final` fields in Java:
+```java
+public class User {
+    private final String name;
+    private final String email;
+    private int loginCount = 0;
+}
+```
+
+### Nullable Fields
+
+Use `Type?` for fields that can be null:
+
+```zinc
+class Order {
+    init str id
+    var str? shippingAddress = none   // nullable, starts as null
+    var str? trackingNumber = none    // nullable, starts as null
+    var str status = "pending"        // non-nullable, has default
+}
+```
+
+The compiler enforces null safety — you must check before using a nullable field:
+
+```zinc
+if order.trackingNumber != none {
+    print("Tracking: {order.trackingNumber}")
+}
+
+// Safe navigation
+var str? tracking = order.trackingNumber?.toUpperCase()
 ```
 
 ## Constructor
