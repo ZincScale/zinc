@@ -34,27 +34,29 @@ func New() *Generator {
 	return &Generator{}
 }
 
-// Generate produces Java source from a Zinc v2 AST.
-// className is derived from the source filename (e.g., "script.zn" -> "Script").
+// OutputFile represents a generated .java file.
+type OutputFile struct {
+	Name    string // e.g., "User.java"
+	Content string
+}
+
+// Generate produces a single Java source string (all in one class).
+// Used by tests and simple single-file transpilation.
 func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.buf.Reset()
 	g.indent = 0
 	g.className = className
 
-	// Collect imports
 	g.emitImports(prog.Imports)
 
-	// Open class wrapper
 	g.writeln("public class %s {", className)
 	g.indent++
 
-	// Top-level declarations (functions, classes, data, enums)
 	for _, d := range prog.Decls {
 		g.emitDecl(d)
 		g.writeln("")
 	}
 
-	// Script-mode: top-level statements → main()
 	if len(prog.Stmts) > 0 {
 		g.writeln("public static void main(String[] args) {")
 		g.indent++
@@ -69,6 +71,148 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.writeln("}")
 
 	return g.buf.String()
+}
+
+// GenerateFiles produces separate .java files for each top-level type.
+// Data classes → records, enums, and classes each get their own file.
+// Top-level functions and script statements go into the main class file.
+func (g *Generator) GenerateFiles(prog *parser.Program, className string) []OutputFile {
+	var files []OutputFile
+
+	// Separate declarations into types (own file) vs functions (main file)
+	var fnDecls []parser.TopLevelDecl
+	var constDecls []parser.TopLevelDecl
+
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.DataClassDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitImports(prog.Imports)
+			g.emitDataClassDecl(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
+		case *parser.EnumDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitImports(prog.Imports)
+			g.emitEnumDecl(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
+		case *parser.ClassDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitImports(prog.Imports)
+			g.emitClassDeclTopLevel(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
+		case *parser.InterfaceDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitImports(prog.Imports)
+			g.emitInterfaceDecl(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
+		case *parser.FnDecl:
+			fnDecls = append(fnDecls, decl)
+		case *parser.ConstDecl:
+			constDecls = append(constDecls, decl)
+		}
+	}
+
+	// Main class file: top-level functions + script statements
+	if len(fnDecls) > 0 || len(constDecls) > 0 || len(prog.Stmts) > 0 {
+		g.buf.Reset()
+		g.indent = 0
+		g.className = className
+		g.emitImports(prog.Imports)
+
+		g.writeln("public class %s {", className)
+		g.indent++
+
+		for _, d := range constDecls {
+			g.emitDecl(d)
+			g.writeln("")
+		}
+
+		for _, d := range fnDecls {
+			g.emitDecl(d)
+			g.writeln("")
+		}
+
+		if len(prog.Stmts) > 0 {
+			g.writeln("public static void main(String[] args) {")
+			g.indent++
+			for _, s := range prog.Stmts {
+				g.emitStmt(s)
+			}
+			g.indent--
+			g.writeln("}")
+		}
+
+		g.indent--
+		g.writeln("}")
+
+		files = append(files, OutputFile{
+			Name:    className + ".java",
+			Content: g.buf.String(),
+		})
+	}
+
+	return files
+}
+
+// emitClassDeclTopLevel emits a class as a top-level public class (not static inner).
+func (g *Generator) emitClassDeclTopLevel(cls *parser.ClassDecl) {
+	for _, a := range cls.Annotations {
+		g.writeln("@%s", g.formatAnnotation(a))
+	}
+
+	ext := ""
+	if len(cls.Parents) > 0 {
+		ext = " extends " + cls.Parents[0]
+		if len(cls.Parents) > 1 {
+			ext += " implements " + strings.Join(cls.Parents[1:], ", ")
+		}
+	}
+
+	typeParams := ""
+	if len(cls.TypeParams) > 0 {
+		typeParams = "<" + strings.Join(cls.TypeParams, ", ") + ">"
+	}
+
+	g.writeln("public class %s%s%s {", cls.Name, typeParams, ext)
+	g.indent++
+
+	g.pendingAccessors = nil
+	for _, f := range cls.Fields {
+		g.emitFieldDecl(f)
+	}
+	if len(cls.Fields) > 0 {
+		g.writeln("")
+	}
+
+	if cls.Ctor != nil {
+		g.emitCtor(cls.Name, cls.Ctor, cls.Parents)
+	}
+
+	g.emitAccessors()
+
+	for _, m := range cls.Methods {
+		g.emitMethodDecl(m)
+		g.writeln("")
+	}
+
+	g.indent--
+	g.writeln("}")
 }
 
 // --- Imports -----------------------------------------------------------------
@@ -671,6 +815,25 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		args += g.formatExpr(na.Value)
 	}
 
+	// Wrap `it` references in lambda: items.filter(it > 0) → items.filter(_it -> _it > 0)
+	var argStrs []string
+	hasItRewrite := false
+	for _, arg := range c.Args {
+		if containsIt(arg) {
+			hasItRewrite = true
+			argStrs = append(argStrs, "_it -> "+g.formatExprIt(arg))
+		} else {
+			argStrs = append(argStrs, g.formatExpr(arg))
+		}
+	}
+	for _, na := range c.NamedArgs {
+		argStrs = append(argStrs, g.formatExpr(na.Value))
+	}
+	if hasItRewrite {
+		return fmt.Sprintf("%s(%s)", callee, strings.Join(argStrs, ", "))
+	}
+	args = strings.Join(argStrs, ", ")
+
 	// Map Zinc builtins to Java equivalents
 	switch callee {
 	case "print":
@@ -689,7 +852,21 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("Double.parseDouble(%s)", args)
 	}
 
+	// Constructor calls: PascalCase name → prepend "new"
+	if len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' && !isBuiltinFunc(callee) {
+		return fmt.Sprintf("new %s(%s)", callee, args)
+	}
+
 	return fmt.Sprintf("%s(%s)", callee, args)
+}
+
+func isBuiltinFunc(name string) bool {
+	switch name {
+	case "System", "Math", "String", "Integer", "Double", "Boolean", "Objects",
+		"Thread", "List", "Map", "Set", "Arrays", "Collections":
+		return true
+	}
+	return false
 }
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
@@ -870,6 +1047,78 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 	}
 }
 
+
+// --- it keyword helpers ------------------------------------------------------
+
+// containsIt checks if an expression tree contains Ident("it").
+func containsIt(e parser.Expr) bool {
+	switch expr := e.(type) {
+	case *parser.Ident:
+		return expr.Name == "it"
+	case *parser.BinaryExpr:
+		return containsIt(expr.Left) || containsIt(expr.Right)
+	case *parser.UnaryExpr:
+		return containsIt(expr.Operand)
+	case *parser.SelectorExpr:
+		return containsIt(expr.Object)
+	case *parser.CallExpr:
+		if containsIt(expr.Callee) {
+			return true
+		}
+		for _, a := range expr.Args {
+			if containsIt(a) {
+				return true
+			}
+		}
+		return false
+	case *parser.IndexExpr:
+		return containsIt(expr.Object) || containsIt(expr.Index)
+	default:
+		return false
+	}
+}
+
+// formatExprIt formats an expression, replacing Ident("it") with "_it".
+func (g *Generator) formatExprIt(e parser.Expr) string {
+	switch expr := e.(type) {
+	case *parser.Ident:
+		if expr.Name == "it" {
+			return "_it"
+		}
+		return expr.Name
+	case *parser.BinaryExpr:
+		left := g.formatExprIt(expr.Left)
+		right := g.formatExprIt(expr.Right)
+		// Reuse the same operator mapping
+		switch expr.Op {
+		case "and":
+			return fmt.Sprintf("%s && %s", left, right)
+		case "or":
+			return fmt.Sprintf("%s || %s", left, right)
+		case "**":
+			return fmt.Sprintf("Math.pow(%s, %s)", left, right)
+		case "==":
+			return fmt.Sprintf("java.util.Objects.equals(%s, %s)", left, right)
+		case "!=":
+			return fmt.Sprintf("!java.util.Objects.equals(%s, %s)", left, right)
+		default:
+			return fmt.Sprintf("%s %s %s", left, expr.Op, right)
+		}
+	case *parser.UnaryExpr:
+		return fmt.Sprintf("%s%s", expr.Op, g.formatExprIt(expr.Operand))
+	case *parser.SelectorExpr:
+		return fmt.Sprintf("%s.%s", g.formatExprIt(expr.Object), expr.Field)
+	case *parser.CallExpr:
+		callee := g.formatExprIt(expr.Callee)
+		var args []string
+		for _, a := range expr.Args {
+			args = append(args, g.formatExprIt(a))
+		}
+		return fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", "))
+	default:
+		return g.formatExpr(e)
+	}
+}
 
 // --- Output helpers ----------------------------------------------------------
 

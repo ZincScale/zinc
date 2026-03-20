@@ -270,7 +270,7 @@ func TestRaise(t *testing.T) {
 	assertContains(t, `
 raise RuntimeException("bad")
 `,
-		`throw RuntimeException("bad");`,
+		`throw new RuntimeException("bad");`,
 	)
 }
 
@@ -455,6 +455,125 @@ class Dog : Animal {
 		`@Override`,
 		`public String speak()`,
 	)
+}
+
+// =============================================================================
+// it keyword
+// =============================================================================
+
+func TestItFilter(t *testing.T) {
+	assertContains(t,
+		`items.filter(it > 0)`,
+		`_it -> _it > 0`,
+	)
+}
+
+func TestItMap(t *testing.T) {
+	assertContains(t,
+		`items.map(it * 2)`,
+		`_it -> _it * 2`,
+	)
+}
+
+func TestItSelectorAccess(t *testing.T) {
+	assertContains(t,
+		`users.sortBy(it.age)`,
+		`_it -> _it.age`,
+	)
+}
+
+func TestItMethodCall(t *testing.T) {
+	assertContains(t,
+		`names.filter(it.startsWith("A"))`,
+		`_it -> _it.startsWith("A")`,
+	)
+}
+
+// =============================================================================
+// Multi-file output
+// =============================================================================
+
+func TestGenerateFilesDataClass(t *testing.T) {
+	src := `
+data User(String name, int age)
+
+print("hello")
+`
+	lex := lexer.New(src)
+	tokens := lex.Tokenize()
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors)
+	}
+
+	gen := New()
+	files := gen.GenerateFiles(prog, "Main")
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+
+	// Find the files by name
+	var userFile, mainFile *OutputFile
+	for i := range files {
+		switch files[i].Name {
+		case "User.java":
+			userFile = &files[i]
+		case "Main.java":
+			mainFile = &files[i]
+		}
+	}
+
+	if userFile == nil {
+		t.Fatal("expected User.java file")
+	}
+	if !strings.Contains(userFile.Content, "public record User(String name, int age)") {
+		t.Errorf("User.java should contain record\ngot:\n%s", userFile.Content)
+	}
+
+	if mainFile == nil {
+		t.Fatal("expected Main.java file")
+	}
+	if !strings.Contains(mainFile.Content, "public static void main(") {
+		t.Errorf("Main.java should contain main\ngot:\n%s", mainFile.Content)
+	}
+}
+
+func TestGenerateFilesEnum(t *testing.T) {
+	src := `
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+var c = Color.Red
+`
+	lex := lexer.New(src)
+	tokens := lex.Tokenize()
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors)
+	}
+
+	gen := New()
+	files := gen.GenerateFiles(prog, "Main")
+
+	var colorFile *OutputFile
+	for i := range files {
+		if files[i].Name == "Color.java" {
+			colorFile = &files[i]
+		}
+	}
+
+	if colorFile == nil {
+		t.Fatal("expected Color.java file")
+	}
+	if !strings.Contains(colorFile.Content, "public enum Color") {
+		t.Errorf("Color.java should contain enum\ngot:\n%s", colorFile.Content)
+	}
 }
 
 // TODO: TestReferenceIdentity and TestReferenceNonIdentity

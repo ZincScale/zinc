@@ -204,6 +204,7 @@ func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 }
 
 // transpileToJava transpiles a .zn file to .java files in outDir.
+// Each data class, enum, and class gets its own .java file.
 func transpileToJava(inFile, outDir string, verbose bool) ([]string, error) {
 	prog, err := parseAndCheck(inFile, verbose)
 	if err != nil {
@@ -212,22 +213,25 @@ func transpileToJava(inFile, outDir string, verbose bool) ([]string, error) {
 
 	className := classNameFromFile(inFile)
 	gen := codegen_java.New()
-	javaSrc := gen.Generate(prog, className)
+	outputFiles := gen.GenerateFiles(prog, className)
 
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
 	}
 
-	mainFile := filepath.Join(outDir, className+".java")
-	if err := os.WriteFile(mainFile, []byte(javaSrc), 0644); err != nil {
-		return nil, fmt.Errorf("writing %s: %w", mainFile, err)
+	var javaFiles []string
+	for _, of := range outputFiles {
+		path := filepath.Join(outDir, of.Name)
+		if err := os.WriteFile(path, []byte(of.Content), 0644); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", path, err)
+		}
+		javaFiles = append(javaFiles, path)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", path)
+		}
 	}
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", mainFile)
-	}
-
-	return []string{mainFile}, nil
+	return javaFiles, nil
 }
 
 // compileJava runs javac on the generated .java files.
