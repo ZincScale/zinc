@@ -336,7 +336,7 @@ class Dog {
     fn str() str = "Dog({name}, {breed}, age={age})"
 }
 
-class Puppy(Dog) {
+class Puppy : Dog {
     fn init(str name) {
         super(name, "Mixed")
     }
@@ -377,7 +377,7 @@ interface Serializable {
     fn fromBytes(bytes data) this   // static factory
 }
 
-class Dog(Speakable) {
+class Dog : Speakable {
     fn speak() str = "Woof!"
 }
 ```

@@ -81,7 +81,7 @@ var d = Dog("Rex", "Lab")
 
 ## Inheritance
 
-Use parentheses after the class name to specify a parent class or interfaces:
+Use a colon after the class name to specify a parent class or interfaces:
 
 ```zinc
 class Animal {
@@ -93,7 +93,7 @@ class Animal {
     }
 }
 
-class Dog(Animal) {
+class Dog : Animal {
     var str breed
 
     fn fetch() str {
@@ -109,7 +109,7 @@ print(d.fetch())                     // Rex fetches!
 Multiple interfaces:
 
 ```zinc
-class Dog(Animal, Serializable, Comparable) {
+class Dog : Animal, Serializable, Comparable {
     // First parent is extends, rest are implements
 }
 ```

@@ -637,7 +637,7 @@ with f = open("test.txt") {
 
 func TestV2ClassInheritance(t *testing.T) {
 	prog, errs := parseV2(`
-class Dog(Animal) {
+class Dog : Animal {
     var str breed
 
     fn speak() str {

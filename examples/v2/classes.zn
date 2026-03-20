@@ -13,7 +13,7 @@ class Animal {
     }
 }
 
-class Dog(Animal) {
+class Dog : Animal {
     var str breed
 
     fn fetch() str {

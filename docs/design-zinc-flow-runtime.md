@@ -526,7 +526,7 @@ class FlowQueue {
 }
 
 // In-memory (within a group) — benchmarked at 88-188K msgs/sec
-class LocalQueue(FlowQueue) {
+class LocalQueue : FlowQueue {
     var q: queue.Queue
 
     fn init(maxsize: int = 10_000) {
@@ -543,7 +543,7 @@ class LocalQueue(FlowQueue) {
 }
 
 // NATS JetStream (between groups) — cross-pod communication
-class NatsQueue(FlowQueue) {
+class NatsQueue : FlowQueue {
     var nc: nats.Connection
     var js: nats.JetStream
     var stream: str
@@ -895,14 +895,14 @@ class SecretsProvider {
 }
 
 // Implementations
-class EnvSecrets(SecretsProvider) {
+class EnvSecrets : SecretsProvider {
     // Reads from environment variables — simplest, K8s-native
     fn get(key: str): str {
         return os.environ[key]
     }
 }
 
-class FileSecrets(SecretsProvider) {
+class FileSecrets : SecretsProvider {
     // Reads from files — mounted K8s secrets
     var base_path: str = "/var/run/secrets"
 
@@ -911,7 +911,7 @@ class FileSecrets(SecretsProvider) {
     }
 }
 
-class VaultSecrets(SecretsProvider) {
+class VaultSecrets : SecretsProvider {
     // Reads from HashiCorp Vault
     var client: VaultClient
 
@@ -1666,11 +1666,11 @@ class PipelineHarness {
     fn run_for(seconds: float) { ... }
 }
 
-class MockServiceRegistry(ServiceRegistry) {
+class MockServiceRegistry : ServiceRegistry {
     // Inject mock services for testing (mock DB, mock HTTP, etc.)
 }
 
-class MockSecretsProvider(SecretsProvider) {
+class MockSecretsProvider : SecretsProvider {
     // Return test secrets without Vault/env/file
     var secrets: dict[str, str] = {}
     fn get(key: str): str { return secrets[key] }

@@ -189,6 +189,11 @@ func (g *Generator) emitFieldDecl(f *parser.FieldDecl) {
 		}
 		return
 	}
+	if f.IsInit {
+		// init fields → final (set in constructor, frozen after)
+		g.writeln("%s final %s %s;", vis, typeName, f.Name)
+		return
+	}
 	if f.Default != nil {
 		g.writeln("%s %s %s = %s;", vis, typeName, f.Name, g.formatExpr(f.Default))
 	} else {

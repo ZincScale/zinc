@@ -98,7 +98,7 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 | `class Dog { var str name }` | `class Dog { private String name; }` |
 | `pub str name` | `public String name;` |
 | `fn init(str name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
-| `class Puppy(Dog) { ... }` | `class Puppy extends Dog { ... }` |
+| `class Puppy : Dog { ... }` | `class Puppy extends Dog { ... }` |
 | `interface Speaker { fn speak() str }` | `interface Speaker { String speak(); }` |
 | `static fn create() Dog` | `static Dog create()` |
 

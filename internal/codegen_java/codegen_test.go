@@ -428,7 +428,7 @@ class Config {
 
 func TestClassInheritance(t *testing.T) {
 	assertContains(t, `
-class Puppy(Dog) {
+class Puppy : Dog {
     var str name
 
     fn speak() str {
@@ -439,6 +439,18 @@ class Puppy(Dog) {
 		`public static class Puppy extends Dog {`,
 		`private String name;`,
 		`String speak() {`,
+	)
+}
+
+func TestClassInitFields(t *testing.T) {
+	assertContains(t, `
+class User {
+    init str name
+    init str email
+}
+`,
+		`private final String name;`,
+		`private final String email;`,
 	)
 }
 

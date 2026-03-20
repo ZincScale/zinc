@@ -388,7 +388,7 @@ class Cache {
 
 func TestV2ClassInheritance(t *testing.T) {
 	assertV2Contains(t, `
-class Dog(Animal) {
+class Dog : Animal {
     var str breed
 
     fn speak() str {

@@ -658,16 +658,15 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	p.expect(lexer.TOKEN_CLASS)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 
-	// Optional parent class: class Dog(Animal)
+	// Optional parent class/interfaces: class Dog : Animal, Serializable
 	var parents []string
-	if p.check(lexer.TOKEN_LPAREN) {
+	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
 		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
 			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
 		}
-		p.expect(lexer.TOKEN_RPAREN)
 	}
 
 	var fields []*FieldDecl
