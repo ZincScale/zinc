@@ -62,7 +62,7 @@ func TestScriptModeHelloWorld(t *testing.T) {
 	assertContains(t,
 		`print("Hello, world!")`,
 		`public class Test {`,
-		`public static void main(String[] args) {`,
+		`public static void main(String[] args) throws Exception {`,
 		`System.out.println("Hello, world!");`,
 	)
 }
@@ -853,11 +853,17 @@ parallel for item in items {
     process(item)
 }
 `,
-		`new java.util.concurrent.StructuredTaskScope.ShutdownOnFailure()`,
+		`java.util.concurrent.StructuredTaskScope.open()`,
 		`for (var item : items)`,
 		`_scope.fork(() -> {`,
 		`_scope.join()`,
-		`_scope.throwIfFailed()`,
+	)
+}
+
+func TestChannelType(t *testing.T) {
+	assertContains(t,
+		`var Channel<String> ch = Channel(100)`,
+		`java.util.concurrent.ArrayBlockingQueue<String> ch = new java.util.concurrent.ArrayBlockingQueue(100)`,
 	)
 }
 

@@ -314,7 +314,7 @@ func compileJava(javaFiles []string, outDir string) error {
 		return fmt.Errorf("javac not found — install JDK 25+")
 	}
 
-	args := []string{"-d", outDir}
+	args := []string{"--enable-preview", "--release", "25", "-d", outDir}
 	args = append(args, javaFiles...)
 
 	cmd := exec.Command(javac, args...)
@@ -333,7 +333,7 @@ func runJava(classDir, className string, scriptArgs []string) error {
 		return fmt.Errorf("java not found — install JDK 25+")
 	}
 
-	args := []string{"-cp", classDir, className}
+	args := []string{"--enable-preview", "-cp", classDir, className}
 	args = append(args, scriptArgs...)
 
 	cmd := exec.Command(java, args...)

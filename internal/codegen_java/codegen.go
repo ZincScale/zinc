@@ -59,7 +59,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	}
 
 	if len(prog.Stmts) > 0 {
-		g.writeln("public static void main(String[] args) {")
+		g.writeln("public static void main(String[] args) throws Exception {")
 		g.indent++
 		for _, s := range prog.Stmts {
 			g.emitStmt(s)
@@ -190,7 +190,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		}
 
 		if len(prog.Stmts) > 0 {
-			g.writeln("public static void main(String[] args) {")
+			g.writeln("public static void main(String[] args) throws Exception {")
 			g.indent++
 			for _, s := range prog.Stmts {
 				g.emitStmt(s)
@@ -814,7 +814,7 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 	//       for (var item : items) { scope.fork(() -> { body; return null; }); }
 	//       scope.join(); scope.throwIfFailed();
 	//   }
-	g.writeln("try (var _scope = new java.util.concurrent.StructuredTaskScope.ShutdownOnFailure()) {")
+	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
 	g.indent++
 	g.writeln("for (var %s : %s) {", p.Item, g.formatExpr(p.Range))
 	g.indent++
@@ -827,7 +827,6 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 	g.indent--
 	g.writeln("}")
 	g.writeln("_scope.join();")
-	g.writeln("_scope.throwIfFailed();")
 	g.indent--
 	g.writeln("}")
 }
@@ -1179,6 +1178,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		rootName = callee[:idx]
 	}
 	if len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' && !isBuiltinFunc(rootName) {
+		// Map Zinc type names to Java equivalents for constructors
+		if mapped, ok := zincToJavaType[callee]; ok {
+			callee = mapped
+		}
 		return fmt.Sprintf("new %s(%s)", callee, args)
 	}
 
@@ -1236,6 +1239,7 @@ var zincToJavaType = map[string]string{
 	"List":    "List",
 	"Map":     "Map",
 	"Set":     "Set",
+	"Channel": "java.util.concurrent.ArrayBlockingQueue",
 }
 
 // zincToJavaBoxed maps Zinc primitives to their boxed Java equivalents (for generics).
