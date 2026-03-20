@@ -2,113 +2,197 @@
   {
     "test": "threading-1KB",
     "count": 100000,
-    "elapsed_sec": 1.132,
-    "msgs_per_sec": 88370,
-    "mb_per_sec": 86.3
+    "elapsed_sec": 0.743,
+    "msgs_per_sec": 134604,
+    "mb_per_sec": 131.4
   },
   {
     "test": "asyncio-1KB",
     "count": 100000,
-    "elapsed_sec": 0.622,
-    "msgs_per_sec": 160791,
-    "mb_per_sec": 157.0
+    "elapsed_sec": 0.546,
+    "msgs_per_sec": 183171,
+    "mb_per_sec": 178.9
   },
   {
     "test": "multiproc-1KB",
     "count": 100000,
-    "elapsed_sec": 1.793,
-    "msgs_per_sec": 55763,
-    "mb_per_sec": 54.5
+    "elapsed_sec": 1.858,
+    "msgs_per_sec": 53819,
+    "mb_per_sec": 52.6
   },
   {
     "test": "threading-fanout-4c-1KB",
     "count": 100000,
-    "elapsed_sec": 0.648,
-    "msgs_per_sec": 154427,
-    "mb_per_sec": 150.8
+    "elapsed_sec": 0.593,
+    "msgs_per_sec": 168540,
+    "mb_per_sec": 164.6
   },
   {
     "test": "threading-10KB",
     "count": 50000,
-    "elapsed_sec": 0.541,
-    "msgs_per_sec": 92397,
-    "mb_per_sec": 902.3
+    "elapsed_sec": 0.674,
+    "msgs_per_sec": 74209,
+    "mb_per_sec": 724.7
   },
   {
     "test": "asyncio-10KB",
     "count": 50000,
-    "elapsed_sec": 0.274,
-    "msgs_per_sec": 182431,
-    "mb_per_sec": 1781.6
+    "elapsed_sec": 0.382,
+    "msgs_per_sec": 130729,
+    "mb_per_sec": 1276.7
   },
   {
     "test": "multiproc-10KB",
     "count": 50000,
-    "elapsed_sec": 1.214,
-    "msgs_per_sec": 41199,
-    "mb_per_sec": 402.3
+    "elapsed_sec": 1.403,
+    "msgs_per_sec": 35633,
+    "mb_per_sec": 348.0
   },
   {
     "test": "threading-fanout-4c-10KB",
     "count": 50000,
-    "elapsed_sec": 0.392,
-    "msgs_per_sec": 127535,
-    "mb_per_sec": 1245.5
+    "elapsed_sec": 0.34,
+    "msgs_per_sec": 147032,
+    "mb_per_sec": 1435.9
   },
   {
     "test": "threading-100KB",
     "count": 10000,
-    "elapsed_sec": 0.175,
-    "msgs_per_sec": 57153,
-    "mb_per_sec": 5581.3
+    "elapsed_sec": 0.174,
+    "msgs_per_sec": 57522,
+    "mb_per_sec": 5617.4
   },
   {
     "test": "asyncio-100KB",
     "count": 10000,
-    "elapsed_sec": 0.099,
-    "msgs_per_sec": 100584,
-    "mb_per_sec": 9822.6
+    "elapsed_sec": 0.125,
+    "msgs_per_sec": 80275,
+    "mb_per_sec": 7839.3
   },
   {
     "test": "multiproc-100KB",
     "count": 10000,
-    "elapsed_sec": 1.015,
-    "msgs_per_sec": 9854,
-    "mb_per_sec": 962.3
+    "elapsed_sec": 1.626,
+    "msgs_per_sec": 6149,
+    "mb_per_sec": 600.5
   },
   {
     "test": "threading-fanout-4c-100KB",
     "count": 10000,
-    "elapsed_sec": 0.07,
-    "msgs_per_sec": 141857,
-    "mb_per_sec": 13853.2
+    "elapsed_sec": 0.088,
+    "msgs_per_sec": 113021,
+    "mb_per_sec": 11037.2
   },
   {
     "test": "threading-1MB",
     "count": 2000,
-    "elapsed_sec": 0.177,
-    "msgs_per_sec": 11315,
-    "mb_per_sec": 11315.3
+    "elapsed_sec": 0.138,
+    "msgs_per_sec": 14508,
+    "mb_per_sec": 14507.7
   },
   {
     "test": "asyncio-1MB",
     "count": 2000,
-    "elapsed_sec": 0.153,
-    "msgs_per_sec": 13063,
-    "mb_per_sec": 13062.6
+    "elapsed_sec": 0.149,
+    "msgs_per_sec": 13432,
+    "mb_per_sec": 13432.3
   },
   {
     "test": "multiproc-1MB",
     "count": 2000,
-    "elapsed_sec": 2.594,
-    "msgs_per_sec": 771,
-    "mb_per_sec": 771.0
+    "elapsed_sec": 2.47,
+    "msgs_per_sec": 810,
+    "mb_per_sec": 809.7
   },
   {
     "test": "threading-fanout-4c-1MB",
     "count": 2000,
-    "elapsed_sec": 0.065,
-    "msgs_per_sec": 30649,
-    "mb_per_sec": 30649.4
+    "elapsed_sec": 0.063,
+    "msgs_per_sec": 31533,
+    "mb_per_sec": 31533.2
+  },
+  {
+    "test": "mutate-threading-1KB",
+    "count": 100000,
+    "elapsed_sec": 2.02,
+    "msgs_per_sec": 49516,
+    "mb_per_sec": 55.2
+  },
+  {
+    "test": "mutate-fanout-4w-1KB",
+    "count": 100000,
+    "elapsed_sec": 1.005,
+    "msgs_per_sec": 99477,
+    "mb_per_sec": 110.9
+  },
+  {
+    "test": "mutate-threading-10KB",
+    "count": 50000,
+    "elapsed_sec": 1.491,
+    "msgs_per_sec": 33543,
+    "mb_per_sec": 332.2
+  },
+  {
+    "test": "mutate-fanout-4w-10KB",
+    "count": 50000,
+    "elapsed_sec": 0.633,
+    "msgs_per_sec": 79041,
+    "mb_per_sec": 782.8
+  },
+  {
+    "test": "mutate-threading-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.502,
+    "msgs_per_sec": 19938,
+    "mb_per_sec": 1949.8
+  },
+  {
+    "test": "mutate-fanout-4w-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.165,
+    "msgs_per_sec": 60777,
+    "mb_per_sec": 5943.7
+  },
+  {
+    "test": "mutate-threading-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.768,
+    "msgs_per_sec": 2605,
+    "mb_per_sec": 2605.3
+  },
+  {
+    "test": "mutate-fanout-4w-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.353,
+    "msgs_per_sec": 5669,
+    "mb_per_sec": 5669.6
+  },
+  {
+    "test": "pipeline-3stage-1KB",
+    "count": 100000,
+    "elapsed_sec": 3.699,
+    "msgs_per_sec": 27037,
+    "mb_per_sec": 31.1
+  },
+  {
+    "test": "pipeline-3stage-10KB",
+    "count": 50000,
+    "elapsed_sec": 2.071,
+    "msgs_per_sec": 24138,
+    "mb_per_sec": 240.0
+  },
+  {
+    "test": "pipeline-3stage-100KB",
+    "count": 10000,
+    "elapsed_sec": 0.754,
+    "msgs_per_sec": 13265,
+    "mb_per_sec": 1297.8
+  },
+  {
+    "test": "pipeline-3stage-1MB",
+    "count": 2000,
+    "elapsed_sec": 0.772,
+    "msgs_per_sec": 2590,
+    "mb_per_sec": 2590.6
   }
 ]

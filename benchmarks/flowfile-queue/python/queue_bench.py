@@ -280,6 +280,193 @@ def bench_threading_fanout(flowfiles: list[bytes], count: int, num_consumers: in
     }
 
 
+# --- FlowFile mutation helpers ---
+
+def mutate_flowfile(packed: bytes) -> bytes:
+    """Simulate a real processor: unpack, modify attrs + content, repack."""
+    attrs, content, _ = unpackage_flowfile(packed)
+    # Mutate attributes
+    attrs["processed_by"] = "enrich_v2"
+    attrs["hop_count"] = str(int(attrs.get("hop_count", "0")) + 1)
+    # Transform content: XOR first 64 bytes (forces new bytes object)
+    ba = bytearray(content)
+    for i in range(min(64, len(ba))):
+        ba[i] ^= 0xAA
+    return package_flowfile(attrs, bytes(ba))
+
+
+# --- Mutate benchmarks: unpack -> modify -> repack -> output queue ---
+
+def bench_mutate_threading(flowfiles: list[bytes], count: int, label: str) -> dict:
+    """Single producer -> processor (mutates FF) -> single sink."""
+    in_q = ThreadQueue(maxsize=1000)
+    out_q = ThreadQueue(maxsize=1000)
+    results = {}
+
+    def processor():
+        processed = 0
+        total_bytes = 0
+        while True:
+            item = in_q.get()
+            if item is SENTINEL:
+                out_q.put(SENTINEL)
+                break
+            modified = mutate_flowfile(item)
+            out_q.put(modified)
+            processed += 1
+            total_bytes += len(item)
+        results["processed"] = processed
+        results["total_bytes"] = total_bytes
+
+    def sink():
+        while True:
+            item = out_q.get()
+            if item is SENTINEL:
+                break
+
+    proc_t = threading.Thread(target=processor)
+    sink_t = threading.Thread(target=sink)
+
+    start = time.perf_counter()
+    proc_t.start()
+    sink_t.start()
+    for i in range(count):
+        in_q.put(flowfiles[i % len(flowfiles)])
+    in_q.put(SENTINEL)
+    proc_t.join()
+    sink_t.join()
+    elapsed = time.perf_counter() - start
+
+    msgs_per_sec = results["processed"] / elapsed
+    mb_per_sec = results["total_bytes"] / elapsed / (1024 * 1024)
+    return {
+        "test": f"mutate-threading-{label}",
+        "count": results["processed"],
+        "elapsed_sec": round(elapsed, 3),
+        "msgs_per_sec": round(msgs_per_sec),
+        "mb_per_sec": round(mb_per_sec, 1),
+    }
+
+
+def bench_mutate_fanout(flowfiles: list[bytes], count: int, num_workers: int, label: str) -> dict:
+    """Single producer -> N parallel processors (mutate FF) -> single sink."""
+    in_q = ThreadQueue(maxsize=2000)
+    out_q = ThreadQueue(maxsize=2000)
+    total_processed = 0
+    total_bytes = 0
+    lock = threading.Lock()
+
+    def processor():
+        nonlocal total_processed, total_bytes
+        local_processed = 0
+        local_bytes = 0
+        while True:
+            item = in_q.get()
+            if item is SENTINEL:
+                in_q.put(SENTINEL)  # re-post for other workers
+                break
+            modified = mutate_flowfile(item)
+            out_q.put(modified)
+            local_processed += 1
+            local_bytes += len(item)
+        with lock:
+            total_processed += local_processed
+            total_bytes += local_bytes
+
+    def sink():
+        while True:
+            item = out_q.get()
+            if item is SENTINEL:
+                break
+
+    workers = [threading.Thread(target=processor) for _ in range(num_workers)]
+    sink_t = threading.Thread(target=sink)
+
+    start = time.perf_counter()
+    for w in workers:
+        w.start()
+    sink_t.start()
+    for i in range(count):
+        in_q.put(flowfiles[i % len(flowfiles)])
+    in_q.put(SENTINEL)
+    for w in workers:
+        w.join()
+    out_q.put(SENTINEL)
+    sink_t.join()
+    elapsed = time.perf_counter() - start
+
+    msgs_per_sec = total_processed / elapsed
+    mb_per_sec = total_bytes / elapsed / (1024 * 1024)
+    return {
+        "test": f"mutate-fanout-{num_workers}w-{label}",
+        "count": total_processed,
+        "elapsed_sec": round(elapsed, 3),
+        "msgs_per_sec": round(msgs_per_sec),
+        "mb_per_sec": round(mb_per_sec, 1),
+    }
+
+
+# --- 3-stage pipeline: source -> procA -> procB -> procC -> sink ---
+
+def bench_pipeline_3stage(flowfiles: list[bytes], count: int, label: str) -> dict:
+    """3-stage pipeline: each stage unpacks, mutates, repacks the FlowFile."""
+    q0 = ThreadQueue(maxsize=1000)
+    q1 = ThreadQueue(maxsize=1000)
+    q2 = ThreadQueue(maxsize=1000)
+    q3 = ThreadQueue(maxsize=1000)
+    results = {}
+
+    def make_stage(in_q, out_q, name):
+        def stage():
+            while True:
+                item = in_q.get()
+                if item is SENTINEL:
+                    out_q.put(SENTINEL)
+                    break
+                modified = mutate_flowfile(item)
+                out_q.put(modified)
+        return stage
+
+    def sink_fn():
+        processed = 0
+        total_bytes = 0
+        while True:
+            item = q3.get()
+            if item is SENTINEL:
+                break
+            processed += 1
+            total_bytes += len(item)
+        results["processed"] = processed
+        results["total_bytes"] = total_bytes
+
+    threads = [
+        threading.Thread(target=make_stage(q0, q1, "procA")),
+        threading.Thread(target=make_stage(q1, q2, "procB")),
+        threading.Thread(target=make_stage(q2, q3, "procC")),
+        threading.Thread(target=sink_fn),
+    ]
+
+    start = time.perf_counter()
+    for t in threads:
+        t.start()
+    for i in range(count):
+        q0.put(flowfiles[i % len(flowfiles)])
+    q0.put(SENTINEL)
+    for t in threads:
+        t.join()
+    elapsed = time.perf_counter() - start
+
+    msgs_per_sec = results["processed"] / elapsed
+    mb_per_sec = results["total_bytes"] / elapsed / (1024 * 1024)
+    return {
+        "test": f"pipeline-3stage-{label}",
+        "count": results["processed"],
+        "elapsed_sec": round(elapsed, 3),
+        "msgs_per_sec": round(msgs_per_sec),
+        "mb_per_sec": round(mb_per_sec, 1),
+    }
+
+
 # --- Main ---
 
 def run_benchmarks():
@@ -331,6 +518,81 @@ def run_benchmarks():
         # Fan-out (4 consumers)
         r = bench_threading_fanout(flowfiles, count, 4, size_label)
         print(f"  fanout (4 cons): {r['msgs_per_sec']:>10,} msgs/s  {r['mb_per_sec']:>8.1f} MB/s  ({r['elapsed_sec']}s)")
+        results.append(r)
+
+    # --- Part 2: Mutate FlowFile benchmarks ---
+    print("\n" + "=" * 70)
+    print("### MUTATE BENCHMARKS: unpack -> modify attrs+content -> repack ###")
+
+    # Validation: small run to verify correctness
+    print("\n--- Validation (10 items, 1KB) ---")
+    val_ffs = [make_flowfile(1024, i) for i in range(10)]
+    val_r = bench_mutate_threading(val_ffs, 10, "validate")
+    print(f"  mutate-validate: {val_r['count']} processed (expected 10)")
+    # Verify mutation actually happened
+    original = val_ffs[0]
+    mutated = mutate_flowfile(original)
+    orig_attrs, orig_content, _ = unpackage_flowfile(original)
+    mut_attrs, mut_content, _ = unpackage_flowfile(mutated)
+    assert mut_attrs["processed_by"] == "enrich_v2", "Attribute mutation failed"
+    assert mut_attrs["hop_count"] == "1", "Hop count failed"
+    assert mut_content[:64] != orig_content[:64], "Content mutation failed"
+    assert mut_content[64:] == orig_content[64:], "Content beyond 64 bytes should be unchanged"
+    print("  Validation PASSED: attrs mutated, content XOR'd, tail preserved")
+
+    # Scale up
+    mutate_counts = {
+        "1KB": 100_000,
+        "10KB": 50_000,
+        "100KB": 10_000,
+        "1MB": 2_000,
+    }
+
+    for size_label, size_bytes in sizes.items():
+        count = mutate_counts[size_label]
+        print(f"\n--- Mutate FlowFile size: {size_label} | count: {count:,} ---")
+
+        pool_size = min(count, 100)
+        flowfiles = [make_flowfile(size_bytes, i) for i in range(pool_size)]
+
+        # Single processor
+        r = bench_mutate_threading(flowfiles, count, size_label)
+        print(f"  mutate-single:   {r['msgs_per_sec']:>10,} msgs/s  {r['mb_per_sec']:>8.1f} MB/s  ({r['elapsed_sec']}s)")
+        results.append(r)
+
+        # Fan-out (4 parallel processors)
+        r = bench_mutate_fanout(flowfiles, count, 4, size_label)
+        print(f"  mutate-4-workers:{r['msgs_per_sec']:>10,} msgs/s  {r['mb_per_sec']:>8.1f} MB/s  ({r['elapsed_sec']}s)")
+        results.append(r)
+
+    # --- Part 3: 3-stage pipeline ---
+    print("\n" + "=" * 70)
+    print("### 3-STAGE PIPELINE: source -> procA -> procB -> procC -> sink ###")
+
+    # Validation
+    print("\n--- Validation (10 items, 1KB) ---")
+    val_ffs = [make_flowfile(1024, i) for i in range(10)]
+    val_r = bench_pipeline_3stage(val_ffs, 10, "validate")
+    print(f"  pipeline-validate: {val_r['count']} processed (expected 10)")
+    # Verify 3 hops
+    hop1 = mutate_flowfile(val_ffs[0])
+    hop2 = mutate_flowfile(hop1)
+    hop3 = mutate_flowfile(hop2)
+    final_attrs, _, _ = unpackage_flowfile(hop3)
+    assert final_attrs["hop_count"] == "3", f"Expected 3 hops, got {final_attrs['hop_count']}"
+    print("  Validation PASSED: 3 hops through pipeline")
+
+    # Scale up
+    print()
+    for size_label, size_bytes in sizes.items():
+        count = mutate_counts[size_label]
+        print(f"--- Pipeline FlowFile size: {size_label} | count: {count:,} ---")
+
+        pool_size = min(count, 100)
+        flowfiles = [make_flowfile(size_bytes, i) for i in range(pool_size)]
+
+        r = bench_pipeline_3stage(flowfiles, count, size_label)
+        print(f"  pipeline-3stage: {r['msgs_per_sec']:>10,} msgs/s  {r['mb_per_sec']:>8.1f} MB/s  ({r['elapsed_sec']}s)")
         results.append(r)
 
     # Write JSON results
