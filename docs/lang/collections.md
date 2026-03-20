@@ -2,124 +2,188 @@
 
 ## Collection Methods
 
-Zinc provides fluent collection methods that transpile to efficient Python. Single operations generate inline comprehensions with zero overhead.
+Zinc provides fluent collection methods using Java's native collection API. No `.stream()` / `.collect()` ceremony — the transpiler handles that.
 
 ```zinc
-items.filter(x -> x > 0)            // [x for x in items if (x > 0)]
-items.map(x -> x * 2)               // [(x * 2) for x in items]
-items.sum()                          // sum(items)
-items.sort_by(x -> x.age)           // sorted(items, key=...)
-items.take(10)                       // items[:10]
-items.skip(5)                        // items[5:]
-items.first(x -> x > 10)            // next(x for x if ...)
-items.any(x -> x > 0)               // any(...)
-items.all(x -> x > 0)               // all(...)
-items.distinct()                     // list(set(...))
-items.group_by(x -> x.category)     // itertools.groupby(...)
+items.filter(x -> x > 0)
+items.map(x -> x * 2)
+items.sum()
+items.sortBy(x -> x.age)
+items.limit(10)
+items.skip(5)
+items.findFirst(x -> x > 10)
+items.anyMatch(x -> x > 0)
+items.allMatch(x -> x > 0)
+items.distinct()
+items.groupBy(x -> x.category)
+items.forEach(x -> print(x))
 ```
 
 ### Method Reference
 
-| Zinc | Python | Description |
+| Zinc | Description | Java equivalent |
 |---|---|---|
-| `.filter(pred)` | list comprehension with `if` | Keep matching elements |
-| `.map(fn)` | list comprehension | Transform each element |
-| `.sum()` | `sum(...)` | Sum all elements |
-| `.sort_by(key)` | `sorted(..., key=)` | Sort by key function |
-| `.take(n)` | `[:n]` | First n elements |
-| `.skip(n)` | `[n:]` | Skip first n elements |
-| `.first(pred)` | `next(... for ... if)` | First match |
-| `.any(pred)` | `any(...)` | True if any match |
-| `.all(pred)` | `all(...)` | True if all match |
-| `.distinct()` | `list(set(...))` | Remove duplicates |
-| `.group_by(key)` | `itertools.groupby(...)` | Group by key |
+| `.filter(pred)` | Keep matching elements | `stream().filter(pred).toList()` |
+| `.map(fn)` | Transform each element | `stream().map(fn).toList()` |
+| `.flatMap(fn)` | Map + flatten | `stream().flatMap(fn).toList()` |
+| `.sortBy(key)` | Sort by key function | `stream().sorted(comparing(key)).toList()` |
+| `.limit(n)` | First n elements | `stream().limit(n).toList()` |
+| `.skip(n)` | Skip first n elements | `stream().skip(n).toList()` |
+| `.findFirst()` | First element (or none) | `stream().findFirst().orElse(null)` |
+| `.findFirst(pred)` | First matching element | `stream().filter(pred).findFirst().orElse(null)` |
+| `.anyMatch(pred)` | True if any match | `stream().anyMatch(pred)` |
+| `.allMatch(pred)` | True if all match | `stream().allMatch(pred)` |
+| `.noneMatch(pred)` | True if none match | `stream().noneMatch(pred)` |
+| `.distinct()` | Remove duplicates | `stream().distinct().toList()` |
+| `.groupBy(key)` | Group into Map | `stream().collect(groupingBy(key))` |
+| `.count()` | Number of elements | `size()` |
+| `.sum()` | Sum all elements | `stream().mapToInt(...).sum()` |
+| `.min()` / `.max()` | Min/max element | `stream().min/max(...)` |
+| `.reduce(init, fn)` | Fold to single value | `stream().reduce(init, fn)` |
+| `.forEach(fn)` | Execute for each | `forEach(fn)` |
+| `.toList()` | Convert to List | `stream().toList()` |
+| `.toMap(k, v)` | Convert to Map | `stream().collect(toMap(k, v))` |
+| `.toSet()` | Convert to Set | `new HashSet<>(list)` |
 
-## Chained Operations and Smart Dispatch
+The transpiler generates the stream chain. You write the fluent call.
 
-When you chain two or more collection methods, Zinc uses smart dispatch at runtime to pick the best backend:
+### Chained Operations
 
 ```zinc
 var int total = orders
-    .filter(o -> o["status"] == "active")
-    .map(o -> o["amount"])
+    .filter(o -> o.status == "active")
+    .map(o -> o.amount)
     .sum()
-```
 
-For plain lists, this generates `_zinc_collect()` with method chaining. For structured data (DataFrames), the same Zinc code can dispatch to Polars:
-
-```zinc
-// Same code, Polars backend:
-// pl.DataFrame(orders).lazy().filter(...).select(...).sum().collect().item()
-```
-
-## Comprehensions
-
-Zinc supports Python-style list and dict comprehensions:
-
-### List Comprehensions
-
-```zinc
-var List<int> squares = [x ** 2 for x in range(10)]
-var List<int> evens = [x for x in numbers if x % 2 == 0]
-```
-
-### Dict Comprehensions
-
-```zinc
-var Map<str, int> lengths = {w: len(w) for w in words}
-```
-
-### Auto Generator Promotion
-
-The transpiler automatically strips brackets inside `sum`, `any`, and `all` to produce generator expressions (more memory-efficient):
-
-```zinc
-var int total = sum([x for x in items])
-// transpiles to: sum(x for x in items)
+var List<str> topNames = users
+    .filter(u -> u.isActive)
+    .sortBy(u -> u.lastName)
+    .limit(10)
+    .map(u -> u.name)
 ```
 
 ## Working with Lists
 
 ```zinc
 var List<str> names = ["Alice", "Bob", "Charlie"]
-names.append("Dave")
-var int count = len(names)
-
-// Slicing
-var List<str> first_two = names.take(2)
-var List<str> rest = names.skip(1)
+names.add("Dave")
+names.addAll(["Eve", "Frank"])
+var int count = names.size()
+var str first = names.get(0)
+names.set(0, "Alicia")
+names.remove("Bob")
 
 // Check membership
 if "Alice" in names {
     print("found")
 }
+
+// Slicing
+var List<str> firstTwo = names.limit(2)
+var List<str> rest = names.skip(1)
 ```
 
-## Working with Dicts
+## Working with Maps
 
 ```zinc
 var Map<str, int> ages = {"Alice": 30, "Bob": 25}
-ages["Charlie"] = 35
+ages.put("Charlie", 35)
+var int age = ages.get("Alice")
+var bool has = ages.containsKey("Alice")
 
 // Iterate
-for key, value in ages.items() {
-    print("{key} is {value}")
+for entry in ages.entrySet() {
+    print("{entry.getKey()} is {entry.getValue()}")
 }
 
-// Delete a key
-del ages["Bob"]
+// Remove a key
+ages.remove("Bob")
+
+// Get with default
+var int val = ages.getOrDefault("Unknown", 0)
+```
+
+## Working with Sets
+
+```zinc
+var Set<str> tags = Set.of("java", "zinc", "flow")
+tags.add("quarkus")
+var bool has = tags.contains("java")
+
+// Set operations
+var Set<str> union = Set.copyOf(a)
+union.addAll(b)
 ```
 
 ## Tuples
 
-Tuples are immutable sequences:
+Zinc has built-in tuple types for lightweight groupings. Each tuple arity generates a `value record` (Valhalla value type when available, regular record as fallback).
 
 ```zinc
-var point = (3, 5)
-var rgb = (255, 128, 0)
+var point = (3, 5)                   // Tuple2<int, int>
+var rgb = (255, 128, 0)              // Tuple3<int, int, int>
+var entry = ("Alice", 30, true)      // Tuple3<str, int, bool>
+```
 
-fn swap(int a, int b) {
-    return b, a                  // return tuple without parens
+### Tuple Access
+
+```zinc
+var x = point.0                      // first element
+var y = point.1                      // second element
+```
+
+### Tuple Destructuring
+
+```zinc
+var (x, y) = point                   // destructure into variables
+var (name, age, active) = entry
+
+fn swap(int a, int b) (int, int) {
+    return (b, a)
 }
-var x, y = swap(1, 2)           // tuple unpacking
+var (x, y) = swap(1, 2)             // x=2, y=1
+```
+
+### Tuples as Return Types
+
+Functions returning tuples generate a record type:
+
+```zinc
+fn minMax(List<int> items) (int, int) {
+    return (items.min(), items.max())
+}
+
+var (lo, hi) = minMax(numbers)
+```
+
+Transpiles to:
+```java
+record MinMaxResult(int _0, int _1) {}
+
+static MinMaxResult minMax(List<Integer> items) {
+    return new MinMaxResult(
+        items.stream().mapToInt(Integer::intValue).min().orElseThrow(),
+        items.stream().mapToInt(Integer::intValue).max().orElseThrow()
+    );
+}
+
+var result = minMax(numbers);
+var lo = result._0();
+var hi = result._1();
+```
+
+### Typed Tuples
+
+```zinc
+var (str name, int age) = getUser()  // typed destructuring
+```
+
+### Tuples in Collections
+
+```zinc
+var List<(str, int)> pairs = [("Alice", 30), ("Bob", 25)]
+
+for (name, age) in pairs {
+    print("{name} is {age}")
+}
 ```
