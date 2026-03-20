@@ -74,6 +74,14 @@ func (p *Parser) ParseV2() *Program {
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
 		default:
+			// Check for contextual keyword: sealed class
+			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "sealed" && p.peekAt(1).Type == lexer.TOKEN_CLASS {
+				p.advance() // consume "sealed"
+				cls := p.v2ParseClassDecl()
+				cls.IsSealed = true
+				prog.Decls = append(prog.Decls, cls)
+				break
+			}
 			// Script mode — top-level statements
 			s := p.v2ParseStmt()
 			if s != nil {
@@ -675,13 +683,17 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 
 	var fields []*FieldDecl
 	var methods []*MethodDecl
+	var variants []*DataClassDecl
 
 	p.expect(lexer.TOKEN_LBRACE)
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
-		if tok.Type == lexer.TOKEN_AT {
+		if tok.Type == lexer.TOKEN_DATA {
+			// Sealed class variant: data Circle(double radius)
+			variants = append(variants, p.v2ParseDataClassDecl())
+		} else if tok.Type == lexer.TOKEN_AT {
 			annots := p.v2ParseAnnotations()
 			m := p.v2ParseMethodDecl()
 			m.Annotations = annots
@@ -736,7 +748,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods}
+	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods, Variants: variants}
 }
 
 // v2ParseMethodDecl: fn name(params) [ReturnType] { body }
@@ -1154,6 +1166,18 @@ func (p *Parser) v2ParsePostfix() Expr {
 	expr := p.v2ParsePrimary()
 	for {
 		switch {
+		case p.check(lexer.TOKEN_QUESTION_DOT):
+			// Safe navigation: obj?.field or obj?.method(args)
+			p.advance()
+			field := p.expect(lexer.TOKEN_IDENT).Literal
+			if p.check(lexer.TOKEN_LPAREN) {
+				// obj?.method(args)
+				call := p.v2ParseCallArgs(&Ident{Name: field})
+				callExpr := call.(*CallExpr)
+				expr = &SafeNavExpr{Object: expr, Field: field, Call: callExpr}
+			} else {
+				expr = &SafeNavExpr{Object: expr, Field: field}
+			}
 		case p.check(lexer.TOKEN_DOT):
 			p.advance()
 			field := p.expect(lexer.TOKEN_IDENT).Literal

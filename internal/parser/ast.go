@@ -56,15 +56,17 @@ func (i *ImportDecl) topLevelTag() {}
 
 // --- Declarations ------------------------------------------------------------
 
-// ClassDecl: [@annotations] class Dog[<T>] : Animal, Speaker { ... }
+// ClassDecl: [@annotations] [sealed] class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
 	Line        int // source line number (1-indexed)
 	Name        string
+	IsSealed    bool     // sealed class (has variant data classes)
 	TypeParams  []string // generic type parameter names
 	Parents     []string // base class + interfaces
 	Fields      []*FieldDecl
 	Ctor        *CtorDecl // nil if no constructor
 	Methods     []*MethodDecl
+	Variants    []*DataClassDecl // sealed class variants
 	Annotations []*Annotation
 }
 

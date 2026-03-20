@@ -123,14 +123,36 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 				Content: g.buf.String(),
 			})
 		case *parser.ClassDecl:
-			g.buf.Reset()
-			g.indent = 0
-			g.emitPackageAndImports(prog.Package, prog.Imports)
-			g.emitClassDeclTopLevel(decl)
-			files = append(files, OutputFile{
-				Name:    decl.Name + ".java",
-				Content: g.buf.String(),
-			})
+			if decl.IsSealed {
+				// Sealed class → sealed interface + variant records
+				g.buf.Reset()
+				g.indent = 0
+				g.emitPackageAndImports(prog.Package, prog.Imports)
+				g.emitSealedInterface(decl)
+				files = append(files, OutputFile{
+					Name:    decl.Name + ".java",
+					Content: g.buf.String(),
+				})
+				for _, v := range decl.Variants {
+					g.buf.Reset()
+					g.indent = 0
+					g.emitPackageAndImports(prog.Package, prog.Imports)
+					g.emitSealedVariant(decl.Name, v)
+					files = append(files, OutputFile{
+						Name:    v.Name + ".java",
+						Content: g.buf.String(),
+					})
+				}
+			} else {
+				g.buf.Reset()
+				g.indent = 0
+				g.emitPackageAndImports(prog.Package, prog.Imports)
+				g.emitClassDeclTopLevel(decl)
+				files = append(files, OutputFile{
+					Name:    decl.Name + ".java",
+					Content: g.buf.String(),
+				})
+			}
 		case *parser.InterfaceDecl:
 			g.buf.Reset()
 			g.indent = 0
@@ -189,6 +211,27 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 	}
 
 	return files
+}
+
+// emitSealedInterface emits a sealed interface + variant records.
+func (g *Generator) emitSealedInterface(cls *parser.ClassDecl) {
+	var permits []string
+	for _, v := range cls.Variants {
+		permits = append(permits, v.Name)
+	}
+	g.writeln("public sealed interface %s permits %s {}", cls.Name, strings.Join(permits, ", "))
+}
+
+func (g *Generator) emitSealedVariant(parent string, d *parser.DataClassDecl) {
+	var fields []string
+	for _, f := range d.Params {
+		typeName := "Object"
+		if f.Type != nil {
+			typeName = g.formatType(f.Type)
+		}
+		fields = append(fields, typeName+" "+f.Name)
+	}
+	g.writeln("public record %s(%s) implements %s {}", d.Name, strings.Join(fields, ", "), parent)
 }
 
 // emitClassDeclTopLevel emits a class as a top-level public class (not static inner).

@@ -801,6 +801,85 @@ func TestImportWildcard(t *testing.T) {
 	)
 }
 
+// =============================================================================
+// Safe navigation
+// =============================================================================
+
+func TestSafeNavField(t *testing.T) {
+	assertContains(t,
+		`var x = obj?.name`,
+		`obj != null ? obj.name : null`,
+	)
+}
+
+func TestSafeNavMethod(t *testing.T) {
+	assertContains(t,
+		`var x = obj?.toString()`,
+		`obj != null ? obj.toString() : null`,
+	)
+}
+
+// =============================================================================
+// Sealed classes
+// =============================================================================
+
+func TestSealedClass(t *testing.T) {
+	src := `
+sealed class Shape {
+    data Circle(double radius)
+    data Rect(double width, double height)
+}
+`
+	lex := lexer.New(src)
+	tokens := lex.Tokenize()
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors)
+	}
+
+	gen := New()
+	files := gen.GenerateFiles(prog, "Main")
+
+	// Should generate: Shape.java (sealed interface), Circle.java, Rect.java
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+
+	var shapeFile, circleFile, rectFile *OutputFile
+	for i := range files {
+		switch files[i].Name {
+		case "Shape.java":
+			shapeFile = &files[i]
+		case "Circle.java":
+			circleFile = &files[i]
+		case "Rect.java":
+			rectFile = &files[i]
+		}
+	}
+
+	if shapeFile == nil {
+		t.Fatal("expected Shape.java")
+	}
+	if !strings.Contains(shapeFile.Content, "sealed interface Shape permits Circle, Rect") {
+		t.Errorf("Shape.java should be sealed interface\ngot:\n%s", shapeFile.Content)
+	}
+
+	if circleFile == nil {
+		t.Fatal("expected Circle.java")
+	}
+	if !strings.Contains(circleFile.Content, "record Circle(double radius) implements Shape") {
+		t.Errorf("Circle.java should implement Shape\ngot:\n%s", circleFile.Content)
+	}
+
+	if rectFile == nil {
+		t.Fatal("expected Rect.java")
+	}
+	if !strings.Contains(rectFile.Content, "record Rect(double width, double height) implements Shape") {
+		t.Errorf("Rect.java should implement Shape\ngot:\n%s", rectFile.Content)
+	}
+}
+
 func TestReferenceIdentity(t *testing.T) {
 	assertContains(t, `
 if a === b {
