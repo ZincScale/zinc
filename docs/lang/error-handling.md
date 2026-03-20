@@ -4,51 +4,67 @@ Zinc uses a two-track error model: `Result<T>` for expected failures and excepti
 
 ## Track 1 — Result<T> for Expected Failures
 
-Use `Result<T>` for validation, parsing, missing data — anything you would put in a loop over 10,000 records:
+Use `Result<T>` for validation, parsing, missing data — anything that can fail in normal business logic:
 
 ```zinc
-fn parse_port(str s) Result<int> {
-    if not s.isdigit() {
-        return Err("not a number: {s}")
+fn parsePort(str s) Result<int> {
+    if not s.isDigit() {
+        return Error("not a number: {s}")
     }
     var int port = int(s)
     if port < 1 or port > 65535 {
-        return Err("out of range: {port}")
+        return Error("out of range: {port}")
     }
-    return port                  // auto-wrapped in Ok()
+    return port                      // auto-wrapped in Ok()
 }
 ```
 
-### Err with Default Value
+### or — Default Value
 
-Provide a fallback value inline:
+Provide a fallback value inline when a Result fails:
 
 ```zinc
-var int port = parse_port("8080") Err 80
+var int port = parsePort("8080") or 80
 ```
 
-If `parse_port` returns an `Err`, the variable gets the default value `80` instead.
+If `parsePort` returns an `Error`, the variable gets `80` instead.
 
-### Err Handler Block
+### or — Error Handler Block
 
 Handle the error with a block. The error is available as `err`:
 
 ```zinc
-var int port = parse_port(input) Err {
-    print("bad port: {err}")
-    return
+var int port = parsePort(input) or {
+    log.warn("bad port: {err}, using default")
+    8080                             // last expression is the fallback value
 }
 ```
 
-### Batch Processing
+The `or { }` block must produce a value of the same type — it's the fallback path.
 
-`Err` blocks work naturally with `continue` to skip bad records:
+### or — Exit the Function
+
+Use `return` in an `or` block to exit the enclosing function early:
+
+```zinc
+fn loadConfig(str path) Config {
+    var str content = readFile(path) or {
+        log.error("cannot read config: {err}")
+        return Config.defaults()     // exits loadConfig, returns default
+    }
+    return parseConfig(content)
+}
+```
+
+### or — Skip in Loops
+
+Use `continue` in an `or` block to skip bad records in batch processing:
 
 ```zinc
 for record in records {
-    var int age = parse_age(record["age"]) Err {
-        print("skipping: {err}")
-        continue
+    var int age = parseAge(record.get("age")) or {
+        log.warn("skipping bad age: {err}")
+        continue                     // skip this record, process next
     }
     process(age)
 }
@@ -56,28 +72,47 @@ for record in records {
 
 ### Returning Result<T>
 
-Return a bare value for success (auto-wrapped in `Ok`) or `Err(message)` for failure:
+Return a bare value for success (auto-wrapped in `Ok`) or `Error(message)` for failure:
 
 ```zinc
 fn divide(float a, float b) Result<float> {
     if b == 0 {
-        return Err("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 
-fn find_user(str id) Result<User> {
+fn findUser(str id) Result<User> {
     var user = db.get(id)
     if user is none {
-        return Err("user not found: {id}")
+        return Error("user not found: {id}")
     }
     return user
 }
 ```
 
+### Result Chaining
+
+Chain multiple failable operations — each `or` handles its own failure:
+
+```zinc
+fn processOrder(str orderId) Result<Receipt> {
+    var order = findOrder(orderId) or {
+        return Error("order not found: {err}")
+    }
+    var payment = chargeCard(order.total) or {
+        return Error("payment failed: {err}")
+    }
+    var receipt = generateReceipt(order, payment) or {
+        return Error("receipt generation failed: {err}")
+    }
+    return receipt
+}
+```
+
 ## Track 2 — Exceptions for Unexpected Failures
 
-Use exceptions for program-stopping failures -- network down, disk full, out of memory:
+Use exceptions for program-stopping failures — network down, disk full, out of memory:
 
 ### try / catch
 
@@ -85,8 +120,8 @@ Use exceptions for program-stopping failures -- network down, disk full, out of 
 try {
     var conn = db.connect(url)
 } catch ConnectionError err {
-    print("database down: {err}")
-    exit(1)
+    log.error("database down: {err}")
+    throw ServiceUnavailable("database unavailable")
 }
 ```
 
@@ -94,23 +129,33 @@ Multiple catch blocks:
 
 ```zinc
 try {
-    var data = fetch_and_parse(url)
+    var data = fetchAndParse(url)
 } catch ConnectionError err {
-    print("network error: {err}")
-} catch ValueError err {
-    print("parse error: {err}")
+    log.error("network error: {err}")
+} catch ParseError err {
+    log.error("parse error: {err}")
 }
 ```
 
-### raise
-
-Raise an exception directly:
+Catch-all:
 
 ```zinc
-raise ValueError("bad config")
+try {
+    riskyOperation()
+} catch Exception err {
+    log.error("unexpected: {err}")
+}
 ```
 
-### Exception Chaining (raise from)
+### throw
+
+Throw an exception:
+
+```zinc
+throw IllegalArgumentException("bad config")
+```
+
+### Exception Chaining (throw from)
 
 Chain exceptions to preserve the original cause:
 
@@ -118,20 +163,43 @@ Chain exceptions to preserve the original cause:
 try {
     var data = parse(raw)
 } catch ParseError err {
-    raise ConfigError("invalid config file") from err
+    throw ConfigError("invalid config file") from err
+}
+```
+
+Transpiles to:
+```java
+try {
+    var data = parse(raw);
+} catch (ParseError err) {
+    throw new ConfigError("invalid config file", err);
 }
 ```
 
 ## Choosing Between Track 1 and Track 2
 
-| Scenario | Use |
-|---|---|
-| Parsing user input | `Result<T>` |
-| Validating form fields | `Result<T>` |
-| Missing dict keys in batch | `Result<T>` |
-| Database connection failure | `try/catch` |
-| File system errors | `try/catch` |
-| Out of memory | `try/catch` |
-| Network timeout | `try/catch` |
+| Scenario | Use | Why |
+|---|---|---|
+| Parsing user input | `Result<T>` | Expected to fail, caller handles it |
+| Validating form fields | `Result<T>` | Normal business logic |
+| Missing keys in batch processing | `Result<T>` | Skip and continue |
+| Database connection failure | `try/catch` | Infrastructure broken |
+| File system errors | `try/catch` | Can't recover locally |
+| Out of memory | `try/catch` | Fundamentally broken |
+| Network timeout | `try/catch` | Transient infrastructure |
 
-Rule of thumb: if the failure is part of normal business logic, use `Result<T>`. If the failure means something is fundamentally broken, use exceptions.
+**Rule of thumb**: if the failure is part of normal business logic, use `Result<T>` + `or`. If the failure means something is fundamentally broken, use `try/catch` + `throw`.
+
+## Summary
+
+| Syntax | Meaning |
+|---|---|
+| `return Error("msg")` | Return a failed Result from a `Result<T>` function |
+| `return value` | Return a successful Result (auto-wrapped in Ok) |
+| `expr or defaultValue` | Use default if expr fails |
+| `expr or { block }` | Run block if expr fails, last expression is fallback |
+| `expr or { return x }` | Exit enclosing function on failure |
+| `expr or { continue }` | Skip loop iteration on failure |
+| `try { } catch Type err { }` | Catch exceptions |
+| `throw ExceptionType("msg")` | Throw an exception |
+| `throw X from cause` | Throw with chained cause |
