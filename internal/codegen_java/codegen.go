@@ -600,10 +600,15 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "**":
 		return fmt.Sprintf("Math.pow(%s, %s)", left, right)
 	case "==":
-		// Use .equals() for objects, == for primitives
+		// Structural equality (Kotlin convention)
 		return fmt.Sprintf("java.util.Objects.equals(%s, %s)", left, right)
 	case "!=":
 		return fmt.Sprintf("!java.util.Objects.equals(%s, %s)", left, right)
+	case "===":
+		// Reference identity
+		return fmt.Sprintf("%s == %s", left, right)
+	case "!==":
+		return fmt.Sprintf("%s != %s", left, right)
 	case "in":
 		return fmt.Sprintf("%s.contains(%s)", right, left)
 	case "not in":

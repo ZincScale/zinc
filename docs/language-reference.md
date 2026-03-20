@@ -32,8 +32,14 @@ fn example() {
 // Arithmetic
 + - * / % **
 
+// Structural equality (Kotlin convention)
+== !=                        // Objects.equals() — same values
+
+// Reference identity
+=== !==                      // same object in memory
+
 // Comparison
-== != < <= > >=
+< <= > >=
 
 // Boolean
 and  or  not
@@ -41,11 +47,11 @@ and  or  not
 // Membership
 in   not in
 
-// Type check / Identity
-is   is not
+// Type check
+is   is not                  // instanceof
 
-// None
-none
+// Null
+null
 ```
 
 ## Imports

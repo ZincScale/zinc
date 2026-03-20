@@ -336,6 +336,30 @@ if item in items {
 	)
 }
 
+func TestStructuralEquality(t *testing.T) {
+	assertContains(t, `
+if a == b {
+    print("equal")
+}
+`,
+		`java.util.Objects.equals(a, b)`,
+	)
+}
+
+func TestStructuralInequality(t *testing.T) {
+	assertContains(t, `
+if a != b {
+    print("not equal")
+}
+`,
+		`!java.util.Objects.equals(a, b)`,
+	)
+}
+
+// TODO: TestReferenceIdentity and TestReferenceNonIdentity
+// Need lexer/parser support for === and !== tokens first.
+// Codegen already handles them in formatBinaryExpr.
+
 func TestIsOperator(t *testing.T) {
 	assertContains(t, `
 if x is String {

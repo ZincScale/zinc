@@ -90,6 +90,29 @@ if value != null {
 }
 ```
 
+## Equality
+
+Zinc follows Kotlin conventions:
+
+| Zinc | Java | Meaning |
+|---|---|---|
+| `a == b` | `Objects.equals(a, b)` | Structural equality (same values) |
+| `a != b` | `!Objects.equals(a, b)` | Structural inequality |
+| `a === b` | `a == b` | Reference identity (same object) |
+| `a !== b` | `a != b` | Reference non-identity |
+
+```zinc
+var a = User("Alice", 30)
+var b = User("Alice", 30)
+
+a == b       // true — same values (data class generates equals())
+a === b      // false — different objects
+a != b       // false
+a !== b      // true
+```
+
+For classes without an `equals()` override, `==` falls through to reference comparison (default `Object.equals()` behavior). `data` classes (records) auto-generate `equals()` based on field values.
+
 ## Type Narrowing
 
 After an `is` check, Zinc narrows the type within the block:
