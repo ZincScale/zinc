@@ -69,8 +69,8 @@ Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing P
 **Variable declarations:**
 - `int x = 5` — explicit type, mutable
 - `var x = 5` — inferred type, mutable (`var` = type inference only)
-- `init int x = 5` — explicit type, immutable after assignment
-- `init x = 5` — inferred type, immutable after assignment
+- `const int x = 5` — explicit type, immutable
+- `const x = 5` — inferred type, immutable
 
 **Nullable types:**
 - `int? x = none` — nullable, transpiles to `Optional[int]`
@@ -78,19 +78,17 @@ Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing P
 
 **Function signatures:**
 - `fn greet(str name) str` — return type after params, no arrow
-- `fn greet(init str name) str` — param cannot be reassigned in body
+- `fn greet(const str name) str` — param cannot be reassigned in body
 - `fn find(str key) str?` — nullable return type
 
 **Class fields:**
-- `const str NAME = "default"` — compile-time constant
+- `const str NAME = "default"` — compile-time constant with default
 - `init str name` — set in constructor, frozen after
 - `str name` — mutable field
 
-**`init` semantics:**
-- Locals: must assign at declaration, cannot reassign after
-- Params: cannot reassign within function body
-- Class fields: set in constructor, frozen after
-- No deferred assignment (no dataflow analysis needed)
+**`const` vs `init`:**
+- `const` — used everywhere (locals, params, class fields with defaults). Assign once, cannot reassign.
+- `init` — class fields only. No default value, set in constructor, frozen after.
 
 ### Other language features
 
