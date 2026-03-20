@@ -6,7 +6,7 @@ Classes use `class` with brace-delimited bodies. Fields are declared with `var` 
 
 ```zinc
 class Stack {
-    var list<int> items = []
+    var List<int> items = []
 
     fn push(int item) {
         items.append(item)       // auto-injects self.items

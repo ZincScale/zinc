@@ -49,7 +49,7 @@ zinc run greet.zn -- Alice
 |---|---|---|
 | `def greet(name: str) -> str:` | `fn greet(str name) str` | Type-first, no colons |
 | `x: int = 5` | `var int x = 5` | Type before name, like Java/Go |
-| `items: list[int]` | `var list<int> items` | Angle brackets for generics |
+| `items: list[int]` | `var List<int> items` | Angle brackets for generics |
 | Indentation-based blocks | `{ }` braces close blocks | No whitespace bugs |
 | `f"Hello, {name}"` | `"Hello, {name}"` | All double-quoted strings interpolate |
 | Types optional | Types enforced | Catch errors at transpile time |
@@ -61,7 +61,7 @@ zinc run greet.zn -- Alice
 ```zinc
 var name = "Alice"          // type inferred
 var int age = 30            // explicit type
-var list<int> scores = []   // generic type
+var List<int> scores = []   // generic type
 ```
 
 ## Functions

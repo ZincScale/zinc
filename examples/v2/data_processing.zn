@@ -1,6 +1,6 @@
 // data_processing.zn — Zinc v2 data processing with comprehensions
 
-fn create_orders() list<dict> {
+fn create_orders() List<Map> {
     return [
         {"id": "1", "customer": "Alice", "amount": 150.0, "status": "completed"},
         {"id": "2", "customer": "Bob", "amount": 50.0, "status": "pending"},

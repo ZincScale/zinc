@@ -53,7 +53,7 @@ if x > 10 {
     print("small")
 }
 
-fn process(list<Order> items) list<Order> {
+fn process(List<Order> items) List<Order> {
     var result = items.filter(x -> x.status == "active")
     if result.count() > 100 {
         result = result.sort_by(x -> x.priority).take(100)
@@ -84,7 +84,7 @@ var result = orders
 ```zinc
 var name = "Alice"          // type inferred as str
 var int age = 30             // explicit type
-var list<int> scores = []    // explicit generic
+var List<int> scores = []    // explicit generic
 const float PI = 3.14159    // immutable
 ```
 
@@ -184,9 +184,9 @@ var user = User(name: "Alice", age: 30, role: "admin")
 
 | Zinc | Java | Literal |
 |---|---|---|
-| `list<T>` | `List<T>` | `[1, 2, 3]` |
-| `dict<K, V>` | `Map<K, V>` | `{"a": 1, "b": 2}` |
-| `set<T>` | `Set<T>` | `set(1, 2, 3)` |
+| `List<T>` | `List<T>` | `[1, 2, 3]` |
+| `Map<K, V>` | `Map<K, V>` | `{"a": 1, "b": 2}` |
+| `Set<T>` | `Set<T>` | `set(1, 2, 3)` |
 | `(T, U)` | Generated record | `(1, "hi")` |
 
 ### Nullable Types
@@ -214,7 +214,7 @@ Transpiles to null checks in Java. The compiler tracks nullability — no `Optio
 
 ```zinc
 class Stack<T> {
-    var list<T> items = []
+    var List<T> items = []
 
     fn push(T item) {
         items.add(item)
@@ -621,7 +621,7 @@ fn toString() str = "MyClass"
 @Path("/users")
 class UserResource {
     @GET
-    fn list() list<User> {
+    fn list() List<User> {
         return userService.findAll()
     }
 

@@ -67,7 +67,7 @@ assert len(items) > 0
 ## Delete
 
 ```zinc
-var dict<str, str> config = {"host": "localhost", "secret": "abc123"}
+var Map<str, str> config = {"host": "localhost", "secret": "abc123"}
 del config["secret"]
 ```
 

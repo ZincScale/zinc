@@ -59,14 +59,14 @@ Zinc supports Python-style list and dict comprehensions:
 ### List Comprehensions
 
 ```zinc
-var list<int> squares = [x ** 2 for x in range(10)]
-var list<int> evens = [x for x in numbers if x % 2 == 0]
+var List<int> squares = [x ** 2 for x in range(10)]
+var List<int> evens = [x for x in numbers if x % 2 == 0]
 ```
 
 ### Dict Comprehensions
 
 ```zinc
-var dict<str, int> lengths = {w: len(w) for w in words}
+var Map<str, int> lengths = {w: len(w) for w in words}
 ```
 
 ### Auto Generator Promotion
@@ -81,13 +81,13 @@ var int total = sum([x for x in items])
 ## Working with Lists
 
 ```zinc
-var list<str> names = ["Alice", "Bob", "Charlie"]
+var List<str> names = ["Alice", "Bob", "Charlie"]
 names.append("Dave")
 var int count = len(names)
 
 // Slicing
-var list<str> first_two = names.take(2)
-var list<str> rest = names.skip(1)
+var List<str> first_two = names.take(2)
+var List<str> rest = names.skip(1)
 
 // Check membership
 if "Alice" in names {
@@ -98,7 +98,7 @@ if "Alice" in names {
 ## Working with Dicts
 
 ```zinc
-var dict<str, int> ages = {"Alice": 30, "Bob": 25}
+var Map<str, int> ages = {"Alice": 30, "Bob": 25}
 ages["Charlie"] = 35
 
 // Iterate

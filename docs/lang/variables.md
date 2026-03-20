@@ -8,7 +8,7 @@ Use `var` to declare variables. Zinc supports type inference, explicit types, an
 var x = 42                      // inferred as int
 var int x = 42                  // explicit type
 var str name = "Alice"          // explicit type
-var list<int> items = []        // generic type
+var List<int> items = []        // generic type
 var a, b = divmod(10, 3)        // tuple unpacking
 ```
 
@@ -21,7 +21,7 @@ var count = 0                   // int
 var name = "Bob"                // str
 var ratio = 3.14                // float
 var active = true               // bool
-var tags = ["a", "b", "c"]     // list<str>
+var tags = ["a", "b", "c"]     // List<str>
 ```
 
 ### Explicit Types
@@ -33,8 +33,8 @@ var int count = 0
 var str name = "Bob"
 var float ratio = 3.14
 var bool active = true
-var list<str> tags = []
-var dict<str, int> scores = {}
+var List<str> tags = []
+var Map<str, int> scores = {}
 ```
 
 ### Tuple Unpacking
@@ -63,7 +63,7 @@ Every variable must be initialized at declaration. There are no uninitialized va
 
 ```zinc
 var x = 0                       // OK — explicit default
-var list<int> items = []        // OK — empty list
+var List<int> items = []        // OK — empty list
 ```
 
 ## Constants (`const`)
@@ -101,7 +101,7 @@ class Config {
 `const` on a collection is reference-only -- the variable cannot be reassigned, but the contents are still mutable:
 
 ```zinc
-const list<int> items = [1, 2, 3]
+const List<int> items = [1, 2, 3]
 items.append(4)                 // OK — contents are mutable
 // items = [5, 6]              // compile error: cannot reassign const
 ```

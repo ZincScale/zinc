@@ -819,7 +819,7 @@ func (g *Generator) isTypeName(e parser.Expr) bool {
 	}
 	// Builtin types
 	switch ident.Name {
-	case "str", "int", "float", "bool", "list", "dict", "tuple", "set", "bytes":
+	case "str", "int", "float", "bool", "List", "Map", "tuple", "Set", "bytes":
 		return true
 	}
 	// Declared classes/data classes
@@ -1097,16 +1097,30 @@ func (g *Generator) emitV2IfExpr(e *parser.IfExpr) string {
 
 // --- Type formatting ---------------------------------------------------------
 
+// zincToPythonType maps Zinc collection type names to Python type names.
+var zincToPythonType = map[string]string{
+	"List": "list",
+	"Map":  "dict",
+	"Set":  "set",
+}
+
 func (g *Generator) v2FormatType(t parser.TypeExpr) string {
 	switch t := t.(type) {
 	case *parser.SimpleType:
+		if pyName, ok := zincToPythonType[t.Name]; ok {
+			return pyName
+		}
 		return t.Name
 	case *parser.GenericType:
 		var args []string
 		for _, a := range t.TypeArgs {
 			args = append(args, g.v2FormatType(a))
 		}
-		return fmt.Sprintf("%s[%s]", t.Name, strings.Join(args, ", "))
+		name := t.Name
+		if pyName, ok := zincToPythonType[name]; ok {
+			name = pyName
+		}
+		return fmt.Sprintf("%s[%s]", name, strings.Join(args, ", "))
 	case *parser.OptionalType:
 		return fmt.Sprintf("Optional[%s]", g.v2FormatType(t.Inner))
 	default:

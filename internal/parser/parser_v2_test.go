@@ -1003,7 +1003,7 @@ fn example() {
 }
 
 func TestV2TypeFirstVarGeneric(t *testing.T) {
-	prog, errs := parseV2(`var list<int> nums = [1, 2, 3]`)
+	prog, errs := parseV2(`var List<int> nums = [1, 2, 3]`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1015,8 +1015,8 @@ func TestV2TypeFirstVarGeneric(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected GenericType, got %T", varStmt.Type)
 	}
-	if gt.Name != "list" {
-		t.Errorf("expected generic name 'list', got %q", gt.Name)
+	if gt.Name != "List" {
+		t.Errorf("expected generic name 'List', got %q", gt.Name)
 	}
 	if len(gt.TypeArgs) != 1 {
 		t.Fatalf("expected 1 type arg, got %d", len(gt.TypeArgs))
@@ -1113,7 +1113,7 @@ fn foo() int {
 
 func TestV2GenericReturnType(t *testing.T) {
 	prog, errs := parseV2(`
-fn foo() list<int> {
+fn foo() List<int> {
     return []
 }
 `)
@@ -1128,8 +1128,8 @@ fn foo() list<int> {
 	if !ok {
 		t.Fatalf("expected GenericType return, got %T", fn.ReturnType)
 	}
-	if gt.Name != "list" {
-		t.Errorf("expected 'list', got %q", gt.Name)
+	if gt.Name != "List" {
+		t.Errorf("expected 'List', got %q", gt.Name)
 	}
 	if len(gt.TypeArgs) != 1 {
 		t.Fatalf("expected 1 type arg, got %d", len(gt.TypeArgs))
@@ -1212,7 +1212,7 @@ data Point {
 }
 
 func TestV2AngleBracketGenericNested(t *testing.T) {
-	prog, errs := parseV2(`var dict<str, list<int>> lookup = {}`)
+	prog, errs := parseV2(`var Map<str, List<int>> lookup = {}`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1224,25 +1224,25 @@ func TestV2AngleBracketGenericNested(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected GenericType, got %T", varStmt.Type)
 	}
-	if gt.Name != "dict" {
-		t.Errorf("expected 'dict', got %q", gt.Name)
+	if gt.Name != "Map" {
+		t.Errorf("expected 'Map', got %q", gt.Name)
 	}
 	if len(gt.TypeArgs) != 2 {
 		t.Fatalf("expected 2 type args, got %d", len(gt.TypeArgs))
 	}
-	// Second type arg should be list<int>
+	// Second type arg should be List<int>
 	innerGt, ok := gt.TypeArgs[1].(*GenericType)
 	if !ok {
 		t.Fatalf("expected nested GenericType, got %T", gt.TypeArgs[1])
 	}
-	if innerGt.Name != "list" {
-		t.Errorf("expected inner generic 'list', got %q", innerGt.Name)
+	if innerGt.Name != "List" {
+		t.Errorf("expected inner generic 'List', got %q", innerGt.Name)
 	}
 }
 
 func TestV2NullableGenericReturnType(t *testing.T) {
 	prog, errs := parseV2(`
-fn foo() list<int>? {
+fn foo() List<int>? {
     return none
 }
 `)
@@ -1261,7 +1261,7 @@ fn foo() list<int>? {
 	if !ok {
 		t.Fatalf("expected GenericType inside OptionalType, got %T", opt.Inner)
 	}
-	if gt.Name != "list" {
-		t.Errorf("expected 'list', got %q", gt.Name)
+	if gt.Name != "List" {
+		t.Errorf("expected 'List', got %q", gt.Name)
 	}
 }

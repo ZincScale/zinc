@@ -1,11 +1,11 @@
 // polars_pipeline.zn — Data pipeline with smart collection dispatch
 //
 // Collection chains auto-detect the best backend:
-// - list<dict> + Polars installed → Polars-backed dispatch
-// - list<int/float> + NumPy installed → NumPy-backed dispatch
+// - List<Map> + Polars installed → Polars-backed dispatch
+// - List<int/float> + NumPy installed → NumPy-backed dispatch
 // - No deps → pure Python comprehensions (always works)
 
-fn create_sales_data() list<dict> {
+fn create_sales_data() List<Map> {
     return [
         {"region": "east", "product": "widget", "amount": 150.0, "status": "completed"},
         {"region": "west", "product": "gadget", "amount": 300.0, "status": "completed"},

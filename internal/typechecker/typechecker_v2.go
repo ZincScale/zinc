@@ -36,7 +36,7 @@ func (e V2Error) String() string {
 
 // V2Type represents a resolved type in the v2 type system.
 type V2Type struct {
-	Name     string   // "int", "str", "list", "dict", "none", "any"
+	Name     string   // "int", "str", "List", "Map", "none", "any"
 	Args     []V2Type // generic args: list[int] → Args=[int]
 	Nullable bool     // Optional[T]
 }
@@ -527,13 +527,13 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		for _, el := range e.Elements {
 			c.inferType(el)
 		}
-		return V2Type{Name: "list"}
+		return V2Type{Name: "List"}
 	case *parser.MapLit:
 		for i := range e.Keys {
 			c.inferType(e.Keys[i])
 			c.inferType(e.Values[i])
 		}
-		return V2Type{Name: "dict"}
+		return V2Type{Name: "Map"}
 	case *parser.LambdaExpr:
 		return typeAny
 	case *parser.IfExpr:
@@ -542,9 +542,9 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		c.inferType(e.Else)
 		return thenType
 	case *parser.ComprehensionExpr:
-		return V2Type{Name: "list"}
+		return V2Type{Name: "List"}
 	case *parser.DictComprehensionExpr:
-		return V2Type{Name: "dict"}
+		return V2Type{Name: "Map"}
 	case *parser.TupleLit:
 		for _, el := range e.Elements {
 			c.inferType(el)

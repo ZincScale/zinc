@@ -63,8 +63,8 @@ A parallel web scraper:
 ```zinc
 import threading
 
-fn scrape_urls(list<str> urls) list<str> {
-    var list<str> results = []
+fn scrape_urls(List<str> urls) List<str> {
+    var List<str> results = []
     var lock = threading.Lock()
 
     parallel for url in urls {
@@ -78,12 +78,12 @@ fn scrape_urls(list<str> urls) list<str> {
     return results
 }
 
-var list<str> urls = [
+var List<str> urls = [
     "https://example.com/page1",
     "https://example.com/page2",
     "https://example.com/page3",
 ]
-var list<str> titles = scrape_urls(urls)
+var List<str> titles = scrape_urls(urls)
 for title in titles {
     print(title)
 }

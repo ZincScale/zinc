@@ -25,7 +25,7 @@ print("upper: {name.upper()}")      // upper: ALICE
 Nested quotes work inside interpolation:
 
 ```zinc
-var dict<str, str> data = {"key": "value"}
+var Map<str, str> data = {"key": "value"}
 print("{data["key"]}")               // value
 ```
 

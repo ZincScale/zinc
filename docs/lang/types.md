@@ -22,9 +22,9 @@ fn f() int { if x > 0 { return 1 } }  // not all code paths return
 | `float` | Floating-point number |
 | `str` | String |
 | `bool` | Boolean (`true` / `false`) |
-| `list<T>` | List of T |
-| `dict<K, V>` | Dictionary mapping K to V |
-| `set<T>` | Set of T |
+| `List<T>` | List of T |
+| `Map<K, V>` | Map of K to V |
+| `Set<T>` | Set of T |
 | `tuple<T, U>` | Tuple |
 | `any` | Any type (opt out of checking) |
 | `none` | None value |
@@ -34,10 +34,10 @@ fn f() int { if x > 0 { return 1 } }  // not all code paths return
 Use angle brackets `<>` for generic type parameters:
 
 ```zinc
-var list<int> numbers = [1, 2, 3]
-var dict<str, int> scores = {"Alice": 100, "Bob": 85}
-var set<str> tags = {"a", "b", "c"}
-var list<list<int>> matrix = [[1, 2], [3, 4]]
+var List<int> numbers = [1, 2, 3]
+var Map<str, int> scores = {"Alice": 100, "Bob": 85}
+var Set<str> tags = {"a", "b", "c"}
+var List<List<int>> matrix = [[1, 2], [3, 4]]
 ```
 
 ## Type Annotations
@@ -48,10 +48,10 @@ Types go before the variable or parameter name:
 // Variables
 var int count = 0
 var str name = "Alice"
-var list<str> items = []
+var List<str> items = []
 
 // Function parameters and return types
-fn process(str input, int limit) list<str> {
+fn process(str input, int limit) List<str> {
     return input.split(",").take(limit)
 }
 ```

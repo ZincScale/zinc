@@ -144,7 +144,7 @@ These were added during the Python pivot and need rethinking for Java:
 ### 5. Smart dispatch (Polars/NumPy)
 - **Python**: transpiler auto-chooses Polars for `list<dict>`, NumPy for `list<int>`
 - **Java**: no equivalent. But Java has excellent stream performance and can use Apache Arrow / Tablesaw for columnar.
-- **Zinc decision**: Smart dispatch concept stays but backends change. `list<dict>` chains → Java streams (or Tablesaw if data-heavy). Numeric chains → JVM SIMD vectorization (Vector API). This is a transpiler optimization, invisible to users.
+- **Zinc decision**: Smart dispatch concept stays but backends change. `List<Map>` chains → Java streams (or Tablesaw if data-heavy). Numeric chains → JVM SIMD vectorization (Vector API). This is a transpiler optimization, invisible to users.
 
 ### 6. Dunder method mapping
 - **Python**: `fn str()` → `__str__`, `fn eq()` → `__eq__`
@@ -287,9 +287,9 @@ The transpiler should be smart about terminal operations:
 | `str` | `String` | |
 | `bool` | `boolean` / `Boolean` | |
 | `bytes` | `byte[]` | |
-| `list<T>` | `List<T>` | `java.util.List` |
-| `dict<K, V>` | `Map<K, V>` | `java.util.Map` |
-| `set<T>` | `Set<T>` | `java.util.Set` |
+| `List<T>` | `List<T>` | `java.util.List` |
+| `Map<K, V>` | `Map<K, V>` | `java.util.Map` |
+| `Set<T>` | `Set<T>` | `java.util.Set` |
 | `(T, U)` | Generated record | Zinc tuples → named records |
 | `T?` | `T` (nullable) | Compiler tracks nullability, no `Optional` for locals |
 | `Result<T>` | Custom `Result<T>` class or `sealed interface` | Generate once in runtime lib |

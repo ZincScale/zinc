@@ -111,7 +111,7 @@ try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
 var results = parallel for order in orders {
     enrich(order)
 }
-// results: list<Order> — same order as input
+// results: List<Order> — same order as input
 ```
 
 Transpiles to forking with result collection, preserving order.
@@ -351,7 +351,7 @@ fn transform(FlowFile flow, str traceId, str tenantId) FlowFile { ... }
 context FlowContext {
     str traceId
     str tenantId
-    list<str> provenance
+    List<str> provenance
 }
 
 // Set once at pipeline entry
@@ -469,7 +469,7 @@ The channel buffers messages while the processor is stopped. Swap = stop old thr
 @RunOnVirtualThread
 class OrderResource {
     @GET
-    fn list() list<Order> {
+    fn list() List<Order> {
         // This blocks a virtual thread, not a platform thread
         return db.query("SELECT * FROM orders")
     }

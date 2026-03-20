@@ -163,7 +163,7 @@ enum Color {
 func TestV2ClassWithMethods(t *testing.T) {
 	assertV2Contains(t, `
 class Stack {
-    var list<int> items = []
+    var List<int> items = []
 
     fn push(int item) {
         items.append(item)
@@ -375,7 +375,7 @@ with f = open("test.txt") {
 func TestV2PrivateFields(t *testing.T) {
 	assertV2Contains(t, `
 class Cache {
-    var dict _data = {}
+    var Map _data = {}
 
     fn get(str key) str {
         return _data[key]
@@ -750,7 +750,7 @@ func TestV2ConstLocal(t *testing.T) {
 
 func TestV2TypeFirstVarWithGeneric(t *testing.T) {
 	assertV2Contains(t,
-		`var list<int> nums = [1, 2, 3]`,
+		`var List<int> nums = [1, 2, 3]`,
 		`nums: list[int] = [1, 2, 3]`,
 	)
 }
@@ -796,7 +796,7 @@ class Service {
 
 func TestV2GenericParam(t *testing.T) {
 	assertV2Contains(t, `
-fn foo(list<int> items) {
+fn foo(List<int> items) {
     print(items)
 }
 `,
