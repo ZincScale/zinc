@@ -27,7 +27,7 @@ fn f() int { if x > 0 { return 1 } }  // not all code paths return
 | `Set<T>` | Set of T |
 | `tuple<T, U>` | Tuple |
 | `any` | Any type (opt out of checking) |
-| `none` | None value |
+| `null` | Null value |
 
 ## Generic Types
 
@@ -81,10 +81,10 @@ if x is not list {
 When the right-hand side is a value, `is` generates Python's `is`:
 
 ```zinc
-if value is none {
+if value is null {
     print("no value")
 }
-if value is not none {
+if value != null {
     print("has value: {value}")
 }
 ```
@@ -107,18 +107,18 @@ fn process(any x) {
 
 ## Nullable Types
 
-Use `Type?` to indicate a value may be `none`:
+Use `Type?` to indicate a value may be `null`:
 
 ```zinc
-var str? name = none
-var int? age = none
+var str? name = null
+var int? age = null
 
 fn find(str id) User? {
-    // may return none
+    // may return null
 }
 
 var User? user = find("abc")
-if user is not none {
+if user != null {
     print(user.name)             // narrowed to User
 }
 ```

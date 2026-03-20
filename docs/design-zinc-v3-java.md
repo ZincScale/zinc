@@ -192,7 +192,7 @@ var user = User(name: "Alice", age: 30, role: "admin")
 ### Nullable Types
 
 ```zinc
-var str? name = none             // nullable
+var str? name = null             // nullable
 var int age = 42                 // non-nullable, compiler enforced
 
 fn find(int id) User? {          // may return null
@@ -200,7 +200,7 @@ fn find(int id) User? {          // may return null
 }
 
 var user = find(42)
-if user != none {
+if user != null {
     print(user.name)           // safe — compiler knows it's non-null here
 }
 

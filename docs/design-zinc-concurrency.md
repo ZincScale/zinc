@@ -635,7 +635,7 @@ parallel(max: 4) {
             var page = retry(max: 3, backoff: exponential(500.millis)) {
                 httpClient.get(url)
             } or { none }
-            if page != none {
+            if page != null {
                 results.send(page)
             }
         }

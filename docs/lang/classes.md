@@ -89,8 +89,8 @@ Use `Type?` for fields that can be null:
 ```zinc
 class Order {
     init str id
-    var str? shippingAddress = none   // nullable, starts as null
-    var str? trackingNumber = none    // nullable, starts as null
+    var str? shippingAddress = null   // nullable, starts as null
+    var str? trackingNumber = null    // nullable, starts as null
     var str status = "pending"        // non-nullable, has default
 }
 ```
@@ -98,7 +98,7 @@ class Order {
 The compiler enforces null safety — you must check before using a nullable field:
 
 ```zinc
-if order.trackingNumber != none {
+if order.trackingNumber != null {
     print("Tracking: {order.trackingNumber}")
 }
 

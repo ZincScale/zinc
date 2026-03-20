@@ -84,7 +84,7 @@ fn divide(float a, float b) Result<float> {
 
 fn findUser(str id) Result<User> {
     var user = db.get(id)
-    if user is none {
+    if user == null {
         return Error("user not found: {id}")
     }
     return user
