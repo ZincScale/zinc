@@ -664,6 +664,27 @@ func TestStreamGroupBy(t *testing.T) {
 	)
 }
 
+func TestStreamMapWithIt(t *testing.T) {
+	assertContains(t,
+		`items.map(it * 2)`,
+		`.stream().map(_it -> _it * 2).toList()`,
+	)
+}
+
+func TestStreamSortByWithIt(t *testing.T) {
+	assertContains(t,
+		`users.sortBy(it.age)`,
+		`.stream().sorted(java.util.Comparator.comparing(_it -> _it.age)).toList()`,
+	)
+}
+
+func TestStreamChainWithIt(t *testing.T) {
+	assertContains(t,
+		`orders.filter(it.active).map(it.amount).sum()`,
+		`.stream().filter(_it -> _it.active).map(_it -> _it.amount).mapToInt(Integer::intValue).sum()`,
+	)
+}
+
 func TestStreamFindFirst(t *testing.T) {
 	assertContains(t,
 		`items.findFirst(x -> x > 10)`,
