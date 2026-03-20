@@ -300,7 +300,7 @@ items.reduce(0, (acc, x) -> acc + x)
 
 func TestBooleanOperators(t *testing.T) {
 	assertContains(t, `
-if a and b {
+if a && b {
     print("both")
 }
 `,
@@ -310,7 +310,7 @@ if a and b {
 
 func TestOrOperator(t *testing.T) {
 	assertContains(t, `
-if a or b {
+if a || b {
     print("either")
 }
 `,
@@ -689,6 +689,57 @@ func TestStreamFindFirst(t *testing.T) {
 	assertContains(t,
 		`items.findFirst(x -> x > 10)`,
 		`.stream().filter(x -> x > 10).findFirst().orElse(null)`,
+	)
+}
+
+// =============================================================================
+// Tuples
+// =============================================================================
+
+func TestTupleLiteral(t *testing.T) {
+	assertContains(t,
+		`var point = (3, 5)`,
+		`new Tuple2(3, 5)`,
+	)
+}
+
+func TestTupleDestructuring(t *testing.T) {
+	assertContains(t, `
+var x, y = swap(1, 2)
+print(x)
+`,
+		`var _tuple = swap(1, 2);`,
+		`var x = _tuple._0();`,
+		`var y = _tuple._1();`,
+	)
+}
+
+func TestTupleRecordGenerated(t *testing.T) {
+	result := transpile(`var point = (3, 5)`)
+	if !strings.Contains(result, "record Tuple2<T0, T1>(T0 _0, T1 _1) {}") {
+		t.Errorf("expected Tuple2 record\ngot:\n%s", result)
+	}
+}
+
+func TestTuple3(t *testing.T) {
+	assertContains(t,
+		`var rgb = (255, 128, 0)`,
+		`new Tuple3(255, 128, 0)`,
+	)
+}
+
+// =============================================================================
+// or {} error handling
+// =============================================================================
+
+func TestOrDefault(t *testing.T) {
+	assertContains(t, `
+var port = parsePort("8080") or 80
+`,
+		`try {`,
+		`port = parsePort("8080");`,
+		`} catch (Exception _err) {`,
+		`port = 80;`,
 	)
 }
 

@@ -262,24 +262,24 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, IsConst: isConst, OrHandler: handler}
 }
 
-// v2ParseErrHandler checks for `Err` after a failable call.
+// v2ParseOrHandler checks for `or` after a failable call.
 // Two forms:
-//   var x = call() Err 0         — single-expression default
-//   var x = call() Err { ... }   — multi-statement handler block
-// Returns nil if no Err follows.
+//   var x = call() or 0         — single-expression default
+//   var x = call() or { ... }   — multi-statement handler block
+// Returns nil if no or follows.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
-	if !p.check(lexer.TOKEN_IDENT) || p.peek().Literal != "Err" {
+	if !p.check(lexer.TOKEN_OR) {
 		return nil
 	}
-	p.advance() // consume "Err"
+	p.advance() // consume "or"
 
-	// Brace block: Err { handler }
+	// Brace block: or { handler }
 	if p.check(lexer.TOKEN_LBRACE) {
 		body := p.v2ParseBlock()
 		return &OrHandler{Body: body}
 	}
 
-	// Single-expression default: Err 0
+	// Single-expression default: or 0
 	expr := p.v2ParseExpr()
 	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
 }
@@ -1042,11 +1042,8 @@ func (p *Parser) v2ParseIfExpr() Expr {
 // v2ParseOr: expr or expr
 func (p *Parser) v2ParseOr() Expr {
 	left := p.v2ParseAnd()
-	for p.check(lexer.TOKEN_PIPE_PIPE) || p.check(lexer.TOKEN_OR) {
+	for p.check(lexer.TOKEN_PIPE_PIPE) {
 		op := p.advance().Literal
-		if op == "or" {
-			op = "||" // normalize to || for AST
-		}
 		right := p.v2ParseAnd()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}
@@ -1056,11 +1053,8 @@ func (p *Parser) v2ParseOr() Expr {
 // v2ParseAnd: expr and expr
 func (p *Parser) v2ParseAnd() Expr {
 	left := p.v2ParseNot()
-	for p.check(lexer.TOKEN_AMP_AMP) || p.check(lexer.TOKEN_AND) {
+	for p.check(lexer.TOKEN_AMP_AMP) {
 		op := p.advance().Literal
-		if op == "and" {
-			op = "&&" // normalize
-		}
 		right := p.v2ParseNot()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}

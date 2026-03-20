@@ -27,11 +27,12 @@ type Generator struct {
 	indent           int
 	className        string // derived from filename or "Main"
 	pendingAccessors []fieldAccessor
+	tupleTypes       map[int]bool // track which Tuple arities we need to generate
 }
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{}
+	return &Generator{tupleTypes: make(map[int]bool)}
 }
 
 // OutputFile represents a generated .java file.
@@ -67,10 +68,28 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		g.writeln("}")
 	}
 
+	// Generate tuple record types used in this file
+	g.emitTupleRecords()
+
 	g.indent--
 	g.writeln("}")
 
 	return g.buf.String()
+}
+
+// emitTupleRecords generates record Tuple2, Tuple3, etc. as static inner classes.
+func (g *Generator) emitTupleRecords() {
+	for n := range g.tupleTypes {
+		g.writeln("")
+		var typeParams, fields []string
+		for i := 0; i < n; i++ {
+			tp := fmt.Sprintf("T%d", i)
+			typeParams = append(typeParams, tp)
+			fields = append(fields, fmt.Sprintf("%s _%d", tp, i))
+		}
+		g.writeln("record Tuple%d<%s>(%s) {}", n,
+			strings.Join(typeParams, ", "), strings.Join(fields, ", "))
+	}
 }
 
 // GenerateFiles produces separate .java files for each top-level type.
@@ -157,6 +176,8 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 			g.indent--
 			g.writeln("}")
 		}
+
+		g.emitTupleRecords()
 
 		g.indent--
 		g.writeln("}")
@@ -582,6 +603,31 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			keyword = typeName
 		}
 	}
+
+	// Handle `or` error handler: var x = call() or default / or { block }
+	if v.OrHandler != nil && v.Value != nil {
+		// Java var requires initializer — use Object if no type specified
+		declType := keyword
+		if declType == "var" || declType == "final var" {
+			declType = "Object"
+		}
+		g.writeln("%s %s;", declType, v.Name)
+		g.writeln("try { %s = %s; } catch (Exception _err) {", v.Name, g.formatExpr(v.Value))
+		g.indent++
+		if v.OrHandler.Body != nil && len(v.OrHandler.Body.Stmts) == 1 {
+			if es, ok := v.OrHandler.Body.Stmts[0].(*parser.ExprStmt); ok {
+				g.writeln("%s = %s;", v.Name, g.formatExpr(es.Expr))
+			} else {
+				g.emitBlock(v.OrHandler.Body)
+			}
+		} else if v.OrHandler.Body != nil {
+			g.emitBlock(v.OrHandler.Body)
+		}
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
 	if v.Value != nil {
 		g.writeln("%s %s = %s;", keyword, v.Name, g.formatExpr(v.Value))
 	} else {
@@ -681,10 +727,9 @@ func (g *Generator) emitRaiseStmt(r *parser.RaiseStmt) {
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
-	// Java has no tuple unpacking — assign to temp, extract
 	g.writeln("var _tuple = %s;", g.formatExpr(t.Value))
 	for i, name := range t.Names {
-		g.writeln("var %s = _tuple.get%d();", name, i)
+		g.writeln("var %s = _tuple._%d();", name, i)
 	}
 }
 
@@ -769,6 +814,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			return fmt.Sprintf("(%s != null ? %s.%s(%s) : null)", obj, obj, expr.Field, args)
 		}
 		return fmt.Sprintf("(%s != null ? %s.%s : null)", obj, obj, expr.Field)
+	case *parser.TupleLit:
+		n := len(expr.Elements)
+		g.tupleTypes[n] = true
+		return fmt.Sprintf("new Tuple%d(%s)", n, g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
 		return "Thread.startVirtualThread(() -> { /* spawn body */ })"
 	case *parser.IfExpr:
@@ -789,9 +838,9 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	right := g.formatExpr(b.Right)
 
 	switch b.Op {
-	case "and":
+	case "and", "&&":
 		return fmt.Sprintf("%s && %s", left, right)
-	case "or":
+	case "or", "||":
 		return fmt.Sprintf("%s || %s", left, right)
 	case "not":
 		return fmt.Sprintf("!%s", right)
@@ -1011,7 +1060,12 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	}
 
 	// Constructor calls: PascalCase name → prepend "new"
-	if len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' && !isBuiltinFunc(callee) {
+	// Skip if it's a method call on a known class (e.g., Integer.parseInt)
+	rootName := callee
+	if idx := strings.Index(callee, "."); idx > 0 {
+		rootName = callee[:idx]
+	}
+	if len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' && !isBuiltinFunc(rootName) {
 		return fmt.Sprintf("new %s(%s)", callee, args)
 	}
 

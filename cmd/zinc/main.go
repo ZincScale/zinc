@@ -109,13 +109,11 @@ func main() {
 				os.Exit(1)
 			}
 
-			// For single file: also check if sibling .zn files exist (same directory)
+			// For single file: if it has a package declaration, build whole directory
 			buildTarget := target
 			if !isDir(target) && strings.HasSuffix(target, ".zn") {
-				dir := filepath.Dir(target)
-				siblings := findZnFiles(dir)
-				if len(siblings) > 1 {
-					buildTarget = dir // build whole directory
+				if hasPackageDecl(target) {
+					buildTarget = filepath.Dir(target)
 				}
 			}
 
@@ -343,6 +341,23 @@ func runJava(classDir, className string, scriptArgs []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func hasPackageDecl(path string) bool {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(src), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			return true
+		}
+		if line != "" && !strings.HasPrefix(line, "//") {
+			return false
+		}
+	}
+	return false
 }
 
 func isDir(path string) bool {

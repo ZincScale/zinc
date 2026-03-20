@@ -332,7 +332,7 @@ func TestV2ExpressionIf(t *testing.T) {
 }
 
 func TestV2AndOrNot(t *testing.T) {
-	prog, errs := parseV2(`var x = a and b or not c`)
+	prog, errs := parseV2(`var x = a && b || not c`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -780,9 +780,9 @@ fn parse_age(str input) Result<int> {
 	}
 }
 
-func TestV2ErrHandlerBlock(t *testing.T) {
+func TestV2OrHandlerBlock(t *testing.T) {
 	prog, errs := parseV2(`
-var age = parse_age(input) Err {
+var age = parse_age(input) or {
     print("bad age")
     return
 }
@@ -792,21 +792,21 @@ var age = parse_age(input) Err {
 	}
 	varStmt := prog.Stmts[0].(*VarStmt)
 	if varStmt.OrHandler == nil {
-		t.Fatal("expected Err handler")
+		t.Fatal("expected or handler")
 	}
 	if len(varStmt.OrHandler.Body.Stmts) != 2 {
 		t.Errorf("expected 2 handler stmts, got %d", len(varStmt.OrHandler.Body.Stmts))
 	}
 }
 
-func TestV2ErrHandlerDefault(t *testing.T) {
-	prog, errs := parseV2(`var age = parse_age(input) Err 0`)
+func TestV2OrHandlerDefault(t *testing.T) {
+	prog, errs := parseV2(`var age = parse_age(input) or 0`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	varStmt := prog.Stmts[0].(*VarStmt)
 	if varStmt.OrHandler == nil {
-		t.Fatal("expected Err handler")
+		t.Fatal("expected or handler")
 	}
 	if len(varStmt.OrHandler.Body.Stmts) != 1 {
 		t.Errorf("expected 1 handler stmt (default expr), got %d", len(varStmt.OrHandler.Body.Stmts))
