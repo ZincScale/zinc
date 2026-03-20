@@ -114,26 +114,9 @@ class Dog : Animal, Serializable, Comparable {
 }
 ```
 
-## Method Mapping
+## Methods
 
-Zinc maps short method names to Java equivalents automatically:
-
-| Zinc | Java |
-|---|---|
-| `fn init(...)` | Constructor |
-| `fn str()` | `toString()` |
-| `fn eq(other)` | `equals(Object other)` |
-| `fn hash()` | `hashCode()` |
-| `fn size()` | `size()` |
-| `fn iter()` | `iterator()` (implements `Iterable<T>`) |
-| `fn compare(other)` | `compareTo(T other)` (implements `Comparable<T>`) |
-| `fn contains(item)` | `contains(Object item)` |
-| `fn get(key)` | `get(K key)` |
-| `fn set(key, val)` | `put(K key, V val)` |
-| `fn add(other)` | Operator overload via method |
-| `fn close()` | `close()` (implements `AutoCloseable`) |
-
-Example:
+Methods use Java names directly — no mapping or translation. Use `fn init(...)` for constructors, and standard Java method names like `toString()`, `equals()`, `hashCode()`, `compareTo()` etc.
 
 ```zinc
 class Vector {
@@ -144,44 +127,21 @@ class Vector {
         return Vector(x + other.x, y + other.y)
     }
 
-    fn str() str {
+    fn toString() str {
         return "({x}, {y})"
     }
 
-    fn eq(Vector other) bool {
+    fn equals(Vector other) bool {
         return x == other.x and y == other.y
     }
 
-    fn hash() int {
+    fn hashCode() int {
         return Objects.hash(x, y)
     }
 }
 ```
 
-Transpiles to:
-```java
-public class Vector {
-    private double x = 0.0;
-    private double y = 0.0;
-
-    public Vector add(Vector other) {
-        return new Vector(x + other.x, y + other.y);
-    }
-
-    @Override public String toString() {
-        return "(" + x + ", " + y + ")";
-    }
-
-    @Override public boolean equals(Object obj) {
-        if (!(obj instanceof Vector other)) return false;
-        return x == other.x && y == other.y;
-    }
-
-    @Override public int hashCode() {
-        return java.util.Objects.hash(x, y);
-    }
-}
-```
+For `data` classes (records), `equals()`, `hashCode()`, and `toString()` are generated automatically — you don't need to write them.
 
 ## Annotations
 

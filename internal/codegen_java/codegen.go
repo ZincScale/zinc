@@ -234,14 +234,7 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	}
 	params := g.formatParams(m.Params)
 
-	// Map Zinc special method names to Java
-	name := mapMethodName(m.Name)
-	override := ""
-	if isOverrideMethod(m.Name) {
-		override = "@Override "
-	}
-
-	g.writeln("%s%s %s%s %s(%s) {", override, vis, static, ret, name, params)
+	g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
 	g.indent++
 	g.emitBlock(m.Body)
 	g.indent--
@@ -833,45 +826,6 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 	}
 }
 
-// mapMethodName translates Zinc special method names to Java equivalents.
-func mapMethodName(name string) string {
-	switch name {
-	case "init":
-		return "" // handled separately as constructor
-	case "str":
-		return "toString"
-	case "repr":
-		return "toString"
-	case "eq":
-		return "equals"
-	case "hash":
-		return "hashCode"
-	case "len":
-		return "size"
-	case "iter":
-		return "iterator"
-	case "compare":
-		return "compareTo"
-	case "contains":
-		return "contains"
-	case "get":
-		return "get"
-	case "set":
-		return "put"
-	default:
-		return name
-	}
-}
-
-// isOverrideMethod returns true if the Zinc method name corresponds to a Java override.
-func isOverrideMethod(name string) bool {
-	switch name {
-	case "str", "repr", "eq", "hash":
-		return true
-	default:
-		return false
-	}
-}
 
 // --- Output helpers ----------------------------------------------------------
 

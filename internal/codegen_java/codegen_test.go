@@ -454,16 +454,25 @@ class User {
 	)
 }
 
-func TestClassToStringOverride(t *testing.T) {
+func TestClassMethodDirect(t *testing.T) {
 	assertContains(t, `
 class Foo {
-    fn str() str {
+    fn toString() str {
+        return "Foo"
+    }
+}
+`,
+		`String toString() {`,
+		`return "Foo";`,
+	)
+	assertNotContains(t, `
+class Foo {
+    fn toString() str {
         return "Foo"
     }
 }
 `,
 		`@Override`,
-		`toString()`,
 	)
 }
 
