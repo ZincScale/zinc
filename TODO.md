@@ -65,12 +65,15 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Pyt
 
 ### Type-first declaration syntax
 Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing Python-style `<name>: <type>`.
+`var`/`const`/`init` keywords required on declarations and class fields (disambiguates for parser).
+Function params don't need keywords — unambiguous inside `()`.
+Generics use `<>` (Java/C#/Dart-style), not `[]` (avoids confusion with list literals).
 
 **Variable declarations:**
-- `int x = 5` — explicit type, mutable
-- `var x = 5` — inferred type, mutable (`var` = type inference only)
-- `const int x = 5` — explicit type, immutable
-- `const x = 5` — inferred type, immutable
+- `var int x = 5` — mutable, explicit type
+- `var x = 5` — mutable, inferred type (`var` = type inference only)
+- `const int x = 5` — immutable, explicit type
+- `const x = 5` — immutable, inferred type
 
 **Nullable types:**
 - `int? x = none` — nullable, transpiles to `Optional[int]`
@@ -86,13 +89,18 @@ Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing P
 - `init str name` — set in constructor, frozen after
 - `str name` — mutable field
 
+**Generics:**
+- `list<int>` not `list[int]` — angle brackets for type params
+- `dict<str, int>`, `map<str, list<int>>`
+- No confusion with list literals `[1, 2, 3]`
+
 **`const` vs `init`:**
 - `const` — used everywhere (locals, params, class fields with defaults). Assign once, cannot reassign.
 - `init` — class fields only. No default value, set in constructor, frozen after.
 
 **Collections and `const`:**
 - `const` only controls reassignment — collection contents remain mutable (don't fight Python's runtime).
-- `const list[int] nums = [1, 2, 3]` — can `nums.append(4)`, cannot `nums = [5, 6, 7]`
+- `const list<int> nums = [1, 2, 3]` — can `nums.append(4)`, cannot `nums = [5, 6, 7]`
 
 ### Other language features
 
