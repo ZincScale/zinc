@@ -1,0 +1,27 @@
+// Streams — Zinc v3
+// Demonstrates: collection methods, it keyword, stream chains
+
+var numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Filter with lambda
+var evens = numbers.filter(x -> x % 2 == 0)
+print("Evens: {evens}")
+
+// Filter with it keyword
+var big = numbers.filter(it > 5)
+print("Big: {big}")
+
+// Map with it
+var doubled = numbers.map(it * 2)
+print("Doubled: {doubled}")
+
+// Chained operations
+var total = numbers.filter(it > 5).map(it * 10).sum()
+print("Sum of >5 * 10: {total}")
+
+// Terminal operations
+var hasNine = numbers.anyMatch(it > 8)
+print("Has >8: {hasNine}")
+
+var first = numbers.findFirst(it > 7)
+print("First >7: {first}")

@@ -1,0 +1,13 @@
+// Sealed Classes — Zinc v3
+// Demonstrates: sealed class, variant records, pattern matching
+
+sealed class Shape {
+    data Circle(double radius)
+    data Rect(double width, double height)
+}
+
+var c = Circle(5.0)
+var r = Rect(3.0, 4.0)
+
+print(c)
+print(r)

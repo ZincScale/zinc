@@ -42,7 +42,7 @@ fn example() {
 < <= > >=
 
 // Boolean
-and  or  not
+&&  ||  not
 
 // Membership
 in   not in

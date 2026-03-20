@@ -60,15 +60,38 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ---
 
-## Phase 2 — Collections & Ergonomics
+## Completed — Phase 2
 
-- [ ] Collection methods → Stream API codegen (`.filter()`, `.map()`, `.sortBy()`, etc.)
-- [ ] `or {}` error handling sugar for Result<T>
-- [ ] Tuple types → generated value records
-- [ ] Tuple destructuring: `var (x, y) = swap(1, 2)`
-- [ ] Safe navigation: `obj?.field`
+### Collections & Stream API
+- [x] Collection methods → Stream API: `.filter()`, `.map()`, `.sortBy()`, `.limit()`, `.skip()`, `.distinct()`
+- [x] Terminal ops: `.sum()`, `.anyMatch()`, `.allMatch()`, `.findFirst()`, `.forEach()`, `.groupBy()`, `.reduce()`
+- [x] Chain detection: `items.filter(x).map(y).sum()` → single stream pipeline
+- [x] `it` keyword in streams: `items.filter(it > 0).map(it * 2).sortBy(it.age)`
+- [x] Auto-imports: `java.util.*` and `java.util.stream.*`
+
+### Error Handling
+- [x] `or` error handler: `var x = call() or default` → try/catch with fallback
+- [x] `or { block }` handler with multi-statement fallback
+- [x] `&&` / `||` for boolean (freed `or` keyword for error handling)
+
+### Tuples
+- [x] Tuple literals: `(a, b)` → `new Tuple2(a, b)` with auto-generated record
+- [x] Tuple destructuring: `var x, y = swap(1, 2)` → `_tuple._0()`, `_tuple._1()`
+- [x] Tuple records auto-generated as inner classes
+
+### Packages & Imports
+- [x] `package com.example` → Java package statement + directory structure
+- [x] `import java.util.List`, `import java.util.*` — Java imports
+- [x] Directory builds: `zinc build myproject/` scans all `.zn` files
+- [x] Multi-file run: auto-discovers sibling `.zn` files with same package
+
+### Type Features
+- [x] Safe navigation: `obj?.field`, `obj?.method()` → null-check ternary
+- [x] `sealed class` → sealed interface + variant records (separate files)
+- [x] 89 codegen tests passing
+
+### Deferred
 - [ ] Source mapping: JSR-45 SMAP for debugger integration (.zn → .java line mapping)
-- [ ] `sealed class` support in parser
 
 ## Phase 3 — Concurrency & Flow Engine
 

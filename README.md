@@ -138,10 +138,12 @@ var double area = match shape {
 
 See [`examples/v3/`](examples/v3/) for working examples:
 
-- [`hello.zn`](examples/v3/hello.zn) — hello world with functions
-- [`classes.zn`](examples/v3/classes.zn) — classes, inheritance, data records
-- [`collections.zn`](examples/v3/collections.zn) — filter, map, it keyword
-- [`error_handling.zn`](examples/v3/error_handling.zn) — Result<T>, Error, or, try/catch
+- [`hello.zn`](examples/v3/hello.zn) — hello world, functions, string interpolation
+- [`classes.zn`](examples/v3/classes.zn) — classes, inheritance, data records, visibility
+- [`streams.zn`](examples/v3/streams.zn) — collection methods, `it` keyword, stream chains
+- [`sealed.zn`](examples/v3/sealed.zn) — sealed classes, variant records
+- [`collections.zn`](examples/v3/collections.zn) — lists, maps, iteration
+- [`error_handling.zn`](examples/v3/error_handling.zn) — try/catch, throw, match expressions
 
 ---
 
