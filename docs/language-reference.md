@@ -20,7 +20,7 @@ fn example() {
 | [Functions](lang/functions.md) | `fn`, parameters, return types, single-expression, lambdas, varargs, default and named args |
 | [Classes](lang/classes.md) | Fields, methods, inheritance, auto-this, method mapping, annotations, data classes (records), enums |
 | [Control Flow](lang/control-flow.md) | `if`/`else`, expression if, `for`, `while`, `match`, `break`/`continue` |
-| [Error Handling](lang/error-handling.md) | `Result<T>`, `Err`, `Err` handler blocks, `try`/`catch`, `raise from` |
+| [Error Handling](lang/error-handling.md) | `Result<T>`, `Error`, `or` handler, `try`/`catch`, `throw from` |
 | [Collections](lang/collections.md) | `filter`, `map`, `sum`, `it` keyword, tuples |
 | [Type System](lang/types.md) | Type checking, type safety errors, type narrowing, generics with `<>`, nullable `Type?` |
 | [Concurrency](lang/concurrency.md) | `spawn`, `parallel for`, `concurrent`, `lock`, `timeout`, `context`, virtual threads |

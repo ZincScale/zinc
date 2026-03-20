@@ -127,7 +127,7 @@ Auto-retry with backoff:
 var result = retry(max: 3, backoff: exponential(100.millis)) {
     httpClient.post(url, payload)
 } or {
-    Err("Failed after 3 retries")
+    Error("Failed after 3 retries")
 }
 ```
 

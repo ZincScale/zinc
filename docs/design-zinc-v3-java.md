@@ -477,7 +477,7 @@ fn parseInt(String s) Result<int> {
     try {
         return s.toInt()
     } catch NumberFormatException e {
-        return Err("Not a number: {s}")
+        return Error("Not a number: {s}")
     }
 }
 
@@ -501,7 +501,7 @@ try {
     var result = conn.query("SELECT * FROM users")
 } catch ConnectionError e {
     log.error("Database down: {e.message}")
-    raise ServiceUnavailable("Try again later") from e
+    throw ServiceUnavailable("Try again later") from e
 } catch QueryError e {
     log.error("Bad query: {e.message}")
 }

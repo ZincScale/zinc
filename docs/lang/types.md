@@ -154,7 +154,7 @@ if user != null {
 ```zinc
 fn parse(String input) Result<int> {
     if not input.isdigit() {
-        return Err("not a number")
+        return Error("not a number")
     }
     return int(input)
 }
