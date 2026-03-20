@@ -13,7 +13,7 @@ fn add(int a, int b) int {
     return a + b
 }
 
-fn say_hello() {
+fn sayHello() {
     print("Hello!")
 }
 ```
@@ -27,7 +27,7 @@ For short functions, use `=` to define the body as a single expression:
 ```zinc
 fn double(int x) int = x * 2
 fn square(int n) int = n * n
-fn full_name(str first, str last) str = "{first} {last}"
+fn fullName(str first, str last) str = "{first} {last}"
 ```
 
 ## Default Arguments
@@ -88,14 +88,39 @@ var adder = (int a, int b) -> a + b
 // Used inline with collection methods
 items.filter(x -> x > 0)
 items.map(x -> x * 2)
-items.sort_by(x -> x.age)
+items.sortBy(x -> x.age)
 ```
+
+### The `it` Keyword
+
+Single-parameter lambdas can use `it` instead of naming the parameter:
+
+```zinc
+items.filter(it > 0)
+items.map(it * 2)
+users.sortBy(it.age)
+```
+
+See [Collections — The `it` Keyword](collections.md#the-it-keyword) for more examples.
+
+### Multi-Parameter Lambdas
 
 Multi-parameter lambdas require parentheses:
 
 ```zinc
 var add = (a, b) -> a + b
 pairs.map((k, v) -> "{k}={v}")
+```
+
+### Block Lambdas
+
+For multi-statement lambdas, use braces:
+
+```zinc
+items.forEach(x -> {
+    var processed = transform(x)
+    save(processed)
+})
 ```
 
 ## Return Types
@@ -109,8 +134,22 @@ fn parse(str input) int {
 
 fn divide(float a, float b) Result<float> {
     if b == 0 {
-        return Err("division by zero")
+        return Error("division by zero")
     }
     return a / b
 }
 ```
+
+## Tuple Return Types
+
+Functions can return multiple values as a tuple:
+
+```zinc
+fn minMax(List<int> items) (int, int) {
+    return (items.min(), items.max())
+}
+
+var (lo, hi) = minMax(numbers)
+```
+
+See [Collections — Tuples](collections.md#tuples) for destructuring details.
