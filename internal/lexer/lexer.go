@@ -236,12 +236,20 @@ func (l *Lexer) NextToken() Token {
 	case '!':
 		if l.peek() == '=' {
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				return l.makeToken(TOKEN_REF_NEQ, "!==", line, col)
+			}
 			return l.makeToken(TOKEN_NEQ, "!=", line, col)
 		}
 		return l.makeToken(TOKEN_BANG, "!", line, col)
 	case '=':
 		if l.peek() == '=' {
 			l.advance()
+			if l.peek() == '=' {
+				l.advance()
+				return l.makeToken(TOKEN_REF_EQ, "===", line, col)
+			}
 			return l.makeToken(TOKEN_EQ, "==", line, col)
 		}
 		return l.makeToken(TOKEN_ASSIGN, "=", line, col)

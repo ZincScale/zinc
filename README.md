@@ -3,39 +3,40 @@
 
 # Zinc
 
-**Zinc** is typed Python with explicit blocks. Write `.zn` files, get type safety, clean syntax, and the full Python ecosystem. The transpiler catches mistakes, generates clean `.py` files, and stays out of your way.
+**Zinc** is a convention-over-configuration JVM language. Write `.zn` files, get type safety, clean syntax, and the full Java ecosystem. The transpiler generates clean `.java` files, compiles with javac, and runs on Java 25 virtual threads.
 
 ```zinc
-import sys
-
-fn greet(name: str): str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 
-var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
+var name = "world"
 print(greet(name))
 ```
 
 ```bash
-$ zinc run hello.zn -- Alice
-Hello, Alice!
+$ zinc run hello.zn
+Hello, world!
 ```
 
 ---
 
 ## Why Zinc?
 
-Python is the best language for getting things done fast. But it has pain points: whitespace bugs, optional types, `self` boilerplate, dunder ceremonies. Zinc fixes these while keeping Python's ecosystem.
+Java is the best runtime for server applications. But it has ceremony: semicolons, `public static void main`, stream().collect(toList()), verbose generics. Zinc removes the ceremony while keeping Java's ecosystem.
 
-- **Enforced types** — catch wrong types, bad args, missing returns at transpile time
-- **Brace blocks `{ }`** — no whitespace ambiguity, familiar C-family syntax
-- **Zero boilerplate** — no `self`, no dunders, no `f""` prefix
-- **It's just Python** — full pip ecosystem, readable `.py` output
-- **Two-track errors** — `Result[T]` for expected failures, exceptions for exceptional ones
-- **Free-threaded** — runs on Python 3.14t (GIL disabled), `.map()` auto-parallelizes
-- **Smart dispatch** — auto-detects data shape, auto-installs polars/numpy, picks fastest backend
-- **Source maps** — Python errors show your `.zn` file and line numbers
-- **Deploy anywhere** — `zinc pack` → PyInstaller, Nuitka, Docker, K8s with free-threaded Python
+- **No semicolons** — newline terminates statements
+- **No `public static void main`** — script mode, top-level statements
+- **Enforced types** — Java-native types, compile-time checked by javac
+- **Brace blocks `{ }`** — familiar C-family syntax
+- **`data` → records** — `data User(String name, int age)` with auto equals/hashCode/toString
+- **Fluent collections** — `.filter().map().sortBy()` without `.stream()/.toList()`
+- **`it` keyword** — `items.filter(it > 0)` instead of `items.filter(x -> x > 0)`
+- **Two-track errors** — `Result<T>` + `or {}` for expected failures, exceptions for unexpected
+- **Virtual threads** — `spawn`, `parallel for`, `concurrent` for structured concurrency
+- **Kotlin-style equality** — `==` structural, `===` reference identity
+- **Visibility model** — fields private by default, `pub` generates getters/setters
+- **Deploy anywhere** — Quarkus + GraalVM native-image, JLink, Docker
 
 ---
 
@@ -43,17 +44,9 @@ Python is the best language for getting things done fast. But it has pain points
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Install, hello world, key concepts |
 | [Language Reference](docs/language-reference.md) | Full syntax guide |
-| [Design Doc](docs/design-zinc-v2-python.md) | Philosophy, decisions, rationale |
-| [Collections Guide](docs/collections.md) | Collection methods, Polars, NumPy, smart dispatch |
-| [Deployment Guide](docs/deployment.md) | Docker, K8s, PyInstaller, Nuitka, CI/CD |
-| [Known Limitations](docs/v2-limitations.md) | What's not yet implemented |
-
-### Design
-
-| Document | Description |
-|----------|-------------|
+| [Design Doc](docs/design-zinc-v3-java.md) | v3 philosophy, Java transpilation, packaging |
+| [Concurrency](docs/design-zinc-concurrency.md) | Virtual threads, structured concurrency |
 | [Zinc Flow](docs/design-zinc-flow.md) | NiFi-inspired flow processing |
 
 ---
@@ -64,7 +57,7 @@ Python is the best language for getting things done fast. But it has pain points
 go install github.com/victorybhg/zinc/cmd/zinc@latest
 ```
 
-Requires: Go 1.21+ and Python 3.13+
+Requires: Go 1.21+ (for building Zinc) and JDK 25+ (for compiling/running output)
 
 ---
 
@@ -72,20 +65,15 @@ Requires: Go 1.21+ and Python 3.13+
 
 ```bash
 # Write a script
-echo 'print("Hello from Zinc!")' > hello.zn
+cat <<'ZN' > hello.zn
+print("Hello from Zinc!")
+ZN
 
-# Run it (free-threaded Python, GIL disabled)
+# Run it
 zinc run hello.zn
 
-# Transpile to Python
-zinc transpile hello.zn
-
-# Package for deployment
-zinc pack hello.zn                   # PyInstaller binary
-zinc pack hello.zn --format nuitka   # compiled native binary
-zinc pack hello.zn --format docker   # Dockerfile
-zinc pack hello.zn --format k8s      # Dockerfile + K8s manifest
-zinc pack myproject/                 # entire project directory
+# Build (transpile to Java + compile)
+zinc build hello.zn
 ```
 
 No project setup, no config, no boilerplate. Single files just run.
@@ -95,59 +83,52 @@ No project setup, no config, no boilerplate. Single files just run.
 ## Feature Highlights
 
 ```zinc
-// Data classes
-data User {
-    name: str
-    email: str
-    age: int = 0
-}
+// Data classes → Java records
+data User(String name, String email, int age = 0)
 
-// Classes with auto-self and dunder mapping
+// Classes with visibility + auto-this
 class Stack {
-    var items: list[int] = []
-    fn push(item: int) {
-        items.append(item)     // → self.items.append(item)
+    var List<int> items = []
+
+    pub fn push(int item) {
+        items.add(item)              // auto-injects this.items
     }
-    fn len(): int {            // → __len__(self)
-        return len(items)
+
+    pub fn size() int {
+        return items.size()
     }
 }
 
 // Two-track error handling
-fn parse_port(s: str): Result[int] {
-    if not s.isdigit() {
-        return Err("not a number")
+fn parsePort(String s) Result<int> {
+    if not s.isDigit() {
+        return Error("not a number")
     }
     return int(s)
 }
-var port = parse_port("8080") Err 80
+var port = parsePort("8080") or 80
 
-// Collection methods → comprehensions
-var active = orders.filter(o -> o.status == "active")
-var total = sum([o.amount for o in active])
+// Fluent collections with it keyword
+var active = orders.filter(it.status == "active")
+var total = active.map(it.amount).sum()
 
 // Expression if
-var label = if count == 1: "item" else: "items"
+var String label = if count == 1: "item" else: "items"
 
-// Threading — real parallelism (no GIL)
+// Virtual threads — real parallelism
 parallel for item in items {
     process(item)
 }
 
-var future = spawn {
-    expensive_computation()
+var (user, orders) = concurrent {
+    fetchUser(id)
+    fetchOrders(id)
 }
 
-// Generators
-fn fibonacci(limit: int) {
-    var a = 0
-    var b = 1
-    while a < limit {
-        yield a
-        var temp = a
-        a = b
-        b = temp + b
-    }
+// Match expressions with destructuring
+var double area = match shape {
+    case Circle(r) -> Math.PI * r ** 2
+    case Rect(w, h) -> w * h
 }
 ```
 
@@ -155,22 +136,12 @@ fn fibonacci(limit: int) {
 
 ## Examples
 
-See [`examples/v2/`](examples/v2/) for working examples:
+See [`examples/v3/`](examples/v3/) for working examples:
 
-- [`hello.zn`](examples/v2/hello.zn) — hello world with functions
-- [`classes.zn`](examples/v2/classes.zn) — classes, inheritance, data classes, enums
-- [`closures.zn`](examples/v2/closures.zn) — lambdas, closures, higher-order functions
-- [`collections.zn`](examples/v2/collections.zn) — lists, dicts, comprehensions, method chains
-- [`constants.zn`](examples/v2/constants.zn) — const declarations
-- [`data_processing.zn`](examples/v2/data_processing.zn) — comprehensions, filtering
-- [`defaults_and_named_args.zn`](examples/v2/defaults_and_named_args.zn) — default params, named args
-- [`enums.zn`](examples/v2/enums.zn) — enums and match expressions
-- [`error_handling.zn`](examples/v2/error_handling.zn) — Result[T], Err, try/catch
-- [`generators.zn`](examples/v2/generators.zn) — yield, generator functions
-- [`polars_pipeline.zn`](examples/v2/polars_pipeline.zn) — data pipeline with smart dispatch
-- [`threading.zn`](examples/v2/threading.zn) — parallel for, spawn, 8.5x speedup
-- [`type_checking.zn`](examples/v2/type_checking.zn) — type annotations, `is` type checks, none
-- [`variadic.zn`](examples/v2/variadic.zn) — *args and **kwargs
+- [`hello.zn`](examples/v3/hello.zn) — hello world with functions
+- [`classes.zn`](examples/v3/classes.zn) — classes, inheritance, data records
+- [`collections.zn`](examples/v3/collections.zn) — filter, map, it keyword
+- [`error_handling.zn`](examples/v3/error_handling.zn) — Result<T>, Error, or, try/catch
 
 ---
 

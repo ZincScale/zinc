@@ -99,6 +99,8 @@ const (
 	TOKEN_PIPE_PIPE // ||
 	TOKEN_EQ        // ==
 	TOKEN_NEQ       // !=
+	TOKEN_REF_EQ    // ===
+	TOKEN_REF_NEQ   // !==
 	TOKEN_LT        // <
 	TOKEN_LTE       // <=
 	TOKEN_GT        // >
@@ -202,6 +204,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_PIPE_PIPE: "||",
 	TOKEN_EQ:        "==",
 	TOKEN_NEQ:       "!=",
+	TOKEN_REF_EQ:    "===",
+	TOKEN_REF_NEQ:   "!==",
 	TOKEN_LT:        "<",
 	TOKEN_LTE:       "<=",
 	TOKEN_GT:        ">",

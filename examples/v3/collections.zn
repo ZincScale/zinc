@@ -1,0 +1,24 @@
+// Collections — Zinc v3
+// Demonstrates: List, Map, filter, map, it keyword, for loops
+
+var List<String> names = ["Alice", "Bob", "Charlie", "Dave"]
+names.add("Eve")
+print("Count: {names.size()}")
+
+// Iteration
+for name in names {
+    print("Hello, {name}")
+}
+
+// Map operations
+var Map<String, int> ages = {"Alice": 30, "Bob": 25, "Charlie": 35}
+ages.put("Dave", 28)
+
+for entry in ages.entrySet() {
+    print("{entry.getKey()} is {entry.getValue()}")
+}
+
+// Lambda filtering
+var List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+var evens = numbers.filter(x -> x % 2 == 0)
+print("Evens: {evens}")

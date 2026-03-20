@@ -21,7 +21,7 @@ fn example() {
 | [Classes](lang/classes.md) | Fields, methods, inheritance, auto-this, method mapping, annotations, data classes (records), enums |
 | [Control Flow](lang/control-flow.md) | `if`/`else`, expression if, `for`, `while`, `match`, `break`/`continue` |
 | [Error Handling](lang/error-handling.md) | `Result<T>`, `Err`, `Err` handler blocks, `try`/`catch`, `raise from` |
-| [Collections](lang/collections.md) | `filter`, `map`, `sum`, comprehensions, tuples |
+| [Collections](lang/collections.md) | `filter`, `map`, `sum`, `it` keyword, tuples |
 | [Type System](lang/types.md) | Type checking, type safety errors, type narrowing, generics with `<>`, nullable `Type?` |
 | [Concurrency](lang/concurrency.md) | `spawn`, `parallel for`, `concurrent`, `lock`, `timeout`, `context`, virtual threads |
 | [Strings](lang/strings.md) | Single-quote, double-quote, triple-quote, interpolation |
@@ -73,7 +73,7 @@ assert items.size() > 0
 
 ```zinc
 with f = FileReader("data.txt") {
-    var str content = f.readLine()
+    var String content = f.readLine()
 }
 // f is automatically closed
 ```
@@ -97,14 +97,8 @@ A single `.zn` file can contain:
 ## CLI
 
 ```bash
-zinc build <file.zn|dir>              # transpile to .java + compile with javac
-zinc build --native <file.zn|dir>     # transpile + GraalVM native-image (via Quarkus)
-zinc run <file.zn|dir>                # transpile + compile + run
-zinc test <dir>                       # transpile + run tests
-zinc check <file.zn>                  # type check only
-zinc fmt <file.zn>                    # format source code
-zinc init [name]                      # scaffold project with Mill
-zinc repl                             # interactive REPL (JShell-based)
-zinc flow run <pipeline>              # run flow pipeline
-zinc flow deploy <pipeline>           # build + deploy to K8s
+zinc build <file.zn>          # transpile to .java + compile with javac
+zinc run <file.zn>            # transpile + compile + run
+zinc fmt <file.zn>            # format source code
+zinc repl                     # interactive REPL
 ```

@@ -1,0 +1,12 @@
+// Hello World — Zinc v3
+// Demonstrates: functions, string interpolation, script mode
+
+fn greet(String name) String {
+    return "Hello, {name}!"
+}
+
+print(greet("World"))
+print(greet("Zinc"))
+
+var int x = 42
+print("The answer is {x}")

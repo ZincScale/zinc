@@ -1,0 +1,28 @@
+// Error Handling — Zinc v3
+// Demonstrates: try/catch, throw, Result<T>, Error, or
+
+// Track 2: Exceptions for unexpected failures
+fn riskyOperation() {
+    throw IllegalArgumentException("something went wrong")
+}
+
+try {
+    riskyOperation()
+} catch IllegalArgumentException e {
+    print("Caught: {e.getMessage()}")
+}
+
+// Control flow
+var int x = 42
+if x > 0 {
+    print("positive")
+} else {
+    print("non-positive")
+}
+
+// Match expression
+var String label = match x {
+    case 0 { "zero" }
+    case _ { "nonzero" }
+}
+print("x is {label}")

@@ -1,0 +1,42 @@
+// Classes — Zinc v3
+// Demonstrates: data records, classes, inheritance, visibility, override
+
+// Data class → Java record (separate .java file)
+data User(String name, String email, int age = 0)
+
+// Class with visibility modifiers
+class Animal {
+    pub var String name
+    pub var String sound
+
+    fn init(String name, String sound) {
+        this.name = name
+        this.sound = sound
+    }
+
+    pub fn speak() String {
+        return "{name} says {sound}"
+    }
+}
+
+class Dog : Animal {
+    pub var String breed
+
+    fn init(String name, String breed) {
+        this.name = name
+        this.sound = "Woof"
+        this.breed = breed
+    }
+
+    override fn toString() String {
+        return "Dog({name}, {breed})"
+    }
+}
+
+// Script mode
+var u = User("Alice", "alice@example.com", 30)
+print(u)
+
+var d = Dog("Rex", "Lab")
+print(d.speak())
+print(d)

@@ -576,7 +576,38 @@ var c = Color.Red
 	}
 }
 
-// TODO: TestReferenceIdentity and TestReferenceNonIdentity
+func TestOverrideGeneratesAnnotation(t *testing.T) {
+	assertContains(t, `
+class Dog : Animal {
+    override fn toString() String {
+        return "Dog"
+    }
+}
+`,
+		`@Override`,
+		`public String toString()`,
+	)
+}
+
+func TestReferenceIdentity(t *testing.T) {
+	assertContains(t, `
+if a === b {
+    print("same object")
+}
+`,
+		`a == b`,
+	)
+}
+
+func TestReferenceNonIdentity(t *testing.T) {
+	assertContains(t, `
+if a !== b {
+    print("different objects")
+}
+`,
+		`a != b`,
+	)
+}
 // Need lexer/parser support for === and !== tokens first.
 // Codegen already handles them in formatBinaryExpr.
 
