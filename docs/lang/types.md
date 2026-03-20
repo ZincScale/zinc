@@ -2,7 +2,7 @@
 
 ## Type Checking
 
-Types are enforced at transpile time. Errors block `.py` output:
+Types are enforced at transpile time. Errors block compilation:
 
 ```
 var int x = "hello"                    // type mismatch: expected int, got String
@@ -58,30 +58,31 @@ fn process(String input, int limit) List<String> {
 
 ## Type Checking with `is`
 
-`is` does both identity checks and type checks. The transpiler decides based on context:
-
-### Type Check
-
-When the right-hand side is a type name, `is` generates `isinstance()`:
+`is` is a type check operator. It checks whether a value is an instance of a type:
 
 ```zinc
 if x is String {
-    print(x.upper())            // x narrowed to String in this block
+    print(x.toUpperCase())      // x narrowed to String in this block
 }
 if x is int {
     print(x + 1)                // x narrowed to int
 }
-if x is not list {
+if x is not List {
     print("not a list")
 }
 ```
 
-### Identity Check
+Transpiles to Java `instanceof`:
+```java
+if (x instanceof String) { ... }
+if (x instanceof Integer) { ... }
+if (!(x instanceof List)) { ... }
+```
 
-When the right-hand side is a value, `is` generates Python's `is`:
+For null checks, use `==` and `!=`:
 
 ```zinc
-if value is null {
+if value == null {
     print("no value")
 }
 if value != null {
