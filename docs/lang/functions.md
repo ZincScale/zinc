@@ -18,6 +18,8 @@ fn say_hello() {
 }
 ```
 
+Functions with no return type return `void` implicitly.
+
 ## Single-Expression Functions
 
 For short functions, use `=` to define the body as a single expression:
@@ -50,19 +52,29 @@ Use named arguments at the call site for clarity:
 connect("db.example.com", port=3306, ssl=true)
 ```
 
-Named arguments work with any function — they are a call-site feature, not a declaration feature.
+Named arguments work with any function — they are a call-site feature, not a declaration feature. The transpiler reorders them to positional order.
 
 ## Variadic Arguments
 
-Use `*args` and `**kwargs` for variadic functions:
+Use `...` suffix for variadic parameters (Java varargs):
 
 ```zinc
-fn log(*args, **kwargs) {
-    print(args)
-    print(kwargs)
+fn log(str... messages) {
+    for msg in messages {
+        print(msg)
+    }
 }
 
-log("info", "server started", level=1)
+log("info", "server started", "port 8080")
+```
+
+Transpiles to:
+```java
+static void log(String... messages) {
+    for (var msg : messages) {
+        System.out.println(msg);
+    }
+}
 ```
 
 ## Lambdas
@@ -86,27 +98,6 @@ var add = (a, b) -> a + b
 pairs.map((k, v) -> "{k}={v}")
 ```
 
-## Generators
-
-Functions that use `yield` become generators:
-
-```zinc
-fn fibonacci(int limit) {
-    var a = 0
-    var b = 1
-    while a < limit {
-        yield a
-        var temp = a
-        a = b
-        b = temp + b
-    }
-}
-
-for n in fibonacci(100) {
-    print(n)
-}
-```
-
 ## Return Types
 
 The return type comes after the closing parenthesis of the parameter list:
@@ -123,5 +114,3 @@ fn divide(float a, float b) Result<float> {
     return a / b
 }
 ```
-
-Functions with no return type return `None` implicitly.

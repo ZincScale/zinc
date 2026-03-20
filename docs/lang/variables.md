@@ -9,7 +9,7 @@ var x = 42                      // inferred as int
 var int x = 42                  // explicit type
 var str name = "Alice"          // explicit type
 var List<int> items = []        // generic type
-var a, b = divmod(10, 3)        // tuple unpacking
+var a, b = swap(1, 2)          // tuple unpacking
 ```
 
 ### Type Inference
@@ -42,11 +42,13 @@ var Map<str, int> scores = {}
 Functions that return multiple values can be unpacked directly:
 
 ```zinc
-fn swap(int a, int b) {
+fn swap(int a, int b) (int, int) {
     return b, a
 }
 var x, y = swap(1, 2)          // x=2, y=1
 ```
+
+Transpiles to a generated record for the return type, with field extraction at the call site.
 
 ### Reassignment
 
@@ -98,11 +100,11 @@ class Config {
 
 ### `const` on Collections
 
-`const` on a collection is reference-only -- the variable cannot be reassigned, but the contents are still mutable:
+`const` on a collection is reference-only — the variable cannot be reassigned, but the contents are still mutable:
 
 ```zinc
 const List<int> items = [1, 2, 3]
-items.append(4)                 // OK — contents are mutable
+items.add(4)                    // OK — contents are mutable
 // items = [5, 6]              // compile error: cannot reassign const
 ```
 
@@ -116,8 +118,8 @@ class User {
     init str email              // frozen after construction
 
     fn init(str name, str email) {
-        self.name = name
-        self.email = email
+        this.name = name
+        this.email = email
     }
 }
 

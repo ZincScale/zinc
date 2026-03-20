@@ -1,4 +1,4 @@
-# Zinc v2 — Language Reference
+# Zinc v3 — Language Reference
 
 ## Blocks
 
@@ -17,13 +17,13 @@ fn example() {
 | Topic | Description |
 |---|---|
 | [Variables and Constants](lang/variables.md) | `var`, `const`, `init`, type inference, initialization, tuple unpacking |
-| [Functions](lang/functions.md) | `fn`, parameters, return types, single-expression, lambdas, `*args`/`**kwargs`, default and named args, generators |
-| [Classes](lang/classes.md) | Fields, methods, inheritance, auto-self, dunder mapping, decorators, `@staticmethod`, `@classmethod`, `@property`, data classes, enums |
+| [Functions](lang/functions.md) | `fn`, parameters, return types, single-expression, lambdas, varargs, default and named args |
+| [Classes](lang/classes.md) | Fields, methods, inheritance, auto-this, method mapping, annotations, data classes (records), enums |
 | [Control Flow](lang/control-flow.md) | `if`/`else`, expression if, `for`, `while`, `match`, `break`/`continue` |
 | [Error Handling](lang/error-handling.md) | `Result<T>`, `Err`, `Err` handler blocks, `try`/`catch`, `raise from` |
-| [Collections](lang/collections.md) | `filter`, `map`, `sum`, comprehensions, smart dispatch, tuples |
+| [Collections](lang/collections.md) | `filter`, `map`, `sum`, comprehensions, tuples |
 | [Type System](lang/types.md) | Type checking, type safety errors, type narrowing, generics with `<>`, nullable `Type?` |
-| [Concurrency](lang/concurrency.md) | `spawn`, `parallel for`, `with lock`, free-threaded Python |
+| [Concurrency](lang/concurrency.md) | `spawn`, `parallel for`, `concurrent`, `lock`, `timeout`, `context`, virtual threads |
 | [Strings](lang/strings.md) | Single-quote, double-quote, triple-quote, interpolation |
 
 ## Operators
@@ -42,7 +42,7 @@ and  or  not
 in   not in
 
 // Type check / Identity
-is   is not                  // type check or identity based on rhs
+is   is not
 
 // None
 none
@@ -51,61 +51,54 @@ none
 ## Imports
 
 ```zinc
-import json
-import os.path
-from pathlib import Path
-from os.path import join, exists, basename
+import java.util.List
+import java.nio.file.Path
+import java.time.Instant
 ```
 
 ## Assert
 
 ```zinc
 assert x > 0, "x must be positive"
-assert len(items) > 0
+assert items.size() > 0
 ```
 
-## Delete
+## Try-with-Resources
 
 ```zinc
-var Map<str, str> config = {"host": "localhost", "secret": "abc123"}
-del config["secret"]
-```
-
-## Context Managers
-
-```zinc
-with f = open("data.txt") {
-    var str content = f.read()
+with f = FileReader("data.txt") {
+    var str content = f.readLine()
 }
 // f is automatically closed
 ```
 
-## Shebang
-
-```zinc
-#!/usr/bin/env zinc run
-print("directly executable!")
+Transpiles to Java try-with-resources:
+```java
+try (var f = new FileReader("data.txt")) {
+    String content = f.readLine();
+}
 ```
 
-```bash
-chmod +x script.zn
-./script.zn
-```
+## File Structure
+
+A single `.zn` file can contain:
+- Top-level functions → `static` methods in a class named after the file
+- Top-level statements → wrapped in `main()`
+- Multiple `data` declarations → each generates a separate record `.java` file
+- Multiple `enum` declarations → each generates a separate enum `.java` file
+- Multiple `class` declarations → each generates a separate `.java` file
 
 ## CLI
 
 ```bash
-zinc run script.zn                    # transpile + run (free-threaded Python)
-zinc run script.zn -- arg1 arg2       # pass args to script
-zinc transpile script.zn              # output .py file
-zinc transpile script.zn -o out.py    # specify output path
-zinc fmt script.zn                    # format source code
-zinc pack script.zn                   # package with PyInstaller
-zinc pack script.zn --format nuitka   # compile to native binary (30-50% faster)
-zinc pack script.zn --format docker   # generate Dockerfile
-zinc pack script.zn --format k8s      # Dockerfile + K8s manifest
-zinc pack myproject/                  # package entire project directory
-zinc repl                             # interactive REPL
+zinc build <file.zn|dir>              # transpile to .java + compile with javac
+zinc build --native <file.zn|dir>     # transpile + GraalVM native-image (via Quarkus)
+zinc run <file.zn|dir>                # transpile + compile + run
+zinc test <dir>                       # transpile + run tests
+zinc check <file.zn>                  # type check only
+zinc fmt <file.zn>                    # format source code
+zinc init [name]                      # scaffold project with Mill
+zinc repl                             # interactive REPL (JShell-based)
+zinc flow run <pipeline>              # run flow pipeline
+zinc flow deploy <pipeline>           # build + deploy to K8s
 ```
-
-All `zinc run` and `zinc pack` use free-threaded Python (GIL disabled) by default. `PYTHON_GIL=0` is set in generated Dockerfiles and K8s manifests.

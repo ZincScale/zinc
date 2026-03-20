@@ -9,18 +9,18 @@ class Stack {
     var List<int> items = []
 
     fn push(int item) {
-        items.append(item)       // auto-injects self.items
+        items.add(item)              // auto-injects this.items
     }
 
     fn pop() int {
-        return items.pop()
+        return items.removeLast()
     }
 
-    fn len() int {               // maps to __len__(self)
-        return len(items)
+    fn size() int {
+        return items.size()
     }
 
-    fn str() str {               // maps to __str__(self)
+    fn str() str {                   // maps to toString()
         return "Stack({items})"
     }
 }
@@ -28,23 +28,23 @@ class Stack {
 var s = Stack()
 s.push(1)
 s.push(2)
-print(s)                         // Stack([1, 2])
+print(s)                             // Stack([1, 2])
 ```
 
-### Auto-Self
+### Auto-This
 
-Inside a class, field references are automatically prefixed with `self.` in the generated Python. You never write `self` in Zinc:
+Inside a class, field references are automatically prefixed with `this.` in the generated Java. You never write `this` in Zinc unless disambiguating from a parameter:
 
 ```zinc
 class Counter {
     var int count = 0
 
     fn increment() {
-        count = count + 1        // transpiles to self.count = self.count + 1
+        count = count + 1            // transpiles to this.count = this.count + 1
     }
 
     fn value() int {
-        return count             // transpiles to return self.count
+        return count                 // transpiles to return this.count
     }
 }
 ```
@@ -55,15 +55,33 @@ Fields use `var` (mutable) or `const` (immutable) with type-first syntax:
 
 ```zinc
 class Config {
-    var str host = "localhost"    // mutable, has default
-    var int port = 8080          // mutable, has default
-    const str version = "1.0"    // immutable
+    var str host = "localhost"        // mutable, has default
+    var int port = 8080              // mutable, has default
+    const str version = "1.0"        // immutable (static final)
 }
+```
+
+## Constructor
+
+Use `fn init(...)` to define a constructor:
+
+```zinc
+class Dog {
+    var str name
+    var str breed
+
+    fn init(str name, str breed) {
+        this.name = name
+        this.breed = breed
+    }
+}
+
+var d = Dog("Rex", "Lab")
 ```
 
 ## Inheritance
 
-Use parentheses after the class name to specify a parent class:
+Use parentheses after the class name to specify a parent class or interfaces:
 
 ```zinc
 class Animal {
@@ -79,7 +97,7 @@ class Dog(Animal) {
     var str breed
 
     fn fetch() str {
-        return "{name} fetches!"     // inherited fields auto-inject self.
+        return "{name} fetches!"     // inherited fields auto-inject this.
     }
 }
 
@@ -88,24 +106,32 @@ print(d.speak())                     // Rex says Woof
 print(d.fetch())                     // Rex fetches!
 ```
 
-## Dunder Mapping
+Multiple interfaces:
 
-Zinc maps short method names to Python's dunder methods automatically:
+```zinc
+class Dog(Animal, Serializable, Comparable) {
+    // First parent is extends, rest are implements
+}
+```
 
-| Zinc | Python |
+## Method Mapping
+
+Zinc maps short method names to Java equivalents automatically:
+
+| Zinc | Java |
 |---|---|
-| `fn init(...)` | `__init__` |
-| `fn str()` | `__str__` |
-| `fn repr()` | `__repr__` |
-| `fn eq(other)` | `__eq__` |
-| `fn len()` | `__len__` |
-| `fn iter()` | `__iter__` |
-| `fn contains(item)` | `__contains__` |
-| `fn get(key)` | `__getitem__` |
-| `fn set(key, val)` | `__setitem__` |
-| `fn add(other)` | `__add__` |
-| `fn lt(other)` | `__lt__` |
-| `fn call(...)` | `__call__` |
+| `fn init(...)` | Constructor |
+| `fn str()` | `toString()` |
+| `fn eq(other)` | `equals(Object other)` |
+| `fn hash()` | `hashCode()` |
+| `fn size()` | `size()` |
+| `fn iter()` | `iterator()` (implements `Iterable<T>`) |
+| `fn compare(other)` | `compareTo(T other)` (implements `Comparable<T>`) |
+| `fn contains(item)` | `contains(Object item)` |
+| `fn get(key)` | `get(K key)` |
+| `fn set(key, val)` | `put(K key, V val)` |
+| `fn add(other)` | Operator overload via method |
+| `fn close()` | `close()` (implements `AutoCloseable`) |
 
 Example:
 
@@ -125,77 +151,66 @@ class Vector {
     fn eq(Vector other) bool {
         return x == other.x and y == other.y
     }
-}
-```
 
-## Decorators
-
-### @staticmethod
-
-Static methods do not receive the instance:
-
-```zinc
-class MyClass {
-    @staticmethod
-    fn create() MyClass {
-        return MyClass()
-    }
-}
-
-var obj = MyClass.create()
-```
-
-### @classmethod
-
-Class methods receive the class as the first argument:
-
-```zinc
-class MyClass {
-    @classmethod
-    fn from_dict(dict d) MyClass {
-        return MyClass()
+    fn hash() int {
+        return Objects.hash(x, y)
     }
 }
 ```
 
-### @property
+Transpiles to:
+```java
+public class Vector {
+    private double x = 0.0;
+    private double y = 0.0;
 
-Properties look like method calls but act like field access:
-
-```zinc
-class Circle {
-    var float radius = 1.0
-
-    @property
-    fn area() float {
-        return 3.14159 * radius * radius
+    public Vector add(Vector other) {
+        return new Vector(x + other.x, y + other.y);
     }
 
-    @property
-    fn diameter() float {
-        return radius * 2
+    @Override public String toString() {
+        return "(" + x + ", " + y + ")";
     }
-}
 
-var c = Circle(radius=5.0)
-print(c.area)                    // 78.53975 — no parentheses
-print(c.diameter)                // 10.0
-```
+    @Override public boolean equals(Object obj) {
+        if (!(obj instanceof Vector other)) return false;
+        return x == other.x && y == other.y;
+    }
 
-### Custom Decorators
-
-Any function can be used as a decorator:
-
-```zinc
-@cache
-fn expensive(int n) int {
-    return compute(n)
+    @Override public int hashCode() {
+        return java.util.Objects.hash(x, y);
+    }
 }
 ```
 
-## Data Classes
+## Annotations
 
-Use `data` for immutable value types. Data classes auto-generate `__init__`, `__repr__`, and `__eq__`:
+Java annotations work directly in Zinc:
+
+```zinc
+@Deprecated
+fn oldMethod() str {
+    return "use newMethod"
+}
+
+@Override
+fn toString() str {
+    return "MyClass"
+}
+
+// Quarkus REST endpoint
+@Path("/users")
+class UserResource {
+    @GET
+    fn list() List<User> {
+        return userService.findAll()
+    }
+}
+```
+
+## Data Classes (Records)
+
+Use `data` for immutable value types. Each `data` declaration generates a separate Java record file.
 
 ```zinc
 data User {
@@ -205,11 +220,33 @@ data User {
 }
 
 var u = User("Alice", "alice@example.com", 30)
-print(u)                         // User(name='Alice', email='alice@example.com', age=30)
+print(u)                         // User[name=Alice, email=alice@example.com, age=30]
 print(u == User("Alice", "alice@example.com", 30))  // true
 ```
 
-Transpiles to Python's `@dataclass class User`.
+Transpiles to a separate `User.java`:
+```java
+public record User(String name, String email, int age) {
+    public User(String name, String email) {
+        this(name, email, 0);
+    }
+}
+```
+
+A single `.zn` file can contain multiple `data` declarations — each produces its own `.java` record file. Records auto-generate `equals()`, `hashCode()`, and `toString()`.
+
+### Data Classes with Methods
+
+```zinc
+data Point {
+    var float x
+    var float y
+
+    fn distance(Point other) float {
+        return Math.sqrt((x - other.x) ** 2 + (y - other.y) ** 2)
+    }
+}
+```
 
 ## Enums
 
@@ -236,3 +273,5 @@ match c {
     case Color.Blue -> print("blue")
 }
 ```
+
+Each `enum` also generates a separate `.java` file.
