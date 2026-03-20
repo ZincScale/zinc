@@ -35,7 +35,6 @@ const usage = `Zinc — convention-over-configuration JVM language.
 Usage:
   zinc build <file.zn>           Transpile to Java and compile with javac
   zinc run <file.zn>             Transpile, compile, and run
-  zinc check <file.zn>           Type check only (no output)
   zinc fmt <file.zn>             Format Zinc source code
   zinc repl                      Interactive Zinc REPL
 
@@ -63,26 +62,6 @@ func main() {
 				os.Exit(1)
 			}
 			runFmt(args[i+1])
-			return
-		case a == "check":
-			target := ""
-			verbose := false
-			for j := i + 1; j < len(args); j++ {
-				if args[j] == "--verbose" || args[j] == "-v" {
-					verbose = true
-				} else if !strings.HasPrefix(args[j], "-") && target == "" {
-					target = args[j]
-				}
-			}
-			if target == "" {
-				fmt.Fprintln(os.Stderr, "usage: zinc check <file.zn>")
-				os.Exit(1)
-			}
-			if _, err := parseAndCheck(target, verbose); err != nil {
-				errs.Error(err.Error())
-				os.Exit(1)
-			}
-			fmt.Printf("check passed: %s\n", target)
 			return
 		case a == "build":
 			target := ""
