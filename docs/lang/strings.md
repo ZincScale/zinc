@@ -19,19 +19,12 @@ Expressions inside `{}` are evaluated:
 
 ```zinc
 print("2 + 3 = {2 + 3}")            // 2 + 3 = 5
-print("upper: {name.upper()}")      // upper: ALICE
-```
-
-Nested quotes work inside interpolation:
-
-```zinc
-var Map<str, str> data = {"key": "value"}
-print("{data["key"]}")               // value
+print("upper: {name.toUpperCase()}")  // upper: ALICE
 ```
 
 ### Single-Quoted Strings (Literal)
 
-Single-quoted strings are literal -- no interpolation:
+Single-quoted strings are literal — no interpolation:
 
 ```zinc
 var str pattern = 'no {interpolation} here'
@@ -59,8 +52,8 @@ ORDER BY name
 
 var str message = """Dear {name},
 
-Thank you for your order #{order_id}.
-Your items will ship on {ship_date}.
+Thank you for your order #{orderId}.
+Your items will ship on {shipDate}.
 
 Best regards,
 The Team"""
@@ -73,38 +66,36 @@ Triple-quoted strings support interpolation (like double-quoted strings).
 ```zinc
 var str s = "Hello, World!"
 
-// Methods
-s.upper()                            // "HELLO, WORLD!"
-s.lower()                            // "hello, world!"
-s.strip()                            // trim whitespace
+// Methods (Java String methods)
+s.toUpperCase()                      // "HELLO, WORLD!"
+s.toLowerCase()                      // "hello, world!"
+s.trim()                             // trim whitespace
 s.split(",")                         // ["Hello", " World!"]
 s.replace("World", "Zinc")           // "Hello, Zinc!"
-s.startswith("Hello")                // true
-s.endswith("!")                       // true
-len(s)                               // 13
+s.startsWith("Hello")                // true
+s.endsWith("!")                      // true
+s.length()                           // 13
+s.contains("World")                  // true
+s.isEmpty()                          // false
+s.substring(0, 5)                    // "Hello"
+s.charAt(0)                          // 'H'
+s.indexOf("World")                   // 7
 
 // Membership
 if "World" in s {
     print("found")
 }
-
-// Slicing
-var str first_five = s[:5]           // "Hello"
 ```
 
 ## String Conversion
 
-Convert values to strings with `str()`:
+Convert values to strings with `String.valueOf()` or interpolation:
 
 ```zinc
-var str num_str = str(42)            // "42"
-var str pi_str = str(3.14)           // "3.14"
-var str bool_str = str(true)         // "True"
-```
+var str numStr = String.valueOf(42)   // "42"
+var str piStr = String.valueOf(3.14)  // "3.14"
 
-Or use interpolation:
-
-```zinc
+// Or just use interpolation — cleaner:
 var int count = 5
-var str label = "{count} items"      // "5 items"
+var str label = "{count} items"       // "5 items"
 ```
