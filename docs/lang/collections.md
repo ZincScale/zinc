@@ -19,6 +19,21 @@ items.groupBy(x -> x.category)
 items.forEach(x -> print(x))
 ```
 
+### The `it` Keyword
+
+For single-parameter lambdas, use `it` instead of naming the parameter (Kotlin-style):
+
+```zinc
+items.filter(it > 0)                 // same as x -> x > 0
+items.map(it * 2)                    // same as x -> x * 2
+users.sortBy(it.age)                 // same as u -> u.age
+users.findFirst(it.isActive)         // same as u -> u.isActive
+users.anyMatch(it.role == "admin")   // same as u -> u.role == "admin"
+names.forEach(print(it))             // same as n -> print(n)
+```
+
+`it` is the implicit parameter — the transpiler expands it to a named lambda. Use explicit `x ->` when you need clarity or have nested lambdas.
+
 ### Method Reference
 
 | Zinc | Description | Java equivalent |
