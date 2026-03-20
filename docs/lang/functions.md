@@ -1,0 +1,127 @@
+# Zinc — Functions
+
+## Basic Functions
+
+Functions are declared with `fn`. Parameters use type-first syntax: `type name`. Return type follows the parameter list.
+
+```zinc
+fn greet(str name) str {
+    return "Hello, {name}!"
+}
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn say_hello() {
+    print("Hello!")
+}
+```
+
+## Single-Expression Functions
+
+For short functions, use `=` to define the body as a single expression:
+
+```zinc
+fn double(int x) int = x * 2
+fn square(int n) int = n * n
+fn full_name(str first, str last) str = "{first} {last}"
+```
+
+## Default Arguments
+
+Parameters can have default values:
+
+```zinc
+fn connect(str host, int port = 80, bool ssl = false) {
+    print("Connecting to {host}:{port}")
+}
+
+connect("db.example.com")                        // port=80, ssl=false
+connect("db.example.com", 3306)                   // ssl=false
+connect("db.example.com", 443, true)              // all explicit
+```
+
+## Named Arguments
+
+Use named arguments at the call site for clarity:
+
+```zinc
+connect("db.example.com", port=3306, ssl=true)
+```
+
+Named arguments work with any function — they are a call-site feature, not a declaration feature.
+
+## Variadic Arguments
+
+Use `*args` and `**kwargs` for variadic functions:
+
+```zinc
+fn log(*args, **kwargs) {
+    print(args)
+    print(kwargs)
+}
+
+log("info", "server started", level=1)
+```
+
+## Lambdas
+
+Lambdas use the `->` arrow syntax:
+
+```zinc
+var doubler = x -> x * 2
+var adder = (int a, int b) -> a + b
+
+// Used inline with collection methods
+items.filter(x -> x > 0)
+items.map(x -> x * 2)
+items.sort_by(x -> x.age)
+```
+
+Multi-parameter lambdas require parentheses:
+
+```zinc
+var add = (a, b) -> a + b
+pairs.map((k, v) -> "{k}={v}")
+```
+
+## Generators
+
+Functions that use `yield` become generators:
+
+```zinc
+fn fibonacci(int limit) {
+    var a = 0
+    var b = 1
+    while a < limit {
+        yield a
+        var temp = a
+        a = b
+        b = temp + b
+    }
+}
+
+for n in fibonacci(100) {
+    print(n)
+}
+```
+
+## Return Types
+
+The return type comes after the closing parenthesis of the parameter list:
+
+```zinc
+fn parse(str input) int {
+    return int(input)
+}
+
+fn divide(float a, float b) Result<float> {
+    if b == 0 {
+        return Err("division by zero")
+    }
+    return a / b
+}
+```
+
+Functions with no return type return `None` implicitly.

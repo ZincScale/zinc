@@ -1,0 +1,75 @@
+// const_and_init.zn — Demonstrates const, init, and type-first syntax
+
+// Top-level constants
+const str APP_NAME = "MyApp"
+const int MAX_RETRIES = 3
+
+// const local variables — immutable after assignment
+const int x = 42
+const greeting = "hello"   // type inferred
+
+// var local variables — mutable
+var int counter = 0
+var name = "Alice"
+
+// Type-first function params
+fn greet(str name) str {
+    return "Hello, {name}!"
+}
+
+// const param — cannot reassign in body
+fn process(const str input) str {
+    // input = "changed"  // ERROR: const param
+    return input.upper()
+}
+
+// Generic types with angle brackets
+var list<int> scores = [85, 92, 78, 95]
+var dict<str, int> ages = {"Alice": 30, "Bob": 25}
+
+// Class with var, const, and init fields
+class Config {
+    // init — set in constructor, frozen after
+    init str host
+    init int port
+
+    // const — immutable with default
+    const str protocol = "https"
+
+    // var — mutable
+    var int retries = 0
+
+    fn url() str {
+        return "{protocol}://{host}:{port}"
+    }
+
+    fn retry() {
+        retries = retries + 1
+    }
+}
+
+// Data class with field keywords
+data Point {
+    var float x
+    var float y
+}
+
+// Using it all
+var config = Config(host="localhost", port=8080)
+print(config.url())       // https://localhost:8080
+config.retry()
+print("Retries: {config.retries}")
+
+var p = Point(3.0, 4.0)
+print("Point: ({p.x}, {p.y})")
+
+// Result with angle-bracket generics
+fn parse_port(str s) Result<int> {
+    if not s.isdigit() {
+        return Err("not a number: {s}")
+    }
+    return int(s)
+}
+
+var port = parse_port("8080") Err 80
+print("Port: {port}")

@@ -7,11 +7,11 @@ Last updated: 2026-03-18
 Everything below is implemented, tested, and working end-to-end:
 
 - Script mode (top-level statements, no main required)
-- `fn` with colon return types, `{ }` brace blocks, `else if`
+- `fn` with type-first declarations, `{ }` brace blocks, `else if`
 - `data` classes → `@dataclass`, `enum` → `enum.Enum`
 - Classes with inheritance, auto-self injection (including inherited fields), dunder mapping
 - `@staticmethod`, `@classmethod`, `@property`, general decorator pass-through
-- Two-track error handling: `Result[T]` / `Err` + `try`/`catch`
+- Two-track error handling: `Result<T>` / `Err` + `try`/`catch`
 - `raise X from Y` (exception chaining)
 - `and`/`or`/`not`, `not in`, `is not`, `none`
 - Expression if (condition-first ternary)
@@ -20,7 +20,7 @@ Everything below is implemented, tested, and working end-to-end:
 - List/dict comprehensions (auto list vs generator promotion)
 - Collection methods: `.filter()`, `.map()`, `.sum()`, `.sort_by()`, `.take()`, etc.
 - Smart dispatch: single method → comprehension, chains → `_zinc_collect()` runtime
-- Smart data shape dispatch: list[dict]→Polars, list[numeric]→NumPy (auto-install if needed)
+- Smart data shape dispatch: list<dict>→Polars, list<numeric>→NumPy (auto-install if needed)
 - Free-threaded Python by default (GIL disabled), auto-parallelize `.map()` on 1000+ items
 - GIL-dependent library warnings at transpile time
 - Type checker: mismatches, return types, arg types, all-paths-return, type narrowing

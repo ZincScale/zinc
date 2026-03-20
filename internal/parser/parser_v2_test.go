@@ -955,3 +955,313 @@ func TestV2SingleQuoteString(t *testing.T) {
 		t.Errorf("expected 'hello', got %q", str.Value)
 	}
 }
+
+func TestV2ConstLocalVar(t *testing.T) {
+	prog, errs := parseV2(`
+fn example() {
+    const int x = 5
+    print(x)
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	varStmt := fn.Body.Stmts[0].(*VarStmt)
+	if !varStmt.IsConst {
+		t.Error("expected IsConst=true")
+	}
+	if varStmt.Name != "x" {
+		t.Errorf("expected name 'x', got %q", varStmt.Name)
+	}
+	if varStmt.Type == nil {
+		t.Error("expected explicit type 'int'")
+	}
+}
+
+func TestV2ConstInferredVar(t *testing.T) {
+	prog, errs := parseV2(`
+fn example() {
+    const x = 5
+    print(x)
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	varStmt := fn.Body.Stmts[0].(*VarStmt)
+	if !varStmt.IsConst {
+		t.Error("expected IsConst=true")
+	}
+	if varStmt.Name != "x" {
+		t.Errorf("expected name 'x', got %q", varStmt.Name)
+	}
+	if varStmt.Type != nil {
+		t.Error("expected nil type (inferred)")
+	}
+}
+
+func TestV2TypeFirstVarGeneric(t *testing.T) {
+	prog, errs := parseV2(`var list<int> nums = [1, 2, 3]`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.Name != "nums" {
+		t.Errorf("expected name 'nums', got %q", varStmt.Name)
+	}
+	gt, ok := varStmt.Type.(*GenericType)
+	if !ok {
+		t.Fatalf("expected GenericType, got %T", varStmt.Type)
+	}
+	if gt.Name != "list" {
+		t.Errorf("expected generic name 'list', got %q", gt.Name)
+	}
+	if len(gt.TypeArgs) != 1 {
+		t.Fatalf("expected 1 type arg, got %d", len(gt.TypeArgs))
+	}
+}
+
+func TestV2TypeFirstVarNullable(t *testing.T) {
+	prog, errs := parseV2(`var int? x = none`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.Name != "x" {
+		t.Errorf("expected name 'x', got %q", varStmt.Name)
+	}
+	opt, ok := varStmt.Type.(*OptionalType)
+	if !ok {
+		t.Fatalf("expected OptionalType, got %T", varStmt.Type)
+	}
+	inner, ok := opt.Inner.(*SimpleType)
+	if !ok || inner.Name != "int" {
+		t.Errorf("expected inner type 'int', got %v", opt.Inner)
+	}
+}
+
+func TestV2TypeFirstParam(t *testing.T) {
+	prog, errs := parseV2(`
+fn foo(int x, str y) {
+    print(x)
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if len(fn.Params) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(fn.Params))
+	}
+	if fn.Params[0].Name != "x" {
+		t.Errorf("expected param name 'x', got %q", fn.Params[0].Name)
+	}
+	p0Type, ok := fn.Params[0].Type.(*SimpleType)
+	if !ok || p0Type.Name != "int" {
+		t.Errorf("expected param type 'int', got %v", fn.Params[0].Type)
+	}
+	if fn.Params[1].Name != "y" {
+		t.Errorf("expected param name 'y', got %q", fn.Params[1].Name)
+	}
+	p1Type, ok := fn.Params[1].Type.(*SimpleType)
+	if !ok || p1Type.Name != "str" {
+		t.Errorf("expected param type 'str', got %v", fn.Params[1].Type)
+	}
+}
+
+func TestV2ConstParam(t *testing.T) {
+	prog, errs := parseV2(`
+fn foo(const str name) {
+    print(name)
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if len(fn.Params) != 1 {
+		t.Fatalf("expected 1 param, got %d", len(fn.Params))
+	}
+	if fn.Params[0].Name != "name" {
+		t.Errorf("expected param name 'name', got %q", fn.Params[0].Name)
+	}
+	if !fn.Params[0].IsConst {
+		t.Error("expected param IsConst=true")
+	}
+}
+
+func TestV2ReturnTypeNoColon(t *testing.T) {
+	prog, errs := parseV2(`
+fn foo() int {
+    return 5
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if fn.ReturnType == nil {
+		t.Fatal("expected return type")
+	}
+	rt, ok := fn.ReturnType.(*SimpleType)
+	if !ok || rt.Name != "int" {
+		t.Errorf("expected return type 'int', got %v", fn.ReturnType)
+	}
+}
+
+func TestV2GenericReturnType(t *testing.T) {
+	prog, errs := parseV2(`
+fn foo() list<int> {
+    return []
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if fn.ReturnType == nil {
+		t.Fatal("expected return type")
+	}
+	gt, ok := fn.ReturnType.(*GenericType)
+	if !ok {
+		t.Fatalf("expected GenericType return, got %T", fn.ReturnType)
+	}
+	if gt.Name != "list" {
+		t.Errorf("expected 'list', got %q", gt.Name)
+	}
+	if len(gt.TypeArgs) != 1 {
+		t.Fatalf("expected 1 type arg, got %d", len(gt.TypeArgs))
+	}
+}
+
+func TestV2InitField(t *testing.T) {
+	prog, errs := parseV2(`
+class Person {
+    init str name
+    init int age
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	cls := prog.Decls[0].(*ClassDecl)
+	if len(cls.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(cls.Fields))
+	}
+	if !cls.Fields[0].IsInit {
+		t.Error("expected first field IsInit=true")
+	}
+	if cls.Fields[0].Name != "name" {
+		t.Errorf("expected field name 'name', got %q", cls.Fields[0].Name)
+	}
+	if !cls.Fields[1].IsInit {
+		t.Error("expected second field IsInit=true")
+	}
+}
+
+func TestV2ConstField(t *testing.T) {
+	prog, errs := parseV2(`
+class Config {
+    const str NAME = "default"
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	cls := prog.Decls[0].(*ClassDecl)
+	if len(cls.Fields) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(cls.Fields))
+	}
+	if !cls.Fields[0].IsConst {
+		t.Error("expected field IsConst=true")
+	}
+	if cls.Fields[0].Name != "NAME" {
+		t.Errorf("expected field name 'NAME', got %q", cls.Fields[0].Name)
+	}
+	if cls.Fields[0].Default == nil {
+		t.Error("expected default value for const field")
+	}
+}
+
+func TestV2DataClassWithVar(t *testing.T) {
+	prog, errs := parseV2(`
+data Point {
+    var int x
+    var int y
+    var str label = "origin"
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	data := prog.Decls[0].(*DataClassDecl)
+	if data.Name != "Point" {
+		t.Errorf("expected 'Point', got %q", data.Name)
+	}
+	if len(data.Params) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(data.Params))
+	}
+	if data.Params[0].Name != "x" {
+		t.Errorf("expected field 'x', got %q", data.Params[0].Name)
+	}
+	if data.Params[2].Default == nil {
+		t.Error("expected default value for 'label'")
+	}
+}
+
+func TestV2AngleBracketGenericNested(t *testing.T) {
+	prog, errs := parseV2(`var dict<str, list<int>> lookup = {}`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.Name != "lookup" {
+		t.Errorf("expected name 'lookup', got %q", varStmt.Name)
+	}
+	gt, ok := varStmt.Type.(*GenericType)
+	if !ok {
+		t.Fatalf("expected GenericType, got %T", varStmt.Type)
+	}
+	if gt.Name != "dict" {
+		t.Errorf("expected 'dict', got %q", gt.Name)
+	}
+	if len(gt.TypeArgs) != 2 {
+		t.Fatalf("expected 2 type args, got %d", len(gt.TypeArgs))
+	}
+	// Second type arg should be list<int>
+	innerGt, ok := gt.TypeArgs[1].(*GenericType)
+	if !ok {
+		t.Fatalf("expected nested GenericType, got %T", gt.TypeArgs[1])
+	}
+	if innerGt.Name != "list" {
+		t.Errorf("expected inner generic 'list', got %q", innerGt.Name)
+	}
+}
+
+func TestV2NullableGenericReturnType(t *testing.T) {
+	prog, errs := parseV2(`
+fn foo() list<int>? {
+    return none
+}
+`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	fn := prog.Decls[0].(*FnDecl)
+	if fn.ReturnType == nil {
+		t.Fatal("expected return type")
+	}
+	opt, ok := fn.ReturnType.(*OptionalType)
+	if !ok {
+		t.Fatalf("expected OptionalType, got %T", fn.ReturnType)
+	}
+	gt, ok := opt.Inner.(*GenericType)
+	if !ok {
+		t.Fatalf("expected GenericType inside OptionalType, got %T", opt.Inner)
+	}
+	if gt.Name != "list" {
+		t.Errorf("expected 'list', got %q", gt.Name)
+	}
+}

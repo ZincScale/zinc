@@ -30,7 +30,7 @@ That's it. No main function, no project setup. Top-level code just runs.
 // greet.zn
 import sys
 
-fn greet(name: str): str {
+fn greet(str name) str {
     return "Hello, {name}!"
 }
 
@@ -47,7 +47,9 @@ zinc run greet.zn -- Alice
 
 | Python | Zinc | Why |
 |---|---|---|
-| `def greet(name: str) -> str:` | `fn greet(name: str): str` | Shorter, colon for return type |
+| `def greet(name: str) -> str:` | `fn greet(str name) str` | Type-first, no colons |
+| `x: int = 5` | `var int x = 5` | Type before name, like Java/Go |
+| `items: list[int]` | `var list<int> items` | Angle brackets for generics |
 | Indentation-based blocks | `{ }` braces close blocks | No whitespace bugs |
 | `f"Hello, {name}"` | `"Hello, {name}"` | All double-quoted strings interpolate |
 | Types optional | Types enforced | Catch errors at transpile time |
@@ -58,19 +60,19 @@ zinc run greet.zn -- Alice
 
 ```zinc
 var name = "Alice"          // type inferred
-var age: int = 30           // explicit type
-var scores: list[int] = []  // generic type
+var int age = 30            // explicit type
+var list<int> scores = []   // generic type
 ```
 
 ## Functions
 
 ```zinc
-fn add(a: int, b: int): int {
+fn add(int a, int b) int {
     return a + b
 }
 
 // Single-expression shorthand
-fn double(x: int): int = x * 2
+fn double(int x) int = x * 2
 ```
 
 ## Control Flow
@@ -97,9 +99,9 @@ while running {
 
 ```zinc
 data User {
-    name: str
-    email: str
-    age: int = 0
+    var str name
+    var str email
+    var int age = 0
 }
 
 var u = User("Alice", "alice@example.com")
@@ -107,10 +109,10 @@ var u = User("Alice", "alice@example.com")
 
 ## Error Handling — Two Tracks
 
-**Expected errors** (validation, parsing) use `Result[T]`:
+**Expected errors** (validation, parsing) use `Result<T>`:
 
 ```zinc
-fn parse_port(s: str): Result[int] {
+fn parse_port(str s) Result<int> {
     if not s.isdigit() {
         return Err("not a number")
     }

@@ -740,3 +740,77 @@ if len(sys.argv) > 1 {
 		}
 	}
 }
+
+func TestV2ConstLocal(t *testing.T) {
+	assertV2Contains(t,
+		`const int x = 5`,
+		`x = 5`,
+	)
+}
+
+func TestV2TypeFirstVarWithGeneric(t *testing.T) {
+	assertV2Contains(t,
+		`var list<int> nums = [1, 2, 3]`,
+		`nums: list[int] = [1, 2, 3]`,
+	)
+}
+
+func TestV2InitClassField(t *testing.T) {
+	assertV2Contains(t, `
+class Person {
+    init str name
+    init int age
+}
+`,
+		"class Person:",
+		"def __init__(self, name: str, age: int):",
+		"self.name = name",
+		"self.age = age",
+	)
+}
+
+func TestV2ConstClassField(t *testing.T) {
+	assertV2Contains(t, `
+class Config {
+    const str NAME = "default"
+}
+`,
+		"class Config:",
+		`NAME: str = "default"`,
+	)
+}
+
+func TestV2MixedFieldTypes(t *testing.T) {
+	assertV2Contains(t, `
+class Service {
+    init str name
+    var int count = 0
+    const str VERSION = "1.0"
+}
+`,
+		"class Service:",
+		"self.name = name",
+		"self.count = count",
+	)
+}
+
+func TestV2GenericParam(t *testing.T) {
+	assertV2Contains(t, `
+fn foo(list<int> items) {
+    print(items)
+}
+`,
+		"def foo(items: list[int]):",
+	)
+}
+
+func TestV2ConstLocalStmt(t *testing.T) {
+	assertV2Contains(t, `
+fn example() {
+    const x = 42
+    print(x)
+}
+`,
+		"x = 42",
+	)
+}
