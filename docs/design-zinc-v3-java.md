@@ -25,12 +25,12 @@ Kotlin succeeded where Groovy failed — static types, null safety, JetBrains to
 
 | You write | Zinc generates |
 |---|---|
-| `data User { name: str, age: int }` | `record User(String name, int age) {}` |
+| `data User { str name, int age }` | `record User(String name, int age) {}` |
 | `items.filter(x -> x > 0)` | `items.stream().filter(x -> x > 0).toList()` |
 | `"Hello, {name}!"` | `"Hello, " + name + "!"` |
 | `match shape { case Circle c -> ... }` | `switch (shape) { case Circle c -> ... }` |
 | `spawn { task() }` | `Thread.startVirtualThread(() -> { task(); })` |
-| `fn str(): str` | `@Override public String toString()` |
+| `fn str() str` | `@Override public String toString()` |
 | `var x = 5` | `var x = 5;` |
 | `items.map(it * 2)` | `items.stream().map(x -> x * 2).toList()` |
 
@@ -53,7 +53,7 @@ if x > 10 {
     print("small")
 }
 
-fn process(items: list[Order]): list[Order] {
+fn process(list<Order> items) list<Order> {
     var result = items.filter(x -> x.status == "active")
     if result.count() > 100 {
         result = result.sort_by(x -> x.priority).take(100)
@@ -83,9 +83,9 @@ var result = orders
 
 ```zinc
 var name = "Alice"          // type inferred as str
-var age: int = 30           // explicit type
-var scores: list[int] = []  // explicit generic
-const PI: float = 3.14159   // immutable
+var int age = 30             // explicit type
+var list<int> scores = []    // explicit generic
+const float PI = 3.14159    // immutable
 ```
 
 Transpiles to:
@@ -99,15 +99,15 @@ final double PI = 3.14159;
 ### Functions
 
 ```zinc
-fn greet(name: str): str {
+fn greet(str name) str {
     return "Hello, {name}!"
 }
 
 // Single-expression shorthand
-fn double(x: int): int = x * 2
+fn double(int x) int = x * 2
 
 // No return type = void
-fn log(msg: str) {
+fn log(str msg) {
     System.out.println(msg)
 }
 ```
@@ -148,7 +148,7 @@ Top-level statements are wrapped in a generated `main()`. Class name derived fro
 ### Named Arguments
 
 ```zinc
-fn connect(host: str, port: int = 5432, ssl: bool = true): Connection {
+fn connect(str host, int port = 5432, bool ssl = true) Connection {
     // ...
 }
 
@@ -184,18 +184,18 @@ var user = User(name: "Alice", age: 30, role: "admin")
 
 | Zinc | Java | Literal |
 |---|---|---|
-| `list[T]` | `List<T>` | `[1, 2, 3]` |
-| `dict[K, V]` | `Map<K, V>` | `{"a": 1, "b": 2}` |
-| `set[T]` | `Set<T>` | `set(1, 2, 3)` |
+| `list<T>` | `List<T>` | `[1, 2, 3]` |
+| `dict<K, V>` | `Map<K, V>` | `{"a": 1, "b": 2}` |
+| `set<T>` | `Set<T>` | `set(1, 2, 3)` |
 | `(T, U)` | Generated record | `(1, "hi")` |
 
 ### Nullable Types
 
 ```zinc
-var name: str? = none          // nullable
-var age: int = 42              // non-nullable, compiler enforced
+var str? name = none             // nullable
+var int age = 42                 // non-nullable, compiler enforced
 
-fn find(id: int): User? {      // may return null
+fn find(int id) User? {          // may return null
     // ...
 }
 
@@ -214,13 +214,13 @@ Transpiles to null checks in Java. The compiler tracks nullability — no `Optio
 
 ```zinc
 class Stack<T> {
-    var items: list[T] = []
+    var list<T> items = []
 
-    fn push(item: T) {
+    fn push(T item) {
         items.add(item)
     }
 
-    fn pop(): T? {
+    fn pop() T? {
         if items.count() == 0 { return none }
         return items.removeLast()
     }
@@ -235,9 +235,9 @@ Transpiles directly to Java generics.
 
 ```zinc
 data User {
-    name: str
-    age: int
-    role: str = "user"
+    str name
+    int age
+    str role = "user"
 }
 ```
 
@@ -256,10 +256,10 @@ Auto-generates: constructor, `equals()`, `hashCode()`, `toString()`. Zinc's `dat
 
 ```zinc
 data Point {
-    x: float
-    y: float
+    float x
+    float y
 
-    fn distance(other: Point): float {
+    fn distance(Point other) float {
         return Math.sqrt((x - other.x) ** 2 + (y - other.y) ** 2)
     }
 }
@@ -269,12 +269,12 @@ data Point {
 
 ```zinc
 sealed class Shape {
-    data Circle { radius: float }
-    data Rect { width: float, height: float }
-    data Triangle { base: float, height: float }
+    data Circle { float radius }
+    data Rect { float width, float height }
+    data Triangle { float base, float height }
 }
 
-fn area(shape: Shape): float {
+fn area(Shape shape) float {
     return match shape {
         case Circle c -> Math.PI * c.radius ** 2
         case Rect r -> r.width * r.height
@@ -312,7 +312,7 @@ enum HttpStatus {
     NotFound = 404
     ServerError = 500
 
-    fn isError(): bool = this.value >= 400
+    fn isError() bool = this.value >= 400
 }
 ```
 
@@ -322,26 +322,26 @@ enum HttpStatus {
 
 ```zinc
 class Dog {
-    var name: str
-    var breed: str
-    pub var age: int = 0
+    var str name
+    var str breed
+    pub var int age = 0
 
-    fn init(name: str, breed: str) {
+    fn init(str name, str breed) {
         this.name = name
         this.breed = breed
     }
 
-    fn speak(): str = "{name} says woof!"
+    fn speak() str = "{name} says woof!"
 
-    fn str(): str = "Dog({name}, {breed}, age={age})"
+    fn str() str = "Dog({name}, {breed}, age={age})"
 }
 
-class Puppy : Dog {
-    fn init(name: str) {
+class Puppy(Dog) {
+    fn init(str name) {
         super(name, "Mixed")
     }
 
-    fn speak(): str = "{name} says yap!"
+    fn speak() str = "{name} says yap!"
 }
 ```
 
@@ -369,16 +369,16 @@ public class Dog {
 
 ```zinc
 interface Speakable {
-    fn speak(): str
+    fn speak() str
 }
 
 interface Serializable {
-    fn toBytes(): bytes
-    fn fromBytes(data: bytes): this   // static factory
+    fn toBytes() bytes
+    fn fromBytes(bytes data) this   // static factory
 }
 
-class Dog : Speakable {
-    fn speak(): str = "Woof!"
+class Dog(Speakable) {
+    fn speak() str = "Woof!"
 }
 ```
 
@@ -473,7 +473,7 @@ Transpiles to stream chains. Comprehensions are syntax sugar for `.filter().map(
 For operations that can fail in normal use (parsing, I/O, network calls):
 
 ```zinc
-fn parseInt(s: str): Result[int] {
+fn parseInt(str s) Result<int> {
     try {
         return s.toInt()
     } catch NumberFormatException e {
@@ -507,7 +507,7 @@ try {
 }
 ```
 
-**No checked exceptions.** All Zinc exceptions are unchecked. Use `Result[T]` for expected failures.
+**No checked exceptions.** All Zinc exceptions are unchecked. Use `Result<T>` for expected failures.
 
 ---
 
@@ -612,21 +612,21 @@ Transpiler hoists all imports to top of generated `.java` file regardless of whe
 
 ```zinc
 @Deprecated
-fn oldMethod(): str = "use newMethod instead"
+fn oldMethod() str = "use newMethod instead"
 
 @Override
-fn toString(): str = "MyClass"
+fn toString() str = "MyClass"
 
 // Quarkus endpoint
 @Path("/users")
 class UserResource {
     @GET
-    fn list(): list[User] {
+    fn list() list<User> {
         return userService.findAll()
     }
 
     @POST
-    fn create(user: User): User {
+    fn create(User user) User {
         return userService.save(user)
     }
 }
@@ -644,7 +644,7 @@ Zinc Flow is a NiFi-inspired data flow engine. Processors are Zinc functions. Se
 
 ```zinc
 @processor
-fn enrich_order(flow: FlowFile): FlowFile {
+fn enrich_order(FlowFile flow) FlowFile {
     var data = json.parse(flow.content)
     data["enriched_at"] = Instant.now().toString()
     data["region"] = lookupRegion(data["zip_code"])
@@ -799,7 +799,7 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 | **Pattern matching** | `switch` with `case Type t ->` | `match` with exhaustiveness |
 | **Concurrency** | `Thread.startVirtualThread(() -> { ... })` | `spawn { ... }` |
 | **Named args** | Not supported | Always available |
-| **Error handling** | Checked exceptions or raw try/catch | `Result[T]` + `or {}` sugar |
+| **Error handling** | Checked exceptions or raw try/catch | `Result<T>` + `or {}` sugar |
 | **Lambdas** | Must name parameter | `it` keyword for single-param |
 | **Build tool** | Gradle/Maven ceremony | Mill YAML, `zinc build` |
 | **Project setup** | archetype/initializr + config | `zinc init`, run immediately |
@@ -816,7 +816,7 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 - Control flow: if/else, for, while, match
 - Lambdas + `it` keyword
 - String interpolation
-- Error handling (try/catch, Result[T])
+- Error handling (try/catch, Result<T>)
 - Imports (hoist to top)
 - Script mode (wrap in main)
 - CLI: `zinc transpile`, `zinc run`, `zinc check`

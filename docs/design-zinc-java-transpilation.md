@@ -29,16 +29,16 @@ These translate directly with minimal or no transformation:
 | Zinc | Java | Notes |
 |---|---|---|
 | `var x = 5` | `var x = 5;` | Java has `var` since 11. Identical semantics. |
-| `var name: str = "hi"` | `String name = "hi";` | Explicit type annotation |
+| `var str name = "hi"` | `String name = "hi";` | Explicit type annotation |
 | `const PI = 3.14` | `final var PI = 3.14;` | `const` → `final` |
 
 ### Data Classes → Records
 
 | Zinc | Java |
 |---|---|
-| `data User { name: str, age: int }` | `record User(String name, int age) {}` |
-| `data Point { x: float, y: float }` | `record Point(double x, double y) {}` |
-| `data frozen Config { host: str }` | `record Config(String host) {}` (records are already immutable) |
+| `data User { str name, int age }` | `record User(String name, int age) {}` |
+| `data Point { float x, float y }` | `record Point(double x, double y) {}` |
+| `data frozen Config { str host }` | `record Config(String host) {}` (records are already immutable) |
 
 Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`. Zinc's `data` was designed for this.
 
@@ -53,9 +53,9 @@ Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`
 
 | Zinc | Java |
 |---|---|
-| `fn greet(name: str): str { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
-| `fn double(x: int): int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
-| `fn process(): none { ... }` | `static void process() { ... }` |
+| `fn greet(str name) str { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
+| `fn double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
+| `fn process() none { ... }` | `static void process() { ... }` |
 
 ### Lambdas
 
@@ -95,12 +95,12 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 
 | Zinc | Java |
 |---|---|
-| `class Dog { var name: str }` | `class Dog { private String name; }` |
-| `pub var name: str` | `public String name;` |
-| `fn init(name: str) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
-| `class Puppy : Dog { ... }` | `class Puppy extends Dog { ... }` |
-| `interface Speaker { fn speak(): str }` | `interface Speaker { String speak(); }` |
-| `static fn create(): Dog` | `static Dog create()` |
+| `class Dog { var str name }` | `class Dog { private String name; }` |
+| `pub str name` | `public String name;` |
+| `fn init(str name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
+| `class Puppy(Dog) { ... }` | `class Puppy extends Dog { ... }` |
+| `interface Speaker { fn speak() str }` | `interface Speaker { String speak(); }` |
+| `static fn create() Dog` | `static Dog create()` |
 
 ### Concurrency → Virtual Threads
 
@@ -142,9 +142,9 @@ These were added during the Python pivot and need rethinking for Java:
 - **Zinc decision**: Keep comprehension syntax. Transpiler converts to stream chains. This is actually cleaner than Python's comprehension syntax for complex cases.
 
 ### 5. Smart dispatch (Polars/NumPy)
-- **Python**: transpiler auto-chooses Polars for `list[dict]`, NumPy for `list[int]`
+- **Python**: transpiler auto-chooses Polars for `list<dict>`, NumPy for `list<int>`
 - **Java**: no equivalent. But Java has excellent stream performance and can use Apache Arrow / Tablesaw for columnar.
-- **Zinc decision**: Smart dispatch concept stays but backends change. `list[dict]` chains → Java streams (or Tablesaw if data-heavy). Numeric chains → JVM SIMD vectorization (Vector API). This is a transpiler optimization, invisible to users.
+- **Zinc decision**: Smart dispatch concept stays but backends change. `list<dict>` chains → Java streams (or Tablesaw if data-heavy). Numeric chains → JVM SIMD vectorization (Vector API). This is a transpiler optimization, invisible to users.
 
 ### 6. Dunder method mapping
 - **Python**: `fn str()` → `__str__`, `fn eq()` → `__eq__`
@@ -178,7 +178,7 @@ These were added during the Python pivot and need rethinking for Java:
 ### 9. Multiple return values
 - **Python**: `return a, b` → tuple
 - **Java**: no tuples. Return a record or use out-parameters.
-- **Zinc decision**: `fn split(): (str, str)` transpiles to a generated record: `record SplitResult(String first, String second)`. Tuple unpacking at call site: `(a, b) = split()` → `var result = split(); var a = result.first(); var b = result.second();`
+- **Zinc decision**: `fn split() (str, str)` transpiles to a generated record: `record SplitResult(String first, String second)`. Tuple unpacking at call site: `(a, b) = split()` → `var result = split(); var a = result.first(); var b = result.second();`
 
 ### 10. Dynamic imports
 - **Python**: `import json` at any point in the file
@@ -201,8 +201,8 @@ These were added during the Python pivot and need rethinking for Java:
 #### 1. Sealed types (for exhaustive match)
 ```zinc
 sealed class Shape {
-    data Circle { radius: float }
-    data Rect { width: float, height: float }
+    data Circle { float radius }
+    data Rect { float width, float height }
 }
 
 // Compiler enforces all cases handled:
@@ -235,7 +235,7 @@ Maps to Java `StructuredTaskScope.ShutdownOnFailure`.
 ```zinc
 // Zinc: flow context propagated implicitly
 @processor
-fn enrich(flow: FlowFile): FlowFile {
+fn enrich(FlowFile flow) FlowFile {
     var trace_id = FlowContext.traceId  // scoped value, not thread-local
     // ...
 }
@@ -287,12 +287,12 @@ The transpiler should be smart about terminal operations:
 | `str` | `String` | |
 | `bool` | `boolean` / `Boolean` | |
 | `bytes` | `byte[]` | |
-| `list[T]` | `List<T>` | `java.util.List` |
-| `dict[K, V]` | `Map<K, V>` | `java.util.Map` |
-| `set[T]` | `Set<T>` | `java.util.Set` |
+| `list<T>` | `List<T>` | `java.util.List` |
+| `dict<K, V>` | `Map<K, V>` | `java.util.Map` |
+| `set<T>` | `Set<T>` | `java.util.Set` |
 | `(T, U)` | Generated record | Zinc tuples → named records |
 | `T?` | `T` (nullable) | Compiler tracks nullability, no `Optional` for locals |
-| `Result[T]` | Custom `Result<T>` class or `sealed interface` | Generate once in runtime lib |
+| `Result<T>` | Custom `Result<T>` class or `sealed interface` | Generate once in runtime lib |
 | `Fn<(A, B), R>` | `BiFunction<A, B, R>` | Map to java.util.function types |
 
 ---
@@ -307,7 +307,7 @@ These are the things that make Zinc worth using instead of raw Java:
 4. **`it` keyword** — `items.map(it * 2)` vs `items.stream().map(x -> x * 2)`
 5. **Trailing lambdas** — cleaner callback APIs
 6. **`or {}` error handling** — `val x = parse(s) or { default }` instead of try/catch boilerplate
-7. **No checked exceptions** — all exceptions are unchecked. Use `Result[T]` for expected failures.
+7. **No checked exceptions** — all exceptions are unchecked. Use `Result<T>` for expected failures.
 8. **Fluent collections without `.stream()/.toList()`** — transpiler adds them
 9. **Convention-over-config project structure** — `zinc init`, `zinc build`, `zinc run`
 10. **Built-in flow engine** — `@processor`, pipeline DSL, hot-swap lifecycle
