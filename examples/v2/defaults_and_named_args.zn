@@ -1,6 +1,6 @@
 // defaults_and_named_args.zn — Default parameter values and named arguments
 
-fn greet(name: str, greeting: str = "Hello", punctuation: str = "!") {
+fn greet(str name, str greeting = "Hello", str punctuation = "!") {
     print("{greeting}, {name}{punctuation}")
 }
 
@@ -14,7 +14,7 @@ greet("Dave", punctuation="?")
 greet("Eve", greeting="Howdy", punctuation="!!")
 
 // Mixed with defaults
-fn connect(host: str, port: int = 5432, ssl: bool = true, timeout: int = 30) {
+fn connect(str host, int port = 5432, bool ssl = true, int timeout = 30) {
     print("Connecting to {host}:{port} ssl={ssl} timeout={timeout}")
 }
 

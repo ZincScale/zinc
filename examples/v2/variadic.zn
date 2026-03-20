@@ -1,7 +1,7 @@
 // variadic.zn — *args and **kwargs
 
 // *args — accept any number of positional args
-fn sum_all(*args): int {
+fn sum_all(*args) int {
     var total = 0
     for n in args {
         total = total + n
@@ -19,7 +19,7 @@ fn create_user(**kwargs) {
 create_user(name="Alice", age=30, role="admin")
 
 // Mixed — required + *args + **kwargs
-fn log(level: str, *args, **kwargs) {
+fn log(str level, *args, **kwargs) {
     var message = " ".join([str(a) for a in args])
     print("[{level}] {message} {kwargs}")
 }

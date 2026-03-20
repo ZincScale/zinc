@@ -68,7 +68,7 @@ func (p *Parser) ParseV2() *Program {
 		case lexer.TOKEN_ENUM:
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
-			prog.Decls = append(prog.Decls, p.parseConstDecl(false))
+			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
 		default:
 			// Script mode — top-level statements
 			s := p.v2ParseStmt()
@@ -149,7 +149,9 @@ func (p *Parser) v2ParseStmt() Stmt {
 
 	switch tok.Type {
 	case lexer.TOKEN_VAR:
-		return p.v2ParseVarStmt()
+		return p.v2ParseVarOrConstStmt()
+	case lexer.TOKEN_CONST:
+		return p.v2ParseVarOrConstStmt()
 	case lexer.TOKEN_RETURN:
 		return p.v2ParseReturnStmt()
 	case lexer.TOKEN_IF:
@@ -213,29 +215,35 @@ func (p *Parser) v2ParseStmt() Stmt {
 	return p.v2ParseExprOrAssignStmt()
 }
 
-// v2ParseVarStmt: var name = expr [Err { handler }]  OR  var name: type = expr  OR  var a, b = expr
-func (p *Parser) v2ParseVarStmt() Stmt {
+// v2ParseVarOrConstStmt: var [type] name = expr  OR  const [type] name = expr  OR  var a, b = expr
+func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 	line := p.peek().Line
-	p.advance() // consume var
+	isConst := p.peek().Type == lexer.TOKEN_CONST
+	p.advance() // consume var/const
 
-	name := p.v2ExpectIdent()
-
-	// Tuple unpacking: var a, b = expr
-	if p.check(lexer.TOKEN_COMMA) {
-		names := []string{name}
-		for p.check(lexer.TOKEN_COMMA) {
-			p.advance()
-			names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
-		}
-		p.expect(lexer.TOKEN_ASSIGN)
-		val := p.v2ParseExpr()
-		return &TupleVarStmt{Line: line, Names: names, Value: val}
-	}
-
+	// Type-first: var type name = expr  OR  inferred: var name = expr
 	var typ TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
+	var name string
+
+	if p.v2IsTypeAnnotation() {
+		// Type is present: var int x = 5, var list<int> nums = []
 		typ = p.v2ParseType()
+		name = p.v2ExpectIdent()
+	} else {
+		// No type (inferred): var x = 5
+		name = p.v2ExpectIdent()
+
+		// Tuple unpacking: var a, b = expr
+		if p.check(lexer.TOKEN_COMMA) {
+			names := []string{name}
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
+			}
+			p.expect(lexer.TOKEN_ASSIGN)
+			val := p.v2ParseExpr()
+			return &TupleVarStmt{Line: line, Names: names, Value: val}
+		}
 	}
 
 	var val Expr
@@ -247,7 +255,7 @@ func (p *Parser) v2ParseVarStmt() Stmt {
 	// Check for Err { handler } block
 	handler := p.v2ParseErrHandler()
 
-	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
+	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, IsConst: isConst, OrHandler: handler}
 }
 
 // v2ParseErrHandler checks for `Err` after a failable call.
@@ -550,22 +558,22 @@ func (p *Parser) v2ParseExprOrAssignStmt() Stmt {
 
 // --- Declarations ------------------------------------------------------------
 
-// v2ParseFnDecl: fn name(params)[: ReturnType] ... end
-//                fn name(params)[: ReturnType] = expr  (single-expression)
+// v2ParseFnDecl: fn name(params) [ReturnType] { body }
+//                fn name(params) [ReturnType] = expr  (single-expression)
 func (p *Parser) v2ParseFnDecl() *FnDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.v2ParseParamList()
 
-	// Optional return type with colon
+	// Optional return type (no colon — type-first style)
+	// Return type is present if next token is an identifier (type name) and not '{'
 	var retType TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
+	if p.v2IsIdent() && !p.check(lexer.TOKEN_LBRACE) {
 		retType = p.v2ParseType()
 	}
 
-	// Single-expression form: fn name(params): Type = expr
+	// Single-expression form: fn name(params) Type = expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
 		expr := p.v2ParseExpr()
@@ -577,7 +585,7 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 	return &FnDecl{Line: line, Name: name, Params: params, ReturnType: retType, Body: body}
 }
 
-// v2ParseParamList: (name: type, name: type = default, ...)
+// v2ParseParamList: (type name, type name = default, ...)
 func (p *Parser) v2ParseParamList() []*ParamDecl {
 	p.expect(lexer.TOKEN_LPAREN)
 	var params []*ParamDecl
@@ -595,8 +603,15 @@ func (p *Parser) v2ParseParamList() []*ParamDecl {
 	return params
 }
 
-// v2ParseParam: name: type [= default]  OR  *args: type  OR  **kwargs: type
+// v2ParseParam: [const] type name [= default]  OR  *args  OR  **kwargs
 func (p *Parser) v2ParseParam() *ParamDecl {
+	// Handle const modifier on params
+	isConst := false
+	if p.check(lexer.TOKEN_CONST) {
+		p.advance()
+		isConst = true
+	}
+
 	// Handle *args
 	variadic := false
 	kwVariadic := false
@@ -608,13 +623,17 @@ func (p *Parser) v2ParseParam() *ParamDecl {
 		variadic = true
 	}
 
-	name := p.v2ExpectIdent()
-
-	// Type annotation is optional for *args/**kwargs
+	// Type-first: type name  OR  untyped: name
 	var typ TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
+	var name string
+
+	if !variadic && !kwVariadic && p.v2IsTypeAnnotation() {
+		// Typed param: int x, list<int> items, str? name
 		typ = p.v2ParseType()
+		name = p.v2ExpectIdent()
+	} else {
+		// Untyped param or variadic: x, *args, **kwargs
+		name = p.v2ExpectIdent()
 	}
 
 	var def Expr
@@ -623,9 +642,8 @@ func (p *Parser) v2ParseParam() *ParamDecl {
 		def = p.v2ParseExpr()
 	}
 
-	param := &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic}
+	param := &ParamDecl{Name: name, Type: typ, Default: def, Variadic: variadic, IsConst: isConst}
 	if kwVariadic {
-		// Mark as **kwargs — reuse Variadic field but prefix name with **
 		param.Name = "**" + name
 	}
 	return param
@@ -665,11 +683,8 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		} else if tok.Type == lexer.TOKEN_FN {
 			m := p.v2ParseMethodDecl()
 			methods = append(methods, m)
-		} else if tok.Type == lexer.TOKEN_VAR {
+		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
-			fields = append(fields, f)
-		} else if tok.Type == lexer.TOKEN_IDENT {
-			f := p.v2ParseBareFieldDecl()
 			fields = append(fields, f)
 		} else {
 			p.errorf("unexpected token %s in class body", tok.Type)
@@ -681,16 +696,16 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods}
 }
 
-// v2ParseMethodDecl: fn name(params)[: ReturnType] ... end
+// v2ParseMethodDecl: fn name(params) [ReturnType] { body }
 func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.v2ParseParamList()
 
+	// Optional return type (no colon — type-first style)
 	var retType TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
+	if p.v2IsIdent() && !p.check(lexer.TOKEN_LBRACE) {
 		retType = p.v2ParseType()
 	}
 
@@ -699,37 +714,31 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 		IsPub: true} // v2: all methods are public (Python convention)
 }
 
-// v2ParseFieldDecl: var name: type [= default]
+// v2ParseFieldDecl: var type name [= default]  |  const type name = default  |  init type name
 func (p *Parser) v2ParseFieldDecl() *FieldDecl {
-	p.advance() // consume var
-	name := p.expect(lexer.TOKEN_IDENT).Literal
+	isConst := p.peek().Type == lexer.TOKEN_CONST
+	isInit := p.peek().Type == lexer.TOKEN_INIT
+	p.advance() // consume var/const/init
+
+	// Type-first: type name
 	var typ TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
+	var name string
+	if p.v2IsTypeAnnotation() {
 		typ = p.v2ParseType()
+		name = p.v2ExpectIdent()
+	} else {
+		name = p.v2ExpectIdent()
 	}
+
 	var def Expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
 		def = p.v2ParseExpr()
 	}
-	return &FieldDecl{Name: name, Type: typ, Default: def}
+	return &FieldDecl{Name: name, Type: typ, Default: def, IsConst: isConst, IsInit: isInit}
 }
 
-// v2ParseBareFieldDecl: name: type [= default]
-func (p *Parser) v2ParseBareFieldDecl() *FieldDecl {
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	p.expect(lexer.TOKEN_COLON)
-	typ := p.v2ParseType()
-	var def Expr
-	if p.check(lexer.TOKEN_ASSIGN) {
-		p.advance()
-		def = p.v2ParseExpr()
-	}
-	return &FieldDecl{Name: name, Type: typ, Default: def}
-}
-
-// v2ParseDataClassDecl: data Name { fields... }
+// v2ParseDataClassDecl: data Name { var/const/init type name ... }
 func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_DATA)
@@ -739,11 +748,13 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	var params []*FieldDecl
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_FN) && !p.check(lexer.TOKEN_EOF) {
-		if !p.check(lexer.TOKEN_IDENT) {
+		tok := p.peek()
+		if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
+			f := p.v2ParseFieldDecl()
+			params = append(params, f)
+		} else {
 			break
 		}
-		f := p.v2ParseBareFieldDecl()
-		params = append(params, f)
 		p.skipSemis()
 	}
 
@@ -755,6 +766,23 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 
 	p.expect(lexer.TOKEN_RBRACE)
 	return &DataClassDecl{Line: line, Name: name, Params: params, Methods: methods}
+}
+
+// v2ParseConstDecl: const [type] NAME = expr (top-level constant)
+func (p *Parser) v2ParseConstDecl() *ConstDecl {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_CONST)
+	var typ TypeExpr
+	var name string
+	if p.v2IsTypeAnnotation() {
+		typ = p.v2ParseType()
+		name = p.v2ExpectIdent()
+	} else {
+		name = p.v2ExpectIdent()
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	val := p.v2ParseExpr()
+	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
 }
 
 // v2ParseEnumDecl: enum Name { variants }
@@ -854,24 +882,30 @@ func (p *Parser) v2ParseAnnotations() []*Annotation {
 	return annots
 }
 
-// --- Types (v2: Python-style generics with []) -------------------------------
+// --- Types (v2: angle-bracket generics <>) -----------------------------------
 
-// v2ParseType: str, int, list[int], dict[str, int], Optional[str]
+// v2ParseType: str, int, list<int>, dict<str, int>, str?
 func (p *Parser) v2ParseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
 	name := tok.Literal
 
-	// Python-style generics: list[int], dict[str, int]
-	if p.check(lexer.TOKEN_LBRACKET) {
-		p.advance() // consume [
+	// Angle-bracket generics: list<int>, dict<str, int>
+	if p.check(lexer.TOKEN_LT) {
+		p.advance() // consume <
 		var args []TypeExpr
 		args = append(args, p.v2ParseType())
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
 			args = append(args, p.v2ParseType())
 		}
-		p.expect(lexer.TOKEN_RBRACKET)
-		return &GenericType{Name: name, TypeArgs: args}
+		p.expect(lexer.TOKEN_GT)
+		typ := &GenericType{Name: name, TypeArgs: args}
+		// Optional suffix on generic: list<int>?
+		if p.check(lexer.TOKEN_QUESTION) {
+			p.advance()
+			return &OptionalType{Inner: typ}
+		}
+		return typ
 	}
 
 	// Optional suffix: Type?
@@ -881,6 +915,34 @@ func (p *Parser) v2ParseType() TypeExpr {
 	}
 
 	return &SimpleType{Name: name}
+}
+
+// v2IsTypeAnnotation checks if the current position looks like a type followed
+// by a name (for var/const/init declarations). Returns true for patterns like:
+//   ident ident    → simple type + name
+//   ident<         → generic type
+//   ident? ident   → nullable type + name
+func (p *Parser) v2IsTypeAnnotation() bool {
+	if !p.v2IsIdent() {
+		return false
+	}
+	next := p.peekAt(1)
+	// ident ident → type name
+	if next.Type == lexer.TOKEN_IDENT || next.Type == lexer.TOKEN_DATA ||
+		next.Type == lexer.TOKEN_MATCH || next.Type == lexer.TOKEN_PRINT {
+		return true
+	}
+	// ident< → generic type
+	if next.Type == lexer.TOKEN_LT {
+		return true
+	}
+	// ident? ident → nullable type + name
+	if next.Type == lexer.TOKEN_QUESTION {
+		peek2 := p.peekAt(2)
+		return peek2.Type == lexer.TOKEN_IDENT || peek2.Type == lexer.TOKEN_DATA ||
+			peek2.Type == lexer.TOKEN_MATCH || peek2.Type == lexer.TOKEN_PRINT
+	}
+	return false
 }
 
 // --- Expressions -------------------------------------------------------------

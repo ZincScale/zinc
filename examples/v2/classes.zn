@@ -1,33 +1,33 @@
 // classes.zn — Zinc v2 class examples
 
 class Animal {
-    var name: str
-    var sound: str
+    var str name
+    var str sound
 
-    fn speak(): str {
+    fn speak() str {
         return "{name} says {sound}"
     }
 
-    fn str(): str {
+    fn str() str {
         return "Animal({name})"
     }
 }
 
 class Dog(Animal) {
-    var breed: str
+    var str breed
 
-    fn fetch(): str {
+    fn fetch() str {
         return "{name} fetches the ball!"
     }
 }
 
 // Data class — auto-generates __init__, __repr__, __eq__
 data Point {
-    x: float
-    y: float
+    var float x
+    var float y
 }
 
-fn distance(a: Point, b: Point): float {
+fn distance(Point a, Point b) float {
     return ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5
 }
 

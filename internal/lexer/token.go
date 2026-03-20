@@ -74,6 +74,7 @@ const (
 	TOKEN_FROM  // from (import support)
 	TOKEN_NONE     // none (Python-style null)
 	TOKEN_PARALLEL // parallel (parallel for)
+	TOKEN_INIT     // init (constructor-set immutable field)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -176,6 +177,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_FROM:      "from",
 	TOKEN_NONE:      "none",
 	TOKEN_PARALLEL:  "parallel",
+	TOKEN_INIT:      "init",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -286,6 +288,7 @@ var keywords = map[string]TokenType{
 	"from":      TOKEN_FROM,
 	"none":      TOKEN_NONE,
 	"parallel":  TOKEN_PARALLEL,
+	"init":      TOKEN_INIT,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

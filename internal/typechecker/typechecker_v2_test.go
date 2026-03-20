@@ -42,7 +42,7 @@ print("hello")
 }
 
 func TestV2TypeMismatch(t *testing.T) {
-	errs := checkV2(`var x: int = "hello"`)
+	errs := checkV2(`var int x = "hello"`)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
@@ -52,7 +52,7 @@ func TestV2TypeMismatch(t *testing.T) {
 }
 
 func TestV2TypeMismatchBool(t *testing.T) {
-	errs := checkV2(`var x: str = true`)
+	errs := checkV2(`var str x = true`)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
@@ -63,7 +63,7 @@ func TestV2TypeMismatchBool(t *testing.T) {
 
 func TestV2IntToFloatOk(t *testing.T) {
 	// int → float is allowed
-	errs := checkV2(`var x: float = 42`)
+	errs := checkV2(`var float x = 42`)
 	if len(errs) > 0 {
 		t.Errorf("expected no errors (int→float), got: %v", errs)
 	}
@@ -71,8 +71,8 @@ func TestV2IntToFloatOk(t *testing.T) {
 
 func TestV2FnTypeChecked(t *testing.T) {
 	errs := checkV2(`
-fn add(a: int, b: int): int {
-    var result: str = a + b
+fn add(int a, int b) int {
+    var str result = a + b
     return result
 }
 `)
@@ -98,8 +98,8 @@ y = 20
 func TestV2DataClassFieldTypes(t *testing.T) {
 	errs := checkV2(`
 data User {
-    name: str
-    age: int
+    var str name
+    var int age
 }
 `)
 	if len(errs) > 0 {
@@ -109,10 +109,9 @@ data User {
 
 func TestV2ClassFieldNoType(t *testing.T) {
 	// This test verifies fields without types get flagged
-	// (var fields always have types in v2, bare fields require colon)
 	errs := checkV2(`
 fn example() {
-    var x: int = "bad"
+    var int x = "bad"
 }
 `)
 	if len(errs) != 1 {
@@ -122,7 +121,7 @@ fn example() {
 
 func TestV2ReturnTypeMismatch(t *testing.T) {
 	errs := checkV2(`
-fn add(a: int, b: int): int {
+fn add(int a, int b) int {
     return "hello"
 }
 `)
@@ -136,7 +135,7 @@ fn add(a: int, b: int): int {
 
 func TestV2FnCallArgCount(t *testing.T) {
 	errs := checkV2(`
-fn greet(name: str): str {
+fn greet(str name) str {
     return "hello"
 }
 greet("Alice", "extra")
@@ -151,7 +150,7 @@ greet("Alice", "extra")
 
 func TestV2FnCallArgType(t *testing.T) {
 	errs := checkV2(`
-fn greet(name: str): str {
+fn greet(str name) str {
     return "hello"
 }
 greet(42)
@@ -187,7 +186,7 @@ for x in items {
 
 func TestV2ResultErrReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn parse(s: str): Result[int] {
+fn parse(str s) Result<int> {
     return Err("bad")
 }
 `)
@@ -198,7 +197,7 @@ fn parse(s: str): Result[int] {
 
 func TestV2AllPathsReturn(t *testing.T) {
 	errs := checkV2(`
-fn classify(x: int): str {
+fn classify(int x) str {
     if x > 0 {
         return "positive"
     }
@@ -214,7 +213,7 @@ fn classify(x: int): str {
 
 func TestV2AllPathsReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn classify(x: int): str {
+fn classify(int x) str {
     if x > 0 {
         return "positive"
     } else {
@@ -229,7 +228,7 @@ fn classify(x: int): str {
 
 func TestV2AllPathsReturnMatch(t *testing.T) {
 	errs := checkV2(`
-fn describe(x: int): str {
+fn describe(int x) str {
     match x {
         case 1 -> return "one"
         case 2 -> return "two"
@@ -245,9 +244,9 @@ fn describe(x: int): str {
 func TestV2TypeNarrowing(t *testing.T) {
 	// After "x is str", x should be narrowed to str in the then-branch
 	errs := checkV2(`
-fn process(x: any) {
+fn process(any x) {
     if x is str {
-        var y: str = x
+        var str y = x
     }
 }
 `)
@@ -258,9 +257,9 @@ fn process(x: any) {
 
 func TestV2TypeNarrowingIsinstance(t *testing.T) {
 	errs := checkV2(`
-fn process(x: any) {
+fn process(any x) {
     if isinstance(x, int) {
-        var y: int = x
+        var int y = x
     }
 }
 `)
@@ -273,7 +272,7 @@ func TestV2ValidScript(t *testing.T) {
 	errs := checkV2(`
 import json
 
-fn greet(name: str): str {
+fn greet(str name) str {
     return "Hello, {name}!"
 }
 
@@ -281,7 +280,7 @@ var msg = greet("Alice")
 print(msg)
 
 var numbers = [1, 2, 3]
-var total: int = 0
+var int total = 0
 for n in numbers {
     total = total + n
 }

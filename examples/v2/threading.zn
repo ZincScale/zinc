@@ -3,7 +3,7 @@ import time
 import threading
 
 // Process items in parallel — each runs on a real thread (no GIL)
-fn heavy_compute(n: int): int {
+fn heavy_compute(int n) int {
     time.sleep(0.05)  // simulate work
     return n * n
 }

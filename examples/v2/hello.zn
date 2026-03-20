@@ -1,7 +1,7 @@
 // hello.zn — Zinc v2 hello world
 import sys
 
-fn greet(name: str): str {
+fn greet(str name) str {
     return "Hello, {name}!"
 }
 

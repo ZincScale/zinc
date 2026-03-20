@@ -1,13 +1,13 @@
 // type_checking.zn — Type annotations, is checks, none
 
 // Type annotations
-var name: str = "Alice"
-var age: int = 30
-var scores: list[int] = [95, 87, 92]
-var config: dict = {"debug": true}
+var str name = "Alice"
+var int age = 30
+var list<int> scores = [95, 87, 92]
+var dict config = {"debug": true}
 
 // Type checking with is — transpiler generates isinstance()
-fn describe(x: any) {
+fn describe(any x) {
     if x is str {
         print("string: {x}")
     } else if x is int {

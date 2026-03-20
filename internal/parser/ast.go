@@ -170,22 +170,25 @@ type Annotation struct {
 
 func (a *Annotation) nodeTag() {}
 
-// FieldDecl: [@annotations] [pub] [readonly] Type name [= expr]
+// FieldDecl: var type name [= default]  |  const type name = default  |  init type name
 type FieldDecl struct {
 	Name        string
 	IsPub       bool
 	IsReadonly  bool
+	IsConst     bool // const field (immutable with default)
+	IsInit      bool // init field (set in constructor, frozen after)
 	Type        TypeExpr
 	Default     Expr // may be nil
 	Annotations []*Annotation
 }
 
-// ParamDecl: name: Type [= expr]  OR  name: ...Type (variadic)
+// ParamDecl: [const] type name [= expr]  OR  *args  OR  **kwargs
 type ParamDecl struct {
 	Name     string
 	Type     TypeExpr
 	Default  Expr // nil if no default
 	Variadic bool // true for ...Type params
+	IsConst  bool // true for const params (cannot reassign in body)
 }
 
 // NamedArg: name: expr at a call site
@@ -253,12 +256,13 @@ type BlockStmt struct {
 func (b *BlockStmt) nodeTag() {}
 func (b *BlockStmt) stmtTag() {}
 
-// VarStmt: name := expr — short variable declaration
+// VarStmt: var [type] name = expr  OR  const [type] name = expr
 type VarStmt struct {
 	Line      int // source line number (1-indexed)
 	Name      string
 	Type      TypeExpr   // may be nil (inferred)
 	Value     Expr       // may be nil
+	IsConst   bool       // true for const declarations (immutable)
 	OrHandler *OrHandler // optional or { } handler for failable calls
 }
 

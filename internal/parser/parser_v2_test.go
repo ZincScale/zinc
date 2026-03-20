@@ -56,7 +56,7 @@ print("hello")
 
 func TestV2FnDecl(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(name: str): str {
+fn greet(str name) str {
     return "Hello, {name}!"
 }
 `)
@@ -82,7 +82,7 @@ fn greet(name: str): str {
 }
 
 func TestV2FnSingleExpr(t *testing.T) {
-	prog, errs := parseV2(`fn double(x: int): int = x * 2`)
+	prog, errs := parseV2(`fn double(int x) int = x * 2`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -212,9 +212,9 @@ match command {
 func TestV2DataClass(t *testing.T) {
 	prog, errs := parseV2(`
 data User {
-    name: str
-    email: str
-    age: int = 0
+    var str name
+    var str email
+    var int age = 0
 }
 `)
 	if len(errs) > 0 {
@@ -252,13 +252,13 @@ enum Color {
 func TestV2Class(t *testing.T) {
 	prog, errs := parseV2(`
 class Stack {
-    var items: list[int] = []
+    var list<int> items = []
 
-    fn push(item: int) {
+    fn push(int item) {
         items.append(item)
     }
 
-    fn pop(): int {
+    fn pop() int {
         return items.pop()
     }
 }
@@ -403,7 +403,7 @@ func TestV2StringInterpolation(t *testing.T) {
 }
 
 func TestV2VarWithType(t *testing.T) {
-	prog, errs := parseV2(`var age: int = 30`)
+	prog, errs := parseV2(`var int age = 30`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -443,11 +443,11 @@ import sys
 from pathlib import Path
 
 data Config {
-    host: str
-    port: int = 8080
+    var str host
+    var int port = 8080
 }
 
-fn load_config(path: str): Config {
+fn load_config(str path) Config {
     var text = Path(path).read_text()
     var raw = json.loads(text)
     return Config(raw["host"], raw["port"])
@@ -594,7 +594,7 @@ func TestV2PrivateConvention(t *testing.T) {
 	// _prefix fields should parse fine (just naming convention)
 	prog, errs := parseV2(`
 class Cache {
-    var _data: dict = {}
+    var dict _data = {}
 
     fn _internal_method() {
         print("private")
@@ -638,9 +638,9 @@ with f = open("test.txt") {
 func TestV2ClassInheritance(t *testing.T) {
 	prog, errs := parseV2(`
 class Dog(Animal) {
-    var breed: str
+    var str breed
 
-    fn speak(): str {
+    fn speak() str {
         return "Woof"
     }
 }
@@ -677,7 +677,7 @@ fn flexible(*args, **kwargs) {
 
 func TestV2DefaultArgs(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(name: str, greeting: str = "Hello"): str {
+fn greet(str name, str greeting = "Hello") str {
     return "{greeting}, {name}!"
 }
 `)
@@ -703,7 +703,7 @@ func TestV2MultipleFromImports(t *testing.T) {
 func TestV2Decorator(t *testing.T) {
 	prog, errs := parseV2(`
 @cache
-fn expensive(n: int): int {
+fn expensive(int n) int {
     return n * n
 }
 `)
@@ -720,7 +720,7 @@ func TestV2StaticMethod(t *testing.T) {
 	prog, errs := parseV2(`
 class Math {
     @staticmethod
-    fn add(a: int, b: int): int {
+    fn add(int a, int b) int {
         return a + b
     }
 }
@@ -768,7 +768,7 @@ func TestV2PrintMultiArg(t *testing.T) {
 
 func TestV2ResultFn(t *testing.T) {
 	prog, errs := parseV2(`
-fn parse_age(input: str): Result[int] {
+fn parse_age(str input) Result<int> {
     if not input.isdigit() {
         return Err("must be a number")
     }
@@ -878,8 +878,8 @@ func TestV2TripleQuoteString(t *testing.T) {
 
 func TestV2NestedFunction(t *testing.T) {
 	_, errs := parseV2(`
-fn outer(): int {
-    fn inner(x: int): int {
+fn outer() int {
+    fn inner(int x) int {
         return x * 2
     }
     return inner(5)
@@ -892,7 +892,7 @@ fn outer(): int {
 
 func TestV2Yield(t *testing.T) {
 	prog, errs := parseV2(`
-fn count_up(n: int) {
+fn count_up(int n) {
     for i in range(n) {
         yield i
     }
@@ -926,7 +926,7 @@ func TestV2TupleLiteral(t *testing.T) {
 
 func TestV2ReturnTuple(t *testing.T) {
 	prog, errs := parseV2(`
-fn divmod(a: int, b: int) {
+fn divmod(int a, int b) {
     return a / b, a % b
 }
 `)

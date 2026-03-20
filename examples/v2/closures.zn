@@ -7,13 +7,13 @@ print("double(5) = {double(5)}")
 print("3 + 4 = {add(3, 4)}")
 
 // Higher-order functions
-fn apply(f, x: int): int {
+fn apply(f, int x) int {
     return f(x)
 }
 print("apply(double, 10) = {apply(double, 10)}")
 
 // Closures — capture enclosing scope
-fn make_adder(n: int) {
+fn make_adder(int n) {
     return x -> x + n
 }
 var add5 = make_adder(5)

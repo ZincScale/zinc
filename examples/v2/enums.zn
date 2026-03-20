@@ -13,7 +13,7 @@ enum Color {
     Blue
 }
 
-fn describe_direction(d: Direction): str {
+fn describe_direction(Direction d) str {
     match d {
         case Direction.North -> return "heading north"
         case Direction.South -> return "heading south"
@@ -23,7 +23,7 @@ fn describe_direction(d: Direction): str {
     return "unknown"
 }
 
-fn move(x: int, y: int, d: Direction) {
+fn move(int x, int y, Direction d) {
     match d {
         case Direction.North -> y = y + 1
         case Direction.South -> y = y - 1
