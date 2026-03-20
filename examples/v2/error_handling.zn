@@ -46,6 +46,6 @@ fn connect(str host) {
 try {
     connect("localhost")
     connect("bad-host")
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("Connection failed: {err}")
 }

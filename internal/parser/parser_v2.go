@@ -427,7 +427,7 @@ func (p *Parser) v2ParseWithStmt() *WithStmt {
 	return &WithStmt{Line: line, Resources: resources, Body: body}
 }
 
-// v2ParseTryStmt: try { } catch err: ExType { }
+// v2ParseTryStmt: try { } catch ExType err { }  OR  try { } catch err { }
 func (p *Parser) v2ParseTryStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_TRY)
@@ -438,20 +438,23 @@ func (p *Parser) v2ParseTryStmt() Stmt {
 	}
 
 	p.advance() // consume catch
-	// Parse error binding: err or err: Type
+	// Type-first: catch ExType err { }  OR  untyped: catch err { }
 	errName := ""
 	errType := ""
 	if p.check(lexer.TOKEN_IDENT) {
-		errName = p.advance().Literal
-		if p.check(lexer.TOKEN_COLON) {
-			p.advance()
-			errType = p.expect(lexer.TOKEN_IDENT).Literal
+		first := p.advance().Literal
+		if p.check(lexer.TOKEN_IDENT) {
+			// Two idents: first is type, second is name
+			errType = first
+			errName = p.advance().Literal
+		} else {
+			// One ident: just the name (no type)
+			errName = first
 		}
 	}
 
 	catchBody := p.v2ParseBlock()
 
-	// Map to AST — we'll use a TryStmt node (need to add to AST)
 	return &TryStmt{
 		Line:      line,
 		Body:      tryBody,

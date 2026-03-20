@@ -364,7 +364,7 @@ func TestV2TryCatch(t *testing.T) {
 	prog, errs := parseV2(`
 try {
     var conn = db.connect(url)
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("failed")
 }
 `)

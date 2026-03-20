@@ -357,7 +357,7 @@ for i, record in enumerate(records) {
 ```zinc
 try {
     var conn = db.connect(url)
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("Database down: {err}")
     exit(1)
 }

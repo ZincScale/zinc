@@ -220,7 +220,7 @@ func TestV2TryCatch(t *testing.T) {
 	assertV2Contains(t, `
 try {
     var conn = db.connect(url)
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("failed")
 }
 `,
@@ -567,7 +567,7 @@ print("Using port: {port}")
 
 try {
     var conn = connect(host, port)
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("Connection failed: {err}")
     exit(1)
 }

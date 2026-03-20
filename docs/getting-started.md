@@ -127,7 +127,7 @@ var port = parse_port("8080") Err 80
 ```zinc
 try {
     var conn = db.connect(url)
-} catch err: ConnectionError {
+} catch ConnectionError err {
     print("Failed: {err}")
     exit(1)
 }

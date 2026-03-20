@@ -414,7 +414,7 @@ type DeferStmt struct {
 func (d *DeferStmt) nodeTag() {}
 func (d *DeferStmt) stmtTag() {}
 
-// TryStmt: try ... catch err: ExType ... end
+// TryStmt: try { } catch ExType err { }
 type TryStmt struct {
 	Line      int
 	Body      *BlockStmt
