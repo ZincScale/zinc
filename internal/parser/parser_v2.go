@@ -682,8 +682,45 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			m := p.v2ParseMethodDecl()
 			m.Annotations = annots
 			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_OVERRIDE {
+			// override fn name(...) { ... }
+			p.advance() // consume override
+			m := p.v2ParseMethodDecl()
+			m.IsPub = true // override methods are always public
+			m.Annotations = append(m.Annotations, &Annotation{Name: "Override"})
+			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_PUB {
+			next := p.peekAt(1)
+			if next.Type == lexer.TOKEN_FN {
+				// pub fn name(...) { ... }
+				p.advance() // consume pub
+				m := p.v2ParseMethodDecl()
+				m.IsPub = true
+				methods = append(methods, m)
+			} else if next.Type == lexer.TOKEN_OVERRIDE {
+				// pub override fn name(...) { ... } — not needed, override implies pub
+				p.advance() // consume pub
+				p.advance() // consume override
+				m := p.v2ParseMethodDecl()
+				m.IsPub = true
+				m.Annotations = append(m.Annotations, &Annotation{Name: "Override"})
+				methods = append(methods, m)
+			} else {
+				// pub var type name — public field
+				p.advance() // consume pub
+				f := p.v2ParseFieldDecl()
+				f.IsPub = true
+				fields = append(fields, f)
+			}
+		} else if tok.Type == lexer.TOKEN_READONLY || (tok.Type == lexer.TOKEN_IDENT && tok.Literal == "read" && p.peekAt(1).Type == lexer.TOKEN_VAR) {
+			// read var type name — read-only field
+			p.advance() // consume read
+			f := p.v2ParseFieldDecl()
+			f.IsReadonly = true
+			fields = append(fields, f)
 		} else if tok.Type == lexer.TOKEN_FN {
 			m := p.v2ParseMethodDecl()
+			m.IsPub = false // private by default
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
@@ -712,8 +749,7 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	}
 
 	body := p.v2ParseBlock()
-	return &MethodDecl{Name: name, Params: params, ReturnType: retType, Body: body,
-		IsPub: true} // v2: all methods are public (Python convention)
+	return &MethodDecl{Name: name, Params: params, ReturnType: retType, Body: body}
 }
 
 // v2ParseFieldDecl: var type name [= default]  |  const type name = default  |  init type name

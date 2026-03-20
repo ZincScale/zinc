@@ -64,11 +64,12 @@ const (
 	TOKEN_DATA
 	TOKEN_SPAWN
 	TOKEN_USE
-	TOKEN_READONLY
-	TOKEN_END   // end (block closer)
-	TOKEN_TRY   // try
-	TOKEN_CATCH // catch
-	TOKEN_RAISE // raise
+	TOKEN_READONLY // read (read-only field)
+	TOKEN_OVERRIDE // override (method override)
+	TOKEN_END      // end (block closer)
+	TOKEN_TRY      // try
+	TOKEN_CATCH    // catch
+	TOKEN_RAISE    // raise (throw)
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
@@ -167,7 +168,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_DATA:      "data",
 	TOKEN_SPAWN:     "spawn",
 	TOKEN_USE:       "use",
-	TOKEN_READONLY:  "readonly",
+	TOKEN_READONLY:  "read",
+	TOKEN_OVERRIDE:  "override",
 	TOKEN_END:       "end",
 	TOKEN_TRY:       "try",
 	TOKEN_CATCH:     "catch",
@@ -278,7 +280,7 @@ var keywords = map[string]TokenType{
 	"data":      TOKEN_DATA,
 	"spawn":     TOKEN_SPAWN,
 	"use":       TOKEN_USE,
-	"readonly":  TOKEN_READONLY,
+	"override":  TOKEN_OVERRIDE,
 	"end":       TOKEN_END,
 	"try":       TOKEN_TRY,
 	"catch":     TOKEN_CATCH,

@@ -23,9 +23,10 @@ import (
 
 // Generator produces Java source from a Zinc AST.
 type Generator struct {
-	buf       strings.Builder
-	indent    int
-	className string // derived from filename or "Main"
+	buf              strings.Builder
+	indent           int
+	className        string // derived from filename or "Main"
+	pendingAccessors []fieldAccessor
 }
 
 // New creates a new Java code generator.
@@ -150,6 +151,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	g.indent++
 
 	// Fields
+	g.pendingAccessors = nil
 	for _, f := range cls.Fields {
 		g.emitFieldDecl(f)
 	}
@@ -162,6 +164,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		g.emitCtor(cls.Name, cls.Ctor, cls.Parents)
 	}
 
+	// Getters/setters
+	g.emitAccessors()
+
 	// Methods
 	for _, m := range cls.Methods {
 		g.emitMethodDecl(m)
@@ -173,14 +178,12 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 }
 
 func (g *Generator) emitFieldDecl(f *parser.FieldDecl) {
-	vis := "private"
-	if f.IsPub {
-		vis = "public"
-	}
 	typeName := "Object"
 	if f.Type != nil {
 		typeName = g.formatType(f.Type)
 	}
+
+	// const → public static final
 	if f.IsConst {
 		if f.Default != nil {
 			g.writeln("public static final %s %s = %s;", typeName, f.Name, g.formatExpr(f.Default))
@@ -189,16 +192,51 @@ func (g *Generator) emitFieldDecl(f *parser.FieldDecl) {
 		}
 		return
 	}
+
+	// init → private final + getter
 	if f.IsInit {
-		// init fields → final (set in constructor, frozen after)
-		g.writeln("%s final %s %s;", vis, typeName, f.Name)
+		g.writeln("private final %s %s;", typeName, f.Name)
+		g.pendingAccessors = append(g.pendingAccessors, fieldAccessor{f.Name, typeName, true, false})
 		return
 	}
+
+	// All fields are private — always
 	if f.Default != nil {
-		g.writeln("%s %s %s = %s;", vis, typeName, f.Name, g.formatExpr(f.Default))
+		g.writeln("private %s %s = %s;", typeName, f.Name, g.formatExpr(f.Default))
 	} else {
-		g.writeln("%s %s %s;", vis, typeName, f.Name)
+		g.writeln("private %s %s;", typeName, f.Name)
 	}
+
+	// pub → getter + setter, read → getter only
+	if f.IsPub {
+		g.pendingAccessors = append(g.pendingAccessors, fieldAccessor{f.Name, typeName, true, true})
+	} else if f.IsReadonly {
+		g.pendingAccessors = append(g.pendingAccessors, fieldAccessor{f.Name, typeName, true, false})
+	}
+}
+
+type fieldAccessor struct {
+	name     string
+	typeName string
+	getter   bool
+	setter   bool
+}
+
+func (g *Generator) emitAccessors() {
+	if len(g.pendingAccessors) == 0 {
+		return
+	}
+	g.writeln("")
+	for _, a := range g.pendingAccessors {
+		capName := strings.ToUpper(a.name[:1]) + a.name[1:]
+		if a.getter {
+			g.writeln("public %s get%s() { return this.%s; }", a.typeName, capName, a.name)
+		}
+		if a.setter {
+			g.writeln("public void set%s(%s %s) { this.%s = %s; }", capName, a.typeName, a.name, a.name, a.name)
+		}
+	}
+	g.pendingAccessors = nil
 }
 
 func (g *Generator) emitCtor(className string, ctor *parser.CtorDecl, parents []string) {

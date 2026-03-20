@@ -356,6 +356,107 @@ if a != b {
 	)
 }
 
+// =============================================================================
+// Visibility
+// =============================================================================
+
+func TestPubFieldGeneratesGetterSetter(t *testing.T) {
+	assertContains(t, `
+class User {
+    pub var String name
+}
+`,
+		`private String name;`,
+		`public String getName()`,
+		`public void setName(String name)`,
+	)
+}
+
+func TestReadFieldGeneratesGetterOnly(t *testing.T) {
+	result := transpile(`
+class User {
+    read var String email
+}
+`)
+	if !strings.Contains(result, "private String email;") {
+		t.Errorf("expected private field\ngot:\n%s", result)
+	}
+	if !strings.Contains(result, "public String getEmail()") {
+		t.Errorf("expected getter\ngot:\n%s", result)
+	}
+	if strings.Contains(result, "setEmail") {
+		t.Errorf("read field should NOT have setter\ngot:\n%s", result)
+	}
+}
+
+func TestInitFieldGeneratesGetterOnly(t *testing.T) {
+	result := transpile(`
+class User {
+    init String id
+}
+`)
+	if !strings.Contains(result, "private final String id;") {
+		t.Errorf("expected private final field\ngot:\n%s", result)
+	}
+	if !strings.Contains(result, "public String getId()") {
+		t.Errorf("expected getter\ngot:\n%s", result)
+	}
+	if strings.Contains(result, "setId") {
+		t.Errorf("init field should NOT have setter\ngot:\n%s", result)
+	}
+}
+
+func TestPrivateFieldNoAccessors(t *testing.T) {
+	result := transpile(`
+class Counter {
+    var int count = 0
+}
+`)
+	if !strings.Contains(result, "private int count = 0;") {
+		t.Errorf("expected private field\ngot:\n%s", result)
+	}
+	if strings.Contains(result, "getCount") || strings.Contains(result, "setCount") {
+		t.Errorf("private field should NOT have accessors\ngot:\n%s", result)
+	}
+}
+
+func TestPubMethod(t *testing.T) {
+	assertContains(t, `
+class Service {
+    pub fn process() {
+        print("working")
+    }
+}
+`,
+		`public void process()`,
+	)
+}
+
+func TestPrivateMethodDefault(t *testing.T) {
+	assertContains(t, `
+class Service {
+    fn helper() {
+        print("internal")
+    }
+}
+`,
+		`private void helper()`,
+	)
+}
+
+func TestOverrideMethod(t *testing.T) {
+	assertContains(t, `
+class Dog : Animal {
+    override fn speak() String {
+        return "Woof!"
+    }
+}
+`,
+		`@Override`,
+		`public String speak()`,
+	)
+}
+
 // TODO: TestReferenceIdentity and TestReferenceNonIdentity
 // Need lexer/parser support for === and !== tokens first.
 // Codegen already handles them in formatBinaryExpr.
