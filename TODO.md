@@ -90,6 +90,10 @@ Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing P
 - `const` — used everywhere (locals, params, class fields with defaults). Assign once, cannot reassign.
 - `init` — class fields only. No default value, set in constructor, frozen after.
 
+**Collections and `const`:**
+- `const` only controls reassignment — collection contents remain mutable (don't fight Python's runtime).
+- `const list[int] nums = [1, 2, 3]` — can `nums.append(4)`, cannot `nums = [5, 6, 7]`
+
 ### Other language features
 
 - [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design docs)
