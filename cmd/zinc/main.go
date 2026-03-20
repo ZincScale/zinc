@@ -98,17 +98,29 @@ func main() {
 			for j := i + 1; j < len(args); j++ {
 				if args[j] == "--verbose" || args[j] == "-v" {
 					verbose = true
+				} else if args[j] == "--" {
+					break
 				} else if !strings.HasPrefix(args[j], "-") && target == "" {
 					target = args[j]
 				}
 			}
-			if target == "" || !strings.HasSuffix(target, ".zn") {
-				fmt.Fprintln(os.Stderr, "usage: zinc run <file.zn> [-- args...]")
+			if target == "" {
+				fmt.Fprintln(os.Stderr, "usage: zinc run <file.zn|dir> [-- args...]")
 				os.Exit(1)
 			}
 
+			// For single file: also check if sibling .zn files exist (same directory)
+			buildTarget := target
+			if !isDir(target) && strings.HasSuffix(target, ".zn") {
+				dir := filepath.Dir(target)
+				siblings := findZnFiles(dir)
+				if len(siblings) > 1 {
+					buildTarget = dir // build whole directory
+				}
+			}
+
 			outDir := filepath.Join(os.TempDir(), "zinc-run-"+filepath.Base(strings.TrimSuffix(target, ".zn")))
-			javaFiles, err := transpileToJava(target, outDir, verbose)
+			javaFiles, err := transpileToJava(buildTarget, outDir, verbose)
 			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
@@ -118,8 +130,23 @@ func main() {
 				os.Exit(1)
 			}
 
-			// Derive class name from filename
+			// Derive class name — check if package was declared
 			className := classNameFromFile(target)
+			// Peek at the source to check for package declaration
+			if src, err := os.ReadFile(target); err == nil {
+				for _, line := range strings.Split(string(src), "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "package ") {
+						pkg := strings.TrimSuffix(strings.TrimPrefix(line, "package "), ";")
+						pkg = strings.TrimSpace(pkg)
+						className = pkg + "." + className
+						break
+					}
+					if line != "" && !strings.HasPrefix(line, "//") {
+						break // package must be first non-comment line
+					}
+				}
+			}
 
 			// Collect script args (after --)
 			var scriptArgs []string
@@ -203,9 +230,52 @@ func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 	return prog, nil
 }
 
-// transpileToJava transpiles a .zn file to .java files in outDir.
+// transpileToJava transpiles .zn file(s) to .java files in outDir.
+// Accepts a single file or a directory (scans for all .zn files).
 // Each data class, enum, and class gets its own .java file.
-func transpileToJava(inFile, outDir string, verbose bool) ([]string, error) {
+func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access %s: %w", target, err)
+	}
+
+	var znFiles []string
+	if info.IsDir() {
+		// Scan directory for .zn files
+		entries, err := os.ReadDir(target)
+		if err != nil {
+			return nil, fmt.Errorf("reading directory %s: %w", target, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".zn") {
+				znFiles = append(znFiles, filepath.Join(target, e.Name()))
+			}
+		}
+		if len(znFiles) == 0 {
+			return nil, fmt.Errorf("no .zn files found in %s", target)
+		}
+	} else {
+		znFiles = []string{target}
+	}
+
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating output dir: %w", err)
+	}
+
+	var allJavaFiles []string
+	for _, znFile := range znFiles {
+		javaFiles, err := transpileSingleFile(znFile, outDir, verbose)
+		if err != nil {
+			return nil, err
+		}
+		allJavaFiles = append(allJavaFiles, javaFiles...)
+	}
+
+	return allJavaFiles, nil
+}
+
+// transpileSingleFile transpiles one .zn file to .java files in outDir.
+func transpileSingleFile(inFile, outDir string, verbose bool) ([]string, error) {
 	prog, err := parseAndCheck(inFile, verbose)
 	if err != nil {
 		return nil, err
@@ -215,13 +285,18 @@ func transpileToJava(inFile, outDir string, verbose bool) ([]string, error) {
 	gen := codegen_java.New()
 	outputFiles := gen.GenerateFiles(prog, className)
 
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating output dir: %w", err)
+	// If package is declared, create subdirectory structure
+	pkgDir := outDir
+	if prog.Package != nil {
+		pkgDir = filepath.Join(outDir, strings.ReplaceAll(prog.Package.Path, ".", string(filepath.Separator)))
+		if err := os.MkdirAll(pkgDir, 0755); err != nil {
+			return nil, fmt.Errorf("creating package dir: %w", err)
+		}
 	}
 
 	var javaFiles []string
 	for _, of := range outputFiles {
-		path := filepath.Join(outDir, of.Name)
+		path := filepath.Join(pkgDir, of.Name)
 		if err := os.WriteFile(path, []byte(of.Content), 0644); err != nil {
 			return nil, fmt.Errorf("writing %s: %w", path, err)
 		}
@@ -268,6 +343,25 @@ func runJava(classDir, className string, scriptArgs []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	return cmd.Run()
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func findZnFiles(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".zn") {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
+	return files
 }
 
 // classNameFromFile derives a Java class name from a .zn filename.

@@ -26,13 +26,17 @@ func (p *Parser) ParseV2() *Program {
 
 	var topStmts []Stmt
 
+	// Optional package declaration: package com.example.myapp
+	if p.check(lexer.TOKEN_PACKAGE) {
+		prog.Package = p.v2ParsePackageDecl()
+		p.skipSemis()
+	}
+
 	for !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 		switch tok.Type {
 		case lexer.TOKEN_IMPORT:
 			prog.Imports = append(prog.Imports, p.v2ParseImport())
-		case lexer.TOKEN_FROM:
-			prog.Imports = append(prog.Imports, p.v2ParseFromImport()...)
 		case lexer.TOKEN_AT:
 			annots := p.v2ParseAnnotations()
 			if p.check(lexer.TOKEN_FN) {
@@ -880,48 +884,32 @@ func (p *Parser) v2ParseEnumDecl() *EnumDecl {
 
 // --- Imports -----------------------------------------------------------------
 
-// v2ParseImport: import json  OR  import os  (bare identifiers, Python-style)
-func (p *Parser) v2ParseImport() *ImportDecl {
-	p.expect(lexer.TOKEN_IMPORT)
-	// Parse dotted path: os, os.path, json, etc.
+// v2ParsePackageDecl: package com.example.myapp
+func (p *Parser) v2ParsePackageDecl() *PackageDecl {
+	p.expect(lexer.TOKEN_PACKAGE)
 	path := p.expect(lexer.TOKEN_IDENT).Literal
 	for p.check(lexer.TOKEN_DOT) {
 		p.advance()
 		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
 	}
-	alias := ""
-	if p.check(lexer.TOKEN_AS) {
-		p.advance()
-		alias = p.expect(lexer.TOKEN_IDENT).Literal
-	}
-	return &ImportDecl{Path: path, Alias: alias}
+	return &PackageDecl{Path: path}
 }
 
-// v2ParseFromImport: from pathlib import Path  OR  from os.path import join, exists
-func (p *Parser) v2ParseFromImport() []*ImportDecl {
-	p.expect(lexer.TOKEN_FROM)
+// v2ParseImport: import java.util.List  OR  import java.util.*
+func (p *Parser) v2ParseImport() *ImportDecl {
+	p.expect(lexer.TOKEN_IMPORT)
 	path := p.expect(lexer.TOKEN_IDENT).Literal
 	for p.check(lexer.TOKEN_DOT) {
 		p.advance()
-		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
-	}
-	p.expect(lexer.TOKEN_IMPORT)
-
-	var imports []*ImportDecl
-	for {
-		name := p.expect(lexer.TOKEN_IDENT).Literal
-		alias := ""
-		if p.check(lexer.TOKEN_AS) {
+		if p.check(lexer.TOKEN_STAR) {
+			// import java.util.*
 			p.advance()
-			alias = p.expect(lexer.TOKEN_IDENT).Literal
-		}
-		imports = append(imports, &ImportDecl{Path: "from:" + path + ":" + name, Alias: alias})
-		if !p.check(lexer.TOKEN_COMMA) {
+			path += ".*"
 			break
 		}
-		p.advance()
+		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
 	}
-	return imports
+	return &ImportDecl{Path: path}
 }
 
 // --- Annotations/Decorators --------------------------------------------------

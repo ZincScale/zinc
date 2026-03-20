@@ -276,28 +276,24 @@ class Stack {
 
 func TestV2Import(t *testing.T) {
 	prog, errs := parseV2(`
-import json
-import os.path
-from pathlib import Path
-from requests import get as http_get
+import java.util.List
+import java.nio.file.Path
+import java.util.*
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	if len(prog.Imports) != 4 {
-		t.Fatalf("expected 4 imports, got %d", len(prog.Imports))
+	if len(prog.Imports) != 3 {
+		t.Fatalf("expected 3 imports, got %d", len(prog.Imports))
 	}
-	if prog.Imports[0].Path != "json" {
-		t.Errorf("expected 'json', got %q", prog.Imports[0].Path)
+	if prog.Imports[0].Path != "java.util.List" {
+		t.Errorf("expected 'java.util.List', got %q", prog.Imports[0].Path)
 	}
-	if prog.Imports[1].Path != "os.path" {
-		t.Errorf("expected 'os.path', got %q", prog.Imports[1].Path)
+	if prog.Imports[1].Path != "java.nio.file.Path" {
+		t.Errorf("expected 'java.nio.file.Path', got %q", prog.Imports[1].Path)
 	}
-	if !strings.HasPrefix(prog.Imports[2].Path, "from:pathlib:Path") {
-		t.Errorf("expected from-import for Path, got %q", prog.Imports[2].Path)
-	}
-	if prog.Imports[3].Alias != "http_get" {
-		t.Errorf("expected alias 'http_get', got %q", prog.Imports[3].Alias)
+	if prog.Imports[2].Path != "java.util.*" {
+		t.Errorf("expected 'java.util.*', got %q", prog.Imports[2].Path)
 	}
 }
 
@@ -434,9 +430,8 @@ var result = orders.filter(o -> o.status == "active").map(o -> o.amount).sum()
 func TestV2FullScript(t *testing.T) {
 	// A complete script combining multiple v2 features
 	_, errs := parseV2(`
-import json
-import sys
-from pathlib import Path
+import java.nio.file.Files
+import java.nio.file.Path
 
 data Config(String host, int port = 8080)
 
@@ -683,13 +678,16 @@ fn greet(str name, str greeting = "Hello") str {
 	}
 }
 
-func TestV2MultipleFromImports(t *testing.T) {
-	prog, errs := parseV2(`from os.path import join, exists, basename`)
+func TestV2WildcardImport(t *testing.T) {
+	prog, errs := parseV2(`import java.util.*`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	if len(prog.Imports) != 3 {
-		t.Fatalf("expected 3 imports, got %d", len(prog.Imports))
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+	if prog.Imports[0].Path != "java.util.*" {
+		t.Errorf("expected 'java.util.*', got %q", prog.Imports[0].Path)
 	}
 }
 

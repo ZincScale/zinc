@@ -47,7 +47,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.indent = 0
 	g.className = className
 
-	g.emitImports(prog.Imports)
+	g.emitPackageAndImports(prog.Package, prog.Imports)
 
 	g.writeln("public class %s {", className)
 	g.indent++
@@ -88,7 +88,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		case *parser.DataClassDecl:
 			g.buf.Reset()
 			g.indent = 0
-			g.emitImports(prog.Imports)
+			g.emitPackageAndImports(prog.Package, prog.Imports)
 			g.emitDataClassDecl(decl)
 			files = append(files, OutputFile{
 				Name:    decl.Name + ".java",
@@ -97,7 +97,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		case *parser.EnumDecl:
 			g.buf.Reset()
 			g.indent = 0
-			g.emitImports(prog.Imports)
+			g.emitPackageAndImports(prog.Package, prog.Imports)
 			g.emitEnumDecl(decl)
 			files = append(files, OutputFile{
 				Name:    decl.Name + ".java",
@@ -106,7 +106,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		case *parser.ClassDecl:
 			g.buf.Reset()
 			g.indent = 0
-			g.emitImports(prog.Imports)
+			g.emitPackageAndImports(prog.Package, prog.Imports)
 			g.emitClassDeclTopLevel(decl)
 			files = append(files, OutputFile{
 				Name:    decl.Name + ".java",
@@ -115,7 +115,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		case *parser.InterfaceDecl:
 			g.buf.Reset()
 			g.indent = 0
-			g.emitImports(prog.Imports)
+			g.emitPackageAndImports(prog.Package, prog.Imports)
 			g.emitInterfaceDecl(decl)
 			files = append(files, OutputFile{
 				Name:    decl.Name + ".java",
@@ -133,7 +133,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		g.buf.Reset()
 		g.indent = 0
 		g.className = className
-		g.emitImports(prog.Imports)
+		g.emitPackageAndImports(prog.Package, prog.Imports)
 
 		g.writeln("public class %s {", className)
 		g.indent++
@@ -223,7 +223,11 @@ var autoImports = []string{
 	"java.util.stream.*",
 }
 
-func (g *Generator) emitImports(imports []*parser.ImportDecl) {
+func (g *Generator) emitPackageAndImports(pkg *parser.PackageDecl, imports []*parser.ImportDecl) {
+	if pkg != nil {
+		g.writeln("package %s;", pkg.Path)
+		g.writeln("")
+	}
 	for _, imp := range autoImports {
 		g.writeln("import %s;", imp)
 	}
@@ -231,6 +235,11 @@ func (g *Generator) emitImports(imports []*parser.ImportDecl) {
 		g.writeln("import %s;", imp.Path)
 	}
 	g.writeln("")
+}
+
+// emitImports is a convenience for codegen that doesn't have a package.
+func (g *Generator) emitImports(imports []*parser.ImportDecl) {
+	g.emitPackageAndImports(nil, imports)
 }
 
 // --- Declarations ------------------------------------------------------------

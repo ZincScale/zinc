@@ -705,6 +705,51 @@ class Dog : Animal {
 	)
 }
 
+// =============================================================================
+// Package declarations
+// =============================================================================
+
+func TestPackageDeclaration(t *testing.T) {
+	src := `
+package com.example.myapp
+
+print("hello")
+`
+	lex := lexer.New(src)
+	tokens := lex.Tokenize()
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors)
+	}
+	if prog.Package == nil {
+		t.Fatal("expected package declaration")
+	}
+	if prog.Package.Path != "com.example.myapp" {
+		t.Errorf("expected package 'com.example.myapp', got %q", prog.Package.Path)
+	}
+
+	gen := New()
+	result := gen.Generate(prog, "Main")
+	if !strings.Contains(result, "package com.example.myapp;") {
+		t.Errorf("expected package statement\ngot:\n%s", result)
+	}
+}
+
+func TestImportDottedPath(t *testing.T) {
+	assertContains(t,
+		`import java.time.Instant`,
+		`import java.time.Instant;`,
+	)
+}
+
+func TestImportWildcard(t *testing.T) {
+	assertContains(t,
+		`import java.nio.file.*`,
+		`import java.nio.file.*;`,
+	)
+}
+
 func TestReferenceIdentity(t *testing.T) {
 	assertContains(t, `
 if a === b {
