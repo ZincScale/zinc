@@ -126,3 +126,58 @@ match status {
     case _ -> log_info(status)
 }
 ```
+
+### Record Destructuring
+
+Destructure `data` class (record) fields directly in match cases:
+
+```zinc
+match shape {
+    case Circle(r) -> Math.PI * r ** 2
+    case Rect(w, h) -> w * h
+    case Triangle(b, h) -> 0.5 * b * h
+}
+```
+
+Nested destructuring:
+
+```zinc
+match event {
+    case Click(Point(x, y)) -> print("clicked at {x}, {y}")
+    case KeyPress(key) -> print("pressed {key}")
+}
+```
+
+### Guard Clauses
+
+Add conditions to match cases with `if`:
+
+```zinc
+match value {
+    case int n if n > 0 -> print("positive: {n}")
+    case int n if n < 0 -> print("negative: {n}")
+    case int n -> print("zero")
+    case _ -> print("not an int")
+}
+```
+
+## Match Expressions
+
+`match` can return a value — use it on the right side of an assignment:
+
+```zinc
+var float area = match shape {
+    case Circle(r) -> Math.PI * r ** 2
+    case Rect(w, h) -> w * h
+    case Triangle(b, h) -> 0.5 * b * h
+}
+
+var str label = match status {
+    case 200 -> "OK"
+    case 404 -> "Not Found"
+    case 500 -> "Server Error"
+    case _ -> "Unknown"
+}
+```
+
+Match expressions must be exhaustive — all cases must be covered, or a `case _` default is required.
