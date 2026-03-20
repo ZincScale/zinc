@@ -63,9 +63,39 @@ Typed Python with explicit blocks. Transpiles `.zn` → `.py`. Free-threaded Pyt
 
 ## Next
 
+### Type-first declaration syntax
+Consistent `<type> <name>` ordering everywhere (Java/C#/Dart-style), replacing Python-style `<name>: <type>`.
+
+**Variable declarations:**
+- `int x = 5` — explicit type, mutable
+- `var x = 5` — inferred type, mutable (`var` = type inference only)
+- `init int x = 5` — explicit type, immutable after assignment
+- `init x = 5` — inferred type, immutable after assignment
+
+**Nullable types:**
+- `int? x = none` — nullable, transpiles to `Optional[int]`
+- `str? name = none` — safe navigation: `name?.upper()` short-circuits to `none`
+
+**Function signatures:**
+- `fn greet(str name) str` — return type after params, no arrow
+- `fn greet(init str name) str` — param cannot be reassigned in body
+- `fn find(str key) str?` — nullable return type
+
+**Class fields:**
+- `const str NAME = "default"` — compile-time constant
+- `init str name` — set in constructor, frozen after
+- `str name` — mutable field
+
+**`init` semantics:**
+- Locals: must assign at declaration, cannot reassign after
+- Params: cannot reassign within function body
+- Class fields: set in constructor, frozen after
+- No deferred assignment (no dataflow analysis needed)
+
+### Other language features
+
 - [ ] Zinc Flow — lightweight NiFi-inspired flow processing (see design docs)
 - [ ] `data` classes with methods — `data` auto-generates `__init__`, `__repr__`, `__eq__`, `__hash__`, `copy()` from fields; all fields frozen (immutable); methods and everything else work same as `class`. Transpiles to `@dataclass(frozen=True)` + `copy()` via `dataclasses.replace()`
-- [ ] Nullable types — `Type?` syntax, transpiles to `Optional[Type]`. Safe navigation `?.` operator (short-circuits to `none` if left side is `none`). Kotlin/Dart/Swift-style.
 - [ ] Dict merge with `+` operator — `a + b` returns new dict (Kotlin-style), transpiles to Python `a | b`
 - [ ] Chained comparisons (`0 < x < 10`)
 - [ ] async / await
