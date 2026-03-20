@@ -19,23 +19,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
-	"zinc/internal/codegen_python"
+	"zinc/internal/codegen_java"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 )
 
-// runREPLV2 starts an interactive Zinc v2 REPL.
-// Each input is transpiled to Python and executed in a persistent Python process.
+// runREPLV2 starts an interactive Zinc REPL.
+// Each input is transpiled to Java, compiled, and executed.
 func runREPLV2() {
-	fmt.Println("Zinc v2 REPL — type Zinc code, see Python output")
-	fmt.Println("Type 'exit' or Ctrl-D to quit, ':py' to see generated Python")
+	fmt.Println("Zinc v3 REPL — type Zinc code, see Java output")
+	fmt.Println("Type 'exit' or Ctrl-D to quit, ':java' to see generated Java")
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	var history []string // accumulate declarations for context
-	showPy := false
+	var history []string
+	showJava := false
+	tmpDir := filepath.Join(os.TempDir(), "zinc-repl")
+	os.MkdirAll(tmpDir, 0755)
 
 	for {
 		fmt.Print("zinc> ")
@@ -52,17 +55,17 @@ func runREPLV2() {
 		if trimmed == "exit" || trimmed == "quit" {
 			break
 		}
-		if trimmed == ":py" {
-			showPy = !showPy
-			if showPy {
-				fmt.Println("  [showing generated Python]")
+		if trimmed == ":java" {
+			showJava = !showJava
+			if showJava {
+				fmt.Println("  [showing generated Java]")
 			} else {
-				fmt.Println("  [hiding generated Python]")
+				fmt.Println("  [hiding generated Java]")
 			}
 			continue
 		}
 
-		// For multi-line input (blocks), collect until braces balance
+		// Multi-line input (blocks)
 		input := line
 		braceDepth := strings.Count(input, "{") - strings.Count(input, "}")
 		for braceDepth > 0 {
@@ -75,7 +78,7 @@ func runREPLV2() {
 			braceDepth += strings.Count(next, "{") - strings.Count(next, "}")
 		}
 
-		// Build full source: history (declarations) + current input
+		// Build full source
 		fullSrc := strings.Join(history, "\n") + "\n" + input
 
 		// Lex + Parse
@@ -93,32 +96,41 @@ func runREPLV2() {
 			continue
 		}
 
-		// Generate Python
-		gen := codegen_python.New()
-		pySrc := gen.GenerateV2(prog)
+		// Generate Java
+		gen := codegen_java.New()
+		javaSrc := gen.Generate(prog, "ZincRepl")
 
-		if showPy {
-			fmt.Println("  --- Python ---")
-			for _, pyLine := range strings.Split(pySrc, "\n") {
-				if strings.TrimSpace(pyLine) != "" {
-					fmt.Printf("  %s\n", pyLine)
+		if showJava {
+			fmt.Println("  --- Java ---")
+			for _, jLine := range strings.Split(javaSrc, "\n") {
+				if strings.TrimSpace(jLine) != "" {
+					fmt.Printf("  %s\n", jLine)
 				}
 			}
 			fmt.Println("  ---")
 		}
 
-		// Execute with Python
-		cmd := exec.Command("python3", "-c", pySrc)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
+		// Write, compile, run
+		javaFile := filepath.Join(tmpDir, "ZincRepl.java")
+		os.WriteFile(javaFile, []byte(javaSrc), 0644)
 
-		// If input was a declaration (fn, class, data, enum, const, import),
-		// add to history so future inputs have context
+		compileCmd := exec.Command("javac", "-d", tmpDir, javaFile)
+		compileCmd.Stderr = os.Stderr
+		if err := compileCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "  compile error\n")
+			continue
+		}
+
+		runCmd := exec.Command("java", "-cp", tmpDir, "ZincRepl")
+		runCmd.Stdout = os.Stdout
+		runCmd.Stderr = os.Stderr
+		runCmd.Run()
+
+		// Track declarations for context
 		if strings.HasPrefix(trimmed, "fn ") || strings.HasPrefix(trimmed, "class ") ||
 			strings.HasPrefix(trimmed, "data ") || strings.HasPrefix(trimmed, "enum ") ||
 			strings.HasPrefix(trimmed, "const ") || strings.HasPrefix(trimmed, "import ") ||
-			strings.HasPrefix(trimmed, "from ") || strings.HasPrefix(trimmed, "var ") {
+			strings.HasPrefix(trimmed, "var ") {
 			history = append(history, input)
 		}
 	}

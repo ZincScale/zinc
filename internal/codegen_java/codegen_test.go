@@ -476,24 +476,23 @@ if x is String {
 // =============================================================================
 
 func TestDataClass(t *testing.T) {
-	assertContains(t, `
-data User {
-    var String name
-    var int age
-}
-`,
+	assertContains(t,
+		`data User(String name, int age)`,
 		`public record User(String name, int age) {`,
 	)
 }
 
-func TestDataClassFloat(t *testing.T) {
-	assertContains(t, `
-data Point {
-    var double x
-    var double y
-}
-`,
+func TestDataClassWithDefault(t *testing.T) {
+	assertContains(t,
+		`data Point(double x, double y)`,
 		`public record Point(double x, double y) {`,
+	)
+}
+
+func TestDataClassOneLiner(t *testing.T) {
+	assertContains(t,
+		`data Config(String host, int port = 8080)`,
+		`public record Config(String host, int port) {`,
 	)
 }
 

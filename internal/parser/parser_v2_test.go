@@ -211,11 +211,7 @@ match command {
 
 func TestV2DataClass(t *testing.T) {
 	prog, errs := parseV2(`
-data User {
-    var str name
-    var str email
-    var int age = 0
-}
+data User(String name, String email, int age = 0)
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -442,12 +438,9 @@ import json
 import sys
 from pathlib import Path
 
-data Config {
-    var str host
-    var int port = 8080
-}
+data Config(String host, int port = 8080)
 
-fn load_config(str path) Config {
+fn load_config(String path) Config {
     var text = Path(path).read_text()
     var raw = json.loads(text)
     return Config(raw["host"], raw["port"])
@@ -1187,11 +1180,7 @@ class Config {
 
 func TestV2DataClassWithVar(t *testing.T) {
 	prog, errs := parseV2(`
-data Point {
-    var int x
-    var int y
-    var str label = "origin"
-}
+data Point(int x, int y, String label = "origin")
 `)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)

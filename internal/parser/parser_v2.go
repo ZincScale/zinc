@@ -776,34 +776,70 @@ func (p *Parser) v2ParseFieldDecl() *FieldDecl {
 	return &FieldDecl{Name: name, Type: typ, Default: def, IsConst: isConst, IsInit: isInit}
 }
 
-// v2ParseDataClassDecl: data Name { var/const/init type name ... }
+// v2ParseDataClassDecl: data Name(Type field, Type field = default) [{ methods }]
 func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_DATA)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 
-	p.expect(lexer.TOKEN_LBRACE)
+	// Parse record-style params: data User(String name, int age = 0)
+	p.expect(lexer.TOKEN_LPAREN)
 	var params []*FieldDecl
-	p.skipSemis()
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_FN) && !p.check(lexer.TOKEN_EOF) {
-		tok := p.peek()
-		if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
-			f := p.v2ParseFieldDecl()
-			params = append(params, f)
-		} else {
-			break
+	if !p.check(lexer.TOKEN_RPAREN) {
+		params = append(params, p.v2ParseDataClassParam())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			if p.check(lexer.TOKEN_RPAREN) {
+				break // trailing comma
+			}
+			params = append(params, p.v2ParseDataClassParam())
 		}
-		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+
+	// Optional parents: data User(String name) : Serializable
+	var parents []string
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		}
 	}
 
+	// Optional body with methods: data User(String name) { fn ... }
 	var methods []*MethodDecl
-	for p.check(lexer.TOKEN_FN) {
-		methods = append(methods, p.v2ParseMethodDecl())
+	if p.check(lexer.TOKEN_LBRACE) {
+		p.advance()
 		p.skipSemis()
+		for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+			if p.peek().Type == lexer.TOKEN_PUB {
+				p.advance()
+				m := p.v2ParseMethodDecl()
+				m.IsPub = true
+				methods = append(methods, m)
+			} else {
+				methods = append(methods, p.v2ParseMethodDecl())
+			}
+			p.skipSemis()
+		}
+		p.expect(lexer.TOKEN_RBRACE)
 	}
 
-	p.expect(lexer.TOKEN_RBRACE)
-	return &DataClassDecl{Line: line, Name: name, Params: params, Methods: methods}
+	return &DataClassDecl{Line: line, Name: name, TypeParams: nil, Parents: parents, Params: params, Methods: methods}
+}
+
+// v2ParseDataClassParam: Type name [= default]
+func (p *Parser) v2ParseDataClassParam() *FieldDecl {
+	typ := p.v2ParseType()
+	name := p.v2ExpectIdent()
+	var def Expr
+	if p.check(lexer.TOKEN_ASSIGN) {
+		p.advance()
+		def = p.v2ParseExpr()
+	}
+	return &FieldDecl{Name: name, IsPub: true, Type: typ, Default: def}
 }
 
 // v2ParseConstDecl: const [type] NAME = expr (top-level constant)

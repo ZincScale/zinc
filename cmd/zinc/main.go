@@ -21,34 +21,31 @@ import (
 	"path/filepath"
 	"strings"
 
-	"zinc/internal/codegen_python"
+	"zinc/internal/codegen_java"
 	"zinc/internal/errs"
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
 	"zinc/internal/typechecker"
 )
 
-var version = "0.20.0"
+var version = "3.0.0"
 
-const usage = `Zinc — typed Python with explicit blocks.
+const usage = `Zinc — convention-over-configuration JVM language.
 
 Usage:
-  zinc run <file.zn>           Transpile to Python and run (free-threaded)
-  zinc transpile <file.zn>     Output .py file
-  zinc fmt <file.zn>           Format Zinc source code
-  zinc pack <file.zn|dir>      Package for deployment (pyinstaller, nuitka, docker, k8s)
-  zinc repl                    Interactive Zinc REPL
-  zinc <file.zn>               Transpile a single file (outputs .py)
+  zinc build <file.zn>           Transpile to Java and compile with javac
+  zinc run <file.zn>             Transpile, compile, and run
+  zinc check <file.zn>           Type check only (no output)
+  zinc fmt <file.zn>             Format Zinc source code
+  zinc repl                      Interactive Zinc REPL
 
 Flags:
-  -o <file>              Output file (default: <input>.py)
-  --verbose              Print tokens and AST summary after transpiling
+  -o <dir>               Output directory (default: zinc-out/)
+  --verbose              Print tokens and AST summary
   --version              Print version and exit
 `
 
 func main() {
-	var inFile, outFile string
-	verbose := false
 	args := os.Args[1:]
 
 	for i := 0; i < len(args); i++ {
@@ -67,27 +64,62 @@ func main() {
 			}
 			runFmt(args[i+1])
 			return
-		case a == "pack":
+		case a == "check":
 			target := ""
-			format := ""
+			verbose := false
 			for j := i + 1; j < len(args); j++ {
-				if args[j] == "--format" && j+1 < len(args) {
-					format = args[j+1]
-					j++
+				if args[j] == "--verbose" || args[j] == "-v" {
+					verbose = true
 				} else if !strings.HasPrefix(args[j], "-") && target == "" {
 					target = args[j]
 				}
 			}
 			if target == "" {
-				fmt.Fprintln(os.Stderr, "usage: zinc pack <file.zn|dir> [--format pyinstaller|nuitka|docker|k8s]")
+				fmt.Fprintln(os.Stderr, "usage: zinc check <file.zn>")
 				os.Exit(1)
 			}
-			runPack(target, format)
+			if _, err := parseAndCheck(target, verbose); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			fmt.Printf("check passed: %s\n", target)
+			return
+		case a == "build":
+			target := ""
+			outDir := "zinc-out"
+			verbose := false
+			for j := i + 1; j < len(args); j++ {
+				if args[j] == "-o" && j+1 < len(args) {
+					outDir = args[j+1]
+					j++
+				} else if args[j] == "--verbose" || args[j] == "-v" {
+					verbose = true
+				} else if !strings.HasPrefix(args[j], "-") && target == "" {
+					target = args[j]
+				}
+			}
+			if target == "" {
+				fmt.Fprintln(os.Stderr, "usage: zinc build <file.zn> [-o outdir]")
+				os.Exit(1)
+			}
+			javaFiles, err := transpileToJava(target, outDir, verbose)
+			if err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			if err := compileJava(javaFiles, outDir); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			fmt.Printf("build complete: %s → %s/\n", target, outDir)
 			return
 		case a == "run":
 			target := ""
+			verbose := false
 			for j := i + 1; j < len(args); j++ {
-				if !strings.HasPrefix(args[j], "-") && target == "" {
+				if args[j] == "--verbose" || args[j] == "-v" {
+					verbose = true
+				} else if !strings.HasPrefix(args[j], "-") && target == "" {
 					target = args[j]
 				}
 			}
@@ -95,14 +127,20 @@ func main() {
 				fmt.Fprintln(os.Stderr, "usage: zinc run <file.zn> [-- args...]")
 				os.Exit(1)
 			}
-			// Transpile to temp file, run with free-threaded Python, clean up
-			tmpFile := filepath.Join(os.TempDir(), "zinc_run_"+filepath.Base(strings.TrimSuffix(target, ".zn"))+".py")
-			pyFile, sourceMap, err := transpileV2File(target, tmpFile, false)
+
+			outDir := filepath.Join(os.TempDir(), "zinc-run-"+filepath.Base(strings.TrimSuffix(target, ".zn")))
+			javaFiles, err := transpileToJava(target, outDir, verbose)
 			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
 			}
-			defer os.Remove(pyFile)
+			if err := compileJava(javaFiles, outDir); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+
+			// Derive class name from filename
+			className := classNameFromFile(target)
 
 			// Collect script args (after --)
 			var scriptArgs []string
@@ -112,123 +150,48 @@ func main() {
 					break
 				}
 			}
-			runArgs := append([]string{pyFile}, scriptArgs...)
 
-			// Try free-threaded Python first
-			pythonBin := findPython()
-			cmd := exec.Command(pythonBin, runArgs...)
-			if !strings.HasSuffix(pythonBin, "t") {
-				cmd.Env = append(os.Environ(), "PYTHON_GIL=0")
-			}
-			cmd.Stdout = os.Stdout
-			cmd.Stdin = os.Stdin
-			var stderrBuf strings.Builder
-			cmd.Stderr = &stderrBuf
-			runErr := cmd.Run()
-
-			// If GIL=0 not supported, retry without
-			if runErr != nil && strings.Contains(stderrBuf.String(), "Disabling the GIL is not supported") {
-				stderrBuf.Reset()
-				cmd = exec.Command(pythonBin, runArgs...)
-				cmd.Stdout = os.Stdout
-				cmd.Stdin = os.Stdin
-				cmd.Stderr = &stderrBuf
-				runErr = cmd.Run()
-			}
-
-			if runErr != nil {
-				stderr := stderrBuf.String()
-				stderr = rewriteTraceback(stderr, pyFile, target, sourceMap)
-				fmt.Fprint(os.Stderr, stderr)
-				if exitErr, ok := runErr.(*exec.ExitError); ok {
+			if err := runJava(outDir, className, scriptArgs); err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
 					os.Exit(exitErr.ExitCode())
 				}
+				errs.Error(err.Error())
 				os.Exit(1)
 			}
 			return
-		case a == "transpile":
-			target := ""
-			localOut := ""
-			localVerbose := false
-			for j := i + 1; j < len(args); j++ {
-				if args[j] == "-o" && j+1 < len(args) {
-					localOut = args[j+1]
-					j++
-				} else if args[j] == "--verbose" || args[j] == "-v" {
-					localVerbose = true
-				} else if !strings.HasPrefix(args[j], "-") && target == "" {
-					target = args[j]
-				}
-			}
-			if target == "" {
-				fmt.Fprintln(os.Stderr, "usage: zinc transpile <file.zn> [-o output.py]")
-				os.Exit(1)
-			}
-			pyFile, _, err := transpileV2File(target, localOut, localVerbose)
+		case !strings.HasPrefix(a, "-"):
+			// Default: zinc build <file.zn>
+			javaFiles, err := transpileToJava(a, "zinc-out", false)
 			if err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
 			}
-			fmt.Printf("transpiled %s → %s\n", target, pyFile)
+			if err := compileJava(javaFiles, "zinc-out"); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			fmt.Printf("build complete: %s → zinc-out/\n", a)
 			return
-		case a == "-o" || a == "--o":
-			if i+1 < len(args) {
-				outFile = args[i+1]
-				i++
-			}
-		case a == "--verbose" || a == "-v":
-			verbose = true
-		case !strings.HasPrefix(a, "-"):
-			if inFile == "" {
-				inFile = a
-			}
 		}
 	}
 
-	if inFile == "" {
+	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)
 	}
-
-	// Default: transpile single file to Python
-	pyFile, _, err := transpileV2File(inFile, outFile, verbose)
-	if err != nil {
-		errs.Error(err.Error())
-		os.Exit(1)
-	}
-	fmt.Printf("transpiled %s → %s\n", inFile, pyFile)
 }
 
-// findPython finds the best Python interpreter, preferring free-threaded builds.
-func findPython() string {
-	for _, bin := range []string{"python3.14t", "python3.13t", "python3t"} {
-		if path, err := exec.LookPath(bin); err == nil {
-			return path
-		}
-	}
-	for _, path := range []string{
-		os.Getenv("HOME") + "/python3.14t/bin/python3.14t",
-		os.Getenv("HOME") + "/python3.14t/bin/python3",
-		"/usr/local/bin/python3t",
-	} {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return "python3"
-}
-
-// transpileV2File transpiles a .zn file to .py using the v2 pipeline.
-func transpileV2File(inFile, outFile string, verbose bool) (string, map[int]int, error) {
+// parseAndCheck runs lexer → parser → typechecker, returns the AST.
+func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 	src, err := os.ReadFile(inFile)
 	if err != nil {
-		return "", nil, fmt.Errorf("reading %s: %w", inFile, err)
+		return nil, fmt.Errorf("reading %s: %w", inFile, err)
 	}
 
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
-		return "", nil, fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
+		return nil, fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
 	}
 
 	if verbose {
@@ -238,7 +201,7 @@ func transpileV2File(inFile, outFile string, verbose bool) (string, map[int]int,
 	p := parser.New(tokens)
 	prog := p.ParseV2()
 	if len(p.Errors) > 0 {
-		return "", nil, fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
+		return nil, fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
 	}
 
 	if verbose {
@@ -251,78 +214,99 @@ func transpileV2File(inFile, outFile string, verbose bool) (string, map[int]int,
 		for _, e := range tcErrors {
 			msgs = append(msgs, e.String())
 		}
-		return "", nil, fmt.Errorf("type errors in %s:\n%s", inFile, strings.Join(msgs, "\n"))
-	}
-
-	gilWarnings := typechecker.CheckGILDependencies(prog)
-	for _, w := range gilWarnings {
-		fmt.Fprintf(os.Stderr, "%s\n", w)
+		return nil, fmt.Errorf("type errors in %s:\n%s", inFile, strings.Join(msgs, "\n"))
 	}
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] type check passed\n")
 	}
 
-	gen := codegen_python.New()
-	gen.SourceFile = inFile
-	pySrc := gen.GenerateV2(prog)
-
-	if outFile == "" {
-		base := filepath.Base(inFile)
-		base = strings.TrimSuffix(base, filepath.Ext(base))
-		outFile = base + ".py"
-	}
-
-	if err := os.WriteFile(outFile, []byte(pySrc), 0644); err != nil {
-		return "", nil, fmt.Errorf("writing %s: %w", outFile, err)
-	}
-
-	return outFile, gen.GetSourceMap(), nil
+	return prog, nil
 }
 
-// rewriteTraceback replaces .py file references with .zn file references in Python tracebacks.
-func rewriteTraceback(stderr, pyFile, znFile string, sourceMap map[int]int) string {
+// transpileToJava transpiles a .zn file to .java files in outDir.
+func transpileToJava(inFile, outDir string, verbose bool) ([]string, error) {
+	prog, err := parseAndCheck(inFile, verbose)
+	if err != nil {
+		return nil, err
+	}
+
+	className := classNameFromFile(inFile)
+	gen := codegen_java.New()
+	javaSrc := gen.Generate(prog, className)
+
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating output dir: %w", err)
+	}
+
+	mainFile := filepath.Join(outDir, className+".java")
+	if err := os.WriteFile(mainFile, []byte(javaSrc), 0644); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", mainFile, err)
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", mainFile)
+	}
+
+	return []string{mainFile}, nil
+}
+
+// compileJava runs javac on the generated .java files.
+func compileJava(javaFiles []string, outDir string) error {
+	javac, err := exec.LookPath("javac")
+	if err != nil {
+		return fmt.Errorf("javac not found — install JDK 25+")
+	}
+
+	args := []string{"-d", outDir}
+	args = append(args, javaFiles...)
+
+	cmd := exec.Command(javac, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("javac failed: %w", err)
+	}
+	return nil
+}
+
+// runJava runs a compiled Java class.
+func runJava(classDir, className string, scriptArgs []string) error {
+	java, err := exec.LookPath("java")
+	if err != nil {
+		return fmt.Errorf("java not found — install JDK 25+")
+	}
+
+	args := []string{"-cp", classDir, className}
+	args = append(args, scriptArgs...)
+
+	cmd := exec.Command(java, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// classNameFromFile derives a Java class name from a .zn filename.
+// e.g., "hello_world.zn" → "HelloWorld", "script.zn" → "Script"
+func classNameFromFile(path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+
+	// Convert snake_case to PascalCase
 	var result strings.Builder
-	for _, line := range strings.Split(stderr, "\n") {
-		if strings.Contains(line, pyFile) && strings.Contains(line, ", line ") {
-			idx := strings.Index(line, ", line ")
-			if idx >= 0 {
-				after := line[idx+7:]
-				numStr := ""
-				for _, ch := range after {
-					if ch >= '0' && ch <= '9' {
-						numStr += string(ch)
-					} else {
-						break
-					}
-				}
-				if numStr != "" {
-					var pyLineNum int
-					fmt.Sscanf(numStr, "%d", &pyLineNum)
-					znLine := findClosestZnLine(pyLineNum, sourceMap)
-					if znLine > 0 {
-						line = strings.Replace(line, pyFile, znFile, 1)
-						line = strings.Replace(line, ", line "+numStr, fmt.Sprintf(", line %d", znLine), 1)
-					} else {
-						line = strings.Replace(line, pyFile, znFile, 1)
-					}
-				}
-			}
+	upper := true
+	for _, ch := range base {
+		if ch == '_' || ch == '-' {
+			upper = true
+			continue
 		}
-		result.WriteString(line)
-		result.WriteString("\n")
-	}
-	return strings.TrimRight(result.String(), "\n") + "\n"
-}
-
-func findClosestZnLine(pyLine int, sourceMap map[int]int) int {
-	if zn, ok := sourceMap[pyLine]; ok {
-		return zn
-	}
-	for offset := 1; offset < 20; offset++ {
-		if zn, ok := sourceMap[pyLine-offset]; ok {
-			return zn
+		if upper {
+			result.WriteRune(rune(strings.ToUpper(string(ch))[0]))
+			upper = false
+		} else {
+			result.WriteRune(ch)
 		}
 	}
-	return 0
+	return result.String()
 }

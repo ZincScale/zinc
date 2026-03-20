@@ -97,10 +97,7 @@ y = 20
 
 func TestV2DataClassFieldTypes(t *testing.T) {
 	errs := checkV2(`
-data User {
-    var String name
-    var int age
-}
+data User(String name, int age)
 `)
 	if len(errs) > 0 {
 		t.Errorf("expected no errors, got: %v", errs)
