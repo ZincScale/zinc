@@ -352,29 +352,53 @@ func TestV2AndOrNot(t *testing.T) {
 	}
 }
 
-func TestV2TryCatch(t *testing.T) {
-	prog, errs := parseV2(`
+func TestV2TryCatchRejected(t *testing.T) {
+	_, errs := parseV2(`
 try {
     var conn = db.connect(url)
 } catch ConnectionError err {
     print("failed")
 }
 `)
+	if len(errs) == 0 {
+		t.Fatal("expected errors for try/catch usage")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "try/catch is not supported") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'try/catch is not supported' error, got: %v", errs)
+	}
+}
+
+func TestV2OrMatch(t *testing.T) {
+	prog, errs := parseV2(`
+var user = fetchUser(id) or match err {
+    case NotFound -> defaultUser
+    case _ -> fallback
+}
+`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	tryStmt := prog.Stmts[0].(*TryStmt)
-	if tryStmt.CatchName != "err" {
-		t.Errorf("expected catch name 'err', got %q", tryStmt.CatchName)
+	varStmt := prog.Stmts[0].(*VarStmt)
+	if varStmt.OrHandler == nil {
+		t.Fatal("expected OrHandler")
 	}
-	if tryStmt.CatchType != "ConnectionError" {
-		t.Errorf("expected catch type 'ConnectionError', got %q", tryStmt.CatchType)
+	if len(varStmt.OrHandler.MatchCases) != 2 {
+		t.Fatalf("expected 2 match cases, got %d", len(varStmt.OrHandler.MatchCases))
 	}
-	if len(tryStmt.Body.Stmts) != 1 {
-		t.Errorf("expected 1 try body stmt, got %d", len(tryStmt.Body.Stmts))
+	if varStmt.OrHandler.MatchCases[0].Type != "NotFound" {
+		t.Errorf("expected case type 'NotFound', got %q", varStmt.OrHandler.MatchCases[0].Type)
 	}
-	if len(tryStmt.CatchBody.Stmts) != 1 {
-		t.Errorf("expected 1 catch body stmt, got %d", len(tryStmt.CatchBody.Stmts))
+	if varStmt.OrHandler.MatchCases[1].Type != "" {
+		t.Errorf("expected wildcard case (empty type), got %q", varStmt.OrHandler.MatchCases[1].Type)
+	}
+	if varStmt.OrHandler.MatchVar != "err" {
+		t.Errorf("expected match var 'err', got %q", varStmt.OrHandler.MatchVar)
 	}
 }
 
@@ -813,14 +837,19 @@ func TestV2OrHandlerDefault(t *testing.T) {
 	}
 }
 
-func TestV2RaiseFrom(t *testing.T) {
-	prog, errs := parseV2(`raise ValueError("bad") from original`)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+func TestV2RaiseRejected(t *testing.T) {
+	_, errs := parseV2(`raise ValueError("bad") from original`)
+	if len(errs) == 0 {
+		t.Fatal("expected errors for raise usage")
 	}
-	raiseStmt := prog.Stmts[0].(*RaiseStmt)
-	if raiseStmt.From == nil {
-		t.Fatal("expected 'from' clause")
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "raise/throw is not supported") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'raise/throw is not supported' error, got: %v", errs)
 	}
 }
 

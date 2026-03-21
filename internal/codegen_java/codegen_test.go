@@ -251,26 +251,76 @@ for x in items {
 // Error handling
 // =============================================================================
 
-func TestTryCatch(t *testing.T) {
+func TestReturnError(t *testing.T) {
 	assertContains(t, `
-try {
-    risky()
-} catch IOException e {
-    print("error")
+fn risky() int {
+    return Error("something went wrong")
 }
 `,
-		`try {`,
-		`risky();`,
-		`} catch (IOException e) {`,
-		`System.out.println("error");`,
+		`throw new RuntimeException("something went wrong");`,
 	)
 }
 
-func TestRaise(t *testing.T) {
+func TestReturnErrorCustomType(t *testing.T) {
 	assertContains(t, `
-raise RuntimeException("bad")
+fn fetch() String {
+    return Error(NotFound("user not found"))
+}
 `,
-		`throw new RuntimeException("bad");`,
+		`throw new NotFound("user not found");`,
+	)
+}
+
+func TestReturnErrorRethrow(t *testing.T) {
+	assertContains(t, `
+fn risky() int {
+    var x = doStuff() or {
+        return Error(err)
+    }
+    return x
+}
+`,
+		`throw err;`,
+	)
+}
+
+func TestOrBlock(t *testing.T) {
+	assertContains(t, `
+var x = risky() or {
+    print("failed")
+}
+`,
+		`try { x = risky(); } catch (Exception err) {`,
+		`System.out.println("failed");`,
+	)
+}
+
+func TestOrOnExprStmt(t *testing.T) {
+	assertContains(t, `
+doSomething() or {
+    print("failed")
+}
+`,
+		`try { doSomething(); } catch (Exception err) {`,
+		`System.out.println("failed");`,
+	)
+}
+
+func TestOrMatch(t *testing.T) {
+	assertContains(t, `
+var user = fetchUser(id) or match err {
+    case NotFound -> defaultUser
+    case Timeout -> retry(id)
+    case _ -> fallback
+}
+`,
+		`try { user = fetchUser(id); }`,
+		`catch (NotFound err) {`,
+		`user = defaultUser;`,
+		`catch (Timeout err) {`,
+		`user = retry(id);`,
+		`catch (Exception err) {`,
+		`user = fallback;`,
 	)
 }
 
@@ -736,9 +786,7 @@ func TestOrDefault(t *testing.T) {
 	assertContains(t, `
 var port = parsePort("8080") or 80
 `,
-		`try {`,
-		`port = parsePort("8080");`,
-		`} catch (Exception _err) {`,
+		`try { port = parsePort("8080"); } catch (Exception err) {`,
 		`port = 80;`,
 	)
 }

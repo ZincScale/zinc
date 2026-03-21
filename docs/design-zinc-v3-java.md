@@ -466,48 +466,58 @@ Transpiles to stream chains. Comprehensions are syntax sugar for `.filter().map(
 
 ---
 
-## Error Handling — Two Tracks
+## Error Handling — Errors as Values
 
-### Track 1: Result Type (Expected Failures)
+All errors are values. No `try`, `catch`, or `throw` in Zinc. The transpiler generates Java exception machinery under the hood. See `docs/design-zinc-errors-as-values.md` for the full design.
 
-For operations that can fail in normal use (parsing, I/O, network calls):
+Functions declare only the success return type:
 
 ```zinc
-fn parseInt(String s) Result<int> {
-    try {
-        return s.toInt()
-    } catch NumberFormatException e {
+fn parseInt(String s) int {
+    var n = s.toInt() or {
         return Error("Not a number: {s}")
     }
+    return n
 }
 
-// Usage with or {} handler
+// Fallback value
+var port = parseInt(input) or 8080
+
+// Handler block (err is implicit)
 var port = parseInt(input) or {
     print("Bad port: {err}")
-    8080  // default
+    8080
 }
 
-// Usage with or-default
-var port = parseInt(input) or 8080
-```
+// Auto-propagate (no handler — error flows to caller)
+var port = parseInt(input)
 
-### Track 2: Exceptions (Unexpected Failures)
+// Typed error matching (rare — API boundaries)
+var user = fetchUser(id) or match err {
+    case NotFound -> return Response(404, "not found")
+    case _ -> return Response(500, "internal error")
+}
 
-For things that shouldn't happen but might:
-
-```zinc
-try {
-    var conn = db.connect()
-    var result = conn.query("SELECT * FROM users")
-} catch ConnectionError e {
-    log.error("Database down: {e.message}")
-    throw ServiceUnavailable("Try again later") from e
-} catch QueryError e {
-    log.error("Bad query: {e.message}")
+// Return errors from functions
+fn fetchUser(int id) User {
+    var resp = http.get("/users/{id}") or {
+        return Error("request failed: {err}")
+    }
+    if resp.status == 404 {
+        return Error(NotFound("user not found"))
+    }
+    return parse(resp.body)
 }
 ```
 
-**No checked exceptions.** All Zinc exceptions are unchecked. Use `Result<T>` for expected failures.
+| Zinc | Java (generated) |
+|---|---|
+| `return Error("msg")` | `throw new RuntimeException("msg")` |
+| `return Error(NotFound("x"))` | `throw new NotFound("x")` |
+| `call() or default` | `try { call(); } catch (Exception e) { default; }` |
+| `call() or { block }` | `try { call(); } catch (Exception err) { block; }` |
+| `call() or match err { ... }` | `try { call(); } catch (TypeA err) { ... } catch (...) { ... }` |
+| No handler | Plain call — exceptions propagate naturally |
 
 ---
 
@@ -799,7 +809,7 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 | **Pattern matching** | `switch` with `case Type t ->` | `match` with exhaustiveness |
 | **Concurrency** | `Thread.startVirtualThread(() -> { ... })` | `spawn { ... }` |
 | **Named args** | Not supported | Always available |
-| **Error handling** | Checked exceptions or raw try/catch | `Result<T>` + `or {}` sugar |
+| **Error handling** | Checked exceptions or raw try/catch | Errors as values: `or {}` / `or match` / `return Error()` |
 | **Lambdas** | Must name parameter | `it` keyword for single-param |
 | **Build tool** | Gradle/Maven ceremony | Mill YAML, `zinc build` |
 | **Project setup** | archetype/initializr + config | `zinc init`, run immediately |
@@ -816,7 +826,7 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 - Control flow: if/else, for, while, match
 - Lambdas + `it` keyword
 - String interpolation
-- Error handling (try/catch, Result<T>)
+- Error handling (errors as values, `or` handlers)
 - Imports (hoist to top)
 - Script mode (wrap in main)
 - CLI: `zinc transpile`, `zinc run`, `zinc check`
@@ -826,7 +836,7 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 - Named arguments
 - Comprehensions → stream chains
 - Trailing lambdas
-- `or {}` error handling sugar
+- `or {}` / `or match` / `return Error()` — errors as values
 - Tuple types → generated records
 - Safe navigation `?.`
 - `zinc fmt` formatter

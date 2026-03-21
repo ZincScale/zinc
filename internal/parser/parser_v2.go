@@ -186,9 +186,13 @@ func (p *Parser) v2ParseStmt() Stmt {
 	case lexer.TOKEN_WITH:
 		return p.v2ParseWithStmt()
 	case lexer.TOKEN_TRY:
-		return p.v2ParseTryStmt()
+		p.errorf("try/catch is not supported in Zinc — use 'or { }' or 'or match' instead")
+		p.advance()
+		return nil
 	case lexer.TOKEN_RAISE:
-		return p.v2ParseRaiseStmt()
+		p.errorf("raise/throw is not supported in Zinc — use 'return Error(...)' instead")
+		p.advance()
+		return nil
 	case lexer.TOKEN_SPAWN:
 		return p.v2ParseSpawnStmt()
 	case lexer.TOKEN_PARALLEL:
@@ -274,15 +278,21 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 }
 
 // v2ParseOrHandler checks for `or` after a failable call.
-// Two forms:
-//   var x = call() or 0         — single-expression default
-//   var x = call() or { ... }   — multi-statement handler block
+// Three forms:
+//   var x = call() or 0                              — single-expression default
+//   var x = call() or { ... }                        — multi-statement handler block
+//   var x = call() or match err { case Type -> ... }  — typed error matching
 // Returns nil if no or follows.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
 	if !p.check(lexer.TOKEN_OR) {
 		return nil
 	}
 	p.advance() // consume "or"
+
+	// or match err { case Type -> ... }
+	if p.check(lexer.TOKEN_MATCH) {
+		return p.v2ParseOrMatch()
+	}
 
 	// Brace block: or { handler }
 	if p.check(lexer.TOKEN_LBRACE) {
@@ -293,6 +303,50 @@ func (p *Parser) v2ParseErrHandler() *OrHandler {
 	// Single-expression default: or 0
 	expr := p.v2ParseExpr()
 	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
+}
+
+// v2ParseOrMatch: or match err { case Type -> body ... case _ -> body }
+func (p *Parser) v2ParseOrMatch() *OrHandler {
+	p.advance() // consume "match"
+
+	// Parse the error variable name (e.g. "err")
+	matchVar := "err"
+	if p.check(lexer.TOKEN_IDENT) {
+		matchVar = p.advance().Literal
+	}
+
+	p.expect(lexer.TOKEN_LBRACE)
+	var cases []*OrMatchCase
+
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		p.expect(lexer.TOKEN_CASE)
+
+		errType := ""
+		if p.check(lexer.TOKEN_IDENT) {
+			lit := p.peek().Literal
+			if lit == "_" {
+				p.advance() // wildcard
+			} else {
+				errType = p.advance().Literal
+			}
+		}
+
+		p.expect(lexer.TOKEN_ARROW) // ->
+
+		// Parse body: either a single expression or a block
+		var body *BlockStmt
+		if p.check(lexer.TOKEN_LBRACE) {
+			body = p.v2ParseBlock()
+		} else {
+			expr := p.v2ParseExpr()
+			body = &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}
+		}
+
+		cases = append(cases, &OrMatchCase{Type: errType, Body: body})
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+
+	return &OrHandler{MatchCases: cases, MatchVar: matchVar}
 }
 
 func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
@@ -585,7 +639,9 @@ func (p *Parser) v2ParseExprOrAssignStmt() Stmt {
 		return &AssignStmt{Line: line, Target: expr, Op: op, Value: val}
 	}
 
-	return &ExprStmt{Line: line, Expr: expr}
+	// Check for or handler on expression statements: call() or { ... }
+	handler := p.v2ParseErrHandler()
+	return &ExprStmt{Line: line, Expr: expr, OrHandler: handler}
 }
 
 // --- Declarations ------------------------------------------------------------

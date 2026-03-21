@@ -591,11 +591,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.AssignStmt:
 		g.emitAssignStmt(stmt)
 	case *parser.ReturnStmt:
-		if stmt.Value != nil {
-			g.writeln("return %s;", g.formatExpr(stmt.Value))
-		} else {
-			g.writeln("return;")
-		}
+		g.emitReturnStmt(stmt)
 	case *parser.IfStmt:
 		g.emitIfStmt(stmt)
 	case *parser.ForStmt:
@@ -609,7 +605,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.MatchStmt:
 		g.emitMatchStmt(stmt)
 	case *parser.ExprStmt:
-		g.writeln("%s;", g.formatExpr(stmt.Expr))
+		g.emitExprStmt(stmt)
 	case *parser.PrintStmt:
 		g.writeln("System.out.println(%s);", g.formatExpr(stmt.Value))
 	case *parser.TryStmt:
@@ -658,7 +654,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 	}
 
-	// Handle `or` error handler: var x = call() or default / or { block }
+	// Handle `or` error handler: var x = call() or default / or { block } / or match { }
 	if v.OrHandler != nil && v.Value != nil {
 		// Java var requires initializer — use Object if no type specified
 		declType := keyword
@@ -666,19 +662,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			declType = "Object"
 		}
 		g.writeln("%s %s;", declType, v.Name)
-		g.writeln("try { %s = %s; } catch (Exception _err) {", v.Name, g.formatExpr(v.Value))
-		g.indent++
-		if v.OrHandler.Body != nil && len(v.OrHandler.Body.Stmts) == 1 {
-			if es, ok := v.OrHandler.Body.Stmts[0].(*parser.ExprStmt); ok {
-				g.writeln("%s = %s;", v.Name, g.formatExpr(es.Expr))
-			} else {
-				g.emitBlock(v.OrHandler.Body)
-			}
-		} else if v.OrHandler.Body != nil {
-			g.emitBlock(v.OrHandler.Body)
-		}
-		g.indent--
-		g.writeln("}")
+		g.emitOrHandler(g.formatExpr(v.Value), v.Name, v.OrHandler)
 		return
 	}
 
@@ -751,6 +735,111 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 		g.emitBlock(c.Body)
 		g.indent--
 		g.writeln("}")
+	}
+	g.indent--
+	g.writeln("}")
+}
+
+// emitReturnStmt handles return statements.
+// return Error(...) → throw new RuntimeException(...) or throw new CustomType(...)
+// return expr → return expr;
+func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
+	if r.Value == nil {
+		g.writeln("return;")
+		return
+	}
+
+	// Detect return Error(...) → throw
+	if call, ok := r.Value.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+			if len(call.Args) == 1 {
+				arg := call.Args[0]
+				// return Error(CustomType(...)) → throw new CustomType(...)
+				if innerCall, ok := arg.(*parser.CallExpr); ok {
+					if innerIdent, ok := innerCall.Callee.(*parser.Ident); ok {
+						// return Error(NotFound("msg")) → throw new NotFound("msg")
+						g.writeln("throw new %s(%s);", innerIdent.Name, g.formatExprList(innerCall.Args))
+						return
+					}
+				}
+				// return Error(err) where err is already an exception → re-throw
+				if ident, ok := arg.(*parser.Ident); ok && ident.Name == "err" {
+					g.writeln("throw err;")
+					return
+				}
+				// return Error("message") → throw new RuntimeException("message")
+				g.writeln("throw new RuntimeException(%s);", g.formatExpr(arg))
+				return
+			}
+		}
+	}
+
+	g.writeln("return %s;", g.formatExpr(r.Value))
+}
+
+// emitExprStmt handles expression statements with optional or handler.
+func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
+	if es.OrHandler == nil {
+		g.writeln("%s;", g.formatExpr(es.Expr))
+		return
+	}
+	g.emitOrHandler(g.formatExpr(es.Expr), "", es.OrHandler)
+}
+
+// emitOrHandler generates try/catch for or handlers (used by VarStmt and ExprStmt).
+func (g *Generator) emitOrHandler(callExpr string, assignTarget string, handler *parser.OrHandler) {
+	// or match err { case Type -> ... }
+	if handler.MatchCases != nil {
+		if assignTarget != "" {
+			g.writeln("try { %s = %s; }", assignTarget, callExpr)
+		} else {
+			g.writeln("try { %s; }", callExpr)
+		}
+		for _, mc := range handler.MatchCases {
+			catchType := "Exception"
+			if mc.Type != "" {
+				catchType = mc.Type
+			}
+			varName := handler.MatchVar
+			if varName == "" {
+				varName = "err"
+			}
+			g.writeln("catch (%s %s) {", catchType, varName)
+			g.indent++
+			if assignTarget != "" && len(mc.Body.Stmts) == 1 {
+				if es, ok := mc.Body.Stmts[0].(*parser.ExprStmt); ok {
+					g.writeln("%s = %s;", assignTarget, g.formatExpr(es.Expr))
+				} else {
+					g.emitBlock(mc.Body)
+				}
+			} else {
+				g.emitBlock(mc.Body)
+			}
+			g.indent--
+			g.writeln("}")
+		}
+		return
+	}
+
+	// or { block } or or default
+	if assignTarget != "" {
+		g.writeln("try { %s = %s; } catch (Exception err) {", assignTarget, callExpr)
+	} else {
+		g.writeln("try { %s; } catch (Exception err) {", callExpr)
+	}
+	g.indent++
+	if handler.Body != nil && len(handler.Body.Stmts) == 1 {
+		if es, ok := handler.Body.Stmts[0].(*parser.ExprStmt); ok {
+			if assignTarget != "" {
+				g.writeln("%s = %s;", assignTarget, g.formatExpr(es.Expr))
+			} else {
+				g.writeln("%s;", g.formatExpr(es.Expr))
+			}
+		} else {
+			g.emitBlock(handler.Body)
+		}
+	} else if handler.Body != nil {
+		g.emitBlock(handler.Body)
 	}
 	g.indent--
 	g.writeln("}")
@@ -1368,6 +1457,21 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 		return g.formatExpr(stmt.Expr) + ";"
 	case *parser.ReturnStmt:
 		if stmt.Value != nil {
+			// Detect return Error(...) in inline context
+			if call, ok := stmt.Value.(*parser.CallExpr); ok {
+				if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" && len(call.Args) == 1 {
+					arg := call.Args[0]
+					if innerCall, ok := arg.(*parser.CallExpr); ok {
+						if innerIdent, ok := innerCall.Callee.(*parser.Ident); ok {
+							return fmt.Sprintf("throw new %s(%s);", innerIdent.Name, g.formatExprList(innerCall.Args))
+						}
+					}
+					if id, ok := arg.(*parser.Ident); ok && id.Name == "err" {
+						return "throw err;"
+					}
+					return fmt.Sprintf("throw new RuntimeException(%s);", g.formatExpr(arg))
+				}
+			}
 			return "return " + g.formatExpr(stmt.Value) + ";"
 		}
 		return "return;"

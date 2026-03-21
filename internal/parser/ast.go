@@ -355,8 +355,17 @@ func (g *GoStmt) nodeTag() {}
 func (g *GoStmt) stmtTag() {}
 
 // OrHandler: or { body } — inline error handler. `err` is implicitly available.
+// OrMatchCase: or match err { case Type -> body ... }
 type OrHandler struct {
-	Body *BlockStmt // handler body; `err` is implicitly available
+	Body       *BlockStmt    // handler body; `err` is implicitly available (nil if match form)
+	MatchCases []*OrMatchCase // or match err { case Type -> ... } (nil if simple form)
+	MatchVar   string         // variable name in or match (e.g. "err")
+}
+
+// OrMatchCase: case TypeName -> { body }
+type OrMatchCase struct {
+	Type string     // exception type (e.g. "NotFound"), empty for wildcard (_)
+	Body *BlockStmt // handler body
 }
 
 func (o *OrHandler) nodeTag() {}
