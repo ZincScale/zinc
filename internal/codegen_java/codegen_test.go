@@ -908,6 +908,51 @@ parallel for item in items {
 	)
 }
 
+func TestParallelForOr(t *testing.T) {
+	assertContains(t, `
+parallel for item in items {
+    process(item)
+} or {
+    print("failed")
+}
+`,
+		`_scope.join();`,
+		`} catch (Exception err) {`,
+		`System.out.println("failed");`,
+	)
+}
+
+func TestConcurrentOr(t *testing.T) {
+	assertContains(t, `
+concurrent {
+    fetchUser(id)
+    fetchOrders(id)
+} or {
+    print("task failed")
+}
+`,
+		`_scope.join();`,
+		`} catch (Exception err) {`,
+		`System.out.println("task failed");`,
+	)
+}
+
+func TestConcurrentWithResultsOr(t *testing.T) {
+	assertContains(t, `
+var (user, orders) = concurrent {
+    fetchUser(id)
+    fetchOrders(id)
+} or {
+    return Error("concurrent failed")
+}
+`,
+		`_scope.join();`,
+		`user = _task0.get();`,
+		`} catch (Exception err) {`,
+		`throw new RuntimeException("concurrent failed");`,
+	)
+}
+
 func TestChannelType(t *testing.T) {
 	assertContains(t,
 		`var Channel<String> ch = Channel(100)`,

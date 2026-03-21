@@ -628,7 +628,8 @@ func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	p.expect(lexer.TOKEN_IN)
 	rangeExpr := p.v2ParseExpr()
 	body := p.v2ParseBlock()
-	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body}
+	handler := p.v2ParseErrHandler()
+	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body, OrHandler: handler}
 }
 
 // v2ParseConcurrentStmt: concurrent { task1; task2 } or concurrent(first: true) { ... }

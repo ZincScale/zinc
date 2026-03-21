@@ -902,11 +902,6 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 }
 
 func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
-	// parallel for item in items { body }
-	// → try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
-	//       for (var item : items) { scope.fork(() -> { body; return null; }); }
-	//       scope.join(); scope.throwIfFailed();
-	//   }
 	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
 	g.indent++
 	g.writeln("for (var %s : %s) {", p.Item, g.formatExpr(p.Range))
@@ -921,33 +916,35 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 	g.writeln("}")
 	g.writeln("_scope.join();")
 	g.indent--
-	g.writeln("}")
+	if p.OrHandler != nil && p.OrHandler.Body != nil {
+		g.writeln("} catch (Exception err) {")
+		g.indent++
+		g.emitBlock(p.OrHandler.Body)
+		g.indent--
+		g.writeln("}")
+	} else {
+		g.writeln("}")
+	}
 }
 
 func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
 	if len(c.Names) > 0 {
-		// var (a, b, c) = concurrent { task1; task2; task3 }
-		// Declare variables
 		for _, name := range c.Names {
 			g.writeln("Object %s;", name)
 		}
 		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
 		g.indent++
-		// Fork each task
 		for i, task := range c.Tasks {
 			g.writeln("var _task%d = _scope.fork(() -> %s);", i, g.formatExpr(task))
 		}
 		g.writeln("_scope.join();")
-		// Collect results
 		for i, name := range c.Names {
 			if i < len(c.Tasks) {
 				g.writeln("%s = _task%d.get();", name, i)
 			}
 		}
 		g.indent--
-		g.writeln("}")
 	} else {
-		// Standalone concurrent { } — fire-and-forget fan-out, wait for all
 		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
 		g.indent++
 		for _, task := range c.Tasks {
@@ -955,6 +952,14 @@ func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
 		}
 		g.writeln("_scope.join();")
 		g.indent--
+	}
+	if c.OrHandler != nil && c.OrHandler.Body != nil {
+		g.writeln("} catch (Exception err) {")
+		g.indent++
+		g.emitBlock(c.OrHandler.Body)
+		g.indent--
+		g.writeln("}")
+	} else {
 		g.writeln("}")
 	}
 }

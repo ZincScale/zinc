@@ -447,13 +447,14 @@ type RaiseStmt struct {
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
 
-// ParallelForStmt: parallel for item in items { body }
+// ParallelForStmt: parallel for item in items { body } [or { handler }]
 type ParallelForStmt struct {
-	Line     int
-	Item     string
-	IndexVar string
-	Range    Expr
-	Body     *BlockStmt
+	Line      int
+	Item      string
+	IndexVar  string
+	Range     Expr
+	Body      *BlockStmt
+	OrHandler *OrHandler // optional error handler
 }
 
 func (p *ParallelForStmt) nodeTag() {}
