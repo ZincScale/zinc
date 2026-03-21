@@ -201,8 +201,6 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseConcurrentStmt()
 	case lexer.TOKEN_TIMEOUT:
 		return p.v2ParseTimeoutStmt()
-	case lexer.TOKEN_CONTEXT:
-		return p.v2ParseContextDecl()
 	case lexer.TOKEN_FN:
 		return p.v2ParseFnDeclAsStmt()
 	case lexer.TOKEN_IDENT:
@@ -687,25 +685,6 @@ func (p *Parser) v2ParseTimeoutStmt() *TimeoutStmt {
 	handler := p.v2ParseErrHandler()
 
 	return &TimeoutStmt{Line: line, Duration: dur, Body: body, OrHandler: handler}
-}
-
-// v2ParseContextDecl: context Name { fields }
-func (p *Parser) v2ParseContextDecl() *ContextDecl {
-	line := p.peek().Line
-	p.advance() // consume "context"
-
-	name := p.v2ExpectIdent()
-	p.expect(lexer.TOKEN_LBRACE)
-
-	var fields []*FieldDecl
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		typ := p.v2ParseType()
-		fieldName := p.v2ExpectIdent()
-		fields = append(fields, &FieldDecl{Name: fieldName, Type: typ})
-	}
-	p.expect(lexer.TOKEN_RBRACE)
-
-	return &ContextDecl{Line: line, Name: name, Fields: fields}
 }
 
 // v2ParseFnDeclAsStmt parses a nested function definition as a statement.

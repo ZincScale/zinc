@@ -639,8 +639,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitConcurrentStmt(stmt)
 	case *parser.TimeoutStmt:
 		g.emitTimeoutStmt(stmt)
-	case *parser.ContextDecl:
-		g.emitContextDecl(stmt)
 	case *parser.AssertStmt:
 		g.emitAssertStmt(stmt)
 	}
@@ -987,20 +985,6 @@ func (g *Generator) emitTimeoutStmt(t *parser.TimeoutStmt) {
 	} else {
 		g.writeln("}")
 	}
-}
-
-func (g *Generator) emitContextDecl(c *parser.ContextDecl) {
-	// context RequestContext { String traceId; String tenantId }
-	// → record RequestContext(String traceId, String tenantId) {}
-	//   static final ScopedValue<RequestContext> _REQUEST_CONTEXT = ScopedValue.newInstance();
-	//   static RequestContext current() { return _REQUEST_CONTEXT.get(); }
-	var fields []string
-	for _, f := range c.Fields {
-		fields = append(fields, fmt.Sprintf("%s %s", g.formatType(f.Type), f.Name))
-	}
-	g.writeln("record %s(%s) {}", c.Name, strings.Join(fields, ", "))
-	scopedName := "_" + strings.ToUpper(c.Name[:1]) + c.Name[1:]
-	g.writeln("static final ScopedValue<%s> %s = ScopedValue.newInstance();", c.Name, scopedName)
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {

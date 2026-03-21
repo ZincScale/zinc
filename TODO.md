@@ -101,8 +101,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] `lock` → `ReentrantLock`
 - [x] `timeout(dur) { }` → deadline-aware execution
 - [x] `Channel<T>` → `ArrayBlockingQueue` with close semantics
-- [x] `context` / `with` → `ScopedValue` for context propagation
-- [ ] Errors as values: `return Error()`, `or match`, no try/catch/throw
+- [x] Errors as values: `return Error()`, `or match`, no try/catch/throw
 
 ## Phase 4 — Packaging & Production
 

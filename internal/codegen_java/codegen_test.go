@@ -996,19 +996,6 @@ timeout(5000) {
 	)
 }
 
-func TestContextDecl(t *testing.T) {
-	assertContains(t, `
-context RequestContext {
-    String traceId
-    String tenantId
-}
-`,
-		`record RequestContext(String traceId, String tenantId) {}`,
-		`static final ScopedValue<RequestContext>`,
-		`ScopedValue.newInstance()`,
-	)
-}
-
 func TestSealedClass(t *testing.T) {
 	src := `
 sealed class Shape {

@@ -530,17 +530,6 @@ type TimeoutStmt struct {
 func (t *TimeoutStmt) nodeTag() {}
 func (t *TimeoutStmt) stmtTag() {}
 
-// ContextDecl: context Type { fields }
-// Declares a scoped value type. Transpiles to a record + ScopedValue holder.
-type ContextDecl struct {
-	Line   int
-	Name   string
-	Fields []*FieldDecl // context fields
-}
-
-func (c *ContextDecl) nodeTag() {}
-func (c *ContextDecl) stmtTag() {}
-
 // --- Expressions -------------------------------------------------------------
 
 // Expr is an expression node.
