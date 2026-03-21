@@ -449,19 +449,39 @@ func classNameFromFile(path string) string {
 
 // runInit scaffolds a new Zinc project.
 func runInit(name string) error {
-	if err := os.MkdirAll(filepath.Join(name, "src"), 0755); err != nil {
-		return fmt.Errorf("creating project directory: %w", err)
+	dirs := []string{
+		filepath.Join(name, "src"),
+		filepath.Join(name, "test"),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return fmt.Errorf("creating directory: %w", err)
+		}
 	}
 
-	// build.mill.yaml
-	millConfig := fmt.Sprintf(`extends: JavaModule
+	// build.mill.yaml — Mill build config
+	millConfig := fmt.Sprintf(`# %s — Zinc project (Mill build)
+# Docs: https://mill-build.org/mill/index.html
+#
+# Commands:
+#   mill app.compile          compile
+#   mill app.run              run
+#   mill app.test             test
+#   mill app.nativeImage      GraalVM native binary
+#   mill app.jlink            self-contained JRE + app
+#   mill app.docker           Docker image
+
+extends: JavaModule
 jvmVersion: 25
 
-project:
-  name: %s
-  version: 0.1.0
-
+# Maven Central dependencies
 mvnDeps: []
+  # - com.google.code.gson:gson:2.11.0
+  # - io.quarkus:quarkus-rest:3.17.0
+
+# Custom Maven repositories (optional)
+# repositories:
+#   - https://repo.example.com/maven2
 `, name)
 	if err := os.WriteFile(filepath.Join(name, "build.mill.yaml"), []byte(millConfig), 0644); err != nil {
 		return err
@@ -477,10 +497,10 @@ print("Hello from Zinc!")
 
 	// .gitignore
 	gitignore := `zinc-out/
+out/
 *.class
 dist/
-Dockerfile
-*-deployment.yaml
+.mill-version
 `
 	if err := os.WriteFile(filepath.Join(name, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return err
@@ -492,24 +512,69 @@ Dockerfile
 	fmt.Printf("  %s/.gitignore\n", name)
 	fmt.Println("\nGet started:")
 	fmt.Printf("  cd %s && zinc run src/main.zn\n", name)
+	fmt.Println("\nAdd dependencies in build.mill.yaml under mvnDeps:")
+	fmt.Println("  mvnDeps:")
+	fmt.Println("    - com.google.code.gson:gson:2.11.0")
 	return nil
 }
 
-// buildNative attempts GraalVM native-image, falls back to JLink.
+// runMill runs a Mill command in the given directory.
+func runMill(dir string, millArgs ...string) error {
+	mill, err := exec.LookPath("mill")
+	if err != nil {
+		return fmt.Errorf("mill not found — install Mill: https://mill-build.org/mill/Installation.html")
+	}
+	cmd := exec.Command(mill, millArgs...)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// hasMillConfig checks if a build.mill.yaml exists in or above the target path.
+func hasMillConfig(target string) (string, bool) {
+	dir := target
+	if !isDir(dir) {
+		dir = filepath.Dir(dir)
+	}
+	// Walk up to find build.mill.yaml
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "build.mill.yaml")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+// buildNative builds a native binary — delegates to Mill if available, else direct.
 func buildNative(outDir, appName string) error {
-	// Try native-image first
+	if projectDir, ok := hasMillConfig(outDir); ok {
+		fmt.Println("building native binary via Mill...")
+		if err := runMill(projectDir, "app.nativeImage"); err != nil {
+			fmt.Fprintln(os.Stderr, "mill app.nativeImage failed, trying jlink...")
+			return runMill(projectDir, "app.jlink")
+		}
+		return nil
+	}
+
+	// No Mill — direct native-image / jlink
 	nativeImage, err := exec.LookPath("native-image")
 	if err == nil {
 		fmt.Println("building native binary with GraalVM native-image...")
+		os.MkdirAll("dist", 0755)
 		cmd := exec.Command(nativeImage,
-			"--enable-preview",
-			"-cp", outDir,
+			"--enable-preview", "-cp", outDir,
 			"-o", filepath.Join("dist", appName),
 			classNameFromFile(appName+".zn"),
 		)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		os.MkdirAll("dist", 0755)
 		if err := cmd.Run(); err == nil {
 			fmt.Printf("native binary: dist/%s\n", appName)
 			return nil
@@ -517,24 +582,18 @@ func buildNative(outDir, appName string) error {
 		fmt.Fprintln(os.Stderr, "native-image failed, falling back to jlink...")
 	}
 
-	// Fallback: jlink
 	jlink, err := exec.LookPath("jlink")
 	if err != nil {
 		return fmt.Errorf("neither native-image nor jlink found — install GraalVM or JDK 25+")
 	}
-
-	fmt.Println("building JLink runtime image...")
+	os.MkdirAll("dist", 0755)
 	distDir := filepath.Join("dist", appName+"-jlink")
 	cmd := exec.Command(jlink,
-		"--module-path", outDir,
-		"--add-modules", "ALL-MODULE-PATH",
-		"--output", distDir,
-		"--strip-debug",
-		"--compress", "zip-6",
+		"--module-path", outDir, "--add-modules", "ALL-MODULE-PATH",
+		"--output", distDir, "--strip-debug", "--compress", "zip-6",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	os.MkdirAll("dist", 0755)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("jlink failed: %w", err)
 	}
@@ -542,8 +601,14 @@ func buildNative(outDir, appName string) error {
 	return nil
 }
 
-// generateDockerfile creates a Dockerfile for the project.
+// generateDockerfile generates a Dockerfile — delegates to Mill if available.
 func generateDockerfile(appName string) error {
+	if projectDir, ok := hasMillConfig("."); ok {
+		fmt.Println("building Docker image via Mill...")
+		return runMill(projectDir, "app.docker")
+	}
+
+	// No Mill — generate a simple Dockerfile
 	dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
@@ -562,6 +627,23 @@ CMD ["java", "--enable-preview", "-cp", "classes", "%s"]
 
 // generateK8sManifest creates a K8s deployment manifest.
 func generateK8sManifest(appName string) error {
+	// Docker first
+	if _, ok := hasMillConfig("."); !ok {
+		// Only generate Dockerfile manually if no Mill
+		dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
+
+WORKDIR /app
+COPY zinc-out/ ./classes/
+
+EXPOSE 8080
+CMD ["java", "--enable-preview", "-cp", "classes", "%s"]
+`, classNameFromFile(appName+".zn"))
+		if err := os.WriteFile("Dockerfile", []byte(dockerfile), 0644); err != nil {
+			return err
+		}
+		fmt.Println("generated: Dockerfile")
+	}
+
 	manifest := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
