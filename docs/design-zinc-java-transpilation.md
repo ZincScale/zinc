@@ -124,7 +124,7 @@ These were added during the Python pivot and need rethinking for Java:
 ### 1. `bytes` type
 - **Python**: first-class `bytes` type with slicing, immutable
 - **Java**: `byte[]` (mutable), `ByteBuffer`, or `ReadOnlyMemory` equivalent
-- **Zinc decision**: `byte[]` maps to `byte[]`. For flow engine, use `ByteBuffer` or `MemorySegment` (Panama API). Hide behind Zinc's `byte[]` type.
+- **Zinc decision**: `byte[]` maps to `byte[]`. For high-performance use cases, `ByteBuffer` or `MemorySegment` (Panama API) available. Hide behind Zinc's `byte[]` type.
 
 ### 2. `**kwargs` / named arguments
 - **Python**: native keyword arguments
@@ -231,20 +231,9 @@ var results = parallel {
 ```
 Maps to Java `StructuredTaskScope.ShutdownOnFailure`.
 
-#### 3. Scoped values (for flow context)
-```zinc
-// Zinc: flow context propagated implicitly
-@processor
-fn enrich(FlowFile flow) FlowFile {
-    var trace_id = FlowContext.traceId  // scoped value, not thread-local
-    // ...
-}
-```
-Maps to Java `ScopedValue<T>` — better than ThreadLocal for virtual threads.
-
-#### 4. Foreign Function & Memory API (for native interop)
+#### 3. Foreign Function & Memory API (for native interop)
 Not surfaced in Zinc syntax, but the runtime can use Panama API for:
-- Direct memory access (no copying for large FlowFile content)
+- Direct memory access (zero-copy large payloads)
 - Native library calls (SIMD, compression, crypto)
 
 ---
@@ -310,8 +299,7 @@ These are the things that make Zinc worth using instead of raw Java:
 7. **No checked exceptions** — all exceptions are unchecked. Use `Result<T>` for expected failures.
 8. **Fluent collections without `.stream()/.toList()`** — transpiler adds them
 9. **Convention-over-config project structure** — `zinc init`, `zinc build`, `zinc run`
-10. **Built-in flow engine** — `@processor`, pipeline DSL, hot-swap lifecycle
-11. **Null safety** — `Type?` syntax with compiler enforcement, no NPEs from untracked nulls
+10. **Null safety** — `Type?` syntax with compiler enforcement, no NPEs from untracked nulls
 12. **String interpolation** — `"Hello {name}"` without ceremony
 13. **Named arguments** — always available, transpiler generates positional or builder
 14. **`spawn` / `parallel for`** — virtual threads without boilerplate
@@ -331,7 +319,7 @@ These are the things that make Zinc worth using instead of raw Java:
 | Type system | Gradual (type hints) | Static (compile-time enforced) | Java is stricter — good |
 | None handling | `None` is untyped | `null` with nullability tracking | Zinc adds safety over Java |
 | Imports | Anywhere in file | Hoisted to top | Transpiler handles |
-| REPL | Python REPL | JShell or custom | Less important for flow engine |
+| REPL | Python REPL | JShell or custom | JShell-based |
 | Startup time | ~50ms (Python) | ~30ms (GraalVM native) / ~500ms (JVM) | Native-image for CLI tools |
 
 ---
@@ -360,16 +348,15 @@ These are the things that make Zinc worth using instead of raw Java:
 - Comprehensions → stream chains
 - `or {}` error handling → try/catch sugar
 
-### Phase 3 — Concurrency & Flow
+### Phase 3 — Concurrency
 - spawn → Thread.startVirtualThread
-- parallel for → StructuredTaskScope
-- @processor / pipeline DSL → Zinc Flow runtime (Java library)
-- Channel<OwnedBuffer> or ArrayBlockingQueue for inter-processor queues
-- CancellationToken equivalent → virtual thread interrupt
+- parallel for / concurrent { } → StructuredTaskScope
+- timeout(dur) { } → StructuredTaskScope + joinUntil
+- Channel<T> → ArrayBlockingQueue
+- lock → ReentrantLock
 
 ### Phase 4 — Packaging & Deployment (Mill + Quarkus)
 - zinc init → Mill project scaffold
 - zinc build → mill compile + native-image
 - zinc run → mill run
 - zinc pack → native-image / JLink / Docker
-- zinc flow run → Quarkus dev mode with hot-reload

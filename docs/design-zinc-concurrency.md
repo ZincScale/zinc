@@ -2,7 +2,7 @@
 
 > **Status**: DESIGN
 > **Target**: Java 25 virtual threads + structured concurrency (preview APIs)
-> **Quarkus**: `@RunOnVirtualThread` for REST/messaging, direct virtual thread usage in flow engine
+> **Quarkus**: `@RunOnVirtualThread` for REST/messaging
 
 ## Philosophy
 
@@ -12,7 +12,7 @@ Zinc concurrency is built on three principles:
 
 2. **Structured by default** — concurrent work has a defined lifetime. When a scope exits, all spawned work is done or cancelled. No orphaned threads, no fire-and-forget footguns. You can opt out for background tasks, but the default is safe.
 
-3. **Context flows automatically** — flow context (trace IDs, provenance, tenant ID) propagates to child threads via scoped values. No parameter drilling, no ThreadLocal pollution.
+3. **Simple primitives** — `spawn`, `parallel for`, `concurrent { }`, `timeout`, `lock`, `Channel<T>`. Compose them for complex patterns.
 
 ---
 
@@ -195,7 +195,7 @@ try {
 
 ### 5. `channel` — Bounded Producer/Consumer Queue
 
-Typed, bounded, blocking queue for communicating between concurrent tasks. This is the core primitive for Zinc Flow processor-to-processor communication.
+Typed, bounded, blocking queue for communicating between concurrent tasks.
 
 ```zinc
 var ch = Channel<Order>(capacity: 100)
@@ -332,131 +332,12 @@ for (int attempt = 0; attempt < 3; attempt++) {
 
 ---
 
-## Context Propagation — Scoped Values
+## GraalVM Native Image Considerations
 
-### The Problem
-
-In a flow engine, every FlowFile carries context: trace ID, provenance chain, tenant ID, security principal. Without scoped values, every function signature needs these parameters:
-
-```zinc
-// BAD: context parameter drilling
-fn enrich(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
-fn validate(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
-fn transform(FlowFile flow, String traceId, String tenantId) FlowFile { ... }
-```
-
-### The Solution: `context`
-
-```zinc
-context FlowContext {
-    String traceId
-    String tenantId
-    List<String> provenance
-}
-
-// Set once at pipeline entry
-with FlowContext(traceId: uuid(), tenantId: "acme") {
-    // All processors in this scope see the context
-    var result = enrich(flow)
-}
-
-// Inside a processor — no parameters needed
-@processor
-fn enrich(FlowFile flow) FlowFile {
-    var ctx = FlowContext.current()
-    log.info("[{ctx.traceId}] Enriching for tenant {ctx.tenantId}")
-    // ...
-}
-```
-
-Transpiles to:
-```java
-private static final ScopedValue<FlowContext> FLOW_CONTEXT = ScopedValue.newInstance();
-
-// At pipeline entry
-ScopedValue.where(FLOW_CONTEXT, new FlowContext(uuid(), "acme"))
-    .run(() -> {
-        var result = enrich(flow);
-    });
-
-// Inside processor
-public FlowFile enrich(FlowFile flow) {
-    var ctx = FLOW_CONTEXT.get();
-    log.info("[" + ctx.traceId() + "] Enriching for tenant " + ctx.tenantId());
-    // ...
-}
-```
-
-**Automatic propagation to child threads**: `StructuredTaskScope.fork()` automatically inherits scoped value bindings. This means:
-
-```zinc
-with FlowContext(traceId: "abc-123") {
-    concurrent {
-        enrichOrder(flow)    // sees traceId "abc-123"
-        lookupCustomer(flow) // sees traceId "abc-123"
-        checkInventory(flow) // sees traceId "abc-123"
-    }
-}
-```
-
-All three concurrent tasks see the same `FlowContext` without passing it as a parameter.
-
----
-
-## Flow Engine Concurrency Model
-
-### Within a Processor Group (Same JVM)
-
-```
-                    Virtual Thread per Processor
-                    ┌──────────────────────────┐
-                    │                          │
- ──[Channel]──→ ProcA ──[Channel]──→ ProcB ──[Channel]──→ ProcC ──→
-                    │                          │
-                    │  ScopedValue: FlowContext │
-                    │  Channel: backpressure    │
-                    │  interrupt(): cancel      │
-                    └──────────────────────────┘
-```
-
-- Each processor runs on a **virtual thread**
-- Inter-processor communication via **Channel** (`ArrayBlockingQueue`)
-- Backpressure via **bounded channel capacity** — producer blocks when channel is full
-- Cancellation via **Thread.interrupt()** — sub-millisecond stop
-- Context via **ScopedValue** — trace ID, tenant, provenance flow automatically
-- Rate limiting via **Rate** — protect downstream services
-
-### Processor Lifecycle
-
-```zinc
-@processor(retries: 3, rate: 1000.perSecond)
-fn enrich_order(FlowFile flow) FlowFile {
-    var data = json.parse(flow.content)
-
-    // This blocks the virtual thread, not a platform thread
-    var customer = db.query("SELECT * FROM customers WHERE id = ?", data["customer_id"])
-
-    data["customer_name"] = customer.name
-    return flow.withContent(json.dump(data))
-}
-```
-
-The runtime wraps this in:
-1. **Rate limiter** — honors `rate: 1000.perSecond`
-2. **Retry loop** — honors `retries: 3` with exponential backoff
-3. **Context binding** — `FlowContext` scoped value set before invocation
-4. **Interrupt check** — checked between iterations for cancellation
-5. **Dead letter** — after retries exhausted, route to DLQ
-
-### Hot Swap
-
-```bash
-zinc flow processor stop enrich_order    # interrupt() → stops in <1ms
-zinc flow processor swap enrich_order    # deploy new version
-zinc flow processor start enrich_order   # new virtual thread, same channel
-```
-
-The channel buffers messages while the processor is stopped. Swap = stop old thread → deploy new code → start new thread. Queue bridges the gap.
+- **Virtual threads**: fully supported in GraalVM native-image
+- **StructuredTaskScope**: supported with `--enable-preview`
+- **ReentrantLock**: fully supported
+- **ArrayBlockingQueue**: fully supported
 
 ---
 
@@ -517,27 +398,6 @@ fn processOrder(Order order) {
 
 ---
 
-## GraalVM Native Image Considerations
-
-- **Virtual threads**: fully supported in GraalVM native-image
-- **StructuredTaskScope**: supported with `--enable-preview`
-- **ScopedValue**: supported with `--enable-preview`
-- **ReentrantLock**: fully supported (no `synchronized` pinning issue anyway in native)
-- **ArrayBlockingQueue**: fully supported
-
-The preview flag (`--enable-preview`) is required for structured concurrency and scoped values until they're finalized. Quarkus passes this through automatically when configured:
-
-```yaml
-# build.mill.yaml
-quarkus:
-  native:
-    additional-build-args: --enable-preview
-```
-
-Once structured concurrency and scoped values are GA (likely Java 26 or 27), the preview flag goes away.
-
----
-
 ## Summary: Zinc Concurrency Primitives
 
 ### Language Keywords (transpiler generates Java code)
@@ -553,8 +413,6 @@ These are part of the Zinc grammar. The transpiler emits the Java concurrency co
 | `concurrent(first: true)` | Race, take first result | `StructuredTaskScope.ShutdownOnSuccess` | Yes |
 | `lock mu { }` | Mutual exclusion | `ReentrantLock` (or `AtomicX` optimization) | N/A |
 | `timeout(dur) { }` | Deadline-aware execution | `joinUntil(Instant)` | Yes |
-| `context T { }` | Scoped value declaration | `ScopedValue<T>` | Yes |
-| `with T(...) { }` | Bind scoped value | `ScopedValue.where().run()` | Yes |
 
 ### Standard Library (`zinc.concurrent`)
 
@@ -584,7 +442,7 @@ The distinction matters: language keywords are optimized by the transpiler (e.g.
 
 ---
 
-## General-Purpose Examples (Not Flow-Specific)
+## Examples
 
 ### REST API: Fan-out to multiple services
 

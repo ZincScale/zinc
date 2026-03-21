@@ -93,7 +93,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 ### Deferred
 - [ ] Source mapping: JSR-45 SMAP for debugger integration (.zn → .java line mapping)
 
-## Phase 3 — Concurrency & Flow Engine
+## Phase 3 — Concurrency
 
 - [x] `spawn` → `Thread.startVirtualThread()`
 - [x] `concurrent { }` → `StructuredTaskScope` fan-out/fan-in
@@ -112,10 +112,9 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ## Phase 5 — Ecosystem
 
-- [ ] Zinc Flow processor library (Kafka, S3, HTTP, JDBC connectors)
-- [ ] REST API for flow pipeline management
-- [ ] TUI dashboard for pipeline monitoring
-- [ ] Quarkus dev mode integration (hot-reload processors)
+- [ ] Standard library: HTTP client, JSON, file I/O wrappers
+- [ ] Quarkus dev mode integration (hot-reload)
+- [ ] IDE support: syntax highlighting, LSP
 
 ---
 
@@ -125,8 +124,6 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [Design Doc](docs/design-zinc-v3-java.md) — v3 philosophy, Java transpilation
 - [Concurrency](docs/design-zinc-concurrency.md) — virtual threads, structured concurrency
 - [Transpilation Mapping](docs/design-zinc-java-transpilation.md) — Zinc → Java for every feature
-- [Zinc Flow](docs/design-zinc-flow.md) — NiFi-inspired flow processing design
-- [Benchmark Results](benchmarks/RESULTS.md) — Java 25 FlowFile performance
 
 ## Previous Versions
 

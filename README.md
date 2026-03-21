@@ -47,7 +47,6 @@ Java is the best runtime for server applications. But it has ceremony: semicolon
 | [Language Reference](docs/language-reference.md) | Full syntax guide |
 | [Design Doc](docs/design-zinc-v3-java.md) | v3 philosophy, Java transpilation, packaging |
 | [Concurrency](docs/design-zinc-concurrency.md) | Virtual threads, structured concurrency |
-| [Zinc Flow](docs/design-zinc-flow.md) | NiFi-inspired flow processing |
 
 ---
 

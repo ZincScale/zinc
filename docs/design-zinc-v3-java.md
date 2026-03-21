@@ -646,69 +646,6 @@ Annotations map directly to Java annotations. Quarkus, Jakarta EE, and any Java 
 
 ---
 
-## Zinc Flow — The Killer App
-
-Zinc Flow is a NiFi-inspired data flow engine. Processors are Zinc functions. See `design-zinc-flow.md` and `design-zinc-flow-runtime.md` for full architecture.
-
-### Processor
-
-```zinc
-@processor
-fn enrich_order(FlowFile flow) FlowFile {
-    var data = json.parse(flow.content)
-    data["enriched_at"] = Instant.now().toString()
-    data["region"] = lookupRegion(data["zip_code"])
-    return flow.withContent(json.dump(data))
-}
-```
-
-Transpiles to a Java class implementing the `Processor` interface:
-```java
-public class EnrichOrder implements Processor {
-    @Override
-    public FlowFile process(FlowFile flow) {
-        var data = Json.parse(flow.content());
-        data.put("enriched_at", Instant.now().toString());
-        data.put("region", lookupRegion((String) data.get("zip_code")));
-        return flow.withContent(Json.dump(data));
-    }
-}
-```
-
-### Pipeline DSL
-
-```zinc
-pipeline order_processing {
-    source kafka("orders-topic", group: "zinc-flow")
-
-    -> validate_order
-    -> enrich_order
-    -> route(
-        status == "completed" -> process_payment,
-        status == "pending"   -> hold_queue,
-        _                     -> dead_letter
-    )
-
-    process_payment -> sink kafka("payments-topic")
-    hold_queue      -> sink s3("s3://bucket/pending/")
-    dead_letter     -> sink file("/var/zinc-flow/dead-letter/")
-}
-```
-
-### Runtime — Java Virtual Threads + ArrayBlockingQueue
-
-Within a ProcessorGroup (same JVM):
-- Each processor runs on a virtual thread
-- Inter-processor communication via `ArrayBlockingQueue<OwnedBuffer>` (for hot paths) or `ArrayBlockingQueue<byte[]>` (for simplicity)
-- Cancellation via `Thread.interrupt()` — sub-millisecond stop latency
-- ZGC handles allocation — naive processor code is fast enough
-
-Between ProcessorGroups (distributed):
-- NATS JetStream for cross-group messaging
-- Serialization only at group boundaries
-
----
-
 ## Project Structure
 
 ```
@@ -721,11 +658,6 @@ myapp/
       order.zn
     services/
       user_service.zn
-    processors/             # Zinc Flow processors
-      enrich.zn
-      validate.zn
-    pipelines/
-      order_pipeline.zn
   test/
     user_test.zn
     order_test.zn
@@ -740,7 +672,6 @@ jvmVersion: 25
 mvnDeps:
   - io.quarkus:quarkus-core:3.x
   - io.quarkus:quarkus-rest:3.x
-  - org.zinc:zinc-flow-runtime:0.1.0
 
 test:
   mvnDeps:
@@ -758,8 +689,6 @@ zinc build [dir]            # transpile + compile (Mill + javac)
 zinc build --native [dir]   # transpile + GraalVM native-image (via Quarkus)
 zinc run [dir]              # transpile + run
 zinc test [dir]             # transpile + run tests
-zinc flow run <pipeline>    # run flow pipeline (Quarkus dev mode)
-zinc flow deploy <pipeline> # build + deploy to K8s
 zinc check <file.zn>        # type check only
 zinc fmt <file.zn>          # auto-format
 zinc repl                   # interactive REPL (JShell-based)
@@ -786,12 +715,6 @@ GraalVM native-image requires all reflection to be declared at build time. Quark
 2. GraalVM configuration generated automatically by Quarkus extensions
 3. Large library compatibility matrix tested in CI
 
-For Zinc Flow, the dependency set is controlled:
-- Flow runtime (our code, no reflection)
-- JSON parsing (Jackson — Quarkus has native-image support)
-- NATS client (well-tested with GraalVM)
-- Kafka client (Quarkus extension handles native-image config)
-
 If a user brings a reflection-heavy library that breaks native-image, `zinc build` falls back to JLink automatically with a warning.
 
 ---
@@ -813,7 +736,6 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 | **Lambdas** | Must name parameter | `it` keyword for single-param |
 | **Build tool** | Gradle/Maven ceremony | Mill YAML, `zinc build` |
 | **Project setup** | archetype/initializr + config | `zinc init`, run immediately |
-| **Flow engine** | Build your own or use NiFi (JVM monolith) | `@processor`, pipeline DSL, built-in |
 
 ---
 
@@ -841,13 +763,13 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 - Safe navigation `?.`
 - `zinc fmt` formatter
 
-### Phase 3 — Concurrency & Flow Engine
+### Phase 3 — Concurrency
 - `spawn` → virtual threads
 - `parallel for` → StructuredTaskScope
-- `@processor` / pipeline DSL → Zinc Flow runtime (Java library)
-- Inter-processor queues (ArrayBlockingQueue + optional pooled buffers)
-- Cancellation via Thread.interrupt()
-- CLI: `zinc flow run`, `zinc flow deploy`
+- `concurrent { }` → fan-out/fan-in
+- `timeout(dur) { }` → deadline-aware execution
+- `Channel<T>` → bounded producer/consumer queue
+- `lock` → ReentrantLock
 
 ### Phase 4 — Packaging & Production
 - Mill integration (`zinc init` generates `build.mill.yaml`)
@@ -857,7 +779,6 @@ If a user brings a reflection-heavy library that breaks native-image, `zinc buil
 - `zinc repl` (JShell-based)
 
 ### Phase 5 — Ecosystem
-- Zinc Flow processor library (Kafka, S3, HTTP, JDBC connectors)
-- REST API management for flow pipelines
-- TUI dashboard for pipeline monitoring
-- Quarkus dev mode integration (hot-reload processors)
+- Standard library: HTTP client, JSON, file I/O wrappers
+- Quarkus dev mode integration (hot-reload)
+- IDE support: syntax highlighting, LSP
