@@ -95,14 +95,14 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ## Phase 3 — Concurrency & Flow Engine
 
-- [ ] `spawn` → `Thread.startVirtualThread()`
-- [ ] `concurrent { }` → `StructuredTaskScope` fan-out/fan-in
-- [ ] `parallel for` → `StructuredTaskScope` with bounded concurrency
-- [ ] `lock` → `ReentrantLock`
-- [ ] `timeout(dur) { }` → deadline-aware execution
-- [ ] `Channel<T>` → `ArrayBlockingQueue` with close semantics
-- [ ] `context` / `with` → `ScopedValue` for context propagation
-- [ ] `@processor` / pipeline DSL → Zinc Flow runtime (Java library)
+- [x] `spawn` → `Thread.startVirtualThread()`
+- [x] `concurrent { }` → `StructuredTaskScope` fan-out/fan-in
+- [x] `parallel for` → `StructuredTaskScope` with bounded concurrency
+- [x] `lock` → `ReentrantLock`
+- [x] `timeout(dur) { }` → deadline-aware execution
+- [x] `Channel<T>` → `ArrayBlockingQueue` with close semantics
+- [x] `context` / `with` → `ScopedValue` for context propagation
+- [ ] Errors as values: `return Error()`, `or match`, no try/catch/throw
 
 ## Phase 4 — Packaging & Production
 

@@ -506,6 +506,41 @@ type WithStmt struct {
 func (w *WithStmt) nodeTag() {}
 func (w *WithStmt) stmtTag() {}
 
+// ConcurrentStmt: concurrent { task1; task2; task3 }
+// With tuple assignment: var (a, b, c) = concurrent { ... }
+type ConcurrentStmt struct {
+	Line      int
+	Tasks     []Expr     // expressions to run concurrently
+	FirstOnly bool       // concurrent(first: true) — race semantics
+	Names     []string   // var (a, b, c) = concurrent { ... } — result names (empty if standalone)
+	OrHandler *OrHandler // optional error handler
+}
+
+func (c *ConcurrentStmt) nodeTag() {}
+func (c *ConcurrentStmt) stmtTag() {}
+
+// TimeoutStmt: timeout(dur) { body } [or { fallback }]
+type TimeoutStmt struct {
+	Line      int
+	Duration  Expr       // duration expression
+	Body      *BlockStmt // body to execute with deadline
+	OrHandler *OrHandler // optional fallback on timeout
+}
+
+func (t *TimeoutStmt) nodeTag() {}
+func (t *TimeoutStmt) stmtTag() {}
+
+// ContextDecl: context Type { fields }
+// Declares a scoped value type. Transpiles to a record + ScopedValue holder.
+type ContextDecl struct {
+	Line   int
+	Name   string
+	Fields []*FieldDecl // context fields
+}
+
+func (c *ContextDecl) nodeTag() {}
+func (c *ContextDecl) stmtTag() {}
+
 // --- Expressions -------------------------------------------------------------
 
 // Expr is an expression node.

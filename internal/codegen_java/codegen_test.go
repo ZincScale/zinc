@@ -938,6 +938,77 @@ with f = FileReader("data.txt") {
 	)
 }
 
+func TestConcurrentStandalone(t *testing.T) {
+	assertContains(t, `
+concurrent {
+    fetchUser(id)
+    fetchOrders(id)
+}
+`,
+		`java.util.concurrent.StructuredTaskScope.open()`,
+		`_scope.fork(() -> { fetchUser(id); return null; });`,
+		`_scope.fork(() -> { fetchOrders(id); return null; });`,
+		`_scope.join();`,
+	)
+}
+
+func TestConcurrentWithResults(t *testing.T) {
+	assertContains(t, `
+var (user, orders) = concurrent {
+    fetchUser(id)
+    fetchOrders(id)
+}
+`,
+		`Object user;`,
+		`Object orders;`,
+		`java.util.concurrent.StructuredTaskScope.open()`,
+		`var _task0 = _scope.fork(() -> fetchUser(id));`,
+		`var _task1 = _scope.fork(() -> fetchOrders(id));`,
+		`_scope.join();`,
+		`user = _task0.get();`,
+		`orders = _task1.get();`,
+	)
+}
+
+func TestTimeoutBasic(t *testing.T) {
+	assertContains(t, `
+timeout(5000) {
+    slowApi(request)
+}
+`,
+		`java.util.concurrent.StructuredTaskScope.open()`,
+		`_scope.fork(() -> {`,
+		`_scope.joinUntil(java.time.Instant.now().plus(5000));`,
+	)
+}
+
+func TestTimeoutWithOr(t *testing.T) {
+	assertContains(t, `
+timeout(5000) {
+    slowApi(request)
+} or {
+    print("timed out")
+}
+`,
+		`java.util.concurrent.StructuredTaskScope.open()`,
+		`} catch (java.util.concurrent.TimeoutException err) {`,
+		`System.out.println("timed out");`,
+	)
+}
+
+func TestContextDecl(t *testing.T) {
+	assertContains(t, `
+context RequestContext {
+    String traceId
+    String tenantId
+}
+`,
+		`record RequestContext(String traceId, String tenantId) {}`,
+		`static final ScopedValue<RequestContext>`,
+		`ScopedValue.newInstance()`,
+	)
+}
+
 func TestSealedClass(t *testing.T) {
 	src := `
 sealed class Shape {

@@ -74,8 +74,11 @@ const (
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
 	TOKEN_NONE     // none (Python-style null)
-	TOKEN_PARALLEL // parallel (parallel for)
-	TOKEN_INIT     // init (constructor-set immutable field)
+	TOKEN_PARALLEL   // parallel (parallel for)
+	TOKEN_INIT       // init (constructor-set immutable field)
+	TOKEN_CONCURRENT // concurrent { } (fan-out/fan-in)
+	TOKEN_TIMEOUT    // timeout(dur) { }
+	TOKEN_CONTEXT    // context (scoped value declaration)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -180,8 +183,11 @@ var tokenNames = map[TokenType]string{
 	TOKEN_AND:       "and",
 	TOKEN_FROM:      "from",
 	TOKEN_NONE:      "none",
-	TOKEN_PARALLEL:  "parallel",
-	TOKEN_INIT:      "init",
+	TOKEN_PARALLEL:   "parallel",
+	TOKEN_INIT:       "init",
+	TOKEN_CONCURRENT: "concurrent",
+	TOKEN_TIMEOUT:    "timeout",
+	TOKEN_CONTEXT:    "context",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -293,8 +299,11 @@ var keywords = map[string]TokenType{
 	"and":       TOKEN_AND,
 	"from":      TOKEN_FROM,
 	"none":      TOKEN_NONE,
-	"parallel":  TOKEN_PARALLEL,
-	"init":      TOKEN_INIT,
+	"parallel":   TOKEN_PARALLEL,
+	"init":       TOKEN_INIT,
+	"concurrent": TOKEN_CONCURRENT,
+	"timeout":    TOKEN_TIMEOUT,
+	"context":    TOKEN_CONTEXT,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

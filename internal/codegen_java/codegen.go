@@ -635,6 +635,12 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitBlock(stmt.Body)
 		g.indent--
 		g.writeln("});")
+	case *parser.ConcurrentStmt:
+		g.emitConcurrentStmt(stmt)
+	case *parser.TimeoutStmt:
+		g.emitTimeoutStmt(stmt)
+	case *parser.ContextDecl:
+		g.emitContextDecl(stmt)
 	case *parser.AssertStmt:
 		g.emitAssertStmt(stmt)
 	}
@@ -918,6 +924,83 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 	g.writeln("_scope.join();")
 	g.indent--
 	g.writeln("}")
+}
+
+func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
+	if len(c.Names) > 0 {
+		// var (a, b, c) = concurrent { task1; task2; task3 }
+		// Declare variables
+		for _, name := range c.Names {
+			g.writeln("Object %s;", name)
+		}
+		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+		g.indent++
+		// Fork each task
+		for i, task := range c.Tasks {
+			g.writeln("var _task%d = _scope.fork(() -> %s);", i, g.formatExpr(task))
+		}
+		g.writeln("_scope.join();")
+		// Collect results
+		for i, name := range c.Names {
+			if i < len(c.Tasks) {
+				g.writeln("%s = _task%d.get();", name, i)
+			}
+		}
+		g.indent--
+		g.writeln("}")
+	} else {
+		// Standalone concurrent { } — fire-and-forget fan-out, wait for all
+		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+		g.indent++
+		for _, task := range c.Tasks {
+			g.writeln("_scope.fork(() -> { %s; return null; });", g.formatExpr(task))
+		}
+		g.writeln("_scope.join();")
+		g.indent--
+		g.writeln("}")
+	}
+}
+
+func (g *Generator) emitTimeoutStmt(t *parser.TimeoutStmt) {
+	// timeout(dur) { body } or { fallback }
+	// → try (var _scope = StructuredTaskScope.open()) {
+	//       var _task = _scope.fork(() -> { body });
+	//       _scope.joinUntil(Instant.now().plus(dur));
+	//       result = _task.get();
+	//   } catch (TimeoutException e) { fallback }
+	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+	g.indent++
+	g.writeln("_scope.fork(() -> {")
+	g.indent++
+	g.emitBlock(t.Body)
+	g.writeln("return null;")
+	g.indent--
+	g.writeln("});")
+	g.writeln("_scope.joinUntil(java.time.Instant.now().plus(%s));", g.formatExpr(t.Duration))
+	g.indent--
+	if t.OrHandler != nil && t.OrHandler.Body != nil {
+		g.writeln("} catch (java.util.concurrent.TimeoutException err) {")
+		g.indent++
+		g.emitBlock(t.OrHandler.Body)
+		g.indent--
+		g.writeln("}")
+	} else {
+		g.writeln("}")
+	}
+}
+
+func (g *Generator) emitContextDecl(c *parser.ContextDecl) {
+	// context RequestContext { String traceId; String tenantId }
+	// → record RequestContext(String traceId, String tenantId) {}
+	//   static final ScopedValue<RequestContext> _REQUEST_CONTEXT = ScopedValue.newInstance();
+	//   static RequestContext current() { return _REQUEST_CONTEXT.get(); }
+	var fields []string
+	for _, f := range c.Fields {
+		fields = append(fields, fmt.Sprintf("%s %s", g.formatType(f.Type), f.Name))
+	}
+	g.writeln("record %s(%s) {}", c.Name, strings.Join(fields, ", "))
+	scopedName := "_" + strings.ToUpper(c.Name[:1]) + c.Name[1:]
+	g.writeln("static final ScopedValue<%s> %s = ScopedValue.newInstance();", c.Name, scopedName)
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
