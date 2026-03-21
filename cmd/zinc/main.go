@@ -33,7 +33,11 @@ var version = "3.0.0"
 const usage = `Zinc — convention-over-configuration JVM language.
 
 Usage:
-  zinc build <file.zn>           Transpile to Java and compile with javac
+  zinc init [name]               Scaffold a new project
+  zinc build <file.zn|dir>       Transpile to Java and compile with javac
+  zinc build --native <dir>      Build native binary (GraalVM native-image)
+  zinc build --docker <dir>      Generate Dockerfile + build JAR
+  zinc build --k8s <dir>         Generate Dockerfile + K8s manifest + build JAR
   zinc run <file.zn>             Transpile, compile, and run
   zinc fmt <file.zn>             Format Zinc source code
   zinc repl                      Interactive Zinc REPL
@@ -56,6 +60,16 @@ func main() {
 		case a == "repl":
 			runREPLV2()
 			return
+		case a == "init":
+			name := "myapp"
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				name = args[i+1]
+			}
+			if err := runInit(name); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			return
 		case a == "fmt":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "usage: zinc fmt <file.zn>")
@@ -67,18 +81,27 @@ func main() {
 			target := ""
 			outDir := "zinc-out"
 			verbose := false
+			native := false
+			docker := false
+			k8s := false
 			for j := i + 1; j < len(args); j++ {
 				if args[j] == "-o" && j+1 < len(args) {
 					outDir = args[j+1]
 					j++
 				} else if args[j] == "--verbose" || args[j] == "-v" {
 					verbose = true
+				} else if args[j] == "--native" {
+					native = true
+				} else if args[j] == "--docker" {
+					docker = true
+				} else if args[j] == "--k8s" {
+					k8s = true
 				} else if !strings.HasPrefix(args[j], "-") && target == "" {
 					target = args[j]
 				}
 			}
 			if target == "" {
-				fmt.Fprintln(os.Stderr, "usage: zinc build <file.zn> [-o outdir]")
+				fmt.Fprintln(os.Stderr, "usage: zinc build <file.zn|dir> [-o outdir] [--native|--docker|--k8s]")
 				os.Exit(1)
 			}
 			javaFiles, err := transpileToJava(target, outDir, verbose)
@@ -90,7 +113,28 @@ func main() {
 				errs.Error(err.Error())
 				os.Exit(1)
 			}
-			fmt.Printf("build complete: %s → %s/\n", target, outDir)
+
+			appName := filepath.Base(strings.TrimSuffix(target, ".zn"))
+			if native {
+				if err := buildNative(outDir, appName); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+			} else if docker || k8s {
+				if err := generateDockerfile(appName); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+				if k8s {
+					if err := generateK8sManifest(appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+				}
+				fmt.Printf("build complete: %s → %s/\n", target, outDir)
+			} else {
+				fmt.Printf("build complete: %s → %s/\n", target, outDir)
+			}
 			return
 		case a == "run":
 			target := ""
@@ -401,4 +445,155 @@ func classNameFromFile(path string) string {
 		}
 	}
 	return result.String()
+}
+
+// runInit scaffolds a new Zinc project.
+func runInit(name string) error {
+	if err := os.MkdirAll(filepath.Join(name, "src"), 0755); err != nil {
+		return fmt.Errorf("creating project directory: %w", err)
+	}
+
+	// build.mill.yaml
+	millConfig := fmt.Sprintf(`extends: JavaModule
+jvmVersion: 25
+
+project:
+  name: %s
+  version: 0.1.0
+
+mvnDeps: []
+`, name)
+	if err := os.WriteFile(filepath.Join(name, "build.mill.yaml"), []byte(millConfig), 0644); err != nil {
+		return err
+	}
+
+	// src/main.zn
+	mainZn := `// main.zn
+print("Hello from Zinc!")
+`
+	if err := os.WriteFile(filepath.Join(name, "src", "main.zn"), []byte(mainZn), 0644); err != nil {
+		return err
+	}
+
+	// .gitignore
+	gitignore := `zinc-out/
+*.class
+dist/
+Dockerfile
+*-deployment.yaml
+`
+	if err := os.WriteFile(filepath.Join(name, ".gitignore"), []byte(gitignore), 0644); err != nil {
+		return err
+	}
+
+	fmt.Printf("created project: %s/\n", name)
+	fmt.Printf("  %s/build.mill.yaml\n", name)
+	fmt.Printf("  %s/src/main.zn\n", name)
+	fmt.Printf("  %s/.gitignore\n", name)
+	fmt.Println("\nGet started:")
+	fmt.Printf("  cd %s && zinc run src/main.zn\n", name)
+	return nil
+}
+
+// buildNative attempts GraalVM native-image, falls back to JLink.
+func buildNative(outDir, appName string) error {
+	// Try native-image first
+	nativeImage, err := exec.LookPath("native-image")
+	if err == nil {
+		fmt.Println("building native binary with GraalVM native-image...")
+		cmd := exec.Command(nativeImage,
+			"--enable-preview",
+			"-cp", outDir,
+			"-o", filepath.Join("dist", appName),
+			classNameFromFile(appName+".zn"),
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		os.MkdirAll("dist", 0755)
+		if err := cmd.Run(); err == nil {
+			fmt.Printf("native binary: dist/%s\n", appName)
+			return nil
+		}
+		fmt.Fprintln(os.Stderr, "native-image failed, falling back to jlink...")
+	}
+
+	// Fallback: jlink
+	jlink, err := exec.LookPath("jlink")
+	if err != nil {
+		return fmt.Errorf("neither native-image nor jlink found — install GraalVM or JDK 25+")
+	}
+
+	fmt.Println("building JLink runtime image...")
+	distDir := filepath.Join("dist", appName+"-jlink")
+	cmd := exec.Command(jlink,
+		"--module-path", outDir,
+		"--add-modules", "ALL-MODULE-PATH",
+		"--output", distDir,
+		"--strip-debug",
+		"--compress", "zip-6",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	os.MkdirAll("dist", 0755)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("jlink failed: %w", err)
+	}
+	fmt.Printf("jlink image: %s/\n", distDir)
+	return nil
+}
+
+// generateDockerfile creates a Dockerfile for the project.
+func generateDockerfile(appName string) error {
+	dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
+
+WORKDIR /app
+COPY zinc-out/ ./classes/
+
+EXPOSE 8080
+CMD ["java", "--enable-preview", "-cp", "classes", "%s"]
+`, classNameFromFile(appName+".zn"))
+
+	if err := os.WriteFile("Dockerfile", []byte(dockerfile), 0644); err != nil {
+		return err
+	}
+	fmt.Println("generated: Dockerfile")
+	return nil
+}
+
+// generateK8sManifest creates a K8s deployment manifest.
+func generateK8sManifest(appName string) error {
+	manifest := fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  labels:
+    app: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: %s
+        image: %s:latest
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+`, appName, appName, appName, appName, appName, appName)
+
+	manifestFile := appName + "-deployment.yaml"
+	if err := os.WriteFile(manifestFile, []byte(manifest), 0644); err != nil {
+		return err
+	}
+	fmt.Printf("generated: %s\n", manifestFile)
+	return nil
 }

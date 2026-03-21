@@ -105,10 +105,10 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ## Phase 4 — Packaging & Production
 
-- [ ] Mill integration: `zinc init` generates `build.mill.yaml`
-- [ ] `zinc build --native` → Quarkus + GraalVM native-image
-- [ ] `zinc build --docker` / `zinc build --k8s`
-- [ ] JLink fallback when native-image fails
+- [x] `zinc init [name]` — scaffold project with `build.mill.yaml`, `src/main.zn`, `.gitignore`
+- [x] `zinc build --native` → GraalVM native-image (JLink fallback)
+- [x] `zinc build --docker` → generate Dockerfile
+- [x] `zinc build --k8s` → Dockerfile + K8s deployment manifest
 
 ## Phase 5 — Ecosystem
 
