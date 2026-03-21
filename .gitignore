@@ -6,16 +6,9 @@
 /*.go
 !/go.mod
 
-# C# benchmark build artifacts
-benchmarks/csharp-aot/bin/
-benchmarks/csharp-aot/obj/
-
 # Zinc build directory
 .zinc-build/
-*.py
-!benchmarks/**/*.py
 Dockerfile
 .dockerignore
 *-deployment.yaml
-*_pack.py
 dist/

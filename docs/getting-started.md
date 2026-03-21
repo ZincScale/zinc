@@ -1,6 +1,6 @@
 # Getting Started with Zinc
 
-Zinc is typed Python with explicit blocks. Write `.zn` files, run them with `zinc run`. The transpiler catches type errors, generates clean `.py` files, and stays out of your way.
+Zinc is a convention-over-configuration JVM language. Write `.zn` files, run them with `zinc run`. The transpiler catches type errors, generates clean Java, and stays out of your way.
 
 ## Install
 
@@ -8,7 +8,7 @@ Zinc is typed Python with explicit blocks. Write `.zn` files, run them with `zin
 go install github.com/victorybhg/zinc/cmd/zinc@latest
 ```
 
-Requires: Go 1.21+ and Python 3.13+
+Requires: Go 1.21+ and Java 25+
 
 ## Hello World
 
@@ -22,19 +22,17 @@ zinc run hello.zn
 # Hello, world!
 ```
 
-That's it. No main function, no project setup. Top-level code just runs.
+That's it. No `public static void main`, no project setup. Top-level code just runs.
 
 ## Your First Script
 
 ```zinc
 // greet.zn
-import sys
-
-fn greet(str name) str {
+fn greet(String name) String {
     return "Hello, {name}!"
 }
 
-var name = if len(sys.argv) > 1: sys.argv[1] else: "world"
+var name = if args.length > 0 { args[0] } else { "world" }
 print(greet(name))
 ```
 
@@ -43,18 +41,18 @@ zinc run greet.zn -- Alice
 # Hello, Alice!
 ```
 
-## Key Differences from Python
+## Key Differences from Java
 
-| Python | Zinc | Why |
+| Java | Zinc | Why |
 |---|---|---|
-| `def greet(name: str) -> str:` | `fn greet(str name) str` | Type-first, no colons |
-| `x: int = 5` | `var int x = 5` | Type before name, like Java/Go |
-| `items: list[int]` | `var List<int> items` | Angle brackets for generics |
-| Indentation-based blocks | `{ }` braces close blocks | No whitespace bugs |
-| `f"Hello, {name}"` | `"Hello, {name}"` | All double-quoted strings interpolate |
-| Types optional | Types enforced | Catch errors at transpile time |
-| `self.name` everywhere | Just `name` in methods | Auto-injected by transpiler |
-| `__init__`, `__str__` | `fn init()`, `fn str()` | Clean names, transpiler maps to dunders |
+| `public static void main(String[] args)` | Top-level code | No ceremony |
+| `String greet(String name) { }` | `fn greet(String name) String` | Return type after params |
+| `var x = new ArrayList<Integer>()` | `var x = List<int>()` | No `new`, no boxing |
+| `record User(String name, int age) {}` | `data User { String name, int age }` | Cleaner syntax |
+| `list.stream().filter(...).toList()` | `list.filter(...)` | Auto stream chains |
+| `"Hello, " + name + "!"` | `"Hello, {name}!"` | String interpolation |
+| `x == null ? null : x.foo()` | `x?.foo()` | Safe navigation |
+| Semicolons everywhere | No semicolons | Less noise |
 
 ## Variables
 
@@ -99,9 +97,9 @@ while running {
 
 ```zinc
 data User {
-    var str name
-    var str email
-    var int age = 0
+    String name
+    String email
+    int age = 0
 }
 
 var u = User("Alice", "alice@example.com")
@@ -112,14 +110,12 @@ var u = User("Alice", "alice@example.com")
 **Expected errors** (validation, parsing) use `Result<T>`:
 
 ```zinc
-fn parse_port(str s) Result<int> {
-    if not s.isdigit() {
-        return Err("not a number")
-    }
-    return int(s)
+fn parse_port(String s) Result<int> {
+    var n = Integer.parseInt(s) or { return Error("not a number") }
+    return n
 }
 
-var port = parse_port("8080") Err 80
+var port = parse_port("8080") or 80
 ```
 
 **Unexpected errors** (network down, disk full) use exceptions:
@@ -127,38 +123,47 @@ var port = parse_port("8080") Err 80
 ```zinc
 try {
     var conn = db.connect(url)
-} catch ConnectionError err {
+} catch Exception err {
     print("Failed: {err}")
-    exit(1)
 }
 ```
 
-## Imports
-
-Use Python's ecosystem directly:
+## Collections
 
 ```zinc
-import json
-import os
-from pathlib import Path
-from requests import get as http_get
+var items = [1, 2, 3, 4, 5]
+
+// Stream chains — no .stream() or .toList() needed
+var evens = items.filter(it > 0).map(it * 2)
+var total = items.filter(it > 10).sum()
+
+// it keyword — implicit lambda parameter
+items.sortBy(it.age)
+items.forEach(print(it))
 ```
 
-## Threading
-
-Zinc runs on free-threaded Python — threads are real parallelism, no GIL:
+## Match
 
 ```zinc
-// Process items in parallel
+match status {
+    case 1 -> "running"
+    case 2 -> "stopped"
+    case _ -> "unknown"
+}
+```
+
+## Concurrency
+
+```zinc
+// Virtual threads
+spawn {
+    expensive_computation()
+}
+
+// Parallel iteration
 parallel for item in items {
     process(item)
 }
-
-// Run in background
-var future = spawn {
-    expensive_computation()
-}
-var result = future.result()
 ```
 
 ## Type Safety
@@ -168,45 +173,26 @@ Type errors are caught automatically during transpilation:
 ```bash
 $ zinc run broken.zn
 error: type errors in broken.zn:
-  line 2: return type mismatch: expected int, got str
-  argument 1 of "greet": expected str, got int
+  line 2: return type mismatch: expected int, got String
+  argument 1 of "greet": expected String, got int
 ```
 
 No separate `check` command — checking IS transpilation.
 
-## Shebang
-
-Make .zn files directly executable:
-
-```zinc
-#!/usr/bin/env zinc run
-print("Hello from zinc!")
-```
-
-```bash
-chmod +x script.zn
-./script.zn
-```
-
 ## CLI
 
 ```bash
-zinc run script.zn                    # transpile + run (free-threaded Python)
+zinc run script.zn                    # transpile + compile + run
 zinc run script.zn -- arg1            # pass args to script
-zinc transpile script.zn              # output .py file
-zinc transpile script.zn -o out.py    # specify output path
+zinc build script.zn                  # transpile + compile
+zinc build myproject/                 # build project directory
+zinc build --native                   # Quarkus + GraalVM native-image
 zinc fmt script.zn                    # format source code
-zinc pack script.zn                   # package with PyInstaller
-zinc pack script.zn --format nuitka   # compile to native binary
-zinc pack script.zn --format docker   # generate Dockerfile (PYTHON_GIL=0)
-zinc pack script.zn --format k8s      # Dockerfile + K8s deployment manifest
-zinc pack myproject/                  # package entire project directory
 zinc repl                             # interactive REPL
 ```
 
 ## Next Steps
 
 - [Language Reference](language-reference.md) — full syntax guide
-- [Deployment Guide](deployment.md) — Docker, K8s, PyInstaller, CI/CD
-- [Design Doc](design-zinc-v2-python.md) — philosophy and decisions
-- [Examples](../examples/v2/) — working examples
+- [Deployment Guide](deployment.md) — Docker, K8s, native-image, CI/CD
+- [Design Doc](design-zinc-v3-java.md) — philosophy and decisions

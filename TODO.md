@@ -126,11 +126,10 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [Design Doc](docs/design-zinc-v3-java.md) — v3 philosophy, Java transpilation
 - [Concurrency](docs/design-zinc-concurrency.md) — virtual threads, structured concurrency
 - [Transpilation Mapping](docs/design-zinc-java-transpilation.md) — Zinc → Java for every feature
-- [OwnedBuffer Pattern](docs/design-owned-buffer-pattern.md) — zero-GC FlowFile processing
 - [Zinc Flow](docs/design-zinc-flow.md) — NiFi-inspired flow processing design
-- [Benchmark Results](benchmarks/RESULTS.md) — Python vs .NET vs Java performance
+- [Benchmark Results](benchmarks/RESULTS.md) — Java 25 FlowFile performance
 
 ## Previous Versions
 
-- v2 (Python target) — shelved, Python threading limitations in pipeline benchmarks
-- v1 (C# AOT + Go backends) — shelved, Quarkus/Micronaut cover that space
+- v2 (Python target) — shelved
+- v1 (C# AOT + Go backends) — shelved
