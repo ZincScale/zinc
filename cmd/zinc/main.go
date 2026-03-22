@@ -110,6 +110,9 @@ func main() {
 
 			// Check for Mill project
 			if projectDir, hasMill := hasMillConfig(target); hasMill {
+				// For Mill projects, derive app name from project directory, not target
+				absProject, _ := filepath.Abs(projectDir)
+				appName = filepath.Base(absProject)
 				// Mill project: transpile .zn → .java into Mill's source dir, delegate to Mill
 				srcDir := filepath.Join(projectDir, "src")
 				cleanGeneratedJava(srcDir)
@@ -127,9 +130,13 @@ func main() {
 					}
 				} else if docker {
 					fmt.Println("building Docker image via Mill...")
-					if err := runMill(projectDir, "assembly"); err != nil {
-						errs.Error(err.Error())
-						os.Exit(1)
+					// Try native build first, fall back to fat JAR
+					if err := runMill(projectDir, "nativeImage"); err != nil {
+						fmt.Println("native-image not available, building fat JAR...")
+						if err := runMill(projectDir, "assembly"); err != nil {
+							errs.Error(err.Error())
+							os.Exit(1)
+						}
 					}
 					if err := generateDockerfile(projectDir, appName); err != nil {
 						errs.Error(err.Error())
@@ -137,9 +144,12 @@ func main() {
 					}
 				} else if k8s {
 					fmt.Println("building Docker image + K8s manifest via Mill...")
-					if err := runMill(projectDir, "assembly"); err != nil {
-						errs.Error(err.Error())
-						os.Exit(1)
+					if err := runMill(projectDir, "nativeImage"); err != nil {
+						fmt.Println("native-image not available, building fat JAR...")
+						if err := runMill(projectDir, "assembly"); err != nil {
+							errs.Error(err.Error())
+							os.Exit(1)
+						}
 					}
 					if err := generateDockerfile(projectDir, appName); err != nil {
 						errs.Error(err.Error())
@@ -724,15 +734,60 @@ func buildNativeDirect(outDir, appName string) error {
 }
 
 // generateDockerfile generates a Dockerfile in the given directory.
+// If a native binary exists (from mill nativeImage), generates a minimal native Dockerfile.
+// Otherwise, generates a JVM Dockerfile using the fat JAR from mill assembly.
 func generateDockerfile(dir, appName string) error {
-	dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
+	nativeBinary := filepath.Join(dir, "out", "nativeImage.dest", "native-executable")
+	assemblyJar := filepath.Join(dir, "out", "assembly.dest", "out.jar")
+
+	var dockerfile string
+	if _, err := os.Stat(nativeBinary); err == nil {
+		// Native binary exists — minimal distroless image
+		dockerfile = fmt.Sprintf(`# Zinc native-image Docker build
+# Binary built via: zinc build --native src/
+FROM gcr.io/distroless/base-nossl-debian12
+
+COPY out/nativeImage.dest/native-executable /app/%s
+WORKDIR /app
+
+EXPOSE 8080
+ENTRYPOINT ["/app/%s"]
+`, appName, appName)
+	} else if _, err := os.Stat(assemblyJar); err == nil {
+		// Fat JAR exists — JVM image
+		dockerfile = `# Zinc JVM Docker build
+# JAR built via: mill assembly
+FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
 COPY out/assembly.dest/out.jar app.jar
 
 EXPOSE 8080
 CMD ["java", "--enable-preview", "-jar", "app.jar"]
-`)
+`
+	} else {
+		// Fallback — generate a multi-stage native build Dockerfile
+		nativeImageTool := "native-image"
+		if niPath, err := exec.LookPath("native-image"); err == nil {
+			nativeImageTool = niPath
+		}
+		_ = nativeImageTool
+		dockerfile = fmt.Sprintf(`# Zinc multi-stage native Docker build
+FROM ghcr.io/graalvm/native-image-community:25 AS build
+
+WORKDIR /build
+COPY src/ src/
+RUN javac --enable-preview --release 25 -d classes src/*.java && \
+    native-image --enable-preview -cp classes -o %s Main
+
+FROM gcr.io/distroless/base-nossl-debian12
+COPY --from=build /build/%s /app/%s
+WORKDIR /app
+
+EXPOSE 8080
+ENTRYPOINT ["/app/%s"]
+`, appName, appName, appName, appName)
+	}
 
 	path := filepath.Join(dir, "Dockerfile")
 	if err := os.WriteFile(path, []byte(dockerfile), 0644); err != nil {
