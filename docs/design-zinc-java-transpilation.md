@@ -1,6 +1,6 @@
 # Design: Zinc → Java Transpilation Mapping
 
-> **Status**: ANALYSIS — mapping Zinc syntax to Java 25 target
+> **Status**: IMPLEMENTED — mapping Zinc syntax to Java 25 target
 > **Context**: Zinc is becoming "what Groovy should have been" — a convention-over-config JVM language with static types, brace syntax, and AOT compilation via Quarkus/GraalVM.
 
 ## The Identity
@@ -15,7 +15,7 @@ Zinc succeeds where Groovy failed because:
 - **Statically typed** — every Zinc type maps to a concrete Java type. GraalVM can optimize.
 - **Brace syntax** — familiar to Java/C#/Go developers. No whitespace sensitivity.
 - **Convention over configuration** — project structure, build (Mill), deployment (Quarkus) are opinionated.
-- **Flow engine as the killer app** — not a build tool, a data processing platform.
+- **Zinc is the language — Flow is a separate project** — not a build tool, a data processing platform.
 - **AOT story** — Quarkus + GraalVM native-image, not JVM-only.
 
 ---
@@ -36,9 +36,9 @@ These translate directly with minimal or no transformation:
 
 | Zinc | Java |
 |---|---|
-| `data User { String name, int age }` | `record User(String name, int age) {}` |
-| `data Point { double x, double y }` | `record Point(double x, double y) {}` |
-| `data frozen Config { String host }` | `record Config(String host) {}` (records are already immutable) |
+| `data User(String name, int age)` | `record User(String name, int age) {}` |
+| `data Point(double x, double y)` | `record Point(double x, double y) {}` |
+| `data frozen Config(String host)` | `record Config(String host) {}` (records are already immutable) |
 
 Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`. Zinc's `data` was designed for this.
 
@@ -53,9 +53,9 @@ Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`
 
 | Zinc | Java |
 |---|---|
-| `fn greet(String name) String { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
-| `fn double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
-| `fn process() none { ... }` | `static void process() { ... }` |
+| `greet(String name) String { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
+| `double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
+| `process() none { ... }` | `static void process() { ... }` |
 
 ### Lambdas
 
@@ -88,8 +88,10 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 
 | Zinc | Java |
 |---|---|
-| `try { risky() } catch IOException e { ... }` | `try { risky(); } catch (IOException e) { ... }` |
-| `raise new IllegalArgumentException("bad")` | `throw new IllegalArgumentException("bad");` |
+| `return Error("msg")` | `throw new RuntimeException("msg");` |
+| `var x = call() or default` | `try { ... } catch (Exception e) { x = default; }` |
+| `var x = call() or { return Error(...) }` | `try { ... } catch (Exception e) { throw ...; }` |
+| `or match err { case Type -> }` | `catch (Type e) { ... }` |
 
 ### Classes
 
@@ -97,10 +99,10 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 |---|---|
 | `class Dog { var String name }` | `class Dog { private String name; }` |
 | `pub String name` | `public String name;` |
-| `fn init(String name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
+| `init(String name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
 | `class Puppy : Dog { ... }` | `class Puppy extends Dog { ... }` |
-| `interface Speaker { fn speak() String }` | `interface Speaker { String speak(); }` |
-| `static fn create() Dog` | `static Dog create()` |
+| `interface Speaker { speak() String }` | `interface Speaker { String speak(); }` |
+| `static create() Dog` | `static Dog create()` |
 
 ### Concurrency → Virtual Threads
 
@@ -117,7 +119,7 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 
 ---
 
-## Pythonisms to Remove or Remap
+## Legacy Design Decisions
 
 These were added during the Python pivot and need rethinking for Java:
 
@@ -251,12 +253,12 @@ Zinc uses fluent method chaining. Java requires `.stream()` entry and `.toList()
 | `items.any(x -> x > 0)` | `items.stream().anyMatch(x -> x > 0)` |
 | `items.all(x -> x > 0)` | `items.stream().allMatch(x -> x > 0)` |
 | `items.sum()` | `items.stream().mapToInt(Integer::intValue).sum()` |
-| `items.sort_by(x -> x.age)` | `items.stream().sorted(Comparator.comparing(x -> x.age())).toList()` |
-| `items.group_by(x -> x.cat)` | `items.stream().collect(Collectors.groupingBy(x -> x.cat()))` |
+| `items.sortBy(x -> x.age)` | `items.stream().sorted(Comparator.comparing(x -> x.age())).toList()` |
+| `items.groupBy(x -> x.cat)` | `items.stream().collect(Collectors.groupingBy(x -> x.cat()))` |
 | `items.distinct()` | `items.stream().distinct().toList()` |
 | `items.take(10)` | `items.stream().limit(10).toList()` |
 | `items.skip(5)` | `items.stream().skip(5).toList()` |
-| `items.flat_map(x -> x.children)` | `items.stream().flatMap(x -> x.children().stream()).toList()` |
+| `items.flatMap(x -> x.children)` | `items.stream().flatMap(x -> x.children().stream()).toList()` |
 | `items.count()` | `items.size()` (or `items.stream().count()` for lazy) |
 | `items.reduce(0, (a,x) -> a + x)` | `items.stream().reduce(0, (a,x) -> a + x)` |
 
@@ -355,8 +357,12 @@ These are the things that make Zinc worth using instead of raw Java:
 - Channel<T> → ArrayBlockingQueue
 - lock → ReentrantLock
 
-### Phase 4 — Packaging & Deployment (Mill + Quarkus)
-- zinc init → Mill project scaffold
-- zinc build → mill compile + native-image
-- zinc run → mill run
-- zinc pack → native-image / JLink / Docker
+### Phase 4 — Packaging & Deployment (Mill + GraalVM)
+- zinc init → Mill project scaffold (build.mill.yaml + NativeImageModule)
+- zinc build → transpile .zn → .java, mill compile (or direct javac for scripts)
+- zinc run → transpile, mill run (or direct java for scripts)
+- zinc build --native → mill nativeImage (GraalVM AOT, ~13MB binary)
+- zinc build --docker → native binary + distroless Dockerfile (JVM fallback)
+- zinc build --k8s → Docker + K8s deployment manifest
+- zinc update → update GraalVM, Mill, Quarkus
+- install.sh → single installer for full toolchain

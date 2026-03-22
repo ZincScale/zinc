@@ -5,7 +5,7 @@
 Blocks use `{ }` braces. Indentation is for readability only.
 
 ```zinc
-fn example() {
+example() {
     if true {
         print("yes")
     }
@@ -97,8 +97,13 @@ A single `.zn` file can contain:
 ## CLI
 
 ```bash
-zinc build <file.zn>          # transpile to .java + compile with javac
-zinc run <file.zn>            # transpile + compile + run
+zinc init [name]              # scaffold a new project
+zinc build <file.zn|dir>      # transpile + compile (Mill if project, javac if script)
+zinc build --native <dir>     # GraalVM native binary via Mill
+zinc build --docker <dir>     # native binary + Dockerfile
+zinc build --k8s <dir>        # Docker + K8s manifest
+zinc run <file.zn|dir>        # transpile + compile + run
 zinc fmt <file.zn>            # format source code
 zinc repl                     # interactive REPL
+zinc update                   # update toolchain (GraalVM, Mill, Quarkus)
 ```

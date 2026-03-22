@@ -243,8 +243,25 @@ Requires GraalVM with `native-image` installed. Falls back to JLink automaticall
 zinc build --docker src/
 ```
 
-Generates a `Dockerfile` for your app. Then build and deploy:
+`zinc build --docker` first builds a GraalVM native binary (via `mill nativeImage`), then generates a minimal Dockerfile. If native-image isn't available, it falls back to a JVM fat JAR.
 
+**Native mode** (default when GraalVM available) — ~13MB distroless image:
+
+```dockerfile
+FROM gcr.io/distroless/base-nossl-debian12
+COPY out/nativeImage.dest/native-executable /app/myapp
+ENTRYPOINT ["/app/myapp"]
+```
+
+**JVM fallback** — when native-image isn't configured:
+
+```dockerfile
+FROM eclipse-temurin:25-jre-alpine
+COPY out/assembly.dest/out.jar app.jar
+CMD ["java", "--enable-preview", "-jar", "app.jar"]
+```
+
+Then build and deploy:
 ```bash
 docker build -t myapp .
 docker run myapp

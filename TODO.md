@@ -7,7 +7,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 ## Completed (v3.0-dev) — Phase 1
 
 ### Language
-- [x] Brace-block syntax `{ }`, `fn` keyword, script mode
+- [x] Brace-block syntax `{ }`, script mode
 - [x] Java-native types: `int`, `double`, `boolean`, `char`, `long`, `String`, `List<T>`, `Map<K,V>`, `Set<T>`
 - [x] Data classes → Java records: `data User(String name, int age)`
 - [x] Enums: `enum Color { Red, Green, Blue }`
@@ -16,8 +16,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] `init` fields → `private final` + getter
 - [x] `override fn` → `@Override` annotation
 - [x] `const` → `public static final`
-- [x] Two-track error handling: `Result<T>` / `Error` + `try`/`catch`/`throw`
-- [x] `throw X from Y` (exception chaining)
+- [x] Errors as values: `return Error()`, `or {}`, `or match` — no try/catch/throw
 - [x] `and`/`or`/`not`, `not in`, `is not`
 - [x] `is` type checks: `x is String` → `instanceof`
 - [x] Kotlin-style equality: `==` structural (Objects.equals), `===` reference identity
@@ -56,7 +55,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] `zinc run <file.zn>` — transpile + compile + run
 - [x] `zinc fmt` — format source code
 - [x] `zinc repl` — Java-backed REPL
-- [x] 62 codegen tests + parser/typechecker tests
+- [x] 100 codegen tests + parser/typechecker tests
 
 ---
 
@@ -88,7 +87,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 ### Type Features
 - [x] Safe navigation: `obj?.field`, `obj?.method()` → null-check ternary
 - [x] `sealed class` → sealed interface + variant records (separate files)
-- [x] 89 codegen tests passing
+- [x] 100 codegen tests passing
 
 ### Deferred
 - [ ] Source mapping: JSR-45 SMAP for debugger integration (.zn → .java line mapping)
@@ -105,13 +104,19 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ## Phase 4 — Packaging & Production
 
+- [x] Mill is Zinc's build tool — full dependency management, fat JARs, native images
 - [x] `zinc init [name]` — scaffold project with `build.mill.yaml`, `src/main.zn`, `.gitignore`
-- [x] `zinc build --native` → GraalVM native-image (JLink fallback)
-- [x] `zinc build --docker` → generate Dockerfile
-- [x] `zinc build --k8s` → Dockerfile + K8s deployment manifest
+- [x] `zinc build` — delegates to `mill compile` for projects
+- [x] `zinc run` — delegates to `mill run` for projects
+- [x] `zinc build --native` → `mill nativeImage` (GraalVM AOT)
+- [x] `zinc build --docker` → native binary + distroless Dockerfile (or JVM fallback)
+- [x] `zinc build --k8s` → Docker + K8s manifest
+- [x] `zinc update` — update toolchain (GraalVM, Mill, Quarkus)
+- [x] Single installer (`install.sh`) for full toolchain
 
 ## Phase 5 — Ecosystem
 
+- [x] `zinc update` — toolchain updater (done in Phase 4)
 - [ ] Standard library: HTTP client, JSON, file I/O wrappers
 - [ ] Quarkus dev mode integration (hot-reload)
 - [ ] IDE support: syntax highlighting, LSP
@@ -124,6 +129,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [Design Doc](docs/design-zinc-v3-java.md) — v3 philosophy, Java transpilation
 - [Concurrency](docs/design-zinc-concurrency.md) — virtual threads, structured concurrency
 - [Transpilation Mapping](docs/design-zinc-java-transpilation.md) — Zinc → Java for every feature
+- [Build Guide](docs/guide-mill-build.md) — Mill, dependencies, Docker, native-image, CI/CD
 
 ## Previous Versions
 
