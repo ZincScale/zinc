@@ -39,6 +39,9 @@ Usage:
   zinc build --docker <dir>      Build Docker image (Mill) or generate Dockerfile
   zinc build --k8s <dir>         Docker image + K8s manifest
   zinc run <file.zn|dir>         Transpile, compile, and run
+  zinc add <dep>                 Add a Maven dependency to build.mill.yaml
+  zinc remove <artifact>         Remove a dependency
+  zinc deps                      List project dependencies
   zinc fmt <file.zn>             Format Zinc source code
   zinc repl                      Interactive Zinc REPL
   zinc update                    Update Zinc toolchain (GraalVM, Mill, Quarkus)
@@ -288,6 +291,34 @@ func main() {
 					errs.Error(err.Error())
 					os.Exit(1)
 				}
+			}
+			return
+		case a == "add":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "usage: zinc add <group:artifact:version>")
+				fmt.Fprintln(os.Stderr, "  e.g. zinc add com.google.code.gson:gson:2.11.0")
+				os.Exit(1)
+			}
+			if err := runAddDep(args[i+1]); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			return
+		case a == "remove":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "usage: zinc remove <artifact>")
+				fmt.Fprintln(os.Stderr, "  e.g. zinc remove gson")
+				os.Exit(1)
+			}
+			if err := runRemoveDep(args[i+1]); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
+			}
+			return
+		case a == "deps":
+			if err := runListDeps(); err != nil {
+				errs.Error(err.Error())
+				os.Exit(1)
 			}
 			return
 		case a == "update":
@@ -878,4 +909,219 @@ func runCmd(name string, args ...string) {
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %s: %v\n", name, err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Dependency management: zinc add / remove / deps
+// ---------------------------------------------------------------------------
+
+// findBuildConfig finds build.mill.yaml in the current or parent directories.
+func findBuildConfig() (string, error) {
+	dir, _ := os.Getwd()
+	for {
+		path := filepath.Join(dir, "build.mill.yaml")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("no build.mill.yaml found — run 'zinc init' to create a project")
+}
+
+// readBuildDeps reads the mvnDeps list from build.mill.yaml.
+func readBuildDeps(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var deps []string
+	inMvnDeps := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "mvnDeps:" || strings.HasPrefix(trimmed, "mvnDeps: [") {
+			if trimmed == "mvnDeps: []" {
+				return nil, nil
+			}
+			inMvnDeps = true
+			continue
+		}
+		if inMvnDeps {
+			if strings.HasPrefix(trimmed, "- ") {
+				dep := strings.TrimPrefix(trimmed, "- ")
+				dep = strings.TrimSpace(dep)
+				if !strings.HasPrefix(dep, "#") {
+					deps = append(deps, dep)
+				}
+			} else if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				break // next YAML key
+			}
+		}
+	}
+	return deps, nil
+}
+
+// runAddDep adds a Maven dependency to build.mill.yaml.
+func runAddDep(dep string) error {
+	// Validate format: group:artifact:version
+	parts := strings.Split(dep, ":")
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid dependency format: %s\n  expected: group:artifact:version (e.g., com.google.code.gson:gson:2.11.0)", dep)
+	}
+
+	path, err := findBuildConfig()
+	if err != nil {
+		return err
+	}
+
+	// Check for duplicates
+	existing, err := readBuildDeps(path)
+	if err != nil {
+		return err
+	}
+	artifact := parts[1]
+	for _, d := range existing {
+		if strings.Contains(d, ":"+artifact+":") || d == dep {
+			return fmt.Errorf("%s is already in dependencies", artifact)
+		}
+	}
+
+	// Read file and insert the dep
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+
+	var result []string
+	inserted := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Handle empty mvnDeps: []
+		if trimmed == "mvnDeps: []" {
+			result = append(result, "mvnDeps:")
+			result = append(result, "  - "+dep)
+			inserted = true
+			// Skip any commented examples after mvnDeps: []
+			for j := i + 1; j < len(lines); j++ {
+				next := strings.TrimSpace(lines[j])
+				if strings.HasPrefix(next, "# ") || strings.HasPrefix(next, "#-") {
+					i = j
+					continue
+				}
+				break
+			}
+			continue
+		}
+
+		result = append(result, line)
+
+		// Find last dep in mvnDeps section and insert after
+		if !inserted && (trimmed == "mvnDeps:" || strings.HasPrefix(trimmed, "mvnDeps:")) && trimmed != "mvnDeps: []" {
+			// Find the last "  - " line in this section
+			for j := i + 1; j < len(lines); j++ {
+				next := strings.TrimSpace(lines[j])
+				if strings.HasPrefix(next, "- ") || strings.HasPrefix(next, "#") || next == "" {
+					result = append(result, lines[j])
+				} else {
+					// Insert before this non-dep line
+					result = append(result, "  - "+dep)
+					inserted = true
+					// Re-process remaining lines
+					for k := j; k < len(lines); k++ {
+						result = append(result, lines[k])
+					}
+					goto done
+				}
+			}
+			// Reached end of file while in deps section
+			result = append(result, "  - "+dep)
+			inserted = true
+			goto done
+		}
+	}
+
+done:
+	if !inserted {
+		return fmt.Errorf("could not find mvnDeps section in %s", path)
+	}
+
+	if err := os.WriteFile(path, []byte(strings.Join(result, "\n")), 0644); err != nil {
+		return err
+	}
+	fmt.Printf("added: %s\n", dep)
+	return nil
+}
+
+// runRemoveDep removes a dependency from build.mill.yaml by artifact name.
+func runRemoveDep(artifact string) error {
+	path, err := findBuildConfig()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var result []string
+	removed := ""
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			dep := strings.TrimPrefix(trimmed, "- ")
+			if strings.Contains(dep, ":"+artifact+":") || strings.Contains(dep, artifact) {
+				removed = dep
+				continue // skip this line
+			}
+		}
+		result = append(result, line)
+	}
+
+	if removed == "" {
+		return fmt.Errorf("dependency '%s' not found in build.mill.yaml", artifact)
+	}
+
+	if err := os.WriteFile(path, []byte(strings.Join(result, "\n")), 0644); err != nil {
+		return err
+	}
+	fmt.Printf("removed: %s\n", removed)
+	return nil
+}
+
+// runListDeps lists dependencies from build.mill.yaml.
+func runListDeps() error {
+	path, err := findBuildConfig()
+	if err != nil {
+		return err
+	}
+
+	deps, err := readBuildDeps(path)
+	if err != nil {
+		return err
+	}
+
+	if len(deps) == 0 {
+		fmt.Println("no dependencies")
+		return nil
+	}
+
+	fmt.Printf("dependencies (%s):\n", filepath.Base(filepath.Dir(path)))
+	for _, dep := range deps {
+		parts := strings.Split(dep, ":")
+		if len(parts) == 3 {
+			fmt.Printf("  %s (%s:%s)\n", parts[1], parts[0], parts[2])
+		} else {
+			fmt.Printf("  %s\n", dep)
+		}
+	}
+	return nil
 }
