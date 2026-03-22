@@ -748,7 +748,28 @@ func (g *Generator) emitIfStmt(s *parser.IfStmt) {
 
 func (g *Generator) emitForStmt(f *parser.ForStmt) {
 	if f.IsRange {
-		g.writeln("for (var %s : %s) {", f.Item, g.formatExpr(f.Range))
+		// Range expression: for i in 1..10 → for (int i = 1; i < 10; i++)
+		if rangeExpr, ok := f.Range.(*parser.RangeExpr); ok {
+			start := g.formatExpr(rangeExpr.Start)
+			end := g.formatExpr(rangeExpr.End)
+			op := "<"
+			if rangeExpr.Inclusive {
+				op = "<="
+			}
+			g.writeln("for (int %s = %s; %s %s %s; %s++) {", f.Item, start, f.Item, op, end, f.Item)
+		} else if f.IndexVar != "" {
+			// for (key, value) in map → iterate entrySet with destructuring
+			g.writeln("for (var _entry : %s.entrySet()) {", g.formatExpr(f.Range))
+			g.indent++
+			g.writeln("var %s = _entry.getKey();", f.IndexVar)
+			g.writeln("var %s = _entry.getValue();", f.Item)
+			g.emitBlock(f.Body)
+			g.indent--
+			g.writeln("}")
+			return
+		} else {
+			g.writeln("for (var %s : %s) {", f.Item, g.formatExpr(f.Range))
+		}
 	} else {
 		init := ""
 		if f.Init != nil {
@@ -1071,6 +1092,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.FloatLit:
 		return expr.Value
 	case *parser.StringLit:
+		// Multi-line strings → Java text blocks with auto-indent stripping
+		if strings.Contains(expr.Value, "\n") {
+			return fmt.Sprintf("\"\"\"\n%s\"\"\"", stripCommonIndent(expr.Value))
+		}
 		return fmt.Sprintf("\"%s\"", expr.Value)
 	case *parser.StringInterpLit:
 		return g.formatStringInterp(expr)
@@ -1327,10 +1352,34 @@ func (g *Generator) formatStreamArg(args []parser.Expr) string {
 	return strings.Join(parts, ", ")
 }
 
+// stringMethodAliases maps Zinc convenience names to Java String methods.
+var stringMethodAliases = map[string]string{
+	"upper":      "toUpperCase",
+	"lower":      "toLowerCase",
+	"trimStart":  "stripLeading",
+	"trimEnd":    "stripTrailing",
+	"startsWith": "startsWith",
+	"endsWith":   "endsWith",
+	"contains":   "contains",
+	"replace":    "replace",
+	"repeat":     "repeat",
+	"isEmpty":    "isEmpty",
+	"chars":      "toCharArray",
+}
+
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// Check for stream chain: items.filter(x).map(y).sum()
 	if root, chain, ok := g.collectStreamChain(c); ok {
 		return g.formatStreamChain(root, chain)
+	}
+
+	// String method aliases: obj.upper() → obj.toUpperCase()
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if javaMethod, ok := stringMethodAliases[sel.Field]; ok {
+			obj := g.formatExpr(sel.Object)
+			args := g.formatExprList(c.Args)
+			return fmt.Sprintf("%s.%s(%s)", obj, javaMethod, args)
+		}
 	}
 
 	callee := g.formatExpr(c.Callee)
@@ -1690,4 +1739,32 @@ func (g *Generator) writeln(format string, args ...interface{}) {
 func (g *Generator) write(format string, args ...interface{}) {
 	g.buf.WriteString(strings.Repeat("    ", g.indent))
 	fmt.Fprintf(&g.buf, format, args...)
+}
+
+// stripCommonIndent removes the common leading whitespace from all lines.
+func stripCommonIndent(s string) string {
+	lines := strings.Split(s, "\n")
+	// Find minimum indent (ignoring empty lines)
+	minIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent <= 0 {
+		return s
+	}
+	var result []string
+	for _, line := range lines {
+		if len(line) >= minIndent {
+			result = append(result, line[minIndent:])
+		} else {
+			result = append(result, line)
+		}
+	}
+	return strings.Join(result, "\n")
 }

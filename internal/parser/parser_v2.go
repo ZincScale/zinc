@@ -1263,7 +1263,7 @@ func (p *Parser) v2ParseNot() Expr {
 
 // v2ParseComparison: expr (== != < <= > >= is in not_in) expr
 func (p *Parser) v2ParseComparison() Expr {
-	left := p.v2ParseAddSub()
+	left := p.v2ParseRange()
 	for {
 		// Handle "not in" as a compound operator
 		if p.check(lexer.TOKEN_NOT) && p.peekAt(1).Type == lexer.TOKEN_IN {
@@ -1289,6 +1289,22 @@ func (p *Parser) v2ParseComparison() Expr {
 		op := p.advance().Literal
 		right := p.v2ParseAddSub()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
+	}
+	return left
+}
+
+// v2ParseRange: expr .. expr, expr ..= expr
+func (p *Parser) v2ParseRange() Expr {
+	left := p.v2ParseAddSub()
+	if p.check(lexer.TOKEN_DOTDOT) {
+		p.advance()
+		right := p.v2ParseAddSub()
+		return &RangeExpr{Start: left, End: right, Inclusive: false}
+	}
+	if p.check(lexer.TOKEN_DOTDOTEQ) {
+		p.advance()
+		right := p.v2ParseAddSub()
+		return &RangeExpr{Start: left, End: right, Inclusive: true}
 	}
 	return left
 }

@@ -1387,3 +1387,60 @@ fn main(String[] args) {
 		`public static void main(String[] args) throws Exception {`,
 	)
 }
+
+// =============================================================================
+// Range syntax
+// =============================================================================
+
+func TestRangeExclusive(t *testing.T) {
+	assertContains(t, `
+for i in 1..5 {
+    print(i)
+}
+`,
+		`for (int i = 1; i < 5; i++) {`,
+	)
+}
+
+func TestRangeInclusive(t *testing.T) {
+	assertContains(t, `
+for i in 1..=5 {
+    print(i)
+}
+`,
+		`for (int i = 1; i <= 5; i++) {`,
+	)
+}
+
+// =============================================================================
+// Map destructuring
+// =============================================================================
+
+func TestMapDestructuring(t *testing.T) {
+	assertContains(t, `
+var Map<String, int> ages = {"Alice": 30}
+for key, value in ages {
+    print("{key}: {value}")
+}
+`,
+		`for (var _entry : ages.entrySet()) {`,
+		`var key = _entry.getKey();`,
+		`var value = _entry.getValue();`,
+	)
+}
+
+// =============================================================================
+// String method aliases
+// =============================================================================
+
+func TestStringUpper(t *testing.T) {
+	assertContains(t, `var x = "hello".upper()`,
+		`"hello".toUpperCase()`,
+	)
+}
+
+func TestStringLower(t *testing.T) {
+	assertContains(t, `var x = "HELLO".lower()`,
+		`"HELLO".toLowerCase()`,
+	)
+}
