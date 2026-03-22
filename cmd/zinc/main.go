@@ -34,16 +34,17 @@ const usage = `Zinc — convention-over-configuration JVM language.
 
 Usage:
   zinc init [name]               Scaffold a new project
-  zinc build <file.zn|dir>       Transpile to Java and compile with javac
-  zinc build --native <dir>      Build native binary (GraalVM native-image)
-  zinc build --docker <dir>      Generate Dockerfile + build JAR
-  zinc build --k8s <dir>         Generate Dockerfile + K8s manifest + build JAR
-  zinc run <file.zn>             Transpile, compile, and run
+  zinc build <file.zn|dir>       Transpile + compile (Mill if project, javac if script)
+  zinc build --native <dir>      Build native binary (GraalVM native-image via Mill)
+  zinc build --docker <dir>      Build Docker image (Mill) or generate Dockerfile
+  zinc build --k8s <dir>         Docker image + K8s manifest
+  zinc run <file.zn|dir>         Transpile, compile, and run
   zinc fmt <file.zn>             Format Zinc source code
   zinc repl                      Interactive Zinc REPL
+  zinc update                    Update Zinc toolchain (GraalVM, Mill, Quarkus)
 
 Flags:
-  -o <dir>               Output directory (default: zinc-out/)
+  -o <dir>               Output directory for non-Mill builds (default: zinc-out/)
   --verbose              Print tokens and AST summary
   --version              Print version and exit
 `
@@ -104,35 +105,85 @@ func main() {
 				fmt.Fprintln(os.Stderr, "usage: zinc build <file.zn|dir> [-o outdir] [--native|--docker|--k8s]")
 				os.Exit(1)
 			}
-			javaFiles, err := transpileToJava(target, outDir, verbose)
-			if err != nil {
-				errs.Error(err.Error())
-				os.Exit(1)
-			}
-			if err := compileJava(javaFiles, outDir); err != nil {
-				errs.Error(err.Error())
-				os.Exit(1)
-			}
 
 			appName := filepath.Base(strings.TrimSuffix(target, ".zn"))
-			if native {
-				if err := buildNative(outDir, appName); err != nil {
+
+			// Check for Mill project
+			if projectDir, hasMill := hasMillConfig(target); hasMill {
+				// Mill project: transpile .zn → .java into Mill's source dir, delegate to Mill
+				srcDir := filepath.Join(projectDir, "src")
+				cleanGeneratedJava(srcDir)
+				if _, err := transpileToJava(target, srcDir, verbose); err != nil {
 					errs.Error(err.Error())
 					os.Exit(1)
 				}
-			} else if docker || k8s {
-				if err := generateDockerfile(appName); err != nil {
-					errs.Error(err.Error())
-					os.Exit(1)
-				}
-				if k8s {
-					if err := generateK8sManifest(appName); err != nil {
+
+				if native {
+					fmt.Println("building native binary via Mill...")
+					if err := runMill(projectDir, "nativeImage"); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+				} else if docker {
+					fmt.Println("building Docker image via Mill...")
+					if err := runMill(projectDir, "assembly"); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+					if err := generateDockerfile(projectDir, appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+				} else if k8s {
+					fmt.Println("building Docker image + K8s manifest via Mill...")
+					if err := runMill(projectDir, "assembly"); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+					if err := generateDockerfile(projectDir, appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+					if err := generateK8sManifest(projectDir, appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+				} else {
+					if err := runMill(projectDir, "compile"); err != nil {
 						errs.Error(err.Error())
 						os.Exit(1)
 					}
 				}
-				fmt.Printf("build complete: %s → %s/\n", target, outDir)
+				fmt.Printf("build complete: %s (Mill project)\n", projectDir)
 			} else {
+				// No Mill: single-file script — direct javac
+				javaFiles, err := transpileToJava(target, outDir, verbose)
+				if err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+				if err := compileJava(javaFiles, outDir); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+
+				if native {
+					if err := buildNativeDirect(outDir, appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+				} else if docker || k8s {
+					if err := generateDockerfile(".", appName); err != nil {
+						errs.Error(err.Error())
+						os.Exit(1)
+					}
+					if k8s {
+						if err := generateK8sManifest(".", appName); err != nil {
+							errs.Error(err.Error())
+							os.Exit(1)
+						}
+					}
+				}
 				fmt.Printf("build complete: %s → %s/\n", target, outDir)
 			}
 			return
@@ -153,43 +204,6 @@ func main() {
 				os.Exit(1)
 			}
 
-			// For single file: if it has a package declaration, build whole directory
-			buildTarget := target
-			if !isDir(target) && strings.HasSuffix(target, ".zn") {
-				if hasPackageDecl(target) {
-					buildTarget = filepath.Dir(target)
-				}
-			}
-
-			outDir := filepath.Join(os.TempDir(), "zinc-run-"+filepath.Base(strings.TrimSuffix(target, ".zn")))
-			javaFiles, err := transpileToJava(buildTarget, outDir, verbose)
-			if err != nil {
-				errs.Error(err.Error())
-				os.Exit(1)
-			}
-			if err := compileJava(javaFiles, outDir); err != nil {
-				errs.Error(err.Error())
-				os.Exit(1)
-			}
-
-			// Derive class name — check if package was declared
-			className := classNameFromFile(target)
-			// Peek at the source to check for package declaration
-			if src, err := os.ReadFile(target); err == nil {
-				for _, line := range strings.Split(string(src), "\n") {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "package ") {
-						pkg := strings.TrimSuffix(strings.TrimPrefix(line, "package "), ";")
-						pkg = strings.TrimSpace(pkg)
-						className = pkg + "." + className
-						break
-					}
-					if line != "" && !strings.HasPrefix(line, "//") {
-						break // package must be first non-comment line
-					}
-				}
-			}
-
 			// Collect script args (after --)
 			var scriptArgs []string
 			for j := i + 1; j < len(args); j++ {
@@ -199,10 +213,79 @@ func main() {
 				}
 			}
 
-			if err := runJava(outDir, className, scriptArgs); err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					os.Exit(exitErr.ExitCode())
+			// Check for Mill project
+			if projectDir, hasMill := hasMillConfig(target); hasMill {
+				// Mill project: transpile .zn → .java into Mill's source dir, delegate to Mill
+				srcDir := filepath.Join(projectDir, "src")
+				cleanGeneratedJava(srcDir)
+				buildTarget := target
+				if !isDir(target) {
+					buildTarget = filepath.Dir(target)
 				}
+				if _, err := transpileToJava(buildTarget, srcDir, verbose); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+
+				millArgs := []string{"run"}
+				if len(scriptArgs) > 0 {
+					millArgs = append(millArgs, "--")
+					millArgs = append(millArgs, scriptArgs...)
+				}
+				if err := runMill(projectDir, millArgs...); err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						os.Exit(exitErr.ExitCode())
+					}
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+			} else {
+				// No Mill: single-file script — direct javac + java
+				buildTarget := target
+				if !isDir(target) && strings.HasSuffix(target, ".zn") {
+					if hasPackageDecl(target) {
+						buildTarget = filepath.Dir(target)
+					}
+				}
+
+				outDir := filepath.Join(os.TempDir(), "zinc-run-"+filepath.Base(strings.TrimSuffix(target, ".zn")))
+				javaFiles, err := transpileToJava(buildTarget, outDir, verbose)
+				if err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+				if err := compileJava(javaFiles, outDir); err != nil {
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+
+				className := classNameFromFile(target)
+				if src, err := os.ReadFile(target); err == nil {
+					for _, line := range strings.Split(string(src), "\n") {
+						line = strings.TrimSpace(line)
+						if strings.HasPrefix(line, "package ") {
+							pkg := strings.TrimSuffix(strings.TrimPrefix(line, "package "), ";")
+							pkg = strings.TrimSpace(pkg)
+							className = pkg + "." + className
+							break
+						}
+						if line != "" && !strings.HasPrefix(line, "//") {
+							break
+						}
+					}
+				}
+
+				if err := runJava(outDir, className, scriptArgs); err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						os.Exit(exitErr.ExitCode())
+					}
+					errs.Error(err.Error())
+					os.Exit(1)
+				}
+			}
+			return
+		case a == "update":
+			if err := runUpdate(); err != nil {
 				errs.Error(err.Error())
 				os.Exit(1)
 			}
@@ -459,21 +542,32 @@ func runInit(name string) error {
 		}
 	}
 
+	// Detect native-image path for build.mill.yaml
+	nativeImagePath := ""
+	if niPath, err := exec.LookPath("native-image"); err == nil {
+		nativeImagePath, _ = filepath.Abs(niPath)
+	}
+
 	// build.mill.yaml — Mill build config
+	nativeImageLine := ""
+	extends := "JavaModule"
+	if nativeImagePath != "" {
+		extends = "[JavaModule, NativeImageModule]"
+		nativeImageLine = fmt.Sprintf("\nnativeImageTool: %s\n", nativeImagePath)
+	}
 	millConfig := fmt.Sprintf(`# %s — Zinc project (Mill build)
 # Docs: https://mill-build.org/mill/index.html
 #
-# Commands:
-#   mill app.compile          compile
-#   mill app.run              run
-#   mill app.test             test
-#   mill app.nativeImage      GraalVM native binary
-#   mill app.jlink            self-contained JRE + app
-#   mill app.docker           Docker image
+# Commands (via zinc CLI or Mill directly):
+#   zinc build src/            compile (transpile + mill compile)
+#   zinc run src/main.zn       run (transpile + mill run)
+#   zinc build --native src/   GraalVM native binary (mill nativeImage)
+#   mill assembly              fat JAR
+#   mill test                  run tests
 
-extends: JavaModule
+extends: %s
 jvmVersion: 25
-
+%s
 # Maven Central dependencies
 mvnDeps: []
   # - com.google.code.gson:gson:2.11.0
@@ -482,7 +576,7 @@ mvnDeps: []
 # Custom Maven repositories (optional)
 # repositories:
 #   - https://repo.example.com/maven2
-`, name)
+`, name, extends, nativeImageLine)
 	if err := os.WriteFile(filepath.Join(name, "build.mill.yaml"), []byte(millConfig), 0644); err != nil {
 		return err
 	}
@@ -496,7 +590,11 @@ print("Hello from Zinc!")
 	}
 
 	// .gitignore
-	gitignore := `zinc-out/
+	gitignore := `# Generated by zinc transpiler
+src/**/*.java
+
+# Build output
+zinc-out/
 out/
 *.class
 dist/
@@ -516,6 +614,21 @@ dist/
 	fmt.Println("  mvnDeps:")
 	fmt.Println("    - com.google.code.gson:gson:2.11.0")
 	return nil
+}
+
+// cleanGeneratedJava removes .java files from the source directory that were generated by zinc.
+// Only removes .java files that sit next to a .zn file (same base name).
+func cleanGeneratedJava(srcDir string) {
+	filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ".java") {
+			// Remove generated .java files — in a zinc project, all .java in src/ is generated
+			os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // runMill runs a Mill command in the given directory.
@@ -552,18 +665,8 @@ func hasMillConfig(target string) (string, bool) {
 	return "", false
 }
 
-// buildNative builds a native binary — delegates to Mill if available, else direct.
-func buildNative(outDir, appName string) error {
-	if projectDir, ok := hasMillConfig(outDir); ok {
-		fmt.Println("building native binary via Mill...")
-		if err := runMill(projectDir, "app.nativeImage"); err != nil {
-			fmt.Fprintln(os.Stderr, "mill app.nativeImage failed, trying jlink...")
-			return runMill(projectDir, "app.jlink")
-		}
-		return nil
-	}
-
-	// No Mill — direct native-image / jlink
+// buildNativeDirect builds a native binary without Mill — direct native-image/jlink.
+func buildNativeDirect(outDir, appName string) error {
 	nativeImage, err := exec.LookPath("native-image")
 	if err == nil {
 		fmt.Println("building native binary with GraalVM native-image...")
@@ -601,49 +704,27 @@ func buildNative(outDir, appName string) error {
 	return nil
 }
 
-// generateDockerfile generates a Dockerfile — delegates to Mill if available.
-func generateDockerfile(appName string) error {
-	if projectDir, ok := hasMillConfig("."); ok {
-		fmt.Println("building Docker image via Mill...")
-		return runMill(projectDir, "app.docker")
-	}
-
-	// No Mill — generate a simple Dockerfile
+// generateDockerfile generates a Dockerfile in the given directory.
+func generateDockerfile(dir, appName string) error {
 	dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
-COPY zinc-out/ ./classes/
+COPY out/assembly.dest/out.jar app.jar
 
 EXPOSE 8080
-CMD ["java", "--enable-preview", "-cp", "classes", "%s"]
-`, classNameFromFile(appName+".zn"))
+CMD ["java", "--enable-preview", "-jar", "app.jar"]
+`)
 
-	if err := os.WriteFile("Dockerfile", []byte(dockerfile), 0644); err != nil {
+	path := filepath.Join(dir, "Dockerfile")
+	if err := os.WriteFile(path, []byte(dockerfile), 0644); err != nil {
 		return err
 	}
-	fmt.Println("generated: Dockerfile")
+	fmt.Printf("generated: %s\n", path)
 	return nil
 }
 
-// generateK8sManifest creates a K8s deployment manifest.
-func generateK8sManifest(appName string) error {
-	// Docker first
-	if _, ok := hasMillConfig("."); !ok {
-		// Only generate Dockerfile manually if no Mill
-		dockerfile := fmt.Sprintf(`FROM eclipse-temurin:25-jre-alpine
-
-WORKDIR /app
-COPY zinc-out/ ./classes/
-
-EXPOSE 8080
-CMD ["java", "--enable-preview", "-cp", "classes", "%s"]
-`, classNameFromFile(appName+".zn"))
-		if err := os.WriteFile("Dockerfile", []byte(dockerfile), 0644); err != nil {
-			return err
-		}
-		fmt.Println("generated: Dockerfile")
-	}
-
+// generateK8sManifest creates a K8s deployment manifest in the given directory.
+func generateK8sManifest(dir, appName string) error {
 	manifest := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -672,10 +753,70 @@ spec:
             cpu: "500m"
 `, appName, appName, appName, appName, appName, appName)
 
-	manifestFile := appName + "-deployment.yaml"
+	manifestFile := filepath.Join(dir, appName+"-deployment.yaml")
 	if err := os.WriteFile(manifestFile, []byte(manifest), 0644); err != nil {
 		return err
 	}
 	fmt.Printf("generated: %s\n", manifestFile)
 	return nil
+}
+
+// runUpdate updates the Zinc toolchain (GraalVM, Mill, Quarkus).
+func runUpdate() error {
+	fmt.Println("Updating Zinc toolchain...")
+
+	// Detect OS
+	uname := "linux"
+	if out, err := exec.Command("uname", "-s").Output(); err == nil {
+		if strings.Contains(strings.ToLower(string(out)), "darwin") {
+			uname = "darwin"
+		}
+	}
+
+	if uname == "darwin" {
+		// macOS: use Homebrew
+		fmt.Println("\n==> Updating GraalVM JDK...")
+		runCmd("brew", "upgrade", "--cask", "graalvm-jdk")
+		fmt.Println("\n==> Updating Mill...")
+		runCmd("brew", "upgrade", "mill")
+		fmt.Println("\n==> Updating Quarkus CLI...")
+		runCmd("brew", "upgrade", "quarkus")
+	} else {
+		// Linux: use SDKMAN for JDK/Quarkus, reinstall Mill launcher
+		sdkmanInit := filepath.Join(os.Getenv("HOME"), ".sdkman", "bin", "sdkman-init.sh")
+		if _, err := os.Stat(sdkmanInit); err != nil {
+			return fmt.Errorf("SDKMAN not found — run the Zinc installer first")
+		}
+
+		// Install latest GraalVM CE (stays on GraalVM, doesn't switch to Temurin)
+		fmt.Println("\n==> Updating GraalVM JDK via SDKMAN...")
+		runCmd("bash", "-c", fmt.Sprintf(
+			`source %s && LATEST=$(sdk list java 2>/dev/null | grep -oP '\d+\.\d+\.\d+-graalce' | head -1) && `+
+				`if [ -n "$LATEST" ]; then sdk install java "$LATEST" && sdk default java "$LATEST"; `+
+				`else echo "GraalVM CE already up to date"; fi`, sdkmanInit))
+
+		fmt.Println("\n==> Updating Quarkus CLI via SDKMAN...")
+		runCmd("bash", "-c", fmt.Sprintf("source %s && sdk upgrade quarkus", sdkmanInit))
+
+		fmt.Println("\n==> Updating Mill launcher...")
+		millURL := "https://raw.githubusercontent.com/com-lihaoyi/mill/main/mill"
+		runCmd("bash", "-c", fmt.Sprintf("curl -fsSL %s -o /tmp/mill-update && chmod +x /tmp/mill-update && sudo mv /tmp/mill-update /usr/local/bin/mill", millURL))
+	}
+
+	fmt.Println("\n==> Toolchain versions:")
+	runCmd("java", "--version")
+	runCmd("native-image", "--version")
+	runCmd("mill", "version")
+	runCmd("quarkus", "--version")
+	return nil
+}
+
+// runCmd runs a command, printing output. Non-fatal on error.
+func runCmd(name string, args ...string) {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %s: %v\n", name, err)
+	}
 }

@@ -289,9 +289,10 @@ kubectl apply -f myapp-deployment.yaml
 | `zinc build -o <dir>` | Custom output directory (default: `zinc-out/`) |
 | `zinc fmt <file.zn>` | Format source code |
 | `zinc repl` | Interactive REPL |
+| `zinc update` | Update toolchain (GraalVM, Mill, Quarkus) |
 | `zinc --version` | Print version |
 
-When `build.mill.yaml` exists, `zinc build` delegates to Mill automatically for native/docker/k8s targets. Without it, Zinc uses direct `javac` compilation.
+When `build.mill.yaml` exists, **all** `zinc build` and `zinc run` commands delegate to Mill — compilation uses Mill's full classpath with dependencies. Without `build.mill.yaml`, Zinc uses direct `javac`/`java` (for single-file scripts).
 
 ---
 
@@ -300,16 +301,14 @@ When `build.mill.yaml` exists, `zinc build` delegates to Mill automatically for 
 For projects with `build.mill.yaml`, you can also use Mill directly:
 
 ```bash
-mill app.compile              # compile
-mill app.run                  # compile + run
-mill app.run -- arg1 arg2     # pass args
-mill app.test                 # run tests
-mill app.assembly             # fat JAR
-mill app.jar                  # thin JAR
-mill app.nativeImage          # GraalVM native binary
-mill app.jlink                # self-contained JRE + app
-mill app.docker               # Docker image
-mill app.publishM2            # publish to local Maven repo (~/.m2)
+mill compile                  # compile
+mill run                      # compile + run
+mill run -- arg1 arg2         # pass args
+mill test                     # run tests
+mill assembly                 # fat JAR
+mill jar                      # thin JAR
+mill nativeImage              # GraalVM native binary (requires NativeImageModule)
+mill publishM2                # publish to local Maven repo (~/.m2)
 ```
 
 ---

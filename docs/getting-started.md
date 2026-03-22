@@ -182,13 +182,16 @@ No separate `check` command — checking IS transpilation.
 ## CLI
 
 ```bash
-zinc run script.zn                    # transpile + compile + run
+zinc init myapp                       # scaffold a new project
+zinc run src/main.zn                  # transpile + compile + run (Mill if project)
 zinc run script.zn -- arg1            # pass args to script
-zinc build script.zn                  # transpile + compile
-zinc build myproject/                 # build project directory
-zinc build --native                   # Quarkus + GraalVM native-image
+zinc build src/                       # transpile + compile (Mill if project)
+zinc build --native src/              # GraalVM native binary via Mill
+zinc build --docker src/              # generate Dockerfile + build
+zinc build --k8s src/                 # Docker + K8s manifest
 zinc fmt script.zn                    # format source code
 zinc repl                             # interactive REPL
+zinc update                           # update toolchain (GraalVM, Mill, Quarkus)
 ```
 
 ## Next Steps
