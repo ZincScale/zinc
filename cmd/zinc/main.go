@@ -439,9 +439,47 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 	return javaFiles, nil
 }
 
+// inferPackageFromDir derives a Java package path from a file's directory
+// relative to a source root. e.g., src/models/user.zn → "models"
+// Files directly in src/ get no package (root package).
+func inferPackageFromDir(filePath, sourceRoot string) string {
+	absFile, _ := filepath.Abs(filePath)
+	absRoot, _ := filepath.Abs(sourceRoot)
+	dir := filepath.Dir(absFile)
+
+	rel, err := filepath.Rel(absRoot, dir)
+	if err != nil || rel == "." {
+		return "" // root package
+	}
+	// Convert path separators to dots: models/orders → models.orders
+	return strings.ReplaceAll(rel, string(filepath.Separator), ".")
+}
+
+// findSourceRoot walks up from znFiles to find the common source root (where src/ is).
+func findSourceRoot(znFiles []string) string {
+	if len(znFiles) == 0 {
+		return "."
+	}
+	// Find the common directory prefix, then check if it's a "src" dir
+	first, _ := filepath.Abs(znFiles[0])
+	dir := filepath.Dir(first)
+
+	// Walk up looking for a directory named "src" in the path
+	for d := dir; d != filepath.Dir(d); d = filepath.Dir(d) {
+		if filepath.Base(d) == "src" {
+			return d
+		}
+	}
+	// Fallback: use the directory of the first file's parent
+	return dir
+}
+
 // transpileMultiFile handles multi-file projects with cross-file type resolution.
+// Convention: directory structure = package. src/models/user.zn → package models.
 func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string, error) {
-	// Pass 1: Parse all files, collect type → package mappings
+	sourceRoot := findSourceRoot(znFiles)
+
+	// Pass 1: Parse all files, infer/enforce package from directory, collect types
 	type parsedFile struct {
 		path string
 		prog *parser.Program
@@ -449,12 +487,32 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 	var parsed []parsedFile
 	// typeRegistry maps type name → package path (e.g., "User" → "models")
 	typeRegistry := make(map[string]string)
+	// pkgTypes maps package → list of type names (for wildcard resolution)
+	pkgTypes := make(map[string][]string)
 
 	for _, znFile := range znFiles {
 		prog, err := parseAndCheck(znFile, verbose)
 		if err != nil {
 			return nil, err
 		}
+
+		// Convention: directory = package
+		inferredPkg := inferPackageFromDir(znFile, sourceRoot)
+
+		if prog.Package != nil {
+			// Validate declared package matches directory
+			if inferredPkg != "" && prog.Package.Path != inferredPkg {
+				fmt.Fprintf(os.Stderr, "warning: %s declares package '%s' but directory suggests '%s'\n",
+					znFile, prog.Package.Path, inferredPkg)
+			}
+		} else if inferredPkg != "" {
+			// Auto-set package from directory
+			prog.Package = &parser.PackageDecl{Path: inferredPkg}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[verbose] %s → auto-package '%s'\n", znFile, inferredPkg)
+			}
+		}
+
 		parsed = append(parsed, parsedFile{path: znFile, prog: prog})
 
 		pkg := ""
@@ -465,17 +523,22 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			switch decl := d.(type) {
 			case *parser.DataClassDecl:
 				typeRegistry[decl.Name] = pkg
+				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
 			case *parser.ClassDecl:
 				typeRegistry[decl.Name] = pkg
+				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
 				if decl.IsSealed {
 					for _, v := range decl.Variants {
 						typeRegistry[v.Name] = pkg
+						pkgTypes[pkg] = append(pkgTypes[pkg], v.Name)
 					}
 				}
 			case *parser.EnumDecl:
 				typeRegistry[decl.Name] = pkg
+				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
 			case *parser.InterfaceDecl:
 				typeRegistry[decl.Name] = pkg
+				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
 			}
 		}
 	}
@@ -485,7 +548,7 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			len(typeRegistry), len(parsed))
 	}
 
-	// Pass 2: For each file, inject imports for types from other packages
+	// Pass 2: Resolve imports and generate Java
 	var allJavaFiles []string
 	for _, pf := range parsed {
 		myPkg := ""
@@ -493,23 +556,43 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			myPkg = pf.prog.Package.Path
 		}
 
-		// Find types used in this file that are defined in other packages
+		// Resolve internal wildcard imports (import models.* → specific types)
+		var resolvedImports []*parser.ImportDecl
 		existingImports := make(map[string]bool)
 		for _, imp := range pf.prog.Imports {
-			existingImports[imp.Path] = true
+			if strings.HasSuffix(imp.Path, ".*") {
+				// Check if this is an internal package
+				wildcardPkg := strings.TrimSuffix(imp.Path, ".*")
+				if types, ok := pkgTypes[wildcardPkg]; ok {
+					// Internal package — resolve to specific type imports
+					for _, typeName := range types {
+						specific := wildcardPkg + "." + typeName
+						if !existingImports[specific] {
+							resolvedImports = append(resolvedImports, &parser.ImportDecl{Path: specific})
+							existingImports[specific] = true
+						}
+					}
+					continue // don't keep the wildcard
+				}
+			}
+			// External import — keep as-is
+			if !existingImports[imp.Path] {
+				resolvedImports = append(resolvedImports, imp)
+				existingImports[imp.Path] = true
+			}
 		}
 
+		// Auto-inject imports for cross-package types
 		for typeName, typePkg := range typeRegistry {
 			if typePkg != myPkg && typePkg != "" {
 				importPath := typePkg + "." + typeName
 				if !existingImports[importPath] {
-					pf.prog.Imports = append(pf.prog.Imports, &parser.ImportDecl{
-						Path: importPath,
-					})
+					resolvedImports = append(resolvedImports, &parser.ImportDecl{Path: importPath})
 					existingImports[importPath] = true
 				}
 			}
 		}
+		pf.prog.Imports = resolvedImports
 
 		// Generate Java files
 		className := classNameFromFile(pf.path)
