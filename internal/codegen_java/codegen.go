@@ -1430,13 +1430,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	}
 
 	// Constructor calls: PascalCase name → prepend "new"
-	// Skip if it's a method call on a known class (e.g., Integer.parseInt)
-	rootName := callee
-	if idx := strings.Index(callee, "."); idx > 0 {
-		rootName = callee[:idx]
-	}
-	if len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' && !isBuiltinFunc(rootName) {
-		// Map Zinc type names to Java equivalents for constructors
+	// Only for simple names (Gson(), User()), not selectors (HttpClient.newBuilder())
+	if !strings.Contains(callee, ".") && len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' {
 		if mapped, ok := zincToJavaType[callee]; ok {
 			callee = mapped
 		}
