@@ -395,6 +395,7 @@ func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 // transpileToJava transpiles .zn file(s) to .java files in outDir.
 // Accepts a single file or a directory (scans for all .zn files).
 // Each data class, enum, and class gets its own .java file.
+// For multi-file projects, auto-resolves cross-file type imports.
 func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {
@@ -424,13 +425,115 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 		return nil, fmt.Errorf("creating output dir: %w", err)
 	}
 
-	var allJavaFiles []string
+	// For multi-file projects: parse all files first, build a type registry,
+	// then inject cross-file imports before codegen.
+	if len(znFiles) > 1 {
+		return transpileMultiFile(znFiles, outDir, verbose)
+	}
+
+	// Single file — no cross-file resolution needed
+	javaFiles, err := transpileSingleFile(znFiles[0], outDir, verbose)
+	if err != nil {
+		return nil, err
+	}
+	return javaFiles, nil
+}
+
+// transpileMultiFile handles multi-file projects with cross-file type resolution.
+func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string, error) {
+	// Pass 1: Parse all files, collect type → package mappings
+	type parsedFile struct {
+		path string
+		prog *parser.Program
+	}
+	var parsed []parsedFile
+	// typeRegistry maps type name → package path (e.g., "User" → "models")
+	typeRegistry := make(map[string]string)
+
 	for _, znFile := range znFiles {
-		javaFiles, err := transpileSingleFile(znFile, outDir, verbose)
+		prog, err := parseAndCheck(znFile, verbose)
 		if err != nil {
 			return nil, err
 		}
-		allJavaFiles = append(allJavaFiles, javaFiles...)
+		parsed = append(parsed, parsedFile{path: znFile, prog: prog})
+
+		pkg := ""
+		if prog.Package != nil {
+			pkg = prog.Package.Path
+		}
+		for _, d := range prog.Decls {
+			switch decl := d.(type) {
+			case *parser.DataClassDecl:
+				typeRegistry[decl.Name] = pkg
+			case *parser.ClassDecl:
+				typeRegistry[decl.Name] = pkg
+				if decl.IsSealed {
+					for _, v := range decl.Variants {
+						typeRegistry[v.Name] = pkg
+					}
+				}
+			case *parser.EnumDecl:
+				typeRegistry[decl.Name] = pkg
+			case *parser.InterfaceDecl:
+				typeRegistry[decl.Name] = pkg
+			}
+		}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] type registry: %d types across %d files\n",
+			len(typeRegistry), len(parsed))
+	}
+
+	// Pass 2: For each file, inject imports for types from other packages
+	var allJavaFiles []string
+	for _, pf := range parsed {
+		myPkg := ""
+		if pf.prog.Package != nil {
+			myPkg = pf.prog.Package.Path
+		}
+
+		// Find types used in this file that are defined in other packages
+		existingImports := make(map[string]bool)
+		for _, imp := range pf.prog.Imports {
+			existingImports[imp.Path] = true
+		}
+
+		for typeName, typePkg := range typeRegistry {
+			if typePkg != myPkg && typePkg != "" {
+				importPath := typePkg + "." + typeName
+				if !existingImports[importPath] {
+					pf.prog.Imports = append(pf.prog.Imports, &parser.ImportDecl{
+						Path: importPath,
+					})
+					existingImports[importPath] = true
+				}
+			}
+		}
+
+		// Generate Java files
+		className := classNameFromFile(pf.path)
+		gen := codegen_java.New()
+		outputFiles := gen.GenerateFiles(pf.prog, className)
+
+		pkgDir := outDir
+		if pf.prog.Package != nil {
+			pkgDir = filepath.Join(outDir, strings.ReplaceAll(pf.prog.Package.Path, ".", string(filepath.Separator)))
+			if err := os.MkdirAll(pkgDir, 0755); err != nil {
+				return nil, fmt.Errorf("creating package dir: %w", err)
+			}
+		}
+
+		for _, of := range outputFiles {
+			path := filepath.Join(pkgDir, of.Name)
+			if err := os.WriteFile(path, []byte(of.Content), 0644); err != nil {
+				return nil, fmt.Errorf("writing %s: %w", path, err)
+			}
+			allJavaFiles = append(allJavaFiles, path)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", path)
+			}
+		}
 	}
 
 	return allJavaFiles, nil
