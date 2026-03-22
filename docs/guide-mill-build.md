@@ -131,10 +131,12 @@ data Order(String id, int amount)
 
 ```zinc
 // src/main.zn — root package, auto-imports User and Order
-var user = User("Alice", "alice@example.com")
-var order = Order("ORD-1", 100)
-print(user)
-print(order)
+fn main() {
+    var user = User("Alice", "alice@example.com")
+    var order = Order("ORD-1", 100)
+    print(user)
+    print(order)
+}
 ```
 
 **How it works:**

@@ -24,6 +24,14 @@ zinc run hello.zn
 
 That's it. No `public static void main`, no project setup. Top-level code just runs.
 
+For projects, use `fn main()` as the entry point:
+
+```zinc
+fn main() {
+    print("Hello, world!")
+}
+```
+
 ## Your First Script
 
 ```zinc
@@ -71,6 +79,12 @@ fn add(int a, int b) int {
 
 // Single-expression shorthand
 fn double(int x) int = x * 2
+
+fn sum(int[] numbers) int {
+    var int total = 0
+    for n in numbers { total = total + n }
+    return total
+}
 ```
 
 ## Control Flow

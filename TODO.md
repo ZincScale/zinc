@@ -33,6 +33,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] `null` (not `none`)
 - [x] Variadic args: `String... messages`
 - [x] Named arguments (call-site reordering)
+- [x] Arrays: `Type[]` syntax, context-dependent inference, `fn main()` entry point
 - [x] Constructor auto-`new`: `User("Alice")` → `new User("Alice")`
 - [x] Java annotations pass-through: `@Deprecated`, `@Path`, `@GET`
 

@@ -90,6 +90,7 @@ try (var f = new FileReader("data.txt")) {
 A single `.zn` file can contain:
 - Top-level functions → `static` methods in a class named after the file
 - Top-level statements → wrapped in `main()`
+- `fn main()` → explicit entry point, generates `main(String[] args)`
 - Multiple `data` declarations → each generates a separate record `.java` file
 - Multiple `enum` declarations → each generates a separate enum `.java` file
 - Multiple `class` declarations → each generates a separate `.java` file
@@ -113,6 +114,22 @@ var u = User("Alice", 30)
 - Wildcard: `import models.*` → resolves to specific types
 - External: `import java.time.Instant` — pass-through
 - Auto-imported: `java.util.*`, `java.util.stream.*`
+
+## Arrays
+
+```zinc
+var int[] nums = [1, 2, 3]       // array declaration
+var String[] names = ["a", "b"]  // string array
+print(nums[0])                   // array access
+print(nums.length)               // array length
+
+// In function signatures
+fn process(int[] data) int {
+    return data.length
+}
+```
+
+Context-dependent: `int[] x = [1,2,3]` creates an array, `var x = [1,2,3]` creates a List.
 
 ## CLI
 

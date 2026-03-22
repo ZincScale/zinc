@@ -1,0 +1,28 @@
+// Arrays — Zinc v3
+// Demonstrates: array declarations, access, length, fn main with args
+
+fn sum(int[] numbers) int {
+    var int total = 0
+    for n in numbers {
+        total = total + n
+    }
+    return total
+}
+
+fn main() {
+    // Array declarations
+    var int[] nums = [10, 20, 30, 40, 50]
+    print("first: {nums[0]}")
+    print("length: {nums.length}")
+    print("sum: {sum(nums)}")
+
+    // String arrays
+    var String[] names = ["Alice", "Bob", "Charlie"]
+    for name in names {
+        print("Hello, {name}!")
+    }
+
+    // Empty array
+    var int[] empty = []
+    print("empty length: {empty.length}")
+}
