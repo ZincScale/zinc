@@ -77,6 +77,25 @@ static void log(String... messages) {
 }
 ```
 
+## Entry Point: `fn main()`
+
+For projects, use `fn main()` as the explicit entry point:
+
+```zinc
+fn main() {
+    print("Hello from Zinc!")
+}
+```
+
+Zinc generates `main(String[] args)` automatically. The `args` variable is available inside `fn main()`. For scripts (top-level statements), no `fn main()` is needed — Zinc wraps them automatically.
+
+```zinc
+// With explicit args
+fn main(String[] args) {
+    print("arg count: {args.length}")
+}
+```
+
 ## Lambdas
 
 Lambdas use the `->` arrow syntax:

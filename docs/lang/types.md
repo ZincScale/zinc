@@ -25,6 +25,8 @@ fn f() int { if x > 0 { return 1 } }  // not all code paths return
 | `List<T>` | List of T |
 | `Map<K, V>` | Map of K to V |
 | `Set<T>` | Set of T |
+| `Type[]` | Array of Type (e.g., `int[]`, `String[]`) |
+| `byte[]` | Byte array (for I/O, serialization) |
 | `tuple<T, U>` | Tuple |
 | `any` | Any type (opt out of checking) |
 | `null` | Null value |
@@ -38,6 +40,43 @@ var List<int> numbers = [1, 2, 3]
 var Map<String, int> scores = {"Alice": 100, "Bob": 85}
 var Set<String> tags = {"a", "b", "c"}
 var List<List<int>> matrix = [[1, 2], [3, 4]]
+```
+
+## Arrays
+
+Arrays use `Type[]` syntax:
+
+```zinc
+var int[] nums = [1, 2, 3]
+var String[] names = ["Alice", "Bob"]
+var byte[] data = [0, 1, 2]
+```
+
+Array access and length:
+
+```zinc
+print(nums[0])         // index access
+print(nums.length)     // array length (not .size())
+```
+
+### Context-Dependent Inference
+
+The `[1, 2, 3]` literal creates different types based on context:
+
+```zinc
+var int[] nums = [1, 2, 3]      // array: new int[] {1, 2, 3}
+var List<int> nums = [1, 2, 3]  // list: new ArrayList<>(List.of(1, 2, 3))
+var nums = [1, 2, 3]            // default: ArrayList (backwards compatible)
+```
+
+### Arrays in Functions
+
+```zinc
+fn sum(int[] numbers) int {
+    var int total = 0
+    for n in numbers { total = total + n }
+    return total
+}
 ```
 
 ## Type Annotations

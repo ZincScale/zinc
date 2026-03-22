@@ -35,6 +35,8 @@ var double ratio = 3.14
 var boolean active = true
 var List<String> tags = []
 var Map<String, int> scores = {}
+var int[] scores = [85, 92, 78]
+var String[] args = []
 ```
 
 ### Tuple Unpacking
