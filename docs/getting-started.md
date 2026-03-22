@@ -194,5 +194,5 @@ zinc repl                             # interactive REPL
 ## Next Steps
 
 - [Language Reference](language-reference.md) — full syntax guide
-- [Deployment Guide](deployment.md) — Docker, K8s, native-image, CI/CD
+- [Build Guide](guide-mill-build.md) — dependencies, deployment, Docker, K8s, native-image, CI/CD
 - [Design Doc](design-zinc-v3-java.md) — philosophy and decisions
