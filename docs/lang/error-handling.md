@@ -1,10 +1,10 @@
 # Zinc — Error Handling
 
-Zinc uses a two-track error model: `Result<T>` for expected failures and exceptions for unexpected failures.
+Zinc uses errors as values. All fallible functions return `Result<T>` and callers handle errors with `or` handlers. There is no try/catch/throw in Zinc.
 
-## Track 1 — Result<T> for Expected Failures
+## Result<T> — Errors as Values
 
-Use `Result<T>` for validation, parsing, missing data — anything that can fail in normal business logic:
+Use `Result<T>` for any operation that can fail — validation, parsing, I/O, missing data, network calls:
 
 ```zinc
 fn parsePort(String s) Result<int> {
@@ -110,85 +110,69 @@ fn processOrder(String orderId) Result<Receipt> {
 }
 ```
 
-## Track 2 — Exceptions for Unexpected Failures
+## or match — Typed Error Handling
 
-Use exceptions for program-stopping failures — network down, disk full, out of memory:
-
-### try / catch
+Use `or match` to handle different error types with pattern matching:
 
 ```zinc
-try {
-    var conn = db.connect(url)
-} catch ConnectionError err {
-    log.error("database down: {err}")
-    throw ServiceUnavailable("database unavailable")
+fn loadConfig(String path) Result<Config> {
+    var content = readFile(path) or match err {
+        case "not found" -> return Error("config missing: {path}")
+        case _ -> return Error("cannot read config: {err}")
+    }
+    return parseConfig(content)
 }
 ```
 
-Multiple catch blocks:
+Handle different error data types:
 
 ```zinc
-try {
-    var data = fetchAndParse(url)
-} catch ConnectionError err {
-    log.error("network error: {err}")
-} catch ParseError err {
-    log.error("parse error: {err}")
+data NotFound(String message)
+data Timeout(String message)
+
+fn fetchData(String url) Result<String> {
+    var response = httpGet(url) or match err {
+        case NotFound -> return Error("resource missing: {err.message}")
+        case Timeout -> return Error("request timed out: {err.message}")
+        case _ -> return Error("fetch failed: {err}")
+    }
+    return response.body
 }
 ```
 
-Catch-all:
+## Custom Error Types
+
+Define error types as data classes:
 
 ```zinc
-try {
-    riskyOperation()
-} catch Exception err {
-    log.error("unexpected: {err}")
+data ValidationError(String field, String reason)
+data NotFoundError(String entity, String id)
+
+fn validateAge(String input) Result<int> {
+    var age = parseInt(input) or {
+        return Error(ValidationError("age", "not a number: {input}"))
+    }
+    if age < 0 or age > 150 {
+        return Error(ValidationError("age", "out of range: {age}"))
+    }
+    return age
 }
 ```
 
-### throw
+## When to Use Result<T>
 
-Throw an exception:
+All fallible operations use `Result<T>` — there is no separate exception track:
 
-```zinc
-throw IllegalArgumentException("bad config")
-```
+| Scenario | Pattern |
+|---|---|
+| Parsing user input | `Result<T>` + `or` fallback |
+| Validating form fields | `Result<T>` + `or match` |
+| Missing keys in batch processing | `Result<T>` + `or { continue }` |
+| Database connection failure | `Result<T>` + `or { return Error(...) }` |
+| File system errors | `Result<T>` + `or { log; return }` |
+| Network timeout | `Result<T>` + `or match` by error type |
 
-### Exception Chaining (throw from)
-
-Chain exceptions to preserve the original cause:
-
-```zinc
-try {
-    var data = parse(raw)
-} catch ParseError err {
-    throw ConfigError("invalid config file") from err
-}
-```
-
-Transpiles to:
-```java
-try {
-    var data = parse(raw);
-} catch (ParseError err) {
-    throw new ConfigError("invalid config file", err);
-}
-```
-
-## Choosing Between Track 1 and Track 2
-
-| Scenario | Use | Why |
-|---|---|---|
-| Parsing user input | `Result<T>` | Expected to fail, caller handles it |
-| Validating form fields | `Result<T>` | Normal business logic |
-| Missing keys in batch processing | `Result<T>` | Skip and continue |
-| Database connection failure | `try/catch` | Infrastructure broken |
-| File system errors | `try/catch` | Can't recover locally |
-| Out of memory | `try/catch` | Fundamentally broken |
-| Network timeout | `try/catch` | Transient infrastructure |
-
-**Rule of thumb**: if the failure is part of normal business logic, use `Result<T>` + `or`. If the failure means something is fundamentally broken, use `try/catch` + `throw`.
+**Rule of thumb**: if a function can fail, it returns `Result<T>`. The caller decides how to handle the error with `or`.
 
 ## Summary
 
@@ -200,6 +184,12 @@ try {
 | `expr or { block }` | Run block if expr fails, last expression is fallback |
 | `expr or { return x }` | Exit enclosing function on failure |
 | `expr or { continue }` | Skip loop iteration on failure |
-| `try { } catch Type err { }` | Catch exceptions |
-| `throw ExceptionType("msg")` | Throw an exception |
-| `throw X from cause` | Throw with chained cause |
+| `expr or match err { case T -> }` | Pattern match on the error |
+
+## Java Transpilation
+
+| Zinc | Java |
+|---|---|
+| `return Error("msg")` | `throw new RuntimeException("msg");` |
+| `call() or default` | `try { call(); } catch (Exception e) { default; }` |
+| `or match err { case T -> }` | `catch (T e) { ... }` |

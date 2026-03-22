@@ -174,8 +174,8 @@ public static User fetchUser(int id) {
 ### 7. Custom error types
 
 ```zinc
-data NotFound { String message }
-data Timeout { String message }
+data NotFound(String message)
+data Timeout(String message)
 
 fn fetchUser(int id) User {
     var resp = http.get("/users/{id}") or {

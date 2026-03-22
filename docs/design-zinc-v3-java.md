@@ -25,7 +25,7 @@ Kotlin succeeded where Groovy failed — static types, null safety, JetBrains to
 
 | You write | Zinc generates |
 |---|---|
-| `data User { String name, int age }` | `record User(String name, int age) {}` |
+| `data User(String name, int age)` | `record User(String name, int age) {}` |
 | `items.filter(x -> x > 0)` | `items.stream().filter(x -> x > 0).toList()` |
 | `"Hello, {name}!"` | `"Hello, " + name + "!"` |
 | `match shape { case Circle c -> ... }` | `switch (shape) { case Circle c -> ... }` |
@@ -221,7 +221,7 @@ class Stack<T> {
     }
 
     fn pop() T? {
-        if items.count() == 0 { return none }
+        if items.count() == 0 { return null }
         return items.removeLast()
     }
 }
@@ -234,11 +234,7 @@ Transpiles directly to Java generics.
 ## Data Classes → Records
 
 ```zinc
-data User {
-    String name
-    int age
-    String role = "user"
-}
+data User(String name, int age, String role = "user")
 ```
 
 Transpiles to:
@@ -255,10 +251,7 @@ Auto-generates: constructor, `equals()`, `hashCode()`, `toString()`. Zinc's `dat
 ### Data with Methods
 
 ```zinc
-data Point {
-    double x
-    double y
-
+data Point(double x, double y) {
     fn distance(Point other) double {
         return Math.sqrt((x - other.x) ** 2 + (y - other.y) ** 2)
     }
@@ -269,9 +262,9 @@ data Point {
 
 ```zinc
 sealed class Shape {
-    data Circle { double radius }
-    data Rect { double width, double height }
-    data Triangle { double base, double height }
+    data Circle(double radius)
+    data Rect(double width, double height)
+    data Triangle(double base, double height)
 }
 
 fn area(Shape shape) double {
