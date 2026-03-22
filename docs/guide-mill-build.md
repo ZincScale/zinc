@@ -117,20 +117,32 @@ myapp/
     user_test.zn
 ```
 
-Use `package` declarations to match directory structure:
+Zinc uses **directory-as-package** convention — no `package` declaration needed:
 
 ```zinc
-// src/models/user.zn
-package models
-
+// src/models/user.zn — automatically gets package models
 data User(String name, String email)
 ```
 
 ```zinc
-// src/main.zn
-var user = User("Alice", "alice@example.com")
-print(user)
+// src/models/order.zn — automatically gets package models
+data Order(String id, int amount)
 ```
+
+```zinc
+// src/main.zn — root package, auto-imports User and Order
+var user = User("Alice", "alice@example.com")
+var order = Order("ORD-1", 100)
+print(user)
+print(order)
+```
+
+**How it works:**
+- Directory relative to `src/` becomes the Java package: `src/models/` → `package models`
+- Types from other packages are auto-imported — no `import` needed for project types
+- Wildcard imports resolve to specific types: `import models.*` → `import models.User; import models.Order;`
+- External imports pass through: `import java.time.Instant` works as expected
+- GraalVM native-image tree-shakes unused classes at AOT build time
 
 ### Run and Build
 
@@ -139,8 +151,6 @@ zinc run src/main.zn          # transpile + compile + run
 zinc build src/                # transpile + compile all .zn in src/
 zinc build src/main.zn         # transpile + compile single file
 ```
-
-When a file has a `package` declaration, `zinc run` automatically builds the whole directory so cross-file references resolve.
 
 ---
 

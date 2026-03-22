@@ -145,6 +145,27 @@ match status {
 }
 ```
 
+## Packages
+
+Directory = package. Put files in subdirectories and Zinc handles the rest:
+
+```
+src/
+  main.zn              # root package
+  models/
+    user.zn            # package models (automatic)
+  services/
+    report.zn          # package services (automatic)
+```
+
+Types from other packages are auto-imported — just use them:
+
+```zinc
+// src/main.zn
+var u = User("Alice", 30)     // auto-imported from models
+print(u)
+```
+
 ## Concurrency
 
 ```zinc

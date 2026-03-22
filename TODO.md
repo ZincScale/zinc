@@ -79,10 +79,12 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] Tuple records auto-generated as inner classes
 
 ### Packages & Imports
-- [x] `package com.example` → Java package statement + directory structure
-- [x] `import java.util.List`, `import java.util.*` — Java imports
-- [x] Directory builds: `zinc build myproject/` scans all `.zn` files
-- [x] Multi-file run: auto-discovers sibling `.zn` files with same package
+- [x] Directory-as-package convention: `src/models/user.zn` → `package models` (auto-inferred)
+- [x] Cross-package type auto-import: use `User` from `models` without explicit import
+- [x] Wildcard import resolution: `import models.*` → specific type imports (tree-shaken)
+- [x] External imports pass-through: `import java.time.Instant`, `import java.nio.file.*`
+- [x] Recursive directory scanning: `zinc build src/` finds all nested `.zn` files
+- [x] Multi-file run: auto-discovers all `.zn` files in project
 
 ### Type Features
 - [x] Safe navigation: `obj?.field`, `obj?.method()` → null-check ternary

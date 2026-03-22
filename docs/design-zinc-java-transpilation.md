@@ -182,10 +182,12 @@ These were added during the Python pivot and need rethinking for Java:
 - **Java**: no tuples. Return a record or use out-parameters.
 - **Zinc decision**: `fn split() (String, String)` transpiles to a generated record: `record SplitResult(String first, String second)`. Tuple unpacking at call site: `(a, b) = split()` → `var result = split(); var a = result.first(); var b = result.second();`
 
-### 10. Dynamic imports
-- **Python**: `import json` at any point in the file
-- **Java**: imports must be at top of file
-- **Zinc decision**: Transpiler collects all `import` statements and hoists to top of generated `.java` file. Zinc allows imports anywhere (convenience), Java output has them at top (requirement).
+### 10. Packages and imports
+- **Convention**: Directory structure = package. `src/models/user.zn` → `package models` (auto-inferred from directory relative to `src/`)
+- **Cross-file types**: Auto-imported. If `User` is defined in `models`, any file using `User` gets `import models.User;` injected automatically.
+- **Wildcard imports**: `import models.*` resolves to specific type imports at transpile time (e.g., `import models.User; import models.Order;`). External wildcards pass through.
+- **External imports**: `import java.time.Instant` passes through verbatim. `import java.nio.file.*` passes through (GraalVM tree-shakes at native-image build).
+- **Auto-imports**: `java.util.*` and `java.util.stream.*` always included.
 
 ---
 

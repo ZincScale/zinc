@@ -94,6 +94,26 @@ A single `.zn` file can contain:
 - Multiple `enum` declarations → each generates a separate enum `.java` file
 - Multiple `class` declarations → each generates a separate `.java` file
 
+## Packages and Imports
+
+Directory structure = package. No `package` declaration needed.
+
+```zinc
+// src/models/user.zn → package models (automatic)
+data User(String name, int age)
+```
+
+```zinc
+// src/main.zn → root package, auto-imports project types
+var u = User("Alice", 30)
+```
+
+**Import rules:**
+- Project types: auto-imported across packages
+- Wildcard: `import models.*` → resolves to specific types
+- External: `import java.time.Instant` — pass-through
+- Auto-imported: `java.util.*`, `java.util.stream.*`
+
 ## CLI
 
 ```bash
