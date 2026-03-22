@@ -6,13 +6,8 @@ data User(String name, String email, int age = 0)
 
 // Class with visibility modifiers
 class Animal {
-    pub var String name
-    pub var String sound
-
-    fn init(String name, String sound) {
-        this.name = name
-        this.sound = sound
-    }
+    pub var String name = ""
+    pub var String sound = ""
 
     pub fn speak() String {
         return "{name} says {sound}"
@@ -20,16 +15,10 @@ class Animal {
 }
 
 class Dog : Animal {
-    pub var String breed
-
-    fn init(String name, String breed) {
-        this.name = name
-        this.sound = "Woof"
-        this.breed = breed
-    }
+    pub var String breed = ""
 
     override fn toString() String {
-        return "Dog({name}, {breed})"
+        return "Dog({getName()}, {getBreed()})"
     }
 }
 
@@ -37,6 +26,9 @@ class Dog : Animal {
 var u = User("Alice", "alice@example.com", 30)
 print(u)
 
-var d = Dog("Rex", "Lab")
+var d = Dog()
+d.setName("Rex")
+d.setSound("Woof")
+d.setBreed("Lab")
 print(d.speak())
 print(d)

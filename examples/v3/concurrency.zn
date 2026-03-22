@@ -1,9 +1,6 @@
 // Concurrency — Zinc v3
-// Demonstrates: spawn, parallel for, lock
+// Demonstrates: spawn, parallel for
 // All generate standard Java — no Zinc runtime
-
-import java.util.concurrent.locks.ReentrantLock
-import java.util.concurrent.atomic.AtomicInteger
 
 // spawn — fire a virtual thread
 spawn {
@@ -12,16 +9,7 @@ spawn {
 Thread.sleep(50)
 
 // parallel for — StructuredTaskScope under the hood
-var counter = AtomicInteger(0)
-parallel for i in [1, 2, 3, 4, 5] {
-    counter.addAndGet(i)
+var numbers = [1, 2, 3, 4, 5]
+parallel for i in numbers {
+    print("parallel: {i}")
 }
-print("Parallel sum: {counter.get()}")
-
-// lock — ReentrantLock under the hood
-var mu = ReentrantLock()
-var int total = 0
-lock mu {
-    total = total + 100
-}
-print("Locked total: {total}")

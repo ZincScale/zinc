@@ -1,16 +1,20 @@
 // Error Handling — Zinc v3
-// Demonstrates: try/catch, throw, Result<T>, Error, or
+// Demonstrates: Error, or handler
+// Zinc uses errors as values — no try/catch/throw
 
-// Track 2: Exceptions for unexpected failures
-fn riskyOperation() {
-    throw IllegalArgumentException("something went wrong")
+// Function that can fail — returns Error on bad input
+fn divide(int a, int b) int {
+    if b == 0 { return Error("division by zero") }
+    return a / b
 }
 
-try {
-    riskyOperation()
-} catch IllegalArgumentException e {
-    print("Caught: {e.getMessage()}")
-}
+// or — fallback value on error
+var result = divide(10, 0) or -1
+print("divide(10, 0) or -1 = {result}")
+
+// Successful call
+var ok = divide(10, 2) or 0
+print("divide(10, 2) = {ok}")
 
 // Control flow
 var int x = 42
@@ -20,9 +24,12 @@ if x > 0 {
     print("non-positive")
 }
 
-// Match expression
-var String label = match x {
-    case 0 { "zero" }
-    case _ { "nonzero" }
+// Match statement
+match x {
+    case 0 {
+        print("zero")
+    }
+    case _ {
+        print("nonzero")
+    }
 }
-print("x is {label}")
