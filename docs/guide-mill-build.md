@@ -123,7 +123,7 @@ Use `package` declarations to match directory structure:
 // src/models/user.zn
 package models
 
-data User(var name: String, var email: String)
+data User(String name, String email)
 ```
 
 ```zinc
@@ -221,8 +221,8 @@ java --enable-preview -cp zinc-out/ Main
 For a fat JAR (all deps bundled) with Mill:
 
 ```bash
-mill app.assembly
-java --enable-preview -jar out/app/assembly.dest/out.jar
+mill assembly
+java --enable-preview -jar out/assembly.dest/out.jar
 ```
 
 ### Native Binary (GraalVM)

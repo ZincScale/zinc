@@ -12,3 +12,7 @@ Dockerfile
 .dockerignore
 *-deployment.yaml
 dist/
+out/
+.quarkus/
+out/
+.quarkus/

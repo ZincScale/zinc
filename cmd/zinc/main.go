@@ -125,17 +125,14 @@ func main() {
 				if native {
 					fmt.Println("building native binary via Mill...")
 					if err := runMill(projectDir, "nativeImage"); err != nil {
-						errs.Error(err.Error())
-						os.Exit(1)
+						exitOnMillErr(err)
 					}
 				} else if docker {
 					fmt.Println("building Docker image via Mill...")
-					// Try native build first, fall back to fat JAR
 					if err := runMill(projectDir, "nativeImage"); err != nil {
 						fmt.Println("native-image not available, building fat JAR...")
 						if err := runMill(projectDir, "assembly"); err != nil {
-							errs.Error(err.Error())
-							os.Exit(1)
+							exitOnMillErr(err)
 						}
 					}
 					if err := generateDockerfile(projectDir, appName); err != nil {
@@ -147,8 +144,7 @@ func main() {
 					if err := runMill(projectDir, "nativeImage"); err != nil {
 						fmt.Println("native-image not available, building fat JAR...")
 						if err := runMill(projectDir, "assembly"); err != nil {
-							errs.Error(err.Error())
-							os.Exit(1)
+							exitOnMillErr(err)
 						}
 					}
 					if err := generateDockerfile(projectDir, appName); err != nil {
@@ -161,8 +157,7 @@ func main() {
 					}
 				} else {
 					if err := runMill(projectDir, "compile"); err != nil {
-						errs.Error(err.Error())
-						os.Exit(1)
+						exitOnMillErr(err)
 					}
 				}
 				fmt.Printf("build complete: %s (Mill project)\n", projectDir)
@@ -377,16 +372,16 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 
 	var znFiles []string
 	if info.IsDir() {
-		// Scan directory for .zn files
-		entries, err := os.ReadDir(target)
-		if err != nil {
-			return nil, fmt.Errorf("reading directory %s: %w", target, err)
-		}
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".zn") {
-				znFiles = append(znFiles, filepath.Join(target, e.Name()))
+		// Recursively scan directory for .zn files
+		filepath.Walk(target, func(path string, fi os.FileInfo, err error) error {
+			if err != nil || fi.IsDir() {
+				return nil
 			}
-		}
+			if strings.HasSuffix(fi.Name(), ".zn") {
+				znFiles = append(znFiles, path)
+			}
+			return nil
+		})
 		if len(znFiles) == 0 {
 			return nil, fmt.Errorf("no .zn files found in %s", target)
 		}
@@ -501,20 +496,6 @@ func hasPackageDecl(path string) bool {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func findZnFiles(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".zn") {
-			files = append(files, filepath.Join(dir, e.Name()))
-		}
-	}
-	return files
 }
 
 // classNameFromFile derives a Java class name from a .zn filename.
@@ -674,6 +655,15 @@ func runMill(dir string, millArgs ...string) error {
 	return cmd.Run()
 }
 
+// exitOnMillErr handles a Mill error — forwards exit code if available, else exits 1.
+func exitOnMillErr(err error) {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		os.Exit(exitErr.ExitCode())
+	}
+	errs.Error(err.Error())
+	os.Exit(1)
+}
+
 // hasMillConfig checks if a build.mill.yaml exists in or above the target path.
 func hasMillConfig(target string) (string, bool) {
 	dir := target
@@ -767,11 +757,6 @@ CMD ["java", "--enable-preview", "-jar", "app.jar"]
 `
 	} else {
 		// Fallback — generate a multi-stage native build Dockerfile
-		nativeImageTool := "native-image"
-		if niPath, err := exec.LookPath("native-image"); err == nil {
-			nativeImageTool = niPath
-		}
-		_ = nativeImageTool
 		dockerfile = fmt.Sprintf(`# Zinc multi-stage native Docker build
 FROM ghcr.io/graalvm/native-image-community:25 AS build
 
