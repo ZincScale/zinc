@@ -5,7 +5,7 @@
 Blocks use `{ }` braces. Indentation is for readability only.
 
 ```zinc
-example() {
+fn example() {
     if true {
         print("yes")
     }

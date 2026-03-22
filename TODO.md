@@ -7,7 +7,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 ## Completed (v3.0-dev) — Phase 1
 
 ### Language
-- [x] Brace-block syntax `{ }`, script mode
+- [x] Brace-block syntax `{ }`, `fn` keyword, script mode
 - [x] Java-native types: `int`, `double`, `boolean`, `char`, `long`, `String`, `List<T>`, `Map<K,V>`, `Set<T>`
 - [x] Data classes → Java records: `data User(String name, int age)`
 - [x] Enums: `enum Color { Red, Green, Blue }`

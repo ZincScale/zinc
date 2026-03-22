@@ -53,9 +53,9 @@ Java records are a perfect match — auto `equals()`, `hashCode()`, `toString()`
 
 | Zinc | Java |
 |---|---|
-| `greet(String name) String { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
-| `double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
-| `process() none { ... }` | `static void process() { ... }` |
+| `fn greet(String name) String { return "Hi {name}" }` | `static String greet(String name) { return "Hi " + name; }` |
+| `fn double(int x) int = x * 2` | `static int doubleVal(int x) { return x * 2; }` |
+| `fn process() none { ... }` | `static void process() { ... }` |
 
 ### Lambdas
 
@@ -99,10 +99,10 @@ Java 21+ pattern matching is a near-exact match for Zinc's `match`.
 |---|---|
 | `class Dog { var String name }` | `class Dog { private String name; }` |
 | `pub String name` | `public String name;` |
-| `init(String name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
+| `fn init(String name) { this.name = name }` | Constructor: `Dog(String name) { this.name = name; }` |
 | `class Puppy : Dog { ... }` | `class Puppy extends Dog { ... }` |
-| `interface Speaker { speak() String }` | `interface Speaker { String speak(); }` |
-| `static create() Dog` | `static Dog create()` |
+| `interface Speaker { fn speak() String }` | `interface Speaker { String speak(); }` |
+| `static fn create() Dog` | `static Dog create()` |
 
 ### Concurrency → Virtual Threads
 
