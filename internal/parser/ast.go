@@ -233,6 +233,14 @@ func (o *OptionalType) nodeTag() {}
 func (o *OptionalType) typeTag() {}
 
 
+// ArrayType: int[], String[], Type[]
+type ArrayType struct {
+	ElementType TypeExpr
+}
+
+func (a *ArrayType) nodeTag() {}
+func (a *ArrayType) typeTag() {}
+
 // FuncTypeExpr: Fn<(Int, String), Bool> → func(int, string) bool
 type FuncTypeExpr struct {
 	Params     []TypeExpr // parameter types

@@ -1124,7 +1124,9 @@ func (p *Parser) v2ParseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
 	name := tok.Literal
 
-	// Angle-bracket generics: list<int>, dict<str, int>
+	var typ TypeExpr
+
+	// Angle-bracket generics: List<int>, Map<String, int>
 	if p.check(lexer.TOKEN_LT) {
 		p.advance() // consume <
 		var args []TypeExpr
@@ -1134,22 +1136,25 @@ func (p *Parser) v2ParseType() TypeExpr {
 			args = append(args, p.v2ParseType())
 		}
 		p.expect(lexer.TOKEN_GT)
-		typ := &GenericType{Name: name, TypeArgs: args}
-		// Optional suffix on generic: list<int>?
-		if p.check(lexer.TOKEN_QUESTION) {
-			p.advance()
-			return &OptionalType{Inner: typ}
-		}
-		return typ
+		typ = &GenericType{Name: name, TypeArgs: args}
+	} else {
+		typ = &SimpleType{Name: name}
 	}
 
-	// Optional suffix: Type?
+	// Array suffix: Type[] or Type<T>[]
+	if p.check(lexer.TOKEN_LBRACKET) && p.peekAt(1).Type == lexer.TOKEN_RBRACKET {
+		p.advance() // consume [
+		p.advance() // consume ]
+		typ = &ArrayType{ElementType: typ}
+	}
+
+	// Optional suffix: Type?, Type[]?
 	if p.check(lexer.TOKEN_QUESTION) {
 		p.advance()
-		return &OptionalType{Inner: &SimpleType{Name: name}}
+		return &OptionalType{Inner: typ}
 	}
 
-	return &SimpleType{Name: name}
+	return typ
 }
 
 // v2IsTypeAnnotation checks if the current position looks like a type followed
@@ -1170,6 +1175,15 @@ func (p *Parser) v2IsTypeAnnotation() bool {
 	// ident< → generic type
 	if next.Type == lexer.TOKEN_LT {
 		return true
+	}
+	// ident[] ident → array type + name
+	if next.Type == lexer.TOKEN_LBRACKET {
+		peek2 := p.peekAt(2)
+		if peek2.Type == lexer.TOKEN_RBRACKET {
+			peek3 := p.peekAt(3)
+			return peek3.Type == lexer.TOKEN_IDENT || peek3.Type == lexer.TOKEN_DATA ||
+				peek3.Type == lexer.TOKEN_MATCH || peek3.Type == lexer.TOKEN_PRINT
+		}
 	}
 	// ident? ident → nullable type + name
 	if next.Type == lexer.TOKEN_QUESTION {

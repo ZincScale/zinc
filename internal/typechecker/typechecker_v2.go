@@ -643,6 +643,10 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 	if declared.Name == "double" && actual.Name == "int" {
 		return true
 	}
+	// Array type is compatible with List literal ([1, 2, 3] can init int[])
+	if strings.HasSuffix(declared.Name, "[]") && actual.Name == "List" {
+		return true
+	}
 	// none is compatible with Optional
 	if actual.Name == "none" && declared.Nullable {
 		return true
@@ -665,6 +669,9 @@ func (c *V2Checker) resolveTypeExpr(t parser.TypeExpr) V2Type {
 			args = append(args, c.resolveTypeExpr(a))
 		}
 		return V2Type{Name: t.Name, Args: args}
+	case *parser.ArrayType:
+		elem := c.resolveTypeExpr(t.ElementType)
+		return V2Type{Name: elem.Name + "[]", Args: elem.Args}
 	case *parser.OptionalType:
 		inner := c.resolveTypeExpr(t.Inner)
 		inner.Nullable = true

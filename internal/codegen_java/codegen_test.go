@@ -1320,3 +1320,70 @@ func TestAssertWithMessage(t *testing.T) {
 		`assert x > 0 : "x must be positive";`,
 	)
 }
+
+// =============================================================================
+// Arrays
+// =============================================================================
+
+func TestArrayDeclaration(t *testing.T) {
+	assertContains(t, `var int[] nums = [1, 2, 3]`,
+		`int[] nums = new int[] {1, 2, 3};`,
+	)
+}
+
+func TestArrayStringDeclaration(t *testing.T) {
+	assertContains(t, `var String[] names = ["Alice", "Bob"]`,
+		`String[] names = new String[] {"Alice", "Bob"};`,
+	)
+}
+
+func TestArrayEmptyDeclaration(t *testing.T) {
+	assertContains(t, `var int[] nums = []`,
+		`int[] nums = new int[0];`,
+	)
+}
+
+func TestArrayAccess(t *testing.T) {
+	assertContains(t, `
+var int[] nums = [10, 20, 30]
+var x = nums[0]
+`,
+		`int[] nums = new int[] {10, 20, 30};`,
+		`var x = nums[0];`,
+	)
+}
+
+func TestArrayInFunction(t *testing.T) {
+	assertContains(t, `
+fn sum(int[] numbers) int {
+    return 0
+}
+`,
+		`static int sum(int[] numbers)`,
+	)
+}
+
+// =============================================================================
+// fn main() entry point
+// =============================================================================
+
+func TestMainNoArgs(t *testing.T) {
+	assertContains(t, `
+fn main() {
+    print("hello")
+}
+`,
+		`public static void main(String[] args) throws Exception {`,
+		`System.out.println("hello")`,
+	)
+}
+
+func TestMainWithArgs(t *testing.T) {
+	assertContains(t, `
+fn main(String[] args) {
+    print("hello")
+}
+`,
+		`public static void main(String[] args) throws Exception {`,
+	)
+}

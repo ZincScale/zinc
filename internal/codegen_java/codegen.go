@@ -27,12 +27,13 @@ type Generator struct {
 	indent           int
 	className        string // derived from filename or "Main"
 	pendingAccessors []fieldAccessor
-	tupleTypes       map[int]bool // track which Tuple arities we need to generate
+	tupleTypes       map[int]bool   // track which Tuple arities we need to generate
+	arrayVars        map[string]bool // track variables declared as array types
 }
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{tupleTypes: make(map[int]bool)}
+	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool)}
 }
 
 // OutputFile represents a generated .java file.
@@ -189,7 +190,15 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 			g.writeln("")
 		}
 
-		if len(prog.Stmts) > 0 {
+		// Only generate script-mode main if no explicit fn main() exists
+		hasExplicitMain := false
+		for _, d := range fnDecls {
+			if fn, ok := d.(*parser.FnDecl); ok && fn.Name == "main" {
+				hasExplicitMain = true
+				break
+			}
+		}
+		if len(prog.Stmts) > 0 && !hasExplicitMain {
 			g.writeln("public static void main(String[] args) throws Exception {")
 			g.indent++
 			for _, s := range prog.Stmts {
@@ -331,6 +340,27 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	for _, a := range fn.Annotations {
 		g.writeln("@%s", g.formatAnnotation(a))
 	}
+
+	// fn main() → public static void main(String[] args) throws Exception
+	if fn.Name == "main" {
+		params := "String[] args"
+		if len(fn.Params) > 0 {
+			params = g.formatParams(fn.Params)
+			// Track args param if it's an array
+			for _, p := range fn.Params {
+				if _, ok := p.Type.(*parser.ArrayType); ok {
+					g.arrayVars[p.Name] = true
+				}
+			}
+		}
+		g.writeln("public static void main(%s) throws Exception {", params)
+		g.indent++
+		g.emitBlock(fn.Body)
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
 	vis := "public "
 	ret := "void"
 	if fn.ReturnType != nil {
@@ -671,6 +701,20 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	}
 
 	if v.Value != nil {
+		// Context-dependent array literal: int[] x = [1, 2, 3] → new int[] {1, 2, 3}
+		if arrType, ok := v.Type.(*parser.ArrayType); ok {
+			g.arrayVars[v.Name] = true
+			if listLit, ok := v.Value.(*parser.ListLit); ok {
+				elemType := g.formatType(arrType.ElementType)
+				if len(listLit.Elements) == 0 {
+					g.writeln("%s %s = new %s[0];", keyword, v.Name, elemType)
+				} else {
+					elems := g.formatExprList(listLit.Elements)
+					g.writeln("%s %s = new %s[] {%s};", keyword, v.Name, elemType, elems)
+				}
+				return
+			}
+		}
 		g.writeln("%s %s = %s;", keyword, v.Name, g.formatExpr(v.Value))
 	} else {
 		g.writeln("%s %s;", keyword, v.Name)
@@ -1046,6 +1090,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.SelectorExpr:
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), expr.Field)
 	case *parser.IndexExpr:
+		// Arrays use [] access, Lists use .get()
+		if ident, ok := expr.Object.(*parser.Ident); ok && g.arrayVars[ident.Name] {
+			return fmt.Sprintf("%s[%s]", g.formatExpr(expr.Object), g.formatExpr(expr.Index))
+		}
 		return fmt.Sprintf("%s.get(%s)", g.formatExpr(expr.Object), g.formatExpr(expr.Index))
 	case *parser.ListLit:
 		if len(expr.Elements) == 0 {
@@ -1429,6 +1477,8 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			args = append(args, g.formatTypeBoxed(a))
 		}
 		return fmt.Sprintf("%s<%s>", baseName, strings.Join(args, ", "))
+	case *parser.ArrayType:
+		return g.formatType(typ.ElementType) + "[]"
 	case *parser.OptionalType:
 		// Nullable in Java — just use the type (compiler tracks nullability)
 		return g.formatType(typ.Inner)
@@ -1470,6 +1520,10 @@ func (g *Generator) formatParams(params []*parser.ParamDecl) string {
 		typeName := "Object"
 		if p.Type != nil {
 			typeName = g.formatType(p.Type)
+			// Track array params for [] access generation
+			if _, ok := p.Type.(*parser.ArrayType); ok {
+				g.arrayVars[p.Name] = true
+			}
 		}
 		if p.Variadic {
 			typeName += "..."
