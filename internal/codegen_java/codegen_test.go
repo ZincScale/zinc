@@ -1238,6 +1238,19 @@ parallel for item in items {
 	)
 }
 
+func TestParallelForBounded(t *testing.T) {
+	assertContains(t, `
+parallel(max: 5) for item in items {
+    process(item)
+}
+`,
+		`new java.util.concurrent.Semaphore(5)`,
+		`_semaphore.acquire()`,
+		`_scope.fork(() -> {`,
+		`finally { _semaphore.release(); }`,
+	)
+}
+
 func TestConcurrentOr(t *testing.T) {
 	assertContains(t, `
 concurrent {

@@ -1036,14 +1036,29 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 }
 
 func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
+	if p.Max > 0 {
+		// Bounded concurrency: use Semaphore to limit concurrent tasks
+		g.writeln("var _semaphore = new java.util.concurrent.Semaphore(%d);", p.Max)
+	}
 	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
 	g.indent++
 	g.writeln("for (var %s : %s) {", p.Item, g.formatExpr(p.Range))
 	g.indent++
+	if p.Max > 0 {
+		g.writeln("_semaphore.acquire();")
+	}
 	g.writeln("_scope.fork(() -> {")
 	g.indent++
+	if p.Max > 0 {
+		g.writeln("try {")
+		g.indent++
+	}
 	g.emitBlock(p.Body)
 	g.writeln("return null;")
+	if p.Max > 0 {
+		g.indent--
+		g.writeln("} finally { _semaphore.release(); }")
+	}
 	g.indent--
 	g.writeln("});")
 	g.indent--

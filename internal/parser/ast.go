@@ -455,7 +455,7 @@ type RaiseStmt struct {
 func (r *RaiseStmt) nodeTag() {}
 func (r *RaiseStmt) stmtTag() {}
 
-// ParallelForStmt: parallel for item in items { body } [or { handler }]
+// ParallelForStmt: parallel [( max: N )] for item in items { body } [or { handler }]
 type ParallelForStmt struct {
 	Line      int
 	Item      string
@@ -463,6 +463,7 @@ type ParallelForStmt struct {
 	Range     Expr
 	Body      *BlockStmt
 	OrHandler *OrHandler // optional error handler
+	Max       int        // 0 = unbounded, >0 = bounded concurrency via semaphore
 }
 
 func (p *ParallelForStmt) nodeTag() {}

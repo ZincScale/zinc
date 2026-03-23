@@ -15,6 +15,8 @@
 package parser
 
 import (
+	"strconv"
+
 	"zinc/internal/lexer"
 )
 
@@ -680,10 +682,34 @@ func (p *Parser) v2ParseSpawnStmt() Stmt {
 	return &ExprStmt{Line: line, Expr: &SpawnExpr{Line: line, Body: body}}
 }
 
-// v2ParseParallelForStmt: parallel for item in expr { body }
+// v2ParseParallelForStmt: parallel [(max: N)] for item in expr { body }
 func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_PARALLEL)
+
+	// Optional: parallel(max: N) for ...
+	maxConcurrency := 0
+	if p.check(lexer.TOKEN_LPAREN) {
+		p.advance()
+		for !p.check(lexer.TOKEN_RPAREN) && !p.check(lexer.TOKEN_EOF) {
+			name := p.v2ExpectIdent()
+			p.expect(lexer.TOKEN_COLON)
+			if name == "max" {
+				tok := p.advance()
+				val, err := strconv.Atoi(tok.Literal)
+				if err == nil {
+					maxConcurrency = val
+				}
+			} else {
+				p.advance() // skip unknown param value
+			}
+			if p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+
 	p.expect(lexer.TOKEN_FOR)
 
 	var item, indexVar string
@@ -698,7 +724,7 @@ func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	rangeExpr := p.v2ParseExpr()
 	body := p.v2ParseBlock()
 	handler := p.v2ParseErrHandler()
-	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body, OrHandler: handler}
+	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body, OrHandler: handler, Max: maxConcurrency}
 }
 
 // v2ParseConcurrentStmt: concurrent { task1; task2 } or concurrent(first: true) { ... }
