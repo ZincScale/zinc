@@ -714,8 +714,8 @@ func (p *Parser) v2ParseConcurrentStmt() *ConcurrentStmt {
 			name := p.v2ExpectIdent()
 			p.expect(lexer.TOKEN_COLON)
 			if name == "first" {
-				val := p.v2ExpectIdent()
-				if val == "true" {
+				tok := p.advance()
+				if tok.Literal == "true" {
 					firstOnly = true
 				}
 			} else {

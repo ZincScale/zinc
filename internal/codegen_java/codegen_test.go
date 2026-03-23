@@ -1269,6 +1269,17 @@ var (user, orders) = concurrent {
 	)
 }
 
+func TestConcurrentFirstOnly(t *testing.T) {
+	assertContains(t, `
+var a, b = concurrent(first: true) {
+    slowApi()
+    fastApi()
+}
+`,
+		`ShutdownOnSuccess`,
+	)
+}
+
 func TestChannelType(t *testing.T) {
 	assertContains(t,
 		`var Channel<String> ch = Channel(100)`,

@@ -1062,24 +1062,36 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 }
 
 func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
+	scopeOpen := "java.util.concurrent.StructuredTaskScope.open()"
+	if c.FirstOnly {
+		scopeOpen = "new java.util.concurrent.StructuredTaskScope.ShutdownOnSuccess<Object>()"
+	}
+
 	if len(c.Names) > 0 {
 		for _, name := range c.Names {
 			g.writeln("Object %s;", name)
 		}
-		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+		g.writeln("try (var _scope = %s) {", scopeOpen)
 		g.indent++
 		for i, task := range c.Tasks {
 			g.writeln("var _task%d = _scope.fork(() -> %s);", i, g.formatExpr(task))
 		}
 		g.writeln("_scope.join();")
-		for i, name := range c.Names {
-			if i < len(c.Tasks) {
-				g.writeln("%s = _task%d.get();", name, i)
+		if c.FirstOnly {
+			g.writeln("var _result = _scope.result();")
+			if len(c.Names) > 0 {
+				g.writeln("%s = _result;", c.Names[0])
+			}
+		} else {
+			for i, name := range c.Names {
+				if i < len(c.Tasks) {
+					g.writeln("%s = _task%d.get();", name, i)
+				}
 			}
 		}
 		g.indent--
 	} else {
-		g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+		g.writeln("try (var _scope = %s) {", scopeOpen)
 		g.indent++
 		for _, task := range c.Tasks {
 			g.writeln("_scope.fork(() -> { %s; return null; });", g.formatExpr(task))
