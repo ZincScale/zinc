@@ -1,0 +1,27 @@
+mood: happy
+sign: negative
+fruit: apple
+fruit: banana
+fruit: cherry
+bob scored 82
+alice scored 95
+charlie scored 91
+exclusive range 0..3:
+  0
+  1
+  2
+inclusive range 1..=3:
+  1
+  2
+  3
+count: 0
+count: 1
+count: 2
+starting...
+i=0
+i=1
+i=2
+i=4
+i=5
+match expr: success
+Control Flow OK

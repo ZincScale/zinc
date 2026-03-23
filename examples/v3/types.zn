@@ -28,8 +28,10 @@ print("byte array length: {data.length}")
 
 // Set
 Set<String> fruits = Set.of("apple", "banana", "cherry")
-print("fruits: {fruits}")
+print("fruits size: {fruits.size()}")
 print("has apple: {fruits.contains("apple")}")
+print("has banana: {fruits.contains("banana")}")
+print("has cherry: {fruits.contains("cherry")}")
 
 // Type checks — is
 var val = "hello"

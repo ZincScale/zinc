@@ -1905,6 +1905,19 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 	case *parser.AssignStmt:
 		return fmt.Sprintf("%s %s %s;", g.formatExpr(stmt.Target), stmt.Op, g.formatExpr(stmt.Value))
 	case *parser.ExprStmt:
+		if stmt.OrHandler != nil {
+			// Inline try/catch for or-handlers in expression statements
+			errVar := g.pushErrVar()
+			result := fmt.Sprintf("try { %s; } catch (Exception %s) { ", g.formatExpr(stmt.Expr), errVar)
+			if stmt.OrHandler.Body != nil {
+				for _, s := range stmt.OrHandler.Body.Stmts {
+					result += g.formatStmtInline(s) + " "
+				}
+			}
+			result += "}"
+			g.popErrVar()
+			return result
+		}
 		return g.formatExpr(stmt.Expr) + ";"
 	case *parser.ReturnStmt:
 		if stmt.Value != nil {

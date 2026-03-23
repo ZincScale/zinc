@@ -1,0 +1,7 @@
+first: 10
+length: 5
+sum: 150
+Hello, Alice!
+Hello, Bob!
+Hello, Charlie!
+empty length: 0

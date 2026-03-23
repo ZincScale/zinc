@@ -1,15 +1,32 @@
 // Concurrency — Zinc v3
-// Demonstrates: spawn, parallel for
+// Demonstrates: spawn, parallel for, channel
 // All generate standard Java — no Zinc runtime
+
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.TimeUnit
 
 // spawn — fire a virtual thread
 spawn {
     print("background task started")
 }
-Thread.sleep(50)
+Thread.sleep(100)
 
 // parallel for — StructuredTaskScope under the hood
+// Use AtomicInteger to collect results deterministically
 var numbers = [1, 2, 3, 4, 5]
+AtomicInteger sum = AtomicInteger(0)
 parallel for i in numbers {
-    print("parallel: {i}")
+    sum.addAndGet(i)
 }
+print("parallel sum: {sum.get()}")
+
+// Channel — bounded queue for producer/consumer
+Channel<String> ch = Channel(10)
+spawn {
+    ch.put("hello from channel") or { }
+}
+Thread.sleep(50)
+String msg = ch.poll(100, TimeUnit.MILLISECONDS) or { "timeout" }
+print("channel: {msg}")
+
+print("Concurrency OK")
