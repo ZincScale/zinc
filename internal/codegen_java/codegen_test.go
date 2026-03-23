@@ -522,6 +522,47 @@ var user = fetchUser(id) or match err {
 	)
 }
 
+func TestOrBlockReturn(t *testing.T) {
+	assertContains(t, `
+fn loadConfig(): String {
+    var data = readFile("config.json") or {
+        return Error("config missing")
+    }
+    return data
+}
+`,
+		`try { data = readFile("config.json"); } catch (Exception err) {`,
+		`throw new RuntimeException("config missing");`,
+	)
+}
+
+func TestOrBlockContinue(t *testing.T) {
+	assertContains(t, `
+for item in items {
+    var result = process(item) or {
+        continue
+    }
+    print(result)
+}
+`,
+		`try { result = process(item); } catch (Exception err) {`,
+		`continue;`,
+	)
+}
+
+func TestCustomErrorType(t *testing.T) {
+	assertContains(t, `
+fn validate(int x): int {
+    if x < 0 {
+        return Error(ValidationError("must be positive"))
+    }
+    return x
+}
+`,
+		`throw new ValidationError("must be positive");`,
+	)
+}
+
 // =============================================================================
 // Lambdas
 // =============================================================================

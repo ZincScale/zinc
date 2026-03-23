@@ -1,6 +1,5 @@
 // Error Handling — Zinc v3
-// Demonstrates: Error, or handler
-// Zinc uses errors as values — no try/catch/throw
+// Demonstrates: Error return, or default, or block, or with return/continue, custom errors
 
 // Function that can fail — returns Error on bad input
 fn divide(int a, int b): int {
@@ -16,20 +15,40 @@ print("divide(10, 0) or -1 = {result}")
 var ok = divide(10, 2) or 0
 print("divide(10, 2) = {ok}")
 
-// Control flow
-int x = 42
-if x > 0 {
-    print("positive")
-} else {
-    print("non-positive")
+// or block — error handler as statement
+divide(10, 0) or {
+    print("caught division error")
+}
+print("or block done")
+
+// Custom error types
+fn validate(int x): int {
+    if x < 0 { return Error(IllegalArgumentException("must be positive")) }
+    return x
 }
 
-// Match statement
-match x {
-    case 0 {
-        print("zero")
+var v = validate(-5) or -1
+print("validate(-5) or -1 = {v}")
+
+var v2 = validate(10) or -1
+print("validate(10) = {v2}")
+
+// or block with return — early exit from function
+fn loadAndProcess(): String {
+    var data = divide(10, 0) or {
+        return "fallback result"
     }
-    case _ {
-        print("nonzero")
-    }
+    return "processed: {data}"
 }
+print("loadAndProcess: {loadAndProcess()}")
+
+// or block with continue — skip items in loop
+var inputs = [2, 0, 5, 0, 3]
+for b in inputs {
+    var val = divide(100, b) or {
+        continue
+    }
+    print("100/{b} = {val}")
+}
+
+print("Error Handling OK")
