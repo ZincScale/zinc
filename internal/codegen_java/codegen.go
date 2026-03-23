@@ -1546,10 +1546,33 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 		case *parser.StringLit:
 			parts = append(parts, fmt.Sprintf("\"%s\"", part.Value))
 		default:
-			parts = append(parts, g.formatExpr(part))
+			expr := g.formatExpr(part)
+			// Wrap expressions that have lower precedence than + in parens
+			// to avoid "str" + a == b being parsed as ("str" + a) == b
+			if g.needsInterpParens(part) {
+				expr = "(" + expr + ")"
+			}
+			parts = append(parts, expr)
 		}
 	}
 	return strings.Join(parts, " + ")
+}
+
+// needsInterpParens returns true if an expression needs parentheses
+// when used inside string concatenation (+ has higher precedence than
+// comparison, equality, and logical operators in Java).
+func (g *Generator) needsInterpParens(expr parser.Expr) bool {
+	switch e := expr.(type) {
+	case *parser.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "===", "!==", "<", ">", "<=", ">=",
+			"&&", "||":
+			return true
+		}
+	case *parser.IfExpr:
+		return true
+	}
+	return false
 }
 
 // --- Type formatting ---------------------------------------------------------

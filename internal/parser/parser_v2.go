@@ -1437,24 +1437,26 @@ func (p *Parser) v2ParseIfExpr() Expr {
 	return &IfExpr{Cond: cond, Then: then, Else: elseExpr}
 }
 
-// v2ParseOr: expr or expr
+// v2ParseOr: expr || expr
+// NOTE: 'or' keyword is NOT a boolean operator — it's the error handler.
+// Use || for boolean OR. 'or' is parsed at statement level (or { }, or match, or default).
 func (p *Parser) v2ParseOr() Expr {
 	left := p.v2ParseAnd()
 	for p.check(lexer.TOKEN_PIPE_PIPE) {
-		op := p.advance().Literal
+		p.advance() // consume ||
 		right := p.v2ParseAnd()
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
+		left = &BinaryExpr{Left: left, Op: "||", Right: right}
 	}
 	return left
 }
 
-// v2ParseAnd: expr and expr
+// v2ParseAnd: expr and expr  OR  expr && expr
 func (p *Parser) v2ParseAnd() Expr {
 	left := p.v2ParseNot()
-	for p.check(lexer.TOKEN_AMP_AMP) {
-		op := p.advance().Literal
+	for p.check(lexer.TOKEN_AMP_AMP) || p.check(lexer.TOKEN_AND) {
+		p.advance() // consume && or 'and'
 		right := p.v2ParseNot()
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
+		left = &BinaryExpr{Left: left, Op: "&&", Right: right}
 	}
 	return left
 }

@@ -556,6 +556,27 @@ if a && b {
 	)
 }
 
+func TestAndKeyword(t *testing.T) {
+	assertContains(t, `
+if a and b {
+    print("both")
+}
+`,
+		`if (a && b) {`,
+	)
+}
+
+// NOTE: 'or' is the error handler keyword, not boolean OR.
+// Boolean OR uses || only. See TestOrOperator.
+
+func TestInterpolationWithOperators(t *testing.T) {
+	assertContains(t, `
+print("eq: {a == b}")
+`,
+		`(java.util.Objects.equals(a, b))`,
+	)
+}
+
 func TestOrOperator(t *testing.T) {
 	assertContains(t, `
 if a || b {

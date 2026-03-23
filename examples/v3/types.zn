@@ -40,10 +40,8 @@ if val is String {
 // Structural equality vs reference identity
 var a = "hello"
 var b = "hello"
-var eq = a == b
-var refEq = a === b
-print("structural eq: {eq}")
-print("reference eq: {refEq}")
+print("structural eq: {a == b}")
+print("reference eq: {a === b}")
 
 // Annotations
 @Deprecated
