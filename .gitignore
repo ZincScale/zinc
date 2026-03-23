@@ -8,6 +8,7 @@
 
 # Zinc build directory
 .zinc-build/
+zinc-out/
 Dockerfile
 .dockerignore
 *-deployment.yaml
