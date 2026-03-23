@@ -1741,7 +1741,7 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_BOOL_LIT:
 		p.advance()
 		return &BoolLit{Value: tok.Literal == "true"}
-	case lexer.TOKEN_NULL, lexer.TOKEN_NONE:
+	case lexer.TOKEN_NULL:
 		p.advance()
 		return &NullLit{}
 	case lexer.TOKEN_SPAWN:

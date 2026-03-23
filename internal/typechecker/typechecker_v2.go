@@ -36,7 +36,7 @@ func (e V2Error) String() string {
 
 // V2Type represents a resolved type in the v2 type system.
 type V2Type struct {
-	Name     string   // "int", "String", "List", "Map", "none", "any"
+	Name     string   // "int", "String", "List", "Map", "null", "any"
 	Args     []V2Type // generic args: list[int] → Args=[int]
 	Nullable bool     // Optional[T]
 }
@@ -60,7 +60,7 @@ var (
 	typeDouble  = V2Type{Name: "double"}
 	typeStr     = V2Type{Name: "String"}
 	typeBool    = V2Type{Name: "boolean"}
-	typeNone    = V2Type{Name: "none"}
+	typeNull    = V2Type{Name: "null"}
 	typeAny     = V2Type{Name: "any"}
 )
 
@@ -460,7 +460,7 @@ func (c *V2Checker) checkAssignStmt(s *parser.AssignStmt) {
 
 func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	if e == nil {
-		return typeNone
+		return typeNull
 	}
 	switch e := e.(type) {
 	case *parser.IntLit:
@@ -472,7 +472,7 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	case *parser.BoolLit:
 		return typeBool
 	case *parser.NullLit:
-		return typeNone
+		return typeNull
 	case *parser.Ident:
 		if t, found := c.scope.lookup(e.Name); found {
 			return t
@@ -678,8 +678,17 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 		return true
 	}
 	// none is compatible with Optional
-	if actual.Name == "none" && declared.Nullable {
+	if actual.Name == "null" && declared.Nullable {
 		return true
+	}
+	// null is compatible with any reference type (non-primitive)
+	if actual.Name == "null" {
+		switch declared.Name {
+		case "int", "long", "double", "float", "boolean", "char", "byte", "short":
+			return false // primitives can't be null
+		default:
+			return true // reference types accept null
+		}
 	}
 	return false
 }

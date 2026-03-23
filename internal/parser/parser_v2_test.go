@@ -541,7 +541,7 @@ func TestV2NotIn(t *testing.T) {
 }
 
 func TestV2IsNot(t *testing.T) {
-	prog, errs := parseV2(`var x = value is not none`)
+	prog, errs := parseV2(`var x = value is not null`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -553,7 +553,7 @@ func TestV2IsNot(t *testing.T) {
 }
 
 func TestV2None(t *testing.T) {
-	prog, errs := parseV2(`var x = none`)
+	prog, errs := parseV2(`var x = null`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1044,7 +1044,7 @@ func TestV2TypeFirstVarGeneric(t *testing.T) {
 }
 
 func TestV2TypeFirstVarNullable(t *testing.T) {
-	prog, errs := parseV2(`var int? x = none`)
+	prog, errs := parseV2(`var int? x = null`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -1259,7 +1259,7 @@ func TestV2AngleBracketGenericNested(t *testing.T) {
 func TestV2NullableGenericReturnType(t *testing.T) {
 	prog, errs := parseV2(`
 fn foo(): List<int>? {
-    return none
+    return null
 }
 `)
 	if len(errs) > 0 {

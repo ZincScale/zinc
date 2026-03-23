@@ -1877,7 +1877,7 @@ func TestEmptyMap(t *testing.T) {
 }
 
 func TestNullLiteral(t *testing.T) {
-	assertContains(t, `var x = none`,
+	assertContains(t, `var x = null`,
 		`var x = null;`,
 	)
 }

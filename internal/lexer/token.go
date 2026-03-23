@@ -73,7 +73,6 @@ const (
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
-	TOKEN_NONE     // none (Python-style null)
 	TOKEN_PARALLEL   // parallel (parallel for)
 	TOKEN_INIT       // init (constructor-set immutable field)
 	TOKEN_CONCURRENT // concurrent { } (fan-out/fan-in)
@@ -181,7 +180,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
 	TOKEN_FROM:      "from",
-	TOKEN_NONE:      "none",
 	TOKEN_PARALLEL:   "parallel",
 	TOKEN_INIT:       "init",
 	TOKEN_CONCURRENT: "concurrent",
@@ -297,7 +295,6 @@ var keywords = map[string]TokenType{
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,
 	"from":      TOKEN_FROM,
-	"none":      TOKEN_NONE,
 	"parallel":   TOKEN_PARALLEL,
 	"init":       TOKEN_INIT,
 	"concurrent": TOKEN_CONCURRENT,
