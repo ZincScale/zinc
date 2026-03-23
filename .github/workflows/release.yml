@@ -1,10 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch:  # disabled auto-triggers — GitHub Actions quota exceeded
-  # push:
-  #   tags:
-  #     - 'v*'
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -20,13 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          cache: false
           go-version: '1.26'
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
 
       - name: Run Goreleaser
         uses: goreleaser/goreleaser-action@v6

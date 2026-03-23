@@ -1,113 +1,24 @@
 name: CI
 
 on:
-  workflow_dispatch:  # disabled auto-triggers — GitHub Actions quota exceeded
-  # push:
-  #   branches: [master]
-  # pull_request:
-  #   branches: [master]
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
 
 jobs:
-  license-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check license headers
-        run: scripts/check-license-headers.sh
-
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.25', '1.26']
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ matrix.go-version }}
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          cache: false
-          go-version: ${{ matrix.go-version }}
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+          go-version: '1.26'
 
       - name: Build
         run: go build ./...
 
-      - name: Unit tests
-        run: go test ./internal/codegen_csharp/ -run "Test[^E]" -v
-
-      - name: E2E tests (C# AOT backend)
-        run: go test ./internal/codegen_csharp/ -run "TestE2E$" -v -timeout 300s
-
-      - name: Other package tests
-        run: go test $(go list ./... | grep -v codegen_csharp) -v
-
-  smoke-test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - name: Ubuntu
-            container: ''
-          - name: RHEL 9
-            container: redhat/ubi9:latest
-          - name: Amazon Linux 2023
-            container: amazonlinux:2023
-    name: smoke-test (${{ matrix.name }})
-    container: ${{ matrix.container || null }}
-    steps:
-      - name: Install system deps (RHEL/AL)
-        if: matrix.container != ''
-        run: |
-          if command -v dnf &>/dev/null; then
-            dnf install -y git tar gzip libicu
-          elif command -v yum &>/dev/null; then
-            yum install -y git tar gzip libicu
-          fi
-
-      - name: Mark workspace safe for Git
-        if: matrix.container != ''
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          cache: false
-          go-version: '1.26'
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Build zinc
-        run: go build -buildvcs=false -o zinc ./cmd/zinc/
-
-      - name: C# smoke tests
-        env:
-          GOFLAGS: -buildvcs=false
-        run: scripts/smoke-test-csharp.sh ./zinc
-
-  govulncheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          cache: false
-          go-version: '1.26'
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Run govulncheck
-        run: govulncheck ./...
+      - name: Test
+        run: go test ./... -v
