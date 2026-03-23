@@ -350,6 +350,27 @@ func main() {
 }
 
 // parseAndCheck runs lexer → parser → typechecker, returns the AST.
+func parseOnly(inFile string, verbose bool) (*parser.Program, error) {
+	src, err := os.ReadFile(inFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", inFile, err)
+	}
+
+	l := lexer.New(string(src))
+	tokens := l.Tokenize()
+	if len(l.Errors) > 0 {
+		return nil, fmt.Errorf("lexer errors in %s:\n%s", inFile, strings.Join(l.Errors, "\n"))
+	}
+
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		return nil, fmt.Errorf("parse errors in %s:\n%s", inFile, strings.Join(p.Errors, "\n"))
+	}
+
+	return prog, nil
+}
+
 func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 	src, err := os.ReadFile(inFile)
 	if err != nil {
@@ -490,8 +511,9 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 	// pkgTypes maps package → list of type names (for wildcard resolution)
 	pkgTypes := make(map[string][]string)
 
+	// Pass 1a: Parse all files (no typechecking yet)
 	for _, znFile := range znFiles {
-		prog, err := parseAndCheck(znFile, verbose)
+		prog, err := parseOnly(znFile, verbose)
 		if err != nil {
 			return nil, err
 		}
@@ -546,6 +568,32 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 	if verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] type registry: %d types across %d files\n",
 			len(typeRegistry), len(parsed))
+	}
+
+	// Pass 1b: Collect all function/method signatures across files
+	allSigs := &typechecker.CollectedSigs{
+		FnSigs:     make(map[string]typechecker.V2FnSig),
+		MethodSigs: make(map[string]map[string]typechecker.V2FnSig),
+	}
+	for _, pf := range parsed {
+		fileSigs := typechecker.CollectSignatures(pf.prog)
+		for k, v := range fileSigs.FnSigs {
+			allSigs.FnSigs[k] = v
+		}
+		for k, v := range fileSigs.MethodSigs {
+			allSigs.MethodSigs[k] = v
+		}
+	}
+
+	// Pass 1c: Typecheck each file with cross-file context
+	for _, pf := range parsed {
+		if tcErrors := typechecker.CheckV2WithContext(pf.prog, allSigs); len(tcErrors) > 0 {
+			var msgs []string
+			for _, e := range tcErrors {
+				msgs = append(msgs, e.String())
+			}
+			return nil, fmt.Errorf("type errors in %s:\n%s", pf.path, strings.Join(msgs, "\n"))
+		}
 	}
 
 	// Pass 2: Resolve imports and generate Java

@@ -101,18 +101,36 @@ type V2Checker struct {
 	scope        *V2Scope
 	fnReturnType *V2Type            // current function's return type
 	fnSigs       map[string]V2FnSig // function signatures for call checking
+	methodSigs   map[string]map[string]V2FnSig // type → method → signature
 	inLoop       bool               // tracking if inside a loop for break/continue
 }
 
 // CheckV2 runs the v2 type checker on a parsed program.
 // Returns errors found. Empty slice = all good.
 func CheckV2(prog *parser.Program) []V2Error {
+	return CheckV2WithContext(prog, nil)
+}
+
+// CheckV2WithContext runs the type checker with pre-populated cross-file signatures.
+// externalSigs contains function/method signatures from other files in the project.
+func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2Error {
 	c := &V2Checker{
-		scope:  newV2Scope(nil),
-		fnSigs: make(map[string]V2FnSig),
+		scope:      newV2Scope(nil),
+		fnSigs:     make(map[string]V2FnSig),
+		methodSigs: make(map[string]map[string]V2FnSig),
 	}
 
-	// Register top-level declarations
+	// Pre-populate with cross-file signatures
+	if externalSigs != nil {
+		for k, v := range externalSigs.FnSigs {
+			c.fnSigs[k] = v
+		}
+		for k, v := range externalSigs.MethodSigs {
+			c.methodSigs[k] = v
+		}
+	}
+
+	// Register top-level declarations (overrides externals for this file)
 	for _, d := range prog.Decls {
 		c.registerDecl(d)
 	}
@@ -128,6 +146,26 @@ func CheckV2(prog *parser.Program) []V2Error {
 	}
 
 	return c.errors
+}
+
+// CollectSignatures extracts function and interface method signatures from a program.
+// Used in multi-file compilation to build cross-file context.
+// CollectedSigs holds both function and method signatures from a file.
+type CollectedSigs struct {
+	FnSigs     map[string]V2FnSig
+	MethodSigs map[string]map[string]V2FnSig // type → method → sig
+}
+
+func CollectSignatures(prog *parser.Program) CollectedSigs {
+	c := &V2Checker{
+		scope:      newV2Scope(nil),
+		fnSigs:     make(map[string]V2FnSig),
+		methodSigs: make(map[string]map[string]V2FnSig),
+	}
+	for _, d := range prog.Decls {
+		c.registerDecl(d)
+	}
+	return CollectedSigs{FnSigs: c.fnSigs, MethodSigs: c.methodSigs}
 }
 
 func (c *V2Checker) errorf(line int, format string, args ...any) {
@@ -158,6 +196,21 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 	case *parser.EnumDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
+	case *parser.InterfaceDecl:
+		c.scope.set(d.Name, V2Type{Name: d.Name})
+		// Register interface method signatures
+		methods := make(map[string]V2FnSig)
+		for _, m := range d.Methods {
+			retType := c.resolveTypeExpr(m.ReturnType)
+			var paramTypes []V2Type
+			var paramNames []string
+			for _, p := range m.Params {
+				paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+				paramNames = append(paramNames, p.Name)
+			}
+			methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+		}
+		c.methodSigs[d.Name] = methods
 	}
 }
 
@@ -340,7 +393,17 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 	case *parser.ForStmt:
 		if s.IsRange {
 			inner := newV2Scope(c.scope)
-			inner.set(s.Item, typeAny)
+			// Infer loop variable type from the range expression
+			rangeType := c.inferType(s.Range)
+			itemType := typeAny
+			if rangeType.Name == "int" {
+				// Range loop: for i in 0..5 → i is int
+				itemType = typeInt
+			} else if len(rangeType.Args) > 0 {
+				// Collection: for item in List<String> → item is String
+				itemType = rangeType.Args[0]
+			}
+			inner.set(s.Item, itemType)
 			if s.IndexVar != "" {
 				inner.set(s.IndexVar, typeInt)
 			}
@@ -360,6 +423,9 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		c.inLoop = prevLoop
 	case *parser.ExprStmt:
 		c.inferType(s.Expr)
+		if s.OrHandler != nil && s.OrHandler.Body != nil {
+			c.checkBlock(s.OrHandler.Body)
+		}
 	case *parser.TryStmt:
 		c.checkBlock(s.Body)
 		if s.CatchBody != nil {
@@ -440,6 +506,10 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 				s.ResolvedType = valType.Name
 			}
 		}
+		// Typecheck or-handler body (for type annotations inside the block)
+		if s.OrHandler != nil && s.OrHandler.Body != nil {
+			c.checkBlock(s.OrHandler.Body)
+		}
 	} else if s.Type != nil {
 		c.scope.set(s.Name, declaredType)
 	} else {
@@ -497,10 +567,17 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		for _, a := range e.Args {
 			argTypes = append(argTypes, c.inferType(a))
 		}
-		// Check method call on object: obj.method(args) → resolve via Java type info
+		// Check method call on object: obj.method(args)
 		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
 			objType := c.inferType(sel.Object)
 			if objType.Name != "" && objType.Name != "any" {
+				// First check Zinc-defined method signatures (interfaces, classes)
+				if methods, ok := c.methodSigs[objType.Name]; ok {
+					if sig, ok := methods[sel.Field]; ok {
+						return sig.ReturnType
+					}
+				}
+				// Then try Java type introspection via javap
 				var typeArgStrs []string
 				for _, a := range objType.Args {
 					typeArgStrs = append(typeArgStrs, a.Name)
@@ -587,6 +664,14 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		return typeAny
 	case *parser.SpreadExpr:
 		return c.inferType(e.Expr)
+	case *parser.RangeExpr:
+		// Ranges produce int sequences
+		return typeInt
+	case *parser.MatchExpr:
+		if len(e.Cases) > 0 {
+			return c.inferType(e.Cases[0].Value)
+		}
+		return typeAny
 	default:
 		return typeAny
 	}
