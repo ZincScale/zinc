@@ -916,6 +916,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	var fields []*FieldDecl
 	var methods []*MethodDecl
 	var variants []*DataClassDecl
+	var ctor *CtorDecl
 
 	p.expect(lexer.TOKEN_LBRACE)
 	p.skipSemis()
@@ -970,6 +971,27 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			m := p.v2ParseMethodDecl()
 			m.IsPub = false // private by default
 			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+			// init(params) { body } — constructor
+			p.advance() // consume init
+			params := p.v2ParseParamList()
+			body := p.v2ParseBlock()
+			// Extract super(...) call from body if present
+			var superArgs []Expr
+			var filteredStmts []Stmt
+			for _, s := range body.Stmts {
+				if es, ok := s.(*ExprStmt); ok {
+					if call, ok := es.Expr.(*CallExpr); ok {
+						if ident, ok := call.Callee.(*Ident); ok && ident.Name == "super" {
+							superArgs = call.Args
+							continue
+						}
+					}
+				}
+				filteredStmts = append(filteredStmts, s)
+			}
+			body.Stmts = filteredStmts
+			ctor = &CtorDecl{Params: params, Body: body, SuperArgs: superArgs}
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)
@@ -984,7 +1006,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Methods: methods, Variants: variants}
+	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods, Variants: variants}
 }
 
 // v2ParseMethodDecl: fn name(params)[: ReturnType] { body }
@@ -1233,7 +1255,7 @@ func (p *Parser) v2ParsePackageDecl() *PackageDecl {
 // v2ParseImport: import java.util.List  OR  import java.util.*
 func (p *Parser) v2ParseImport() *ImportDecl {
 	p.expect(lexer.TOKEN_IMPORT)
-	path := p.expect(lexer.TOKEN_IDENT).Literal
+	path := p.v2ExpectIdentOrKeyword()
 	for p.check(lexer.TOKEN_DOT) {
 		p.advance()
 		if p.check(lexer.TOKEN_STAR) {
@@ -1242,9 +1264,23 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 			path += ".*"
 			break
 		}
-		path += "." + p.expect(lexer.TOKEN_IDENT).Literal
+		path += "." + p.v2ExpectIdentOrKeyword()
 	}
 	return &ImportDecl{Path: path}
+}
+
+// v2ExpectIdentOrKeyword consumes and returns the current token's literal
+// if it is an IDENT or any keyword token that could appear as a Java
+// package/class name segment (e.g., "concurrent" in java.util.concurrent).
+func (p *Parser) v2ExpectIdentOrKeyword() string {
+	tok := p.peek()
+	if tok.Type == lexer.TOKEN_IDENT || tok.Type == lexer.TOKEN_CONCURRENT ||
+		tok.Type == lexer.TOKEN_DATA || tok.Type == lexer.TOKEN_MATCH ||
+		tok.Type == lexer.TOKEN_PRINT || tok.Type == lexer.TOKEN_SPAWN ||
+		tok.Type == lexer.TOKEN_INTERFACE {
+		return p.advance().Literal
+	}
+	return p.expect(lexer.TOKEN_IDENT).Literal
 }
 
 // --- Annotations/Decorators --------------------------------------------------
@@ -1533,7 +1569,7 @@ func (p *Parser) v2ParsePostfix() Expr {
 			}
 		case p.check(lexer.TOKEN_DOT):
 			p.advance()
-			field := p.expect(lexer.TOKEN_IDENT).Literal
+			field := p.v2ExpectIdentOrKeyword()
 			expr = &SelectorExpr{Object: expr, Field: field}
 		case p.check(lexer.TOKEN_LBRACKET):
 			p.advance()
@@ -1636,6 +1672,12 @@ func (p *Parser) v2ParsePrimary() Expr {
 		p.advance()
 		body := p.v2ParseBlock()
 		return &SpawnExpr{Line: line, Body: body}
+	case lexer.TOKEN_THIS:
+		p.advance()
+		return &Ident{Name: "this"}
+	case lexer.TOKEN_SUPER:
+		p.advance()
+		return &Ident{Name: "super"}
 	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:
 		// print and data are regular identifiers in expression context
 		// Check for lambda: name -> expr

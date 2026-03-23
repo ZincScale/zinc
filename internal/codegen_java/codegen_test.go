@@ -1414,6 +1414,89 @@ class User {
 	)
 }
 
+func TestClassConstructor(t *testing.T) {
+	assertContains(t, `
+class User {
+    init String name
+    init int age
+
+    init(String name, int age) {
+        this.name = name
+        this.age = age
+    }
+}
+`,
+		`private final String name;`,
+		`private final int age;`,
+		`public User(String name, int age) {`,
+		`this.name = name;`,
+		`this.age = age;`,
+	)
+}
+
+func TestClassConstructorWithDefaults(t *testing.T) {
+	assertContains(t, `
+class Server {
+    init String host
+    init int port
+
+    init(String host, int port = 8080) {
+        this.host = host
+        this.port = port
+    }
+}
+`,
+		`public Server(String host, int port) {`,
+		`this.host = host;`,
+		`this.port = port;`,
+	)
+}
+
+func TestClassConstructorWithSuper(t *testing.T) {
+	assertContains(t, `
+class Dog : Animal {
+    init String breed
+
+    init(String name, String breed) {
+        super(name)
+        this.breed = breed
+    }
+}
+`,
+		`public Dog(String name, String breed) {`,
+		`super(name);`,
+		`this.breed = breed;`,
+	)
+}
+
+func TestClassConstructorAndMethods(t *testing.T) {
+	assertContains(t, `
+class Counter {
+    init int start
+    var int count = 0
+
+    init(int start) {
+        this.start = start
+        count = start
+    }
+
+    pub fn increment() {
+        count = count + 1
+    }
+
+    pub fn value(): int {
+        return count
+    }
+}
+`,
+		`public Counter(int start) {`,
+		`this.start = start;`,
+		`count = start;`,
+		`public void increment()`,
+		`public int value()`,
+	)
+}
+
 func TestClassMethodDirect(t *testing.T) {
 	assertContains(t, `
 class Foo {
