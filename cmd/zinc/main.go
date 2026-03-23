@@ -824,6 +824,14 @@ func runInit(name string) error {
 
 extends: %s
 jvmVersion: 25
+
+javacOptions:
+  - --enable-preview
+  - --release
+  - "25"
+
+forkArgs:
+  - --enable-preview
 %s
 # Maven Central dependencies
 mvnDeps: []
