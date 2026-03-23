@@ -495,6 +495,20 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		for _, a := range e.Args {
 			argTypes = append(argTypes, c.inferType(a))
 		}
+		// Check method call on object: obj.method(args) → resolve via Java type info
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
+			objType := c.inferType(sel.Object)
+			if objType.Name != "" && objType.Name != "any" {
+				var typeArgStrs []string
+				for _, a := range objType.Args {
+					typeArgStrs = append(typeArgStrs, a.Name)
+				}
+				resolved := ResolveZincMethodReturn(objType.Name, typeArgStrs, sel.Field)
+				if resolved != "" {
+					return V2Type{Name: resolved}
+				}
+			}
+		}
 		// Check function call argument types against signature
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if sig, found := c.fnSigs[ident.Name]; found {
@@ -522,7 +536,18 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		}
 		return typeAny
 	case *parser.SelectorExpr:
-		c.inferType(e.Object)
+		objType := c.inferType(e.Object)
+		// Try to resolve field/method type from Java class
+		if objType.Name != "" && objType.Name != "any" {
+			var typeArgStrs []string
+			for _, a := range objType.Args {
+				typeArgStrs = append(typeArgStrs, a.Name)
+			}
+			resolved := ResolveZincMethodReturn(objType.Name, typeArgStrs, e.Field)
+			if resolved != "" {
+				return V2Type{Name: resolved}
+			}
+		}
 		return typeAny
 	case *parser.IndexExpr:
 		c.inferType(e.Object)
