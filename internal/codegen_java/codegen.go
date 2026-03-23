@@ -30,6 +30,7 @@ type Generator struct {
 	tupleTypes       map[int]bool   // track which Tuple arities we need to generate
 	arrayVars        map[string]bool // track variables declared as array types
 	interfaces       map[string]bool // track which type names are interfaces
+	errVarStack      []string        // stack of catch variable names for nested or-blocks
 }
 
 // New creates a new Java code generator.
@@ -910,7 +911,7 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 				}
 				// return Error(err) where err is already an exception → wrap and re-throw
 				if ident, ok := arg.(*parser.Ident); ok && ident.Name == "err" {
-					g.writeln("throw new RuntimeException(err);")
+					g.writeln("throw new RuntimeException(%s);", g.currentErrVar())
 					return
 				}
 				// return Error("message") → throw new RuntimeException("message")
@@ -930,6 +931,31 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		return
 	}
 	g.emitOrHandler(g.formatExpr(es.Expr), "", es.OrHandler)
+}
+
+// pushErrVar generates a unique catch variable name and pushes it on the stack.
+func (g *Generator) pushErrVar() string {
+	name := "err"
+	if len(g.errVarStack) > 0 {
+		name = fmt.Sprintf("_err%d", len(g.errVarStack)+1)
+	}
+	g.errVarStack = append(g.errVarStack, name)
+	return name
+}
+
+// popErrVar removes the most recent catch variable from the stack.
+func (g *Generator) popErrVar() {
+	if len(g.errVarStack) > 0 {
+		g.errVarStack = g.errVarStack[:len(g.errVarStack)-1]
+	}
+}
+
+// currentErrVar returns the current catch variable name (top of stack).
+func (g *Generator) currentErrVar() string {
+	if len(g.errVarStack) > 0 {
+		return g.errVarStack[len(g.errVarStack)-1]
+	}
+	return "err"
 }
 
 // emitOrHandler generates try/catch for or handlers (used by VarStmt and ExprStmt).
@@ -968,10 +994,11 @@ func (g *Generator) emitOrHandler(callExpr string, assignTarget string, handler 
 	}
 
 	// or { block } or or default
+	errVar := g.pushErrVar()
 	if assignTarget != "" {
-		g.writeln("try { %s = %s; } catch (Exception err) {", assignTarget, callExpr)
+		g.writeln("try { %s = %s; } catch (Exception %s) {", assignTarget, callExpr, errVar)
 	} else {
-		g.writeln("try { %s; } catch (Exception err) {", callExpr)
+		g.writeln("try { %s; } catch (Exception %s) {", callExpr, errVar)
 	}
 	g.indent++
 	if handler.Body != nil && len(handler.Body.Stmts) == 1 {
@@ -989,6 +1016,7 @@ func (g *Generator) emitOrHandler(callExpr string, assignTarget string, handler 
 	}
 	g.indent--
 	g.writeln("}")
+	g.popErrVar()
 }
 
 func (g *Generator) emitTryStmt(t *parser.TryStmt) {
@@ -1190,6 +1218,10 @@ func (g *Generator) emitBlock(block *parser.BlockStmt) {
 func (g *Generator) formatExpr(e parser.Expr) string {
 	switch expr := e.(type) {
 	case *parser.Ident:
+		// Map 'err' to the current catch variable name (for nested or-blocks)
+		if expr.Name == "err" && len(g.errVarStack) > 0 {
+			return g.currentErrVar()
+		}
 		return expr.Name
 	case *parser.IntLit:
 		return expr.Value
@@ -1297,6 +1329,9 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "not":
 		return fmt.Sprintf("!%s", right)
 	case "**":
+		if b.ResolvedType == "int" || b.ResolvedType == "long" {
+			return fmt.Sprintf("(long)Math.pow(%s, %s)", left, right)
+		}
 		return fmt.Sprintf("Math.pow(%s, %s)", left, right)
 	case "==":
 		// Structural equality (Kotlin convention)
@@ -1883,7 +1918,7 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 						}
 					}
 					if id, ok := arg.(*parser.Ident); ok && id.Name == "err" {
-						return "throw new RuntimeException(err);"
+						return fmt.Sprintf("throw new RuntimeException(%s);", g.currentErrVar())
 					}
 					return fmt.Sprintf("throw new RuntimeException(%s);", g.formatExpr(arg))
 				}
@@ -1945,6 +1980,9 @@ func (g *Generator) formatExprIt(e parser.Expr) string {
 		case "or":
 			return fmt.Sprintf("%s || %s", left, right)
 		case "**":
+			if expr.ResolvedType == "int" || expr.ResolvedType == "long" {
+				return fmt.Sprintf("(long)Math.pow(%s, %s)", left, right)
+			}
 			return fmt.Sprintf("Math.pow(%s, %s)", left, right)
 		case "==":
 			return fmt.Sprintf("java.util.Objects.equals(%s, %s)", left, right)

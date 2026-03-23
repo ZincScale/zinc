@@ -602,6 +602,45 @@ fn validate(int x): int {
 	)
 }
 
+func TestPowerOperatorIntResult(t *testing.T) {
+	assertContains(t, `
+var x = 2 ** 3
+`,
+		`(long)Math.pow(2, 3)`,
+	)
+}
+
+func TestPowerOperatorDoubleResult(t *testing.T) {
+	assertContains(t, `
+var x = 2.0 ** 3
+`,
+		`Math.pow(2.0, 3)`,
+	)
+	assertNotContains(t, `
+var x = 2.0 ** 3
+`,
+		`(long)Math.pow`,
+	)
+}
+
+func TestNestedOrBlocksUniqueErrVars(t *testing.T) {
+	assertContains(t, `
+fn risky(): int {
+    return Error("fail")
+}
+fn outer() {
+    var x = risky() or {
+        var y = risky() or {
+            print("inner failed")
+        }
+    }
+}
+`,
+		`catch (Exception err)`,
+		`catch (Exception _err2)`,
+	)
+}
+
 // =============================================================================
 // Lambdas
 // =============================================================================

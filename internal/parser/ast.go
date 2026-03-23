@@ -551,9 +551,10 @@ type Expr interface {
 
 // BinaryExpr: left op right
 type BinaryExpr struct {
-	Left  Expr
-	Op    string
-	Right Expr
+	Left         Expr
+	Op           string
+	Right        Expr
+	ResolvedType string // filled by typechecker for codegen type decisions
 }
 
 func (b *BinaryExpr) nodeTag() {}

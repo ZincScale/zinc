@@ -482,7 +482,9 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	case *parser.BinaryExpr:
 		left := c.inferType(e.Left)
 		right := c.inferType(e.Right)
-		return c.inferBinaryType(e.Op, left, right)
+		result := c.inferBinaryType(e.Op, left, right)
+		e.ResolvedType = result.Name
+		return result
 	case *parser.UnaryExpr:
 		operand := c.inferType(e.Operand)
 		if e.Op == "!" || e.Op == "not" {
