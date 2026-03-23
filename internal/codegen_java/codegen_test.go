@@ -1002,6 +1002,62 @@ func TestStreamFindFirst(t *testing.T) {
 	)
 }
 
+func TestStreamFlatMap(t *testing.T) {
+	assertContains(t,
+		`orders.flatMap(o -> o.items)`,
+		`.stream().flatMap(o -> o.items).toList()`,
+	)
+}
+
+func TestStreamSkip(t *testing.T) {
+	assertContains(t,
+		`items.skip(5)`,
+		`.stream().skip(5).toList()`,
+	)
+}
+
+func TestStreamAllMatch(t *testing.T) {
+	assertContains(t,
+		`items.allMatch(x -> x > 0)`,
+		`.stream().allMatch(x -> x > 0)`,
+	)
+}
+
+func TestStreamNoneMatch(t *testing.T) {
+	assertContains(t,
+		`items.noneMatch(x -> x < 0)`,
+		`.stream().noneMatch(x -> x < 0)`,
+	)
+}
+
+func TestStreamMin(t *testing.T) {
+	assertContains(t,
+		`items.min()`,
+		`.stream().min(`,
+	)
+}
+
+func TestStreamMax(t *testing.T) {
+	assertContains(t,
+		`items.max()`,
+		`.stream().max(`,
+	)
+}
+
+func TestStreamReduce(t *testing.T) {
+	assertContains(t,
+		`items.reduce(0, (a, b) -> a + b)`,
+		`.stream().reduce(0, (a, b) -> a + b)`,
+	)
+}
+
+func TestStreamToSet(t *testing.T) {
+	assertContains(t,
+		`items.toSet()`,
+		`.stream().collect(java.util.stream.Collectors.toSet())`,
+	)
+}
+
 // =============================================================================
 // Tuples
 // =============================================================================
