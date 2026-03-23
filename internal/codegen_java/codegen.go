@@ -1425,6 +1425,7 @@ func (g *Generator) formatStreamArg(args []parser.Expr) string {
 var stringMethodAliases = map[string]string{
 	"upper":      "toUpperCase",
 	"lower":      "toLowerCase",
+	"trim":       "strip",
 	"trimStart":  "stripLeading",
 	"trimEnd":    "stripTrailing",
 	"startsWith": "startsWith",
@@ -1434,6 +1435,10 @@ var stringMethodAliases = map[string]string{
 	"repeat":     "repeat",
 	"isEmpty":    "isEmpty",
 	"chars":      "toCharArray",
+	"split":      "split",
+	"substring":  "substring",
+	"charAt":     "charAt",
+	"indexOf":    "indexOf",
 }
 
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {

@@ -1864,3 +1864,83 @@ func TestStringLower(t *testing.T) {
 		`"HELLO".toLowerCase()`,
 	)
 }
+
+func TestStringTrim(t *testing.T) {
+	assertContains(t, `var x = "  hello  ".trim()`,
+		`"  hello  ".strip()`,
+	)
+}
+
+func TestStringTrimStartEnd(t *testing.T) {
+	assertContains(t, `var x = "  hello  ".trimStart()`,
+		`"  hello  ".stripLeading()`,
+	)
+}
+
+func TestStringSplit(t *testing.T) {
+	assertContains(t, `var parts = "a,b,c".split(",")`,
+		`"a,b,c".split(",")`,
+	)
+}
+
+func TestStringContains(t *testing.T) {
+	assertContains(t, `var b = "hello world".contains("world")`,
+		`"hello world".contains("world")`,
+	)
+}
+
+func TestStringStartsWith(t *testing.T) {
+	assertContains(t, `var b = "hello".startsWith("he")`,
+		`"hello".startsWith("he")`,
+	)
+}
+
+func TestStringReplace(t *testing.T) {
+	assertContains(t, `var x = "hello".replace("l", "r")`,
+		`"hello".replace("l", "r")`,
+	)
+}
+
+func TestStringRepeat(t *testing.T) {
+	assertContains(t, `var x = "ha".repeat(3)`,
+		`"ha".repeat(3)`,
+	)
+}
+
+func TestStringIsEmpty(t *testing.T) {
+	assertContains(t, `var b = "".isEmpty()`,
+		`"".isEmpty()`,
+	)
+}
+
+func TestStringSubstring(t *testing.T) {
+	assertContains(t, `var x = "hello".substring(1, 3)`,
+		`"hello".substring(1, 3)`,
+	)
+}
+
+func TestStringCharAt(t *testing.T) {
+	assertContains(t, `var c = "hello".charAt(0)`,
+		`"hello".charAt(0)`,
+	)
+}
+
+func TestStringIndexOf(t *testing.T) {
+	assertContains(t, `var i = "hello".indexOf("ll")`,
+		`"hello".indexOf("ll")`,
+	)
+}
+
+func TestSingleQuoteString(t *testing.T) {
+	assertContains(t, `var x = 'hello world'`,
+		`"hello world"`,
+	)
+}
+
+func TestTripleQuoteString(t *testing.T) {
+	assertContains(t, "var x = \"\"\"hello\nworld\"\"\"",
+		`"""`,
+		`hello`,
+		`world"""`,
+	)
+}
