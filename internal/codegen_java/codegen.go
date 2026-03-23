@@ -1784,11 +1784,11 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 			keyword = g.formatType(stmt.Type)
 		}
 		if stmt.Value != nil {
-			return fmt.Sprintf("%s %s = %s", keyword, stmt.Name, g.formatExpr(stmt.Value))
+			return fmt.Sprintf("%s %s = %s;", keyword, stmt.Name, g.formatExpr(stmt.Value))
 		}
-		return fmt.Sprintf("%s %s", keyword, stmt.Name)
+		return fmt.Sprintf("%s %s;", keyword, stmt.Name)
 	case *parser.AssignStmt:
-		return fmt.Sprintf("%s %s %s", g.formatExpr(stmt.Target), stmt.Op, g.formatExpr(stmt.Value))
+		return fmt.Sprintf("%s %s %s;", g.formatExpr(stmt.Target), stmt.Op, g.formatExpr(stmt.Value))
 	case *parser.ExprStmt:
 		return g.formatExpr(stmt.Expr) + ";"
 	case *parser.ReturnStmt:

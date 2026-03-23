@@ -876,6 +876,11 @@ func (p *Parser) v2ParseParam() *ParamDecl {
 	if !variadic && !kwVariadic && p.v2IsTypeAnnotation() {
 		// Typed param: int x, list<int> items, str? name
 		typ = p.v2ParseType()
+		// Check for Java-style variadic: Type... name
+		if p.check(lexer.TOKEN_DOTDOTDOT) {
+			p.advance()
+			variadic = true
+		}
 		name = p.v2ExpectIdent()
 	} else {
 		// Untyped param or variadic: x, *args, **kwargs
@@ -1374,6 +1379,10 @@ func (p *Parser) v2IsTypeAnnotation() bool {
 	if next.Type == lexer.TOKEN_LT {
 		return true
 	}
+	// ident... → variadic type (Type... name)
+	if next.Type == lexer.TOKEN_DOTDOTDOT {
+		return true
+	}
 	// ident[] ident → array type + name
 	if next.Type == lexer.TOKEN_LBRACKET {
 		peek2 := p.peekAt(2)
@@ -1700,13 +1709,18 @@ func (p *Parser) v2ParsePrimary() Expr {
 	return &Ident{Name: "__error__"}
 }
 
-// v2ParseLambda: name -> expr
+// v2ParseLambda: name -> expr  OR  name -> { stmts }
 func (p *Parser) v2ParseLambda() Expr {
 	name := p.advance().Literal // param name
 	p.advance()                 // consume ->
-	// Lambda body — parse expression
-	expr := p.v2ParseExpr()
 	param := &ParamDecl{Name: name}
+	// Block lambda: x -> { ... }
+	if p.check(lexer.TOKEN_LBRACE) {
+		body := p.v2ParseBlock()
+		return &LambdaExpr{Params: []*ParamDecl{param}, Body: body}
+	}
+	// Expression lambda: x -> expr
+	expr := p.v2ParseExpr()
 	return &LambdaExpr{Params: []*ParamDecl{param}, Expr: expr}
 }
 
@@ -1761,7 +1775,7 @@ func (p *Parser) v2LooksLikeLambdaParams() bool {
 	}
 }
 
-// v2ParseMultiParamLambda: (a, b) -> expr
+// v2ParseMultiParamLambda: (a, b) -> expr  OR  (a, b) -> { stmts }
 func (p *Parser) v2ParseMultiParamLambda() Expr {
 	p.advance() // consume (
 	var params []*ParamDecl
@@ -1772,6 +1786,12 @@ func (p *Parser) v2ParseMultiParamLambda() Expr {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_ARROW)
+	// Block lambda: (a, b) -> { ... }
+	if p.check(lexer.TOKEN_LBRACE) {
+		body := p.v2ParseBlock()
+		return &LambdaExpr{Params: params, Body: body}
+	}
+	// Expression lambda: (a, b) -> expr
 	expr := p.v2ParseExpr()
 	return &LambdaExpr{Params: params, Expr: expr}
 }

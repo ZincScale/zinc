@@ -247,6 +247,57 @@ class Logger {
 	)
 }
 
+func TestFnSingleExpression(t *testing.T) {
+	assertContains(t, `
+fn double(int x): int = x * 2
+`,
+		`static int double(int x) {`,
+		`return x * 2;`,
+	)
+}
+
+func TestFnSingleExpressionVoid(t *testing.T) {
+	assertContains(t, `
+fn greet(String name) = print("Hello, {name}!")
+`,
+		`static void greet(String name) {`,
+	)
+}
+
+func TestFnNamedArgs(t *testing.T) {
+	assertContains(t, `
+fn connect(String host, int port): String {
+    return host
+}
+var x = connect(port = 3000, host = "localhost")
+`,
+		`connect(`,
+	)
+}
+
+func TestFnVariadicParams(t *testing.T) {
+	assertContains(t, `
+fn log(String... messages) {
+    for msg in messages {
+        print(msg)
+    }
+}
+`,
+		`static void log(String... messages) {`,
+	)
+}
+
+func TestBlockLambda(t *testing.T) {
+	assertContains(t, `
+var result = items.map(x -> {
+    var doubled = x * 2
+    return doubled + 1
+})
+`,
+		`x -> {`,
+	)
+}
+
 func TestFnMultipleParams(t *testing.T) {
 	assertContains(t, `
 fn add(int a, int b): int {
