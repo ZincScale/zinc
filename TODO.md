@@ -148,6 +148,10 @@ Syntax features observed in other modern languages (Dart, Kotlin, Swift, Rust, G
 - [Transpilation Mapping](docs/design-zinc-java-transpilation.md) — Zinc → Java for every feature
 - [Build Guide](docs/guide-mill-build.md) — Mill, dependencies, Docker, native-image, CI/CD
 
+## Related Projects
+
+- [Zinc Flow](https://github.com/victorybhg/zinc-flow) — NiFi-inspired data flow engine, dogfooding Zinc
+
 ## Previous Versions
 
 - v2 (Python target) — shelved
