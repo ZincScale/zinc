@@ -1305,9 +1305,13 @@ func (p *Parser) v2ParseAnnotations() []*Annotation {
 		if p.check(lexer.TOKEN_LPAREN) {
 			p.advance()
 			for !p.check(lexer.TOKEN_RPAREN) && !p.check(lexer.TOKEN_EOF) {
-				// Collect raw arg tokens as strings
+				// Collect raw arg tokens — preserve string quotes
 				tok := p.advance()
-				args = append(args, tok.Literal)
+				if tok.Type == lexer.TOKEN_STRING_LIT || tok.Type == lexer.TOKEN_RAW_STRING {
+					args = append(args, "\""+tok.Literal+"\"")
+				} else {
+					args = append(args, tok.Literal)
+				}
 				if p.check(lexer.TOKEN_COMMA) {
 					p.advance()
 				}

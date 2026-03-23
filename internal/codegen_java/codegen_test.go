@@ -1729,6 +1729,85 @@ import java.nio.file.Path
 // Assert
 // =============================================================================
 
+// =============================================================================
+// Types — nullable, byte[], Set, annotations
+// =============================================================================
+
+func TestNullableType(t *testing.T) {
+	assertContains(t, `
+fn find(String key): String? {
+    return null
+}
+`,
+		`static String find(String key) {`,
+		`return null;`,
+	)
+}
+
+func TestNullableField(t *testing.T) {
+	assertContains(t, `
+class Order {
+    pub String? shippingAddress = null
+}
+`,
+		`private String shippingAddress = null;`,
+	)
+}
+
+func TestByteArray(t *testing.T) {
+	assertContains(t, `
+fn process(byte[] data): int {
+    return data.length
+}
+`,
+		`static int process(byte[] data) {`,
+		`return data.length;`,
+	)
+}
+
+func TestSetType(t *testing.T) {
+	assertContains(t, `
+Set<String> names = Set.of("Alice", "Bob")
+`,
+		`Set<String> names = Set.of("Alice", "Bob");`,
+	)
+}
+
+func TestAnnotationWithArgs(t *testing.T) {
+	assertContains(t, `
+@Deprecated
+fn oldMethod() {
+    print("old")
+}
+`,
+		`@Deprecated`,
+		`static void oldMethod()`,
+	)
+}
+
+func TestAnnotationWithStringArg(t *testing.T) {
+	assertContains(t, `
+@Path("/api")
+fn handleApi() {
+    print("api")
+}
+`,
+		`@Path("/api")`,
+	)
+}
+
+func TestSafeNavigationField(t *testing.T) {
+	assertContains(t, `var x = obj?.name`,
+		`(obj != null ? obj.name : null)`,
+	)
+}
+
+func TestSafeNavigationMethod(t *testing.T) {
+	assertContains(t, `var x = obj?.toString()`,
+		`(obj != null ? obj.toString() : null)`,
+	)
+}
+
 func TestAssertBasic(t *testing.T) {
 	assertContains(t, `assert x > 0`,
 		`assert x > 0;`,
