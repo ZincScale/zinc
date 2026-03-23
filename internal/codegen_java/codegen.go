@@ -29,11 +29,12 @@ type Generator struct {
 	pendingAccessors []fieldAccessor
 	tupleTypes       map[int]bool   // track which Tuple arities we need to generate
 	arrayVars        map[string]bool // track variables declared as array types
+	interfaces       map[string]bool // track which type names are interfaces
 }
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool)}
+	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool)}
 }
 
 // OutputFile represents a generated .java file.
@@ -42,12 +43,55 @@ type OutputFile struct {
 	Content string
 }
 
+// collectInterfaces scans declarations to build the set of known interface names.
+func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
+	for _, d := range decls {
+		if iface, ok := d.(*parser.InterfaceDecl); ok {
+			g.interfaces[iface.Name] = true
+		}
+	}
+}
+
+// RegisterInterface allows external callers (e.g., multi-file compilation)
+// to register interface names discovered in other files.
+func (g *Generator) RegisterInterface(name string) {
+	g.interfaces[name] = true
+}
+
+// buildInheritanceClause builds the extends/implements string for a class.
+// It checks each parent against the known interface set.
+func (g *Generator) buildInheritanceClause(parents []string) string {
+	if len(parents) == 0 {
+		return ""
+	}
+
+	var extendsNames []string
+	var implNames []string
+	for _, p := range parents {
+		if g.interfaces[p] {
+			implNames = append(implNames, p)
+		} else {
+			extendsNames = append(extendsNames, p)
+		}
+	}
+
+	var parts []string
+	if len(extendsNames) > 0 {
+		parts = append(parts, "extends "+strings.Join(extendsNames, ", "))
+	}
+	if len(implNames) > 0 {
+		parts = append(parts, "implements "+strings.Join(implNames, ", "))
+	}
+	return " " + strings.Join(parts, " ")
+}
+
 // Generate produces a single Java source string (all in one class).
 // Used by tests and simple single-file transpilation.
 func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.buf.Reset()
 	g.indent = 0
 	g.className = className
+	g.collectInterfaces(prog.Decls)
 
 	g.emitPackageAndImports(prog.Package, prog.Imports)
 
@@ -98,6 +142,7 @@ func (g *Generator) emitTupleRecords() {
 // Top-level functions and script statements go into the main class file.
 func (g *Generator) GenerateFiles(prog *parser.Program, className string) []OutputFile {
 	var files []OutputFile
+	g.collectInterfaces(prog.Decls)
 
 	// Separate declarations into types (own file) vs functions (main file)
 	var fnDecls []parser.TopLevelDecl
@@ -249,13 +294,7 @@ func (g *Generator) emitClassDeclTopLevel(cls *parser.ClassDecl) {
 		g.writeln("@%s", g.formatAnnotation(a))
 	}
 
-	ext := ""
-	if len(cls.Parents) > 0 {
-		ext = " extends " + cls.Parents[0]
-		if len(cls.Parents) > 1 {
-			ext += " implements " + strings.Join(cls.Parents[1:], ", ")
-		}
-	}
+	ext := g.buildInheritanceClause(cls.Parents)
 
 	typeParams := ""
 	if len(cls.TypeParams) > 0 {
@@ -387,14 +426,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		g.writeln("@%s", g.formatAnnotation(a))
 	}
 
-	ext := ""
-	if len(cls.Parents) > 0 {
-		// First parent is extends, rest are implements
-		ext = " extends " + cls.Parents[0]
-		if len(cls.Parents) > 1 {
-			ext += " implements " + strings.Join(cls.Parents[1:], ", ")
-		}
-	}
+	ext := g.buildInheritanceClause(cls.Parents)
 
 	typeParams := ""
 	if len(cls.TypeParams) > 0 {

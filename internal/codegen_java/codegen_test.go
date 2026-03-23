@@ -1173,6 +1173,145 @@ func TestDataClassOneLiner(t *testing.T) {
 	)
 }
 
+func TestDataClassWithMethods(t *testing.T) {
+	assertContains(t, `
+data Point(int x, int y) {
+    pub fn sum(): int {
+        return x + y
+    }
+
+    pub fn scale(int factor): Point {
+        return Point(x * factor, y * factor)
+    }
+}
+`,
+		`public record Point(int x, int y) {`,
+		`public int sum() {`,
+		`return x + y;`,
+		`public Point scale(int factor) {`,
+	)
+}
+
+// =============================================================================
+// Generics — classes, functions, data classes
+// =============================================================================
+
+func TestGenericClass(t *testing.T) {
+	assertContains(t, `
+class Box<T> {
+    pub T value
+
+    pub fn get(): T {
+        return value
+    }
+}
+`,
+		`public static class Box<T>`,
+		`private T value;`,
+		`public T getValue()`,
+		`public T get() {`,
+		`return value;`,
+	)
+}
+
+func TestGenericFunction(t *testing.T) {
+	assertContains(t, `
+fn identity<T>(T val): T {
+    return val
+}
+`,
+		`<T> T identity(T val) {`,
+		`return val;`,
+	)
+}
+
+func TestGenericDataClass(t *testing.T) {
+	assertContains(t, `
+data Pair<A, B>(A first, B second)
+`,
+		`public record Pair<A, B>(A first, B second) {`,
+	)
+}
+
+func TestClassImplementsInterface(t *testing.T) {
+	assertContains(t, `
+interface Greeter {
+    fn greet(): String
+}
+
+class HelloGreeter : Greeter {
+    pub fn greet(): String {
+        return "hello"
+    }
+}
+`,
+		`public interface Greeter`,
+		`String greet()`,
+		`public static class HelloGreeter implements Greeter`,
+		`public String greet()`,
+	)
+}
+
+func TestClassExtendsClassImplementsInterface(t *testing.T) {
+	assertContains(t, `
+interface Serializable {
+    fn serialize(): String
+}
+
+class Base {
+    pub String name = "base"
+}
+
+class Child : Base, Serializable {
+    pub fn serialize(): String {
+        return name
+    }
+}
+`,
+		`public static class Child extends Base implements Serializable`,
+	)
+}
+
+func TestSealedClassWithEmptyVariant(t *testing.T) {
+	src := `
+sealed class ProcessorResult {
+    data Single(String value)
+    data Drop()
+}
+`
+	lex := lexer.New(src)
+	tokens := lex.Tokenize()
+	p := parser.New(tokens)
+	prog := p.ParseV2()
+	if len(p.Errors) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors)
+	}
+
+	gen := New()
+	files := gen.GenerateFiles(prog, "Main")
+
+	// Should generate: ProcessorResult.java (sealed interface), Single.java, Drop.java
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+
+	found := false
+	for _, f := range files {
+		if f.Name == "Drop.java" {
+			found = true
+			if !strings.Contains(f.Content, "record Drop()") {
+				t.Errorf("Drop.java should contain 'record Drop()' but got:\n%s", f.Content)
+			}
+			if !strings.Contains(f.Content, "implements ProcessorResult") {
+				t.Errorf("Drop.java should implement ProcessorResult but got:\n%s", f.Content)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected Drop.java file")
+	}
+}
+
 // =============================================================================
 // Enums
 // =============================================================================
