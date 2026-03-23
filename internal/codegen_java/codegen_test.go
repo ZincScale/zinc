@@ -328,6 +328,48 @@ if x > 10 {
 	)
 }
 
+func TestExpressionIf(t *testing.T) {
+	assertContains(t, `
+var x = if true: "yes" else: "no"
+`,
+		`(true ? "yes" : "no")`,
+	)
+}
+
+func TestForWithIndexMap(t *testing.T) {
+	// for key, value in map → entrySet iteration
+	assertContains(t, `
+for key, value in ages {
+    print("{key}: {value}")
+}
+`,
+		`for (var _entry : ages.entrySet())`,
+		`var key = _entry.getKey();`,
+		`var value = _entry.getValue();`,
+	)
+}
+
+func TestMatchEnum(t *testing.T) {
+	assertContains(t, `
+match color {
+    case "Red" {
+        print("red")
+    }
+    case "Green" {
+        print("green")
+    }
+    case _ {
+        print("other")
+    }
+}
+`,
+		`switch (color)`,
+		`case "Red" -> {`,
+		`case "Green" -> {`,
+		`default -> {`,
+	)
+}
+
 func TestForRange(t *testing.T) {
 	assertContains(t, `
 for item in items {
