@@ -249,6 +249,26 @@ match cmd {
 	)
 }
 
+func TestMatchRecordPattern(t *testing.T) {
+	assertContains(t, `
+match result {
+    case Single(f) {
+        print(f)
+    }
+    case Drop() {
+        print("dropped")
+    }
+    case _ {
+        print("other")
+    }
+}
+`,
+		`case Single(var f) -> {`,
+		`case Drop _ -> {`,
+		`default -> {`,
+	)
+}
+
 func TestBreakContinue(t *testing.T) {
 	assertContains(t, `
 for x in items {

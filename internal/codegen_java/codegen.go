@@ -830,7 +830,7 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 		if c.Pattern == nil {
 			g.writeln("default -> {")
 		} else {
-			g.writeln("case %s -> {", g.formatExpr(c.Pattern))
+			g.writeln("case %s -> {", g.formatMatchPattern(c.Pattern))
 		}
 		g.indent++
 		g.emitBlock(c.Body)
@@ -839,6 +839,34 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 	}
 	g.indent--
 	g.writeln("}")
+}
+
+// formatMatchPattern formats a case pattern for Java switch pattern matching.
+// Zinc: case Single(f) → Java: case Single(var f)  (record destructuring)
+// Zinc: case Drop()     → Java: case Drop _         (empty record match)
+// Zinc: case "literal"  → Java: case "literal"      (constant)
+// Zinc: case ident       → Java: case ident          (enum/constant)
+func (g *Generator) formatMatchPattern(expr parser.Expr) string {
+	if call, ok := expr.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok {
+			// Record pattern: Type(bindings...)
+			if len(call.Args) == 0 {
+				// Empty record: case Drop() → case Drop _
+				return ident.Name + " _"
+			}
+			// Destructuring: case Single(f) → case Single(var f)
+			var bindings []string
+			for _, arg := range call.Args {
+				if argIdent, ok := arg.(*parser.Ident); ok {
+					bindings = append(bindings, "var "+argIdent.Name)
+				} else {
+					bindings = append(bindings, g.formatExpr(arg))
+				}
+			}
+			return fmt.Sprintf("%s(%s)", ident.Name, strings.Join(bindings, ", "))
+		}
+	}
+	return g.formatExpr(expr)
 }
 
 // emitReturnStmt handles return statements.
