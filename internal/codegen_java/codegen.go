@@ -1202,6 +1202,8 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return "false"
 	case *parser.NullLit:
 		return "null"
+	case *parser.MatchExpr:
+		return g.formatMatchExpr(expr)
 	case *parser.BinaryExpr:
 		return g.formatBinaryExpr(expr)
 	case *parser.UnaryExpr:
@@ -1583,6 +1585,21 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 		}
 	}
 	return strings.Join(parts, " + ")
+}
+
+// formatMatchExpr emits a Java switch expression: switch (subject) { case X -> val; ... }
+func (g *Generator) formatMatchExpr(m *parser.MatchExpr) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("switch (%s) { ", g.formatExpr(m.Subject)))
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			sb.WriteString(fmt.Sprintf("default -> %s; ", g.formatExpr(c.Value)))
+		} else {
+			sb.WriteString(fmt.Sprintf("case %s -> %s; ", g.formatMatchPattern(c.Pattern), g.formatExpr(c.Value)))
+		}
+	}
+	sb.WriteString("}")
+	return sb.String()
 }
 
 // needsInterpParens returns true if an expression needs parentheses

@@ -429,6 +429,21 @@ match result {
 	)
 }
 
+func TestMatchExpression(t *testing.T) {
+	assertContains(t, `
+var label = match status {
+    case "ok" { "success" }
+    case "err" { "failure" }
+    case _ { "unknown" }
+}
+`,
+		`switch (status) {`,
+		`case "ok" -> "success"`,
+		`case "err" -> "failure"`,
+		`default -> "unknown"`,
+	)
+}
+
 func TestBreakContinue(t *testing.T) {
 	assertContains(t, `
 for x in items {

@@ -1682,6 +1682,42 @@ func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 	*args = append(*args, arg)
 }
 
+// v2ParseMatchExpr: match subject { case pat { expr } ... }
+// Returns a MatchExpr for use in expression position (e.g., var x = match ...)
+func (p *Parser) v2ParseMatchExpr() Expr {
+	p.expect(lexer.TOKEN_MATCH)
+	subject := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_LBRACE)
+	p.skipSemis()
+
+	var cases []*MatchExprCase
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		p.expect(lexer.TOKEN_CASE)
+		var pattern Expr
+		if p.check(lexer.TOKEN_IDENT) && p.peek().Literal == "_" {
+			p.advance() // wildcard
+			pattern = nil
+		} else {
+			pattern = p.v2ParseExpr()
+		}
+		// case pattern { value-expr }  OR  case pattern -> value-expr
+		if p.check(lexer.TOKEN_LBRACE) {
+			p.advance()
+			value := p.v2ParseExpr()
+			p.skipSemis()
+			p.expect(lexer.TOKEN_RBRACE)
+			cases = append(cases, &MatchExprCase{Pattern: pattern, Value: value})
+		} else if p.check(lexer.TOKEN_ARROW) {
+			p.advance()
+			value := p.v2ParseExpr()
+			cases = append(cases, &MatchExprCase{Pattern: pattern, Value: value})
+		}
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &MatchExpr{Subject: subject, Cases: cases}
+}
+
 // v2ParsePrimary: literals, identifiers, parens, lists, dicts, lambdas
 func (p *Parser) v2ParsePrimary() Expr {
 	tok := p.peek()
@@ -1719,6 +1755,8 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_SUPER:
 		p.advance()
 		return &Ident{Name: "super"}
+	case lexer.TOKEN_MATCH:
+		return p.v2ParseMatchExpr()
 	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:
 		// print and data are regular identifiers in expression context
 		// Check for lambda: name -> expr

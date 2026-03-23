@@ -63,4 +63,13 @@ for i in 0..10 {
     print("i={i}")
 }
 
+// Match expression (returns value)
+var status = "ok"
+var label = match status {
+    case "ok" { "success" }
+    case "err" { "failure" }
+    case _ { "unknown" }
+}
+print("match expr: {label}")
+
 print("Control Flow OK")
