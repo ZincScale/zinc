@@ -1,11 +1,11 @@
 // Constructors — Zinc v3
-// Demonstrates: init constructor, init fields, super calls
+// Demonstrates: init constructor, init fields, super calls, default params
 
 class Server {
     init String host
     init int port
 
-    init(String host, int port) {
+    init(String host, int port = 8080) {
         this.host = host
         this.port = port
     }
@@ -32,10 +32,14 @@ class SecureServer : Server {
     }
 }
 
-// Basic construction
+// Basic construction with all params
 var s = Server("localhost", 3000)
 print(s.address())
 print(s)
+
+// Default parameter — port defaults to 8080
+var s2 = Server("0.0.0.0")
+print(s2.address())
 
 // Inheritance with super
 var ss = SecureServer("prod.example.com", 443, "/etc/ssl/cert.pem")

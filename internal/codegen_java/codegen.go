@@ -417,6 +417,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.emitBlock(fn.Body)
 	g.indent--
 	g.writeln("}")
+
+	// Generate overloads for default parameters
+	g.emitDefaultOverloads(fn.Name, ret, fn.Params, false)
 }
 
 // --- Classes -----------------------------------------------------------------
@@ -537,6 +540,9 @@ func (g *Generator) emitCtor(className string, ctor *parser.CtorDecl, parents []
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
+
+	// Generate overloads for default parameters
+	g.emitDefaultOverloads(className, "", ctor.Params, true)
 }
 
 func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
@@ -563,6 +569,9 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	g.emitBlock(m.Body)
 	g.indent--
 	g.writeln("}")
+
+	// Generate overloads for default parameters
+	g.emitMethodDefaultOverloads(vis, static, ret, m.Name, m.Params)
 }
 
 // --- Data Classes (Records) --------------------------------------------------
@@ -1617,6 +1626,103 @@ func (g *Generator) formatTypeBoxed(t parser.TypeExpr) string {
 }
 
 // --- Helpers -----------------------------------------------------------------
+
+// emitDefaultOverloads generates overloaded constructors or static functions
+// for each suffix of default parameters.
+// e.g., fn foo(int a, int b = 10, int c = 20) generates:
+//   foo(int a, int b) { foo(a, b, 20); }
+//   foo(int a) { foo(a, 10, 20); }
+func (g *Generator) emitDefaultOverloads(name string, retType string, params []*parser.ParamDecl, isCtor bool) {
+	// Find first param with default
+	firstDefault := -1
+	for i, p := range params {
+		if p.Default != nil {
+			firstDefault = i
+			break
+		}
+	}
+	if firstDefault < 0 {
+		return
+	}
+
+	// Generate overloads: from (all params minus last default) down to (just required params)
+	for cutoff := len(params) - 1; cutoff >= firstDefault; cutoff-- {
+		required := params[:cutoff]
+		paramStr := g.formatParams(required)
+
+		// Build call args: required params by name + defaults for the rest
+		var callArgs []string
+		for _, p := range required {
+			callArgs = append(callArgs, p.Name)
+		}
+		for _, p := range params[cutoff:] {
+			callArgs = append(callArgs, g.formatExpr(p.Default))
+		}
+		argStr := strings.Join(callArgs, ", ")
+
+		if isCtor {
+			g.writeln("public %s(%s) {", name, paramStr)
+			g.indent++
+			g.writeln("this(%s);", argStr)
+			g.indent--
+			g.writeln("}")
+			g.writeln("")
+		} else {
+			if retType == "void" {
+				g.writeln("static void %s(%s) {", name, paramStr)
+				g.indent++
+				g.writeln("%s(%s);", name, argStr)
+			} else {
+				g.writeln("static %s %s(%s) {", retType, name, paramStr)
+				g.indent++
+				g.writeln("return %s(%s);", name, argStr)
+			}
+			g.indent--
+			g.writeln("}")
+			g.writeln("")
+		}
+	}
+}
+
+// emitMethodDefaultOverloads generates overloaded methods for default params.
+func (g *Generator) emitMethodDefaultOverloads(vis, static, retType, name string, params []*parser.ParamDecl) {
+	firstDefault := -1
+	for i, p := range params {
+		if p.Default != nil {
+			firstDefault = i
+			break
+		}
+	}
+	if firstDefault < 0 {
+		return
+	}
+
+	for cutoff := len(params) - 1; cutoff >= firstDefault; cutoff-- {
+		required := params[:cutoff]
+		paramStr := g.formatParams(required)
+
+		var callArgs []string
+		for _, p := range required {
+			callArgs = append(callArgs, p.Name)
+		}
+		for _, p := range params[cutoff:] {
+			callArgs = append(callArgs, g.formatExpr(p.Default))
+		}
+		argStr := strings.Join(callArgs, ", ")
+
+		if retType == "void" {
+			g.writeln("%s %s%s %s(%s) {", vis, static, retType, name, paramStr)
+			g.indent++
+			g.writeln("%s(%s);", name, argStr)
+		} else {
+			g.writeln("%s %s%s %s(%s) {", vis, static, retType, name, paramStr)
+			g.indent++
+			g.writeln("return %s(%s);", name, argStr)
+		}
+		g.indent--
+		g.writeln("}")
+	}
+}
 
 func (g *Generator) formatParams(params []*parser.ParamDecl) string {
 	var parts []string

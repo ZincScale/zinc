@@ -180,6 +180,73 @@ fn sayHello() {
 	)
 }
 
+func TestFnDefaultParams(t *testing.T) {
+	assertContains(t, `
+fn connect(String host, int port = 8080): String {
+    return "{host}:{port}"
+}
+`,
+		// Full version
+		`static String connect(String host, int port) {`,
+		// Overload with default
+		`static String connect(String host) {`,
+		`return connect(host, 8080);`,
+	)
+}
+
+func TestFnMultipleDefaults(t *testing.T) {
+	assertContains(t, `
+fn setup(String host, int port = 80, boolean ssl = false): String {
+    return host
+}
+`,
+		// Full version
+		`static String setup(String host, int port, boolean ssl) {`,
+		// Overload: host + port (ssl defaults)
+		`static String setup(String host, int port) {`,
+		`return setup(host, port, false);`,
+		// Overload: host only (port + ssl default)
+		`static String setup(String host) {`,
+		`return setup(host, 80, false);`,
+	)
+}
+
+func TestConstructorDefaultParams(t *testing.T) {
+	assertContains(t, `
+class Server {
+    init String host
+    init int port
+
+    init(String host, int port = 8080) {
+        this.host = host
+        this.port = port
+    }
+}
+`,
+		// Full constructor
+		`public Server(String host, int port) {`,
+		// Overload with default
+		`public Server(String host) {`,
+		`this(host, 8080);`,
+	)
+}
+
+func TestMethodDefaultParams(t *testing.T) {
+	assertContains(t, `
+class Logger {
+    pub fn log(String msg, String level = "INFO") {
+        print(msg)
+    }
+}
+`,
+		// Full method
+		`public void log(String msg, String level) {`,
+		// Overload with default
+		`public void log(String msg) {`,
+		`log(msg, "INFO");`,
+	)
+}
+
 func TestFnMultipleParams(t *testing.T) {
 	assertContains(t, `
 fn add(int a, int b): int {
