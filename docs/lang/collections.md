@@ -65,12 +65,12 @@ The transpiler generates the stream chain. You write the fluent call.
 ### Chained Operations
 
 ```zinc
-var int total = orders
+int total = orders
     .filter(o -> o.status == "active")
     .map(o -> o.amount)
     .sum()
 
-var List<String> topNames = users
+List<String> topNames = users
     .filter(u -> u.isActive)
     .sortBy(u -> u.lastName)
     .limit(10)
@@ -80,11 +80,11 @@ var List<String> topNames = users
 ## Working with Lists
 
 ```zinc
-var List<String> names = ["Alice", "Bob", "Charlie"]
+List<String> names = ["Alice", "Bob", "Charlie"]
 names.add("Dave")
 names.addAll(["Eve", "Frank"])
-var int count = names.size()
-var String first = names.get(0)
+int count = names.size()
+String first = names.get(0)
 names.set(0, "Alicia")
 names.remove("Bob")
 
@@ -94,17 +94,17 @@ if "Alice" in names {
 }
 
 // Slicing
-var List<String> firstTwo = names.limit(2)
-var List<String> rest = names.skip(1)
+List<String> firstTwo = names.limit(2)
+List<String> rest = names.skip(1)
 ```
 
 ## Working with Maps
 
 ```zinc
-var Map<String, int> ages = {"Alice": 30, "Bob": 25}
+Map<String, int> ages = {"Alice": 30, "Bob": 25}
 ages.put("Charlie", 35)
-var int age = ages.get("Alice")
-var boolean has = ages.containsKey("Alice")
+int age = ages.get("Alice")
+boolean has = ages.containsKey("Alice")
 
 // Iterate
 for entry in ages.entrySet() {
@@ -115,18 +115,18 @@ for entry in ages.entrySet() {
 ages.remove("Bob")
 
 // Get with default
-var int val = ages.getOrDefault("Unknown", 0)
+int val = ages.getOrDefault("Unknown", 0)
 ```
 
 ## Working with Sets
 
 ```zinc
-var Set<String> tags = Set.of("java", "zinc", "flow")
+Set<String> tags = Set.of("java", "zinc", "flow")
 tags.add("quarkus")
-var boolean has = tags.contains("java")
+boolean has = tags.contains("java")
 
 // Set operations
-var Set<String> union = Set.copyOf(a)
+Set<String> union = Set.copyOf(a)
 union.addAll(b)
 ```
 
@@ -153,7 +153,7 @@ var y = point.1                      // second element
 var (x, y) = point                   // destructure into variables
 var (name, age, active) = entry
 
-fn swap(int a, int b) (int, int) {
+fn swap(int a, int b): (int, int) {
     return (b, a)
 }
 var (x, y) = swap(1, 2)             // x=2, y=1
@@ -164,7 +164,7 @@ var (x, y) = swap(1, 2)             // x=2, y=1
 Functions returning tuples generate a record type:
 
 ```zinc
-fn minMax(List<int> items) (int, int) {
+fn minMax(List<int> items): (int, int) {
     return (items.min(), items.max())
 }
 
@@ -196,7 +196,7 @@ var (String name, int age) = getUser()  // typed destructuring
 ### Tuples in Collections
 
 ```zinc
-var List<(String, int)> pairs = [("Alice", 30), ("Bob", 25)]
+List<(String, int)> pairs = [("Alice", 30), ("Bob", 25)]
 
 for (name, age) in pairs {
     print("{name} is {age}")

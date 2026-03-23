@@ -216,6 +216,10 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "lock" && p.peekAt(1).Type == lexer.TOKEN_IDENT {
 			return p.v2ParseLockStmt()
 		}
+		// Type name = expr → typed variable declaration without var keyword
+		if p.v2IsTypedVarDecl() {
+			return p.v2ParseTypedVarStmt()
+		}
 	case lexer.TOKEN_DATA:
 		// data as variable name (data = ..., data["key"], data.field)
 		// vs data class declaration (data Name { ... })
@@ -306,6 +310,69 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 	handler := p.v2ParseErrHandler()
 
 	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, IsConst: isConst, OrHandler: handler}
+}
+
+// v2IsTypedVarDecl checks if the current position starts a typed variable declaration
+// without the var keyword: Type name = expr  or  Type name  (no value).
+// The type must look like a type annotation (checked via v2IsTypeAnnotation) AND
+// the token after the type+name must be = or end-of-statement (not ( which would be a call).
+func (p *Parser) v2IsTypedVarDecl() bool {
+	if !p.v2IsTypeAnnotation() {
+		return false
+	}
+	// Scan past the type to find the name position
+	i := 1
+	tok := p.peek()
+	// Handle generic: Type<...>
+	if p.peekAt(i).Type == lexer.TOKEN_LT {
+		depth := 1
+		i++
+		for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+			if p.peekAt(i).Type == lexer.TOKEN_LT {
+				depth++
+			} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+				depth--
+			}
+			i++
+		}
+	}
+	// Handle array: Type[]
+	if p.peekAt(i).Type == lexer.TOKEN_LBRACKET && p.peekAt(i+1).Type == lexer.TOKEN_RBRACKET {
+		i += 2
+	}
+	// Handle nullable: Type?
+	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+		i++
+	}
+	// Next must be an identifier (the variable name)
+	nameToken := p.peekAt(i)
+	if nameToken.Type != lexer.TOKEN_IDENT && nameToken.Type != lexer.TOKEN_DATA &&
+		nameToken.Type != lexer.TOKEN_MATCH && nameToken.Type != lexer.TOKEN_PRINT {
+		return false
+	}
+	// Exclude contextual keywords that start special statements (assert, del, yield, lock)
+	if tok.Literal == "assert" || tok.Literal == "del" || tok.Literal == "yield" || tok.Literal == "lock" {
+		return false
+	}
+	i++
+	// After name, must see = or end-of-statement (not ( which would be a function call)
+	next := p.peekAt(i)
+	return next.Type == lexer.TOKEN_ASSIGN || next.Type == lexer.TOKEN_RBRACE ||
+		next.Type == lexer.TOKEN_EOF
+}
+
+// v2ParseTypedVarStmt parses: Type name = expr  or  Type name (no value)
+func (p *Parser) v2ParseTypedVarStmt() *VarStmt {
+	line := p.peek().Line
+	typ := p.v2ParseType()
+	name := p.v2ExpectIdent()
+	var val Expr
+	if p.check(lexer.TOKEN_ASSIGN) {
+		p.advance()
+		val = p.v2ParseExpr()
+	}
+	handler := p.v2ParseErrHandler()
+	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
 // v2ParseOrHandler checks for `or` after a failable call.
@@ -734,18 +801,18 @@ func (p *Parser) v2ParseExprOrAssignStmt() Stmt {
 
 // --- Declarations ------------------------------------------------------------
 
-// v2ParseFnDecl: fn name(params) [ReturnType] { body }
-//                fn name(params) [ReturnType] = expr  (single-expression)
+// v2ParseFnDecl: fn name(params)[: ReturnType] { body }
+//                fn name(params)[: ReturnType] = expr  (single-expression)
 func (p *Parser) v2ParseFnDecl() *FnDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.v2ParseParamList()
 
-	// Optional return type (no colon — type-first style)
-	// Return type is present if next token is an identifier (type name) and not '{'
+	// Optional return type after colon: fn name(params): Type { }
 	var retType TypeExpr
-	if p.v2IsIdent() && !p.check(lexer.TOKEN_LBRACE) {
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance() // consume ':'
 		retType = p.v2ParseType()
 	}
 
@@ -875,7 +942,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				m.IsPub = true
 				methods = append(methods, m)
 			} else if next.Type == lexer.TOKEN_OVERRIDE {
-				// pub override fn name(...) { ... } — not needed, override implies pub
+				// pub override fn name(...) { ... }
 				p.advance() // consume pub
 				p.advance() // consume override
 				m := p.v2ParseMethodDecl()
@@ -883,16 +950,16 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				m.Annotations = append(m.Annotations, &Annotation{Name: "Override"})
 				methods = append(methods, m)
 			} else {
-				// pub var type name — public field
+				// pub Type name — public field (no var keyword needed)
 				p.advance() // consume pub
-				f := p.v2ParseFieldDecl()
+				f := p.v2ParseFieldDeclNoKeyword()
 				f.IsPub = true
 				fields = append(fields, f)
 			}
-		} else if tok.Type == lexer.TOKEN_READONLY || (tok.Type == lexer.TOKEN_IDENT && tok.Literal == "read" && p.peekAt(1).Type == lexer.TOKEN_VAR) {
-			// read var type name — read-only field
+		} else if tok.Type == lexer.TOKEN_READONLY {
+			// read Type name — read-only field (no var keyword needed)
 			p.advance() // consume read
-			f := p.v2ParseFieldDecl()
+			f := p.v2ParseFieldDeclNoKeyword()
 			f.IsReadonly = true
 			fields = append(fields, f)
 		} else if tok.Type == lexer.TOKEN_FN {
@@ -901,6 +968,10 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
+			fields = append(fields, f)
+		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
+			// Type name = default — private field without var keyword
+			f := p.v2ParseFieldDeclNoKeyword()
 			fields = append(fields, f)
 		} else {
 			p.errorf("unexpected token %s in class body", tok.Type)
@@ -912,16 +983,17 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	return &ClassDecl{Line: line, Name: name, Parents: parents, Fields: fields, Methods: methods, Variants: variants}
 }
 
-// v2ParseMethodDecl: fn name(params) [ReturnType] { body }
+// v2ParseMethodDecl: fn name(params)[: ReturnType] { body }
 func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	params := p.v2ParseParamList()
 
-	// Optional return type (no colon — type-first style)
+	// Optional return type after colon: fn name(params): Type { }
 	var retType TypeExpr
-	if p.v2IsIdent() && !p.check(lexer.TOKEN_LBRACE) {
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance() // consume ':'
 		retType = p.v2ParseType()
 	}
 
@@ -951,6 +1023,67 @@ func (p *Parser) v2ParseFieldDecl() *FieldDecl {
 		def = p.v2ParseExpr()
 	}
 	return &FieldDecl{Name: name, Type: typ, Default: def, IsConst: isConst, IsInit: isInit}
+}
+
+// v2ParseFieldDeclNoKeyword parses a field without var/const/init prefix: Type name [= default]
+func (p *Parser) v2ParseFieldDeclNoKeyword() *FieldDecl {
+	var typ TypeExpr
+	var name string
+	if p.v2IsTypeAnnotation() {
+		typ = p.v2ParseType()
+		name = p.v2ExpectIdent()
+	} else {
+		name = p.v2ExpectIdent()
+	}
+	var def Expr
+	if p.check(lexer.TOKEN_ASSIGN) {
+		p.advance()
+		def = p.v2ParseExpr()
+	}
+	return &FieldDecl{Name: name, Type: typ, Default: def}
+}
+
+// v2IsClassFieldDecl checks if the current IDENT in a class body starts a field
+// declaration (Type name [= default]) rather than a method or expression.
+func (p *Parser) v2IsClassFieldDecl() bool {
+	if !p.v2IsTypeAnnotation() {
+		return false
+	}
+	// Scan past the type to find the name
+	i := 1
+	// Generic: Type<...>
+	if p.peekAt(i).Type == lexer.TOKEN_LT {
+		depth := 1
+		i++
+		for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+			if p.peekAt(i).Type == lexer.TOKEN_LT {
+				depth++
+			} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+				depth--
+			}
+			i++
+		}
+	}
+	// Array: Type[]
+	if p.peekAt(i).Type == lexer.TOKEN_LBRACKET && p.peekAt(i+1).Type == lexer.TOKEN_RBRACKET {
+		i += 2
+	}
+	// Nullable: Type?
+	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
+		i++
+	}
+	// Next should be the field name (ident)
+	nameToken := p.peekAt(i)
+	if nameToken.Type != lexer.TOKEN_IDENT && nameToken.Type != lexer.TOKEN_DATA &&
+		nameToken.Type != lexer.TOKEN_MATCH && nameToken.Type != lexer.TOKEN_PRINT {
+		return false
+	}
+	i++
+	// After name: = (with default) or end of statement (no default)
+	// NOT ( which would be a method call
+	next := p.peekAt(i)
+	return next.Type == lexer.TOKEN_ASSIGN || next.Type == lexer.TOKEN_RBRACE ||
+		next.Type == lexer.TOKEN_EOF
 }
 
 // v2ParseDataClassDecl: data Name(Type field, Type field = default) [{ methods }]

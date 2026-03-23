@@ -102,6 +102,24 @@ func TestVarFloatType(t *testing.T) {
 	)
 }
 
+// --- var elision tests (Type name = expr without var keyword) ---
+
+func TestTypedVarNoKeyword(t *testing.T) {
+	assertContains(t, `int age = 30`, `int age = 30;`)
+}
+
+func TestTypedVarNoKeywordString(t *testing.T) {
+	assertContains(t, `String name = "Alice"`, `String name = "Alice";`)
+}
+
+func TestTypedVarNoKeywordGeneric(t *testing.T) {
+	assertContains(t, `List<int> scores = []`, `List<Integer> scores = new java.util.ArrayList<>();`)
+}
+
+func TestTypedVarNoKeywordMap(t *testing.T) {
+	assertContains(t, `Map<String, int> ages = {}`, `Map<String, Integer> ages = new java.util.HashMap<>();`)
+}
+
 func TestConstVar(t *testing.T) {
 	assertContains(t,
 		`const PI = 3.14`,
@@ -142,7 +160,7 @@ print("Hello, {name}!")
 
 func TestFnBasic(t *testing.T) {
 	assertContains(t, `
-fn greet(String name) String {
+fn greet(String name): String {
     return "Hello, {name}!"
 }
 `,
@@ -164,7 +182,7 @@ fn sayHello() {
 
 func TestFnMultipleParams(t *testing.T) {
 	assertContains(t, `
-fn add(int a, int b) int {
+fn add(int a, int b): int {
     return a + b
 }
 `,
@@ -253,7 +271,7 @@ for x in items {
 
 func TestReturnError(t *testing.T) {
 	assertContains(t, `
-fn risky() int {
+fn risky(): int {
     return Error("something went wrong")
 }
 `,
@@ -263,7 +281,7 @@ fn risky() int {
 
 func TestReturnErrorCustomType(t *testing.T) {
 	assertContains(t, `
-fn fetch() String {
+fn fetch(): String {
     return Error(NotFound("user not found"))
 }
 `,
@@ -273,7 +291,7 @@ fn fetch() String {
 
 func TestReturnErrorRethrow(t *testing.T) {
 	assertContains(t, `
-fn risky() int {
+fn risky(): int {
     var x = doStuff() or {
         return Error(err)
     }
@@ -413,7 +431,7 @@ if a != b {
 func TestPubFieldGeneratesGetterSetter(t *testing.T) {
 	assertContains(t, `
 class User {
-    pub var String name
+    pub String name
 }
 `,
 		`private String name;`,
@@ -425,7 +443,7 @@ class User {
 func TestReadFieldGeneratesGetterOnly(t *testing.T) {
 	result := transpile(`
 class User {
-    read var String email
+    readonly String email
 }
 `)
 	if !strings.Contains(result, "private String email;") {
@@ -497,7 +515,7 @@ class Service {
 func TestOverrideMethod(t *testing.T) {
 	assertContains(t, `
 class Dog : Animal {
-    override fn speak() String {
+    override fn speak(): String {
         return "Woof!"
     }
 }
@@ -794,7 +812,7 @@ var port = parsePort("8080") or 80
 func TestOverrideGeneratesAnnotation(t *testing.T) {
 	assertContains(t, `
 class Dog : Animal {
-    override fn toString() String {
+    override fn toString(): String {
         return "Dog"
     }
 }
@@ -1184,7 +1202,7 @@ class Dog {
     var String name
     var String breed
 
-    fn speak() String {
+    fn speak(): String {
         return "Woof!"
     }
 }
@@ -1214,7 +1232,7 @@ func TestClassInheritance(t *testing.T) {
 class Puppy : Dog {
     var String name
 
-    fn speak() String {
+    fn speak(): String {
         return "yap!"
     }
 }
@@ -1240,7 +1258,7 @@ class User {
 func TestClassMethodDirect(t *testing.T) {
 	assertContains(t, `
 class Foo {
-    fn toString() String {
+    fn toString(): String {
         return "Foo"
     }
 }
@@ -1250,7 +1268,7 @@ class Foo {
 	)
 	assertNotContains(t, `
 class Foo {
-    fn toString() String {
+    fn toString(): String {
         return "Foo"
     }
 }
@@ -1355,7 +1373,7 @@ var x = nums[0]
 
 func TestArrayInFunction(t *testing.T) {
 	assertContains(t, `
-fn sum(int[] numbers) int {
+fn sum(int[] numbers): int {
     return 0
 }
 `,

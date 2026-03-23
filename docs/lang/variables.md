@@ -2,13 +2,13 @@
 
 ## Variables
 
-Use `var` to declare variables. Zinc supports type inference, explicit types, and tuple unpacking.
+Use `var` for type-inferred variables. When you specify an explicit type, drop the `var` keyword. Zinc supports type inference, explicit types, and tuple unpacking.
 
 ```zinc
 var x = 42                      // inferred as int
-var int x = 42                  // explicit type
-var String name = "Alice"          // explicit type
-var List<int> items = []        // generic type
+int x = 42                      // explicit type
+String name = "Alice"              // explicit type
+List<int> items = []            // generic type
 var a, b = swap(1, 2)          // tuple unpacking
 ```
 
@@ -26,17 +26,17 @@ var tags = ["a", "b", "c"]     // List<String>
 
 ### Explicit Types
 
-Place the type before the variable name:
+Place the type before the variable name (no `var` keyword needed):
 
 ```zinc
-var int count = 0
-var String name = "Bob"
-var double ratio = 3.14
-var boolean active = true
-var List<String> tags = []
-var Map<String, int> scores = {}
-var int[] scores = [85, 92, 78]
-var String[] args = []
+int count = 0
+String name = "Bob"
+double ratio = 3.14
+boolean active = true
+List<String> tags = []
+Map<String, int> scores = {}
+int[] scores = [85, 92, 78]
+String[] args = []
 ```
 
 ### Tuple Unpacking
@@ -44,7 +44,7 @@ var String[] args = []
 Functions that return multiple values can be unpacked directly:
 
 ```zinc
-fn swap(int a, int b) (int, int) {
+fn swap(int a, int b): (int, int) {
     return b, a
 }
 var x, y = swap(1, 2)          // x=2, y=1
@@ -67,7 +67,7 @@ Every variable must be initialized at declaration. There are no uninitialized va
 
 ```zinc
 var x = 0                       // OK — explicit default
-var List<int> items = []        // OK — empty list
+List<int> items = []            // OK — empty list
 ```
 
 ## Constants (`const`)
@@ -76,7 +76,7 @@ Use `const` for immutable bindings. Constants must be initialized and cannot be 
 
 ```zinc
 const PI = 3.14159
-const int MAX_RETRIES = 3
+const int MAX_RETRIES = 3          // const keeps the keyword
 const String APP_NAME = "zinc-app"
 ```
 
@@ -85,7 +85,7 @@ const String APP_NAME = "zinc-app"
 Parameters can be marked `const` to prevent reassignment inside the function body:
 
 ```zinc
-fn greet(const String name) String {
+fn greet(const String name): String {
     // name = "other"           // compile error: cannot reassign const parameter
     return "Hello, {name}!"
 }

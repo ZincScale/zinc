@@ -38,7 +38,7 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 - [x] Java annotations pass-through: `@Deprecated`, `@Path`, `@GET`
 
 ### Type System
-- [x] Type mismatches: `var int x = "hello"` → error
+- [x] Type mismatches: `int x = "hello"` → error
 - [x] Return type verification: all code paths must return
 - [x] Function call arg type and count checking
 - [x] Type narrowing after `is` checks

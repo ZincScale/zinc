@@ -71,7 +71,7 @@ func TestV2IntToDoubleOk(t *testing.T) {
 
 func TestV2FnTypeChecked(t *testing.T) {
 	errs := checkV2(`
-fn add(int a, int b) int {
+fn add(int a, int b): int {
     var String result = a + b
     return result
 }
@@ -118,7 +118,7 @@ fn example() {
 
 func TestV2ReturnTypeMismatch(t *testing.T) {
 	errs := checkV2(`
-fn add(int a, int b) int {
+fn add(int a, int b): int {
     return "hello"
 }
 `)
@@ -132,7 +132,7 @@ fn add(int a, int b) int {
 
 func TestV2FnCallArgCount(t *testing.T) {
 	errs := checkV2(`
-fn greet(String name) String {
+fn greet(String name): String {
     return "hello"
 }
 greet("Alice", "extra")
@@ -147,7 +147,7 @@ greet("Alice", "extra")
 
 func TestV2FnCallArgType(t *testing.T) {
 	errs := checkV2(`
-fn greet(String name) String {
+fn greet(String name): String {
     return "hello"
 }
 greet(42)
@@ -183,7 +183,7 @@ for x in items {
 
 func TestV2ResultErrReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn parse(String s) Result<int> {
+fn parse(String s): Result<int> {
     return Err("bad")
 }
 `)
@@ -194,7 +194,7 @@ fn parse(String s) Result<int> {
 
 func TestV2AllPathsReturn(t *testing.T) {
 	errs := checkV2(`
-fn classify(int x) String {
+fn classify(int x): String {
     if x > 0 {
         return "positive"
     }
@@ -210,7 +210,7 @@ fn classify(int x) String {
 
 func TestV2AllPathsReturnOk(t *testing.T) {
 	errs := checkV2(`
-fn classify(int x) String {
+fn classify(int x): String {
     if x > 0 {
         return "positive"
     } else {
@@ -225,7 +225,7 @@ fn classify(int x) String {
 
 func TestV2AllPathsReturnMatch(t *testing.T) {
 	errs := checkV2(`
-fn describe(int x) String {
+fn describe(int x): String {
     match x {
         case 1 -> return "one"
         case 2 -> return "two"
@@ -269,7 +269,7 @@ func TestV2ValidScript(t *testing.T) {
 	errs := checkV2(`
 import json
 
-fn greet(String name) String {
+fn greet(String name): String {
     return "Hello, {name}!"
 }
 

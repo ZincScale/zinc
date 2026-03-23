@@ -56,7 +56,7 @@ print("hello")
 
 func TestV2FnDecl(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(str name) str {
+fn greet(str name): str {
     return "Hello, {name}!"
 }
 `)
@@ -82,7 +82,7 @@ fn greet(str name) str {
 }
 
 func TestV2FnSingleExpr(t *testing.T) {
-	prog, errs := parseV2(`fn double(int x) int = x * 2`)
+	prog, errs := parseV2(`fn double(int x): int = x * 2`)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -254,7 +254,7 @@ class Stack {
         items.append(item)
     }
 
-    fn pop() int {
+    fn pop(): int {
         return items.pop()
     }
 }
@@ -459,7 +459,7 @@ import java.nio.file.Path
 
 data Config(String host, int port = 8080)
 
-fn load_config(String path) Config {
+fn load_config(String path): Config {
     var text = Path(path).read_text()
     var raw = json.loads(text)
     return Config(raw["host"], raw["port"])
@@ -652,7 +652,7 @@ func TestV2ClassInheritance(t *testing.T) {
 class Dog : Animal {
     var str breed
 
-    fn speak() str {
+    fn speak(): str {
         return "Woof"
     }
 }
@@ -689,7 +689,7 @@ fn flexible(*args, **kwargs) {
 
 func TestV2DefaultArgs(t *testing.T) {
 	prog, errs := parseV2(`
-fn greet(str name, str greeting = "Hello") str {
+fn greet(str name, str greeting = "Hello"): str {
     return "{greeting}, {name}!"
 }
 `)
@@ -718,7 +718,7 @@ func TestV2WildcardImport(t *testing.T) {
 func TestV2Decorator(t *testing.T) {
 	prog, errs := parseV2(`
 @cache
-fn expensive(int n) int {
+fn expensive(int n): int {
     return n * n
 }
 `)
@@ -735,7 +735,7 @@ func TestV2StaticMethod(t *testing.T) {
 	prog, errs := parseV2(`
 class Math {
     @staticmethod
-    fn add(int a, int b) int {
+    fn add(int a, int b): int {
         return a + b
     }
 }
@@ -783,7 +783,7 @@ func TestV2PrintMultiArg(t *testing.T) {
 
 func TestV2ResultFn(t *testing.T) {
 	prog, errs := parseV2(`
-fn parse_age(str input) Result<int> {
+fn parse_age(str input): Result<int> {
     if not input.isdigit() {
         return Err("must be a number")
     }
@@ -898,8 +898,8 @@ func TestV2TripleQuoteString(t *testing.T) {
 
 func TestV2NestedFunction(t *testing.T) {
 	_, errs := parseV2(`
-fn outer() int {
-    fn inner(int x) int {
+fn outer(): int {
+    fn inner(int x): int {
         return x * 2
     }
     return inner(5)
@@ -1114,7 +1114,7 @@ fn foo(const str name) {
 
 func TestV2ReturnTypeNoColon(t *testing.T) {
 	prog, errs := parseV2(`
-fn foo() int {
+fn foo(): int {
     return 5
 }
 `)
@@ -1133,7 +1133,7 @@ fn foo() int {
 
 func TestV2GenericReturnType(t *testing.T) {
 	prog, errs := parseV2(`
-fn foo() List<int> {
+fn foo(): List<int> {
     return []
 }
 `)
@@ -1258,7 +1258,7 @@ func TestV2AngleBracketGenericNested(t *testing.T) {
 
 func TestV2NullableGenericReturnType(t *testing.T) {
 	prog, errs := parseV2(`
-fn foo() List<int>? {
+fn foo(): List<int>? {
     return none
 }
 `)

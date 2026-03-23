@@ -95,10 +95,10 @@ Mutual exclusion for shared mutable state:
 
 ```zinc
 var mu = Lock()
-var int counter = 0
+int counter = 0
 
 parallel for item in items {
-    var int result = compute(item)
+    int result = compute(item)
     lock mu {
         counter = counter + result
     }
@@ -207,7 +207,7 @@ Context automatically propagates to child threads spawned with `concurrent` or `
 A parallel web scraper with rate limiting and timeout:
 
 ```zinc
-fn scrapeUrls(List<String> urls) List<String> {
+fn scrapeUrls(List<String> urls): List<String> {
     var results = Channel<String>(1000)
     var limiter = Rate(10.perSecond)
 
@@ -224,7 +224,7 @@ fn scrapeUrls(List<String> urls) List<String> {
     }
     results.close()
 
-    var List<String> titles = []
+    List<String> titles = []
     for title in results {
         titles.add(title)
     }

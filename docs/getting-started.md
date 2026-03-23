@@ -36,7 +36,7 @@ fn main() {
 
 ```zinc
 // greet.zn
-fn greet(String name) String {
+fn greet(String name): String {
     return "Hello, {name}!"
 }
 
@@ -54,7 +54,7 @@ zinc run greet.zn -- Alice
 | Java | Zinc | Why |
 |---|---|---|
 | `public static void main(String[] args)` | Top-level code | No ceremony |
-| `String greet(String name) { }` | `fn greet(String name) String` | Return type after params |
+| `String greet(String name) { }` | `fn greet(String name): String` | Return type after params (colon-separated) |
 | `var x = new ArrayList<Integer>()` | `var x = List<int>()` | No `new`, no boxing |
 | `record User(String name, int age) {}` | `data User { String name, int age }` | Cleaner syntax |
 | `list.stream().filter(...).toList()` | `list.filter(...)` | Auto stream chains |
@@ -66,22 +66,22 @@ zinc run greet.zn -- Alice
 
 ```zinc
 var name = "Alice"          // type inferred
-var int age = 30            // explicit type
-var List<int> scores = []   // generic type
+int age = 30                // explicit type
+List<int> scores = []       // generic type
 ```
 
 ## Functions
 
 ```zinc
-fn add(int a, int b) int {
+fn add(int a, int b): int {
     return a + b
 }
 
 // Single-expression shorthand
-fn double(int x) int = x * 2
+fn double(int x): int = x * 2
 
-fn sum(int[] numbers) int {
-    var int total = 0
+fn sum(int[] numbers): int {
+    int total = 0
     for n in numbers { total = total + n }
     return total
 }
@@ -121,7 +121,7 @@ Zinc uses errors as values — no try/catch/throw.
 
 ```zinc
 // Expected errors use Result<T>
-fn parse_port(String s) Result<int> {
+fn parse_port(String s): Result<int> {
     var n = Integer.parseInt(s) or { return Error("not a number") }
     return n
 }

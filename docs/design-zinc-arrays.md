@@ -7,16 +7,16 @@
 
 ```zinc
 // Declaration — Type[] syntax
-var String[] names = ["Alice", "Bob"]
-var int[] scores = [1, 2, 3]
-var byte[] data = [0, 1, 2]
+String[] names = ["Alice", "Bob"]
+int[] scores = [1, 2, 3]
+byte[] data = [0, 1, 2]
 
 // Inferred type
 var names = ["Alice", "Bob"]       // List<String> (current behavior, unchanged)
 
 // Context-dependent inference (Option B)
-var int[] nums = [1, 2, 3]        // → new int[] {1, 2, 3}
-var List<int> nums = [1, 2, 3]    // → new ArrayList<>(List.of(1, 2, 3))
+int[] nums = [1, 2, 3]            // → new int[] {1, 2, 3}
+List<int> nums = [1, 2, 3]        // → new ArrayList<>(List.of(1, 2, 3))
 var nums = [1, 2, 3]              // → ArrayList (default, backwards compatible)
 
 // Access
@@ -29,8 +29,8 @@ fn main(String[] args) {
     print("arg: {args[0]}")
 }
 
-fn sum(int[] numbers) int {
-    var int total = 0
+fn sum(int[] numbers): int {
+    int total = 0
     for n in numbers { total = total + n }
     return total
 }
@@ -81,7 +81,7 @@ public static void main(String[] args) throws Exception {
 | `Type[]` | `Type[]` | Any object array |
 | `[1, 2, 3]` (no type context) | `ArrayList<Integer>` | Default: List (backwards compatible) |
 | `int[] x = [1, 2, 3]` | `int[] x = new int[] {1, 2, 3}` | Array from context |
-| `List<int> x = [1, 2, 3]` | `List<Integer> x = new ArrayList<>(...)` | List from context |
+| `List<int> x = [1, 2, 3]` | `var x = new ArrayList<>(List.of(1, 2, 3))` | List from context |
 
 ## Implementation Plan
 
@@ -103,7 +103,7 @@ public static void main(String[] args) throws Exception {
 5. `for x in arr` → iterate over array
 
 ### Codegen
-1. **Declaration**: `var int[] x = [1, 2, 3]` → `int[] x = new int[] {1, 2, 3};`
+1. **Declaration**: `int[] x = [1, 2, 3]` → `int[] x = new int[] {1, 2, 3};`
 2. **Access**: `x[0]` → `x[0]` (same)
 3. **Assignment**: `x[0] = 5` → `x[0] = 5;` (same)
 4. **Length**: `x.length` → `x.length` (same, not .size())

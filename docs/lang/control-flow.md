@@ -21,9 +21,9 @@ No parentheses around the condition. Braces are always required.
 Use `if`/`else` as an expression. The condition comes first:
 
 ```zinc
-var String label = if count == 1: "item" else: "items"
-var int abs_val = if x >= 0: x else: -x
-var String status = if active: "on" else: "off"
+String label = if count == 1: "item" else: "items"
+int abs_val = if x >= 0: x else: -x
+String status = if active: "on" else: "off"
 ```
 
 ## for Loops
@@ -69,7 +69,7 @@ while running {
     process()
 }
 
-var int count = 0
+int count = 0
 while count < 10 {
     count = count + 1
 }
@@ -166,13 +166,13 @@ match value {
 `match` can return a value — use it on the right side of an assignment:
 
 ```zinc
-var double area = match shape {
+double area = match shape {
     case Circle(r) -> Math.PI * r ** 2
     case Rect(w, h) -> w * h
     case Triangle(b, h) -> 0.5 * b * h
 }
 
-var String label = match status {
+String label = match status {
     case 200 -> "OK"
     case 404 -> "Not Found"
     case 500 -> "Server Error"

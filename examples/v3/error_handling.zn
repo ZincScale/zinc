@@ -3,7 +3,7 @@
 // Zinc uses errors as values — no try/catch/throw
 
 // Function that can fail — returns Error on bad input
-fn divide(int a, int b) int {
+fn divide(int a, int b): int {
     if b == 0 { return Error("division by zero") }
     return a / b
 }
@@ -17,7 +17,7 @@ var ok = divide(10, 2) or 0
 print("divide(10, 2) = {ok}")
 
 // Control flow
-var int x = 42
+int x = 42
 if x > 0 {
     print("positive")
 } else {

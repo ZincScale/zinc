@@ -7,11 +7,11 @@ Zinc uses errors as values. All fallible functions return `Result<T>` and caller
 Use `Result<T>` for any operation that can fail — validation, parsing, I/O, missing data, network calls:
 
 ```zinc
-fn parsePort(String s) Result<int> {
+fn parsePort(String s): Result<int> {
     if not s.isDigit() {
         return Error("not a number: {s}")
     }
-    var int port = int(s)
+    int port = int(s)
     if port < 1 or port > 65535 {
         return Error("out of range: {port}")
     }
@@ -24,7 +24,7 @@ fn parsePort(String s) Result<int> {
 Provide a fallback value inline when a Result fails:
 
 ```zinc
-var int port = parsePort("8080") or 80
+int port = parsePort("8080") or 80
 ```
 
 If `parsePort` returns an `Error`, the variable gets `80` instead.
@@ -34,7 +34,7 @@ If `parsePort` returns an `Error`, the variable gets `80` instead.
 Handle the error with a block. The error is available as `err`:
 
 ```zinc
-var int port = parsePort(input) or {
+int port = parsePort(input) or {
     log.warn("bad port: {err}, using default")
     8080                             // last expression is the fallback value
 }
@@ -47,8 +47,8 @@ The `or { }` block must produce a value of the same type — it's the fallback p
 Use `return` in an `or` block to exit the enclosing function early:
 
 ```zinc
-fn loadConfig(String path) Config {
-    var String content = readFile(path) or {
+fn loadConfig(String path): Config {
+    String content = readFile(path) or {
         log.error("cannot read config: {err}")
         return Config.defaults()     // exits loadConfig, returns default
     }
@@ -62,7 +62,7 @@ Use `continue` in an `or` block to skip bad records in batch processing:
 
 ```zinc
 for record in records {
-    var int age = parseAge(record.get("age")) or {
+    int age = parseAge(record.get("age")) or {
         log.warn("skipping bad age: {err}")
         continue                     // skip this record, process next
     }
@@ -75,14 +75,14 @@ for record in records {
 Return a bare value for success (auto-wrapped in `Ok`) or `Error(message)` for failure:
 
 ```zinc
-fn divide(double a, double b) Result<double> {
+fn divide(double a, double b): Result<double> {
     if b == 0 {
         return Error("division by zero")
     }
     return a / b
 }
 
-fn findUser(String id) Result<User> {
+fn findUser(String id): Result<User> {
     var user = db.get(id)
     if user == null {
         return Error("user not found: {id}")
@@ -96,7 +96,7 @@ fn findUser(String id) Result<User> {
 Chain multiple failable operations — each `or` handles its own failure:
 
 ```zinc
-fn processOrder(String orderId) Result<Receipt> {
+fn processOrder(String orderId): Result<Receipt> {
     var order = findOrder(orderId) or {
         return Error("order not found: {err}")
     }
@@ -115,7 +115,7 @@ fn processOrder(String orderId) Result<Receipt> {
 Use `or match` to handle different error types with pattern matching:
 
 ```zinc
-fn loadConfig(String path) Result<Config> {
+fn loadConfig(String path): Result<Config> {
     var content = readFile(path) or match err {
         case "not found" -> return Error("config missing: {path}")
         case _ -> return Error("cannot read config: {err}")
@@ -130,7 +130,7 @@ Handle different error data types:
 data NotFound(String message)
 data Timeout(String message)
 
-fn fetchData(String url) Result<String> {
+fn fetchData(String url): Result<String> {
     var response = httpGet(url) or match err {
         case NotFound -> return Error("resource missing: {err.message}")
         case Timeout -> return Error("request timed out: {err.message}")
@@ -148,7 +148,7 @@ Define error types as data classes:
 data ValidationError(String field, String reason)
 data NotFoundError(String entity, String id)
 
-fn validateAge(String input) Result<int> {
+fn validateAge(String input): Result<int> {
     var age = parseInt(input) or {
         return Error(ValidationError("age", "not a number: {input}"))
     }

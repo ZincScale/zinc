@@ -6,18 +6,18 @@ data User(String name, String email, int age = 0)
 
 // Class with visibility modifiers
 class Animal {
-    pub var String name = ""
-    pub var String sound = ""
+    pub String name = ""
+    pub String sound = ""
 
-    pub fn speak() String {
+    pub fn speak(): String {
         return "{name} says {sound}"
     }
 }
 
 class Dog : Animal {
-    pub var String breed = ""
+    pub String breed = ""
 
-    override fn toString() String {
+    override fn toString(): String {
         return "Dog({getName()}, {getBreed()})"
     }
 }

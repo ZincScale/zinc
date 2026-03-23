@@ -5,13 +5,13 @@
 Types are enforced at transpile time. Errors block compilation:
 
 ```
-var int x = "hello"                    // type mismatch: expected int, got String
-fn add() int { return "bad" }          // return type mismatch
+int x = "hello"                        // type mismatch: expected int, got String
+fn add(): int { return "bad" }         // return type mismatch
 greet(42)                              // argument 1: expected String, got int
 greet("a", "b")                        // expects 1 args, got 2
 break                                  // 'break' outside of loop
 y = 10                                 // undefined variable "y"
-fn f() int { if x > 0 { return 1 } }  // not all code paths return
+fn f(): int { if x > 0 { return 1 } }  // not all code paths return
 ```
 
 ## Built-in Types
@@ -36,10 +36,10 @@ fn f() int { if x > 0 { return 1 } }  // not all code paths return
 Use angle brackets `<>` for generic type parameters:
 
 ```zinc
-var List<int> numbers = [1, 2, 3]
-var Map<String, int> scores = {"Alice": 100, "Bob": 85}
-var Set<String> tags = {"a", "b", "c"}
-var List<List<int>> matrix = [[1, 2], [3, 4]]
+List<int> numbers = [1, 2, 3]
+Map<String, int> scores = {"Alice": 100, "Bob": 85}
+Set<String> tags = {"a", "b", "c"}
+List<List<int>> matrix = [[1, 2], [3, 4]]
 ```
 
 ## Arrays
@@ -47,9 +47,9 @@ var List<List<int>> matrix = [[1, 2], [3, 4]]
 Arrays use `Type[]` syntax:
 
 ```zinc
-var int[] nums = [1, 2, 3]
-var String[] names = ["Alice", "Bob"]
-var byte[] data = [0, 1, 2]
+int[] nums = [1, 2, 3]
+String[] names = ["Alice", "Bob"]
+byte[] data = [0, 1, 2]
 ```
 
 Array access and length:
@@ -64,16 +64,16 @@ print(nums.length)     // array length (not .size())
 The `[1, 2, 3]` literal creates different types based on context:
 
 ```zinc
-var int[] nums = [1, 2, 3]      // array: new int[] {1, 2, 3}
-var List<int> nums = [1, 2, 3]  // list: new ArrayList<>(List.of(1, 2, 3))
+int[] nums = [1, 2, 3]          // array: new int[] {1, 2, 3}
+List<int> nums = [1, 2, 3]      // list: new ArrayList<>(List.of(1, 2, 3))
 var nums = [1, 2, 3]            // default: ArrayList (backwards compatible)
 ```
 
 ### Arrays in Functions
 
 ```zinc
-fn sum(int[] numbers) int {
-    var int total = 0
+fn sum(int[] numbers): int {
+    int total = 0
     for n in numbers { total = total + n }
     return total
 }
@@ -85,12 +85,12 @@ Types go before the variable or parameter name:
 
 ```zinc
 // Variables
-var int count = 0
-var String name = "Alice"
-var List<String> items = []
+int count = 0
+String name = "Alice"
+List<String> items = []
 
 // Function parameters and return types
-fn process(String input, int limit) List<String> {
+fn process(String input, int limit): List<String> {
     return input.split(",").take(limit)
 }
 ```
@@ -159,7 +159,7 @@ After an `is` check, Zinc narrows the type within the block:
 ```zinc
 fn process(any x) {
     if x is String {
-        var String s = x            // OK -- x narrowed to String
+        String s = x                // OK -- x narrowed to String
         print(s.upper())
     }
     if x is int {
@@ -173,14 +173,14 @@ fn process(any x) {
 Use `Type?` to indicate a value may be `null`:
 
 ```zinc
-var String? name = null
-var int? age = null
+String? name = null
+int? age = null
 
-fn find(String id) User? {
+fn find(String id): User? {
     // may return null
 }
 
-var User? user = find("abc")
+User? user = find("abc")
 if user != null {
     print(user.name)             // narrowed to User
 }
@@ -191,7 +191,7 @@ if user != null {
 `Result<T>` is a generic type for operations that may fail. See [Error Handling](error-handling.md) for full details:
 
 ```zinc
-fn parse(String input) Result<int> {
+fn parse(String input): Result<int> {
     if not input.isdigit() {
         return Error("not a number")
     }

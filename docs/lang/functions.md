@@ -2,14 +2,14 @@
 
 ## Basic Functions
 
-Functions are declared with `fn`. Parameters use type-first syntax: `type name`. Return type follows the parameter list.
+Functions are declared with `fn`. Parameters use type-first syntax: `type name`. Return type follows the parameter list, separated by a colon.
 
 ```zinc
-fn greet(String name) String {
+fn greet(String name): String {
     return "Hello, {name}!"
 }
 
-fn add(int a, int b) int {
+fn add(int a, int b): int {
     return a + b
 }
 
@@ -25,9 +25,9 @@ Functions with no return type return `void` implicitly.
 For short functions, use `=` to define the body as a single expression:
 
 ```zinc
-fn double(int x) int = x * 2
-fn square(int n) int = n * n
-fn fullName(String first, String last) String = "{first} {last}"
+fn double(int x): int = x * 2
+fn square(int n): int = n * n
+fn fullName(String first, String last): String = "{first} {last}"
 ```
 
 ## Default Arguments
@@ -144,14 +144,14 @@ items.forEach(x -> {
 
 ## Return Types
 
-The return type comes after the closing parenthesis of the parameter list:
+The return type comes after the closing parenthesis of the parameter list, separated by a colon:
 
 ```zinc
-fn parse(String input) int {
+fn parse(String input): int {
     return int(input)
 }
 
-fn divide(double a, double b) Result<double> {
+fn divide(double a, double b): Result<double> {
     if b == 0 {
         return Error("division by zero")
     }
@@ -164,7 +164,7 @@ fn divide(double a, double b) Result<double> {
 Functions can return multiple values as a tuple:
 
 ```zinc
-fn minMax(List<int> items) (int, int) {
+fn minMax(List<int> items): (int, int) {
     return (items.min(), items.max())
 }
 
