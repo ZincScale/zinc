@@ -268,12 +268,13 @@ func (b *BlockStmt) stmtTag() {}
 
 // VarStmt: var [type] name = expr  OR  const [type] name = expr
 type VarStmt struct {
-	Line      int // source line number (1-indexed)
-	Name      string
-	Type      TypeExpr   // may be nil (inferred)
-	Value     Expr       // may be nil
-	IsConst   bool       // true for const declarations (immutable)
-	OrHandler *OrHandler // optional or { } handler for failable calls
+	Line         int // source line number (1-indexed)
+	Name         string
+	Type         TypeExpr   // may be nil (inferred)
+	Value        Expr       // may be nil
+	IsConst      bool       // true for const declarations (immutable)
+	OrHandler    *OrHandler // optional or { } handler for failable calls
+	ResolvedType string     // filled by typechecker for var + or handler inference
 }
 
 func (v *VarStmt) nodeTag() {}

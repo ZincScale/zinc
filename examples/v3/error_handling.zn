@@ -51,4 +51,18 @@ for b in inputs {
     print("100/{b} = {val}")
 }
 
+// or block with return Error(err) — propagate error up
+fn safeDivide(int a, int b): int {
+    var result = divide(a, b) or {
+        return Error(err)
+    }
+    return result
+}
+
+var propagated = safeDivide(10, 0) or -99
+print("propagated error: {propagated}")
+
+var propagatedOk = safeDivide(10, 2) or -99
+print("propagated ok: {propagatedOk}")
+
 print("Error Handling OK")

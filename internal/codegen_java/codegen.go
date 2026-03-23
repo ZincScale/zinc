@@ -731,10 +731,18 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 
 	// Handle `or` error handler: var x = call() or default / or { block } / or match { }
 	if v.OrHandler != nil && v.Value != nil {
-		// Java var requires initializer — use Object if no type specified
+		// Java var requires initializer — use resolved type if available, else Object
 		declType := keyword
 		if declType == "var" || declType == "final var" {
-			declType = "Object"
+			if v.ResolvedType != "" {
+				if mapped, ok := zincToJavaType[v.ResolvedType]; ok {
+					declType = mapped
+				} else {
+					declType = v.ResolvedType
+				}
+			} else {
+				declType = "Object"
+			}
 		}
 		g.writeln("%s %s;", declType, v.Name)
 		g.emitOrHandler(g.formatExpr(v.Value), v.Name, v.OrHandler)
@@ -900,9 +908,9 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 						return
 					}
 				}
-				// return Error(err) where err is already an exception → re-throw
+				// return Error(err) where err is already an exception → wrap and re-throw
 				if ident, ok := arg.(*parser.Ident); ok && ident.Name == "err" {
-					g.writeln("throw err;")
+					g.writeln("throw new RuntimeException(err);")
 					return
 				}
 				// return Error("message") → throw new RuntimeException("message")
@@ -1875,7 +1883,7 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 						}
 					}
 					if id, ok := arg.(*parser.Ident); ok && id.Name == "err" {
-						return "throw err;"
+						return "throw new RuntimeException(err);"
 					}
 					return fmt.Sprintf("throw new RuntimeException(%s);", g.formatExpr(arg))
 				}

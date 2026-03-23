@@ -434,6 +434,11 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 			c.scope.set(s.Name, declaredType)
 		} else {
 			c.scope.set(s.Name, valType)
+			// When using var with or handler, store the resolved type name
+			// so codegen can emit the correct Java type instead of Object
+			if s.OrHandler != nil && valType.Name != "" && valType.Name != "any" {
+				s.ResolvedType = valType.Name
+			}
 		}
 	} else if s.Type != nil {
 		c.scope.set(s.Name, declaredType)

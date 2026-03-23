@@ -20,6 +20,7 @@ import (
 
 	"zinc/internal/lexer"
 	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
 func transpile(src string) string {
@@ -30,6 +31,8 @@ func transpile(src string) string {
 	if len(p.Errors) > 0 {
 		return "PARSE_ERRORS: " + strings.Join(p.Errors, "; ")
 	}
+	// Run typechecker to fill in resolved types (e.g., var + or handler inference)
+	typechecker.CheckV2(prog)
 	gen := New()
 	return gen.Generate(prog, "Test")
 }
@@ -493,7 +496,7 @@ fn risky(): int {
     return x
 }
 `,
-		`throw err;`,
+		`throw new RuntimeException(err);`,
 	)
 }
 
@@ -534,6 +537,27 @@ var user = fetchUser(id) or match err {
 		`user = retry(id);`,
 		`catch (Exception err) {`,
 		`user = fallback;`,
+	)
+}
+
+func TestOrHandlerTypeInference(t *testing.T) {
+	assertContains(t, `
+fn divide(int a, int b): int {
+    if b == 0 { return Error("zero") }
+    return a / b
+}
+var x = divide(10, 2) or -1
+`,
+		`int x;`,
+	)
+	assertNotContains(t, `
+fn divide(int a, int b): int {
+    if b == 0 { return Error("zero") }
+    return a / b
+}
+var x = divide(10, 2) or -1
+`,
+		`Object x;`,
 	)
 }
 
