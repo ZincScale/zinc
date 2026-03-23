@@ -181,3 +181,44 @@ var String label = match status {
 ```
 
 Match expressions must be exhaustive — all cases must be covered, or a `case _` default is required.
+
+## with (Resource Management)
+
+The `with` statement manages resources that need cleanup. It automatically closes resources when the block exits — similar to Python's `with` or Java's try-with-resources, but cleaner.
+
+### Single Resource
+
+```zinc
+with f = FileReader("data.txt") {
+    var line = f.readLine()
+    print(line)
+}
+// f.close() is called automatically when the block exits
+```
+
+Transpiles to:
+```java
+try (var f = new FileReader("data.txt")) {
+    var line = f.readLine();
+    System.out.println(line);
+}
+```
+
+### Multiple Resources
+
+Comma-separated resources are all cleaned up when the block exits:
+
+```zinc
+with input = FileReader("in.txt"), output = FileWriter("out.txt") {
+    output.write(input.read())
+}
+// both input and output are closed automatically
+```
+
+### Why `with` instead of `defer`
+
+Some languages (Go, Swift) use `defer` for cleanup. Zinc uses `with` because:
+- Cleanup is **scoped** — tied to the block, not the whole function
+- Cleanup is **automatic** — any `AutoCloseable` resource gets closed
+- No risk of forgetting the `defer` call
+- Reads as a single unit: open, use, done

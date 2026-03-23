@@ -126,6 +126,20 @@ Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → jav
 
 ---
 
+## May Work On in the Future
+
+Syntax features observed in other modern languages (Dart, Kotlin, Swift, Rust, Gleam, Julia, etc.) that could improve Zinc DX. None are committed — just ideas worth revisiting.
+
+- [ ] **`??` null coalesce** — `user?.name ?? "Anonymous"` → ternary null check. Dart, Kotlin (`?:`), Swift.
+- [ ] **Extension methods** — add methods to types you don't own. `extend String { fn isPalindrome() -> boolean { ... } }` → static utility method. Dart, Kotlin, Scala 3, Swift.
+- [ ] **Spread operator `...`** — `[...first, 99, ...second]` → collection construction. Dart, JS, Python.
+- [ ] **Collection `if`/`for`** — inline conditionals and loops in collection literals. Dart.
+- [ ] **Copy-and-update for data classes** — `user with { age: 31 }` → new record with one field changed. F#, Kotlin `.copy()`.
+- [ ] **Pipe operator `|>`** — `data |> parse |> validate |> save` → nested calls read left-to-right. F#, Elixir, Julia, Gleam.
+- [ ] **Operator overloading** — `operator fn plus(other: Vec) -> Vec` for domain types (money, vectors). Kotlin, Rust.
+
+---
+
 ## Docs
 
 - [Language Reference](docs/language-reference.md) — index + links to topic guides
