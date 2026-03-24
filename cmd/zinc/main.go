@@ -572,8 +572,9 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 
 	// Pass 1b: Collect all function/method signatures across files
 	allSigs := &typechecker.CollectedSigs{
-		FnSigs:     make(map[string]typechecker.V2FnSig),
-		MethodSigs: make(map[string]map[string]typechecker.V2FnSig),
+		FnSigs:      make(map[string]typechecker.V2FnSig),
+		MethodSigs:  make(map[string]map[string]typechecker.V2FnSig),
+		ParentTypes: make(map[string][]string),
 	}
 	for _, pf := range parsed {
 		fileSigs := typechecker.CollectSignatures(pf.prog)
@@ -582,6 +583,9 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		}
 		for k, v := range fileSigs.MethodSigs {
 			allSigs.MethodSigs[k] = v
+		}
+		for k, v := range fileSigs.ParentTypes {
+			allSigs.ParentTypes[k] = v
 		}
 	}
 

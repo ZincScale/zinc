@@ -101,8 +101,9 @@ func parseJavap(className string) *JavaClassInfo {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Parse class declaration for type params: "public class Foo<E> extends ..."
-		if strings.HasPrefix(line, "public class ") || strings.HasPrefix(line, "public abstract class ") {
+		// Parse class/interface declaration for type params: "public class Foo<E> extends ..."
+		if strings.HasPrefix(line, "public class ") || strings.HasPrefix(line, "public abstract class ") ||
+			strings.HasPrefix(line, "public interface ") {
 			if idx := strings.Index(line, "<"); idx != -1 {
 				end := strings.Index(line[idx:], ">")
 				if end != -1 {

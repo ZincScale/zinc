@@ -102,6 +102,7 @@ type V2Checker struct {
 	fnReturnType *V2Type            // current function's return type
 	fnSigs       map[string]V2FnSig // function signatures for call checking
 	methodSigs   map[string]map[string]V2FnSig // type → method → signature
+	parentTypes  map[string][]string // class → parent types (interfaces, superclasses)
 	inLoop       bool               // tracking if inside a loop for break/continue
 }
 
@@ -115,9 +116,10 @@ func CheckV2(prog *parser.Program) []V2Error {
 // externalSigs contains function/method signatures from other files in the project.
 func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2Error {
 	c := &V2Checker{
-		scope:      newV2Scope(nil),
-		fnSigs:     make(map[string]V2FnSig),
-		methodSigs: make(map[string]map[string]V2FnSig),
+		scope:       newV2Scope(nil),
+		fnSigs:      make(map[string]V2FnSig),
+		methodSigs:  make(map[string]map[string]V2FnSig),
+		parentTypes: make(map[string][]string),
 	}
 
 	// Pre-populate with cross-file signatures
@@ -127,6 +129,9 @@ func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2E
 		}
 		for k, v := range externalSigs.MethodSigs {
 			c.methodSigs[k] = v
+		}
+		for k, v := range externalSigs.ParentTypes {
+			c.parentTypes[k] = v
 		}
 	}
 
@@ -152,20 +157,22 @@ func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2E
 // Used in multi-file compilation to build cross-file context.
 // CollectedSigs holds both function and method signatures from a file.
 type CollectedSigs struct {
-	FnSigs     map[string]V2FnSig
-	MethodSigs map[string]map[string]V2FnSig // type → method → sig
+	FnSigs      map[string]V2FnSig
+	MethodSigs  map[string]map[string]V2FnSig // type → method → sig
+	ParentTypes map[string][]string           // class → parent types
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
 	c := &V2Checker{
-		scope:      newV2Scope(nil),
-		fnSigs:     make(map[string]V2FnSig),
-		methodSigs: make(map[string]map[string]V2FnSig),
+		scope:       newV2Scope(nil),
+		fnSigs:      make(map[string]V2FnSig),
+		methodSigs:  make(map[string]map[string]V2FnSig),
+		parentTypes: make(map[string][]string),
 	}
 	for _, d := range prog.Decls {
 		c.registerDecl(d)
 	}
-	return CollectedSigs{FnSigs: c.fnSigs, MethodSigs: c.methodSigs}
+	return CollectedSigs{FnSigs: c.fnSigs, MethodSigs: c.methodSigs, ParentTypes: c.parentTypes}
 }
 
 func (c *V2Checker) errorf(line int, format string, args ...any) {
@@ -192,6 +199,9 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 		c.fnSigs[d.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
 	case *parser.ClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
+		if len(d.Parents) > 0 {
+			c.parentTypes[d.Name] = d.Parents
+		}
 	case *parser.DataClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 	case *parser.EnumDecl:
@@ -775,6 +785,14 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 			return false // primitives can't be null
 		default:
 			return true // reference types accept null
+		}
+	}
+	// Check if actual type implements/extends declared type
+	if parents, ok := c.parentTypes[actual.Name]; ok {
+		for _, p := range parents {
+			if p == declared.Name {
+				return true
+			}
 		}
 	}
 	return false
