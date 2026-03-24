@@ -77,6 +77,10 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
+		case lexer.TOKEN_ACTOR:
+			prog.Decls = append(prog.Decls, p.v2ParseActorDecl())
+		case lexer.TOKEN_SUPERVISOR:
+			prog.Decls = append(prog.Decls, p.v2ParseSupervisorDecl())
 		default:
 			// Check for contextual keyword: sealed class
 			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "sealed" && p.peekAt(1).Type == lexer.TOKEN_CLASS {
@@ -1054,6 +1058,107 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods, Variants: variants}
+}
+
+// v2ParseActorDecl: actor Name[<T>] [: Interface] { fields, init, receive fn, fn }
+func (p *Parser) v2ParseActorDecl() *ActorDecl {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_ACTOR)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	typeParams := p.parseTypeParams()
+
+	// Optional interfaces: actor Counter : Monitorable
+	var parents []string
+	if p.check(lexer.TOKEN_COLON) {
+		p.advance()
+		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		}
+	}
+
+	var fields []*FieldDecl
+	var methods []*MethodDecl
+	var receives []*MethodDecl
+	var ctor *CtorDecl
+
+	p.expect(lexer.TOKEN_LBRACE)
+	p.skipSemis()
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		tok := p.peek()
+
+		if tok.Type == lexer.TOKEN_RECEIVE {
+			// receive fn name(...) { ... }
+			p.advance() // consume "receive"
+			m := p.v2ParseMethodDecl()
+			m.IsPub = true // receive handlers are the public API
+			receives = append(receives, m)
+		} else if tok.Type == lexer.TOKEN_FN {
+			m := p.v2ParseMethodDecl()
+			m.IsPub = false // private helper
+			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+			// init(params) { body } — constructor
+			p.advance() // consume init
+			params := p.v2ParseParamList()
+			body := p.v2ParseBlock()
+			ctor = &CtorDecl{Params: params, Body: body}
+		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
+			f := p.v2ParseFieldDecl()
+			fields = append(fields, f)
+		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
+			f := p.v2ParseFieldDeclNoKeyword()
+			fields = append(fields, f)
+		} else {
+			p.errorf("unexpected token %s in actor body", tok.Type)
+			p.advance()
+		}
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &ActorDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods, Receives: receives}
+}
+
+// v2ParseSupervisorDecl: supervisor Name { init fields, child declarations, init(...) { } }
+func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_SUPERVISOR)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+
+	var fields []*FieldDecl
+	var children []*ChildDecl
+	var ctor *CtorDecl
+
+	p.expect(lexer.TOKEN_LBRACE)
+	p.skipSemis()
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		tok := p.peek()
+
+		if tok.Type == lexer.TOKEN_CHILD {
+			// child worker1 = new ProcessorWorker(...)
+			p.advance() // consume "child"
+			childName := p.expect(lexer.TOKEN_IDENT).Literal
+			p.expect(lexer.TOKEN_ASSIGN)
+			initExpr := p.v2ParseExpr()
+			children = append(children, &ChildDecl{Name: childName, Init: initExpr})
+		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+			// init(params) { body } — constructor
+			p.advance() // consume init
+			params := p.v2ParseParamList()
+			body := p.v2ParseBlock()
+			ctor = &CtorDecl{Params: params, Body: body}
+		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
+			f := p.v2ParseFieldDecl()
+			fields = append(fields, f)
+		} else {
+			p.errorf("unexpected token %s in supervisor body", tok.Type)
+			p.advance()
+		}
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &SupervisorDecl{Line: line, Name: name, Fields: fields, Ctor: ctor, Children: children}
 }
 
 // v2ParseMethodDecl: fn name(params)[: ReturnType] { body }

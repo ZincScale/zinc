@@ -2266,3 +2266,98 @@ func TestFullyQualifiedTypes(t *testing.T) {
 		"java.math.BigDecimal[] values",
 	)
 }
+
+// --- Actor Tests -------------------------------------------------------------
+
+func TestActorBasic(t *testing.T) {
+	assertContains(t, `
+actor Counter {
+	var int count = 0
+
+	receive fn increment() {
+		count += 1
+	}
+}`,
+		"LinkedBlockingQueue<Runnable> _mailbox",
+		"volatile boolean _running = true",
+		"Thread.startVirtualThread",
+		"_mailbox.take()",
+		"public void increment()",
+		"_mailbox.add(() ->",
+	)
+}
+
+func TestActorRequestReply(t *testing.T) {
+	assertContains(t, `
+actor Counter {
+	var int count = 0
+
+	receive fn getCount(): int {
+		return count
+	}
+}`,
+		"CompletableFuture<Integer>",
+		"_future.complete(count)",
+		"return _future.get()",
+		"public int getCount()",
+	)
+}
+
+func TestActorConstructor(t *testing.T) {
+	assertContains(t, `
+actor Counter {
+	var int count = 0
+
+	init(int start) {
+		count = start
+	}
+
+	receive fn getCount(): int {
+		return count
+	}
+}`,
+		"public Counter(int start) throws Exception",
+		"count = start",
+		"Thread.startVirtualThread",
+	)
+}
+
+func TestActorPrivateMethods(t *testing.T) {
+	assertContains(t, `
+actor Processor {
+	fn validate(int n): boolean {
+		return n > 0
+	}
+}`,
+		"private boolean validate(int n)",
+	)
+}
+
+func TestActorLifecycle(t *testing.T) {
+	assertContains(t, `
+actor Worker {
+	receive fn doWork() {
+	}
+}`,
+		"public void shutdown() throws Exception",
+		"public void shutdown(long timeoutMs) throws Exception",
+		"public void kill()",
+		"_actorThread.interrupt()",
+		"_mailbox.clear()",
+		"ActorRuntime.pendingKill",
+	)
+}
+
+func TestSupervisorBasic(t *testing.T) {
+	assertContains(t, `
+supervisor Pipeline {
+	init String strategy = "one_for_one"
+
+	child worker1 = new Object()
+}`,
+		"public static class Pipeline",
+		"private Object worker1",
+		"public void start()",
+		"public void shutdown()",
+	)
+}

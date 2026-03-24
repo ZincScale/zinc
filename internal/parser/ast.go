@@ -152,6 +152,39 @@ type EnumDecl struct {
 func (e *EnumDecl) nodeTag()      {}
 func (e *EnumDecl) topLevelTag() {}
 
+// ActorDecl: actor Counter { var int count = 0; init(...) { }; receive fn ...(); fn ...() }
+type ActorDecl struct {
+	Line       int
+	Name       string
+	TypeParams []string      // generic type parameter names
+	Parents    []string      // interfaces the actor implements
+	Fields     []*FieldDecl
+	Ctor       *CtorDecl     // init(...) { } constructor (nil if none)
+	Methods    []*MethodDecl // regular private helpers (not message handlers)
+	Receives   []*MethodDecl // receive fn handlers (message interface)
+}
+
+func (a *ActorDecl) nodeTag()      {}
+func (a *ActorDecl) topLevelTag() {}
+
+// SupervisorDecl: supervisor Pipeline { init fields; child declarations; init(...) { } }
+type SupervisorDecl struct {
+	Line     int
+	Name     string
+	Fields   []*FieldDecl
+	Ctor     *CtorDecl    // init(...) { } constructor (nil if none)
+	Children []*ChildDecl
+}
+
+func (s *SupervisorDecl) nodeTag()      {}
+func (s *SupervisorDecl) topLevelTag() {}
+
+// ChildDecl: child worker1 = new ProcessorWorker(...)
+type ChildDecl struct {
+	Name string
+	Init Expr // factory expression for create/restart
+}
+
 // ConstDecl: [pub] const NAME: Type = expr
 type ConstDecl struct {
 	Line  int // source line number (1-indexed)

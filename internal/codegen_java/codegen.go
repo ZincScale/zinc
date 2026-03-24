@@ -16,6 +16,7 @@ package codegen_java
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"zinc/internal/parser"
@@ -150,6 +151,7 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 	// Separate declarations into types (own file) vs functions (main file)
 	var fnDecls []parser.TopLevelDecl
 	var constDecls []parser.TopLevelDecl
+	hasActors := false
 
 	for _, d := range prog.Decls {
 		switch decl := d.(type) {
@@ -211,11 +213,42 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 				Name:    decl.Name + ".java",
 				Content: g.buf.String(),
 			})
+		case *parser.ActorDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitPackageAndImports(prog.Package, prog.Imports)
+			g.emitActorDeclTopLevel(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
+			hasActors = true
+		case *parser.SupervisorDecl:
+			g.buf.Reset()
+			g.indent = 0
+			g.emitPackageAndImports(prog.Package, prog.Imports)
+			g.emitSupervisorDeclTopLevel(decl)
+			files = append(files, OutputFile{
+				Name:    decl.Name + ".java",
+				Content: g.buf.String(),
+			})
 		case *parser.FnDecl:
 			fnDecls = append(fnDecls, decl)
 		case *parser.ConstDecl:
 			constDecls = append(constDecls, decl)
 		}
+	}
+
+	// Generate ActorRuntime if any actors exist
+	if hasActors {
+		g.buf.Reset()
+		g.indent = 0
+		g.emitPackageAndImports(prog.Package, prog.Imports)
+		g.emitActorRuntime()
+		files = append(files, OutputFile{
+			Name:    "ActorRuntime.java",
+			Content: g.buf.String(),
+		})
 	}
 
 	// Main class file: top-level functions + script statements
@@ -374,6 +407,10 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitInterfaceDecl(decl)
 	case *parser.ConstDecl:
 		g.emitConstDecl(decl)
+	case *parser.ActorDecl:
+		g.emitActorDecl(decl)
+	case *parser.SupervisorDecl:
+		g.emitSupervisorDecl(decl)
 	}
 }
 
@@ -616,6 +653,326 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	g.emitMethodDefaultOverloads(vis, static, ret, m.Name, m.Params)
 }
 
+// --- Actors ------------------------------------------------------------------
+
+func (g *Generator) emitActorDecl(act *parser.ActorDecl) {
+	g.emitActorBody(act, "public static class")
+}
+
+func (g *Generator) emitActorDeclTopLevel(act *parser.ActorDecl) {
+	g.emitActorBody(act, "public class")
+}
+
+func (g *Generator) emitActorBody(act *parser.ActorDecl, classPrefix string) {
+	typeParams := ""
+	if len(act.TypeParams) > 0 {
+		typeParams = "<" + strings.Join(act.TypeParams, ", ") + ">"
+	}
+	ext := g.buildInheritanceClause(act.Parents)
+
+	g.writeln("%s %s%s%s {", classPrefix, act.Name, typeParams, ext)
+	g.indent++
+
+	// Infrastructure fields
+	g.writeln("private final java.util.concurrent.LinkedBlockingQueue<Runnable> _mailbox = new java.util.concurrent.LinkedBlockingQueue<>();")
+	g.writeln("private final Thread _actorThread;")
+	g.writeln("private volatile boolean _running = true;")
+	g.writeln("")
+
+	// User fields (all private, no accessors — actor state is owned)
+	for _, f := range act.Fields {
+		g.emitActorFieldDecl(f)
+	}
+	if len(act.Fields) > 0 {
+		g.writeln("")
+	}
+
+	// Constructor
+	g.emitActorCtor(act)
+
+	// Receive methods (public API — message handlers)
+	for _, m := range act.Receives {
+		g.emitActorReceiveMethod(m)
+		g.writeln("")
+	}
+
+	// Private helper methods
+	g.currentClassParents = act.Parents
+	for _, m := range act.Methods {
+		g.emitMethodDecl(m)
+		g.writeln("")
+	}
+
+	// Lifecycle methods
+	g.emitActorLifecycleMethods()
+
+	g.indent--
+	g.writeln("}")
+}
+
+func (g *Generator) emitActorFieldDecl(f *parser.FieldDecl) {
+	typeName := "Object"
+	if f.Type != nil {
+		typeName = g.formatType(f.Type)
+	}
+	if f.Default != nil {
+		g.writeln("private %s %s = %s;", typeName, f.Name, g.formatExpr(f.Default))
+	} else {
+		g.writeln("private %s %s;", typeName, f.Name)
+	}
+}
+
+func (g *Generator) emitActorCtor(act *parser.ActorDecl) {
+	params := ""
+	if act.Ctor != nil {
+		params = g.formatParams(act.Ctor.Params)
+	}
+	g.writeln("public %s(%s) throws Exception {", act.Name, params)
+	g.indent++
+
+	// User init body
+	if act.Ctor != nil {
+		g.emitBlock(act.Ctor.Body)
+	}
+
+	// Start actor thread with message loop
+	g.writeln("this._actorThread = Thread.startVirtualThread(() -> {")
+	g.indent++
+	g.writeln("while (_running) {")
+	g.indent++
+	g.writeln("try {")
+	g.indent++
+	g.writeln("Runnable msg = _mailbox.take();")
+	g.writeln("msg.run();")
+	g.indent--
+	g.writeln("} catch (InterruptedException e) {")
+	g.indent++
+	g.writeln("Thread.currentThread().interrupt();")
+	g.writeln("break;")
+	g.indent--
+	g.writeln("} catch (Exception e) {")
+	g.indent++
+	g.writeln("System.err.println(\"Actor error: \" + e.getMessage());")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("});")
+
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+}
+
+func (g *Generator) emitActorReceiveMethod(m *parser.MethodDecl) {
+	hasReturn := m.ReturnType != nil
+	params := g.formatParams(m.Params)
+
+	if hasReturn {
+		// Request-reply: CompletableFuture
+		ret := g.formatType(m.ReturnType)
+		boxedRet := g.formatTypeBoxed(m.ReturnType)
+		g.writeln("public %s %s(%s) throws Exception {", ret, m.Name, params)
+		g.indent++
+		g.writeln("var _future = new java.util.concurrent.CompletableFuture<%s>();", boxedRet)
+		g.writeln("_mailbox.add(() -> {")
+		g.indent++
+		g.emitActorReceiveBody(m.Body, true)
+		g.indent--
+		g.writeln("});")
+		g.writeln("return _future.get();")
+		g.indent--
+		g.writeln("}")
+	} else {
+		// Fire-and-forget
+		g.writeln("public void %s(%s) {", m.Name, params)
+		g.indent++
+		g.writeln("_mailbox.add(() -> {")
+		g.indent++
+		g.emitActorReceiveBody(m.Body, false)
+		g.indent--
+		g.writeln("});")
+		g.indent--
+		g.writeln("}")
+	}
+}
+
+func (g *Generator) emitActorReceiveBody(body *parser.BlockStmt, isRequestReply bool) {
+	if body == nil {
+		return
+	}
+	for _, s := range body.Stmts {
+		if isRequestReply {
+			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
+				g.writeln("_future.complete(%s);", g.formatExpr(ret.Value))
+				continue
+			}
+		}
+		g.emitStmt(s)
+	}
+}
+
+func (g *Generator) emitActorLifecycleMethods() {
+	// shutdown() — cooperative
+	g.writeln("public void shutdown() throws Exception {")
+	g.indent++
+	g.writeln("_running = false;")
+	g.writeln("_mailbox.add(() -> {});")
+	g.writeln("_actorThread.join();")
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// shutdown(timeoutMs) — cooperative with escalation
+	g.writeln("public void shutdown(long timeoutMs) throws Exception {")
+	g.indent++
+	g.writeln("_running = false;")
+	g.writeln("_mailbox.add(() -> {});")
+	g.writeln("_actorThread.join(timeoutMs);")
+	g.writeln("if (_actorThread.isAlive()) { _actorThread.interrupt(); }")
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// kill() — brutal
+	g.writeln("public void kill() {")
+	g.indent++
+	g.writeln("_running = false;")
+	g.writeln("_actorThread.interrupt();")
+	g.writeln("_mailbox.clear();")
+	g.writeln("ActorRuntime.pendingKill(_actorThread);")
+	g.indent--
+	g.writeln("}")
+}
+
+// --- ActorRuntime (generated once per app when actors are used) ---------------
+
+func (g *Generator) emitActorRuntime() {
+	g.writeln("public class ActorRuntime {")
+	g.indent++
+	g.writeln("private static final java.util.concurrent.ConcurrentLinkedQueue<Thread> _pendingKills = new java.util.concurrent.ConcurrentLinkedQueue<>();")
+	g.writeln("private static final long REAPER_TIMEOUT_MS = 10_000;")
+	g.writeln("private static volatile boolean _reaperStarted = false;")
+	g.writeln("")
+	g.writeln("public static void pendingKill(Thread thread) {")
+	g.indent++
+	g.writeln("_pendingKills.add(thread);")
+	g.writeln("ensureReaperStarted();")
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+	g.writeln("private static synchronized void ensureReaperStarted() {")
+	g.indent++
+	g.writeln("if (_reaperStarted) return;")
+	g.writeln("_reaperStarted = true;")
+	g.writeln("Thread.startVirtualThread(() -> {")
+	g.indent++
+	g.writeln("while (true) {")
+	g.indent++
+	g.writeln("try { Thread.sleep(REAPER_TIMEOUT_MS); } catch (InterruptedException e) { break; }")
+	g.writeln("var it = _pendingKills.iterator();")
+	g.writeln("while (it.hasNext()) {")
+	g.indent++
+	g.writeln("var t = it.next();")
+	g.writeln("if (!t.isAlive()) {")
+	g.indent++
+	g.writeln("it.remove();")
+	g.indent--
+	g.writeln("} else {")
+	g.indent++
+	g.writeln("System.err.println(\"FATAL: Actor thread refused to terminate after kill. Forcing exit.\");")
+	g.writeln("System.exit(1);")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("});")
+	g.indent--
+	g.writeln("}")
+	g.indent--
+	g.writeln("}")
+}
+
+// --- Supervisors -------------------------------------------------------------
+
+func (g *Generator) emitSupervisorDecl(sup *parser.SupervisorDecl) {
+	g.emitSupervisorBody(sup, "public static class")
+}
+
+func (g *Generator) emitSupervisorDeclTopLevel(sup *parser.SupervisorDecl) {
+	g.emitSupervisorBody(sup, "public class")
+}
+
+func (g *Generator) emitSupervisorBody(sup *parser.SupervisorDecl, classPrefix string) {
+	g.writeln("%s %s {", classPrefix, sup.Name)
+	g.indent++
+
+	// Fields
+	for _, f := range sup.Fields {
+		g.emitFieldDecl(f)
+	}
+
+	// Child actor fields
+	for _, c := range sup.Children {
+		g.writeln("private Object %s;", c.Name)
+	}
+	if len(sup.Fields) > 0 || len(sup.Children) > 0 {
+		g.writeln("")
+	}
+
+	// Constructor
+	if sup.Ctor != nil {
+		params := g.formatParams(sup.Ctor.Params)
+		g.writeln("public %s(%s) throws Exception {", sup.Name, params)
+		g.indent++
+		g.emitBlock(sup.Ctor.Body)
+		g.indent--
+		g.writeln("}")
+		g.writeln("")
+	}
+
+	// start() — create and start all child actors
+	g.writeln("public void start() throws Exception {")
+	g.indent++
+	for _, c := range sup.Children {
+		g.writeln("%s = %s;", c.Name, g.formatExpr(c.Init))
+	}
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// shutdown() — cascade to all children
+	g.writeln("public void shutdown() throws Exception {")
+	g.indent++
+	for _, c := range sup.Children {
+		g.writeln("if (%s != null) { ((Object) %s).getClass().getMethod(\"shutdown\").invoke(%s); }", c.Name, c.Name, c.Name)
+	}
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// shutdown(timeoutMs) — cascade with timeout then kill
+	g.writeln("public void shutdown(long timeoutMs) throws Exception {")
+	g.indent++
+	for _, c := range sup.Children {
+		g.writeln("if (%s != null) {", c.Name)
+		g.indent++
+		g.writeln("try { ((Object) %s).getClass().getMethod(\"shutdown\", long.class).invoke(%s, timeoutMs); } catch (Exception e) {}", c.Name, c.Name)
+		g.writeln("try { ((Object) %s).getClass().getMethod(\"kill\").invoke(%s); } catch (Exception e) {}", c.Name, c.Name)
+		g.indent--
+		g.writeln("}")
+	}
+	g.indent--
+	g.writeln("}")
+
+	g.indent--
+	g.writeln("}")
+}
+
 // --- Data Classes (Records) --------------------------------------------------
 
 func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
@@ -743,7 +1100,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.ParallelForStmt:
 		g.emitParallelForStmt(stmt)
 	case *parser.GoStmt:
-		// go { body } → Thread.startVirtualThread
+		// go { body } → Thread.startVirtualThread (DEPRECATED)
+		fmt.Fprintln(os.Stderr, "warning: 'go' is deprecated — use actor for concurrent work")
 		g.writeln("Thread.startVirtualThread(() -> {")
 		g.indent++
 		g.emitBlock(stmt.Body)
@@ -1338,6 +1696,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.tupleTypes[n] = true
 		return fmt.Sprintf("new Tuple%d(%s)", n, g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
+		fmt.Fprintln(os.Stderr, "warning: 'spawn' is deprecated — use actor for concurrent work")
 		var body strings.Builder
 		if expr.Body != nil {
 			for _, s := range expr.Body.Stmts {

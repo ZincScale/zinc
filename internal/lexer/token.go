@@ -77,6 +77,10 @@ const (
 	TOKEN_INIT       // init (constructor-set immutable field)
 	TOKEN_CONCURRENT // concurrent { } (fan-out/fan-in)
 	TOKEN_TIMEOUT    // timeout(dur) { }
+	TOKEN_ACTOR      // actor (isolated concurrent unit)
+	TOKEN_SUPERVISOR // supervisor (manages actor lifecycle)
+	TOKEN_RECEIVE    // receive (message handler in actor)
+	TOKEN_CHILD      // child (managed actor in supervisor)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -184,6 +188,10 @@ var tokenNames = map[TokenType]string{
 	TOKEN_INIT:       "init",
 	TOKEN_CONCURRENT: "concurrent",
 	TOKEN_TIMEOUT:    "timeout",
+	TOKEN_ACTOR:      "actor",
+	TOKEN_SUPERVISOR: "supervisor",
+	TOKEN_RECEIVE:    "receive",
+	TOKEN_CHILD:      "child",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -299,6 +307,10 @@ var keywords = map[string]TokenType{
 	"init":       TOKEN_INIT,
 	"concurrent": TOKEN_CONCURRENT,
 	"timeout":    TOKEN_TIMEOUT,
+	"actor":      TOKEN_ACTOR,
+	"supervisor": TOKEN_SUPERVISOR,
+	"receive":    TOKEN_RECEIVE,
+	"child":      TOKEN_CHILD,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.
