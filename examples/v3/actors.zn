@@ -1,7 +1,14 @@
 // Actors — Zinc v3
-// Demonstrates: actor, receive fn, fire-and-forget, request-reply, shutdown, kill
+// Comprehensive actor model tests:
+//   - fire-and-forget, request-reply, constructor injection
+//   - message ordering (FIFO), complex state, private helpers
+//   - actor-to-actor messaging, concurrent senders
+//   - shutdown, kill lifecycle
 
-// Simple counter actor
+import java.util.concurrent.atomic.AtomicInteger
+
+// === Test 1: Basic counter — fire-and-forget + request-reply ===
+
 actor Counter {
     var int count = 0
 
@@ -22,27 +29,18 @@ actor Counter {
     }
 }
 
-// Create actor — starts immediately
 var counter = new Counter(0)
-
-// Fire-and-forget messages
 counter.increment()
 counter.increment()
 counter.increment()
 counter.add(7)
-
-// Small delay to let messages process
 Thread.sleep(100)
-
-// Request-reply — blocks until response
 var n = counter.getCount()
 print("count: {n}")
-
-// Shutdown — cooperative drain + join
 counter.shutdown()
-print("counter shutdown")
 
-// Actor with no constructor
+// === Test 2: No-arg constructor + String return ===
+
 actor Greeter {
     receive fn greet(String name): String {
         return "hello {name}"
@@ -53,5 +51,187 @@ var greeter = new Greeter()
 var msg = greeter.greet("zinc")
 print(msg)
 greeter.shutdown()
+
+// === Test 3: Message ordering — FIFO guarantee ===
+
+actor OrderTracker {
+    var String log = ""
+
+    receive fn append(String s) {
+        log = log + s
+    }
+
+    receive fn getLog(): String {
+        return log
+    }
+}
+
+var tracker = new OrderTracker()
+tracker.append("a")
+tracker.append("b")
+tracker.append("c")
+tracker.append("d")
+tracker.append("e")
+Thread.sleep(100)
+var log = tracker.getLog()
+print("order: {log}")
+tracker.shutdown()
+
+// === Test 4: Complex state — List accumulation ===
+
+actor Collector {
+    var List<String> items = new ArrayList()
+
+    receive fn add(String item) {
+        items.add(item)
+    }
+
+    receive fn size(): int {
+        return items.size()
+    }
+
+    receive fn getAll(): String {
+        return String.join(",", items)
+    }
+}
+
+var collector = new Collector()
+collector.add("x")
+collector.add("y")
+collector.add("z")
+Thread.sleep(100)
+var sz = collector.size()
+print("size: {sz}")
+var all = collector.getAll()
+print("items: {all}")
+collector.shutdown()
+
+// === Test 5: Private helper methods ===
+
+actor Calculator {
+    var int result = 0
+
+    receive fn compute(int a, int b): int {
+        result = doAdd(a, b)
+        return result
+    }
+
+    fn doAdd(int a, int b): int {
+        return a + b
+    }
+}
+
+var calc = new Calculator()
+var sum = calc.compute(17, 25)
+print("sum: {sum}")
+calc.shutdown()
+
+// === Test 6: Multiple request-reply in sequence ===
+
+actor Doubler {
+    receive fn twice(int n): int {
+        return n * 2
+    }
+}
+
+var doubler = new Doubler()
+var r1 = doubler.twice(5)
+var r2 = doubler.twice(r1)
+var r3 = doubler.twice(r2)
+print("doubled: {r3}")
+doubler.shutdown()
+
+// === Test 7: Actor-to-actor messaging ===
+
+actor Adder {
+    var int total = 0
+
+    receive fn add(int n) {
+        total += n
+    }
+
+    receive fn getTotal(): int {
+        return total
+    }
+}
+
+actor Multiplier {
+    init Adder target
+
+    init(Adder target) {
+        this.target = target
+    }
+
+    receive fn multiplyAndSend(int n, int factor) {
+        var result = n * factor
+        target.add(result)
+    }
+}
+
+var adder = new Adder()
+var multiplier = new Multiplier(adder)
+multiplier.multiplyAndSend(3, 10)
+multiplier.multiplyAndSend(4, 10)
+multiplier.multiplyAndSend(5, 10)
+Thread.sleep(200)
+var total = adder.getTotal()
+print("total: {total}")
+multiplier.shutdown()
+adder.shutdown()
+
+// === Test 8: Concurrent senders — no lost messages ===
+
+actor ConcurrentCounter {
+    var int count = 0
+
+    receive fn inc() {
+        count += 1
+    }
+
+    receive fn getCount(): int {
+        return count
+    }
+}
+
+var cc = new ConcurrentCounter()
+// Send 100 increments from parallel threads
+var indices = new ArrayList()
+for i in 0..100 {
+    indices.add(i)
+}
+parallel for i in indices {
+    cc.inc()
+}
+Thread.sleep(200)
+var ccn = cc.getCount()
+print("concurrent: {ccn}")
+cc.shutdown()
+
+// === Test 9: Kill lifecycle ===
+
+actor Immortal {
+    var int ticks = 0
+
+    receive fn tick() {
+        ticks += 1
+    }
+
+    receive fn getTicks(): int {
+        return ticks
+    }
+}
+
+var mortal = new Immortal()
+mortal.tick()
+mortal.tick()
+mortal.tick()
+Thread.sleep(100)
+var ticks = mortal.getTicks()
+print("before kill: {ticks}")
+mortal.kill()
+print("killed")
+
+// Small delay for reaper to clean up (thread should exit quickly)
+Thread.sleep(200)
 
 print("Actors OK")

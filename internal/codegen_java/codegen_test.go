@@ -2348,6 +2348,99 @@ actor Worker {
 	)
 }
 
+func TestActorMultipleReceiveFns(t *testing.T) {
+	assertContains(t, `
+actor Counter {
+	var int count = 0
+	receive fn increment() { count += 1 }
+	receive fn add(int n) { count += n }
+	receive fn getCount(): int { return count }
+	receive fn reset() { count = 0 }
+}`,
+		"public void increment()",
+		"public void add(int n)",
+		"public int getCount()",
+		"public void reset()",
+		// All fire-and-forget should use _mailbox.add
+		"_mailbox.add(() ->",
+		// Request-reply should use CompletableFuture
+		"CompletableFuture<Integer>",
+	)
+}
+
+func TestActorReceiveTryCatch(t *testing.T) {
+	// Verify fire-and-forget wraps in try-catch preserving exception type
+	assertContains(t, `
+actor Worker {
+	receive fn doWork() {
+		print("working")
+	}
+}`,
+		"try {",
+		"(e instanceof RuntimeException re) ? re : new RuntimeException(e)",
+	)
+}
+
+func TestActorRequestReplyTryCatch(t *testing.T) {
+	// Verify request-reply wraps in try-catch with completeExceptionally
+	assertContains(t, `
+actor Worker {
+	receive fn compute(): int {
+		return 42
+	}
+}`,
+		"try {",
+		"_future.completeExceptionally(e)",
+	)
+}
+
+func TestActorNoFields(t *testing.T) {
+	// Actor with no state — just a message handler
+	assertContains(t, `
+actor Echo {
+	receive fn echo(String msg): String {
+		return msg
+	}
+}`,
+		"public static class Echo",
+		"LinkedBlockingQueue<Runnable> _mailbox",
+		"public String echo(String msg)",
+	)
+}
+
+func TestActorFieldsPrivate(t *testing.T) {
+	// Actor fields should be private with no getters
+	result := transpile(`
+actor Secret {
+	var String data = "hidden"
+	receive fn getData(): String { return data }
+}`)
+	if !strings.Contains(result, "private String data") {
+		t.Errorf("expected private field, got:\n%s", result)
+	}
+	// Should NOT have a getter method for 'data'
+	if strings.Contains(result, "public String getData") && strings.Contains(result, "return this.data") {
+		// getData is a receive fn, not a getter — it should use CompletableFuture
+		if !strings.Contains(result, "CompletableFuture") {
+			t.Errorf("expected receive fn with CompletableFuture, got plain getter:\n%s", result)
+		}
+	}
+}
+
+func TestActorWithParent(t *testing.T) {
+	assertContains(t, `
+interface Pingable {
+	fn ping(): String
+}
+actor PingActor : Pingable {
+	receive fn ping(): String {
+		return "pong"
+	}
+}`,
+		"implements Pingable",
+	)
+}
+
 func TestSupervisorBasic(t *testing.T) {
 	assertContains(t, `
 supervisor Pipeline {

@@ -1,4 +1,12 @@
 count: 10
-counter shutdown
 hello zinc
+order: abcde
+size: 3
+items: x,y,z
+sum: 42
+doubled: 40
+total: 120
+concurrent: 100
+before kill: 3
+killed
 Actors OK
