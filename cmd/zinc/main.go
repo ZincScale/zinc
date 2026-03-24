@@ -649,6 +649,14 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Generate Java files
 		className := classNameFromFile(pf.path)
 		gen := codegen_java.New()
+		// Register cross-file interface names so codegen emits "implements" not "extends"
+		for _, other := range parsed {
+			for _, d := range other.prog.Decls {
+				if iface, ok := d.(*parser.InterfaceDecl); ok {
+					gen.RegisterInterface(iface.Name)
+				}
+			}
+		}
 		outputFiles := gen.GenerateFiles(pf.prog, className)
 
 		pkgDir := outDir

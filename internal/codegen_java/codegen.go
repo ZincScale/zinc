@@ -413,7 +413,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		typeParams = "<" + strings.Join(fn.TypeParams, ", ") + "> "
 	}
 
-	g.writeln("%sstatic %s%s %s(%s) {", vis, typeParams, ret, fn.Name, params)
+	g.writeln("%sstatic %s%s %s(%s) throws Exception {", vis, typeParams, ret, fn.Name, params)
 	g.indent++
 	g.emitBlock(fn.Body)
 	g.indent--
@@ -531,7 +531,7 @@ func (g *Generator) emitAccessors() {
 
 func (g *Generator) emitCtor(className string, ctor *parser.CtorDecl, parents []string) {
 	params := g.formatParams(ctor.Params)
-	g.writeln("public %s(%s) {", className, params)
+	g.writeln("public %s(%s) throws Exception {", className, params)
 	g.indent++
 	if len(ctor.SuperArgs) > 0 {
 		args := g.formatExprList(ctor.SuperArgs)
@@ -565,11 +565,31 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	}
 	params := g.formatParams(m.Params)
 
-	g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
-	g.indent++
-	g.emitBlock(m.Body)
-	g.indent--
-	g.writeln("}")
+	// @Override methods can't add throws not in the parent signature
+	isOverride := false
+	for _, a := range m.Annotations {
+		if a.Name == "Override" {
+			isOverride = true
+			break
+		}
+	}
+	if isOverride {
+		g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
+		g.indent++
+		g.writeln("try {")
+		g.indent++
+		g.emitBlock(m.Body)
+		g.indent--
+		g.writeln("} catch (Exception e) { throw new RuntimeException(e); }")
+		g.indent--
+		g.writeln("}")
+	} else {
+		g.writeln("%s %s%s %s(%s) throws Exception {", vis, static, ret, m.Name, params)
+		g.indent++
+		g.emitBlock(m.Body)
+		g.indent--
+		g.writeln("}")
+	}
 
 	// Generate overloads for default parameters
 	g.emitMethodDefaultOverloads(vis, static, ret, m.Name, m.Params)
@@ -638,7 +658,7 @@ func (g *Generator) emitInterfaceDecl(iface *parser.InterfaceDecl) {
 			ret = g.formatType(m.ReturnType)
 		}
 		params := g.formatParams(m.Params)
-		g.writeln("%s %s(%s);", ret, m.Name, params)
+		g.writeln("%s %s(%s) throws Exception;", ret, m.Name, params)
 	}
 	g.indent--
 	g.writeln("}")
@@ -1775,7 +1795,7 @@ func (g *Generator) emitDefaultOverloads(name string, retType string, params []*
 		argStr := strings.Join(callArgs, ", ")
 
 		if isCtor {
-			g.writeln("public %s(%s) {", name, paramStr)
+			g.writeln("public %s(%s) throws Exception {", name, paramStr)
 			g.indent++
 			g.writeln("this(%s);", argStr)
 			g.indent--
@@ -1783,11 +1803,11 @@ func (g *Generator) emitDefaultOverloads(name string, retType string, params []*
 			g.writeln("")
 		} else {
 			if retType == "void" {
-				g.writeln("static void %s(%s) {", name, paramStr)
+				g.writeln("static void %s(%s) throws Exception {", name, paramStr)
 				g.indent++
 				g.writeln("%s(%s);", name, argStr)
 			} else {
-				g.writeln("static %s %s(%s) {", retType, name, paramStr)
+				g.writeln("static %s %s(%s) throws Exception {", retType, name, paramStr)
 				g.indent++
 				g.writeln("return %s(%s);", name, argStr)
 			}

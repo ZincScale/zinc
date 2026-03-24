@@ -167,7 +167,7 @@ fn greet(String name): String {
     return "Hello, {name}!"
 }
 `,
-		`public static String greet(String name) {`,
+		`public static String greet(String name) throws Exception {`,
 		`return "Hello, " + name + "!";`,
 	)
 }
@@ -178,7 +178,7 @@ fn sayHello() {
     print("Hello!")
 }
 `,
-		`public static void sayHello() {`,
+		`public static void sayHello() throws Exception {`,
 		`System.out.println("Hello!");`,
 	)
 }
@@ -190,9 +190,9 @@ fn connect(String host, int port = 8080): String {
 }
 `,
 		// Full version
-		`static String connect(String host, int port) {`,
+		`static String connect(String host, int port) throws Exception {`,
 		// Overload with default
-		`static String connect(String host) {`,
+		`static String connect(String host) throws Exception {`,
 		`return connect(host, 8080);`,
 	)
 }
@@ -204,12 +204,12 @@ fn setup(String host, int port = 80, boolean ssl = false): String {
 }
 `,
 		// Full version
-		`static String setup(String host, int port, boolean ssl) {`,
+		`static String setup(String host, int port, boolean ssl) throws Exception {`,
 		// Overload: host + port (ssl defaults)
-		`static String setup(String host, int port) {`,
+		`static String setup(String host, int port) throws Exception {`,
 		`return setup(host, port, false);`,
 		// Overload: host only (port + ssl default)
-		`static String setup(String host) {`,
+		`static String setup(String host) throws Exception {`,
 		`return setup(host, 80, false);`,
 	)
 }
@@ -227,9 +227,9 @@ class Server {
 }
 `,
 		// Full constructor
-		`public Server(String host, int port) {`,
+		`public Server(String host, int port) throws Exception {`,
 		// Overload with default
-		`public Server(String host) {`,
+		`public Server(String host) throws Exception {`,
 		`this(host, 8080);`,
 	)
 }
@@ -243,7 +243,7 @@ class Logger {
 }
 `,
 		// Full method
-		`public void log(String msg, String level) {`,
+		`public void log(String msg, String level) throws Exception {`,
 		// Overload with default
 		`public void log(String msg) {`,
 		`log(msg, "INFO");`,
@@ -254,7 +254,7 @@ func TestFnSingleExpression(t *testing.T) {
 	assertContains(t, `
 fn double(int x): int = x * 2
 `,
-		`static int double(int x) {`,
+		`static int double(int x) throws Exception {`,
 		`return x * 2;`,
 	)
 }
@@ -263,7 +263,7 @@ func TestFnSingleExpressionVoid(t *testing.T) {
 	assertContains(t, `
 fn greet(String name) = print("Hello, {name}!")
 `,
-		`static void greet(String name) {`,
+		`static void greet(String name) throws Exception {`,
 	)
 }
 
@@ -286,7 +286,7 @@ fn log(String... messages) {
     }
 }
 `,
-		`static void log(String... messages) {`,
+		`static void log(String... messages) throws Exception {`,
 	)
 }
 
@@ -307,7 +307,7 @@ fn add(int a, int b): int {
     return a + b
 }
 `,
-		`public static int add(int a, int b) {`,
+		`public static int add(int a, int b) throws Exception {`,
 		`return a + b;`,
 	)
 }
@@ -1586,9 +1586,9 @@ data Point(int x, int y) {
 }
 `,
 		`public record Point(int x, int y) {`,
-		`public int sum() {`,
+		`public int sum() throws Exception {`,
 		`return x + y;`,
-		`public Point scale(int factor) {`,
+		`public Point scale(int factor) throws Exception {`,
 	)
 }
 
@@ -1609,7 +1609,7 @@ class Box<T> {
 		`public static class Box<T>`,
 		`private T value;`,
 		`public T getValue()`,
-		`public T get() {`,
+		`public T get() throws Exception {`,
 		`return value;`,
 	)
 }
@@ -1620,7 +1620,7 @@ fn identity<T>(T val): T {
     return val
 }
 `,
-		`<T> T identity(T val) {`,
+		`<T> T identity(T val) throws Exception {`,
 		`return val;`,
 	)
 }
@@ -1646,9 +1646,9 @@ class HelloGreeter : Greeter {
 }
 `,
 		`public interface Greeter`,
-		`String greet()`,
+		`String greet() throws Exception`,
 		`public static class HelloGreeter implements Greeter`,
-		`public String greet()`,
+		`public String greet() throws Exception`,
 	)
 }
 
@@ -1749,7 +1749,7 @@ class Dog {
 		`public static class Dog {`,
 		`private String name;`,
 		`private String breed;`,
-		`String speak() {`,
+		`String speak() throws Exception {`,
 		`return "Woof!";`,
 	)
 }
@@ -1778,7 +1778,7 @@ class Puppy : Dog {
 `,
 		`public static class Puppy extends Dog {`,
 		`private String name;`,
-		`String speak() {`,
+		`String speak() throws Exception {`,
 	)
 }
 
@@ -1808,7 +1808,7 @@ class User {
 `,
 		`private final String name;`,
 		`private final int age;`,
-		`public User(String name, int age) {`,
+		`public User(String name, int age) throws Exception {`,
 		`this.name = name;`,
 		`this.age = age;`,
 	)
@@ -1826,7 +1826,7 @@ class Server {
     }
 }
 `,
-		`public Server(String host, int port) {`,
+		`public Server(String host, int port) throws Exception {`,
 		`this.host = host;`,
 		`this.port = port;`,
 	)
@@ -1843,7 +1843,7 @@ class Dog : Animal {
     }
 }
 `,
-		`public Dog(String name, String breed) {`,
+		`public Dog(String name, String breed) throws Exception {`,
 		`super(name);`,
 		`this.breed = breed;`,
 	)
@@ -1869,7 +1869,7 @@ class Counter {
     }
 }
 `,
-		`public Counter(int start) {`,
+		`public Counter(int start) throws Exception {`,
 		`this.start = start;`,
 		`count = start;`,
 		`public void increment()`,
@@ -1885,7 +1885,7 @@ class Foo {
     }
 }
 `,
-		`String toString() {`,
+		`String toString() throws Exception {`,
 		`return "Foo";`,
 	)
 	assertNotContains(t, `
@@ -1959,7 +1959,7 @@ fn find(String key): String? {
     return null
 }
 `,
-		`static String find(String key) {`,
+		`static String find(String key) throws Exception {`,
 		`return null;`,
 	)
 }
@@ -1980,7 +1980,7 @@ fn process(byte[] data): int {
     return data.length
 }
 `,
-		`static int process(byte[] data) {`,
+		`static int process(byte[] data) throws Exception {`,
 		`return data.length;`,
 	)
 }
