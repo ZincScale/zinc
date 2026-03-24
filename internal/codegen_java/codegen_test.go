@@ -2267,64 +2267,80 @@ func TestFullyQualifiedTypes(t *testing.T) {
 	)
 }
 
-// --- Actor Tests -------------------------------------------------------------
+// --- Actor Tests (class extends Actor) ---------------------------------------
 
-func TestActorBasic(t *testing.T) {
+func TestActorBasicDualMode(t *testing.T) {
+	// pub fn on Actor subclass → dual-mode (mailbox if supervised, direct if not)
 	assertContains(t, `
-actor Counter {
+class Counter : Actor {
 	var int count = 0
 
-	receive fn increment() {
+	pub fn increment() {
 		count += 1
 	}
 }`,
-		"LinkedBlockingQueue<Runnable> _mailbox",
-		"volatile boolean _running = true",
-		"Thread.startVirtualThread",
-		"_mailbox.take()",
 		"public void increment()",
+		"if (_mailbox != null)",
 		"_mailbox.add(() ->",
+		"count += 1",
 	)
 }
 
-func TestActorRequestReply(t *testing.T) {
+func TestActorRequestReplyDualMode(t *testing.T) {
 	assertContains(t, `
-actor Counter {
+class Counter : Actor {
 	var int count = 0
 
-	receive fn getCount(): int {
+	pub fn getCount(): int {
 		return count
 	}
 }`,
+		"public int getCount()",
+		"if (_mailbox != null)",
 		"CompletableFuture<Integer>",
 		"_future.complete(count)",
 		"return _future.get()",
-		"public int getCount()",
 	)
 }
 
-func TestActorConstructor(t *testing.T) {
-	assertContains(t, `
-actor Counter {
+func TestActorConstructorInert(t *testing.T) {
+	// Actor constructor should NOT start a thread
+	result := transpile(`
+class Counter : Actor {
 	var int count = 0
 
 	init(int start) {
 		count = start
 	}
 
-	receive fn getCount(): int {
+	pub fn getCount(): int {
+		return count
+	}
+}`)
+	assertContains(t, `
+class Counter : Actor {
+	var int count = 0
+
+	init(int start) {
+		count = start
+	}
+
+	pub fn getCount(): int {
 		return count
 	}
 }`,
 		"public Counter(int start) throws Exception",
 		"count = start",
-		"Thread.startVirtualThread",
 	)
+	// Should NOT contain thread start — actor is inert
+	if strings.Contains(result, "Thread.startVirtualThread") {
+		t.Errorf("actor constructor should NOT start thread:\n%s", result)
+	}
 }
 
 func TestActorPrivateMethods(t *testing.T) {
 	assertContains(t, `
-actor Processor {
+class Processor : Actor {
 	fn validate(int n): boolean {
 		return n > 0
 	}
@@ -2333,46 +2349,43 @@ actor Processor {
 	)
 }
 
-func TestActorLifecycle(t *testing.T) {
-	assertContains(t, `
-actor Worker {
-	receive fn doWork() {
+func TestActorNoLifecycleOnActor(t *testing.T) {
+	// Actors should NOT have shutdown/kill — supervisor handles that
+	result := transpile(`
+class Worker : Actor {
+	pub fn doWork() {
 	}
-}`,
-		"public void shutdown() throws Exception",
-		"public void shutdown(long timeoutMs) throws Exception",
-		"public void kill()",
-		"_actorThread.interrupt()",
-		"_mailbox.clear()",
-		"ActorRuntime.pendingKill",
-	)
+}`)
+	if strings.Contains(result, "public void shutdown()") {
+		t.Errorf("actor should NOT have shutdown method:\n%s", result)
+	}
+	if strings.Contains(result, "public void kill()") {
+		t.Errorf("actor should NOT have kill method:\n%s", result)
+	}
 }
 
-func TestActorMultipleReceiveFns(t *testing.T) {
+func TestActorMultiplePubFns(t *testing.T) {
 	assertContains(t, `
-actor Counter {
+class Counter : Actor {
 	var int count = 0
-	receive fn increment() { count += 1 }
-	receive fn add(int n) { count += n }
-	receive fn getCount(): int { return count }
-	receive fn reset() { count = 0 }
+	pub fn increment() { count += 1 }
+	pub fn add(int n) { count += n }
+	pub fn getCount(): int { return count }
+	pub fn reset() { count = 0 }
 }`,
 		"public void increment()",
 		"public void add(int n)",
 		"public int getCount()",
 		"public void reset()",
-		// All fire-and-forget should use _mailbox.add
 		"_mailbox.add(() ->",
-		// Request-reply should use CompletableFuture
 		"CompletableFuture<Integer>",
 	)
 }
 
-func TestActorReceiveTryCatch(t *testing.T) {
-	// Verify fire-and-forget wraps in try-catch preserving exception type
+func TestActorFireAndForgetTryCatch(t *testing.T) {
 	assertContains(t, `
-actor Worker {
-	receive fn doWork() {
+class Worker : Actor {
+	pub fn doWork() {
 		print("working")
 	}
 }`,
@@ -2382,10 +2395,9 @@ actor Worker {
 }
 
 func TestActorRequestReplyTryCatch(t *testing.T) {
-	// Verify request-reply wraps in try-catch with completeExceptionally
 	assertContains(t, `
-actor Worker {
-	receive fn compute(): int {
+class Worker : Actor {
+	pub fn compute(): int {
 		return 42
 	}
 }`,
@@ -2394,59 +2406,46 @@ actor Worker {
 	)
 }
 
-func TestActorNoFields(t *testing.T) {
-	// Actor with no state — just a message handler
-	assertContains(t, `
-actor Echo {
-	receive fn echo(String msg): String {
-		return msg
-	}
-}`,
-		"public static class Echo",
-		"LinkedBlockingQueue<Runnable> _mailbox",
-		"public String echo(String msg)",
-	)
-}
-
 func TestActorFieldsPrivate(t *testing.T) {
-	// Actor fields should be private with no getters
 	result := transpile(`
-actor Secret {
+class Secret : Actor {
 	var String data = "hidden"
-	receive fn getData(): String { return data }
+	pub fn getData(): String { return data }
 }`)
 	if !strings.Contains(result, "private String data") {
 		t.Errorf("expected private field, got:\n%s", result)
 	}
-	// Should NOT have a getter method for 'data'
-	if strings.Contains(result, "public String getData") && strings.Contains(result, "return this.data") {
-		// getData is a receive fn, not a getter — it should use CompletableFuture
-		if !strings.Contains(result, "CompletableFuture") {
-			t.Errorf("expected receive fn with CompletableFuture, got plain getter:\n%s", result)
-		}
-	}
 }
 
-func TestActorWithParent(t *testing.T) {
+func TestAbstractClass(t *testing.T) {
 	assertContains(t, `
-interface Pingable {
-	fn ping(): String
-}
-actor PingActor : Pingable {
-	receive fn ping(): String {
-		return "pong"
-	}
+abstract class Shape {
+	abstract pub fn area(): double
 }`,
-		"implements Pingable",
+		"abstract public static class Shape",
+		"public abstract double area()",
 	)
 }
 
-func TestSupervisorBasic(t *testing.T) {
+func TestAbstractActorClass(t *testing.T) {
 	assertContains(t, `
-actor Worker {
-	receive fn doWork() {}
+abstract class Processor : Actor {
+	abstract pub fn process(String input): String
+}`,
+		"abstract public static class Processor",
+		"public abstract String process(String input)",
+	)
 }
-supervisor Pipeline {
+
+// --- Supervisor Tests (class extends Supervisor) -----------------------------
+
+func TestSupervisorStart(t *testing.T) {
+	// Supervisor generates start() that activates actor fields
+	assertContains(t, `
+class Worker : Actor {
+	pub fn doWork() {}
+}
+class Team : Supervisor {
 	init Worker w1
 	init Worker w2
 
@@ -2455,22 +2454,41 @@ supervisor Pipeline {
 		this.w2 = w2
 	}
 }`,
-		"public static class Pipeline",
-		"private final Worker w1",
-		"private final Worker w2",
-		"public Pipeline(Worker w1, Worker w2)",
+		"public void start()",
+		"w1._running = true",
+		"w1._mailbox = new java.util.concurrent.ArrayBlockingQueue<>",
+		"Thread.startVirtualThread",
+		"w1._mailbox.take()",
+	)
+}
+
+func TestSupervisorShutdown(t *testing.T) {
+	assertContains(t, `
+class Worker : Actor {
+	pub fn doWork() {}
+}
+class Pipeline : Supervisor {
+	init Worker w1
+	init Worker w2
+
+	init(Worker w1, Worker w2) {
+		this.w1 = w1
+		this.w2 = w2
+	}
+}`,
 		"public void shutdown() throws Exception",
-		"w1.shutdown()",
-		"w2.shutdown()",
+		"w1._running = false",
+		"w1._mailbox.add(() -> {})",
+		"w1._actorThread.join()",
 	)
 }
 
 func TestSupervisorKill(t *testing.T) {
 	assertContains(t, `
-actor Worker {
-	receive fn doWork() {}
+class Worker : Actor {
+	pub fn doWork() {}
 }
-supervisor Team {
+class Team : Supervisor {
 	init Worker w
 
 	init(Worker w) {
@@ -2478,16 +2496,18 @@ supervisor Team {
 	}
 }`,
 		"public void kill()",
-		"w.kill()",
+		"w._actorThread.interrupt()",
+		"w._mailbox.clear()",
+		"_runtime.pendingKill(w._actorThread)",
 	)
 }
 
 func TestSupervisorShutdownTimeout(t *testing.T) {
 	assertContains(t, `
-actor Worker {
-	receive fn doWork() {}
+class Worker : Actor {
+	pub fn doWork() {}
 }
-supervisor Team {
+class Team : Supervisor {
 	init Worker w
 
 	init(Worker w) {
@@ -2495,19 +2515,17 @@ supervisor Team {
 	}
 }`,
 		"public void shutdown(long timeoutMs) throws Exception",
-		"w.shutdown(timeoutMs)",
-		"w.kill()",
+		"w._actorThread.join(timeoutMs)",
 	)
 }
 
 func TestSupervisorMixedFields(t *testing.T) {
-	// Supervisor with both actor fields and config fields
 	// Only actor fields should get lifecycle cascade
 	assertContains(t, `
-actor Worker {
-	receive fn doWork() {}
+class Worker : Actor {
+	pub fn doWork() {}
 }
-supervisor Pipeline {
+class Pipeline : Supervisor {
 	init String name
 	init Worker w
 
@@ -2516,15 +2534,14 @@ supervisor Pipeline {
 		this.w = w
 	}
 }`,
-		"w.shutdown()",
-		"w.kill()",
+		"w._running = false",
 	)
 	// name is not an actor — should NOT appear in lifecycle
 	result := transpile(`
-actor Worker {
-	receive fn doWork() {}
+class Worker : Actor {
+	pub fn doWork() {}
 }
-supervisor Pipeline {
+class Pipeline : Supervisor {
 	init String name
 	init Worker w
 
@@ -2533,7 +2550,41 @@ supervisor Pipeline {
 		this.w = w
 	}
 }`)
-	if strings.Contains(result, "name.shutdown()") {
-		t.Errorf("non-actor field 'name' should not have shutdown() called:\n%s", result)
+	if strings.Contains(result, "name._running") {
+		t.Errorf("non-actor field 'name' should not appear in lifecycle:\n%s", result)
 	}
+}
+
+func TestSupervisorRuntime(t *testing.T) {
+	// Supervisor should have a _runtime field
+	assertContains(t, `
+class Worker : Actor {
+	pub fn doWork() {}
+}
+class Team : Supervisor {
+	init Worker w
+	init(Worker w) {
+		this.w = w
+	}
+}`,
+		"protected ActorRuntime _runtime",
+	)
+}
+
+func TestOverloadedConstructors(t *testing.T) {
+	assertContains(t, `
+class Flexible {
+	var int value = 0
+
+	init(int v) {
+		value = v
+	}
+
+	init(String s) {
+		value = Integer.parseInt(s)
+	}
+}`,
+		"public Flexible(int v) throws Exception",
+		"public Flexible(String s) throws Exception",
+	)
 }

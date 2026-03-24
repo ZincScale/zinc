@@ -869,7 +869,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 		g.writeln("if (%s != null) {", name)
 		g.indent++
 		g.writeln("%s._running = true;", name)
-		g.writeln("%s._mailbox = new java.util.concurrent.ArrayBlockingQueue<>(%s.mailboxCapacity);", name, name)
+		g.writeln("%s._mailbox = new java.util.concurrent.ArrayBlockingQueue<>(%s.mailboxCapacity());", name, name)
 		g.writeln("%s._actorThread = Thread.startVirtualThread(() -> {", name)
 		g.indent++
 		g.writeln("while (%s._running) {", name)
@@ -955,7 +955,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 func (g *Generator) emitActorBaseClass() {
 	g.writeln("public abstract class Actor {")
 	g.indent++
-	g.writeln("public int mailboxCapacity = 1000;")
+	g.writeln("public int mailboxCapacity() { return 1000; }")
 	g.writeln("public java.util.concurrent.ArrayBlockingQueue<Runnable> _mailbox;")
 	g.writeln("public Thread _actorThread;")
 	g.writeln("public volatile boolean _running = false;")
