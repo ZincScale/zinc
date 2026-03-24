@@ -1885,7 +1885,8 @@ class Foo {
     }
 }
 `,
-		`String toString() throws Exception {`,
+		`String toString() {`,
+		`try {`,
 		`return "Foo";`,
 	)
 	assertNotContains(t, `

@@ -19,18 +19,20 @@ import (
 	"strings"
 
 	"zinc/internal/parser"
+	"zinc/internal/typechecker"
 )
 
 // Generator produces Java source from a Zinc AST.
 type Generator struct {
-	buf              strings.Builder
-	indent           int
-	className        string // derived from filename or "Main"
-	pendingAccessors []fieldAccessor
-	tupleTypes       map[int]bool   // track which Tuple arities we need to generate
-	arrayVars        map[string]bool // track variables declared as array types
-	interfaces       map[string]bool // track which type names are interfaces
-	errVarStack      []string        // stack of catch variable names for nested or-blocks
+	buf                strings.Builder
+	indent             int
+	className          string // derived from filename or "Main"
+	pendingAccessors   []fieldAccessor
+	tupleTypes         map[int]bool    // track which Tuple arities we need to generate
+	arrayVars          map[string]bool // track variables declared as array types
+	interfaces         map[string]bool // track which type names are interfaces
+	errVarStack        []string        // stack of catch variable names for nested or-blocks
+	currentClassParents []string       // parents of the class currently being emitted
 }
 
 // New creates a new Java code generator.
@@ -305,6 +307,7 @@ func (g *Generator) emitClassDeclTopLevel(cls *parser.ClassDecl) {
 	g.writeln("public class %s%s%s {", cls.Name, typeParams, ext)
 	g.indent++
 
+	g.currentClassParents = cls.Parents
 	g.pendingAccessors = nil
 	for _, f := range cls.Fields {
 		g.emitFieldDecl(f)
@@ -440,6 +443,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	g.writeln("public static class %s%s%s {", cls.Name, typeParams, ext)
 	g.indent++
 
+	g.currentClassParents = cls.Parents
 	// Fields
 	g.pendingAccessors = nil
 	for _, f := range cls.Fields {
@@ -565,15 +569,32 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	}
 	params := g.formatParams(m.Params)
 
-	// @Override methods can't add throws not in the parent signature
-	isOverride := false
-	for _, a := range m.Annotations {
-		if a.Name == "Override" {
-			isOverride = true
+	// Check if this method overrides a parent method that doesn't throw.
+	// If so, wrap body in try/catch. Otherwise, declare throws Exception.
+	needsWrap := false
+	for _, parent := range g.currentClassParents {
+		// Check Zinc interfaces — they all declare throws Exception, so no wrap needed
+		if g.interfaces[parent] {
+			continue
+		}
+		// Check Java parent via javap
+		javaClass := parent
+		if mapped, ok := typechecker.ZincToJavaClass(parent); ok {
+			javaClass = mapped
+		}
+		if found, throws := typechecker.MethodThrows(javaClass, m.Name); found && !throws {
+			needsWrap = true
 			break
 		}
 	}
-	if isOverride {
+	// All classes implicitly extend java.lang.Object
+	if !needsWrap {
+		if found, throws := typechecker.MethodThrows("java.lang.Object", m.Name); found && !throws {
+			needsWrap = true
+		}
+	}
+
+	if needsWrap {
 		g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
 		g.indent++
 		g.writeln("try {")
@@ -621,6 +642,7 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 	g.writeln("public record %s%s(%s)%s {", d.Name, typeParams, strings.Join(fields, ", "), ext)
 	g.indent++
 
+	g.currentClassParents = d.Parents
 	// Methods inside data class
 	for _, m := range d.Methods {
 		g.emitMethodDecl(m)

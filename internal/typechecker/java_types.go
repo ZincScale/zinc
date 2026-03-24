@@ -39,6 +39,7 @@ type JavaMethodSig struct {
 	Name       string   // e.g. "poll"
 	ReturnType string   // e.g. "E", "int", "boolean", "void"
 	ParamTypes []string // e.g. ["long", "java.util.concurrent.TimeUnit"]
+	Throws     bool     // true if method declares throws
 }
 
 var globalResolver = &JavaTypeResolver{cache: make(map[string]*JavaClassInfo)}
@@ -140,8 +141,10 @@ func parseMethodLine(line string) *JavaMethodSig {
 	line = strings.TrimPrefix(line, "public ")
 	line = strings.TrimSuffix(line, ";")
 
-	// Remove "throws ..." clause
+	// Check and remove "throws ..." clause
+	throws := false
 	if idx := strings.Index(line, " throws "); idx != -1 {
+		throws = true
 		line = line[:idx]
 	}
 
@@ -200,6 +203,7 @@ func parseMethodLine(line string) *JavaMethodSig {
 		Name:       methodName,
 		ReturnType: returnType,
 		ParamTypes: paramTypes,
+		Throws:     throws,
 	}
 }
 
@@ -213,6 +217,27 @@ var zincToJavaClass = map[string]string{
 	"Set":       "java.util.Set",
 	"HashSet":   "java.util.HashSet",
 	"String":    "java.lang.String",
+}
+
+// MethodThrows checks if a method on a Java class declares throws.
+// Returns true if the method throws, false if it doesn't or if unknown.
+func MethodThrows(className string, methodName string) (found bool, throws bool) {
+	info := globalResolver.getClassInfo(className)
+	if info == nil {
+		return false, false
+	}
+	for _, m := range info.Methods {
+		if m.Name == methodName {
+			return true, m.Throws
+		}
+	}
+	return false, false
+}
+
+// ZincToJavaClass maps a Zinc type name to its Java fully-qualified class name.
+func ZincToJavaClass(zincType string) (string, bool) {
+	jc, ok := zincToJavaClass[zincType]
+	return jc, ok
 }
 
 // ResolveZincMethodReturn resolves a method return type for a Zinc type.
