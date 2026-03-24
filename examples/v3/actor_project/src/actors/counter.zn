@@ -1,0 +1,25 @@
+// Counter actor — lives in actors package
+
+actor Counter {
+    var int count = 0
+
+    init(int start) {
+        count = start
+    }
+
+    receive fn increment() {
+        count += 1
+    }
+
+    receive fn add(int n) {
+        count += n
+    }
+
+    receive fn getCount(): int {
+        return count
+    }
+
+    receive fn reset() {
+        count = 0
+    }
+}

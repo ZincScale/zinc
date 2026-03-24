@@ -1,0 +1,57 @@
+// Actors — Zinc v3
+// Demonstrates: actor, receive fn, fire-and-forget, request-reply, shutdown, kill
+
+// Simple counter actor
+actor Counter {
+    var int count = 0
+
+    init(int start) {
+        count = start
+    }
+
+    receive fn increment() {
+        count += 1
+    }
+
+    receive fn add(int n) {
+        count += n
+    }
+
+    receive fn getCount(): int {
+        return count
+    }
+}
+
+// Create actor — starts immediately
+var counter = new Counter(0)
+
+// Fire-and-forget messages
+counter.increment()
+counter.increment()
+counter.increment()
+counter.add(7)
+
+// Small delay to let messages process
+Thread.sleep(100)
+
+// Request-reply — blocks until response
+var n = counter.getCount()
+print("count: {n}")
+
+// Shutdown — cooperative drain + join
+counter.shutdown()
+print("counter shutdown")
+
+// Actor with no constructor
+actor Greeter {
+    receive fn greet(String name): String {
+        return "hello {name}"
+    }
+}
+
+var greeter = new Greeter()
+var msg = greeter.greet("zinc")
+print(msg)
+greeter.shutdown()
+
+print("Actors OK")

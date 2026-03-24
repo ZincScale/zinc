@@ -1,0 +1,13 @@
+# Actor project — multi-file integration test
+extends: JavaModule
+jvmVersion: 25
+
+javacOptions:
+  - --enable-preview
+  - --release
+  - "25"
+
+forkArgs:
+  - --enable-preview
+
+mainClass: Main

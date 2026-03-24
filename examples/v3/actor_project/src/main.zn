@@ -1,0 +1,38 @@
+// Multi-file actor project — main entry point
+// Tests cross-package actor usage: actors defined in actors/ package, used from root
+
+import actors.Counter
+import actors.Greeter
+
+fn main() {
+    // Create actors from another package
+    var counter = new Counter(0)
+    var greeter = new Greeter("hi")
+
+    // Fire-and-forget
+    counter.increment()
+    counter.increment()
+    counter.add(8)
+
+    // Let messages process
+    Thread.sleep(100)
+
+    // Request-reply across packages
+    var n = counter.getCount()
+    print("counter: {n}")
+
+    var msg = greeter.greet("world")
+    print(msg)
+
+    // Reset and verify
+    counter.reset()
+    Thread.sleep(50)
+    var after = counter.getCount()
+    print("after reset: {after}")
+
+    // Shutdown all
+    counter.shutdown()
+    greeter.shutdown()
+
+    print("Multi-file actors OK")
+}

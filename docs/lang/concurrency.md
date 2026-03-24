@@ -4,39 +4,108 @@ Zinc runs on Java 25 virtual threads. No async/await, no colored functions. Ever
 
 See `design-zinc-concurrency.md` for the full design with Java transpilation details.
 
-## spawn
+## actor
 
-Run a block on a new virtual thread:
+An actor is an isolated concurrent unit. It owns its state exclusively, communicates via message passing, and runs on its own virtual thread. Actors can be safely killed because no external code references their state.
 
 ```zinc
-spawn {
-    sendEmail(user, "Welcome!")
+actor Counter {
+    var int count = 0
+
+    init(int start) {
+        count = start
+    }
+
+    // Fire-and-forget — caller doesn't wait
+    receive fn increment() {
+        count += 1
+    }
+
+    receive fn add(int n) {
+        count += n
+    }
+
+    // Request-reply — caller blocks until response
+    receive fn getCount(): int {
+        return count
+    }
+
+    // Regular fn = private helper, runs on actor thread
+    fn validate(int n): boolean {
+        return n > 0
+    }
 }
 ```
 
-With a result (future):
+Usage:
 
 ```zinc
-var future = spawn {
-    fetchUser(id)
+var counter = new Counter(0)    // actor starts immediately
+counter.increment()              // async, returns immediately
+counter.add(5)                   // async, returns immediately
+var n = counter.getCount()       // blocks until reply: 6
+```
+
+### Actor lifecycle
+
+- **`shutdown()`** — cooperative: drains pending messages, waits for actor thread to exit
+- **`shutdown(timeoutMs)`** — cooperative with escalation: waits up to timeout, then interrupts
+- **`kill()`** — brutal: interrupts thread, discards pending messages, hands thread to reaper
+
+```zinc
+counter.shutdown()          // wait for clean exit
+counter.shutdown(5000)      // wait 5s, then interrupt
+counter.kill()              // immediate kill
+```
+
+### Why actors, not spawn
+
+`spawn` creates unstructured threads — fire-and-forget with no error propagation, no lifecycle management, and no safe way to kill. Actors provide:
+
+- **Isolation** — state is private, no shared memory corruption
+- **Message passing** — all communication through the mailbox
+- **Lifecycle** — shutdown/kill with guaranteed cleanup
+- **Brutal kill safety** — because state is owned, thread abandonment is safe
+
+### ActorRuntime
+
+When any actor is killed, its thread is registered with a global reaper. If a killed thread doesn't die within the reaper timeout (default 10s), the system exits with `System.exit(1)`. This guarantees no dangling resources — ever.
+
+Three system states, no fourth:
+1. **Running** — actors processing messages
+2. **Shutting down** — actors draining and joining
+3. **Fatal** — killed thread refused to die → forced exit
+
+## supervisor
+
+A supervisor manages child actors. It can start, stop, and restart them.
+
+```zinc
+supervisor Pipeline {
+    init String strategy = "one_for_one"
+    init int maxRestarts = 3
+    init long within = 5000
+
+    child worker1 = new Counter(0)
+    child worker2 = new Counter(100)
 }
-print("main continues...")
-var user = future.get()
 ```
 
-Spawn multiple tasks:
+- `child` declares a managed actor with a factory expression (used for restart)
+- Strategy: `one_for_one` (restart only the failed child), `one_for_all` (restart all on any failure)
 
 ```zinc
-var f1 = spawn { download("file1.zip") }
-var f2 = spawn { download("file2.zip") }
-var f3 = spawn { download("file3.zip") }
-
-var r1 = f1.get()
-var r2 = f2.get()
-var r3 = f3.get()
+var sup = new Pipeline()
+sup.start()                  // create and start all children
+sup.shutdown()               // cascade shutdown to all children
+sup.shutdown(5000)           // cascade with timeout, then kill
 ```
 
-`spawn` is unstructured — the thread outlives the calling scope. Use `concurrent` or `parallel for` for structured work.
+## spawn (deprecated)
+
+> **Deprecated** — use `actor` for long-lived concurrent work, `concurrent` for short-lived fan-out.
+
+`spawn` creates an unstructured virtual thread with no lifecycle management. It is preserved for backward compatibility but emits a compiler warning.
 
 ## concurrent
 
@@ -138,12 +207,20 @@ Bounded producer/consumer queue for communicating between threads:
 ```zinc
 var ch = new Channel<Order>(capacity: 100)
 
-// Producer
-spawn {
-    for order in incomingOrders() {
-        ch.send(order)
+// Producer actor
+actor Producer {
+    init Channel<Order> ch
+
+    init(Channel<Order> ch) {
+        this.ch = ch
     }
-    ch.close()
+
+    receive fn produce(List<Order> orders) {
+        for order in orders {
+            ch.send(order)
+        }
+        ch.close()
+    }
 }
 
 // Consumer
@@ -236,7 +313,8 @@ fn scrapeUrls(List<String> urls): List<String> {
 
 | Primitive | Purpose | Structured? |
 |---|---|---|
-| `spawn { }` | Fire a virtual thread | No |
+| `actor` | Isolated concurrent unit with mailbox | Yes (owned) |
+| `supervisor` | Manages actor lifecycle and restarts | Yes (owned) |
 | `concurrent { }` | Fan-out tasks, collect results | Yes |
 | `concurrent(first: true)` | Race, take first result | Yes |
 | `parallel for` | Fan-out loop, wait for all | Yes |
@@ -248,11 +326,12 @@ fn scrapeUrls(List<String> urls): List<String> {
 | `select { }` | Wait on multiple channels | N/A |
 | `context T { }` | Scoped value declaration | Yes |
 | `with T(...) { }` | Bind scoped value | Yes |
+| ~~`spawn { }`~~ | ~~Fire a virtual thread~~ | Deprecated |
 
 ### What's NOT in Zinc
 
 - **No `async`/`await`** — virtual threads make blocking cheap. No colored functions.
 - **No `synchronized`** — use `lock` (generates `ReentrantLock`).
-- **No raw `Thread` API** — use `spawn`, `parallel`, `concurrent`.
-- **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in.
+- **No raw `Thread` API** — use `actor` for long-lived work, `concurrent`/`parallel` for short-lived.
+- **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in. Actors use it internally for request-reply.
 - **No reactive streams** — virtual threads replace the need for reactive programming.

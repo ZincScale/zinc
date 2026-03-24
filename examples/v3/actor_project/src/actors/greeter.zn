@@ -1,0 +1,13 @@
+// Greeter actor — lives in actors package
+
+actor Greeter {
+    var String prefix = "hello"
+
+    init(String prefix) {
+        this.prefix = prefix
+    }
+
+    receive fn greet(String name): String {
+        return "{prefix} {name}"
+    }
+}
