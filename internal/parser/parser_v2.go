@@ -1127,7 +1127,6 @@ func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 
 	var fields []*FieldDecl
-	var children []*ChildDecl
 	var ctor *CtorDecl
 
 	p.expect(lexer.TOKEN_LBRACE)
@@ -1135,14 +1134,7 @@ func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
-		if tok.Type == lexer.TOKEN_CHILD {
-			// child worker1 = new ProcessorWorker(...)
-			p.advance() // consume "child"
-			childName := p.expect(lexer.TOKEN_IDENT).Literal
-			p.expect(lexer.TOKEN_ASSIGN)
-			initExpr := p.v2ParseExpr()
-			children = append(children, &ChildDecl{Name: childName, Init: initExpr})
-		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
+		if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
 			// init(params) { body } — constructor
 			p.advance() // consume init
 			params := p.v2ParseParamList()
@@ -1151,6 +1143,9 @@ func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)
+		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
+			f := p.v2ParseFieldDeclNoKeyword()
+			fields = append(fields, f)
 		} else {
 			p.errorf("unexpected token %s in supervisor body", tok.Type)
 			p.advance()
@@ -1158,7 +1153,7 @@ func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &SupervisorDecl{Line: line, Name: name, Fields: fields, Ctor: ctor, Children: children}
+	return &SupervisorDecl{Line: line, Name: name, Fields: fields, Ctor: ctor}
 }
 
 // v2ParseMethodDecl: fn name(params)[: ReturnType] { body }

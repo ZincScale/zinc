@@ -32,13 +32,14 @@ type Generator struct {
 	tupleTypes         map[int]bool    // track which Tuple arities we need to generate
 	arrayVars          map[string]bool // track variables declared as array types
 	interfaces         map[string]bool // track which type names are interfaces
+	actors             map[string]bool // track which type names are actors
 	errVarStack        []string        // stack of catch variable names for nested or-blocks
 	currentClassParents []string       // parents of the class currently being emitted
 }
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool)}
+	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool), actors: make(map[string]bool)}
 }
 
 // OutputFile represents a generated .java file.
@@ -53,6 +54,9 @@ func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
 		if iface, ok := d.(*parser.InterfaceDecl); ok {
 			g.interfaces[iface.Name] = true
 		}
+		if act, ok := d.(*parser.ActorDecl); ok {
+			g.actors[act.Name] = true
+		}
 	}
 }
 
@@ -60,6 +64,12 @@ func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
 // to register interface names discovered in other files.
 func (g *Generator) RegisterInterface(name string) {
 	g.interfaces[name] = true
+}
+
+// RegisterActor allows external callers (e.g., multi-file compilation)
+// to register actor type names discovered in other files.
+func (g *Generator) RegisterActor(name string) {
+	g.actors[name] = true
 }
 
 // buildInheritanceClause builds the extends/implements string for a class.
@@ -919,45 +929,42 @@ func (g *Generator) emitSupervisorBody(sup *parser.SupervisorDecl, classPrefix s
 	g.writeln("%s %s {", classPrefix, sup.Name)
 	g.indent++
 
-	// Fields
+	// Collect actor-typed field names for lifecycle generation
+	var actorFields []string
+	for _, f := range sup.Fields {
+		typeName := ""
+		if f.Type != nil {
+			if st, ok := f.Type.(*parser.SimpleType); ok {
+				typeName = st.Name
+			}
+		}
+		if g.actors[typeName] {
+			actorFields = append(actorFields, f.Name)
+		}
+	}
+
+	// Fields — same as class
+	g.pendingAccessors = nil
 	for _, f := range sup.Fields {
 		g.emitFieldDecl(f)
 	}
-
-	// Child actor fields
-	for _, c := range sup.Children {
-		g.writeln("private Object %s;", c.Name)
-	}
-	if len(sup.Fields) > 0 || len(sup.Children) > 0 {
+	if len(sup.Fields) > 0 {
 		g.writeln("")
 	}
 
 	// Constructor
 	if sup.Ctor != nil {
-		params := g.formatParams(sup.Ctor.Params)
-		g.writeln("public %s(%s) throws Exception {", sup.Name, params)
-		g.indent++
-		g.emitBlock(sup.Ctor.Body)
-		g.indent--
-		g.writeln("}")
-		g.writeln("")
+		g.emitCtor(sup.Name, sup.Ctor, nil)
 	}
 
-	// start() — create and start all child actors
-	g.writeln("public void start() throws Exception {")
-	g.indent++
-	for _, c := range sup.Children {
-		g.writeln("%s = %s;", c.Name, g.formatExpr(c.Init))
-	}
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
+	// Getters for init fields
+	g.emitAccessors()
 
-	// shutdown() — cascade to all children
+	// shutdown() — cascade to actor-typed fields (typed, no reflection)
 	g.writeln("public void shutdown() throws Exception {")
 	g.indent++
-	for _, c := range sup.Children {
-		g.writeln("if (%s != null) { ((Object) %s).getClass().getMethod(\"shutdown\").invoke(%s); }", c.Name, c.Name, c.Name)
+	for _, name := range actorFields {
+		g.writeln("if (%s != null) { %s.shutdown(); }", name, name)
 	}
 	g.indent--
 	g.writeln("}")
@@ -966,13 +973,23 @@ func (g *Generator) emitSupervisorBody(sup *parser.SupervisorDecl, classPrefix s
 	// shutdown(timeoutMs) — cascade with timeout then kill
 	g.writeln("public void shutdown(long timeoutMs) throws Exception {")
 	g.indent++
-	for _, c := range sup.Children {
-		g.writeln("if (%s != null) {", c.Name)
+	for _, name := range actorFields {
+		g.writeln("if (%s != null) {", name)
 		g.indent++
-		g.writeln("try { ((Object) %s).getClass().getMethod(\"shutdown\", long.class).invoke(%s, timeoutMs); } catch (Exception e) {}", c.Name, c.Name)
-		g.writeln("try { ((Object) %s).getClass().getMethod(\"kill\").invoke(%s); } catch (Exception e) {}", c.Name, c.Name)
+		g.writeln("try { %s.shutdown(timeoutMs); } catch (Exception e) {}", name)
+		g.writeln("try { %s.kill(); } catch (Exception e) {}", name)
 		g.indent--
 		g.writeln("}")
+	}
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// kill() — brutal kill all actor-typed fields
+	g.writeln("public void kill() {")
+	g.indent++
+	for _, name := range actorFields {
+		g.writeln("if (%s != null) { %s.kill(); }", name, name)
 	}
 	g.indent--
 	g.writeln("}")

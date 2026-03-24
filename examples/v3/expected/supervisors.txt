@@ -1,0 +1,9 @@
+team created
+a1: 3, a2: 101
+team shutdown
+worker: 1
+configured shutdown
+kill cascaded
+both created
+both shutdown
+Supervisors OK

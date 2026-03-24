@@ -80,7 +80,6 @@ const (
 	TOKEN_ACTOR      // actor (isolated concurrent unit)
 	TOKEN_SUPERVISOR // supervisor (manages actor lifecycle)
 	TOKEN_RECEIVE    // receive (message handler in actor)
-	TOKEN_CHILD      // child (managed actor in supervisor)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -191,7 +190,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_ACTOR:      "actor",
 	TOKEN_SUPERVISOR: "supervisor",
 	TOKEN_RECEIVE:    "receive",
-	TOKEN_CHILD:      "child",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -310,7 +308,6 @@ var keywords = map[string]TokenType{
 	"actor":      TOKEN_ACTOR,
 	"supervisor": TOKEN_SUPERVISOR,
 	"receive":    TOKEN_RECEIVE,
-	"child":      TOKEN_CHILD,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

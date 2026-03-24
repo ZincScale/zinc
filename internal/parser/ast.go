@@ -167,23 +167,17 @@ type ActorDecl struct {
 func (a *ActorDecl) nodeTag()      {}
 func (a *ActorDecl) topLevelTag() {}
 
-// SupervisorDecl: supervisor Pipeline { init fields; child declarations; init(...) { } }
+// SupervisorDecl: supervisor Pipeline { init/var fields; init(...) { } }
+// Actor-typed fields are automatically managed (shutdown/kill cascade).
 type SupervisorDecl struct {
-	Line     int
-	Name     string
-	Fields   []*FieldDecl
-	Ctor     *CtorDecl    // init(...) { } constructor (nil if none)
-	Children []*ChildDecl
+	Line   int
+	Name   string
+	Fields []*FieldDecl
+	Ctor   *CtorDecl // init(...) { } constructor (nil if none)
 }
 
 func (s *SupervisorDecl) nodeTag()      {}
 func (s *SupervisorDecl) topLevelTag() {}
-
-// ChildDecl: child worker1 = new ProcessorWorker(...)
-type ChildDecl struct {
-	Name string
-	Init Expr // factory expression for create/restart
-}
 
 // ConstDecl: [pub] const NAME: Type = expr
 type ConstDecl struct {

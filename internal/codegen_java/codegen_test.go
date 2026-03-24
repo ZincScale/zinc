@@ -2443,14 +2443,97 @@ actor PingActor : Pingable {
 
 func TestSupervisorBasic(t *testing.T) {
 	assertContains(t, `
+actor Worker {
+	receive fn doWork() {}
+}
 supervisor Pipeline {
-	init String strategy = "one_for_one"
+	init Worker w1
+	init Worker w2
 
-	child worker1 = new Object()
+	init(Worker w1, Worker w2) {
+		this.w1 = w1
+		this.w2 = w2
+	}
 }`,
 		"public static class Pipeline",
-		"private Object worker1",
-		"public void start()",
-		"public void shutdown()",
+		"private final Worker w1",
+		"private final Worker w2",
+		"public Pipeline(Worker w1, Worker w2)",
+		"public void shutdown() throws Exception",
+		"w1.shutdown()",
+		"w2.shutdown()",
 	)
+}
+
+func TestSupervisorKill(t *testing.T) {
+	assertContains(t, `
+actor Worker {
+	receive fn doWork() {}
+}
+supervisor Team {
+	init Worker w
+
+	init(Worker w) {
+		this.w = w
+	}
+}`,
+		"public void kill()",
+		"w.kill()",
+	)
+}
+
+func TestSupervisorShutdownTimeout(t *testing.T) {
+	assertContains(t, `
+actor Worker {
+	receive fn doWork() {}
+}
+supervisor Team {
+	init Worker w
+
+	init(Worker w) {
+		this.w = w
+	}
+}`,
+		"public void shutdown(long timeoutMs) throws Exception",
+		"w.shutdown(timeoutMs)",
+		"w.kill()",
+	)
+}
+
+func TestSupervisorMixedFields(t *testing.T) {
+	// Supervisor with both actor fields and config fields
+	// Only actor fields should get lifecycle cascade
+	assertContains(t, `
+actor Worker {
+	receive fn doWork() {}
+}
+supervisor Pipeline {
+	init String name
+	init Worker w
+
+	init(String name, Worker w) {
+		this.name = name
+		this.w = w
+	}
+}`,
+		"w.shutdown()",
+		"w.kill()",
+	)
+	// name is not an actor — should NOT appear in lifecycle
+	result := transpile(`
+actor Worker {
+	receive fn doWork() {}
+}
+supervisor Pipeline {
+	init String name
+	init Worker w
+
+	init(String name, Worker w) {
+		this.name = name
+		this.w = w
+	}
+}`)
+	if strings.Contains(result, "name.shutdown()") {
+		t.Errorf("non-actor field 'name' should not have shutdown() called:\n%s", result)
+	}
 }

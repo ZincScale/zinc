@@ -78,27 +78,31 @@ Three system states, no fourth:
 
 ## supervisor
 
-A supervisor manages child actors. It can start, stop, and restart them.
+A supervisor manages actor lifecycle via constructor injection. Any field whose type is an `actor` gets automatic lifecycle cascade — no reflection, fully typed.
 
 ```zinc
 supervisor Pipeline {
-    init String strategy = "one_for_one"
-    init int maxRestarts = 3
-    init long within = 5000
+    init Counter w1
+    init Counter w2
 
-    child worker1 = new Counter(0)
-    child worker2 = new Counter(100)
+    init(Counter w1, Counter w2) {
+        this.w1 = w1
+        this.w2 = w2
+    }
 }
 ```
 
-- `child` declares a managed actor with a factory expression (used for restart)
-- Strategy: `one_for_one` (restart only the failed child), `one_for_all` (restart all on any failure)
+- Actor-typed fields are detected by the transpiler's type registry
+- Non-actor fields (config, etc.) are left alone
+- No `child` keyword — the `actor` type is the signal
 
 ```zinc
-var sup = new Pipeline()
-sup.start()                  // create and start all children
-sup.shutdown()               // cascade shutdown to all children
+var a = new Counter(0)
+var b = new Counter(100)
+var sup = new Pipeline(a, b)
+sup.shutdown()               // cascade shutdown to all actor fields
 sup.shutdown(5000)           // cascade with timeout, then kill
+sup.kill()                   // brutal kill all actor fields
 ```
 
 ## spawn (deprecated)

@@ -27,6 +27,8 @@ fi
 expected="counter: 10
 hi world
 after reset: 0
+supervised: 1, 2
+team shutdown
 Multi-file actors OK"
 
 if [ "$actual" = "$expected" ]; then
