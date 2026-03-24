@@ -778,7 +778,11 @@ func (g *Generator) emitActorReceiveMethod(m *parser.MethodDecl) {
 		g.writeln("var _future = new java.util.concurrent.CompletableFuture<%s>();", boxedRet)
 		g.writeln("_mailbox.add(() -> {")
 		g.indent++
+		g.writeln("try {")
+		g.indent++
 		g.emitActorReceiveBody(m.Body, true)
+		g.indent--
+		g.writeln("} catch (Exception e) { _future.completeExceptionally(e); }")
 		g.indent--
 		g.writeln("});")
 		g.writeln("return _future.get();")
@@ -790,7 +794,11 @@ func (g *Generator) emitActorReceiveMethod(m *parser.MethodDecl) {
 		g.indent++
 		g.writeln("_mailbox.add(() -> {")
 		g.indent++
+		g.writeln("try {")
+		g.indent++
 		g.emitActorReceiveBody(m.Body, false)
+		g.indent--
+		g.writeln("} catch (Exception e) { throw (e instanceof RuntimeException re) ? re : new RuntimeException(e); }")
 		g.indent--
 		g.writeln("});")
 		g.indent--
