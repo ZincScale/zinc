@@ -56,15 +56,17 @@ func (i *ImportDecl) topLevelTag() {}
 
 // --- Declarations ------------------------------------------------------------
 
-// ClassDecl: [@annotations] [sealed] class Dog[<T>] : Animal, Speaker { ... }
+// ClassDecl: [@annotations] [abstract] [sealed] class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
 	Line        int // source line number (1-indexed)
 	Name        string
 	IsSealed    bool     // sealed class (has variant data classes)
+	IsAbstract  bool     // abstract class
 	TypeParams  []string // generic type parameter names
 	Parents     []string // base class + interfaces
 	Fields      []*FieldDecl
-	Ctor        *CtorDecl // nil if no constructor
+	Ctor        *CtorDecl   // primary constructor (nil if none)
+	Ctors       []*CtorDecl // overloaded constructors (nil or empty if none)
 	Methods     []*MethodDecl
 	Variants    []*DataClassDecl // sealed class variants
 	Annotations []*Annotation
@@ -98,11 +100,12 @@ type CtorDecl struct {
 	SuperArgs []Expr // args extracted from super(...) call in body
 }
 
-// MethodDecl: [@annotations] [pub] [static] fn name(params) [: ReturnType] { body }
+// MethodDecl: [@annotations] [pub] [static] [abstract] fn name(params) [: ReturnType] { body }
 type MethodDecl struct {
 	Name        string
 	IsPub       bool
 	IsStatic    bool
+	IsAbstract  bool // abstract method (no body)
 	Params      []*ParamDecl
 	ReturnType  TypeExpr // nil = void
 	Body        *BlockStmt
@@ -151,33 +154,6 @@ type EnumDecl struct {
 
 func (e *EnumDecl) nodeTag()      {}
 func (e *EnumDecl) topLevelTag() {}
-
-// ActorDecl: actor Counter { var int count = 0; init(...) { }; receive fn ...(); fn ...() }
-type ActorDecl struct {
-	Line       int
-	Name       string
-	TypeParams []string      // generic type parameter names
-	Parents    []string      // interfaces the actor implements
-	Fields     []*FieldDecl
-	Ctor       *CtorDecl     // init(...) { } constructor (nil if none)
-	Methods    []*MethodDecl // regular private helpers (not message handlers)
-	Receives   []*MethodDecl // receive fn handlers (message interface)
-}
-
-func (a *ActorDecl) nodeTag()      {}
-func (a *ActorDecl) topLevelTag() {}
-
-// SupervisorDecl: supervisor Pipeline { init/var fields; init(...) { } }
-// Actor-typed fields are automatically managed (shutdown/kill cascade).
-type SupervisorDecl struct {
-	Line   int
-	Name   string
-	Fields []*FieldDecl
-	Ctor   *CtorDecl // init(...) { } constructor (nil if none)
-}
-
-func (s *SupervisorDecl) nodeTag()      {}
-func (s *SupervisorDecl) topLevelTag() {}
 
 // ConstDecl: [pub] const NAME: Type = expr
 type ConstDecl struct {

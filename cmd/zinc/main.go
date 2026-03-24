@@ -649,14 +649,31 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Generate Java files
 		className := classNameFromFile(pf.path)
 		gen := codegen_java.New()
-		// Register cross-file type names for codegen (interfaces for implements, actors for supervisor lifecycle)
+		// Register cross-file type names for codegen
 		for _, other := range parsed {
 			for _, d := range other.prog.Decls {
 				if iface, ok := d.(*parser.InterfaceDecl); ok {
 					gen.RegisterInterface(iface.Name)
 				}
-				if act, ok := d.(*parser.ActorDecl); ok {
-					gen.RegisterActor(act.Name)
+				// Register actor classes (classes extending Actor or another actor)
+				if cls, ok := d.(*parser.ClassDecl); ok {
+					for _, parent := range cls.Parents {
+						if parent == "Actor" {
+							gen.RegisterActor(cls.Name)
+						}
+					}
+				}
+			}
+		}
+		// Second pass: transitive actor detection (class extends an actor class)
+		for _, other := range parsed {
+			for _, d := range other.prog.Decls {
+				if cls, ok := d.(*parser.ClassDecl); ok {
+					for _, parent := range cls.Parents {
+						if gen.IsActor(parent) {
+							gen.RegisterActor(cls.Name)
+						}
+					}
 				}
 			}
 		}

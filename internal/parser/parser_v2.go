@@ -77,10 +77,17 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
-		case lexer.TOKEN_ACTOR:
-			prog.Decls = append(prog.Decls, p.v2ParseActorDecl())
-		case lexer.TOKEN_SUPERVISOR:
-			prog.Decls = append(prog.Decls, p.v2ParseSupervisorDecl())
+		case lexer.TOKEN_ABSTRACT:
+			// abstract class Name { ... }
+			p.advance() // consume "abstract"
+			if p.check(lexer.TOKEN_CLASS) {
+				cls := p.v2ParseClassDecl()
+				cls.IsAbstract = true
+				prog.Decls = append(prog.Decls, cls)
+			} else {
+				p.errorf("expected 'class' after 'abstract'")
+				p.advance()
+			}
 		default:
 			// Check for contextual keyword: sealed class
 			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "sealed" && p.peekAt(1).Type == lexer.TOKEN_CLASS {
@@ -955,14 +962,29 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	var fields []*FieldDecl
 	var methods []*MethodDecl
 	var variants []*DataClassDecl
-	var ctor *CtorDecl
+	var ctors []*CtorDecl
 
 	p.expect(lexer.TOKEN_LBRACE)
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
-		if tok.Type == lexer.TOKEN_DATA {
+		if tok.Type == lexer.TOKEN_ABSTRACT {
+			// abstract fn name(...): ReturnType
+			p.advance() // consume abstract
+			isPub := false
+			if p.check(lexer.TOKEN_PUB) {
+				isPub = true
+				p.advance()
+			}
+			m := p.v2ParseMethodDecl()
+			m.IsAbstract = true
+			m.IsPub = true // abstract methods are always public
+			if isPub {
+				m.IsPub = true
+			}
+			methods = append(methods, m)
+		} else if tok.Type == lexer.TOKEN_DATA {
 			// Sealed class variant: data Circle(double radius)
 			variants = append(variants, p.v2ParseDataClassDecl())
 		} else if tok.Type == lexer.TOKEN_AT {
@@ -1023,7 +1045,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			m.IsPub = false // private by default
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
-			// init(params) { body } — constructor
+			// init(params) { body } — constructor (supports overloading)
 			p.advance() // consume init
 			params := p.v2ParseParamList()
 			body := p.v2ParseBlock()
@@ -1042,7 +1064,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				filteredStmts = append(filteredStmts, s)
 			}
 			body.Stmts = filteredStmts
-			ctor = &CtorDecl{Params: params, Body: body, SuperArgs: superArgs}
+			ctors = append(ctors, &CtorDecl{Params: params, Body: body, SuperArgs: superArgs})
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)
@@ -1057,106 +1079,15 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods, Variants: variants}
-}
-
-// v2ParseActorDecl: actor Name[<T>] [: Interface] { fields, init, receive fn, fn }
-func (p *Parser) v2ParseActorDecl() *ActorDecl {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_ACTOR)
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	typeParams := p.parseTypeParams()
-
-	// Optional interfaces: actor Counter : Monitorable
-	var parents []string
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance()
-		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
-		for p.check(lexer.TOKEN_COMMA) {
-			p.advance()
-			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
-		}
-	}
-
-	var fields []*FieldDecl
-	var methods []*MethodDecl
-	var receives []*MethodDecl
+	// Back-compat: set Ctor to the first constructor if any
 	var ctor *CtorDecl
-
-	p.expect(lexer.TOKEN_LBRACE)
-	p.skipSemis()
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		tok := p.peek()
-
-		if tok.Type == lexer.TOKEN_RECEIVE {
-			// receive fn name(...) { ... }
-			p.advance() // consume "receive"
-			m := p.v2ParseMethodDecl()
-			m.IsPub = true // receive handlers are the public API
-			receives = append(receives, m)
-		} else if tok.Type == lexer.TOKEN_FN {
-			m := p.v2ParseMethodDecl()
-			m.IsPub = false // private helper
-			methods = append(methods, m)
-		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
-			// init(params) { body } — constructor
-			p.advance() // consume init
-			params := p.v2ParseParamList()
-			body := p.v2ParseBlock()
-			ctor = &CtorDecl{Params: params, Body: body}
-		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
-			f := p.v2ParseFieldDecl()
-			fields = append(fields, f)
-		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
-			f := p.v2ParseFieldDeclNoKeyword()
-			fields = append(fields, f)
-		} else {
-			p.errorf("unexpected token %s in actor body", tok.Type)
-			p.advance()
-		}
-		p.skipSemis()
+	if len(ctors) > 0 {
+		ctor = ctors[0]
 	}
-	p.expect(lexer.TOKEN_RBRACE)
-	return &ActorDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Methods: methods, Receives: receives}
+	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Ctors: ctors, Methods: methods, Variants: variants}
 }
 
-// v2ParseSupervisorDecl: supervisor Name { init fields, child declarations, init(...) { } }
-func (p *Parser) v2ParseSupervisorDecl() *SupervisorDecl {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_SUPERVISOR)
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-
-	var fields []*FieldDecl
-	var ctor *CtorDecl
-
-	p.expect(lexer.TOKEN_LBRACE)
-	p.skipSemis()
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		tok := p.peek()
-
-		if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
-			// init(params) { body } — constructor
-			p.advance() // consume init
-			params := p.v2ParseParamList()
-			body := p.v2ParseBlock()
-			ctor = &CtorDecl{Params: params, Body: body}
-		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
-			f := p.v2ParseFieldDecl()
-			fields = append(fields, f)
-		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
-			f := p.v2ParseFieldDeclNoKeyword()
-			fields = append(fields, f)
-		} else {
-			p.errorf("unexpected token %s in supervisor body", tok.Type)
-			p.advance()
-		}
-		p.skipSemis()
-	}
-	p.expect(lexer.TOKEN_RBRACE)
-	return &SupervisorDecl{Line: line, Name: name, Fields: fields, Ctor: ctor}
-}
-
-// v2ParseMethodDecl: fn name(params)[: ReturnType] { body }
+// v2ParseMethodDecl: [abstract] fn name(params)[: ReturnType] [{ body }]
 func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
 	p.expect(lexer.TOKEN_FN)
@@ -1170,7 +1101,11 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 		retType = p.v2ParseType()
 	}
 
-	body := p.v2ParseBlock()
+	// Body is optional for abstract methods
+	var body *BlockStmt
+	if p.check(lexer.TOKEN_LBRACE) {
+		body = p.v2ParseBlock()
+	}
 	return &MethodDecl{Name: name, Params: params, ReturnType: retType, Body: body}
 }
 
