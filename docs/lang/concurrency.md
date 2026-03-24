@@ -2,6 +2,11 @@
 
 Zinc runs on Java 25 virtual threads. No async/await, no colored functions. Every function is synchronous — blocking is cheap because virtual threads unmount from carrier threads on I/O.
 
+For detailed documentation on specific topics:
+- [Actors](actors.md) — isolated concurrent units with message passing
+- [Supervisors](supervisors.md) — managing actor lifecycle
+- [Guide: Actors](../guide-actors.md) — patterns, testing, migration
+
 See `design-zinc-concurrency.md` for the full design with Java transpilation details.
 
 ## actor

@@ -304,3 +304,11 @@ An actor transpiles to a Java class with:
 - Generated `shutdown()`, `shutdown(long)`, `kill()` methods
 
 See `docs/design-zinc-concurrency.md` for full transpilation details.
+
+## See Also
+
+- [Supervisors](supervisors.md) — managing actor lifecycle
+- [Concurrency](concurrency.md) — all concurrency primitives (`concurrent`, `parallel for`, `timeout`)
+- [Guide: Actors](../guide-actors.md) — patterns, testing, migration, anti-patterns
+- [Example: actors.zn](../../examples/v3/actors.zn) — 9 e2e test scenarios (counter, ordering, actor-to-actor, concurrent senders, kill)
+- [Example: actor_project/](../../examples/v3/actor_project/) — multi-file project with cross-package actors and supervisor

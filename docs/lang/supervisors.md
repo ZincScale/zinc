@@ -207,3 +207,11 @@ var pipeline = new Pipeline(enricher, writer)
 // ... on application shutdown:
 pipeline.shutdown(5000)
 ```
+
+## See Also
+
+- [Actors](actors.md) — actor syntax, receive fn, lifecycle, state ownership
+- [Concurrency](concurrency.md) — all concurrency primitives
+- [Guide: Actors](../guide-actors.md) — patterns, testing, anti-patterns
+- [Example: supervisors.zn](../../examples/v3/supervisors.zn) — 6 e2e supervisor test scenarios
+- [Example: actor_project/](../../examples/v3/actor_project/) — multi-file project with cross-package supervisor

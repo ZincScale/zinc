@@ -367,3 +367,12 @@ Actors have startup overhead (mailbox allocation, thread creation). Use them for
 | Dependency | None (language primitive) | OTP stdlib | Akka library (100+ JARs) |
 
 Zinc's actor model is closest to Erlang's in philosophy (isolation, let-it-crash, supervision) but runs on the JVM with static typing and zero framework dependencies.
+
+## See Also
+
+- [Actors — Language Reference](lang/actors.md) — syntax, semantics, lifecycle
+- [Supervisors — Language Reference](lang/supervisors.md) — typed lifecycle cascade
+- [Concurrency](lang/concurrency.md) — all concurrency primitives
+- [Example: actors.zn](../examples/v3/actors.zn) — 9 e2e test scenarios
+- [Example: supervisors.zn](../examples/v3/supervisors.zn) — 6 supervisor test scenarios
+- [Example: actor_project/](../examples/v3/actor_project/) — multi-file project with cross-package actors and supervisor
