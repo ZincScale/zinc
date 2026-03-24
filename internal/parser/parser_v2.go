@@ -963,8 +963,20 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			variants = append(variants, p.v2ParseDataClassDecl())
 		} else if tok.Type == lexer.TOKEN_AT {
 			annots := p.v2ParseAnnotations()
+			isPub := false
+			if p.check(lexer.TOKEN_PUB) {
+				isPub = true
+				p.advance()
+			}
+			isStatic := false
+			if p.check(lexer.TOKEN_STATIC) {
+				isStatic = true
+				p.advance()
+			}
 			m := p.v2ParseMethodDecl()
 			m.Annotations = annots
+			m.IsPub = m.IsPub || isPub
+			m.IsStatic = m.IsStatic || isStatic
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_OVERRIDE {
 			// override fn name(...) { ... }
