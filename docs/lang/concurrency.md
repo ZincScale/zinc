@@ -94,7 +94,7 @@ var results = parallel for order in orders {
 Mutual exclusion for shared mutable state:
 
 ```zinc
-var mu = Lock()
+var mu = new Lock()
 int counter = 0
 
 parallel for item in items {
@@ -136,7 +136,7 @@ var result = retry(max: 3, backoff: exponential(100.millis)) {
 Bounded producer/consumer queue for communicating between threads:
 
 ```zinc
-var ch = Channel<Order>(capacity: 100)
+var ch = new Channel<Order>(capacity: 100)
 
 // Producer
 spawn {
@@ -155,7 +155,7 @@ for order in ch {
 Fan-out with multiple consumers:
 
 ```zinc
-var ch = Channel<Order>(capacity: 100)
+var ch = new Channel<Order>(capacity: 100)
 
 parallel(max: 4) {
     for order in ch {
@@ -169,8 +169,8 @@ parallel(max: 4) {
 Wait on multiple channels:
 
 ```zinc
-var orders = Channel<Order>(100)
-var cancellations = Channel<Cancellation>(100)
+var orders = new Channel<Order>(100)
+var cancellations = new Channel<Cancellation>(100)
 
 select {
     case order from orders -> processOrder(order)
@@ -189,7 +189,7 @@ context RequestContext {
 }
 
 // Bind at entry point
-with RequestContext(traceId: uuid(), tenantId: "acme") {
+with new RequestContext(traceId: uuid(), tenantId: "acme") {
     handleRequest()
 }
 
@@ -208,8 +208,8 @@ A parallel web scraper with rate limiting and timeout:
 
 ```zinc
 fn scrapeUrls(List<String> urls): List<String> {
-    var results = Channel<String>(1000)
-    var limiter = Rate(10.perSecond)
+    var results = new Channel<String>(1000)
+    var limiter = new Rate(10.perSecond)
 
     parallel(max: 4) for url in urls {
         rate limiter {
@@ -244,7 +244,7 @@ fn scrapeUrls(List<String> urls): List<String> {
 | `lock mu { }` | Mutual exclusion | N/A |
 | `timeout(dur) { }` | Deadline-aware execution | Yes |
 | `retry(max, backoff) { }` | Auto-retry with backoff | N/A |
-| `Channel<T>(n)` | Bounded producer/consumer | N/A |
+| `new Channel<T>(n)` | Bounded producer/consumer | N/A |
 | `select { }` | Wait on multiple channels | N/A |
 | `context T { }` | Scoped value declaration | Yes |
 | `with T(...) { }` | Bind scoped value | Yes |

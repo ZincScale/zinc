@@ -28,7 +28,7 @@ data User(String name, int age)
 ```zinc
 // src/main.zn — User is auto-imported from models
 fn main() {
-    var u = User("Alice", 30)
+    var u = new User("Alice", 30)
     print(u)
 }
 ```

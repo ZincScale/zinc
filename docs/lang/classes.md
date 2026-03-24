@@ -25,7 +25,7 @@ class Stack {
     }
 }
 
-var s = Stack()
+var s = new Stack()
 s.push(1)
 s.push(2)
 print(s)                             // Stack([1, 2])
@@ -239,7 +239,7 @@ class Dog {
     }
 }
 
-var d = Dog("Rex", "Lab")
+var d = new Dog("Rex", "Lab")
 ```
 
 ## Inheritance
@@ -300,9 +300,9 @@ Use `data` for immutable value types. Each `data` declaration generates a separa
 ```zinc
 data User(String name, String email, int age = 0)
 
-var u = User("Alice", "alice@example.com", 30)
+var u = new User("Alice", "alice@example.com", 30)
 print(u)                         // User[name=Alice, email=alice@example.com, age=30]
-print(u == User("Alice", "alice@example.com", 30))  // true
+print(u == new User("Alice", "alice@example.com", 30))  // true
 ```
 
 Transpiles to a separate `User.java`:

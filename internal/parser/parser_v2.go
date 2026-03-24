@@ -327,6 +327,10 @@ func (p *Parser) v2IsTypedVarDecl() bool {
 	// Scan past the type to find the name position
 	i := 1
 	tok := p.peek()
+	// Handle dotted/fully-qualified names: java.util.Map
+	for p.peekAt(i).Type == lexer.TOKEN_DOT && isIdentLike(p.peekAt(i+1).Type) {
+		i += 2
+	}
 	// Handle generic: Type<...>
 	if p.peekAt(i).Type == lexer.TOKEN_LT {
 		depth := 1
@@ -1300,15 +1304,21 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 	return &ImportDecl{Path: path}
 }
 
+// isIdentLike returns true if the token type can be used as a name segment
+// (identifier or keyword that could appear in a dotted path like java.util.concurrent).
+func isIdentLike(t lexer.TokenType) bool {
+	return t == lexer.TOKEN_IDENT || t == lexer.TOKEN_CONCURRENT ||
+		t == lexer.TOKEN_DATA || t == lexer.TOKEN_MATCH ||
+		t == lexer.TOKEN_PRINT || t == lexer.TOKEN_SPAWN ||
+		t == lexer.TOKEN_INTERFACE
+}
+
 // v2ExpectIdentOrKeyword consumes and returns the current token's literal
 // if it is an IDENT or any keyword token that could appear as a Java
 // package/class name segment (e.g., "concurrent" in java.util.concurrent).
 func (p *Parser) v2ExpectIdentOrKeyword() string {
 	tok := p.peek()
-	if tok.Type == lexer.TOKEN_IDENT || tok.Type == lexer.TOKEN_CONCURRENT ||
-		tok.Type == lexer.TOKEN_DATA || tok.Type == lexer.TOKEN_MATCH ||
-		tok.Type == lexer.TOKEN_PRINT || tok.Type == lexer.TOKEN_SPAWN ||
-		tok.Type == lexer.TOKEN_INTERFACE {
+	if isIdentLike(tok.Type) {
 		return p.advance().Literal
 	}
 	return p.expect(lexer.TOKEN_IDENT).Literal
@@ -1357,6 +1367,12 @@ func (p *Parser) v2ParseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
 	name := tok.Literal
 
+	// Dotted/fully-qualified names: java.util.Map
+	for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+		p.advance() // consume .
+		name += "." + p.advance().Literal
+	}
+
 	var typ TypeExpr
 
 	// Angle-bracket generics: List<int>, Map<String, int>
@@ -1399,7 +1415,12 @@ func (p *Parser) v2IsTypeAnnotation() bool {
 	if !p.v2IsIdent() {
 		return false
 	}
-	next := p.peekAt(1)
+	// Skip past dotted segments: java.util.Map → find position after last ident
+	i := 1
+	for p.peekAt(i).Type == lexer.TOKEN_DOT && isIdentLike(p.peekAt(i+1).Type) {
+		i += 2
+	}
+	next := p.peekAt(i)
 	// ident ident → type name
 	if next.Type == lexer.TOKEN_IDENT || next.Type == lexer.TOKEN_DATA ||
 		next.Type == lexer.TOKEN_MATCH || next.Type == lexer.TOKEN_PRINT {
@@ -1415,16 +1436,16 @@ func (p *Parser) v2IsTypeAnnotation() bool {
 	}
 	// ident[] ident → array type + name
 	if next.Type == lexer.TOKEN_LBRACKET {
-		peek2 := p.peekAt(2)
+		peek2 := p.peekAt(i + 1)
 		if peek2.Type == lexer.TOKEN_RBRACKET {
-			peek3 := p.peekAt(3)
+			peek3 := p.peekAt(i + 2)
 			return peek3.Type == lexer.TOKEN_IDENT || peek3.Type == lexer.TOKEN_DATA ||
 				peek3.Type == lexer.TOKEN_MATCH || peek3.Type == lexer.TOKEN_PRINT
 		}
 	}
 	// ident? ident → nullable type + name
 	if next.Type == lexer.TOKEN_QUESTION {
-		peek2 := p.peekAt(2)
+		peek2 := p.peekAt(i + 1)
 		return peek2.Type == lexer.TOKEN_IDENT || peek2.Type == lexer.TOKEN_DATA ||
 			peek2.Type == lexer.TOKEN_MATCH || peek2.Type == lexer.TOKEN_PRINT
 	}
@@ -1593,7 +1614,10 @@ func (p *Parser) v2ParsePower() Expr {
 
 // v2ParsePostfix: primary followed by .field, [index], (args)
 func (p *Parser) v2ParsePostfix() Expr {
-	expr := p.v2ParsePrimary()
+	return p.v2ParsePostfixFrom(p.v2ParsePrimary())
+}
+
+func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 	for {
 		switch {
 		case p.check(lexer.TOKEN_QUESTION_DOT):
@@ -1749,6 +1773,15 @@ func (p *Parser) v2ParsePrimary() Expr {
 		p.advance()
 		body := p.v2ParseBlock()
 		return &SpawnExpr{Line: line, Body: body}
+	case lexer.TOKEN_NEW:
+		p.advance() // consume "new"
+		expr := p.v2ParsePostfixFrom(p.v2ParsePrimary())
+		if call, ok := expr.(*CallExpr); ok {
+			call.IsNew = true
+			return call
+		}
+		p.errorf("expected constructor call after 'new'")
+		return expr
 	case lexer.TOKEN_THIS:
 		p.advance()
 		return &Ident{Name: "this"}

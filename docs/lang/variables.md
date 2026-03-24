@@ -125,7 +125,7 @@ class User {
     }
 }
 
-var u = User("Alice", "alice@example.com")
+var u = new User("Alice", "alice@example.com")
 // u.name = "Bob"              // compile error: init field is frozen
 ```
 

@@ -141,8 +141,8 @@ Zinc follows Kotlin conventions:
 | `a !== b` | `a != b` | Reference non-identity |
 
 ```zinc
-var a = User("Alice", 30)
-var b = User("Alice", 30)
+var a = new User("Alice", 30)
+var b = new User("Alice", 30)
 
 a == b       // true — same values (data class generates equals())
 a === b      // false — different objects

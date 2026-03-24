@@ -576,6 +576,7 @@ type CallExpr struct {
 	Args      []Expr     // positional args (must come before named args)
 	NamedArgs []NamedArg // named args, may be empty
 	TypeArgs  []string   // type arguments, e.g. ["Config"] in jsonDecode<Config>(data)
+	IsNew     bool       // true when preceded by `new` keyword
 }
 
 func (c *CallExpr) nodeTag() {}

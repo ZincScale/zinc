@@ -189,7 +189,7 @@ The `with` statement manages resources that need cleanup. It automatically close
 ### Single Resource
 
 ```zinc
-with f = FileReader("data.txt") {
+with f = new FileReader("data.txt") {
     var line = f.readLine()
     print(line)
 }
@@ -209,7 +209,7 @@ try (var f = new FileReader("data.txt")) {
 Comma-separated resources are all cleaned up when the block exits:
 
 ```zinc
-with input = FileReader("in.txt"), output = FileWriter("out.txt") {
+with input = new FileReader("in.txt"), output = new FileWriter("out.txt") {
     output.write(input.read())
 }
 // both input and output are closed automatically

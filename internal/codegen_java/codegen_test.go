@@ -1373,7 +1373,7 @@ var a, b = concurrent(first: true) {
 
 func TestChannelType(t *testing.T) {
 	assertContains(t,
-		`var Channel<String> ch = Channel(100)`,
+		`var Channel<String> ch = new Channel(100)`,
 		`java.util.concurrent.ArrayBlockingQueue<String> ch = new java.util.concurrent.ArrayBlockingQueue(100)`,
 	)
 }
@@ -1393,7 +1393,7 @@ lock mu {
 
 func TestWithStmt(t *testing.T) {
 	assertContains(t, `
-with f = FileReader("data.txt") {
+with f = new FileReader("data.txt") {
     print("reading")
 }
 `,
@@ -2241,5 +2241,27 @@ func TestTripleQuoteString(t *testing.T) {
 		`"""`,
 		`hello`,
 		`world"""`,
+	)
+}
+
+func TestFullyQualifiedTypes(t *testing.T) {
+	// Variable declaration with FQDN type
+	assertContains(t, "java.util.concurrent.atomic.AtomicInteger counter = new java.util.concurrent.atomic.AtomicInteger(0)",
+		"java.util.concurrent.atomic.AtomicInteger counter = new java.util.concurrent.atomic.AtomicInteger(0)",
+	)
+
+	// FQDN type in function parameter
+	assertContains(t, "fn process(java.util.List<String> items): int { return 0 }",
+		"java.util.List<String> items",
+	)
+
+	// FQDN type as return type
+	assertContains(t, "fn getMap(): java.util.Map<String, int> { return null }",
+		"java.util.Map<String, Integer>",
+	)
+
+	// FQDN array type
+	assertContains(t, "java.math.BigDecimal[] values = null",
+		"java.math.BigDecimal[] values",
 	)
 }

@@ -52,19 +52,19 @@ class FormalGreeter : Greeter {
 }
 
 // Script mode — test all features
-var u = User("Alice", "alice@example.com", 30)
+var u = new User("Alice", "alice@example.com", 30)
 print(u)
 
-var dog = Dog("Rex", "Lab")
+var dog = new Dog("Rex", "Lab")
 print(dog.speak())
 print(dog)
 
-var cfg = Config()
+var cfg = new Config()
 print("host: {cfg.getHost()}")
 print("port: {cfg.getPort()}")
 print("version: {Config.VERSION}")
 
-Greeter g = FormalGreeter()
+Greeter g = new FormalGreeter()
 print(g.greet("World"))
 
 print("Classes OK")

@@ -1575,9 +1575,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("Double.parseDouble(%s)", args)
 	}
 
-	// Constructor calls: PascalCase name → prepend "new"
-	// Only for simple names (Gson(), User()), not selectors (HttpClient.newBuilder())
-	if !strings.Contains(callee, ".") && len(callee) > 0 && callee[0] >= 'A' && callee[0] <= 'Z' {
+	// Constructor calls: explicit `new` keyword
+	if c.IsNew {
 		if mapped, ok := zincToJavaType[callee]; ok {
 			callee = mapped
 		}
