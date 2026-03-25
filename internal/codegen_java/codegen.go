@@ -1733,6 +1733,19 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		if mapped, ok := zincToJavaType[callee]; ok {
 			callee = mapped
 		}
+		if len(c.TypeArgs) > 0 {
+			var mappedArgs []string
+			for _, ta := range c.TypeArgs {
+				if mapped, ok := zincToJavaBoxed[ta]; ok {
+					mappedArgs = append(mappedArgs, mapped)
+				} else if mapped, ok := zincToJavaType[ta]; ok {
+					mappedArgs = append(mappedArgs, mapped)
+				} else {
+					mappedArgs = append(mappedArgs, ta)
+				}
+			}
+			return fmt.Sprintf("new %s<%s>(%s)", callee, strings.Join(mappedArgs, ", "), args)
+		}
 		return fmt.Sprintf("new %s(%s)", callee, args)
 	}
 

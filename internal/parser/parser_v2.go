@@ -16,6 +16,7 @@ package parser
 
 import (
 	"strconv"
+	"strings"
 
 	"zinc/internal/lexer"
 )
@@ -1453,6 +1454,26 @@ func (p *Parser) v2ParseType() TypeExpr {
 	return typ
 }
 
+// formatTypeExpr converts a TypeExpr back to its string representation.
+func (p *Parser) formatTypeExpr(t TypeExpr) string {
+	switch t := t.(type) {
+	case *SimpleType:
+		return t.Name
+	case *GenericType:
+		var args []string
+		for _, a := range t.TypeArgs {
+			args = append(args, p.formatTypeExpr(a))
+		}
+		return t.Name + "<" + strings.Join(args, ", ") + ">"
+	case *ArrayType:
+		return p.formatTypeExpr(t.ElementType) + "[]"
+	case *OptionalType:
+		return p.formatTypeExpr(t.Inner) + "?"
+	default:
+		return "Object"
+	}
+}
+
 // v2IsTypeAnnotation checks if the current position looks like a type followed
 // by a name (for var/const/init declarations). Returns true for patterns like:
 //   ident ident    → simple type + name
@@ -1822,13 +1843,30 @@ func (p *Parser) v2ParsePrimary() Expr {
 		return &SpawnExpr{Line: line, Body: body}
 	case lexer.TOKEN_NEW:
 		p.advance() // consume "new"
-		expr := p.v2ParsePostfixFrom(p.v2ParsePrimary())
-		if call, ok := expr.(*CallExpr); ok {
-			call.IsNew = true
-			return call
+		// Parse type name (possibly dotted: java.util.ArrayList)
+		nameTok := p.expect(lexer.TOKEN_IDENT)
+		name := nameTok.Literal
+		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+			p.advance() // consume .
+			name += "." + p.advance().Literal
 		}
-		p.errorf("expected constructor call after 'new'")
-		return expr
+		// Parse optional generic type args: <T, U>
+		var typeArgs []string
+		if p.check(lexer.TOKEN_LT) {
+			p.advance() // consume <
+			typeArgs = append(typeArgs, p.formatTypeExpr(p.v2ParseType()))
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				typeArgs = append(typeArgs, p.formatTypeExpr(p.v2ParseType()))
+			}
+			p.expect(lexer.TOKEN_GT)
+		}
+		// Parse constructor args via v2ParseCallArgs (handles parens)
+		ident := &Ident{Name: name}
+		call := p.v2ParseCallArgs(ident).(*CallExpr)
+		call.TypeArgs = typeArgs
+		call.IsNew = true
+		return call
 	case lexer.TOKEN_THIS:
 		p.advance()
 		return &Ident{Name: "this"}
