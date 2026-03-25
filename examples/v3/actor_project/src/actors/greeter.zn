@@ -1,13 +1,13 @@
-// Greeter actor — lives in actors package
+// Greeter — lives in actors package, extends Actor
 
-actor Greeter {
+class Greeter : Actor {
     var String prefix = "hello"
 
     init(String prefix) {
         this.prefix = prefix
     }
 
-    receive fn greet(String name): String {
+    pub fn greet(String name): String {
         return "{prefix} {name}"
     }
 }

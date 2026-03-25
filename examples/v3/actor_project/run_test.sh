@@ -3,6 +3,10 @@
 # Usage: ./run_test.sh [path-to-zinc-binary]
 
 ZINC="${1:-zinc}"
+# Resolve to absolute path if relative
+if [[ "$ZINC" == ./* ]]; then
+    ZINC="$(cd "$(dirname "$ZINC")" && pwd)/$(basename "$ZINC")"
+fi
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Build from the project directory
@@ -30,6 +34,9 @@ after reset: 0
 supervised: 1, 2
 team shutdown
 Multi-file actors OK"
+
+# Note: direct mode doesn't need Thread.sleep (synchronous)
+# Supervised mode needs Thread.sleep for async mailbox processing
 
 if [ "$actual" = "$expected" ]; then
     echo "PASS: multi-file actor project"
