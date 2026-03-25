@@ -36,7 +36,6 @@ type Generator struct {
 	zincMethods        map[string]map[string]bool // className → methodName → canThrow
 	errVarStack        []string        // stack of catch variable names for nested or-blocks
 	currentClassParents []string       // parents of the class currently being emitted
-	SkipActorRuntime   bool            // when true, don't generate DefaultActorRuntime in GenerateFiles
 }
 
 // New creates a new Java code generator.
@@ -291,7 +290,6 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 	// Separate declarations into types (own file) vs functions (main file)
 	var fnDecls []parser.TopLevelDecl
 	var constDecls []parser.TopLevelDecl
-	hasActors := false
 
 	for _, d := range prog.Decls {
 		switch decl := d.(type) {
@@ -358,27 +356,6 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		case *parser.ConstDecl:
 			constDecls = append(constDecls, decl)
 		}
-	}
-
-	// Check if any class extends Actor (need to generate stdlib files)
-	for _, d := range prog.Decls {
-		if cls, ok := d.(*parser.ClassDecl); ok {
-			if g.isActorClass(cls) || g.isSupervisorClass(cls) {
-				hasActors = true
-				break
-			}
-		}
-	}
-
-	// Generate DefaultActorRuntime if actors/supervisors are used
-	// Placed in zinc package alongside Actor, Supervisor, ActorRuntime
-	if hasActors && !g.SkipActorRuntime {
-		g.buf.Reset()
-		g.indent = 0
-		zincPkg := &parser.PackageDecl{Path: "zinc"}
-		g.emitPackageAndImports(zincPkg, nil)
-		g.emitDefaultActorRuntime()
-		files = append(files, OutputFile{Name: "zinc" + string(os.PathSeparator) + "DefaultActorRuntime.java", Content: g.buf.String()})
 	}
 
 	// Main class file: top-level functions + script statements
@@ -485,12 +462,6 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 	isActor := g.isActorClass(cls)
 	isSupervisor := g.isSupervisorClass(cls)
 	g.currentClassParents = cls.Parents
-
-	// Supervisor: add _runtime field
-	if isSupervisor {
-		g.writeln("protected ActorRuntime _runtime;")
-		g.writeln("")
-	}
 
 	// User fields
 	g.pendingAccessors = nil
@@ -1042,74 +1013,30 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	g.writeln("}")
 	g.writeln("")
 
-	// kill() — brutal
+	// kill() — brutal with reaper verification
 	g.writeln("public void kill() throws Exception {")
 	g.indent++
+	// Interrupt all actor threads
+	g.writeln("java.util.List<Thread> killed = new java.util.ArrayList<>();")
 	for _, name := range actorFields {
 		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
 		g.indent++
 		g.writeln("%s.setRunning(false);", name)
 		g.writeln("%s.getActorThread().interrupt();", name)
-		g.writeln("%s.getMailbox().clear();", name)
-		g.writeln("if (_runtime != null) { _runtime.pendingKill(%s.getActorThread()); }", name)
+		g.writeln("if (%s.getMailbox() != null) { %s.getMailbox().clear(); }", name, name)
+		g.writeln("killed.add(%s.getActorThread());", name)
 		g.indent--
 		g.writeln("}")
 	}
-	g.indent--
-	g.writeln("}")
-}
-
-// --- Stdlib Generators (emitted when actors are used) ------------------------
-
-// GenerateDefaultActorRuntimeFile returns the complete Java source for DefaultActorRuntime.
-// Used by the multi-file compiler to generate it once outside the per-file loop.
-func GenerateDefaultActorRuntimeFile() string {
-	g := New()
-	g.writeln("package zinc;")
-	g.writeln("")
-	g.emitDefaultActorRuntime()
-	return g.buf.String()
-}
-
-// emitDefaultActorRuntime generates the production ActorRuntime implementation.
-// This is generated (not from stdlib) because it needs low-level Java constructs
-// (synchronized, ConcurrentLinkedQueue, virtual thread) that bootstrap the actor system.
-func (g *Generator) emitDefaultActorRuntime() {
-	g.writeln("public class DefaultActorRuntime implements ActorRuntime {")
+	// Reaper verification: wait for killed threads to die
+	g.writeln("Thread.sleep(getReaperTimeoutMs());")
+	g.writeln("for (var t : killed) {")
 	g.indent++
-	g.writeln("private final java.util.concurrent.ConcurrentLinkedQueue<Thread> _pendingKills = new java.util.concurrent.ConcurrentLinkedQueue<>();")
-	g.writeln("private final long _reaperTimeoutMs;")
-	g.writeln("private volatile boolean _reaperStarted = false;")
-	g.writeln("")
-	g.writeln("public DefaultActorRuntime(long reaperTimeoutMs) {")
+	g.writeln("if (t.isAlive()) {")
 	g.indent++
-	g.writeln("this._reaperTimeoutMs = reaperTimeoutMs;")
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
-	g.writeln("public void pendingKill(Thread thread) {")
+	g.writeln("if (getReaperHandler() != null) {")
 	g.indent++
-	g.writeln("_pendingKills.add(thread);")
-	g.writeln("ensureReaperStarted();")
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
-	g.writeln("private synchronized void ensureReaperStarted() {")
-	g.indent++
-	g.writeln("if (_reaperStarted) return;")
-	g.writeln("_reaperStarted = true;")
-	g.writeln("Thread.startVirtualThread(() -> {")
-	g.indent++
-	g.writeln("while (true) {")
-	g.indent++
-	g.writeln("try { Thread.sleep(_reaperTimeoutMs); } catch (InterruptedException e) { break; }")
-	g.writeln("var it = _pendingKills.iterator();")
-	g.writeln("while (it.hasNext()) {")
-	g.indent++
-	g.writeln("var t = it.next();")
-	g.writeln("if (!t.isAlive()) {")
-	g.indent++
-	g.writeln("it.remove();")
+	g.writeln("getReaperHandler().run();")
 	g.indent--
 	g.writeln("} else {")
 	g.indent++
@@ -1122,12 +1049,11 @@ func (g *Generator) emitDefaultActorRuntime() {
 	g.indent--
 	g.writeln("}")
 	g.indent--
-	g.writeln("});")
-	g.indent--
-	g.writeln("}")
-	g.indent--
 	g.writeln("}")
 }
+
+// --- Stdlib Generators (emitted when actors are used) ------------------------
+
 
 // --- Data Classes (Records) --------------------------------------------------
 

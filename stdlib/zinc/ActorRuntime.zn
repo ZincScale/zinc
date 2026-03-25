@@ -1,8 +1,0 @@
-// ActorRuntime — interface for actor kill/reaper management.
-// Inject into supervisors. Mock for testing.
-
-package zinc
-
-interface ActorRuntime {
-    fn pendingKill(Thread thread)
-}

@@ -777,7 +777,6 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Generate Java files
 		className := classNameFromFile(pf.path)
 		gen := codegen_java.New()
-		gen.SkipActorRuntime = true // generated once at the end, not per-file
 		// Register cross-file type names for codegen
 		for _, other := range parsed {
 			for _, d := range other.prog.Decls {
@@ -829,31 +828,6 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 				fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", path)
 			}
 		}
-	}
-
-	// Generate DefaultActorRuntime once if any actors exist
-	hasActors := false
-	for _, pf := range parsed {
-		for _, d := range pf.prog.Decls {
-			if cls, ok := d.(*parser.ClassDecl); ok {
-				for _, parent := range cls.Parents {
-					if parent == "Actor" || parent == "Supervisor" {
-						hasActors = true
-					}
-				}
-			}
-		}
-	}
-	if hasActors {
-		runtimeContent := codegen_java.GenerateDefaultActorRuntimeFile()
-		runtimePath := filepath.Join(outDir, "zinc", "DefaultActorRuntime.java")
-		if err := os.MkdirAll(filepath.Dir(runtimePath), 0755); err != nil {
-			return nil, fmt.Errorf("creating zinc dir: %w", err)
-		}
-		if err := os.WriteFile(runtimePath, []byte(runtimeContent), 0644); err != nil {
-			return nil, fmt.Errorf("writing DefaultActorRuntime: %w", err)
-		}
-		allJavaFiles = append(allJavaFiles, runtimePath)
 	}
 
 	return allJavaFiles, nil

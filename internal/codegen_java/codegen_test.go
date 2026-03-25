@@ -2500,7 +2500,7 @@ class Team : Supervisor {
 		"public void kill()",
 		"w.getActorThread().interrupt()",
 		"w.getMailbox().clear()",
-		"_runtime.pendingKill(w.getActorThread())",
+		"System.exit(1)",
 	)
 }
 
@@ -2555,22 +2555,6 @@ class Pipeline : Supervisor {
 	if strings.Contains(result, "name._running") {
 		t.Errorf("non-actor field 'name' should not appear in lifecycle:\n%s", result)
 	}
-}
-
-func TestSupervisorRuntime(t *testing.T) {
-	// Supervisor should have a _runtime field
-	assertContains(t, `
-class Worker : Actor {
-	pub fn doWork() {}
-}
-class Team : Supervisor {
-	init Worker w
-	init(Worker w) {
-		this.w = w
-	}
-}`,
-		"protected ActorRuntime _runtime",
-	)
 }
 
 func TestOverloadedConstructors(t *testing.T) {
