@@ -63,6 +63,46 @@ public class Transformer {
 
     // --- Entry point ---------------------------------------------------------
 
+    /**
+     * Transforms a Zinc program into multiple CompilationUnits — one per top-level type.
+     * Script mode programs get a single Main class.
+     */
+    public Result<List<CompilationUnit>> transformAll(Program program) {
+        var units = new java.util.ArrayList<CompilationUnit>();
+
+        // Script mode — single Main class with everything
+        if (!program.stmts().isEmpty()) {
+            var result = transform(program);
+            if (result.isErr()) return Result.err(((Result.Err<?>) result).errors());
+            units.add(result.unwrap());
+            return Result.ok(units);
+        }
+
+        // Multi-type mode — one CU per top-level declaration
+        for (var decl : program.decls()) {
+            var cu = new CompilationUnit();
+            if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
+            for (var imp : program.imports()) cu.addImport(imp.path());
+
+            switch (decl) {
+                case ClassDecl cls -> cu.addType(transformClassDecl(cls));
+                case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
+                case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
+                case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
+                case EnumDecl en -> cu.addType(transformEnumDecl(en));
+                case FnDecl fn -> {
+                    // Top-level function without script — wrap in utility class
+                    var utilClass = cu.addClass(className, Keyword.PUBLIC);
+                    utilClass.addMember(transformFnDecl(fn));
+                }
+                case ConstDecl c -> {}
+            }
+            units.add(cu);
+        }
+
+        return Result.ok(units);
+    }
+
     public Result<CompilationUnit> transform(Program program) {
         var cu = new CompilationUnit();
 
