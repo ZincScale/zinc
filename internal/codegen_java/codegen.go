@@ -16,7 +16,6 @@ package codegen_java
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"zinc/internal/parser"
@@ -32,7 +31,6 @@ type Generator struct {
 	tupleTypes         map[int]bool    // track which Tuple arities we need to generate
 	arrayVars          map[string]bool // track variables declared as array types
 	interfaces         map[string]bool // track which type names are interfaces
-	actors             map[string]bool // track which type names are actors
 	zincMethods        map[string]map[string]bool // className → methodName → canThrow
 	errVarStack        []string        // stack of catch variable names for nested or-blocks
 	currentClassParents []string       // parents of the class currently being emitted
@@ -40,7 +38,7 @@ type Generator struct {
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool), actors: make(map[string]bool), zincMethods: make(map[string]map[string]bool)}
+	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool), zincMethods: make(map[string]map[string]bool)}
 }
 
 // OutputFile represents a generated .java file.
@@ -136,18 +134,9 @@ func exprCanThrow(e parser.Expr) bool {
 	}
 }
 
-// collectInterfaces scans declarations to build the set of known interface and actor names.
-// Actors are detected via inheritance: any class extending "Actor" (or a class that extends Actor) is an actor.
+// collectInterfaces scans declarations to build the set of known interface names
+// and collect Zinc class method signatures for throws analysis.
 func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
-	// Always register the stdlib base types
-	g.actors["Actor"] = true
-	g.actors["Supervisor"] = true
-
-	// Register Actor base class methods (generated, not parsed)
-	g.zincMethods["Actor"] = map[string]bool{
-		"mailboxCapacity": false, // cannot throw — just returns an int
-	}
-
 	for _, d := range decls {
 		if iface, ok := d.(*parser.InterfaceDecl); ok {
 			g.interfaces[iface.Name] = true
@@ -163,42 +152,12 @@ func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
 			g.zincMethods[cls.Name] = methods
 		}
 	}
-
-	// Multi-pass: detect actor subclasses transitively
-	changed := true
-	for changed {
-		changed = false
-		for _, d := range decls {
-			if cls, ok := d.(*parser.ClassDecl); ok {
-				if !g.actors[cls.Name] {
-					for _, parent := range cls.Parents {
-						if g.actors[parent] {
-							g.actors[cls.Name] = true
-							changed = true
-							break
-						}
-					}
-				}
-			}
-		}
-	}
 }
 
 // RegisterInterface allows external callers (e.g., multi-file compilation)
 // to register interface names discovered in other files.
 func (g *Generator) RegisterInterface(name string) {
 	g.interfaces[name] = true
-}
-
-// RegisterActor allows external callers (e.g., multi-file compilation)
-// to register actor type names discovered in other files.
-func (g *Generator) RegisterActor(name string) {
-	g.actors[name] = true
-}
-
-// IsActor checks if a type name is a known actor type.
-func (g *Generator) IsActor(name string) bool {
-	return g.actors[name]
 }
 
 // buildInheritanceClause builds the extends/implements string for a class.
@@ -437,7 +396,6 @@ func (g *Generator) emitClassDeclTopLevel(cls *parser.ClassDecl) {
 }
 
 // emitClassBody is the shared implementation for top-level and inner class emission.
-// It detects actor/supervisor behavior via inheritance and adds infrastructure accordingly.
 func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 	for _, a := range cls.Annotations {
 		g.writeln("@%s", g.formatAnnotation(a))
@@ -459,20 +417,12 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 	g.writeln("%s%s %s%s%s {", abstractMod, classPrefix, cls.Name, typeParams, ext)
 	g.indent++
 
-	isActor := g.isActorClass(cls)
-	isSupervisor := g.isSupervisorClass(cls)
 	g.currentClassParents = cls.Parents
 
-	// User fields
+	// Fields
 	g.pendingAccessors = nil
 	for _, f := range cls.Fields {
-		if isActor && !cls.IsAbstract {
-			// Concrete actor subclass fields are private, no accessors — state is owned
-			g.emitActorFieldDecl(f)
-		} else {
-			// Normal fields (including Actor base class — needs getters/setters)
-			g.emitFieldDecl(f)
-		}
+		g.emitFieldDecl(f)
 	}
 	if len(cls.Fields) > 0 {
 		g.writeln("")
@@ -487,26 +437,11 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 		g.emitCtor(cls.Name, cls.Ctor, cls.Parents)
 	}
 
-	if !isActor || cls.IsAbstract {
-		// Emit accessors for non-actors AND abstract actor base classes
-		// (Actor base class fields need getters/setters for supervisor access)
-		g.emitAccessors()
-	}
+	g.emitAccessors()
 
 	// Methods
 	for _, m := range cls.Methods {
-		// Check if method has @Override annotation
-		hasOverride := false
-		for _, a := range m.Annotations {
-			if a.Name == "Override" {
-				hasOverride = true
-				break
-			}
-		}
-		if isActor && m.IsPub && !hasOverride {
-			// Actor pub fn → dual-mode (mailbox/direct), but not overrides
-			g.emitActorDualModeMethod(m)
-		} else if m.IsAbstract {
+		if m.IsAbstract {
 			// Abstract method — signature only
 			ret := "void"
 			if m.ReturnType != nil {
@@ -519,27 +454,8 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 		g.writeln("")
 	}
 
-	// Supervisor lifecycle methods
-	if isSupervisor {
-		actorFields := g.getActorFields(cls)
-		g.emitSupervisorMethods(actorFields)
-	}
-
 	g.indent--
 	g.writeln("}")
-}
-
-// emitActorFieldDecl emits an actor field — always private, no accessors.
-func (g *Generator) emitActorFieldDecl(f *parser.FieldDecl) {
-	typeName := "Object"
-	if f.Type != nil {
-		typeName = g.formatType(f.Type)
-	}
-	if f.Default != nil {
-		g.writeln("private %s %s = %s;", typeName, f.Name, g.formatExpr(f.Default))
-	} else {
-		g.writeln("private %s %s;", typeName, f.Name)
-	}
 }
 
 // --- Imports -----------------------------------------------------------------
@@ -810,250 +726,6 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	g.emitMethodDefaultOverloads(vis, static, ret, m.Name, m.Params)
 }
 
-// --- Actor/Supervisor Detection via Inheritance ------------------------------
-
-// isActorClass returns true if this class extends Actor (directly or transitively).
-func (g *Generator) isActorClass(cls *parser.ClassDecl) bool {
-	for _, parent := range cls.Parents {
-		if g.actors[parent] && parent != "Supervisor" {
-			return true
-		}
-	}
-	return false
-}
-
-// isSupervisorClass returns true if this class extends Supervisor.
-func (g *Generator) isSupervisorClass(cls *parser.ClassDecl) bool {
-	for _, parent := range cls.Parents {
-		if parent == "Supervisor" {
-			return true
-		}
-	}
-	return false
-}
-
-// getActorFields returns field names whose types are actors (for supervisor lifecycle).
-func (g *Generator) getActorFields(cls *parser.ClassDecl) []string {
-	var names []string
-	for _, f := range cls.Fields {
-		if f.Type != nil {
-			if st, ok := f.Type.(*parser.SimpleType); ok {
-				if g.actors[st.Name] && st.Name != "Actor" && st.Name != "Supervisor" {
-					names = append(names, f.Name)
-				}
-			}
-		}
-	}
-	return names
-}
-
-// emitActorDualModeMethod emits a pub fn on an actor class with dual-mode:
-// if getMailbox() != null → enqueue to mailbox; else → direct execution.
-// Fields come from Actor base class (stdlib): mailbox, actorThread, running.
-func (g *Generator) emitActorDualModeMethod(m *parser.MethodDecl) {
-	if m.IsAbstract {
-		// Abstract method — no body
-		ret := "void"
-		if m.ReturnType != nil {
-			ret = g.formatType(m.ReturnType)
-		}
-		g.writeln("public abstract %s %s(%s) throws Exception;", ret, m.Name, g.formatParams(m.Params))
-		return
-	}
-
-	hasReturn := m.ReturnType != nil
-	params := g.formatParams(m.Params)
-
-	if hasReturn {
-		ret := g.formatType(m.ReturnType)
-		boxedRet := g.formatTypeBoxed(m.ReturnType)
-		g.writeln("public %s %s(%s) throws Exception {", ret, m.Name, params)
-		g.indent++
-		g.writeln("if (getMailbox() != null) {")
-		g.indent++
-		// Mailbox mode — request-reply via CompletableFuture
-		g.writeln("var _future = new java.util.concurrent.CompletableFuture<%s>();", boxedRet)
-		g.writeln("getMailbox().add(() -> {")
-		g.indent++
-		g.writeln("try {")
-		g.indent++
-		g.emitActorReceiveBody(m.Body, true)
-		g.indent--
-		g.writeln("} catch (Exception e) { _future.completeExceptionally(e); }")
-		g.indent--
-		g.writeln("});")
-		g.writeln("return _future.get();")
-		g.indent--
-		g.writeln("} else {")
-		g.indent++
-		// Direct mode — synchronous execution
-		g.emitBlock(m.Body)
-		g.indent--
-		g.writeln("}")
-		g.indent--
-		g.writeln("}")
-	} else {
-		g.writeln("public void %s(%s) throws Exception {", m.Name, params)
-		g.indent++
-		g.writeln("if (getMailbox() != null) {")
-		g.indent++
-		// Mailbox mode — fire-and-forget
-		g.writeln("getMailbox().add(() -> {")
-		g.indent++
-		g.writeln("try {")
-		g.indent++
-		if m.Body != nil {
-			g.emitBlock(m.Body)
-		}
-		g.indent--
-		g.writeln("} catch (Exception e) { throw (e instanceof RuntimeException re) ? re : new RuntimeException(e); }")
-		g.indent--
-		g.writeln("});")
-		g.indent--
-		g.writeln("} else {")
-		g.indent++
-		// Direct mode — synchronous execution
-		if m.Body != nil {
-			g.emitBlock(m.Body)
-		}
-		g.indent--
-		g.writeln("}")
-		g.indent--
-		g.writeln("}")
-	}
-}
-
-// emitActorReceiveBody emits a receive method body, transforming return → _future.complete for request-reply.
-func (g *Generator) emitActorReceiveBody(body *parser.BlockStmt, isRequestReply bool) {
-	if body == nil {
-		return
-	}
-	for _, s := range body.Stmts {
-		if isRequestReply {
-			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
-				g.writeln("_future.complete(%s);", g.formatExpr(ret.Value))
-				continue
-			}
-		}
-		g.emitStmt(s)
-	}
-}
-
-// emitSupervisorMethods emits start(), shutdown(), shutdown(long), kill() for a supervisor class.
-// Uses getter/setter methods on Actor base class fields: mailbox, actorThread, running, mailboxCapacity.
-func (g *Generator) emitSupervisorMethods(actorFields []string) {
-	// start() — activate each actor: create mailbox, start virtual thread
-	g.writeln("public void start() throws Exception {")
-	g.indent++
-	for _, name := range actorFields {
-		g.writeln("if (%s != null) {", name)
-		g.indent++
-		g.writeln("%s.setRunning(true);", name)
-		g.writeln("%s.setMailbox(new java.util.concurrent.ArrayBlockingQueue<>(%s.getMailboxCapacity()));", name, name)
-		g.writeln("%s.setActorThread(Thread.startVirtualThread(() -> {", name)
-		g.indent++
-		g.writeln("while (%s.getRunning()) {", name)
-		g.indent++
-		g.writeln("try {")
-		g.indent++
-		g.writeln("Runnable msg = %s.getMailbox().take();", name)
-		g.writeln("msg.run();")
-		g.indent--
-		g.writeln("} catch (InterruptedException e) {")
-		g.indent++
-		g.writeln("Thread.currentThread().interrupt();")
-		g.writeln("break;")
-		g.indent--
-		g.writeln("} catch (Exception e) {")
-		g.indent++
-		g.writeln("System.err.println(\"Actor error in %s: \" + e.getMessage());", name)
-		g.indent--
-		g.writeln("}")
-		g.indent--
-		g.writeln("}")
-		g.indent--
-		g.writeln("}));")
-		g.indent--
-		g.writeln("}")
-	}
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
-
-	// shutdown() — cooperative cascade
-	g.writeln("public void shutdown() throws Exception {")
-	g.indent++
-	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
-		g.indent++
-		g.writeln("%s.setRunning(false);", name)
-		g.writeln("%s.getMailbox().add(() -> {});", name)
-		g.writeln("%s.getActorThread().join();", name)
-		g.indent--
-		g.writeln("}")
-	}
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
-
-	// shutdown(timeoutMs) — cooperative with escalation
-	g.writeln("public void shutdown(long timeoutMs) throws Exception {")
-	g.indent++
-	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
-		g.indent++
-		g.writeln("%s.setRunning(false);", name)
-		g.writeln("%s.getMailbox().add(() -> {});", name)
-		g.writeln("%s.getActorThread().join(timeoutMs);", name)
-		g.writeln("if (%s.getActorThread().isAlive()) { %s.getActorThread().interrupt(); }", name, name)
-		g.indent--
-		g.writeln("}")
-	}
-	g.indent--
-	g.writeln("}")
-	g.writeln("")
-
-	// kill() — brutal with reaper verification
-	g.writeln("public void kill() throws Exception {")
-	g.indent++
-	// Interrupt all actor threads
-	g.writeln("java.util.List<Thread> killed = new java.util.ArrayList<>();")
-	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
-		g.indent++
-		g.writeln("%s.setRunning(false);", name)
-		g.writeln("%s.getActorThread().interrupt();", name)
-		g.writeln("if (%s.getMailbox() != null) { %s.getMailbox().clear(); }", name, name)
-		g.writeln("killed.add(%s.getActorThread());", name)
-		g.indent--
-		g.writeln("}")
-	}
-	// Reaper verification: wait for killed threads to die
-	g.writeln("Thread.sleep(getReaperTimeoutMs());")
-	g.writeln("for (var t : killed) {")
-	g.indent++
-	g.writeln("if (t.isAlive()) {")
-	g.indent++
-	g.writeln("if (getReaperHandler() != null) {")
-	g.indent++
-	g.writeln("getReaperHandler().run();")
-	g.indent--
-	g.writeln("} else {")
-	g.indent++
-	g.writeln("System.err.println(\"FATAL: Actor thread refused to terminate after kill. Forcing exit.\");")
-	g.writeln("System.exit(1);")
-	g.indent--
-	g.writeln("}")
-	g.indent--
-	g.writeln("}")
-	g.indent--
-	g.writeln("}")
-	g.indent--
-	g.writeln("}")
-}
-
-// --- Stdlib Generators (emitted when actors are used) ------------------------
-
 
 // --- Data Classes (Records) --------------------------------------------------
 
@@ -1182,8 +854,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.ParallelForStmt:
 		g.emitParallelForStmt(stmt)
 	case *parser.GoStmt:
-		// go { body } → Thread.startVirtualThread (DEPRECATED)
-		fmt.Fprintln(os.Stderr, "warning: 'go' is deprecated — use actor for concurrent work")
+		// go { body } → Thread.startVirtualThread
 		g.writeln("Thread.startVirtualThread(() -> {")
 		g.indent++
 		g.emitBlock(stmt.Body)
@@ -1778,7 +1449,6 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.tupleTypes[n] = true
 		return fmt.Sprintf("new Tuple%d(%s)", n, g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
-		fmt.Fprintln(os.Stderr, "warning: 'spawn' is deprecated — use actor for concurrent work")
 		var body strings.Builder
 		if expr.Body != nil {
 			for _, s := range expr.Body.Stmts {

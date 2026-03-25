@@ -416,40 +416,30 @@ func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 // findStdlibDir locates the stdlib directory relative to the zinc binary.
 // Checks: <binary-dir>/stdlib, <binary-dir>/../stdlib, and the ZINC_STDLIB env var.
 func findStdlibDir() string {
-	// Check ZINC_STDLIB env var first
 	if dir := os.Getenv("ZINC_STDLIB"); dir != "" {
 		if _, err := os.Stat(dir); err == nil {
 			return dir
 		}
 	}
-
-	// Find the binary's directory
 	exe, err := os.Executable()
 	if err == nil {
 		exe, _ = filepath.EvalSymlinks(exe)
 		binDir := filepath.Dir(exe)
-
-		// Check <binary-dir>/stdlib
 		candidate := filepath.Join(binDir, "stdlib")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
-
-		// Check <binary-dir>/../stdlib (for go run / development)
 		candidate = filepath.Join(binDir, "..", "stdlib")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
-
-	// Fallback: check current working directory's parent (development mode)
 	if cwd, err := os.Getwd(); err == nil {
 		candidate := filepath.Join(cwd, "stdlib")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
-
 	return ""
 }
 
@@ -484,27 +474,6 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
-	}
-
-	// Check if single file needs stdlib imports — if so, promote to multi-file
-	if len(znFiles) == 1 {
-		stdlibDir := findStdlibDir()
-		if stdlibDir != "" {
-			prog, err := parseOnly(znFiles[0], false)
-			if err == nil {
-				for _, imp := range prog.Imports {
-					if strings.HasPrefix(imp.Path, "zinc.") {
-						parts := strings.SplitN(imp.Path, ".", 2)
-						if len(parts) == 2 {
-							znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
-							if _, err := os.Stat(znFile); err == nil {
-								znFiles = append(znFiles, znFile)
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 
 	// For multi-file projects: parse all files first, build a type registry,
@@ -582,18 +551,13 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Convention: directory = package
 		inferredPkg := inferPackageFromDir(znFile, sourceRoot)
 
-		// Check if file is under source root (not stdlib)
-		absFile, _ := filepath.Abs(znFile)
-		absRoot, _ := filepath.Abs(sourceRoot)
-		isUnderSourceRoot := strings.HasPrefix(absFile, absRoot)
-
 		if prog.Package != nil {
-			// Validate declared package matches directory — only for project files
-			if isUnderSourceRoot && inferredPkg != "" && prog.Package.Path != inferredPkg {
+			// Validate declared package matches directory
+			if inferredPkg != "" && prog.Package.Path != inferredPkg {
 				fmt.Fprintf(os.Stderr, "warning: %s declares package '%s' but directory suggests '%s'\n",
 					znFile, prog.Package.Path, inferredPkg)
 			}
-		} else if inferredPkg != "" && isUnderSourceRoot {
+		} else if inferredPkg != "" {
 			// Auto-set package from directory
 			prog.Package = &parser.PackageDecl{Path: inferredPkg}
 			if verbose {
@@ -627,68 +591,6 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			case *parser.InterfaceDecl:
 				typeRegistry[decl.Name] = pkg
 				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
-			}
-		}
-	}
-
-	// Resolve stdlib imports: if any file imports zinc.*, include ALL stdlib .zn files
-	stdlibDir := findStdlibDir()
-	if stdlibDir != "" {
-		hasZincImport := false
-		for _, pf := range parsed {
-			for _, imp := range pf.prog.Imports {
-				if strings.HasPrefix(imp.Path, "zinc.") {
-					hasZincImport = true
-					break
-				}
-			}
-			if hasZincImport {
-				break
-			}
-		}
-		var stdlibNeeded []string
-		if hasZincImport {
-			// Include all stdlib files when any zinc.* import is present
-			stdlibZincDir := filepath.Join(stdlibDir, "zinc")
-			filepath.Walk(stdlibZincDir, func(path string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					return nil
-				}
-				if strings.HasSuffix(fi.Name(), ".zn") {
-					stdlibNeeded = append(stdlibNeeded, path)
-				}
-				return nil
-			})
-		}
-		// Parse and include stdlib files
-		seen := make(map[string]bool)
-		for _, znFile := range stdlibNeeded {
-			if seen[znFile] {
-				continue
-			}
-			seen[znFile] = true
-			prog, err := parseOnly(znFile, verbose)
-			if err != nil {
-				return nil, fmt.Errorf("parsing stdlib %s: %w", znFile, err)
-			}
-			// Stdlib files declare their own package
-			parsed = append(parsed, parsedFile{path: znFile, prog: prog})
-			pkg := ""
-			if prog.Package != nil {
-				pkg = prog.Package.Path
-			}
-			for _, d := range prog.Decls {
-				switch decl := d.(type) {
-				case *parser.ClassDecl:
-					typeRegistry[decl.Name] = pkg
-					pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
-				case *parser.InterfaceDecl:
-					typeRegistry[decl.Name] = pkg
-					pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
-				}
-			}
-			if verbose {
-				fmt.Fprintf(os.Stderr, "[verbose] included stdlib: %s\n", znFile)
 			}
 		}
 	}
@@ -782,26 +684,6 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			for _, d := range other.prog.Decls {
 				if iface, ok := d.(*parser.InterfaceDecl); ok {
 					gen.RegisterInterface(iface.Name)
-				}
-				// Register actor classes (classes extending Actor or another actor)
-				if cls, ok := d.(*parser.ClassDecl); ok {
-					for _, parent := range cls.Parents {
-						if parent == "Actor" {
-							gen.RegisterActor(cls.Name)
-						}
-					}
-				}
-			}
-		}
-		// Second pass: transitive actor detection (class extends an actor class)
-		for _, other := range parsed {
-			for _, d := range other.prog.Decls {
-				if cls, ok := d.(*parser.ClassDecl); ok {
-					for _, parent := range cls.Parents {
-						if gen.IsActor(parent) {
-							gen.RegisterActor(cls.Name)
-						}
-					}
 				}
 			}
 		}

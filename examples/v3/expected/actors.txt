@@ -1,9 +1,0 @@
-direct: 10
-hello zinc
-order: abcde
-size: 3
-items: x,y,z
-sum: 42
-doubled: 40
-capacity: 50000
-Actors OK

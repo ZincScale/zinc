@@ -2,74 +2,19 @@
 
 Zinc runs on Java 25 virtual threads. No async/await, no colored functions. Every function is synchronous — blocking is cheap because virtual threads unmount from carrier threads on I/O.
 
-For detailed documentation on specific topics:
-- [Actors](actors.md) — isolated concurrent units with message passing
-- [Supervisors](supervisors.md) — managing actor lifecycle
-- [Guide: Actors](../guide-actors.md) — patterns, testing, migration
-
 See `design-zinc-concurrency.md` for the full design with Java transpilation details.
 
-## Actors (class extends Actor)
+## spawn
 
-An actor is an isolated concurrent unit. Extend the `Actor` abstract class — `pub fn` methods become message handlers (dual-mode: direct in test, mailbox when supervised).
+Run a block on a new virtual thread:
 
 ```zinc
-class Counter : Actor {
-    var int count = 0
-
-    pub fn increment() {
-        count += 1
-    }
-
-    pub fn getCount(): int {
-        return count
-    }
+spawn {
+    sendEmail(user, "Welcome!")
 }
 ```
 
-Actors are inert on construction. A supervisor activates them with `start()`:
-
-```zinc
-var counter = new Counter(0)
-counter.increment()         // direct mode — synchronous (testing)
-
-var sup = new Team(counter)
-sup.start()                 // activates — mailbox + virtual thread
-counter.increment()         // supervised mode — async via mailbox
-```
-
-See [Actors](actors.md) for full documentation.
-
-## Supervisors (class extends Supervisor)
-
-A supervisor manages actor lifecycle. Extend the `Supervisor` abstract class — actor-typed fields get automatic lifecycle cascade.
-
-```zinc
-class Team : Supervisor {
-    init Counter w1
-    init Counter w2
-
-    init(Counter w1, Counter w2) {
-        this.w1 = w1
-        this.w2 = w2
-    }
-}
-
-var a = new Counter(0)
-var b = new Counter(100)
-var sup = new Team(a, b)
-sup.start()                 // activate all actors
-sup.shutdown()              // cascade shutdown
-sup.kill()                  // cascade brutal kill
-```
-
-See [Supervisors](supervisors.md) for full documentation.
-
-## spawn (deprecated)
-
-> **Deprecated** — use `class : Actor` for long-lived concurrent work, `concurrent` for short-lived fan-out.
-
-`spawn` creates an unstructured virtual thread with no lifecycle management. It is preserved for backward compatibility but emits a compiler warning.
+`spawn` is unstructured — the thread outlives the calling scope. Use `concurrent` or `parallel for` for structured work.
 
 ## concurrent
 
@@ -171,20 +116,12 @@ Bounded producer/consumer queue for communicating between threads:
 ```zinc
 var ch = new Channel<Order>(capacity: 100)
 
-// Producer — extends Actor
-class Producer : Actor {
-    init Channel<Order> ch
-
-    init(Channel<Order> ch) {
-        this.ch = ch
+// Producer
+spawn {
+    for order in incomingOrders() {
+        ch.send(order)
     }
-
-    pub fn produce(List<Order> orders) {
-        for order in orders {
-            ch.send(order)
-        }
-        ch.close()
-    }
+    ch.close()
 }
 
 // Consumer
@@ -277,8 +214,7 @@ fn scrapeUrls(List<String> urls): List<String> {
 
 | Primitive | Purpose | Structured? |
 |---|---|---|
-| `class : Actor` | Isolated concurrent unit with mailbox | Yes (owned) |
-| `class : Supervisor` | Manages actor lifecycle | Yes (owned) |
+| `spawn { }` | Fire a virtual thread | No |
 | `concurrent { }` | Fan-out tasks, collect results | Yes |
 | `concurrent(first: true)` | Race, take first result | Yes |
 | `parallel for` | Fan-out loop, wait for all | Yes |
@@ -290,12 +226,11 @@ fn scrapeUrls(List<String> urls): List<String> {
 | `select { }` | Wait on multiple channels | N/A |
 | `context T { }` | Scoped value declaration | Yes |
 | `with T(...) { }` | Bind scoped value | Yes |
-| ~~`spawn { }`~~ | ~~Fire a virtual thread~~ | Deprecated |
 
 ### What's NOT in Zinc
 
 - **No `async`/`await`** — virtual threads make blocking cheap. No colored functions.
 - **No `synchronized`** — use `lock` (generates `ReentrantLock`).
-- **No raw `Thread` API** — use `class : Actor` for long-lived work, `concurrent`/`parallel` for short-lived.
-- **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in. Actors use it internally for request-reply.
+- **No raw `Thread` API** — use `spawn`, `concurrent`, `parallel`.
+- **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in.
 - **No reactive streams** — virtual threads replace the need for reactive programming.
