@@ -1,5 +1,7 @@
 // Greeter — lives in actors package, extends Actor
 
+import zinc.Actor
+
 class Greeter : Actor {
     var String prefix = "hello"
 

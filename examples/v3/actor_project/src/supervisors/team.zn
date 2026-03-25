@@ -1,5 +1,6 @@
 // Team supervisor — manages Counter actors from the actors package
 
+import zinc.Supervisor
 import actors.Counter
 
 class Team : Supervisor {

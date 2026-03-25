@@ -1,0 +1,8 @@
+// Supervisor — abstract base class for actor lifecycle management.
+// Extend this class to create a supervisor. Actor-typed fields get
+// automatic start/shutdown/kill lifecycle cascade.
+
+package zinc
+
+abstract class Supervisor {
+}

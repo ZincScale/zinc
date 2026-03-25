@@ -7,6 +7,9 @@
 //   - Direct mode (no start) = synchronous for testing
 //   - Mixed actor + config fields
 
+import zinc.Actor
+import zinc.Supervisor
+
 // === Shared actor type ===
 
 class Counter : Actor {

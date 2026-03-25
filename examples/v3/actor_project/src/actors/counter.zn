@@ -1,5 +1,7 @@
 // Counter — lives in actors package, extends Actor
 
+import zinc.Actor
+
 class Counter : Actor {
     var int count = 0
 

@@ -413,6 +413,46 @@ func parseAndCheck(inFile string, verbose bool) (*parser.Program, error) {
 	return prog, nil
 }
 
+// findStdlibDir locates the stdlib directory relative to the zinc binary.
+// Checks: <binary-dir>/stdlib, <binary-dir>/../stdlib, and the ZINC_STDLIB env var.
+func findStdlibDir() string {
+	// Check ZINC_STDLIB env var first
+	if dir := os.Getenv("ZINC_STDLIB"); dir != "" {
+		if _, err := os.Stat(dir); err == nil {
+			return dir
+		}
+	}
+
+	// Find the binary's directory
+	exe, err := os.Executable()
+	if err == nil {
+		exe, _ = filepath.EvalSymlinks(exe)
+		binDir := filepath.Dir(exe)
+
+		// Check <binary-dir>/stdlib
+		candidate := filepath.Join(binDir, "stdlib")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+
+		// Check <binary-dir>/../stdlib (for go run / development)
+		candidate = filepath.Join(binDir, "..", "stdlib")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	// Fallback: check current working directory's parent (development mode)
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, "stdlib")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
 // transpileToJava transpiles .zn file(s) to .java files in outDir.
 // Accepts a single file or a directory (scans for all .zn files).
 // Each data class, enum, and class gets its own .java file.
@@ -444,6 +484,27 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating output dir: %w", err)
+	}
+
+	// Check if single file needs stdlib imports — if so, promote to multi-file
+	if len(znFiles) == 1 {
+		stdlibDir := findStdlibDir()
+		if stdlibDir != "" {
+			prog, err := parseOnly(znFiles[0], false)
+			if err == nil {
+				for _, imp := range prog.Imports {
+					if strings.HasPrefix(imp.Path, "zinc.") {
+						parts := strings.SplitN(imp.Path, ".", 2)
+						if len(parts) == 2 {
+							znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
+							if _, err := os.Stat(znFile); err == nil {
+								znFiles = append(znFiles, znFile)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// For multi-file projects: parse all files first, build a type registry,
@@ -561,6 +622,56 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			case *parser.InterfaceDecl:
 				typeRegistry[decl.Name] = pkg
 				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+			}
+		}
+	}
+
+	// Resolve stdlib imports: if any file imports zinc.*, include the stdlib .zn files
+	stdlibDir := findStdlibDir()
+	if stdlibDir != "" {
+		var stdlibNeeded []string
+		for _, pf := range parsed {
+			for _, imp := range pf.prog.Imports {
+				if strings.HasPrefix(imp.Path, "zinc.") {
+					parts := strings.SplitN(imp.Path, ".", 2)
+					if len(parts) == 2 {
+						znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
+						if _, err := os.Stat(znFile); err == nil {
+							stdlibNeeded = append(stdlibNeeded, znFile)
+						}
+					}
+				}
+			}
+		}
+		// Parse and include stdlib files
+		seen := make(map[string]bool)
+		for _, znFile := range stdlibNeeded {
+			if seen[znFile] {
+				continue
+			}
+			seen[znFile] = true
+			prog, err := parseOnly(znFile, verbose)
+			if err != nil {
+				return nil, fmt.Errorf("parsing stdlib %s: %w", znFile, err)
+			}
+			// Stdlib files declare their own package
+			parsed = append(parsed, parsedFile{path: znFile, prog: prog})
+			pkg := ""
+			if prog.Package != nil {
+				pkg = prog.Package.Path
+			}
+			for _, d := range prog.Decls {
+				switch decl := d.(type) {
+				case *parser.ClassDecl:
+					typeRegistry[decl.Name] = pkg
+					pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+				case *parser.InterfaceDecl:
+					typeRegistry[decl.Name] = pkg
+					pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+				}
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[verbose] included stdlib: %s\n", znFile)
 			}
 		}
 	}

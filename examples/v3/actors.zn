@@ -5,6 +5,7 @@
 //   - Supervised mode = mailbox async after supervisor.start()
 //   - Private helpers, complex state, actor-to-actor messaging
 
+import zinc.Actor
 import java.util.concurrent.atomic.AtomicInteger
 
 // === Test 1: Direct mode — actor as plain class (testing) ===

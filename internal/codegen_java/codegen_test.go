@@ -2282,8 +2282,8 @@ class Counter : Actor {
 	}
 }`,
 		"public void increment()",
-		"if (_mailbox != null)",
-		"_mailbox.add(() ->",
+		"if (getMailbox() != null)",
+		"getMailbox().add(() ->",
 		"count += 1",
 	)
 }
@@ -2298,7 +2298,7 @@ class Counter : Actor {
 	}
 }`,
 		"public int getCount()",
-		"if (_mailbox != null)",
+		"if (getMailbox() != null)",
 		"CompletableFuture<Integer>",
 		"_future.complete(count)",
 		"return _future.get()",
@@ -2379,7 +2379,7 @@ class Counter : Actor {
 		"public void add(int n)",
 		"public int getCount()",
 		"public void reset()",
-		"_mailbox.add(() ->",
+		"getMailbox().add(() ->",
 		"CompletableFuture<Integer>",
 	)
 }
@@ -2457,10 +2457,10 @@ class Team : Supervisor {
 	}
 }`,
 		"public void start()",
-		"w1._running = true",
-		"w1._mailbox = new java.util.concurrent.ArrayBlockingQueue<>",
+		"w1.setRunning(true)",
+		"w1.setMailbox(new java.util.concurrent.ArrayBlockingQueue<>",
 		"Thread.startVirtualThread",
-		"w1._mailbox.take()",
+		"w1.getMailbox().take()",
 	)
 }
 
@@ -2479,9 +2479,9 @@ class Pipeline : Supervisor {
 	}
 }`,
 		"public void shutdown() throws Exception",
-		"w1._running = false",
-		"w1._mailbox.add(() -> {})",
-		"w1._actorThread.join()",
+		"w1.setRunning(false)",
+		"w1.getMailbox().add(() -> {})",
+		"w1.getActorThread().join()",
 	)
 }
 
@@ -2498,9 +2498,9 @@ class Team : Supervisor {
 	}
 }`,
 		"public void kill()",
-		"w._actorThread.interrupt()",
-		"w._mailbox.clear()",
-		"_runtime.pendingKill(w._actorThread)",
+		"w.getActorThread().interrupt()",
+		"w.getMailbox().clear()",
+		"_runtime.pendingKill(w.getActorThread())",
 	)
 }
 
@@ -2517,7 +2517,7 @@ class Team : Supervisor {
 	}
 }`,
 		"public void shutdown(long timeoutMs) throws Exception",
-		"w._actorThread.join(timeoutMs)",
+		"w.getActorThread().join(timeoutMs)",
 	)
 }
 
@@ -2536,7 +2536,7 @@ class Pipeline : Supervisor {
 		this.w = w
 	}
 }`,
-		"w._running = false",
+		"w.setRunning(false)",
 	)
 	// name is not an actor — should NOT appear in lifecycle
 	result := transpile(`

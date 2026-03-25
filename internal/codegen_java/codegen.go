@@ -369,30 +369,9 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 		}
 	}
 
-	// Generate stdlib files if actors/supervisors are used
+	// Generate DefaultActorRuntime if actors/supervisors are used
+	// (Actor, Supervisor, ActorRuntime come from stdlib .zn files)
 	if hasActors {
-		// Actor.java — abstract base class
-		g.buf.Reset()
-		g.indent = 0
-		g.emitPackageAndImports(prog.Package, prog.Imports)
-		g.emitActorBaseClass()
-		files = append(files, OutputFile{Name: "Actor.java", Content: g.buf.String()})
-
-		// Supervisor.java — abstract base class
-		g.buf.Reset()
-		g.indent = 0
-		g.emitPackageAndImports(prog.Package, prog.Imports)
-		g.emitSupervisorBaseClass()
-		files = append(files, OutputFile{Name: "Supervisor.java", Content: g.buf.String()})
-
-		// ActorRuntime.java — interface
-		g.buf.Reset()
-		g.indent = 0
-		g.emitPackageAndImports(prog.Package, prog.Imports)
-		g.emitActorRuntimeInterface()
-		files = append(files, OutputFile{Name: "ActorRuntime.java", Content: g.buf.String()})
-
-		// DefaultActorRuntime.java — production implementation
 		g.buf.Reset()
 		g.indent = 0
 		g.emitPackageAndImports(prog.Package, prog.Imports)
@@ -504,9 +483,6 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 	isActor := g.isActorClass(cls)
 	isSupervisor := g.isSupervisorClass(cls)
 	g.currentClassParents = cls.Parents
-
-	// Actor infrastructure fields (inherited from Actor base, but we don't re-emit them)
-	// The Actor base class already has _mailbox, _actorThread, _running, mailboxCapacity
 
 	// Supervisor: add _runtime field
 	if isSupervisor {
@@ -895,16 +871,9 @@ func (g *Generator) getActorFields(cls *parser.ClassDecl) []string {
 	return names
 }
 
-// emitActorInfraFields emits the mailbox/thread/running fields for an actor class.
-func (g *Generator) emitActorInfraFields() {
-	g.writeln("public java.util.concurrent.ArrayBlockingQueue<Runnable> _mailbox;")
-	g.writeln("public Thread _actorThread;")
-	g.writeln("public volatile boolean _running = false;")
-	g.writeln("")
-}
-
 // emitActorDualModeMethod emits a pub fn on an actor class with dual-mode:
-// if _mailbox != null → enqueue to mailbox; else → direct execution.
+// if getMailbox() != null → enqueue to mailbox; else → direct execution.
+// Fields come from Actor base class (stdlib): mailbox, actorThread, running.
 func (g *Generator) emitActorDualModeMethod(m *parser.MethodDecl) {
 	if m.IsAbstract {
 		// Abstract method — no body
@@ -924,11 +893,11 @@ func (g *Generator) emitActorDualModeMethod(m *parser.MethodDecl) {
 		boxedRet := g.formatTypeBoxed(m.ReturnType)
 		g.writeln("public %s %s(%s) throws Exception {", ret, m.Name, params)
 		g.indent++
-		g.writeln("if (_mailbox != null) {")
+		g.writeln("if (getMailbox() != null) {")
 		g.indent++
 		// Mailbox mode — request-reply via CompletableFuture
 		g.writeln("var _future = new java.util.concurrent.CompletableFuture<%s>();", boxedRet)
-		g.writeln("_mailbox.add(() -> {")
+		g.writeln("getMailbox().add(() -> {")
 		g.indent++
 		g.writeln("try {")
 		g.indent++
@@ -950,10 +919,10 @@ func (g *Generator) emitActorDualModeMethod(m *parser.MethodDecl) {
 	} else {
 		g.writeln("public void %s(%s) throws Exception {", m.Name, params)
 		g.indent++
-		g.writeln("if (_mailbox != null) {")
+		g.writeln("if (getMailbox() != null) {")
 		g.indent++
 		// Mailbox mode — fire-and-forget
-		g.writeln("_mailbox.add(() -> {")
+		g.writeln("getMailbox().add(() -> {")
 		g.indent++
 		g.writeln("try {")
 		g.indent++
@@ -995,6 +964,7 @@ func (g *Generator) emitActorReceiveBody(body *parser.BlockStmt, isRequestReply 
 }
 
 // emitSupervisorMethods emits start(), shutdown(), shutdown(long), kill() for a supervisor class.
+// Uses getter/setter methods on Actor base class fields: mailbox, actorThread, running, mailboxCapacity.
 func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	// start() — activate each actor: create mailbox, start virtual thread
 	g.writeln("public void start() throws Exception {")
@@ -1002,15 +972,15 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	for _, name := range actorFields {
 		g.writeln("if (%s != null) {", name)
 		g.indent++
-		g.writeln("%s._running = true;", name)
-		g.writeln("%s._mailbox = new java.util.concurrent.ArrayBlockingQueue<>(%s.mailboxCapacity());", name, name)
-		g.writeln("%s._actorThread = Thread.startVirtualThread(() -> {", name)
+		g.writeln("%s.setRunning(true);", name)
+		g.writeln("%s.setMailbox(new java.util.concurrent.ArrayBlockingQueue<>(%s.getMailboxCapacity()));", name, name)
+		g.writeln("%s.setActorThread(Thread.startVirtualThread(() -> {", name)
 		g.indent++
-		g.writeln("while (%s._running) {", name)
+		g.writeln("while (%s.getRunning()) {", name)
 		g.indent++
 		g.writeln("try {")
 		g.indent++
-		g.writeln("Runnable msg = %s._mailbox.take();", name)
+		g.writeln("Runnable msg = %s.getMailbox().take();", name)
 		g.writeln("msg.run();")
 		g.indent--
 		g.writeln("} catch (InterruptedException e) {")
@@ -1026,7 +996,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 		g.indent--
 		g.writeln("}")
 		g.indent--
-		g.writeln("});")
+		g.writeln("}));")
 		g.indent--
 		g.writeln("}")
 	}
@@ -1038,11 +1008,11 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	g.writeln("public void shutdown() throws Exception {")
 	g.indent++
 	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s._actorThread != null) {", name, name)
+		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
 		g.indent++
-		g.writeln("%s._running = false;", name)
-		g.writeln("%s._mailbox.add(() -> {});", name)
-		g.writeln("%s._actorThread.join();", name)
+		g.writeln("%s.setRunning(false);", name)
+		g.writeln("%s.getMailbox().add(() -> {});", name)
+		g.writeln("%s.getActorThread().join();", name)
 		g.indent--
 		g.writeln("}")
 	}
@@ -1054,12 +1024,12 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	g.writeln("public void shutdown(long timeoutMs) throws Exception {")
 	g.indent++
 	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s._actorThread != null) {", name, name)
+		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
 		g.indent++
-		g.writeln("%s._running = false;", name)
-		g.writeln("%s._mailbox.add(() -> {});", name)
-		g.writeln("%s._actorThread.join(timeoutMs);", name)
-		g.writeln("if (%s._actorThread.isAlive()) { %s._actorThread.interrupt(); }", name, name)
+		g.writeln("%s.setRunning(false);", name)
+		g.writeln("%s.getMailbox().add(() -> {});", name)
+		g.writeln("%s.getActorThread().join(timeoutMs);", name)
+		g.writeln("if (%s.getActorThread().isAlive()) { %s.getActorThread().interrupt(); }", name, name)
 		g.indent--
 		g.writeln("}")
 	}
@@ -1071,12 +1041,12 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	g.writeln("public void kill() {")
 	g.indent++
 	for _, name := range actorFields {
-		g.writeln("if (%s != null && %s._actorThread != null) {", name, name)
+		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
 		g.indent++
-		g.writeln("%s._running = false;", name)
-		g.writeln("%s._actorThread.interrupt();", name)
-		g.writeln("%s._mailbox.clear();", name)
-		g.writeln("if (_runtime != null) { _runtime.pendingKill(%s._actorThread); }", name)
+		g.writeln("%s.setRunning(false);", name)
+		g.writeln("%s.getActorThread().interrupt();", name)
+		g.writeln("%s.getMailbox().clear();", name)
+		g.writeln("if (_runtime != null) { _runtime.pendingKill(%s.getActorThread()); }", name)
 		g.indent--
 		g.writeln("}")
 	}
@@ -1086,33 +1056,9 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 
 // --- Stdlib Generators (emitted when actors are used) ------------------------
 
-func (g *Generator) emitActorBaseClass() {
-	g.writeln("public abstract class Actor {")
-	g.indent++
-	g.writeln("public int mailboxCapacity() { return 1000; }")
-	g.writeln("public java.util.concurrent.ArrayBlockingQueue<Runnable> _mailbox;")
-	g.writeln("public Thread _actorThread;")
-	g.writeln("public volatile boolean _running = false;")
-	g.indent--
-	g.writeln("}")
-}
-
-func (g *Generator) emitSupervisorBaseClass() {
-	g.writeln("public abstract class Supervisor {")
-	g.indent++
-	g.writeln("protected ActorRuntime _runtime;")
-	g.indent--
-	g.writeln("}")
-}
-
-func (g *Generator) emitActorRuntimeInterface() {
-	g.writeln("public interface ActorRuntime {")
-	g.indent++
-	g.writeln("void pendingKill(Thread thread);")
-	g.indent--
-	g.writeln("}")
-}
-
+// emitDefaultActorRuntime generates the production ActorRuntime implementation.
+// This is generated (not from stdlib) because it needs low-level Java constructs
+// (synchronized, ConcurrentLinkedQueue, virtual thread) that bootstrap the actor system.
 func (g *Generator) emitDefaultActorRuntime() {
 	g.writeln("public class DefaultActorRuntime implements ActorRuntime {")
 	g.indent++
