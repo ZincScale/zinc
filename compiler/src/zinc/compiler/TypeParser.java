@@ -82,8 +82,8 @@ public class TypeParser {
             if (ctx.check(LBRACKET) && ctx.peekAt(1).type() == RBRACKET) { ctx.advance(); ctx.advance(); }
             // Optional: Type?
             if (ctx.check(QUESTION)) ctx.advance();
-            // Must be followed by an identifier (the variable name)
-            return ctx.check(IDENT);
+            // Must be followed by an identifier (or keyword used as identifier)
+            return ctx.check(IDENT) || ctx.isIdentLike(ctx.peek().type());
         } finally {
             ctx.restore(saved);
         }

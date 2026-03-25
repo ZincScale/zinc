@@ -79,6 +79,15 @@ public class ExprParser {
             String typeName = ctx.expect(IDENT).literal();
             return new TypeAssertExpr(left, typeName, false);
         }
+        // "hello" in str → str.contains("hello")
+        if (ctx.check(IN)) {
+            ctx.advance();
+            var container = parseRange();
+            // Rewrite as: container.contains(left) — represented as CallExpr
+            return new CallExpr(
+                new SelectorExpr(container, "contains"),
+                java.util.List.of(left), java.util.List.of(), java.util.List.of(), false);
+        }
         return left;
     }
 

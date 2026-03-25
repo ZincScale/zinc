@@ -567,6 +567,19 @@ public class Transformer {
         Expression init = v.value() != null ? transformExpr(v.value()) : null;
         if (v.type() != null) {
             var type = transformType(v.type());
+
+            // Array type + list literal → new Type[]{elem1, elem2, ...}
+            if (v.type() instanceof Ast.ArrayType arrType && v.value() instanceof ListLit list) {
+                var elemType = transformType(arrType.elementType());
+                var elems = new NodeList<Expression>();
+                for (var el : list.elements()) elems.add(transformExpr(el));
+                var arrayInit = new ArrayCreationExpr(elemType, new NodeList<>(new ArrayCreationLevel()),
+                    new ArrayInitializerExpr(elems));
+                var decl = new VariableDeclarationExpr(type, v.name());
+                decl.getVariable(0).setInitializer(arrayInit);
+                return new ExpressionStmt(decl);
+            }
+
             var decl = new VariableDeclarationExpr(type, v.name());
             if (init != null) decl.getVariable(0).setInitializer(init);
             return new ExpressionStmt(decl);
@@ -1032,14 +1045,34 @@ public class Transformer {
     private Expression transformBinaryExpr(Ast.BinaryExpr bin) {
         var left = transformExpr(bin.left());
         var right = transformExpr(bin.right());
+
+        // == in Zinc is structural equality → Objects.equals(a, b)
+        if (bin.op().equals("==")) {
+            return new MethodCallExpr(new NameExpr("java.util.Objects"), "equals",
+                new NodeList<>(left, right));
+        }
+        // != → !Objects.equals(a, b)
+        if (bin.op().equals("!=")) {
+            return new com.github.javaparser.ast.expr.UnaryExpr(
+                new MethodCallExpr(new NameExpr("java.util.Objects"), "equals",
+                    new NodeList<>(left, right)),
+                com.github.javaparser.ast.expr.UnaryExpr.Operator.LOGICAL_COMPLEMENT);
+        }
+        // === is reference equality → a == b in Java
+        if (bin.op().equals("===")) {
+            return new com.github.javaparser.ast.expr.BinaryExpr(left, right, BinaryExpr.Operator.EQUALS);
+        }
+        // !== → a != b in Java
+        if (bin.op().equals("!==")) {
+            return new com.github.javaparser.ast.expr.BinaryExpr(left, right, BinaryExpr.Operator.NOT_EQUALS);
+        }
+
         var op = switch (bin.op()) {
             case "+" -> BinaryExpr.Operator.PLUS;
             case "-" -> BinaryExpr.Operator.MINUS;
             case "*" -> BinaryExpr.Operator.MULTIPLY;
             case "/" -> BinaryExpr.Operator.DIVIDE;
             case "%" -> BinaryExpr.Operator.REMAINDER;
-            case "==" -> BinaryExpr.Operator.EQUALS;
-            case "!=" -> BinaryExpr.Operator.NOT_EQUALS;
             case "<" -> BinaryExpr.Operator.LESS;
             case "<=" -> BinaryExpr.Operator.LESS_EQUALS;
             case ">" -> BinaryExpr.Operator.GREATER;
@@ -1108,19 +1141,26 @@ public class Transformer {
             String methodName = METHOD_ALIASES.getOrDefault(sel.field(), sel.field());
 
             // Stream methods on collections: .filter(), .map(), .reduce(), etc.
-            // list.filter(pred) → list.stream().filter(pred).toList()
-            // list.map(fn) → list.stream().map(fn).toList()
             if (isStreamMethod(methodName)) {
+                // Rewrite `it` references in args to lambda: filter(it > 5) → filter(_it -> _it > 5)
+                var rewrittenArgs = new NodeList<Expression>();
+                for (var arg : call.args()) {
+                    if (containsIt(arg)) {
+                        var rewritten = rewriteIt(arg);
+                        var param = new Parameter(new UnknownType(), "_it");
+                        rewrittenArgs.add(new com.github.javaparser.ast.expr.LambdaExpr(
+                            new NodeList<>(param), rewritten));
+                    } else {
+                        rewrittenArgs.add(transformExpr(arg));
+                    }
+                }
+
                 var obj = transformExpr(sel.object());
                 var stream = new MethodCallExpr(obj, "stream");
-                var streamOp = new MethodCallExpr(stream, methodName, args);
+                var streamOp = new MethodCallExpr(stream, methodName, rewrittenArgs);
                 return switch (methodName) {
-                    case "reduce" -> streamOp;
-                    case "forEach" -> streamOp;
-                    case "anyMatch", "allMatch", "noneMatch" -> streamOp;
-                    case "count" -> streamOp;
-                    case "findFirst" -> streamOp;
-                    case "sorted" -> new MethodCallExpr(streamOp, "toList");
+                    case "reduce", "forEach", "anyMatch", "allMatch", "noneMatch",
+                         "count", "findFirst" -> streamOp;
                     default -> new MethodCallExpr(streamOp, "toList");
                 };
             }
@@ -1150,6 +1190,12 @@ public class Transformer {
                 expr = new StringLiteralExpr(s.value());
             } else {
                 expr = transformExpr(part);
+                // Wrap complex expressions in parens to avoid precedence issues with + concatenation
+                if (expr instanceof com.github.javaparser.ast.expr.BinaryExpr
+                    || expr instanceof ConditionalExpr
+                    || expr instanceof com.github.javaparser.ast.expr.UnaryExpr) {
+                    expr = new EnclosedExpr(expr);
+                }
             }
             if (result == null) {
                 result = expr;
@@ -1309,6 +1355,53 @@ public class Transformer {
     /** Quick expression to Java source string for inline use. */
     private String exprToJava(Expr expr) {
         return transformExpr(expr).toString();
+    }
+
+    /** Check if an expression contains the `it` implicit parameter. */
+    private boolean containsIt(Expr expr) {
+        return switch (expr) {
+            case Ident id -> id.name().equals("it");
+            case Ast.BinaryExpr bin -> containsIt(bin.left()) || containsIt(bin.right());
+            case Ast.UnaryExpr un -> containsIt(un.operand());
+            case CallExpr call -> call.args().stream().anyMatch(this::containsIt)
+                || (call.callee() instanceof SelectorExpr sel && containsIt(sel.object()));
+            case SelectorExpr sel -> containsIt(sel.object());
+            default -> false;
+        };
+    }
+
+    /** Rewrite `it` references to `_it` and transform the expression. */
+    private Expression rewriteIt(Expr expr) {
+        return switch (expr) {
+            case Ident id -> id.name().equals("it") ? new NameExpr("_it") : new NameExpr(id.name());
+            case Ast.BinaryExpr bin -> new com.github.javaparser.ast.expr.BinaryExpr(
+                rewriteIt(bin.left()), rewriteIt(bin.right()),
+                switch (bin.op()) {
+                    case "+" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.PLUS;
+                    case "-" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.MINUS;
+                    case "*" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.MULTIPLY;
+                    case "/" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.DIVIDE;
+                    case "%" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.REMAINDER;
+                    case ">" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.GREATER;
+                    case "<" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.LESS;
+                    case ">=" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.GREATER_EQUALS;
+                    case "<=" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.LESS_EQUALS;
+                    case "==" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.EQUALS;
+                    case "!=" -> com.github.javaparser.ast.expr.BinaryExpr.Operator.NOT_EQUALS;
+                    default -> com.github.javaparser.ast.expr.BinaryExpr.Operator.PLUS;
+                });
+            case CallExpr call -> {
+                // it.method() → _it.method()
+                if (call.callee() instanceof SelectorExpr sel && containsIt(sel.object())) {
+                    var args = new NodeList<Expression>();
+                    for (var a : call.args()) args.add(containsIt(a) ? rewriteIt(a) : transformExpr(a));
+                    yield new MethodCallExpr(rewriteIt(sel.object()), sel.field(), args);
+                }
+                yield transformExpr(expr);
+            }
+            case SelectorExpr sel -> new FieldAccessExpr(rewriteIt(sel.object()), sel.field());
+            default -> transformExpr(expr);
+        };
     }
 
     private static boolean isStreamMethod(String name) {

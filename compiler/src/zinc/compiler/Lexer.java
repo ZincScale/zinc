@@ -324,7 +324,30 @@ public class Lexer {
             if (ch == '{') hasInterp = true;
             sb.append(advance());
         }
-        return token(hasInterp ? INTERP_STRING : STRING_LIT, sb.toString(), tokLine, tokCol);
+        var content = stripIndent(sb.toString());
+        return token(hasInterp ? INTERP_STRING : STRING_LIT, content, tokLine, tokCol);
+    }
+
+    /** Strip common leading whitespace from multi-line strings. */
+    private String stripIndent(String s) {
+        if (s.startsWith("\n")) s = s.substring(1);
+        int lastNl = s.lastIndexOf('\n');
+        if (lastNl >= 0 && s.substring(lastNl + 1).isBlank()) s = s.substring(0, lastNl);
+        var lines = s.split("\n", -1);
+        int minIndent = Integer.MAX_VALUE;
+        for (var line : lines) {
+            if (line.isBlank()) continue;
+            int indent = 0;
+            for (char c : line.toCharArray()) { if (c == ' ') indent++; else break; }
+            minIndent = Math.min(minIndent, indent);
+        }
+        if (minIndent == Integer.MAX_VALUE || minIndent == 0) return s;
+        var result = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) result.append('\n');
+            if (lines[i].length() > minIndent) result.append(lines[i].substring(minIndent));
+        }
+        return result.toString();
     }
 
     // --- Number and identifier ---
