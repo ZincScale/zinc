@@ -126,10 +126,8 @@ public class TransformerTest {
 
     static void testDataClass() {
         var java = transpile("data Point(int x, int y)");
-        assertContains("data: class", java, "class Point");
-        assertContains("data: field x", java, "int x");
-        assertContains("data: field y", java, "int y");
-        assertContains("data: ctor", java, "Point(int x, int y)");
+        assertContains("data: record", java, "record Point");
+        assertContains("data: params", java, "int x, int y");
         System.out.println("--- Data Class ---");
         System.out.println(java);
     }
@@ -344,10 +342,11 @@ public class TransformerTest {
                 data Rect(double w, double h)
             }
             """);
-        assertContains("sealed: Shape", java, "abstract class Shape");
-        assertContains("sealed: Circle", java, "class Circle");
-        assertContains("sealed: Rect", java, "class Rect");
-        assertContains("sealed: extends Shape", java, "extends Shape");
+        assertContains("sealed: interface", java, "sealed interface Shape");
+        assertContains("sealed: permits", java, "permits Circle, Rect");
+        assertContains("sealed: Circle record", java, "record Circle");
+        assertContains("sealed: Rect record", java, "record Rect");
+        assertContains("sealed: implements Shape", java, "implements Shape");
     }
 
     static void testExpressionIf() {
@@ -431,9 +430,9 @@ public class TransformerTest {
     }
 
     static void testDataClassToString() {
+        // Records get toString for free — no need to generate
         var java = transpile("data Point(int x, int y)");
-        assertContains("data_str: toString", java, "toString");
-        assertContains("data_str: Point[", java, "Point[");
+        assertContains("data_str: record", java, "record Point(int x, int y)");
     }
 
     static void testPrimitiveEquality() {

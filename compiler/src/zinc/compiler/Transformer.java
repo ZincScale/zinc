@@ -162,7 +162,10 @@ public class Transformer {
                 for (var variant : sealed.variants()) {
                     var varCu = newCU(program);
                     var varClass = transformDataClassDecl(variant);
-                    varClass.addExtendedType(sealed.name());
+                    // Record implements sealed interface
+                    if (varClass instanceof com.github.javaparser.ast.body.RecordDeclaration rec) {
+                        rec.addImplementedType(sealed.name());
+                    }
                     varCu.addType(varClass);
                     units.add(varCu);
                 }
@@ -401,67 +404,63 @@ public class Transformer {
         return jIface;
     }
 
-    private ClassOrInterfaceDeclaration transformDataClassDecl(DataClassDecl data) {
-        // Data class → Java record-like class with constructor, fields, equals, hashCode, toString
-        var jClass = new ClassOrInterfaceDeclaration();
-        jClass.setName(data.name());
-        jClass.addModifier(Keyword.PUBLIC);
+    /**
+     * data class → Java record (Java 25).
+     * data Point(int x, int y) → public record Point(int x, int y) { }
+     * Records get: constructor, accessors, equals, hashCode, toString for free.
+     */
+    private com.github.javaparser.ast.body.TypeDeclaration<?> transformDataClassDecl(DataClassDecl data) {
+        var record = new com.github.javaparser.ast.body.RecordDeclaration(
+            new NodeList<>(com.github.javaparser.ast.Modifier.publicModifier()),
+            data.name());
 
-        // Fields (final)
+        // Record parameters
         for (var param : data.params()) {
             var type = param.type() != null ? transformType(param.type()) : new ClassOrInterfaceType(null, "Object");
-            var field = jClass.addField(type, param.name(), Keyword.PRIVATE, Keyword.FINAL);
+            record.addParameter(type, param.name());
         }
 
-        // Constructor
-        var ctor = jClass.addConstructor(Keyword.PUBLIC);
-        var ctorBody = new BlockStmt();
-        for (var param : data.params()) {
-            var type = param.type() != null ? transformType(param.type()) : new ClassOrInterfaceType(null, "Object");
-            ctor.addParameter(type, param.name());
-            ctorBody.addStatement(new ExpressionStmt(new AssignExpr(
-                new NameExpr("this." + param.name()),
-                new NameExpr(param.name()),
-                AssignExpr.Operator.ASSIGN)));
-        }
-        ctor.setBody(ctorBody);
-
-        // Getters
-        for (var param : data.params()) {
-            var type = param.type() != null ? transformType(param.type()) : new ClassOrInterfaceType(null, "Object");
-            var getter = jClass.addMethod(param.name(), Keyword.PUBLIC);
-            getter.setType(type);
-            getter.setBody(new BlockStmt().addStatement(new ReturnStmt(new NameExpr("this." + param.name()))));
+        // Implemented interfaces
+        for (var parent : data.parents()) {
+            if (interfaceNames.contains(parent)) {
+                record.addImplementedType(parent);
+            }
         }
 
-        // toString: ClassName[field1=val1, field2=val2, ...]
-        var toStr = jClass.addMethod("toString", Keyword.PUBLIC);
-        toStr.addMarkerAnnotation("Override");
-        toStr.setType(new ClassOrInterfaceType(null, "String"));
-        var sb = new StringBuilder("\"" + data.name() + "[\"");
-        for (int i = 0; i < data.params().size(); i++) {
-            var p = data.params().get(i);
-            if (i > 0) sb.append(" + \", \"");
-            sb.append(" + \"").append(p.name()).append("=\" + this.").append(p.name());
-        }
-        sb.append(" + \"]\"");
-        toStr.setBody(new BlockStmt().addStatement(new ReturnStmt(parseExpr(sb.toString()))));
-
-        // Methods
+        // Additional methods
         for (var method : data.methods()) {
-            jClass.addMember(transformMethodDecl(method));
+            record.addMember(transformMethodDecl(method));
         }
 
-        return jClass;
+        return record;
     }
 
+    /**
+     * sealed class → Java sealed interface (Java 25).
+     * Records can implement interfaces but can't extend classes.
+     * sealed class Shape { data Circle(...), data Rect(...) }
+     * → public sealed interface Shape permits Circle, Rect {}
+     */
     private ClassOrInterfaceDeclaration transformSealedClassDecl(SealedClassDecl sealed) {
-        var jClass = new ClassOrInterfaceDeclaration();
-        jClass.setName(sealed.name());
-        jClass.addModifier(Keyword.PUBLIC, Keyword.ABSTRACT);
-        // Store variants for separate file generation
+        var jIface = new ClassOrInterfaceDeclaration();
+        jIface.setInterface(true);
+        jIface.setName(sealed.name());
+        jIface.addModifier(Keyword.PUBLIC, Keyword.SEALED);
+
+        // Add permits clause
+        var permits = new NodeList<ClassOrInterfaceType>();
+        for (var variant : sealed.variants()) {
+            permits.add(new ClassOrInterfaceType(null, variant.name()));
+        }
+        jIface.setPermittedTypes(permits);
+
+        // Methods from sealed class body
+        for (var method : sealed.methods()) {
+            jIface.addMember(transformMethodDecl(method));
+        }
+
         sealedVariantMap.put(sealed.name(), sealed.variants());
-        return jClass;
+        return jIface;
     }
 
     private final java.util.Map<String, List<DataClassDecl>> sealedVariantMap = new java.util.HashMap<>();
