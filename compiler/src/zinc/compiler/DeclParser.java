@@ -92,6 +92,11 @@ public class DeclParser {
         return new ClassDecl(line, name, false, typeParams, parents, fields, ctors, methods, annotations);
     }
 
+    // Collected during parseClassBody for sealed classes
+    private final List<DataClassDecl> sealedVariants = new java.util.ArrayList<>();
+
+    public List<DataClassDecl> getSealedVariants() { return sealedVariants; }
+
     private void parseClassBody(List<FieldDecl> fields, List<CtorDecl> ctors, List<MethodDecl> methods) {
         while (!ctx.check(RBRACE) && !ctx.check(EOF)) {
             ctx.skipSemis();
@@ -117,8 +122,7 @@ public class DeclParser {
 
             // Nested data class (sealed class variant)
             if (ctx.check(DATA) && ctx.peekAt(1).type() == IDENT) {
-                // Skip for now — data variants inside sealed class
-                parseDataClassDecl();
+                sealedVariants.add(parseDataClassDecl());
                 continue;
             }
 
@@ -308,7 +312,7 @@ public class DeclParser {
 
     public SealedClassDecl parseSealedClass(ClassDecl cls) {
         return new SealedClassDecl(cls.line(), cls.name(), cls.parents(),
-            cls.fields(), cls.ctors(), cls.methods(), List.of(), cls.annotations());
+            cls.fields(), cls.ctors(), cls.methods(), List.copyOf(sealedVariants), cls.annotations());
     }
 
     // --- Annotations ---------------------------------------------------------

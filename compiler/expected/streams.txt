@@ -1,0 +1,18 @@
+Evens: [2, 4, 6, 8, 10]
+Big: [6, 7, 8, 9, 10]
+Doubled: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+Sum of >5 * 10: 400
+Has >8: true
+All positive: true
+None negative: true
+First >7: 8
+Skip 7: [8, 9, 10]
+Limit 3: [1, 2, 3]
+Distinct: [1, 2, 3]
+Sorted by length: [apple, banana, cherry]
+Reduce sum: 55
+ForEach:
+  9
+  10
+Grouped by first char: {c=[cat, car, cup], d=[dog]}
+Streams OK

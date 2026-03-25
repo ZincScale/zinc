@@ -331,8 +331,9 @@ public class Lexer {
     /** Strip common leading whitespace from multi-line strings. */
     private String stripIndent(String s) {
         if (s.startsWith("\n")) s = s.substring(1);
+        // Remove trailing whitespace-only line (before closing """)
         int lastNl = s.lastIndexOf('\n');
-        if (lastNl >= 0 && s.substring(lastNl + 1).isBlank()) s = s.substring(0, lastNl);
+        if (lastNl >= 0 && s.substring(lastNl + 1).isBlank()) s = s.substring(0, lastNl + 1);
         var lines = s.split("\n", -1);
         int minIndent = Integer.MAX_VALUE;
         for (var line : lines) {

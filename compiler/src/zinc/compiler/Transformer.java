@@ -108,7 +108,18 @@ public class Transformer {
                     case ClassDecl cls -> cu.addType(transformClassDecl(cls));
                     case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
                     case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
-                    case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
+                    case SealedClassDecl sealed -> {
+                    cu.addType(transformSealedClassDecl(sealed));
+                    for (var variant : sealed.variants()) {
+                        var varCu = new CompilationUnit();
+                        if (program.pkg() != null) varCu.setPackageDeclaration(program.pkg().path());
+                        varCu.addImport("java.util", false, true);
+                        var varClass = transformDataClassDecl(variant);
+                        varClass.addExtendedType(sealed.name());
+                        varCu.addType(varClass);
+                        units.add(varCu);
+                    }
+                }
                     case EnumDecl en -> cu.addType(transformEnumDecl(en));
                     default -> { continue; }
                 }
@@ -152,7 +163,18 @@ public class Transformer {
                 case ClassDecl cls -> cu.addType(transformClassDecl(cls));
                 case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
                 case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
-                case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
+                case SealedClassDecl sealed -> {
+                    cu.addType(transformSealedClassDecl(sealed));
+                    for (var variant : sealed.variants()) {
+                        var varCu = new CompilationUnit();
+                        if (program.pkg() != null) varCu.setPackageDeclaration(program.pkg().path());
+                        varCu.addImport("java.util", false, true);
+                        var varClass = transformDataClassDecl(variant);
+                        varClass.addExtendedType(sealed.name());
+                        varCu.addType(varClass);
+                        units.add(varCu);
+                    }
+                }
                 case EnumDecl en -> cu.addType(transformEnumDecl(en));
                 case ConstDecl c -> {}
                 default -> {}
@@ -448,10 +470,12 @@ public class Transformer {
         var jClass = new ClassOrInterfaceDeclaration();
         jClass.setName(sealed.name());
         jClass.addModifier(Keyword.PUBLIC, Keyword.ABSTRACT);
-        // Java sealed classes need permits — add variants
-        // For now, generate as abstract class
+        // Store variants for separate file generation
+        sealedVariantMap.put(sealed.name(), sealed.variants());
         return jClass;
     }
+
+    private final java.util.Map<String, List<DataClassDecl>> sealedVariantMap = new java.util.HashMap<>();
 
     private EnumDeclaration transformEnumDecl(EnumDecl en) {
         var jEnum = new EnumDeclaration();
@@ -1142,27 +1166,7 @@ public class Transformer {
 
             // Stream methods on collections: .filter(), .map(), .reduce(), etc.
             if (isStreamMethod(methodName)) {
-                // Rewrite `it` references in args to lambda: filter(it > 5) → filter(_it -> _it > 5)
-                var rewrittenArgs = new NodeList<Expression>();
-                for (var arg : call.args()) {
-                    if (containsIt(arg)) {
-                        var rewritten = rewriteIt(arg);
-                        var param = new Parameter(new UnknownType(), "_it");
-                        rewrittenArgs.add(new com.github.javaparser.ast.expr.LambdaExpr(
-                            new NodeList<>(param), rewritten));
-                    } else {
-                        rewrittenArgs.add(transformExpr(arg));
-                    }
-                }
-
-                var obj = transformExpr(sel.object());
-                var stream = new MethodCallExpr(obj, "stream");
-                var streamOp = new MethodCallExpr(stream, methodName, rewrittenArgs);
-                return switch (methodName) {
-                    case "reduce", "forEach", "anyMatch", "allMatch", "noneMatch",
-                         "count", "findFirst" -> streamOp;
-                    default -> new MethodCallExpr(streamOp, "toList");
-                };
+                return transformStreamChain(call);
             }
 
             return new MethodCallExpr(transformExpr(sel.object()), methodName, args);
@@ -1217,6 +1221,13 @@ public class Transformer {
             }
         }
         var body = transformBlock(lam.body());
+        // Single-expression lambda: { return expr; } → use expression form
+        // This lets Java infer void vs value context automatically
+        if (body.getStatements().size() == 1
+            && body.getStatement(0) instanceof ReturnStmt ret
+            && ret.getExpression().isPresent()) {
+            return new com.github.javaparser.ast.expr.LambdaExpr(params, ret.getExpression().get());
+        }
         return new com.github.javaparser.ast.expr.LambdaExpr(params, body);
     }
 
@@ -1357,6 +1368,79 @@ public class Transformer {
         return transformExpr(expr).toString();
     }
 
+    /**
+     * Transform a stream chain: collect all chained stream ops, emit as single stream pipeline.
+     * numbers.filter(it > 5).map(it * 10).sum()
+     * → numbers.stream().filter(_it -> _it > 5).mapToInt(_it -> _it * 10).sum()
+     */
+    private Expression transformStreamChain(CallExpr call) {
+        // Collect chain: walk down the selector/call chain until we hit a non-stream receiver
+        var ops = new java.util.ArrayList<CallExpr>();
+        Expr root = call;
+        while (root instanceof CallExpr c && c.callee() instanceof SelectorExpr sel
+               && isStreamMethod(METHOD_ALIASES.getOrDefault(sel.field(), sel.field()))) {
+            ops.addFirst(c);
+            root = sel.object();
+        }
+
+        // root is the collection, ops are the stream operations in order
+        Expression stream = new MethodCallExpr(transformExpr(root), "stream");
+
+        for (var op : ops) {
+            var sel = (SelectorExpr) op.callee();
+            String methodName = METHOD_ALIASES.getOrDefault(sel.field(), sel.field());
+
+            var streamArgs = new NodeList<Expression>();
+            for (var arg : op.args()) {
+                if (containsIt(arg)) {
+                    streamArgs.add(new com.github.javaparser.ast.expr.LambdaExpr(
+                        new NodeList<>(new Parameter(new UnknownType(), "_it")), rewriteIt(arg)));
+                } else {
+                    streamArgs.add(transformExpr(arg));
+                }
+            }
+
+            // Special transforms for certain stream ops
+            switch (methodName) {
+                case "sum" -> {
+                    stream = new MethodCallExpr(stream, "mapToInt", new NodeList<>(parseExpr("x -> (int) x")));
+                    stream = new MethodCallExpr(stream, "sum");
+                }
+                case "sortBy" -> {
+                    // sortBy(key) → sorted(Comparator.comparing(key))
+                    var comparator = new MethodCallExpr(new NameExpr("Comparator"), "comparing", streamArgs);
+                    stream = new MethodCallExpr(stream, "sorted", new NodeList<>(comparator));
+                }
+                case "groupBy" -> {
+                    var collector = new MethodCallExpr(new NameExpr("java.util.stream.Collectors"), "groupingBy", streamArgs);
+                    stream = new MethodCallExpr(stream, "collect", new NodeList<>(collector));
+                }
+                case "findFirst" -> {
+                    // findFirst(pred) → filter(pred).findFirst().orElse(null)
+                    if (!streamArgs.isEmpty()) {
+                        stream = new MethodCallExpr(stream, "filter", streamArgs);
+                    }
+                    stream = new MethodCallExpr(stream, "findFirst");
+                    stream = new MethodCallExpr(stream, "orElse", new NodeList<>(new NullLiteralExpr()));
+                }
+                default -> stream = new MethodCallExpr(stream, methodName, streamArgs);
+            }
+        }
+
+        // If the last op is terminal, return as-is. Otherwise wrap in .toList()
+        var lastOp = ops.getLast();
+        var lastSel = (SelectorExpr) lastOp.callee();
+        String lastName = METHOD_ALIASES.getOrDefault(lastSel.field(), lastSel.field());
+        boolean isTerminal = switch (lastName) {
+            case "reduce", "forEach", "anyMatch", "allMatch", "noneMatch",
+                 "count", "findFirst", "sum", "min", "max", "average",
+                 "groupBy" -> true;
+            default -> false;
+        };
+
+        return isTerminal ? stream : new MethodCallExpr(stream, "toList");
+    }
+
     /** Check if an expression contains the `it` implicit parameter. */
     private boolean containsIt(Expr expr) {
         return switch (expr) {
@@ -1406,9 +1490,10 @@ public class Transformer {
 
     private static boolean isStreamMethod(String name) {
         return switch (name) {
-            case "filter", "map", "flatMap", "reduce", "forEach", "sorted",
+            case "filter", "map", "flatMap", "reduce", "forEach", "sorted", "sortBy",
                  "distinct", "limit", "skip", "anyMatch", "allMatch", "noneMatch",
-                 "findFirst", "count", "toList" -> true;
+                 "findFirst", "count", "toList", "sum", "min", "max", "average",
+                 "groupBy" -> true;
             default -> false;
         };
     }

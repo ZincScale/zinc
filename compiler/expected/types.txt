@@ -1,0 +1,14 @@
+found: Alice
+missing: null
+safe nav: 5
+safe nav null: null
+byte array length: 5
+fruits size: 3
+has apple: true
+has banana: true
+has cherry: true
+is String: true
+structural eq: true
+reference eq: true
+deprecated: old
+Types OK

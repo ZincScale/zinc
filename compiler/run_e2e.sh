@@ -4,6 +4,7 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ZINC_DIR="$DIR/../examples/v3"
+EXPECTED_DIR="$DIR/expected"
 JP="$HOME/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar"
 PASS=0
 FAIL=0
@@ -12,7 +13,11 @@ ERRORS=""
 
 for zn in "$ZINC_DIR"/*.zn; do
     name=$(basename "$zn" .zn)
-    expected="$ZINC_DIR/expected/${name}.txt"
+    # Use Java compiler expected files, fall back to Go compiler's
+    expected="$EXPECTED_DIR/${name}.txt"
+    if [ ! -f "$expected" ]; then
+        expected="$ZINC_DIR/expected/${name}.txt"
+    fi
 
     if [ ! -f "$expected" ]; then
         echo "SKIP: $name (no expected output)"
