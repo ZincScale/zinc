@@ -1,5 +1,5 @@
 // Concurrency — Zinc v3
-// Demonstrates: spawn, parallel for, channel
+// Demonstrates: spawn, parallel for, concurrent, channel, timeout
 // All generate standard Java — no Zinc runtime
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -19,6 +19,63 @@ parallel for i in numbers {
     sum.addAndGet(i)
 }
 print("parallel sum: {sum.get()}")
+
+// parallel for with bounded concurrency
+AtomicInteger bounded = new AtomicInteger(0)
+parallel(max: 2) for i in numbers {
+    bounded.addAndGet(i)
+}
+print("parallel bounded sum: {bounded.get()}")
+
+// parallel for or — error propagation
+fn failOnTwo(int i): int {
+    if i == 2 {
+        int x = Integer.parseInt("bad")
+        return x
+    }
+    return i
+}
+
+var parallelErr = "none"
+parallel for i in [1, 2, 3] {
+    failOnTwo(i)
+} or {
+    parallelErr = "caught"
+}
+print("parallel for or: {parallelErr}")
+
+// concurrent — fan-out multiple tasks
+fn setTen(AtomicInteger a): int {
+    a.set(10)
+    return 10
+}
+
+fn setTwenty(AtomicInteger a): int {
+    a.set(20)
+    return 20
+}
+
+AtomicInteger c1 = new AtomicInteger(0)
+AtomicInteger c2 = new AtomicInteger(0)
+concurrent {
+    setTen(c1)
+    setTwenty(c2)
+}
+print("concurrent: {c1.get()} {c2.get()}")
+
+// concurrent or — error propagation
+fn parseBad(): int {
+    int x = Integer.parseInt("bad")
+    return x
+}
+
+var concurrentErr = "none"
+concurrent {
+    parseBad()
+} or {
+    concurrentErr = "caught"
+}
+print("concurrent or: {concurrentErr}")
 
 // Channel — bounded queue for producer/consumer
 Channel<String> ch = new Channel(10)
