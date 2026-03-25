@@ -34,7 +34,7 @@ public class LexerTest {
     }
 
     static void testHelloWorld() {
-        var tokens = new Lexer("print(\"Hello, World!\")").tokenize();
+        var tokens = lexer("print(\"Hello, World!\")");
         expect("hello_world: print", tokens.get(0).type(), PRINT);
         expect("hello_world: lparen", tokens.get(1).type(), LPAREN);
         expect("hello_world: string", tokens.get(2).type(), STRING_LIT);
@@ -44,7 +44,7 @@ public class LexerTest {
     }
 
     static void testKeywords() {
-        var tokens = new Lexer("fn class interface var pub init spawn concurrent parallel for if else match").tokenize();
+        var tokens = lexer("fn class interface var pub init spawn concurrent parallel for if else match");
         expect("kw: fn", tokens.get(0).type(), FN);
         expect("kw: class", tokens.get(1).type(), CLASS);
         expect("kw: interface", tokens.get(2).type(), INTERFACE);
@@ -61,7 +61,7 @@ public class LexerTest {
     }
 
     static void testOperators() {
-        var tokens = new Lexer("+ - * / ** == != < <= > >= -> .. ..= ... && || ?. ??").tokenize();
+        var tokens = lexer("+ - * / ** == != < <= > >= -> .. ..= ... && || ?. ??");
         expect("op: plus", tokens.get(0).type(), PLUS);
         expect("op: minus", tokens.get(1).type(), MINUS);
         expect("op: star", tokens.get(2).type(), STAR);
@@ -84,13 +84,13 @@ public class LexerTest {
     }
 
     static void testStringInterpolation() {
-        var tokens = new Lexer("\"Hello, {name}!\"").tokenize();
+        var tokens = lexer("\"Hello, {name}!\"");
         expect("interp: type", tokens.get(0).type(), INTERP_STRING);
         expect("interp: val", tokens.get(0).literal(), "Hello, {name}!");
     }
 
     static void testNumbers() {
-        var tokens = new Lexer("42 3.14 0").tokenize();
+        var tokens = lexer("42 3.14 0");
         expect("num: int", tokens.get(0).type(), INT_LIT);
         expect("num: int_val", tokens.get(0).literal(), "42");
         expect("num: float", tokens.get(1).type(), FLOAT_LIT);
@@ -99,7 +99,7 @@ public class LexerTest {
     }
 
     static void testFunction() {
-        var tokens = new Lexer("fn add(int a, int b): int { return a + b }").tokenize();
+        var tokens = lexer("fn add(int a, int b): int { return a + b }");
         expect("fn: fn", tokens.get(0).type(), FN);
         expect("fn: name", tokens.get(1).type(), IDENT);
         expect("fn: name_val", tokens.get(1).literal(), "add");
@@ -110,7 +110,7 @@ public class LexerTest {
     }
 
     static void testClassDecl() {
-        var tokens = new Lexer("class Foo : Bar { pub fn greet() { } }").tokenize();
+        var tokens = lexer("class Foo : Bar { pub fn greet() { } }");
         expect("cls: class", tokens.get(0).type(), CLASS);
         expect("cls: name", tokens.get(1).literal(), "Foo");
         expect("cls: colon", tokens.get(2).type(), COLON);
@@ -119,7 +119,7 @@ public class LexerTest {
     }
 
     static void testOrHandler() {
-        var tokens = new Lexer("var x = foo() or { \"default\" }").tokenize();
+        var tokens = lexer("var x = foo() or { \"default\" }");
         expect("or: var", tokens.get(0).type(), VAR);
         // var x = foo ( ) or ...
         // 0   1 2  3  4 5  6
@@ -127,7 +127,7 @@ public class LexerTest {
     }
 
     static void testRanges() {
-        var tokens = new Lexer("1..5 1..=5").tokenize();
+        var tokens = lexer("1..5 1..=5");
         expect("range: start", tokens.get(0).type(), INT_LIT);
         expect("range: dotdot", tokens.get(1).type(), DOTDOT);
         expect("range: end", tokens.get(2).type(), INT_LIT);
@@ -136,25 +136,29 @@ public class LexerTest {
     }
 
     static void testAnnotation() {
-        var tokens = new Lexer("@Override pub fn toString(): String { }").tokenize();
+        var tokens = lexer("@Override pub fn toString(): String { }");
         expect("ann: at", tokens.get(0).type(), AT);
         expect("ann: name", tokens.get(1).literal(), "Override");
     }
 
     static void testRawString() {
-        var tokens = new Lexer("`raw \\n string`").tokenize();
+        var tokens = lexer("`raw \\n string`");
         expect("raw: type", tokens.get(0).type(), RAW_STRING);
         expect("raw: val", tokens.get(0).literal(), "raw \\n string");
     }
 
     static void testLineTracking() {
-        var tokens = new Lexer("a\nb\nc").tokenize();
+        var tokens = lexer("a\nb\nc");
         expect("line: a", tokens.get(0).line(), 1);
         expect("line: b", tokens.get(1).line(), 2);
         expect("line: c", tokens.get(2).line(), 3);
     }
 
     // --- Test helpers ---
+
+    static java.util.List<Token> lexer(String src) {
+        return new Lexer(src).tokenize().unwrap();
+    }
 
     static void expect(String name, Object actual, Object expected) {
         if (expected.equals(actual)) {

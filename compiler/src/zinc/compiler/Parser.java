@@ -35,7 +35,13 @@ public class Parser {
 
     public List<String> errors() { return ctx.errors(); }
 
-    public Program parse() {
+    public Result<Ast.Program> parseResult() {
+        var program = parse();
+        if (!ctx.errors().isEmpty()) return Result.err(ctx.errors());
+        return Result.ok(program);
+    }
+
+    public Ast.Program parse() {
         ctx.skipSemis();
         PackageDecl pkg = null;
         var imports = new ArrayList<ImportDecl>();

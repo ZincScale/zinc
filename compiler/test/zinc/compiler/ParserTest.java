@@ -48,13 +48,13 @@ public class ParserTest {
     }
 
     static Program parse(String src) {
-        var tokens = new Lexer(src).tokenize();
-        var parser = new Parser(tokens);
-        var prog = parser.parse();
-        if (!parser.errors().isEmpty()) {
-            System.out.println("  Parse errors: " + parser.errors());
+        var tokens = new Lexer(src).tokenize().unwrap();
+        var result = new Parser(tokens).parseResult();
+        if (result.isErr()) {
+            System.out.println("  Parse errors: " + ((Result.Err<?>) result).errors());
+            return new Parser(tokens).parse(); // return partial for test inspection
         }
-        return prog;
+        return result.unwrap();
     }
 
     // --- Tests ---------------------------------------------------------------

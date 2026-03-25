@@ -417,7 +417,7 @@ public class ExprParser {
                 }
                 if (i < raw.length()) i++; // skip closing }
                 var lexer = new Lexer(exprStr.toString());
-                var tokens = lexer.tokenize();
+                var tokens = lexer.tokenize().or(List.of(new Token(TokenType.EOF, "", 0, 0)));
                 var subCtx = new ParseContext(tokens);
                 var subExpr = new ExprParser(subCtx, types);
                 parts.add(subExpr.parseExpr());

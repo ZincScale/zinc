@@ -56,14 +56,15 @@ public class Lexer {
 
     public List<String> errors() { return errors; }
 
-    public List<Token> tokenize() {
+    public Result<List<Token>> tokenize() {
         var tokens = new ArrayList<Token>();
         while (true) {
             var tok = nextToken();
             tokens.add(tok);
             if (tok.type() == EOF) break;
         }
-        return tokens;
+        if (!errors.isEmpty()) return Result.err(errors);
+        return Result.ok(tokens);
     }
 
     public Token nextToken() {
