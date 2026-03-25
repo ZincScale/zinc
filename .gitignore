@@ -1,19 +1,16 @@
-/zinc
-/growl
-/gwen
-
-# Generated .go files from local zinc runs (root dir)
-/*.go
-!/go.mod
-
-# Zinc build directory
-.zinc-build/
-zinc-out/
-Dockerfile
-.dockerignore
-*-deployment.yaml
+# Build artifacts
+*.class
+out/
 dist/
-out/
-.quarkus/
-out/
-.quarkus/
+zinc-out/
+
+# Mill
+.mill-*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Compiler build
+compiler/out/
