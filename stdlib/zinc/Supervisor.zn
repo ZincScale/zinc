@@ -1,8 +1,20 @@
 // Supervisor — abstract base class for actor lifecycle management.
 // Extend this class to create a supervisor. Actor-typed fields get
 // automatic start/shutdown/kill lifecycle cascade.
+//
+// Usage:
+//   import zinc.Supervisor
+//   class Pipeline : Supervisor {
+//       init Worker w1
+//       init Worker w2
+//       init(Worker w1, Worker w2) { this.w1 = w1; this.w2 = w2 }
+//   }
 
 package zinc
 
 abstract class Supervisor {
+    abstract pub fn start()
+    abstract pub fn shutdown()
+    abstract pub fn shutdown(long timeoutMs)
+    abstract pub fn kill()
 }
