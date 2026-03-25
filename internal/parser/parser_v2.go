@@ -695,7 +695,15 @@ func (p *Parser) v2ParseSpawnStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_SPAWN)
 	body := p.v2ParseBlock()
-	return &ExprStmt{Line: line, Expr: &SpawnExpr{Line: line, Body: body}}
+	spawn := &SpawnExpr{Line: line, Body: body}
+	// Optional: spawn { } or { handler }
+	var orHandler *OrHandler
+	if p.check(lexer.TOKEN_OR) {
+		p.advance()
+		orHandler = &OrHandler{Body: p.v2ParseBlock()}
+		spawn.OrHandler = orHandler
+	}
+	return &ExprStmt{Line: line, Expr: spawn}
 }
 
 // v2ParseParallelForStmt: parallel [(max: N)] for item in expr { body }

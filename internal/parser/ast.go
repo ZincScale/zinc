@@ -738,10 +738,11 @@ func (r *RawStringLit) exprTag() {}
 // .values, .containsKey, .send, .receive) are now parsed as regular CallExpr
 // and dispatched to builtin behavior in codegen based on receiver type.
 
-// SpawnExpr: spawn { body } — spawns a concurrent task, returns Future<T>
+// SpawnExpr: spawn { body } [or { handler }] — spawns a virtual thread
 type SpawnExpr struct {
-	Line int
-	Body *BlockStmt
+	Line      int
+	Body      *BlockStmt
+	OrHandler *OrHandler // optional error handler
 }
 
 func (*SpawnExpr) nodeTag() {}

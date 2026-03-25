@@ -1459,12 +1459,26 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			}
 		}
 		body := g.buf.String()[startLen:]
-		// Truncate buf back to start position by rebuilding
 		prefix := g.buf.String()[:startLen]
 		g.buf.Reset()
 		g.buf.WriteString(prefix)
 		g.indent = savedIndent
-		return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s} catch (Exception _ex) { throw new RuntimeException(_ex); } })", strings.TrimSpace(body)+" ")
+		trimmed := strings.TrimSpace(body)
+		if expr.OrHandler != nil && expr.OrHandler.Body != nil {
+			// Capture or-handler body
+			startLen2 := g.buf.Len()
+			g.indent = 0
+			for _, s := range expr.OrHandler.Body.Stmts {
+				g.emitStmt(s)
+			}
+			handlerBody := g.buf.String()[startLen2:]
+			prefix2 := g.buf.String()[:startLen2]
+			g.buf.Reset()
+			g.buf.WriteString(prefix2)
+			g.indent = savedIndent
+			return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s } catch (Exception err) { %s } })", trimmed, strings.TrimSpace(handlerBody))
+		}
+		return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s } catch (Exception _ex) { throw new RuntimeException(_ex); } })", trimmed)
 	case *parser.IfExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.RangeExpr:
