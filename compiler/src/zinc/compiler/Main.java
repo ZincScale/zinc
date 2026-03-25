@@ -63,12 +63,14 @@ public class Main {
         String input = null;
         Path outDir = null;
         boolean nativeImage = true; // default: build native binaries
+        boolean fatJar = false;
 
         for (int i = 0; i < args.size(); i++) {
             switch (args.get(i)) {
                 case "-o" -> { if (i + 1 < args.size()) outDir = Path.of(args.get(++i)); }
                 case "--native" -> nativeImage = true;
                 case "--no-native" -> nativeImage = false;
+                case "--fat-jar" -> { fatJar = true; nativeImage = false; }
                 default -> { if (!args.get(i).startsWith("-")) input = args.get(i); }
             }
         }
@@ -111,6 +113,15 @@ public class Main {
                 System.out.println("building native image...");
                 exitCode = runNativeImage(projectDir, outDir);
                 if (exitCode != 0) System.exit(exitCode);
+            }
+
+            // Fat jar option
+            if (fatJar) {
+                System.out.println("building fat jar...");
+                int jarExitCode = runMill(projectDir, "assembly");
+                if (jarExitCode != 0) {
+                    System.err.println("mill assembly failed — trying manual jar");
+                }
             }
 
             System.out.println("build complete: " + projectDir + " (Mill project)");
@@ -226,6 +237,15 @@ public class Main {
             catch (IOException e) { return Result.err("cannot read " + znFile + ": " + e.getMessage()); }
 
             String className = capitalize(znFile.getFileName().toString().replace(".zn", ""));
+
+            // Infer package from directory relative to source root
+            String pkg = null;
+            var sourceRoot = Files.isDirectory(input) ? input : input.getParent();
+            var relative = sourceRoot.toAbsolutePath().relativize(znFile.toAbsolutePath().getParent());
+            if (relative.getNameCount() > 0 && !relative.toString().isEmpty()) {
+                pkg = relative.toString().replace("/", ".").replace("\\", ".");
+            }
+
             var lexResult = new Lexer(source).tokenize();
             if (lexResult.isErr()) return Result.err(((Result.Err<?>) lexResult).errors());
 
@@ -233,6 +253,12 @@ public class Main {
             var parseResult = parser.parseResult();
             if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
             var program = parseResult.unwrap();
+
+            // Set inferred package if not declared in source
+            if (program.pkg() == null && pkg != null) {
+                program = new Ast.Program(program.sourceFile(), new Ast.PackageDecl(pkg),
+                    program.imports(), program.decls(), program.stmts());
+            }
 
             parsed.add(new ParsedFile(znFile, className, program));
 
@@ -480,12 +506,26 @@ public class Main {
             // Derive binary name from project directory
             var binaryName = projectDir.getFileName().toString().toLowerCase().replace("-", "");
 
+            // Get reachability metadata for dependencies
+            var metadataArgs = NativeImageConfig.buildNativeImageArgs(cpEntries);
+
             var cmd = new ArrayList<>(List.of(
                 "native-image", "--enable-preview",
                 "-cp", classpath,
                 "-o", projectDir.resolve(binaryName).toString(),
-                "--no-fallback", "-O2", "-march=native",
-                mainClass));
+                "--no-fallback", "-O2", "-march=native"));
+            cmd.addAll(metadataArgs);
+
+            // Run tracing agent if no metadata found for some deps
+            if (metadataArgs.isEmpty() && cpEntries.size() > 1) {
+                System.out.println("no bundled metadata — running tracing agent...");
+                var tracingDir = NativeImageConfig.runTracingAgent(mainClass, classpath, projectDir);
+                if (tracingDir != null) {
+                    cmd.add("-H:ConfigurationFileDirectories=" + tracingDir);
+                }
+            }
+
+            cmd.add(mainClass);
 
             System.out.println("native-image: " + mainClass + " → " + binaryName);
             var process = new ProcessBuilder(cmd).inheritIO().start();
