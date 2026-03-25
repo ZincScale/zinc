@@ -2,11 +2,11 @@
 
 Zinc runs on Java 25 virtual threads. No async/await, no colored functions. Every function is synchronous — blocking is cheap because virtual threads unmount from carrier threads on I/O.
 
-See `design-zinc-concurrency.md` for the full design with Java transpilation details.
+All structured primitives (`concurrent`, `parallel for`, `timeout`) transpile to Java 25's `StructuredTaskScope`.
 
 ## spawn
 
-Run a block on a new virtual thread:
+Run a block on a new virtual thread (unstructured, fire-and-forget):
 
 ```zinc
 spawn {
@@ -97,18 +97,6 @@ var result = timeout(5.seconds) {
 }
 ```
 
-## retry
-
-Auto-retry with backoff:
-
-```zinc
-var result = retry(max: 3, backoff: exponential(100.millis)) {
-    httpClient.post(url, payload)
-} or {
-    Error("Failed after 3 retries")
-}
-```
-
 ## Channel
 
 Bounded producer/consumer queue for communicating between threads:
@@ -142,74 +130,6 @@ parallel(max: 4) {
 }
 ```
 
-## select
-
-Wait on multiple channels:
-
-```zinc
-var orders = new Channel<Order>(100)
-var cancellations = new Channel<Cancellation>(100)
-
-select {
-    case order from orders -> processOrder(order)
-    case cancel from cancellations -> processCancellation(cancel)
-}
-```
-
-## context
-
-Scoped values for implicit context propagation — no parameter drilling:
-
-```zinc
-context RequestContext {
-    String traceId
-    String tenantId
-}
-
-// Bind at entry point
-with new RequestContext(traceId: uuid(), tenantId: "acme") {
-    handleRequest()
-}
-
-// Read anywhere in the call chain — no parameter needed
-fn handleRequest() {
-    var ctx = RequestContext.current()
-    print("[{ctx.traceId}] Processing for {ctx.tenantId}")
-}
-```
-
-Context automatically propagates to child threads spawned with `concurrent` or `parallel for`.
-
-## Practical Example
-
-A parallel web scraper with rate limiting and timeout:
-
-```zinc
-fn scrapeUrls(List<String> urls): List<String> {
-    var results = new Channel<String>(1000)
-    var limiter = new Rate(10.perSecond)
-
-    parallel(max: 4) for url in urls {
-        rate limiter {
-            var title = timeout(5.seconds) {
-                var content = httpClient.get(url)
-                parseTitle(content)
-            } or {
-                "timeout: {url}"
-            }
-            results.send(title)
-        }
-    }
-    results.close()
-
-    List<String> titles = []
-    for title in results {
-        titles.add(title)
-    }
-    return titles
-}
-```
-
 ## Summary
 
 | Primitive | Purpose | Structured? |
@@ -221,11 +141,7 @@ fn scrapeUrls(List<String> urls): List<String> {
 | `parallel(max: N) for` | Bounded fan-out | Yes |
 | `lock mu { }` | Mutual exclusion | N/A |
 | `timeout(dur) { }` | Deadline-aware execution | Yes |
-| `retry(max, backoff) { }` | Auto-retry with backoff | N/A |
 | `new Channel<T>(n)` | Bounded producer/consumer | N/A |
-| `select { }` | Wait on multiple channels | N/A |
-| `context T { }` | Scoped value declaration | Yes |
-| `with T(...) { }` | Bind scoped value | Yes |
 
 ### What's NOT in Zinc
 
