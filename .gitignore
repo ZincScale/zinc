@@ -14,3 +14,4 @@ zinc-out/
 
 # Compiler build
 compiler/out/
+.claude/
