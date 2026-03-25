@@ -4,6 +4,27 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-25
+
+### Changed
+- **Self-contained zinc binary** — jpackage bundles JDK (javac, jlink, jdeps) + Mill + compiler. Zero external dependencies.
+- **javac via javax.tools API** — no shell-out to javac, uses bundled JDK compiler module
+- **In-process class loading** — scripts run via URLClassLoader, no shell-out to java
+- **jpackage default** — `zinc build` produces bundled JRE apps (works with ALL Java libraries)
+- **GraalVM native-image opt-in** — `zinc build --native` for max performance when libs support it
+
+### Added
+- Bundled Mill build tool — no separate Mill install needed
+- `zinc build --package` (default) — jpackage + jlink with stripped JRE
+- `zinc build --fat-jar` — uber jar via Mill assembly
+- `zinc build --docker` — multi-stage Dockerfile with jlink JRE on distroless base
+- `zinc build --native` — GraalVM native-image with reachability metadata + tracing agent
+- GraalVM reachability metadata auto-download for native builds
+- Tracing agent fallback for libraries without bundled metadata
+- Package inference from directory structure (src/flow/worker.zn → package flow)
+- Distroless Docker base (gcr.io/distroless/base-nossl-debian12:nonroot)
+- jlink optimizations: --strip-debug --no-man-pages --compress=zip-6
+
 ## [1.0.0] - 2026-03-25
 
 ### Changed
