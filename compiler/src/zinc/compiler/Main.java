@@ -79,6 +79,12 @@ public class Main {
             outDir = Path.of("/tmp/zinc-build-" + inputPath.getFileName().toString().replace(".zn", ""));
         }
 
+        // Check for Mill project
+        Path projectDir = null;
+        if (Files.isDirectory(inputPath)) {
+            projectDir = findProjectDir(inputPath);
+        }
+
         var result = compileProject(inputPath, outDir);
         switch (result) {
             case Result.Ok<List<Path>> ok -> {
@@ -88,6 +94,14 @@ public class Main {
                 for (var e : err.errors()) System.err.println("error: " + e);
                 System.exit(1);
             }
+        }
+
+        // If Mill project, run mill compile after transpilation
+        if (projectDir != null) {
+            System.out.println("mill compile");
+            int exitCode = runMill(projectDir, "compile");
+            if (exitCode != 0) System.exit(exitCode);
+            System.out.println("build complete: " + projectDir + " (Mill project)");
         }
     }
 
@@ -101,11 +115,28 @@ public class Main {
 
         String input = args.getFirst();
         var runArgs = args.size() > 1 ? args.subList(1, args.size()) : List.<String>of();
-
         var inputPath = Path.of(input);
+
+        // Check for Mill project (directory with build.mill.yaml)
+        if (Files.isDirectory(inputPath)) {
+            var projectDir = findProjectDir(inputPath);
+            if (projectDir != null) {
+                // Mill project: transpile → mill run
+                var outDir = inputPath; // transpile in-place (Mill expects src/)
+                var compileResult = compileProject(inputPath, outDir);
+                if (compileResult.isErr()) {
+                    for (var e : ((Result.Err<?>) compileResult).errors()) System.err.println("error: " + e);
+                    System.exit(1);
+                }
+                System.out.println("mill run");
+                System.exit(runMill(projectDir, "run"));
+                return;
+            }
+        }
+
+        // Script/single-file mode: compile → javac → java
         var outDir = Path.of("/tmp/zinc-run-" + inputPath.getFileName().toString().replace(".zn", ""));
 
-        // Step 1: Compile .zn → .java
         var compileResult = compileProject(inputPath, outDir);
         if (compileResult.isErr()) {
             for (var e : ((Result.Err<?>) compileResult).errors()) System.err.println("error: " + e);
@@ -113,23 +144,19 @@ public class Main {
         }
         var javaFiles = compileResult.unwrap();
 
-        // Step 2: javac .java → .class
         var javacResult = runJavac(javaFiles, outDir);
         if (javacResult.isErr()) {
             for (var e : ((Result.Err<?>) javacResult).errors()) System.err.println(e);
             System.exit(1);
         }
 
-        // Step 3: Determine main class
         String mainClass = findMainClass(javaFiles, outDir);
         if (mainClass == null) {
             System.err.println("error: no main class found");
             System.exit(1);
         }
 
-        // Step 4: java -cp outDir MainClass [args...]
-        var exitCode = runJava(mainClass, outDir, runArgs);
-        System.exit(exitCode);
+        System.exit(runJava(mainClass, outDir, runArgs));
     }
 
     // --- Compilation pipeline ------------------------------------------------
@@ -270,6 +297,32 @@ public class Main {
         }
 
         return Result.ok(javaFiles);
+    }
+
+    // --- Mill integration ----------------------------------------------------
+
+    /** Find the project root containing build.mill.yaml. */
+    private static Path findProjectDir(Path dir) {
+        var current = dir.toAbsolutePath();
+        while (current != null) {
+            if (Files.exists(current.resolve("build.mill.yaml"))) return current;
+            current = current.getParent();
+        }
+        return null;
+    }
+
+    /** Run a Mill command in the project directory. */
+    private static int runMill(Path projectDir, String command) {
+        try {
+            var process = new ProcessBuilder("mill", command)
+                .directory(projectDir.toFile())
+                .inheritIO()
+                .start();
+            return process.waitFor();
+        } catch (Exception e) {
+            System.err.println("failed to run mill: " + e.getMessage());
+            return 1;
+        }
     }
 
     // --- javac ----------------------------------------------------------------

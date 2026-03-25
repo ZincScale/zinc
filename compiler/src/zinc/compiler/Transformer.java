@@ -1077,6 +1077,15 @@ public class Transformer {
         if (bin.op().equals("!==")) {
             return new com.github.javaparser.ast.expr.BinaryExpr(left, right, BinaryExpr.Operator.NOT_EQUALS);
         }
+        // ** → Math.pow(), cast to (long) for int operands
+        if (bin.op().equals("**")) {
+            var pow = new MethodCallExpr(new NameExpr("Math"), "pow", new NodeList<>(left, right));
+            if (isPrimitiveLiteral(bin.left()) && isPrimitiveLiteral(bin.right())
+                && bin.left() instanceof IntLit && bin.right() instanceof IntLit) {
+                return new CastExpr(PrimitiveType.longType(), pow);
+            }
+            return pow;
+        }
 
         var op = switch (bin.op()) {
             case "+" -> BinaryExpr.Operator.PLUS;
