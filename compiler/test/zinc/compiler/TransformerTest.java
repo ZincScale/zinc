@@ -31,6 +31,23 @@ public class TransformerTest {
         testSpawn();
         testConcurrent();
         testParallelFor();
+        testEquality();
+        testArrayLiteral();
+        testMapLiteral();
+        testMethodAliases();
+        testStreamChain();
+        testStreamIt();
+        testInOperator();
+        testSealedClass();
+        testExpressionIf();
+        testMatchExpr();
+        testDefaultParams();
+        testSingleExprFn();
+        testVarArgs();
+        testConstField();
+        testForWithIndex();
+        testInheritance();
+        testDataClassToString();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -39,8 +56,12 @@ public class TransformerTest {
     static String transpile(String zinc) {
         var tokens = new Lexer(zinc).tokenize().unwrap();
         var program = new Parser(tokens).parse();
-        var result = new Transformer().transform(program);
-        return result.unwrap().toString();
+        var result = new Transformer().transformAll(program);
+        var sb = new StringBuilder();
+        for (var cu : result.unwrap()) {
+            sb.append(cu.toString()).append("\n");
+        }
+        return sb.toString();
     }
 
     static void testHelloWorld() {
@@ -264,6 +285,151 @@ public class TransformerTest {
         assertContains("pfor: foreach", java, "for (var item : items)");
         System.out.println("--- Parallel For ---");
         System.out.println(java);
+    }
+
+    static void testEquality() {
+        var java = transpile("var x = a == b\nvar y = a === b\nvar z = a != b");
+        assertContains("eq: Objects.equals", java, "Objects.equals(a, b)");
+        assertContains("eq: ref ==", java, "a == b");
+        assertContains("eq: !Objects.equals", java, "!java.util.Objects.equals(a, b)");
+    }
+
+    static void testArrayLiteral() {
+        var java = transpile("int[] nums = [1, 2, 3]");
+        assertContains("arr: new int[]", java, "new int[]");
+        assertContains("arr: elements", java, "1, 2, 3");
+    }
+
+    static void testMapLiteral() {
+        var java = transpile("var m = {\"a\": 1, \"b\": 2}");
+        assertContains("map: LinkedHashMap", java, "LinkedHashMap");
+        assertContains("map: put", java, "put");
+    }
+
+    static void testMethodAliases() {
+        var java = transpile("var x = s.upper()\nvar y = s.lower()\nvar z = s.trim()");
+        assertContains("alias: upper", java, "toUpperCase");
+        assertContains("alias: lower", java, "toLowerCase");
+        assertContains("alias: trim", java, "strip");
+    }
+
+    static void testStreamChain() {
+        var java = transpile("var x = nums.filter(x -> x > 0).map(x -> x * 2).toList()");
+        assertContains("stream: .stream()", java, ".stream()");
+        assertContains("stream: .filter(", java, ".filter(");
+        assertContains("stream: .map(", java, ".map(");
+        assertContains("stream: .toList()", java, ".toList()");
+    }
+
+    static void testStreamIt() {
+        var java = transpile("var x = nums.filter(it > 5)");
+        assertContains("it: _it", java, "_it");
+        assertContains("it: lambda", java, "->");
+        assertContains("it: stream", java, ".stream()");
+    }
+
+    static void testInOperator() {
+        var java = transpile("var x = \"hello\" in list");
+        assertContains("in: contains", java, ".contains(");
+    }
+
+    static void testSealedClass() {
+        var java = transpile("""
+            sealed class Shape {
+                data Circle(double radius)
+                data Rect(double w, double h)
+            }
+            """);
+        assertContains("sealed: Shape", java, "abstract class Shape");
+        assertContains("sealed: Circle", java, "class Circle");
+        assertContains("sealed: Rect", java, "class Rect");
+        assertContains("sealed: extends Shape", java, "extends Shape");
+    }
+
+    static void testExpressionIf() {
+        var java = transpile("var x = if true: \"yes\" else: \"no\"");
+        assertContains("if_expr: ternary", java, "?");
+        assertContains("if_expr: yes", java, "yes");
+        assertContains("if_expr: no", java, "no");
+    }
+
+    static void testMatchExpr() {
+        var java = transpile("""
+            var x = match status {
+                case "ok" { "success" }
+                case _ { "unknown" }
+            }
+            """);
+        assertContains("match_expr: Objects.equals", java, "Objects.equals");
+        assertContains("match_expr: success", java, "success");
+        assertContains("match_expr: unknown", java, "unknown");
+    }
+
+    static void testDefaultParams() {
+        var java = transpile("""
+            fn connect(String host, int port = 8080): String {
+                return host
+            }
+            connect("localhost")
+            """);
+        assertContains("defaults: overload", java, "connect(String host)");
+        assertContains("defaults: primary", java, "connect(String host, int port)");
+    }
+
+    static void testSingleExprFn() {
+        var java = transpile("""
+            fn doubled(int x): int = x * 2
+            doubled(5)
+            """);
+        assertContains("single_expr: return", java, "return x * 2");
+    }
+
+    static void testVarArgs() {
+        var java = transpile("""
+            fn sum(int... nums): int { return 0 }
+            sum(1, 2, 3)
+            """);
+        assertContains("varargs: int...", java, "int... nums");
+    }
+
+    static void testConstField() {
+        var java = transpile("""
+            class Config {
+                const String VERSION = "1.0"
+            }
+            """);
+        assertContains("const: public static final", java, "public static final");
+        assertContains("const: VERSION", java, "VERSION");
+    }
+
+    static void testForWithIndex() {
+        var java = transpile("""
+            for k, v in map {
+                print(k)
+            }
+            """);
+        assertContains("for_idx: entrySet", java, "entrySet");
+        assertContains("for_idx: getKey", java, "getKey");
+        assertContains("for_idx: getValue", java, "getValue");
+    }
+
+    static void testInheritance() {
+        var java = transpile("""
+            interface Speaker {
+                fn speak(): String
+            }
+            class Dog : Speaker {
+                pub fn speak(): String { return "woof" }
+            }
+            """);
+        assertContains("inherit: implements", java, "implements Speaker");
+        assertNotContains("inherit: no throws", java, "throws Exception");
+    }
+
+    static void testDataClassToString() {
+        var java = transpile("data Point(int x, int y)");
+        assertContains("data_str: toString", java, "toString");
+        assertContains("data_str: Point[", java, "Point[");
     }
 
     // --- Helpers -------------------------------------------------------------
