@@ -256,10 +256,9 @@ public class Transformer {
 
         for (var param : fn.params()) {
             var type = param.type() != null ? transformType(param.type()) : new ClassOrInterfaceType(null, "Object");
-            if (param.isVariadic()) {
-                type = new com.github.javaparser.ast.type.ArrayType(type);
-            }
-            method.addParameter(type, param.name());
+            var jParam = new Parameter(type, param.name());
+            if (param.isVariadic()) jParam.setVarArgs(true);
+            method.addParameter(jParam);
         }
 
         if (fn.body() != null) {
@@ -286,7 +285,14 @@ public class Transformer {
         // Fields
         for (var field : cls.fields()) {
             var type = field.type() != null ? transformType(field.type()) : new ClassOrInterfaceType(null, "Object");
-            var jField = jClass.addField(type, field.name(), field.isPub() ? Keyword.PUBLIC : Keyword.PRIVATE);
+            Keyword visibility = field.isPub() ? Keyword.PUBLIC : Keyword.PRIVATE;
+            if (field.isConst()) {
+                // const → public static final
+                var jField = jClass.addField(type, field.name(), Keyword.PUBLIC, Keyword.STATIC, Keyword.FINAL);
+                if (field.defaultValue() != null) jField.getVariable(0).setInitializer(transformExpr(field.defaultValue()));
+                continue;
+            }
+            var jField = jClass.addField(type, field.name(), visibility);
             if (field.isInit()) jField.addModifier(Keyword.FINAL);
             if (field.defaultValue() != null) {
                 jField.getVariable(0).setInitializer(transformExpr(field.defaultValue()));
@@ -327,6 +333,32 @@ public class Transformer {
                     new MethodCallExpr(null, "super", superArgs)));
             }
             jCtor.setBody(body);
+
+            // Generate overloads for default parameters
+            int firstDefault = -1;
+            for (int i = 0; i < ctor.params().size(); i++) {
+                if (ctor.params().get(i).defaultValue() != null) { firstDefault = i; break; }
+            }
+            if (firstDefault >= 0) {
+                for (int cut = firstDefault; cut < ctor.params().size(); cut++) {
+                    var overload = jClass.addConstructor(Keyword.PUBLIC);
+                    var callArgs = new NodeList<Expression>();
+                    for (int i = 0; i < ctor.params().size(); i++) {
+                        var p = ctor.params().get(i);
+                        var pType = p.type() != null ? transformType(p.type()) : new ClassOrInterfaceType(null, "Object");
+                        if (i < cut) {
+                            overload.addParameter(pType, p.name());
+                            callArgs.add(new NameExpr(p.name()));
+                        } else {
+                            callArgs.add(p.defaultValue() != null ? transformExpr(p.defaultValue()) : new NullLiteralExpr());
+                        }
+                    }
+                    var overloadBody = new BlockStmt();
+                    overloadBody.addStatement(new ExpressionStmt(
+                        new MethodCallExpr(null, "this", callArgs)));
+                    overload.setBody(overloadBody);
+                }
+            }
         }
 
         // Methods
@@ -390,6 +422,19 @@ public class Transformer {
             getter.setType(type);
             getter.setBody(new BlockStmt().addStatement(new ReturnStmt(new NameExpr("this." + param.name()))));
         }
+
+        // toString: ClassName[field1=val1, field2=val2, ...]
+        var toStr = jClass.addMethod("toString", Keyword.PUBLIC);
+        toStr.addMarkerAnnotation("Override");
+        toStr.setType(new ClassOrInterfaceType(null, "String"));
+        var sb = new StringBuilder("\"" + data.name() + "[\"");
+        for (int i = 0; i < data.params().size(); i++) {
+            var p = data.params().get(i);
+            if (i > 0) sb.append(" + \", \"");
+            sb.append(" + \"").append(p.name()).append("=\" + this.").append(p.name());
+        }
+        sb.append(" + \"]\"");
+        toStr.setBody(new BlockStmt().addStatement(new ReturnStmt(parseExpr(sb.toString()))));
 
         // Methods
         for (var method : data.methods()) {
@@ -504,6 +549,7 @@ public class Transformer {
                 }
                 yield List.of(new ExpressionStmt(transformExpr(e.expr())));
             }
+            case Ast.MatchStmt m -> List.of(transformMatchStmt(m));
             case Ast.BreakStmt b -> List.of(new BreakStmt());
             case Ast.ContinueStmt c -> List.of(new ContinueStmt());
             case Ast.BlockStmt b -> List.of(transformBlock(b));
@@ -658,6 +704,36 @@ public class Transformer {
             new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"),
             catchBody);
         return new TryStmt(tryBody, new NodeList<>(catchClause), null);
+    }
+
+    /** match stmt → chain of if/else if */
+    private Statement transformMatchStmt(Ast.MatchStmt m) {
+        var subject = transformExpr(m.subject());
+        IfStmt firstIf = null;
+        IfStmt lastIf = null;
+        Statement defaultCase = null;
+
+        for (var c : m.cases()) {
+            if (c.pattern() == null) {
+                // wildcard: _ { body }
+                defaultCase = transformBlock(c.body());
+            } else {
+                var cond = new MethodCallExpr(
+                    new NameExpr("java.util.Objects"), "equals",
+                    new NodeList<>(subject.clone(), transformExpr(c.pattern())));
+                var ifStmt = new IfStmt(cond, transformBlock(c.body()), null);
+                if (firstIf == null) {
+                    firstIf = ifStmt;
+                } else {
+                    lastIf.setElseStmt(ifStmt);
+                }
+                lastIf = ifStmt;
+            }
+        }
+
+        if (firstIf == null) return defaultCase != null ? defaultCase : new BlockStmt();
+        if (defaultCase != null && lastIf != null) lastIf.setElseStmt(defaultCase);
+        return firstIf;
     }
 
     // --- Concurrency ---------------------------------------------------------
@@ -898,17 +974,22 @@ public class Transformer {
             case ListLit list -> {
                 var listArgs = new NodeList<Expression>();
                 for (var el : list.elements()) listArgs.add(transformExpr(el));
-                yield new MethodCallExpr(new NameExpr("java.util.List"), "of", listArgs);
+                // new ArrayList<>(List.of(...)) — mutable, Java infers type from elements
+                var listOf = new MethodCallExpr(new NameExpr("List"), "of", listArgs);
+                yield new ObjectCreationExpr(null,
+                    new ClassOrInterfaceType(null, "ArrayList<>"), new NodeList<>(listOf));
             }
             case StringInterpLit interp -> transformInterpString(interp);
             case MapLit map -> {
-                // {k: v, ...} → java.util.Map.of(k, v, ...)
+                // {k: v, ...} → new LinkedHashMap<>(Map.of(k, v, ...)) for insertion order
                 var mapArgs = new NodeList<Expression>();
                 for (int i = 0; i < map.keys().size(); i++) {
                     mapArgs.add(transformExpr(map.keys().get(i)));
                     mapArgs.add(transformExpr(map.values().get(i)));
                 }
-                yield new MethodCallExpr(new NameExpr("java.util.Map"), "of", mapArgs);
+                var mapOf = new MethodCallExpr(new NameExpr("Map"), "of", mapArgs);
+                yield new ObjectCreationExpr(null,
+                    new ClassOrInterfaceType(null, "LinkedHashMap"), new NodeList<>(mapOf));
             }
             case RawStringLit raw -> new StringLiteralExpr(raw.value());
             case SafeNavExpr nav -> {
@@ -1022,6 +1103,25 @@ public class Transformer {
         // Method call on object: obj.method(args) with alias resolution
         if (call.callee() instanceof SelectorExpr sel) {
             String methodName = METHOD_ALIASES.getOrDefault(sel.field(), sel.field());
+
+            // Stream methods on collections: .filter(), .map(), .reduce(), etc.
+            // list.filter(pred) → list.stream().filter(pred).toList()
+            // list.map(fn) → list.stream().map(fn).toList()
+            if (isStreamMethod(methodName)) {
+                var obj = transformExpr(sel.object());
+                var stream = new MethodCallExpr(obj, "stream");
+                var streamOp = new MethodCallExpr(stream, methodName, args);
+                return switch (methodName) {
+                    case "reduce" -> streamOp;
+                    case "forEach" -> streamOp;
+                    case "anyMatch", "allMatch", "noneMatch" -> streamOp;
+                    case "count" -> streamOp;
+                    case "findFirst" -> streamOp;
+                    case "sorted" -> new MethodCallExpr(streamOp, "toList");
+                    default -> new MethodCallExpr(streamOp, "toList");
+                };
+            }
+
             return new MethodCallExpr(transformExpr(sel.object()), methodName, args);
         }
 
@@ -1200,6 +1300,15 @@ public class Transformer {
                 }
                 yield type;
             }
+        };
+    }
+
+    private static boolean isStreamMethod(String name) {
+        return switch (name) {
+            case "filter", "map", "flatMap", "reduce", "forEach", "sorted",
+                 "distinct", "limit", "skip", "anyMatch", "allMatch", "noneMatch",
+                 "findFirst", "count", "toList" -> true;
+            default -> false;
         };
     }
 
