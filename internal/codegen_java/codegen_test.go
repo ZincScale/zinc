@@ -1275,9 +1275,10 @@ spawn {
     print("background")
 }
 `,
-		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
-		`throw new RuntimeException(err);`,
-		`.start(() -> {`,
+		`CompletableFuture<Void>`,
+		`Thread.ofVirtual().start(() -> {`,
+		`_f.complete(null)`,
+		`_f.completeExceptionally(err)`,
 	)
 }
 
@@ -1287,8 +1288,9 @@ var future = spawn {
     compute()
 }
 `,
-		`Thread.ofVirtual().uncaughtExceptionHandler(`,
-		`.start(() -> {`,
+		`var future =`,
+		`CompletableFuture<Void>`,
+		`Thread.ofVirtual().start`,
 	)
 }
 
@@ -1300,9 +1302,9 @@ spawn {
     print("error: {err}")
 }
 `,
-		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
+		`CompletableFuture<Void>`,
 		`System.out.println("error: " + err)`,
-		`.start(() -> {`,
+		`_f.completeExceptionally(err)`,
 	)
 }
 
@@ -1322,9 +1324,10 @@ class Worker {
     }
 }
 `,
-		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
+		`CompletableFuture<Void>`,
 		`while (running)`,
 		`System.out.println("worker crashed: " + err)`,
+		`_f.completeExceptionally(err)`,
 	)
 }
 
@@ -1334,19 +1337,20 @@ spawn {
     print("fire and forget")
 }
 `,
-		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> { throw new RuntimeException(err);`,
-		`.start(() -> {`,
+		`CompletableFuture<Void>`,
+		`_f.completeExceptionally(err)`,
 	)
 }
 
-func TestSpawnReturnsThread(t *testing.T) {
+func TestSpawnReturnsFuture(t *testing.T) {
 	assertContains(t, `
 var t = spawn {
     compute()
 }
 t.join()
 `,
-		`var t = Thread.ofVirtual()`,
+		`var t =`,
+		`CompletableFuture<Void>`,
 		`t.join()`,
 	)
 }

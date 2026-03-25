@@ -1464,12 +1464,9 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.buf.WriteString(prefix)
 		g.indent = savedIndent
 		trimmed := strings.TrimSpace(body)
-		// Wrap body in try-catch to handle checked exceptions from Runnable
-		wrappedBody := fmt.Sprintf("try { %s } catch (Exception _ex) { if (_ex instanceof RuntimeException) throw (RuntimeException) _ex; throw new RuntimeException(_ex); }", trimmed)
-		// Default handler: wrap in Error (RuntimeException) — always present
-		defaultHandler := "throw new RuntimeException(err);"
+		// or handler runs as supervision on error, before future is completed
+		orHandlerCode := ""
 		if expr.OrHandler != nil && expr.OrHandler.Body != nil {
-			// Capture or-handler body
 			startLen2 := g.buf.Len()
 			g.indent = 0
 			for _, s := range expr.OrHandler.Body.Stmts {
@@ -1480,10 +1477,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			g.buf.Reset()
 			g.buf.WriteString(prefix2)
 			g.indent = savedIndent
-			defaultHandler = strings.TrimSpace(handlerBody)
+			orHandlerCode = strings.TrimSpace(handlerBody) + " "
 		}
-		// spawn always returns Thread, always has UncaughtExceptionHandler
-		return fmt.Sprintf("Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> { %s }).start(() -> { %s })", defaultHandler, wrappedBody)
+		// spawn returns CompletableFuture<Void> — virtual thread completes it
+		return fmt.Sprintf("((java.util.function.Supplier<java.util.concurrent.CompletableFuture<Void>>) () -> { var _f = new java.util.concurrent.CompletableFuture<Void>(); Thread.ofVirtual().start(() -> { try { %s _f.complete(null); } catch (Exception err) { %s_f.completeExceptionally(err); } }); return _f; }).get()", trimmed, orHandlerCode)
 	case *parser.IfExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.RangeExpr:
