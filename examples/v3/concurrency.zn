@@ -29,4 +29,25 @@ Thread.sleep(50)
 String msg = ch.poll(100, TimeUnit.MILLISECONDS) or { "timeout" }
 print("channel: {msg}")
 
+// spawn or — error handler captures exceptions
+var result = new AtomicInteger(0)
+spawn {
+    int x = Integer.parseInt("not_a_number")
+    result.set(x)
+} or {
+    result.set(-1)
+}
+Thread.sleep(100)
+print("spawn or error: {result.get()}")
+
+// spawn or — success path (no error)
+var ok = new AtomicInteger(0)
+spawn {
+    ok.set(42)
+} or {
+    ok.set(-1)
+}
+Thread.sleep(100)
+print("spawn or success: {ok.get()}")
+
 print("Concurrency OK")

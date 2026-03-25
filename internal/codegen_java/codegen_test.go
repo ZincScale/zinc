@@ -1276,6 +1276,8 @@ spawn {
 }
 `,
 		`Thread.startVirtualThread(() -> {`,
+		`catch (Exception _ex)`,
+		`throw new RuntimeException(_ex)`,
 	)
 }
 
@@ -1286,6 +1288,64 @@ var future = spawn {
 }
 `,
 		`Thread.startVirtualThread(() -> {`,
+	)
+}
+
+func TestSpawnOrHandler(t *testing.T) {
+	assertContains(t, `
+spawn {
+    riskyWork()
+} or {
+    print("error: {err}")
+}
+`,
+		`Thread.startVirtualThread(() -> {`,
+		`catch (Exception err)`,
+		`System.out.println("error: " + err)`,
+	)
+	// Should NOT have RuntimeException wrapper when or handler is present
+	assertNotContains(t, `
+spawn {
+    riskyWork()
+} or {
+    print("error: {err}")
+}
+`,
+		`RuntimeException`,
+	)
+}
+
+func TestSpawnOrHandlerWithWhileLoop(t *testing.T) {
+	assertContains(t, `
+class Worker {
+    var boolean running = false
+    pub fn start() {
+        running = true
+        spawn {
+            while running {
+                print("tick")
+            }
+        } or {
+            print("worker crashed: {err}")
+        }
+    }
+}
+`,
+		`Thread.startVirtualThread(() -> {`,
+		`while (running)`,
+		`catch (Exception err)`,
+		`System.out.println("worker crashed: " + err)`,
+	)
+}
+
+func TestSpawnWithoutOrHasRuntimeException(t *testing.T) {
+	assertContains(t, `
+spawn {
+    print("fire and forget")
+}
+`,
+		`catch (Exception _ex)`,
+		`throw new RuntimeException(_ex)`,
 	)
 }
 
