@@ -397,7 +397,12 @@ public class Transformer {
             case Ast.IfStmt i -> List.of(transformIfStmt(i));
             case Ast.ForStmt f -> List.of(transformForStmt(f));
             case Ast.WhileStmt w -> List.of(new WhileStmt(transformExpr(w.cond()), transformBlock(w.body())));
-            case Ast.ExprStmt e -> List.of(new ExpressionStmt(transformExpr(e.expr())));
+            case Ast.ExprStmt e -> {
+                if (e.orHandler() != null) {
+                    yield List.of(transformExprStmtWithOrHandler(e));
+                }
+                yield List.of(new ExpressionStmt(transformExpr(e.expr())));
+            }
             case Ast.BreakStmt b -> List.of(new BreakStmt());
             case Ast.ContinueStmt c -> List.of(new ContinueStmt());
             case Ast.BlockStmt b -> List.of(transformBlock(b));
@@ -407,6 +412,11 @@ public class Transformer {
     }
 
     private Statement transformVarStmt(Ast.VarStmt v) {
+        // or-handler: var x = call() or { default }
+        if (v.orHandler() != null && v.value() != null) {
+            return transformVarWithOrHandler(v);
+        }
+
         Expression init = v.value() != null ? transformExpr(v.value()) : null;
         if (v.type() != null) {
             var type = transformType(v.type());
@@ -418,6 +428,53 @@ public class Transformer {
         var decl = new VariableDeclarationExpr(new VarType(), v.name());
         if (init != null) decl.getVariable(0).setInitializer(init);
         return new ExpressionStmt(decl);
+    }
+
+    /**
+     * var x = call() or { default }
+     * →
+     * Type x;
+     * try { x = call(); } catch (Exception err) { x = default; }
+     *
+     * For now we use try/catch at the Java boundary. When we move to full
+     * Result types this becomes: var _r = call(); var x = _r.isOk() ? _r.unwrap() : default;
+     */
+    private Statement transformVarWithOrHandler(Ast.VarStmt v) {
+        var block = new BlockStmt();
+        Type type = v.type() != null ? transformType(v.type()) : new ClassOrInterfaceType(null, "Object");
+
+        // Declare: Type x;
+        block.addStatement(new ExpressionStmt(new VariableDeclarationExpr(type, v.name())));
+
+        // Try block: x = call();
+        var tryBody = new BlockStmt();
+        tryBody.addStatement(new ExpressionStmt(new AssignExpr(
+            new NameExpr(v.name()), transformExpr(v.value()), AssignExpr.Operator.ASSIGN)));
+
+        // Catch block: or handler body
+        var catchBody = new BlockStmt();
+        if (v.orHandler().body() != null) {
+            var handlerStmts = v.orHandler().body().stmts();
+            if (handlerStmts.size() == 1 && handlerStmts.getFirst() instanceof Ast.ExprStmt es) {
+                // Single expression or-handler: or { defaultExpr } → x = defaultExpr
+                catchBody.addStatement(new ExpressionStmt(new AssignExpr(
+                    new NameExpr(v.name()), transformExpr(es.expr()), AssignExpr.Operator.ASSIGN)));
+            } else {
+                // Block or-handler
+                for (var stmt : handlerStmts) {
+                    for (var jStmt : transformStmt(stmt)) {
+                        catchBody.addStatement(jStmt);
+                    }
+                }
+            }
+        }
+
+        var catchClause = new CatchClause(
+            new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"),
+            catchBody);
+        block.addStatement(new TryStmt(tryBody, new NodeList<>(catchClause), null));
+
+        return block;
     }
 
     private Statement transformAssignStmt(Ast.AssignStmt a) {
@@ -434,7 +491,57 @@ public class Transformer {
 
     private Statement transformReturnStmt(Ast.ReturnStmt r) {
         if (r.value() == null) return new ReturnStmt();
+
+        // return Error(expr) → throw new RuntimeException(expr)
+        // This is the Java boundary — Zinc errors become Java exceptions for propagation
+        if (r.value() instanceof CallExpr call
+            && call.callee() instanceof Ident id
+            && id.name().equals("Error")) {
+            if (!call.args().isEmpty()) {
+                var arg = call.args().getFirst();
+                // return Error(CustomType(...)) → throw new CustomType(...)
+                if (arg instanceof CallExpr innerCall
+                    && innerCall.callee() instanceof Ident innerId
+                    && Character.isUpperCase(innerId.name().charAt(0))) {
+                    var args = new NodeList<Expression>();
+                    for (var a : innerCall.args()) args.add(transformExpr(a));
+                    return new ThrowStmt(new ObjectCreationExpr(null,
+                        new ClassOrInterfaceType(null, innerId.name()), args));
+                }
+                // return Error(err) or return Error("msg") → throw new RuntimeException(...)
+                return new ThrowStmt(new ObjectCreationExpr(null,
+                    new ClassOrInterfaceType(null, "RuntimeException"),
+                    new NodeList<>(transformExpr(arg))));
+            }
+            return new ThrowStmt(new ObjectCreationExpr(null,
+                new ClassOrInterfaceType(null, "RuntimeException"),
+                new NodeList<>(new StringLiteralExpr("error"))));
+        }
+
         return new ReturnStmt(transformExpr(r.value()));
+    }
+
+    /**
+     * call() or { handler }
+     * → try { call(); } catch (Exception err) { handler; }
+     */
+    private Statement transformExprStmtWithOrHandler(Ast.ExprStmt e) {
+        var tryBody = new BlockStmt();
+        tryBody.addStatement(new ExpressionStmt(transformExpr(e.expr())));
+
+        var catchBody = new BlockStmt();
+        if (e.orHandler().body() != null) {
+            for (var stmt : e.orHandler().body().stmts()) {
+                for (var jStmt : transformStmt(stmt)) {
+                    catchBody.addStatement(jStmt);
+                }
+            }
+        }
+
+        var catchClause = new CatchClause(
+            new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"),
+            catchBody);
+        return new TryStmt(tryBody, new NodeList<>(catchClause), null);
     }
 
     private Statement transformIfStmt(Ast.IfStmt i) {

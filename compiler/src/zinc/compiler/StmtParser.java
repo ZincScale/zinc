@@ -78,7 +78,7 @@ public class StmtParser {
         TypeExpr type = null;
         if (types.isTypeAnnotation()) type = types.parseType();
 
-        String name = ctx.expect(IDENT).literal();
+        String name = ctx.expectIdentOrKeyword();
         Expr value = null;
         OrHandler orHandler = null;
 
@@ -93,7 +93,7 @@ public class StmtParser {
     private Stmt parseTypedVarStmt() {
         int line = ctx.peek().line();
         TypeExpr type = types.parseType();
-        String name = ctx.expect(IDENT).literal();
+        String name = ctx.expectIdentOrKeyword();
         Expr value = null;
         OrHandler orHandler = null;
 

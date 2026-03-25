@@ -23,6 +23,11 @@ public class TransformerTest {
         testIfElse();
         testForIn();
         testLambda();
+        testOrHandler();
+        testOrHandlerBlock();
+        testReturnError();
+        testReturnErrorCustomType();
+        testExprOrHandler();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -144,6 +149,73 @@ public class TransformerTest {
             """);
         assertContains("lambda: arrow", java, "->");
         System.out.println("--- Lambda ---");
+        System.out.println(java);
+    }
+
+    static void testOrHandler() {
+        var java = transpile("""
+            var x = parseInt("42") or { -1 }
+            """);
+        assertContains("or: try", java, "try");
+        assertContains("or: catch", java, "catch (Exception err)");
+        assertContains("or: default", java, "-1");
+        System.out.println("--- Or Handler ---");
+        System.out.println(java);
+    }
+
+    static void testOrHandlerBlock() {
+        var java = transpile("""
+            var data = readFile("config.json") or {
+                print("file not found")
+                return
+            }
+            """);
+        assertContains("or_block: try", java, "try");
+        assertContains("or_block: catch", java, "catch (Exception err)");
+        assertContains("or_block: print", java, "System.out.println");
+        System.out.println("--- Or Handler Block ---");
+        System.out.println(java);
+    }
+
+    static void testReturnError() {
+        var java = transpile("""
+            fn loadConfig(): String {
+                var data = readFile("config.json") or {
+                    return Error("config missing")
+                }
+                return data
+            }
+            loadConfig()
+            """);
+        assertContains("ret_err: throw", java, "throw new RuntimeException");
+        assertContains("ret_err: msg", java, "config missing");
+        System.out.println("--- Return Error ---");
+        System.out.println(java);
+    }
+
+    static void testReturnErrorCustomType() {
+        var java = transpile("""
+            fn findUser(String id): User {
+                return Error(NotFound("user not found"))
+            }
+            findUser("1")
+            """);
+        assertContains("ret_custom: throw", java, "throw new NotFound");
+        assertContains("ret_custom: msg", java, "user not found");
+        System.out.println("--- Return Error Custom Type ---");
+        System.out.println(java);
+    }
+
+    static void testExprOrHandler() {
+        var java = transpile("""
+            doSomething() or {
+                print("failed")
+            }
+            """);
+        assertContains("expr_or: try", java, "try");
+        assertContains("expr_or: catch", java, "catch (Exception err)");
+        assertContains("expr_or: handler", java, "System.out.println");
+        System.out.println("--- Expr Or Handler ---");
         System.out.println(java);
     }
 
