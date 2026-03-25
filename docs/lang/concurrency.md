@@ -9,84 +9,43 @@ For detailed documentation on specific topics:
 
 See `design-zinc-concurrency.md` for the full design with Java transpilation details.
 
-## actor
+## Actors (class extends Actor)
 
-An actor is an isolated concurrent unit. It owns its state exclusively, communicates via message passing, and runs on its own virtual thread. Actors can be safely killed because no external code references their state.
+An actor is an isolated concurrent unit. Extend the `Actor` abstract class — `pub fn` methods become message handlers (dual-mode: direct in test, mailbox when supervised).
 
 ```zinc
-actor Counter {
+class Counter : Actor {
     var int count = 0
 
-    init(int start) {
-        count = start
-    }
-
-    // Fire-and-forget — caller doesn't wait
-    receive fn increment() {
+    pub fn increment() {
         count += 1
     }
 
-    receive fn add(int n) {
-        count += n
-    }
-
-    // Request-reply — caller blocks until response
-    receive fn getCount(): int {
+    pub fn getCount(): int {
         return count
-    }
-
-    // Regular fn = private helper, runs on actor thread
-    fn validate(int n): boolean {
-        return n > 0
     }
 }
 ```
 
-Usage:
+Actors are inert on construction. A supervisor activates them with `start()`:
 
 ```zinc
-var counter = new Counter(0)    // actor starts immediately
-counter.increment()              // async, returns immediately
-counter.add(5)                   // async, returns immediately
-var n = counter.getCount()       // blocks until reply: 6
+var counter = new Counter(0)
+counter.increment()         // direct mode — synchronous (testing)
+
+var sup = new Team(counter)
+sup.start()                 // activates — mailbox + virtual thread
+counter.increment()         // supervised mode — async via mailbox
 ```
 
-### Actor lifecycle
+See [Actors](actors.md) for full documentation.
 
-- **`shutdown()`** — cooperative: drains pending messages, waits for actor thread to exit
-- **`shutdown(timeoutMs)`** — cooperative with escalation: waits up to timeout, then interrupts
-- **`kill()`** — brutal: interrupts thread, discards pending messages, hands thread to reaper
+## Supervisors (class extends Supervisor)
 
-```zinc
-counter.shutdown()          // wait for clean exit
-counter.shutdown(5000)      // wait 5s, then interrupt
-counter.kill()              // immediate kill
-```
-
-### Why actors, not spawn
-
-`spawn` creates unstructured threads — fire-and-forget with no error propagation, no lifecycle management, and no safe way to kill. Actors provide:
-
-- **Isolation** — state is private, no shared memory corruption
-- **Message passing** — all communication through the mailbox
-- **Lifecycle** — shutdown/kill with guaranteed cleanup
-- **Brutal kill safety** — because state is owned, thread abandonment is safe
-
-### ActorRuntime
-
-When any actor is killed, its thread is registered with a global reaper. If a killed thread doesn't die within the reaper timeout (default 10s), the system exits with `System.exit(1)`. This guarantees no dangling resources — ever.
-
-Three system states, no fourth:
-1. **Running** — actors processing messages
-2. **Shutting down** — actors draining and joining
-3. **Fatal** — killed thread refused to die → forced exit
-
-## supervisor
-
-A supervisor manages actor lifecycle via constructor injection. Any field whose type is an `actor` gets automatic lifecycle cascade — no reflection, fully typed.
+A supervisor manages actor lifecycle. Extend the `Supervisor` abstract class — actor-typed fields get automatic lifecycle cascade.
 
 ```zinc
-supervisor Pipeline {
+class Team : Supervisor {
     init Counter w1
     init Counter w2
 
@@ -95,24 +54,20 @@ supervisor Pipeline {
         this.w2 = w2
     }
 }
-```
 
-- Actor-typed fields are detected by the transpiler's type registry
-- Non-actor fields (config, etc.) are left alone
-- No `child` keyword — the `actor` type is the signal
-
-```zinc
 var a = new Counter(0)
 var b = new Counter(100)
-var sup = new Pipeline(a, b)
-sup.shutdown()               // cascade shutdown to all actor fields
-sup.shutdown(5000)           // cascade with timeout, then kill
-sup.kill()                   // brutal kill all actor fields
+var sup = new Team(a, b)
+sup.start()                 // activate all actors
+sup.shutdown()              // cascade shutdown
+sup.kill()                  // cascade brutal kill
 ```
+
+See [Supervisors](supervisors.md) for full documentation.
 
 ## spawn (deprecated)
 
-> **Deprecated** — use `actor` for long-lived concurrent work, `concurrent` for short-lived fan-out.
+> **Deprecated** — use `class : Actor` for long-lived concurrent work, `concurrent` for short-lived fan-out.
 
 `spawn` creates an unstructured virtual thread with no lifecycle management. It is preserved for backward compatibility but emits a compiler warning.
 
@@ -216,15 +171,15 @@ Bounded producer/consumer queue for communicating between threads:
 ```zinc
 var ch = new Channel<Order>(capacity: 100)
 
-// Producer actor
-actor Producer {
+// Producer — extends Actor
+class Producer : Actor {
     init Channel<Order> ch
 
     init(Channel<Order> ch) {
         this.ch = ch
     }
 
-    receive fn produce(List<Order> orders) {
+    pub fn produce(List<Order> orders) {
         for order in orders {
             ch.send(order)
         }
@@ -322,8 +277,8 @@ fn scrapeUrls(List<String> urls): List<String> {
 
 | Primitive | Purpose | Structured? |
 |---|---|---|
-| `actor` | Isolated concurrent unit with mailbox | Yes (owned) |
-| `supervisor` | Manages actor lifecycle and restarts | Yes (owned) |
+| `class : Actor` | Isolated concurrent unit with mailbox | Yes (owned) |
+| `class : Supervisor` | Manages actor lifecycle | Yes (owned) |
 | `concurrent { }` | Fan-out tasks, collect results | Yes |
 | `concurrent(first: true)` | Race, take first result | Yes |
 | `parallel for` | Fan-out loop, wait for all | Yes |
@@ -341,6 +296,6 @@ fn scrapeUrls(List<String> urls): List<String> {
 
 - **No `async`/`await`** — virtual threads make blocking cheap. No colored functions.
 - **No `synchronized`** — use `lock` (generates `ReentrantLock`).
-- **No raw `Thread` API** — use `actor` for long-lived work, `concurrent`/`parallel` for short-lived.
+- **No raw `Thread` API** — use `class : Actor` for long-lived work, `concurrent`/`parallel` for short-lived.
 - **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in. Actors use it internally for request-reply.
 - **No reactive streams** — virtual threads replace the need for reactive programming.

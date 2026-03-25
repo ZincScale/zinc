@@ -1,47 +1,73 @@
 # Zinc — Actors
 
-Actors are isolated concurrent units. An actor owns its state exclusively, communicates through message passing, and runs on its own virtual thread. Because state is never shared, actors can be safely killed without risk of corruption.
+Actors are isolated concurrent units. An actor owns its state exclusively, communicates through message passing, and can be safely killed because no external code accesses its state.
+
+In Zinc, actors are classes that extend the `Actor` abstract base class. No special keyword — just inheritance.
 
 ## Defining an Actor
 
-Use the `actor` keyword. Define message handlers with `receive fn`:
-
 ```zinc
-actor Counter {
+class Counter : Actor {
     var int count = 0
 
-    receive fn increment() {
+    pub fn increment() {
         count += 1
     }
 
-    receive fn getCount(): int {
+    pub fn getCount(): int {
         return count
     }
 }
 ```
 
-An actor starts immediately on construction:
+- `class Counter : Actor` — extends Actor, gets actor behavior
+- `pub fn` — message handler (dual-mode: direct in test, mailbox when supervised)
+- `fn` — private helper (always runs directly on the actor thread)
+
+## Dual-Mode: Direct and Supervised
+
+Actor methods work in two modes depending on whether a supervisor has started the actor:
+
+### Direct mode (testing)
+
+Without a supervisor, actor methods execute synchronously — just like regular class methods:
 
 ```zinc
-var counter = new Counter()
-counter.increment()            // async — returns immediately
-var n = counter.getCount()     // blocks until reply: 1
+var counter = new Counter(0)
+counter.increment()            // synchronous, same thread
+counter.increment()
+var n = counter.getCount()     // returns 2 immediately
 ```
 
-## receive fn — Message Handlers
+No threads, no mailbox, no async. Perfect for unit testing.
 
-`receive fn` defines the actor's public API. There are two forms:
+### Supervised mode (production)
+
+When a supervisor calls `start()`, actor methods route through the mailbox:
+
+```zinc
+var counter = new Counter(0)
+var sup = new Pipeline(counter)
+sup.start()                     // activates counter — mailbox + thread created
+
+counter.increment()             // async — enqueued to mailbox
+var n = counter.getCount()      // blocks until actor processes and replies
+```
+
+The supervisor owns the thread lifecycle. See [Supervisors](supervisors.md).
+
+## Fire-and-Forget vs Request-Reply
 
 ### Fire-and-forget (void return)
 
-The caller enqueues the message and returns immediately. The actor processes it later on its own thread:
+The caller enqueues the message and returns immediately:
 
 ```zinc
-receive fn increment() {
+pub fn increment() {
     count += 1
 }
 
-counter.increment()  // returns immediately, doesn't wait
+counter.increment()  // returns immediately in supervised mode
 ```
 
 ### Request-reply (non-void return)
@@ -49,91 +75,68 @@ counter.increment()  // returns immediately, doesn't wait
 The caller blocks until the actor processes the message and returns a result:
 
 ```zinc
-receive fn getCount(): int {
+pub fn getCount(): int {
     return count
 }
 
-var n = counter.getCount()  // blocks until actor replies
+var n = counter.getCount()  // blocks until reply
 ```
 
-Request-reply uses `CompletableFuture` under the hood — the caller's thread is parked (cheap with virtual threads) until the actor thread completes the future.
-
-### Parameters
-
-Receive functions take any number of parameters:
-
-```zinc
-receive fn add(int n) {
-    count += n
-}
-
-receive fn transfer(String from, String to, int amount): boolean {
-    // ...
-    return true
-}
-```
+Uses `CompletableFuture` under the hood — the caller's virtual thread parks cheaply until the actor responds.
 
 ## State Ownership
 
-All actor fields are **private** — no getters, no setters, no external access. This is enforced by the transpiler. The only way to interact with actor state is through `receive fn`:
+All actor fields are **private** — no getters, no setters, no external access. The transpiler enforces this. The only way to interact with actor state is through `pub fn`:
 
 ```zinc
-actor Account {
+class Account : Actor {
     var int balance = 0
 
-    receive fn deposit(int amount) {
+    pub fn deposit(int amount) {
         balance += amount
     }
 
-    receive fn getBalance(): int {
+    pub fn getBalance(): int {
         return balance
     }
 }
 
 var account = new Account()
-// account.balance          ← compile error: field is private
-account.deposit(100)         // ← the only way in
-var b = account.getBalance() // ← the only way out
+// account.balance          ← not accessible
+account.deposit(100)         // the only way in
+var b = account.getBalance() // the only way out
 ```
-
-This isolation guarantee is what makes actors safe to kill — no external code holds a reference to the actor's state.
 
 ## Constructors
 
-Actors support constructors with `init`:
-
 ```zinc
-actor Worker {
+class Worker : Actor {
     init String name
-    init ProcessorFn processor
+    init int maxRetries
 
-    init(String name, ProcessorFn processor) {
+    init(String name, int maxRetries) {
         this.name = name
-        this.processor = processor
+        this.maxRetries = maxRetries
     }
 
-    receive fn process(FlowFile ff) {
-        var result = processor.process(ff)
-        // ...
+    pub fn process(String task): String {
+        return "{name}: processed {task}"
     }
 }
 
-var worker = new Worker("enricher", enrichFn)
+var worker = new Worker("enricher", 3)
 ```
 
-The constructor body runs before the actor thread starts. Dependencies are injected through the constructor — no DI framework needed.
+The constructor runs immediately — it sets up state. The actor thread starts later when a supervisor calls `start()`.
 
 ## Private Helper Methods
 
-Regular `fn` (without `receive`) defines private helper methods. They run on the actor thread and can only be called from within the actor:
+Regular `fn` (without `pub`) are private helpers. They run on the actor thread when called from within a `pub fn`:
 
 ```zinc
-actor Calculator {
-    var int result = 0
-
-    receive fn compute(int a, int b): int {
-        result = doAdd(a, b)
-        return result
+class Calculator : Actor {
+    pub fn compute(int a, int b): int {
+        return doAdd(a, b)
     }
 
     fn doAdd(int a, int b): int {
@@ -142,173 +145,81 @@ actor Calculator {
 }
 ```
 
-Helpers are useful for factoring out logic shared between multiple `receive fn` handlers.
-
 ## Actor-to-Actor Messaging
 
-Actors can hold references to other actors and send messages to them:
+Actors can hold references to other actors and send messages:
 
 ```zinc
-actor Logger {
-    receive fn log(String msg) {
+class Logger : Actor {
+    pub fn log(String msg) {
         print("[LOG] {msg}")
     }
 }
 
-actor Worker {
+class Worker : Actor {
     init Logger logger
 
     init(Logger logger) {
         this.logger = logger
     }
 
-    receive fn doWork(String task) {
+    pub fn doWork(String task) {
         logger.log("starting: {task}")
-        // ... do work ...
+        // ... work ...
         logger.log("finished: {task}")
     }
 }
-
-var logger = new Logger()
-var worker = new Worker(logger)
-worker.doWork("process order")
 ```
 
-Messages between actors are always async (fire-and-forget) or blocking (request-reply) — never direct method calls. This preserves isolation.
+## Overriding Mailbox Capacity
 
-## Implementing Interfaces
-
-Actors can implement interfaces:
+The default mailbox size is 1000. Override the `mailboxCapacity()` method to change it:
 
 ```zinc
-interface Pingable {
-    fn ping(): String
-}
+class HighThroughput : Actor {
+    override fn mailboxCapacity(): int {
+        return 50000
+    }
 
-actor PingActor : Pingable {
-    receive fn ping(): String {
-        return "pong"
+    pub fn process(String msg) {
+        // handles high volume
     }
 }
 ```
 
-## Message Ordering
-
-Messages sent to a single actor are processed in **FIFO order** — the order they were sent:
-
-```zinc
-actor Logger {
-    var String log = ""
-
-    receive fn append(String s) {
-        log = log + s
-    }
-
-    receive fn getLog(): String {
-        return log
-    }
-}
-
-var logger = new Logger()
-logger.append("a")
-logger.append("b")
-logger.append("c")
-Thread.sleep(100)
-var result = logger.getLog()  // always "abc", never reordered
-```
-
-When multiple threads send to the same actor, messages from different senders are interleaved but each sender's messages maintain their relative order.
-
-## Lifecycle
-
-Every actor has three lifecycle methods, generated automatically:
-
-### shutdown()
-
-Cooperative shutdown. Drains pending messages, then waits for the actor thread to exit:
-
-```zinc
-counter.shutdown()  // blocks until actor finishes and exits
-```
-
-### shutdown(timeoutMs)
-
-Cooperative with escalation. Waits up to the timeout, then interrupts:
-
-```zinc
-counter.shutdown(5000)  // wait 5s, then interrupt if still running
-```
-
-### kill()
-
-Brutal kill. Interrupts the actor thread immediately, discards pending messages, and registers the thread with the ActorRuntime reaper:
-
-```zinc
-counter.kill()  // immediate termination
-```
-
-If the killed thread doesn't die within the reaper timeout (default 10 seconds), the ActorRuntime calls `System.exit(1)` — guaranteeing no dangling resources.
-
-### Three system states
-
-1. **Running** — actors processing messages normally
-2. **Shutting down** — `shutdown()` called, actors draining
-3. **Fatal** — killed thread refused to die → `System.exit(1)`
-
-There is no fourth state. No silent thread leaks.
+The supervisor reads this value when creating the actor's mailbox in `start()`.
 
 ## Error Handling
 
-If a `receive fn` throws an exception:
+In supervised mode:
 
-- **Fire-and-forget**: the exception is caught by the actor's message loop, logged to stderr, and the actor continues processing the next message (Erlang-style resilience)
-- **Request-reply**: the exception is propagated to the caller via `CompletableFuture.completeExceptionally()` — the caller sees it as an `ExecutionException` wrapping the original
+- **Fire-and-forget**: exceptions are caught by the actor's message loop, logged, and the actor continues processing. One bad message doesn't kill the actor.
+- **Request-reply**: exceptions are propagated to the caller via `CompletableFuture` — the caller sees the original exception.
 
-```zinc
-actor Risky {
-    receive fn mayFail(int n): int {
-        if n < 0 {
-            raise "negative input"
-        }
-        return n * 2
-    }
-}
+In direct mode, exceptions propagate normally (no mailbox wrapping).
 
-var r = new Risky()
-var result = r.mayFail(-1)  // throws ExecutionException wrapping "negative input"
-```
+## Message Ordering
 
-The actor itself is not killed by the exception — it continues serving subsequent messages. This is the "let it crash" philosophy: individual message failures don't bring down the actor.
+Messages to a single actor are processed in **FIFO order**. When multiple threads send to the same actor, each sender's messages maintain their relative order.
 
 ## What Actors Replace
 
-Actors replace `spawn` (deprecated) for all concurrent work that needs lifecycle management:
+Actors replace `spawn` (deprecated) for all concurrent work needing lifecycle management:
 
-| Before (spawn) | After (actor) |
+| Before (spawn) | After (Actor) |
 |---|---|
-| `spawn { runLoop() }` | Actor with `receive fn` |
-| No error propagation | Exceptions caught/propagated |
-| No lifecycle management | `shutdown()`, `kill()` |
+| `spawn { runLoop() }` | `class Worker : Actor { pub fn process() }` |
+| No error handling | Exceptions caught/propagated |
+| No lifecycle | Supervisor manages start/shutdown/kill |
 | No safe kill | Kill is safe (state is owned) |
-| Raw thread, no supervision | Supervisor manages restarts |
+| Raw thread | Virtual thread managed by supervisor |
 
-For short-lived parallel work (fan-out/fan-in), continue using `concurrent { }` or `parallel for` — those use `StructuredTaskScope` and are the right tool for bounded, scoped work.
-
-## Java Transpilation
-
-An actor transpiles to a Java class with:
-- A `LinkedBlockingQueue<Runnable>` mailbox
-- A virtual thread running the message loop
-- `receive fn` → methods that enqueue lambdas onto the mailbox
-- Request-reply → `CompletableFuture` for the return value
-- Generated `shutdown()`, `shutdown(long)`, `kill()` methods
-
-See `docs/design-zinc-concurrency.md` for full transpilation details.
+For short-lived parallel work, continue using `concurrent { }` or `parallel for`.
 
 ## See Also
 
-- [Supervisors](supervisors.md) — managing actor lifecycle
-- [Concurrency](concurrency.md) — all concurrency primitives (`concurrent`, `parallel for`, `timeout`)
-- [Guide: Actors](../guide-actors.md) — patterns, testing, migration, anti-patterns
-- [Example: actors.zn](../../examples/v3/actors.zn) — 9 e2e test scenarios (counter, ordering, actor-to-actor, concurrent senders, kill)
-- [Example: actor_project/](../../examples/v3/actor_project/) — multi-file project with cross-package actors and supervisor
+- [Supervisors](supervisors.md) — managing actor lifecycle with start/shutdown/kill
+- [Concurrency](concurrency.md) — all concurrency primitives
+- [Guide: Actors](../guide-actors.md) — patterns, testing, migration
+- [Example: actors.zn](../../examples/v3/actors.zn) — e2e test scenarios
+- [Example: actor_project/](../../examples/v3/actor_project/) — multi-file project
