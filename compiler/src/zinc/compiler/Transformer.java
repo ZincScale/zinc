@@ -54,11 +54,17 @@ import zinc.compiler.Ast.Annotation;
 public class Transformer {
 
     private String className = "Main";
+    private java.util.Map<String, TypeInfo> resolvedTypes = java.util.Map.of();
 
     public Transformer() {}
 
     public Transformer(String className) {
         this.className = className;
+    }
+
+    public Transformer(String className, java.util.Map<String, TypeInfo> resolvedTypes) {
+        this.className = className;
+        this.resolvedTypes = resolvedTypes;
     }
 
     // --- Entry point ---------------------------------------------------------
@@ -391,7 +397,10 @@ public class Transformer {
 
     private List<Statement> transformStmt(Stmt stmt) {
         return switch (stmt) {
-            case Ast.VarStmt v -> List.of(transformVarStmt(v));
+            case Ast.VarStmt v -> {
+                if (v.orHandler() != null && v.value() != null) yield transformVarWithOrHandlerStmts(v);
+                else yield List.of(transformVarStmt(v));
+            }
             case Ast.AssignStmt a -> List.of(transformAssignStmt(a));
             case Ast.ReturnStmt r -> List.of(transformReturnStmt(r));
             case Ast.IfStmt i -> List.of(transformIfStmt(i));
@@ -417,11 +426,6 @@ public class Transformer {
     }
 
     private Statement transformVarStmt(Ast.VarStmt v) {
-        // or-handler: var x = call() or { default }
-        if (v.orHandler() != null && v.value() != null) {
-            return transformVarWithOrHandler(v);
-        }
-
         Expression init = v.value() != null ? transformExpr(v.value()) : null;
         if (v.type() != null) {
             var type = transformType(v.type());
@@ -437,19 +441,26 @@ public class Transformer {
 
     /**
      * var x = call() or { default }
-     * →
-     * Type x;
-     * try { x = call(); } catch (Exception err) { x = default; }
-     *
-     * For now we use try/catch at the Java boundary. When we move to full
-     * Result types this becomes: var _r = call(); var x = _r.isOk() ? _r.unwrap() : default;
+     * Returns multiple statements to avoid scoping issues:
+     *   Type x;
+     *   try { x = call(); } catch (Exception err) { x = default; }
      */
-    private Statement transformVarWithOrHandler(Ast.VarStmt v) {
-        var block = new BlockStmt();
-        Type type = v.type() != null ? transformType(v.type()) : new ClassOrInterfaceType(null, "Object");
+    private List<Statement> transformVarWithOrHandlerStmts(Ast.VarStmt v) {
+        var stmts = new java.util.ArrayList<Statement>();
 
-        // Declare: Type x;
-        block.addStatement(new ExpressionStmt(new VariableDeclarationExpr(type, v.name())));
+        // Use explicit type, resolved type from typechecker, or Object fallback
+        Type javaType;
+        if (v.type() != null) {
+            javaType = transformType(v.type());
+        } else {
+            var resolved = resolvedTypes.get(v.line() + ":" + v.name());
+            if (resolved != null && !resolved.name().equals("any")) {
+                javaType = typeInfoToJavaType(resolved);
+            } else {
+                javaType = new ClassOrInterfaceType(null, "Object");
+            }
+        }
+        stmts.add(new ExpressionStmt(new VariableDeclarationExpr(javaType, v.name())));
 
         // Try block: x = call();
         var tryBody = new BlockStmt();
@@ -465,10 +476,18 @@ public class Transformer {
                 catchBody.addStatement(new ExpressionStmt(new AssignExpr(
                     new NameExpr(v.name()), transformExpr(es.expr()), AssignExpr.Operator.ASSIGN)));
             } else {
-                // Block or-handler
-                for (var stmt : handlerStmts) {
-                    for (var jStmt : transformStmt(stmt)) {
-                        catchBody.addStatement(jStmt);
+                // Block or-handler — last expression becomes assignment to var
+                for (int idx = 0; idx < handlerStmts.size(); idx++) {
+                    var stmt = handlerStmts.get(idx);
+                    boolean isLast = (idx == handlerStmts.size() - 1);
+                    if (isLast && stmt instanceof Ast.ExprStmt es && es.orHandler() == null) {
+                        // Last expression in block = fallback value
+                        catchBody.addStatement(new ExpressionStmt(new AssignExpr(
+                            new NameExpr(v.name()), transformExpr(es.expr()), AssignExpr.Operator.ASSIGN)));
+                    } else {
+                        for (var jStmt : transformStmt(stmt)) {
+                            catchBody.addStatement(jStmt);
+                        }
                     }
                 }
             }
@@ -477,9 +496,9 @@ public class Transformer {
         var catchClause = new CatchClause(
             new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"),
             catchBody);
-        block.addStatement(new TryStmt(tryBody, new NodeList<>(catchClause), null));
+        stmts.add(new TryStmt(tryBody, new NodeList<>(catchClause), null));
 
-        return block;
+        return stmts;
     }
 
     private Statement transformAssignStmt(Ast.AssignStmt a) {
@@ -937,6 +956,30 @@ public class Transformer {
                 .setTypeArguments(new NodeList<>(new ClassOrInterfaceType(null, "java.util.concurrent.CompletableFuture<Void>"))),
             new EnclosedExpr(supplierLambda));
         return new MethodCallExpr(new EnclosedExpr(cast), "get");
+    }
+
+    /** Convert TypeInfo to JavaParser Type. */
+    private Type typeInfoToJavaType(TypeInfo info) {
+        return switch (info.name()) {
+            case "int" -> PrimitiveType.intType();
+            case "long" -> PrimitiveType.longType();
+            case "double" -> PrimitiveType.doubleType();
+            case "float" -> PrimitiveType.floatType();
+            case "boolean" -> PrimitiveType.booleanType();
+            case "byte" -> PrimitiveType.byteType();
+            case "char" -> PrimitiveType.charType();
+            case "short" -> PrimitiveType.shortType();
+            case "void" -> new VoidType();
+            default -> {
+                var type = new ClassOrInterfaceType(null, info.name());
+                if (!info.args().isEmpty()) {
+                    var args = new NodeList<Type>();
+                    for (var arg : info.args()) args.add(typeInfoToJavaType(arg));
+                    type.setTypeArguments(args);
+                }
+                yield type;
+            }
+        };
     }
 
     /** Parse a Java expression from a string via JavaParser. */

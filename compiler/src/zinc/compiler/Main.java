@@ -77,8 +77,14 @@ public class Main {
         if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
         var program = parseResult.unwrap();
 
+        // Typecheck
+        var typeChecker = new TypeChecker();
+        var typeResult = typeChecker.check(program);
+        // Type errors are warnings, not fatal — continue with partial info
+        var resolvedTypes = typeResult.isOk() ? typeResult.unwrap() : java.util.Map.<String, TypeInfo>of();
+
         // Transform
-        var transformer = new Transformer(className);
+        var transformer = new Transformer(className, resolvedTypes);
         var transformResult = transformer.transformAll(program);
         if (transformResult.isErr()) return Result.err(((Result.Err<?>) transformResult).errors());
         var units = transformResult.unwrap();
@@ -96,6 +102,14 @@ public class Main {
 
     private static String capitalize(String s) {
         if (s.isEmpty()) return s;
-        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+        // Convert snake_case to PascalCase: error_test → ErrorTest
+        var sb = new StringBuilder();
+        boolean upper = true;
+        for (char c : s.toCharArray()) {
+            if (c == '_' || c == '-') { upper = true; continue; }
+            sb.append(upper ? Character.toUpperCase(c) : c);
+            upper = false;
+        }
+        return sb.toString();
     }
 }
