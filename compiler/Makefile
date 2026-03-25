@@ -40,6 +40,8 @@ package: build deps
 	cp zinc-compiler.jar pkg-input/
 	cp lib/mill pkg-input/
 	jdeps --print-module-deps --ignore-missing-deps --multi-release 25 zinc-compiler.jar > /tmp/zinc-modules.txt 2>/dev/null || echo "java.base" > /tmp/zinc-modules.txt
+	@echo "modules: $$(cat /tmp/zinc-modules.txt)"
+	@which jpackage >/dev/null 2>&1 || (echo "error: jpackage not found. Install JDK 25 (not just JRE)." && exit 1)
 	jpackage --type app-image \
 		--name zinc \
 		--input pkg-input \
@@ -48,10 +50,12 @@ package: build deps
 		--dest dist \
 		--add-modules $$(cat /tmp/zinc-modules.txt),jdk.compiler,jdk.jlink,jdk.jdeps,jdk.jpackage \
 		--java-options "--enable-preview" \
-		--jlink-options "--strip-debug --no-man-pages --no-header-files --compress=zip-6"
+		--jlink-options "--strip-debug --no-man-pages --no-header-files --compress=zip-6" \
+		--verbose
 	@rm -rf pkg-input
+	@echo "jpackage output:" && ls -la dist/
+	@du -sh dist/zinc/ 2>/dev/null || du -sh dist/*
 	@echo "built: dist/zinc/ (self-contained: JDK + Mill + zinc compiler)"
-	@du -sh dist/zinc/
 
 # Optional: GraalVM native-image (smaller + faster, but no javac/jpackage internally)
 native: build
