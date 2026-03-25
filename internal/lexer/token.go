@@ -263,7 +263,7 @@ var keywords = map[string]TokenType{
 	"while":     TOKEN_WHILE,
 	"break":     TOKEN_BREAK,
 	"continue":  TOKEN_CONTINUE,
-	"go":        TOKEN_GO,
+	// "go" removed — use "spawn" instead
 	"or":        TOKEN_OR,
 	"print":     TOKEN_PRINT,
 	"var":       TOKEN_VAR,

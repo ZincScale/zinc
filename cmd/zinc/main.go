@@ -476,6 +476,27 @@ func transpileToJava(target, outDir string, verbose bool) ([]string, error) {
 		return nil, fmt.Errorf("creating output dir: %w", err)
 	}
 
+	// Check if single file needs stdlib imports — if so, promote to multi-file
+	if len(znFiles) == 1 {
+		stdlibDir := findStdlibDir()
+		if stdlibDir != "" {
+			prog, err := parseOnly(znFiles[0], false)
+			if err == nil {
+				for _, imp := range prog.Imports {
+					if strings.HasPrefix(imp.Path, "zinc.") {
+						parts := strings.SplitN(imp.Path, ".", 2)
+						if len(parts) == 2 {
+							znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
+							if _, err := os.Stat(znFile); err == nil {
+								znFiles = append(znFiles, znFile)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// For multi-file projects: parse all files first, build a type registry,
 	// then inject cross-file imports before codegen.
 	if len(znFiles) > 1 {
@@ -591,6 +612,47 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 			case *parser.InterfaceDecl:
 				typeRegistry[decl.Name] = pkg
 				pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+			}
+		}
+	}
+
+	// Resolve stdlib imports: if any file imports zinc.*, include matching stdlib .zn files
+	stdlibDir := findStdlibDir()
+	if stdlibDir != "" {
+		seen := make(map[string]bool)
+		for _, pf := range parsed {
+			for _, imp := range pf.prog.Imports {
+				if strings.HasPrefix(imp.Path, "zinc.") {
+					parts := strings.SplitN(imp.Path, ".", 2)
+					if len(parts) == 2 {
+						znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
+						if _, err := os.Stat(znFile); err == nil && !seen[znFile] {
+							seen[znFile] = true
+							prog, err := parseOnly(znFile, verbose)
+							if err != nil {
+								return nil, fmt.Errorf("parsing stdlib %s: %w", znFile, err)
+							}
+							parsed = append(parsed, parsedFile{path: znFile, prog: prog})
+							pkg := ""
+							if prog.Package != nil {
+								pkg = prog.Package.Path
+							}
+							for _, d := range prog.Decls {
+								switch decl := d.(type) {
+								case *parser.ClassDecl:
+									typeRegistry[decl.Name] = pkg
+									pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+								case *parser.InterfaceDecl:
+									typeRegistry[decl.Name] = pkg
+									pkgTypes[pkg] = append(pkgTypes[pkg], decl.Name)
+								}
+							}
+							if verbose {
+								fmt.Fprintf(os.Stderr, "[verbose] included stdlib: %s\n", znFile)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
