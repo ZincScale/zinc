@@ -1,39 +1,48 @@
 // Supervisors — Zinc v3
-// Comprehensive supervisor tests:
-//   - constructor injection of actor children
-//   - typed lifecycle cascade (no reflection)
-//   - mixed actor + config fields
-//   - shutdown cascades to actor fields only
-//   - kill cascades to actor fields only
-//   - multiple supervisors independent
+// Tests for class-based supervisor model:
+//   - Supervisor extends Supervisor, manages actor-typed fields
+//   - start() activates actors (creates mailbox + thread)
+//   - shutdown() cascades to all actor fields
+//   - kill() cascades brutal termination
+//   - Direct mode (no start) = synchronous for testing
+//   - Mixed actor + config fields
 
 // === Shared actor type ===
 
-actor Counter {
+class Counter : Actor {
     var int count = 0
 
     init(int start) {
         count = start
     }
 
-    receive fn increment() {
+    pub fn increment() {
         count += 1
     }
 
-    receive fn getCount(): int {
+    pub fn getCount(): int {
         return count
     }
 }
 
-// === Test 1: Supervisor with constructor injection ===
+// === Test 1: Direct mode — actors work without supervisor ===
 
-supervisor Team {
-    init Counter c1
-    init Counter c2
+var c1 = new Counter(0)
+c1.increment()
+c1.increment()
+c1.increment()
+var n1 = c1.getCount()
+print("direct: {n1}")
 
-    init(Counter c1, Counter c2) {
-        this.c1 = c1
-        this.c2 = c2
+// === Test 2: Supervisor with constructor injection ===
+
+class Team : Supervisor {
+    init Counter a
+    init Counter b
+
+    init(Counter a, Counter b) {
+        this.a = a
+        this.b = b
     }
 }
 
@@ -42,25 +51,30 @@ var a2 = new Counter(100)
 var team = new Team(a1, a2)
 print("team created")
 
-// === Test 2: Children work independently ===
+// === Test 3: Supervised mode — start activates actors ===
 
-a1.increment()
+team.start()
+print("team started")
+
+// Send messages through mailbox (async)
 a1.increment()
 a1.increment()
 a2.increment()
-Thread.sleep(100)
-var n1 = a1.getCount()
-var n2 = a2.getCount()
-print("a1: {n1}, a2: {n2}")
+Thread.sleep(200)
 
-// === Test 3: Supervisor shutdown cascades to children ===
+// Request-reply through mailbox
+var v1 = a1.getCount()
+var v2 = a2.getCount()
+print("supervised: {v1}, {v2}")
+
+// === Test 4: Supervisor shutdown cascades ===
 
 team.shutdown()
 print("team shutdown")
 
-// === Test 4: Supervisor with mixed actor + config fields ===
+// === Test 5: Mixed actor + config fields ===
 
-supervisor ConfiguredTeam {
+class ConfiguredTeam : Supervisor {
     init String name
     init int maxRetries
     init Counter worker
@@ -74,49 +88,44 @@ supervisor ConfiguredTeam {
 
 var w = new Counter(0)
 var ct = new ConfiguredTeam("pipeline", 3, w)
+ct.start()
 w.increment()
-Thread.sleep(50)
+Thread.sleep(100)
 var wn = w.getCount()
 print("worker: {wn}")
 ct.shutdown()
 print("configured shutdown")
 
-// === Test 5: Kill cascades ===
+// === Test 6: Kill cascades ===
 
 var k1 = new Counter(0)
 var k2 = new Counter(0)
 var killTeam = new Team(k1, k2)
+killTeam.start()
 k1.increment()
 k2.increment()
-Thread.sleep(50)
+Thread.sleep(100)
 killTeam.kill()
 print("kill cascaded")
 Thread.sleep(200)
 
-// === Test 6: Multiple supervisors independent ===
+// === Test 7: Multiple supervisors independent ===
+
+class SingleSup : Supervisor {
+    init Counter w
+
+    init(Counter w) {
+        this.w = w
+    }
+}
 
 var s1a = new Counter(10)
 var s2a = new Counter(20)
-
-supervisor SupA {
-    init Counter w
-
-    init(Counter w) {
-        this.w = w
-    }
-}
-
-supervisor SupB {
-    init Counter w
-
-    init(Counter w) {
-        this.w = w
-    }
-}
-
-var sa = new SupA(s1a)
-var sb = new SupB(s2a)
-print("both created")
+var sa = new SingleSup(s1a)
+var sb = new SingleSup(s2a)
+sa.start()
+sb.start()
+print("both started")
 sa.shutdown()
 sb.shutdown()
 print("both shutdown")

@@ -955,7 +955,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 func (g *Generator) emitActorBaseClass() {
 	g.writeln("public abstract class Actor {")
 	g.indent++
-	g.writeln("public int mailboxCapacity() { return 1000; }")
+	g.writeln("public int mailboxCapacity() throws Exception { return 1000; }")
 	g.writeln("public java.util.concurrent.ArrayBlockingQueue<Runnable> _mailbox;")
 	g.writeln("public Thread _actorThread;")
 	g.writeln("public volatile boolean _running = false;")

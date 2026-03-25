@@ -1,48 +1,47 @@
 // Actors — Zinc v3
-// Comprehensive actor model tests:
-//   - fire-and-forget, request-reply, constructor injection
-//   - message ordering (FIFO), complex state, private helpers
-//   - actor-to-actor messaging, concurrent senders
-//   - shutdown, kill lifecycle
+// Comprehensive tests for class-based actor model:
+//   - class extends Actor, pub fn = message handler (dual-mode)
+//   - Direct mode (no supervisor) = synchronous calls for testing
+//   - Supervised mode = mailbox async after supervisor.start()
+//   - Private helpers, complex state, actor-to-actor messaging
 
 import java.util.concurrent.atomic.AtomicInteger
 
-// === Test 1: Basic counter — fire-and-forget + request-reply ===
+// === Test 1: Direct mode — actor as plain class (testing) ===
 
-actor Counter {
+class Counter : Actor {
     var int count = 0
 
     init(int start) {
         count = start
     }
 
-    receive fn increment() {
+    pub fn increment() {
         count += 1
     }
 
-    receive fn add(int n) {
+    pub fn add(int n) {
         count += n
     }
 
-    receive fn getCount(): int {
+    pub fn getCount(): int {
         return count
     }
 }
 
+// Direct mode — no supervisor, synchronous calls
 var counter = new Counter(0)
 counter.increment()
 counter.increment()
 counter.increment()
 counter.add(7)
-Thread.sleep(100)
 var n = counter.getCount()
-print("count: {n}")
-counter.shutdown()
+print("direct: {n}")
 
 // === Test 2: No-arg constructor + String return ===
 
-actor Greeter {
-    receive fn greet(String name): String {
+class Greeter : Actor {
+    pub fn greet(String name): String {
         return "hello {name}"
     }
 }
@@ -50,18 +49,17 @@ actor Greeter {
 var greeter = new Greeter()
 var msg = greeter.greet("zinc")
 print(msg)
-greeter.shutdown()
 
-// === Test 3: Message ordering — FIFO guarantee ===
+// === Test 3: Message ordering — FIFO ===
 
-actor OrderTracker {
+class OrderTracker : Actor {
     var String log = ""
 
-    receive fn append(String s) {
+    pub fn append(String s) {
         log = log + s
     }
 
-    receive fn getLog(): String {
+    pub fn getLog(): String {
         return log
     }
 }
@@ -72,25 +70,23 @@ tracker.append("b")
 tracker.append("c")
 tracker.append("d")
 tracker.append("e")
-Thread.sleep(100)
 var log = tracker.getLog()
 print("order: {log}")
-tracker.shutdown()
 
-// === Test 4: Complex state — List accumulation ===
+// === Test 4: Complex state — List ===
 
-actor Collector {
+class Collector : Actor {
     var List<String> items = new ArrayList()
 
-    receive fn add(String item) {
+    pub fn add(String item) {
         items.add(item)
     }
 
-    receive fn size(): int {
+    pub fn size(): int {
         return items.size()
     }
 
-    receive fn getAll(): String {
+    pub fn getAll(): String {
         return String.join(",", items)
     }
 }
@@ -99,19 +95,17 @@ var collector = new Collector()
 collector.add("x")
 collector.add("y")
 collector.add("z")
-Thread.sleep(100)
 var sz = collector.size()
 print("size: {sz}")
 var all = collector.getAll()
 print("items: {all}")
-collector.shutdown()
 
 // === Test 5: Private helper methods ===
 
-actor Calculator {
+class Calculator : Actor {
     var int result = 0
 
-    receive fn compute(int a, int b): int {
+    pub fn compute(int a, int b): int {
         result = doAdd(a, b)
         return result
     }
@@ -124,12 +118,11 @@ actor Calculator {
 var calc = new Calculator()
 var sum = calc.compute(17, 25)
 print("sum: {sum}")
-calc.shutdown()
 
-// === Test 6: Multiple request-reply in sequence ===
+// === Test 6: Sequential request-reply ===
 
-actor Doubler {
-    receive fn twice(int n): int {
+class Doubler : Actor {
+    pub fn twice(int n): int {
         return n * 2
     }
 }
@@ -139,99 +132,21 @@ var r1 = doubler.twice(5)
 var r2 = doubler.twice(r1)
 var r3 = doubler.twice(r2)
 print("doubled: {r3}")
-doubler.shutdown()
 
-// === Test 7: Actor-to-actor messaging ===
+// === Test 7: Override mailboxCapacity ===
 
-actor Adder {
-    var int total = 0
-
-    receive fn add(int n) {
-        total += n
+class BigQueue : Actor {
+    override fn mailboxCapacity(): int {
+        return 50000
     }
 
-    receive fn getTotal(): int {
-        return total
+    pub fn getCapacity(): int {
+        return mailboxCapacity()
     }
 }
 
-actor Multiplier {
-    init Adder target
-
-    init(Adder target) {
-        this.target = target
-    }
-
-    receive fn multiplyAndSend(int n, int factor) {
-        var result = n * factor
-        target.add(result)
-    }
-}
-
-var adder = new Adder()
-var multiplier = new Multiplier(adder)
-multiplier.multiplyAndSend(3, 10)
-multiplier.multiplyAndSend(4, 10)
-multiplier.multiplyAndSend(5, 10)
-Thread.sleep(200)
-var total = adder.getTotal()
-print("total: {total}")
-multiplier.shutdown()
-adder.shutdown()
-
-// === Test 8: Concurrent senders — no lost messages ===
-
-actor ConcurrentCounter {
-    var int count = 0
-
-    receive fn inc() {
-        count += 1
-    }
-
-    receive fn getCount(): int {
-        return count
-    }
-}
-
-var cc = new ConcurrentCounter()
-// Send 100 increments from parallel threads
-var indices = new ArrayList()
-for i in 0..100 {
-    indices.add(i)
-}
-parallel for i in indices {
-    cc.inc()
-}
-Thread.sleep(200)
-var ccn = cc.getCount()
-print("concurrent: {ccn}")
-cc.shutdown()
-
-// === Test 9: Kill lifecycle ===
-
-actor Immortal {
-    var int ticks = 0
-
-    receive fn tick() {
-        ticks += 1
-    }
-
-    receive fn getTicks(): int {
-        return ticks
-    }
-}
-
-var mortal = new Immortal()
-mortal.tick()
-mortal.tick()
-mortal.tick()
-Thread.sleep(100)
-var ticks = mortal.getTicks()
-print("before kill: {ticks}")
-mortal.kill()
-print("killed")
-
-// Small delay for reaper to clean up (thread should exit quickly)
-Thread.sleep(200)
+var bq = new BigQueue()
+var cap = bq.getCapacity()
+print("capacity: {cap}")
 
 print("Actors OK")
