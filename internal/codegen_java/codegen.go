@@ -1464,6 +1464,8 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.buf.WriteString(prefix)
 		g.indent = savedIndent
 		trimmed := strings.TrimSpace(body)
+		// Wrap body in try-catch to handle checked exceptions from Runnable
+		wrappedBody := fmt.Sprintf("try { %s } catch (Exception _ex) { if (_ex instanceof RuntimeException) throw (RuntimeException) _ex; throw new RuntimeException(_ex); }", trimmed)
 		if expr.OrHandler != nil && expr.OrHandler.Body != nil {
 			// Capture or-handler body
 			startLen2 := g.buf.Len()
@@ -1476,9 +1478,11 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			g.buf.Reset()
 			g.buf.WriteString(prefix2)
 			g.indent = savedIndent
-			return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s } catch (Exception err) { %s } })", trimmed, strings.TrimSpace(handlerBody))
+			// or handler becomes UncaughtExceptionHandler — err is the original exception
+			return fmt.Sprintf("Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> { %s }).start(() -> { %s })", strings.TrimSpace(handlerBody), wrappedBody)
 		}
-		return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s } catch (Exception _ex) { throw new RuntimeException(_ex); } })", trimmed)
+		// Without or: checked exceptions rethrow as RuntimeException, hits default handler (stderr)
+		return fmt.Sprintf("Thread.startVirtualThread(() -> { %s })", wrappedBody)
 	case *parser.IfExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.RangeExpr:

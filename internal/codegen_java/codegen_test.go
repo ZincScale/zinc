@@ -1299,19 +1299,9 @@ spawn {
     print("error: {err}")
 }
 `,
-		`Thread.startVirtualThread(() -> {`,
-		`catch (Exception err)`,
+		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
 		`System.out.println("error: " + err)`,
-	)
-	// Should NOT have RuntimeException wrapper when or handler is present
-	assertNotContains(t, `
-spawn {
-    riskyWork()
-} or {
-    print("error: {err}")
-}
-`,
-		`RuntimeException`,
+		`.start(() -> {`,
 	)
 }
 
@@ -1331,9 +1321,8 @@ class Worker {
     }
 }
 `,
-		`Thread.startVirtualThread(() -> {`,
+		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
 		`while (running)`,
-		`catch (Exception err)`,
 		`System.out.println("worker crashed: " + err)`,
 	)
 }
