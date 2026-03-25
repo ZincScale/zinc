@@ -107,4 +107,30 @@ spawn {
 Thread.sleep(100)
 print("spawn or success: {ok.get()}")
 
+// spawn returns CompletableFuture — join propagates errors to caller
+var task = spawn {
+    print("future task done")
+}
+task.join()
+print("future isDone: {task.isDone()}")
+
+// spawn join or — caller catches error from spawned thread
+var task2 = spawn {
+    Integer.parseInt("bad")
+}
+task2.join() or {
+    print("join caught error")
+}
+print("future failed: {task2.isCompletedExceptionally()}")
+
+// spawn or + join or — supervision fires, then caller catches
+var task3 = spawn {
+    Integer.parseInt("bad")
+} or {
+    print("supervision fired")
+}
+task3.join() or {
+    print("caller caught after supervision")
+}
+
 print("Concurrency OK")
