@@ -28,6 +28,9 @@ public class TransformerTest {
         testReturnError();
         testReturnErrorCustomType();
         testExprOrHandler();
+        testSpawn();
+        testConcurrent();
+        testParallelFor();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -216,6 +219,50 @@ public class TransformerTest {
         assertContains("expr_or: catch", java, "catch (Exception err)");
         assertContains("expr_or: handler", java, "System.out.println");
         System.out.println("--- Expr Or Handler ---");
+        System.out.println(java);
+    }
+
+    static void testSpawn() {
+        var java = transpile("""
+            var task = spawn {
+                print("working")
+            } or {
+                print("failed")
+            }
+            """);
+        assertContains("spawn: CompletableFuture", java, "CompletableFuture");
+        assertContains("spawn: Thread.ofVirtual", java, "Thread.ofVirtual");
+        assertContains("spawn: complete", java, "_f.complete(null)");
+        assertContains("spawn: completeExceptionally", java, "_f.completeExceptionally");
+        System.out.println("--- Spawn ---");
+        System.out.println(java);
+    }
+
+    static void testConcurrent() {
+        var java = transpile("""
+            concurrent {
+                fetchUser(id)
+                fetchOrders(id)
+            }
+            """);
+        assertContains("concurrent: scope", java, "StructuredTaskScope");
+        assertContains("concurrent: fork", java, "_scope.fork");
+        assertContains("concurrent: join", java, "_scope.join");
+        assertContains("concurrent: joiner", java, "awaitAllSuccessfulOrThrow");
+        System.out.println("--- Concurrent ---");
+        System.out.println(java);
+    }
+
+    static void testParallelFor() {
+        var java = transpile("""
+            parallel for item in items {
+                process(item)
+            }
+            """);
+        assertContains("pfor: scope", java, "StructuredTaskScope");
+        assertContains("pfor: fork", java, "_scope.fork");
+        assertContains("pfor: foreach", java, "for (var item : items)");
+        System.out.println("--- Parallel For ---");
         System.out.println(java);
     }
 
