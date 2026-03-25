@@ -79,6 +79,21 @@ public class Transformer {
         this.resolvedTypes = resolvedTypes;
     }
 
+    /** Create a new CompilationUnit with standard imports. */
+    private CompilationUnit newCU(Program program) {
+        var cu = new CompilationUnit();
+        if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
+        cu.addImport("java.util", false, true);
+        cu.addImport("java.util.stream", false, true);
+        for (var imp : program.imports()) cu.addImport(imp.path());
+        return cu;
+    }
+
+    /** Register an interface name from another file (for extends/implements detection). */
+    public void registerInterface(String name) {
+        interfaceNames.add(name);
+    }
+
     // --- Entry point ---------------------------------------------------------
 
     /**
@@ -101,30 +116,8 @@ public class Transformer {
 
             // Types declared in script mode get their own files
             for (var decl : program.decls()) {
-                if (decl instanceof FnDecl) continue; // already in Main
-                var cu = new CompilationUnit();
-                if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
-                for (var imp : program.imports()) cu.addImport(imp.path());
-                switch (decl) {
-                    case ClassDecl cls -> cu.addType(transformClassDecl(cls));
-                    case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
-                    case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
-                    case SealedClassDecl sealed -> {
-                    cu.addType(transformSealedClassDecl(sealed));
-                    for (var variant : sealed.variants()) {
-                        var varCu = new CompilationUnit();
-                        if (program.pkg() != null) varCu.setPackageDeclaration(program.pkg().path());
-                        varCu.addImport("java.util", false, true);
-                        var varClass = transformDataClassDecl(variant);
-                        varClass.addExtendedType(sealed.name());
-                        varCu.addType(varClass);
-                        units.add(varCu);
-                    }
-                }
-                    case EnumDecl en -> cu.addType(transformEnumDecl(en));
-                    default -> { continue; }
-                }
-                units.add(cu);
+                if (decl instanceof FnDecl) continue;
+                emitDeclToUnits(decl, program, units);
             }
             return Result.ok(units);
         }
@@ -134,14 +127,10 @@ public class Transformer {
             .filter(d -> d instanceof FnDecl).map(d -> (FnDecl) d).toList();
 
         if (!topFns.isEmpty()) {
-            var cu = new CompilationUnit();
-            if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
-            for (var imp : program.imports()) cu.addImport(imp.path());
-
+            var cu = newCU(program);
             var mainClass = cu.addClass(className, Keyword.PUBLIC);
             for (var fn : topFns) {
                 for (var jMethod : transformFnDeclWithOverloads(fn)) {
-                    // fn main() → public static void main(String[] args) throws Exception
                     if (fn.name().equals("main") && jMethod.getParameters().isEmpty()) {
                         jMethod.addParameter("String[]", "args");
                         jMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
@@ -154,36 +143,34 @@ public class Transformer {
 
         // Other declarations — one CU per type
         for (var decl : program.decls()) {
-            if (decl instanceof FnDecl) continue; // already handled
-
-            var cu = new CompilationUnit();
-            if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
-            for (var imp : program.imports()) cu.addImport(imp.path());
-
-            switch (decl) {
-                case ClassDecl cls -> cu.addType(transformClassDecl(cls));
-                case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
-                case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
-                case SealedClassDecl sealed -> {
-                    cu.addType(transformSealedClassDecl(sealed));
-                    for (var variant : sealed.variants()) {
-                        var varCu = new CompilationUnit();
-                        if (program.pkg() != null) varCu.setPackageDeclaration(program.pkg().path());
-                        varCu.addImport("java.util", false, true);
-                        var varClass = transformDataClassDecl(variant);
-                        varClass.addExtendedType(sealed.name());
-                        varCu.addType(varClass);
-                        units.add(varCu);
-                    }
-                }
-                case EnumDecl en -> cu.addType(transformEnumDecl(en));
-                case ConstDecl c -> {}
-                default -> {}
-            }
-            units.add(cu);
+            if (decl instanceof FnDecl) continue;
+            emitDeclToUnits(decl, program, units);
         }
 
         return Result.ok(units);
+    }
+
+    /** Emit a single declaration to its own CompilationUnit(s). */
+    private void emitDeclToUnits(Ast.TopLevelDecl decl, Program program, java.util.ArrayList<CompilationUnit> units) {
+        var cu = newCU(program);
+        switch (decl) {
+            case ClassDecl cls -> cu.addType(transformClassDecl(cls));
+            case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
+            case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
+            case SealedClassDecl sealed -> {
+                cu.addType(transformSealedClassDecl(sealed));
+                for (var variant : sealed.variants()) {
+                    var varCu = newCU(program);
+                    var varClass = transformDataClassDecl(variant);
+                    varClass.addExtendedType(sealed.name());
+                    varCu.addType(varClass);
+                    units.add(varCu);
+                }
+            }
+            case EnumDecl en -> cu.addType(transformEnumDecl(en));
+            default -> { return; }
+        }
+        units.add(cu);
     }
 
     public Result<CompilationUnit> transform(Program program) {
