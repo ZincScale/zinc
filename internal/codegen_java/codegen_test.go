@@ -1295,7 +1295,7 @@ parallel for item in items {
     process(item)
 }
 `,
-		`java.util.concurrent.StructuredTaskScope.open()`,
+		`Joiner.awaitAllSuccessfulOrThrow()`,
 		`for (var item : items)`,
 		`_scope.fork(() -> {`,
 		`_scope.join()`,
@@ -1367,7 +1367,7 @@ var a, b = concurrent(first: true) {
     fastApi()
 }
 `,
-		`ShutdownOnSuccess`,
+		`Joiner.anySuccessfulResultOrThrow()`,
 	)
 }
 
@@ -1408,7 +1408,7 @@ concurrent {
     fetchOrders(id)
 }
 `,
-		`java.util.concurrent.StructuredTaskScope.open()`,
+		`Joiner.awaitAllSuccessfulOrThrow()`,
 		`_scope.fork(() -> { fetchUser(id); return null; });`,
 		`_scope.fork(() -> { fetchOrders(id); return null; });`,
 		`_scope.join();`,
@@ -1424,7 +1424,7 @@ var (user, orders) = concurrent {
 `,
 		`Object user;`,
 		`Object orders;`,
-		`java.util.concurrent.StructuredTaskScope.open()`,
+		`Joiner.awaitAllSuccessfulOrThrow()`,
 		`var _task0 = _scope.fork(() -> fetchUser(id));`,
 		`var _task1 = _scope.fork(() -> fetchOrders(id));`,
 		`_scope.join();`,

@@ -1229,7 +1229,7 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 		// Bounded concurrency: use Semaphore to limit concurrent tasks
 		g.writeln("var _semaphore = new java.util.concurrent.Semaphore(%d);", p.Max)
 	}
-	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open()) {")
+	g.writeln("try (var _scope = java.util.concurrent.StructuredTaskScope.open(java.util.concurrent.StructuredTaskScope.Joiner.awaitAllSuccessfulOrThrow())) {")
 	g.indent++
 	g.writeln("for (var %s : %s) {", p.Item, g.formatExpr(p.Range))
 	g.indent++
@@ -1266,9 +1266,9 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 }
 
 func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
-	scopeOpen := "java.util.concurrent.StructuredTaskScope.open()"
+	scopeOpen := "java.util.concurrent.StructuredTaskScope.open(java.util.concurrent.StructuredTaskScope.Joiner.awaitAllSuccessfulOrThrow())"
 	if c.FirstOnly {
-		scopeOpen = "new java.util.concurrent.StructuredTaskScope.ShutdownOnSuccess<Object>()"
+		scopeOpen = "java.util.concurrent.StructuredTaskScope.open(java.util.concurrent.StructuredTaskScope.Joiner.anySuccessfulResultOrThrow())"
 	}
 
 	if len(c.Names) > 0 {
