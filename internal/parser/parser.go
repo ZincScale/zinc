@@ -1820,66 +1820,7 @@ func (p *Parser) parsePackageDecl() *PackageDecl {
 // --- Program -----------------------------------------------------------------
 
 // Parse parses the full program and returns the AST.
-func (p *Parser) Parse() *Program {
-	prog := &Program{}
-	p.skipSemis()
-	// Optional package declaration (must be first)
-	if p.check(lexer.TOKEN_PACKAGE) {
-		prog.Package = p.parsePackageDecl()
-		p.skipSemis()
-	}
-	for !p.check(lexer.TOKEN_EOF) {
-		// Collect annotations before top-level declarations
-		annots := p.parseAnnotations()
-
-		tok := p.peek()
-		switch tok.Type {
-		case lexer.TOKEN_IMPORT:
-			prog.Imports = append(prog.Imports, p.parseImportDecl())
-		case lexer.TOKEN_USE:
-			prog.Imports = append(prog.Imports, p.parseUseDecl())
-		case lexer.TOKEN_DATA:
-			prog.Decls = append(prog.Decls, p.parseDataClassDecl())
-		case lexer.TOKEN_ENUM:
-			prog.Decls = append(prog.Decls, p.parseEnumDecl())
-		case lexer.TOKEN_INTERFACE:
-			prog.Decls = append(prog.Decls, p.parseInterfaceDecl())
-		case lexer.TOKEN_CONST:
-			prog.Decls = append(prog.Decls, p.parseConstDecl(false))
-		case lexer.TOKEN_PUB:
-			p.advance()
-			if p.check(lexer.TOKEN_CONST) {
-				prog.Decls = append(prog.Decls, p.parseConstDecl(true))
-			} else {
-				fn := p.parseFnDecl(true)
-				fn.Annotations = annots
-				prog.Decls = append(prog.Decls, fn)
-			}
-		case lexer.TOKEN_IDENT:
-			if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
-				next := p.peekAt(1)
-				if next.Type == lexer.TOKEN_IDENT && len(next.Literal) > 0 && next.Literal[0] >= 'a' && next.Literal[0] <= 'z' {
-					fn := p.parseFnDecl(false)
-					fn.Annotations = annots
-					prog.Decls = append(prog.Decls, fn)
-				} else {
-					cls := p.parseClassDecl()
-					cls.Annotations = annots
-					prog.Decls = append(prog.Decls, cls)
-				}
-			} else {
-				fn := p.parseFnDecl(false)
-				fn.Annotations = annots
-				prog.Decls = append(prog.Decls, fn)
-			}
-		default:
-			p.errorf("unexpected top-level token %s (%q)", tok.Type, tok.Literal)
-			p.advance()
-		}
-		p.skipSemis()
-	}
-	return prog
-}
+// Parse is the v1 entry point — deprecated, use ParseV2() instead.
 
 // ErrorString returns all parser errors as a single string.
 func (p *Parser) ErrorString() string {
