@@ -1275,9 +1275,9 @@ spawn {
     print("background")
 }
 `,
-		`Thread.startVirtualThread(() -> {`,
-		`catch (Exception _ex)`,
-		`throw new RuntimeException(_ex)`,
+		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> {`,
+		`throw new RuntimeException(err);`,
+		`.start(() -> {`,
 	)
 }
 
@@ -1287,7 +1287,8 @@ var future = spawn {
     compute()
 }
 `,
-		`Thread.startVirtualThread(() -> {`,
+		`Thread.ofVirtual().uncaughtExceptionHandler(`,
+		`.start(() -> {`,
 	)
 }
 
@@ -1327,14 +1328,26 @@ class Worker {
 	)
 }
 
-func TestSpawnWithoutOrHasRuntimeException(t *testing.T) {
+func TestSpawnWithoutOrHasDefaultHandler(t *testing.T) {
 	assertContains(t, `
 spawn {
     print("fire and forget")
 }
 `,
-		`catch (Exception _ex)`,
-		`throw new RuntimeException(_ex)`,
+		`Thread.ofVirtual().uncaughtExceptionHandler((_t, err) -> { throw new RuntimeException(err);`,
+		`.start(() -> {`,
+	)
+}
+
+func TestSpawnReturnsThread(t *testing.T) {
+	assertContains(t, `
+var t = spawn {
+    compute()
+}
+t.join()
+`,
+		`var t = Thread.ofVirtual()`,
+		`t.join()`,
 	)
 }
 

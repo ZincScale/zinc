@@ -1848,7 +1848,12 @@ func (p *Parser) v2ParsePrimary() Expr {
 		line := tok.Line
 		p.advance()
 		body := p.v2ParseBlock()
-		return &SpawnExpr{Line: line, Body: body}
+		spawn := &SpawnExpr{Line: line, Body: body}
+		if p.check(lexer.TOKEN_OR) {
+			p.advance()
+			spawn.OrHandler = &OrHandler{Body: p.v2ParseBlock()}
+		}
+		return spawn
 	case lexer.TOKEN_NEW:
 		p.advance() // consume "new"
 		// Parse type name (possibly dotted: java.util.ArrayList)
