@@ -9,10 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  package:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: macos-amd64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,22 +33,21 @@ jobs:
           curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
             -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 
-      - name: Build native binary
+      - name: Build self-contained package (JDK + Mill + compiler)
         working-directory: compiler
-        run: make build && make native
+        run: make package
 
-      - name: Package
-        run: |
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          [ "$ARCH" = "x86_64" ] && ARCH="amd64"
-          [ "$ARCH" = "aarch64" ] && ARCH="arm64"
-          tar czf zinc-${OS}-${ARCH}.tar.gz -C compiler zinc
+      - name: Run e2e tests
+        working-directory: compiler
+        run: bash run_e2e.sh
+
+      - name: Package release artifact
+        run: tar czf zinc-${{ matrix.platform }}.tar.gz -C compiler/dist zinc
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: zinc-*.tar.gz
+          files: zinc-${{ matrix.platform }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -65,7 +68,7 @@ jobs:
           curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
             -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 
-      - name: Build jar
+      - name: Build jar (for users with existing JDK 25)
         working-directory: compiler
         run: make build
 

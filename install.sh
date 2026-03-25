@@ -7,76 +7,59 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Zinc installer — installs Zinc compiler + toolchain (GraalVM JDK 25, Mill)
+# Zinc installer — downloads pre-built self-contained package
 # Usage: curl -sSL https://raw.githubusercontent.com/ZincScale/zinc/master/install.sh | sh
 
 set -e
 
 REPO="ZincScale/zinc"
-INSTALL_DIR="${ZINC_INSTALL_DIR:-$HOME/.local/bin}"
-MILL_LAUNCHER_URL="https://raw.githubusercontent.com/com-lihaoyi/mill/main/mill"
+INSTALL_DIR="${ZINC_INSTALL_DIR:-$HOME/.local}"
 
 echo "Zinc installer"
 echo "=============="
 
-# Check Java 25
-check_java() {
-    if command -v java >/dev/null 2>&1; then
-        ver=$(java -version 2>&1 | head -1 | sed 's/.*"\([0-9]*\).*/\1/')
-        if [ "$ver" -ge 25 ] 2>/dev/null; then
-            echo "✓ Java $ver found"
-            return 0
-        fi
-    fi
-    echo "✗ Java 25+ required. Install GraalVM JDK 25:"
-    echo "  https://www.graalvm.org/downloads/"
-    return 1
-}
+# Detect platform
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+[ "$ARCH" = "x86_64" ] && ARCH="amd64"
+[ "$ARCH" = "aarch64" ] && ARCH="arm64"
+[ "$ARCH" = "arm64" ] && ARCH="amd64"  # macOS reports arm64
 
-# Check/install Mill
-check_mill() {
-    if command -v mill >/dev/null 2>&1; then
-        echo "✓ Mill found"
-        return 0
-    fi
-    echo "Installing Mill..."
-    curl -L "$MILL_LAUNCHER_URL" > /tmp/mill && chmod +x /tmp/mill
-    mkdir -p "$INSTALL_DIR"
-    mv /tmp/mill "$INSTALL_DIR/mill"
-    echo "✓ Mill installed to $INSTALL_DIR/mill"
-}
+PLATFORM="${OS}-${ARCH}"
+echo "platform: $PLATFORM"
 
-# Install Zinc compiler
-install_zinc() {
-    echo "Installing Zinc compiler..."
+# Get latest release
+LATEST=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": "\(.*\)".*/\1/')
+if [ -z "$LATEST" ]; then
+    echo "error: could not determine latest release"
+    exit 1
+fi
+echo "version: $LATEST"
 
-    # Clone and build
-    TMPDIR=$(mktemp -d)
-    git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR/zinc" 2>/dev/null
-    cd "$TMPDIR/zinc/compiler"
-    make build 2>/dev/null
+# Download
+URL="https://github.com/$REPO/releases/download/$LATEST/zinc-$PLATFORM.tar.gz"
+echo "downloading: $URL"
 
-    # Install
-    mkdir -p "$INSTALL_DIR"
-    cp zinc-compiler.jar "$INSTALL_DIR/"
-    cat > "$INSTALL_DIR/zinc" << 'LAUNCHER'
-#!/bin/sh
-exec java --enable-preview -jar "$(dirname "$0")/zinc-compiler.jar" "$@"
-LAUNCHER
-    chmod +x "$INSTALL_DIR/zinc"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-    # Cleanup
-    rm -rf "$TMPDIR"
+curl -fSL "$URL" -o "$TMPDIR/zinc.tar.gz"
+tar xzf "$TMPDIR/zinc.tar.gz" -C "$TMPDIR"
 
-    echo "✓ Zinc installed to $INSTALL_DIR/zinc"
-}
+# Install
+mkdir -p "$INSTALL_DIR"
+rm -rf "$INSTALL_DIR/zinc"
+mv "$TMPDIR/zinc" "$INSTALL_DIR/zinc"
 
-# Main
-check_java || exit 1
-check_mill
-install_zinc
+# Create symlink in bin
+mkdir -p "$INSTALL_DIR/bin"
+ln -sf "$INSTALL_DIR/zinc/bin/zinc" "$INSTALL_DIR/bin/zinc"
 
 echo ""
-echo "Done! Make sure $INSTALL_DIR is in your PATH."
-echo "  zinc init my-project"
-echo "  zinc run my-project/src/main.zn"
+echo "Zinc $LATEST installed to $INSTALL_DIR/zinc"
+echo ""
+echo "Add to PATH (if not already):"
+echo "  export PATH=\"$INSTALL_DIR/bin:\$PATH\""
+echo ""
+echo "Verify:"
+echo "  zinc run hello.zn"

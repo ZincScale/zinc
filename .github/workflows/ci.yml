@@ -24,18 +24,16 @@ jobs:
           curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
             -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 
-      - name: Build
+      - name: Build self-contained package
         working-directory: compiler
-        run: make build
+        run: make package
 
-      - name: Unit tests
+      - name: Run all tests
         working-directory: compiler
         run: make test
 
-      - name: Build native binary
+      - name: Verify zinc binary
         working-directory: compiler
-        run: make native
-
-      - name: Test native binary
-        working-directory: compiler
-        run: ./zinc run ../examples/v3/hello.zn
+        run: |
+          ./zinc run ../examples/v3/hello.zn
+          ./zinc run ../examples/v3/concurrency.zn
