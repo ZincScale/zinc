@@ -674,6 +674,12 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		return typeAny
 	case *parser.SpreadExpr:
 		return c.inferType(e.Expr)
+	case *parser.SpawnExpr:
+		// Typecheck the body of spawn blocks so var types resolve
+		if e.Body != nil {
+			c.checkBlock(e.Body)
+		}
+		return typeAny
 	case *parser.RangeExpr:
 		// Ranges produce int sequences
 		return typeInt

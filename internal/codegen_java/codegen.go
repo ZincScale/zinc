@@ -1449,14 +1449,22 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		g.tupleTypes[n] = true
 		return fmt.Sprintf("new Tuple%d(%s)", n, g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
-		var body strings.Builder
+		// Capture body by emitting into main buf, then extracting
+		startLen := g.buf.Len()
+		savedIndent := g.indent
+		g.indent = 0
 		if expr.Body != nil {
 			for _, s := range expr.Body.Stmts {
-				body.WriteString(g.formatStmtInline(s))
-				body.WriteString(" ")
+				g.emitStmt(s)
 			}
 		}
-		return fmt.Sprintf("Thread.startVirtualThread(() -> { %s})", body.String())
+		body := g.buf.String()[startLen:]
+		// Truncate buf back to start position by rebuilding
+		prefix := g.buf.String()[:startLen]
+		g.buf.Reset()
+		g.buf.WriteString(prefix)
+		g.indent = savedIndent
+		return fmt.Sprintf("Thread.startVirtualThread(() -> { try { %s} catch (Exception _ex) { throw new RuntimeException(_ex); } })", strings.TrimSpace(body)+" ")
 	case *parser.IfExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.RangeExpr:
