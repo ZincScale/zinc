@@ -981,15 +981,18 @@ public class Transformer {
             }
             case StringInterpLit interp -> transformInterpString(interp);
             case MapLit map -> {
-                // {k: v, ...} → new LinkedHashMap<>(Map.of(k, v, ...)) for insertion order
-                var mapArgs = new NodeList<Expression>();
-                for (int i = 0; i < map.keys().size(); i++) {
-                    mapArgs.add(transformExpr(map.keys().get(i)));
-                    mapArgs.add(transformExpr(map.values().get(i)));
+                // Build map imperatively to preserve insertion order
+                // new LinkedHashMap<>() {{ put(k1, v1); put(k2, v2); }}
+                var initBlock = new StringBuilder("new java.util.LinkedHashMap<>()");
+                if (!map.keys().isEmpty()) {
+                    initBlock.append(" {{ ");
+                    for (int i = 0; i < map.keys().size(); i++) {
+                        initBlock.append("put(").append(exprToJava(map.keys().get(i)))
+                            .append(", ").append(exprToJava(map.values().get(i))).append("); ");
+                    }
+                    initBlock.append("}}");
                 }
-                var mapOf = new MethodCallExpr(new NameExpr("Map"), "of", mapArgs);
-                yield new ObjectCreationExpr(null,
-                    new ClassOrInterfaceType(null, "LinkedHashMap"), new NodeList<>(mapOf));
+                yield parseExpr(initBlock.toString());
             }
             case RawStringLit raw -> new StringLiteralExpr(raw.value());
             case SafeNavExpr nav -> {
@@ -1301,6 +1304,11 @@ public class Transformer {
                 yield type;
             }
         };
+    }
+
+    /** Quick expression to Java source string for inline use. */
+    private String exprToJava(Expr expr) {
+        return transformExpr(expr).toString();
     }
 
     private static boolean isStreamMethod(String name) {
