@@ -433,14 +433,73 @@ public class Main {
         }
     }
 
-    /** Build native binary from a Mill project. */
+    /** Build native binary from a Mill project using mill classpath + native-image. */
     private static int runNativeImage(Path projectDir, Path outDir) {
-        // Mill projects: use mill nativeImage if available, otherwise manual
-        int exitCode = runMill(projectDir, "nativeImage");
-        if (exitCode == 0) return 0;
-        // Fallback: find the jar and native-image it directly
-        System.out.println("mill nativeImage not available, trying direct...");
-        return runNativeImage("Main", projectDir.resolve("out/compile.dest/classes"));
+        // Get classpath from Mill
+        try {
+            var cpProcess = new ProcessBuilder("mill", "show", "runClasspath")
+                .directory(projectDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+            var cpOutput = new String(cpProcess.getInputStream().readAllBytes());
+            cpProcess.waitFor();
+
+            // Parse classpath entries from Mill output
+            var cpEntries = new ArrayList<String>();
+            for (var line : cpOutput.split("[,\\[\\]\"]")) {
+                line = line.trim();
+                if (line.startsWith("ref:") || line.startsWith("qref:")) {
+                    // Extract path after the last colon
+                    var path = line.substring(line.lastIndexOf(':') + 1);
+                    if (Files.exists(Path.of(path))) cpEntries.add(path);
+                }
+            }
+            // Add compiled classes
+            var classesDir = projectDir.resolve("out/compile.dest/classes");
+            if (Files.exists(classesDir)) cpEntries.addFirst(classesDir.toString());
+
+            if (cpEntries.isEmpty()) {
+                System.err.println("error: could not determine classpath from Mill");
+                return 1;
+            }
+
+            var classpath = String.join(":", cpEntries);
+
+            // Find main class from build.mill.yaml
+            String mainClass = "Main";
+            var buildYaml = projectDir.resolve("build.mill.yaml");
+            if (Files.exists(buildYaml)) {
+                for (var line : Files.readAllLines(buildYaml)) {
+                    if (line.trim().startsWith("mainClass:")) {
+                        mainClass = line.trim().substring("mainClass:".length()).trim();
+                        break;
+                    }
+                }
+            }
+
+            // Derive binary name from project directory
+            var binaryName = projectDir.getFileName().toString().toLowerCase().replace("-", "");
+
+            var cmd = new ArrayList<>(List.of(
+                "native-image", "--enable-preview",
+                "-cp", classpath,
+                "-o", projectDir.resolve(binaryName).toString(),
+                "--no-fallback", "-O2", "-march=native",
+                mainClass));
+
+            System.out.println("native-image: " + mainClass + " → " + binaryName);
+            var process = new ProcessBuilder(cmd).inheritIO().start();
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                var binary = projectDir.resolve(binaryName);
+                System.out.println("native binary: " + binary + " (" +
+                    Files.size(binary) / 1024 / 1024 + "MB)");
+            }
+            return exitCode;
+        } catch (Exception e) {
+            System.err.println("native-image failed: " + e.getMessage());
+            return 1;
+        }
     }
 
     // --- javac ----------------------------------------------------------------
