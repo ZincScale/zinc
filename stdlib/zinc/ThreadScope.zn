@@ -1,0 +1,70 @@
+// ThreadScope — supervised thread ownership with guaranteed cleanup.
+// All threads created via scope.spawn() are owned by this scope.
+// On shutdown (or scope exit via `with`): cooperative interrupt,
+// wait timeout, then call kill handler if threads still alive.
+//
+// Usage:
+//   import zinc.ThreadScope
+//
+//   with new ThreadScope(5000) as scope {
+//       scope.spawn { workerLoop() }
+//       scope.spawn { processQueue() }
+//       app.start(8080)
+//   }
+//   // shutdown runs automatically — all threads cleaned up
+//
+// Or with explicit shutdown:
+//   var scope = new ThreadScope(5000)
+//   scope.spawn { workerLoop() }
+//   // ... later ...
+//   scope.shutdown()
+
+package zinc
+
+class ThreadScope : AutoCloseable {
+    var long timeoutMs
+    var Runnable killHandler = null
+    var List<Thread> threads = new ArrayList()
+
+    init(long timeoutMs) {
+        this.timeoutMs = timeoutMs
+    }
+
+    init(long timeoutMs, Runnable killHandler) {
+        this.timeoutMs = timeoutMs
+        this.killHandler = killHandler
+    }
+
+    pub fn spawn(Runnable task) {
+        var t = Thread.startVirtualThread(task)
+        threads.add(t)
+    }
+
+    pub fn shutdown() {
+        // Cooperative: interrupt all threads
+        for t in threads {
+            t.interrupt()
+        }
+
+        // Wait for each thread to finish within timeout
+        for t in threads {
+            t.join(timeoutMs) or { }
+        }
+
+        // Check for dangling threads — call kill handler or exit
+        for t in threads {
+            if t.isAlive() {
+                if killHandler != null {
+                    killHandler.run()
+                    return
+                }
+                System.err.println("FATAL: Thread refused to terminate after {timeoutMs}ms. Forcing exit.")
+                System.exit(1)
+            }
+        }
+    }
+
+    override fn close() {
+        shutdown()
+    }
+}
