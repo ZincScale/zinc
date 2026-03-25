@@ -608,7 +608,8 @@ public class Main {
                 "--main-class", mainClass,
                 "--dest", projectDir.resolve("dist").toString(),
                 "--add-modules", modules,
-                "--java-options", "--enable-preview");
+                "--java-options", "--enable-preview",
+                "--jlink-options", "--strip-debug --no-man-pages --no-header-files --compress=zip-6");
 
             System.out.println("jpackage: " + appName);
             var process = new ProcessBuilder(cmd).inheritIO().start();
@@ -651,15 +652,34 @@ public class Main {
                 }
             }
 
-            // Generate Dockerfile
+            // Detect modules for jlink
+            var jdepsProcess = new ProcessBuilder(
+                "jdeps", "--print-module-deps", "--ignore-missing-deps",
+                "--multi-release", "25", fatJar.toString())
+                .redirectErrorStream(true).start();
+            var modules = new String(jdepsProcess.getInputStream().readAllBytes()).trim();
+            jdepsProcess.waitFor();
+            if (modules.isEmpty() || modules.contains("Error")) {
+                modules = "java.base,java.desktop,java.instrument,java.management,java.naming,java.security.jgss,java.sql";
+            }
+
+            // Generate multi-stage Dockerfile: jlink JRE on distroless
             var dockerfile = projectDir.resolve("Dockerfile");
             Files.writeString(dockerfile, """
-                FROM eclipse-temurin:25-jre-alpine
+                # Stage 1: Build minimal JRE with jlink (JDK only needed here)
+                FROM eclipse-temurin:25-jdk-alpine AS jre-build
+                RUN jlink --add-modules %s \\
+                    --strip-debug --no-man-pages --no-header-files --compress=zip-6 \\
+                    --output /custom-jre
+
+                # Stage 2: Distroless base — no shell, no package manager, minimal attack surface
+                FROM gcr.io/distroless/base-nossl-debian12:nonroot
+                COPY --from=jre-build /custom-jre /jre
                 WORKDIR /app
                 COPY %s app.jar
                 EXPOSE 8080
-                CMD ["java", "--enable-preview", "-jar", "app.jar"]
-                """.formatted(fatJar.getFileName()));
+                ENTRYPOINT ["/jre/bin/java", "--enable-preview", "-jar", "app.jar"]
+                """.formatted(modules, fatJar.getFileName()));
 
             // Build
             var cmd = List.of("docker", "build", "-t", appName, "-f", dockerfile.toString(), fatJar.getParent().toString());
