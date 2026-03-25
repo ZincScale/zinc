@@ -142,6 +142,17 @@ public class StmtParser {
             var body = parseBlock();
             return new ForStmt(line, null, null, null, true, "", item, range, body);
         }
+        // for key, value in expr { } (bare, no parens)
+        if (ctx.check(IDENT) && ctx.peekAt(1).type() == COMMA
+            && ctx.peekAt(2).type() == IDENT && ctx.peekAt(3).type() == IN) {
+            String indexVar = ctx.advance().literal();
+            ctx.advance(); // ,
+            String item = ctx.advance().literal();
+            ctx.expect(IN);
+            var range = exprs.parseExpr();
+            var body = parseBlock();
+            return new ForStmt(line, null, null, null, true, indexVar, item, range, body);
+        }
         // for (i, item) in expr { }
         if (ctx.check(LPAREN) && ctx.peekAt(1).type() == IDENT) {
             ctx.advance(); // (

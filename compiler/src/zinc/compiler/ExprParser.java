@@ -207,6 +207,7 @@ public class ExprParser {
             case SUPER -> parseSuperCall();
             case NEW -> parseNewExpr();
             case SPAWN -> parseSpawnExpr();
+            case IF -> parseIfExpr();
             case MATCH -> parseMatchExpr();
             case IDENT, PRINT, DATA, SEALED -> {
                 if (ctx.peekAt(1).type() == ARROW) yield parseLambda();
@@ -261,6 +262,20 @@ public class ExprParser {
         return new SpawnExpr(line, body, orHandler);
     }
 
+    /**
+     * if cond: thenExpr else: elseExpr  (expression-if / ternary)
+     */
+    private Expr parseIfExpr() {
+        ctx.advance(); // if
+        var cond = parseExpr();
+        ctx.expect(COLON);
+        var thenExpr = parseExpr();
+        ctx.expect(ELSE);
+        ctx.expect(COLON);
+        var elseExpr = parseExpr();
+        return new Ast.IfExpr(cond, thenExpr, elseExpr);
+    }
+
     private Expr parseMatchExpr() {
         ctx.expect(MATCH);
         var subject = parseExpr();
@@ -274,11 +289,26 @@ public class ExprParser {
             if (!ctx.check(IDENT) || !ctx.peek().literal().equals("_")) {
                 pattern = parseExpr();
             } else {
-                ctx.advance();
+                ctx.advance(); // _
             }
-            ctx.expect(ARROW);
-            var value = parseExpr();
-            cases.add(new MatchExprCase(pattern, value));
+            // Match expr can use -> or { }
+            if (ctx.check(ARROW)) {
+                ctx.advance();
+                var value = parseExpr();
+                cases.add(new MatchExprCase(pattern, value));
+            } else if (ctx.check(LBRACE)) {
+                // Block form: case X { expr } — last expr is the value
+                ctx.advance();
+                Expr value = new NullLit();
+                while (!ctx.check(RBRACE) && !ctx.check(EOF)) {
+                    ctx.skipSemis();
+                    if (ctx.check(RBRACE)) break;
+                    value = parseExpr();
+                    ctx.skipSemis();
+                }
+                ctx.expect(RBRACE);
+                cases.add(new MatchExprCase(pattern, value));
+            }
             ctx.skipSemis();
         }
         ctx.expect(RBRACE);

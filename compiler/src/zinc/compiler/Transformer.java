@@ -54,6 +54,8 @@ import zinc.compiler.Ast.TupleLit;
 import zinc.compiler.Ast.SliceExpr;
 import zinc.compiler.Ast.SpreadExpr;
 import zinc.compiler.Ast.SuperCallExpr;
+import zinc.compiler.Ast.MatchExpr;
+import zinc.compiler.Ast.MatchExprCase;
 
 /**
  * Transforms Zinc AST into JavaParser AST.
@@ -63,6 +65,7 @@ public class Transformer {
 
     private String className = "Main";
     private java.util.Map<String, TypeInfo> resolvedTypes = java.util.Map.of();
+    private java.util.Set<String> interfaceNames = new java.util.HashSet<>();
 
     public Transformer() {}
 
@@ -82,6 +85,11 @@ public class Transformer {
      * Script mode programs get a single Main class.
      */
     public Result<List<CompilationUnit>> transformAll(Program program) {
+        // Pre-scan: collect interface names
+        for (var decl : program.decls()) {
+            if (decl instanceof InterfaceDecl iface) interfaceNames.add(iface.name());
+        }
+
         var units = new java.util.ArrayList<CompilationUnit>();
 
         // Script mode — Main class for stmts + top-level fns, separate CUs for types
@@ -120,14 +128,14 @@ public class Transformer {
 
             var mainClass = cu.addClass(className, Keyword.PUBLIC);
             for (var fn : topFns) {
-                var jMethod = transformFnDecl(fn);
-                // fn main() → public static void main(String[] args) throws Exception
-                if (fn.name().equals("main")) {
-                    jMethod.getParameters().clear();
-                    jMethod.addParameter("String[]", "args");
-                    jMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
+                for (var jMethod : transformFnDeclWithOverloads(fn)) {
+                    // fn main() → public static void main(String[] args) throws Exception
+                    if (fn.name().equals("main") && jMethod.getParameters().isEmpty()) {
+                        jMethod.addParameter("String[]", "args");
+                        jMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
+                    }
+                    mainClass.addMember(jMethod);
                 }
-                mainClass.addMember(jMethod);
             }
             units.add(cu);
         }
@@ -163,7 +171,9 @@ public class Transformer {
             cu.setPackageDeclaration(program.pkg().path());
         }
 
-        // Imports
+        // Standard imports + user imports
+        cu.addImport("java.util", false, true); // java.util.*
+        cu.addImport("java.util.stream", false, true); // java.util.stream.*
         for (var imp : program.imports()) {
             cu.addImport(imp.path());
         }
@@ -185,7 +195,7 @@ public class Transformer {
             // Add top-level functions as static methods on Main
             for (var decl : program.decls()) {
                 if (decl instanceof FnDecl fn) {
-                    mainClass.addMember(transformFnDecl(fn));
+                    for (var m : transformFnDeclWithOverloads(fn)) mainClass.addMember(m);
                 }
             }
         }
@@ -195,6 +205,49 @@ public class Transformer {
 
     // --- Declarations --------------------------------------------------------
 
+    private List<MethodDeclaration> transformFnDeclWithOverloads(FnDecl fn) {
+        var methods = new java.util.ArrayList<MethodDeclaration>();
+        methods.add(transformFnDecl(fn));
+
+        // Generate overloads for default parameters
+        var defaults = fn.params().stream().filter(p -> p.defaultValue() != null).toList();
+        if (!defaults.isEmpty()) {
+            // For each default param, generate an overload without it
+            int firstDefault = -1;
+            for (int i = 0; i < fn.params().size(); i++) {
+                if (fn.params().get(i).defaultValue() != null) { firstDefault = i; break; }
+            }
+            for (int cut = firstDefault; cut < fn.params().size(); cut++) {
+                var overload = new MethodDeclaration();
+                overload.setName(fn.name());
+                overload.addModifier(Keyword.PUBLIC, Keyword.STATIC);
+                overload.setType(fn.returnType() != null ? transformType(fn.returnType()) : new VoidType());
+
+                var callArgs = new NodeList<Expression>();
+                for (int i = 0; i < fn.params().size(); i++) {
+                    var p = fn.params().get(i);
+                    var pType = p.type() != null ? transformType(p.type()) : new ClassOrInterfaceType(null, "Object");
+                    if (i < cut) {
+                        overload.addParameter(pType, p.name());
+                        callArgs.add(new NameExpr(p.name()));
+                    } else {
+                        callArgs.add(p.defaultValue() != null ? transformExpr(p.defaultValue()) : new NullLiteralExpr());
+                    }
+                }
+                var body = new BlockStmt();
+                var delegateCall = new MethodCallExpr(null, fn.name(), callArgs);
+                if (fn.returnType() != null) {
+                    body.addStatement(new ReturnStmt(delegateCall));
+                } else {
+                    body.addStatement(new ExpressionStmt(delegateCall));
+                }
+                overload.setBody(body);
+                methods.add(overload);
+            }
+        }
+        return methods;
+    }
+
     private MethodDeclaration transformFnDecl(FnDecl fn) {
         var method = new MethodDeclaration();
         method.setName(fn.name());
@@ -203,6 +256,9 @@ public class Transformer {
 
         for (var param : fn.params()) {
             var type = param.type() != null ? transformType(param.type()) : new ClassOrInterfaceType(null, "Object");
+            if (param.isVariadic()) {
+                type = new com.github.javaparser.ast.type.ArrayType(type);
+            }
             method.addParameter(type, param.name());
         }
 
@@ -220,7 +276,11 @@ public class Transformer {
         if (cls.isAbstract()) jClass.addModifier(Keyword.ABSTRACT);
 
         for (var parent : cls.parents()) {
-            jClass.addImplementedType(parent);
+            if (interfaceNames.contains(parent)) {
+                jClass.addImplementedType(parent);
+            } else {
+                jClass.addExtendedType(parent);
+            }
         }
 
         // Fields
@@ -361,10 +421,14 @@ public class Transformer {
     private MethodDeclaration transformMethodDecl(Ast.MethodDecl method) {
         var jMethod = new MethodDeclaration();
         jMethod.setName(method.name());
-        if (method.isPub()) jMethod.addModifier(Keyword.PUBLIC);
+        // Override methods from Object (toString, equals, hashCode) must be public
+        boolean isOverride = method.name().equals("toString") || method.name().equals("equals")
+            || method.name().equals("hashCode");
+        if (method.isPub() || isOverride) jMethod.addModifier(Keyword.PUBLIC);
         else jMethod.addModifier(Keyword.PRIVATE);
         if (method.isStatic()) jMethod.addModifier(Keyword.STATIC);
         if (method.isAbstract()) jMethod.addModifier(Keyword.ABSTRACT);
+        if (isOverride) jMethod.addMarkerAnnotation("Override");
         jMethod.setType(method.returnType() != null ? transformType(method.returnType()) : new VoidType());
 
         for (var param : method.params()) {
@@ -398,9 +462,10 @@ public class Transformer {
                 default -> new ClassOrInterfaceType(null, s.name());
             };
             case Ast.GenericType g -> {
-                var base = new ClassOrInterfaceType(null, g.name());
+                String baseName = TYPE_MAP.getOrDefault(g.name(), g.name());
+                var base = new ClassOrInterfaceType(null, baseName);
                 var args = new NodeList<Type>();
-                for (var arg : g.typeArgs()) args.add(transformType(arg));
+                for (var arg : g.typeArgs()) args.add(transformTypeBoxed(arg));
                 base.setTypeArguments(args);
                 yield base;
             }
@@ -775,10 +840,35 @@ public class Transformer {
 
     private Statement transformForStmt(Ast.ForStmt f) {
         if (f.isRange()) {
+            // for key, value in map → for (var _entry : map.entrySet()) { var key = _entry.getKey(); ... }
+            if (!f.indexVar().isEmpty()) {
+                var forEach = new ForEachStmt();
+                forEach.setVariable(new VariableDeclarationExpr(new VarType(), "_entry"));
+                forEach.setIterable(new MethodCallExpr(transformExpr(f.range()), "entrySet"));
+                var body = transformBlock(f.body());
+                // Prepend key/value declarations
+                var keyDecl = new ExpressionStmt(new VariableDeclarationExpr(new VarType(), f.indexVar()));
+                ((VariableDeclarationExpr) keyDecl.getExpression()).getVariable(0)
+                    .setInitializer(new MethodCallExpr(new NameExpr("_entry"), "getKey"));
+                var valDecl = new ExpressionStmt(new VariableDeclarationExpr(new VarType(), f.item()));
+                ((VariableDeclarationExpr) valDecl.getExpression()).getVariable(0)
+                    .setInitializer(new MethodCallExpr(new NameExpr("_entry"), "getValue"));
+                body.getStatements().addFirst(valDecl);
+                body.getStatements().addFirst(keyDecl);
+                forEach.setBody(body);
+                return forEach;
+            }
+
             // for item in range → for (var item : range)
             var forEach = new ForEachStmt();
             forEach.setVariable(new VariableDeclarationExpr(new VarType(), f.item()));
-            forEach.setIterable(transformExpr(f.range()));
+            var iterable = transformExpr(f.range());
+            // IntStream → boxed for for-each
+            if (f.range() instanceof RangeExpr) {
+                iterable = new MethodCallExpr(
+                    new MethodCallExpr(iterable, "boxed"), "toList");
+            }
+            forEach.setIterable(iterable);
             forEach.setBody(transformBlock(f.body()));
             return forEach;
         }
@@ -840,6 +930,9 @@ public class Transformer {
                     yield new CastExpr(new ClassOrInterfaceType(null, ta.typeName()), transformExpr(ta.object()));
                 }
             }
+            case Ast.IfExpr ifE -> new ConditionalExpr(
+                transformExpr(ifE.cond()), transformExpr(ifE.then()), transformExpr(ifE.elseExpr()));
+            case MatchExpr matchE -> transformMatchExpr(matchE);
             case Ast.LambdaExpr lam -> transformLambda(lam);
             case Ast.SpawnExpr spawn -> transformSpawn(spawn);
             case RangeExpr range -> transformRange(range);
@@ -1046,6 +1139,44 @@ public class Transformer {
                 .setTypeArguments(new NodeList<>(new ClassOrInterfaceType(null, "java.util.concurrent.CompletableFuture<Void>"))),
             new EnclosedExpr(supplierLambda));
         return new MethodCallExpr(new EnclosedExpr(cast), "get");
+    }
+
+    /** Match expression → nested ternary. */
+    private Expression transformMatchExpr(MatchExpr match) {
+        var subject = transformExpr(match.subject());
+        // Build nested ternary: subject.equals(case1) ? val1 : subject.equals(case2) ? val2 : default
+        Expression result = new NullLiteralExpr(); // default
+        for (int i = match.cases().size() - 1; i >= 0; i--) {
+            var c = match.cases().get(i);
+            if (c.pattern() == null) {
+                // Wildcard _ → default
+                result = transformExpr(c.value());
+            } else {
+                var cond = new MethodCallExpr(
+                    new NameExpr("java.util.Objects"), "equals",
+                    new NodeList<>(subject.clone(), transformExpr(c.pattern())));
+                result = new ConditionalExpr(cond, transformExpr(c.value()), result);
+            }
+        }
+        return result;
+    }
+
+    /** Transform type with boxing for generics context. */
+    private Type transformTypeBoxed(Ast.TypeExpr type) {
+        return switch (type) {
+            case Ast.SimpleType s -> switch (s.name()) {
+                case "int" -> new ClassOrInterfaceType(null, "Integer");
+                case "long" -> new ClassOrInterfaceType(null, "Long");
+                case "double" -> new ClassOrInterfaceType(null, "Double");
+                case "float" -> new ClassOrInterfaceType(null, "Float");
+                case "boolean" -> new ClassOrInterfaceType(null, "Boolean");
+                case "byte" -> new ClassOrInterfaceType(null, "Byte");
+                case "char" -> new ClassOrInterfaceType(null, "Character");
+                case "short" -> new ClassOrInterfaceType(null, "Short");
+                default -> new ClassOrInterfaceType(null, s.name());
+            };
+            default -> transformType(type);
+        };
     }
 
     /** Convert TypeInfo to JavaParser Type. */

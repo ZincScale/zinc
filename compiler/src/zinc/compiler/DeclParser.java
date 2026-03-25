@@ -51,6 +51,13 @@ public class DeclParser {
         TypeExpr returnType = null;
         if (ctx.match(COLON)) returnType = types.parseType();
 
+        // Single-expression function: fn name(params): Type = expr
+        if (ctx.match(ASSIGN)) {
+            var expr = exprs.parseExpr();
+            var body = new BlockStmt(List.of(new ReturnStmt(line, expr)));
+            return new FnDecl(line, name, false, typeParams, params, returnType, body, List.of());
+        }
+
         var body = stmts.parseBlock();
         return new FnDecl(line, name, false, typeParams, params, returnType, body, List.of());
     }
