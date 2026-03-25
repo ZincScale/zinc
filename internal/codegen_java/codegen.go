@@ -33,19 +33,107 @@ type Generator struct {
 	arrayVars          map[string]bool // track variables declared as array types
 	interfaces         map[string]bool // track which type names are interfaces
 	actors             map[string]bool // track which type names are actors
+	zincMethods        map[string]map[string]bool // className → methodName → canThrow
 	errVarStack        []string        // stack of catch variable names for nested or-blocks
 	currentClassParents []string       // parents of the class currently being emitted
 }
 
 // New creates a new Java code generator.
 func New() *Generator {
-	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool), actors: make(map[string]bool)}
+	return &Generator{tupleTypes: make(map[int]bool), arrayVars: make(map[string]bool), interfaces: make(map[string]bool), actors: make(map[string]bool), zincMethods: make(map[string]map[string]bool)}
 }
 
 // OutputFile represents a generated .java file.
 type OutputFile struct {
 	Name    string // e.g., "User.java"
 	Content string
+}
+
+// methodCanThrow walks a method body to determine if it can throw an exception.
+// Returns true if the body contains: raise, or-handlers, or calls to other methods.
+func methodCanThrow(body *parser.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if stmtCanThrow(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtCanThrow(s parser.Stmt) bool {
+	switch s := s.(type) {
+	case *parser.RaiseStmt:
+		return true
+	case *parser.ExprStmt:
+		return exprCanThrow(s.Expr)
+	case *parser.VarStmt:
+		if s.OrHandler != nil {
+			return true
+		}
+		return s.Value != nil && exprCanThrow(s.Value)
+	case *parser.AssignStmt:
+		return exprCanThrow(s.Value)
+	case *parser.ReturnStmt:
+		return s.Value != nil && exprCanThrow(s.Value)
+	case *parser.IfStmt:
+		if exprCanThrow(s.Cond) {
+			return true
+		}
+		if s.Then != nil && methodCanThrow(s.Then) {
+			return true
+		}
+		if s.ElseStmt != nil {
+			if elseBlock, ok := s.ElseStmt.(*parser.BlockStmt); ok {
+				return methodCanThrow(elseBlock)
+			}
+			return stmtCanThrow(s.ElseStmt)
+		}
+		return false
+	case *parser.ForStmt:
+		return methodCanThrow(s.Body)
+	case *parser.WhileStmt:
+		return methodCanThrow(s.Body)
+	case *parser.BlockStmt:
+		return methodCanThrow(s)
+	case *parser.PrintStmt:
+		return false
+	case *parser.BreakStmt, *parser.ContinueStmt:
+		return false
+	default:
+		// Unknown statement type — conservatively assume it can throw
+		return true
+	}
+}
+
+func exprCanThrow(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch e := e.(type) {
+	case *parser.IntLit, *parser.FloatLit, *parser.StringLit, *parser.BoolLit, *parser.NullLit:
+		return false
+	case *parser.Ident:
+		return false
+	case *parser.ThisExpr:
+		return false
+	case *parser.SelectorExpr:
+		return exprCanThrow(e.Object)
+	case *parser.BinaryExpr:
+		return exprCanThrow(e.Left) || exprCanThrow(e.Right)
+	case *parser.UnaryExpr:
+		return exprCanThrow(e.Operand)
+	case *parser.CallExpr:
+		return true
+	case *parser.IndexExpr:
+		return true
+	case *parser.LambdaExpr:
+		return false
+	default:
+		return true
+	}
 }
 
 // collectInterfaces scans declarations to build the set of known interface and actor names.
@@ -55,11 +143,27 @@ func (g *Generator) collectInterfaces(decls []parser.TopLevelDecl) {
 	g.actors["Actor"] = true
 	g.actors["Supervisor"] = true
 
+	// Register Actor base class methods (generated, not parsed)
+	g.zincMethods["Actor"] = map[string]bool{
+		"mailboxCapacity": false, // cannot throw — just returns an int
+	}
+
 	for _, d := range decls {
 		if iface, ok := d.(*parser.InterfaceDecl); ok {
 			g.interfaces[iface.Name] = true
 		}
 	}
+	// Collect Zinc class method signatures (canThrow analysis)
+	for _, d := range decls {
+		if cls, ok := d.(*parser.ClassDecl); ok {
+			methods := make(map[string]bool)
+			for _, m := range cls.Methods {
+				methods[m.Name] = methodCanThrow(m.Body)
+			}
+			g.zincMethods[cls.Name] = methods
+		}
+	}
+
 	// Multi-pass: detect actor subclasses transitively
 	changed := true
 	for changed {
@@ -439,8 +543,16 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 
 	// Methods
 	for _, m := range cls.Methods {
-		if isActor && m.IsPub {
-			// Actor pub fn → dual-mode (mailbox/direct)
+		// Check if method has @Override annotation
+		hasOverride := false
+		for _, a := range m.Annotations {
+			if a.Name == "Override" {
+				hasOverride = true
+				break
+			}
+		}
+		if isActor && m.IsPub && !hasOverride {
+			// Actor pub fn → dual-mode (mailbox/direct), but not overrides
 			g.emitActorDualModeMethod(m)
 		} else if m.IsAbstract {
 			// Abstract method — signature only
@@ -677,32 +789,46 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 	}
 	params := g.formatParams(m.Params)
 
+	// Determine if this method actually can throw.
+	canThrow := methodCanThrow(m.Body)
+
 	// Check if this method overrides a parent method that doesn't throw.
 	// If so, wrap body in try/catch. Otherwise, declare throws Exception.
 	needsWrap := false
-	for _, parent := range g.currentClassParents {
-		// Check Zinc interfaces — they all declare throws Exception, so no wrap needed
-		if g.interfaces[parent] {
-			continue
+	if canThrow {
+		for _, parent := range g.currentClassParents {
+			// Check Zinc interfaces — they all declare throws Exception, so no wrap needed
+			if g.interfaces[parent] {
+				continue
+			}
+			// Check Zinc parent classes first — we know their method signatures
+			if methods, ok := g.zincMethods[parent]; ok {
+				if parentCanThrow, found := methods[m.Name]; found && !parentCanThrow {
+					needsWrap = true
+					break
+				}
+				continue
+			}
+			// Fall through to javap for Java library parents
+			javaClass := parent
+			if mapped, ok := typechecker.ZincToJavaClass(parent); ok {
+				javaClass = mapped
+			}
+			if found, throws := typechecker.MethodThrows(javaClass, m.Name); found && !throws {
+				needsWrap = true
+				break
+			}
 		}
-		// Check Java parent via javap
-		javaClass := parent
-		if mapped, ok := typechecker.ZincToJavaClass(parent); ok {
-			javaClass = mapped
-		}
-		if found, throws := typechecker.MethodThrows(javaClass, m.Name); found && !throws {
-			needsWrap = true
-			break
-		}
-	}
-	// All classes implicitly extend java.lang.Object
-	if !needsWrap {
-		if found, throws := typechecker.MethodThrows("java.lang.Object", m.Name); found && !throws {
-			needsWrap = true
+		// All classes implicitly extend java.lang.Object
+		if !needsWrap {
+			if found, throws := typechecker.MethodThrows("java.lang.Object", m.Name); found && !throws {
+				needsWrap = true
+			}
 		}
 	}
 
 	if needsWrap {
+		// Override of non-throwing parent — wrap body in try/catch
 		g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
 		g.indent++
 		g.writeln("try {")
@@ -712,8 +838,16 @@ func (g *Generator) emitMethodDecl(m *parser.MethodDecl) {
 		g.writeln("} catch (Exception e) { throw new RuntimeException(e); }")
 		g.indent--
 		g.writeln("}")
-	} else {
+	} else if canThrow {
+		// Method can throw — declare it
 		g.writeln("%s %s%s %s(%s) throws Exception {", vis, static, ret, m.Name, params)
+		g.indent++
+		g.emitBlock(m.Body)
+		g.indent--
+		g.writeln("}")
+	} else {
+		// Method cannot throw — no throws declaration
+		g.writeln("%s %s%s %s(%s) {", vis, static, ret, m.Name, params)
 		g.indent++
 		g.emitBlock(m.Body)
 		g.indent--
@@ -955,7 +1089,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 func (g *Generator) emitActorBaseClass() {
 	g.writeln("public abstract class Actor {")
 	g.indent++
-	g.writeln("public int mailboxCapacity() throws Exception { return 1000; }")
+	g.writeln("public int mailboxCapacity() { return 1000; }")
 	g.writeln("public java.util.concurrent.ArrayBlockingQueue<Runnable> _mailbox;")
 	g.writeln("public Thread _actorThread;")
 	g.writeln("public volatile boolean _running = false;")

@@ -1586,7 +1586,7 @@ data Point(int x, int y) {
 }
 `,
 		`public record Point(int x, int y) {`,
-		`public int sum() throws Exception {`,
+		`public int sum() {`,
 		`return x + y;`,
 		`public Point scale(int factor) throws Exception {`,
 	)
@@ -1609,7 +1609,7 @@ class Box<T> {
 		`public static class Box<T>`,
 		`private T value;`,
 		`public T getValue()`,
-		`public T get() throws Exception {`,
+		`public T get() {`,
 		`return value;`,
 	)
 }
@@ -1648,7 +1648,7 @@ class HelloGreeter : Greeter {
 		`public interface Greeter`,
 		`String greet() throws Exception`,
 		`public static class HelloGreeter implements Greeter`,
-		`public String greet() throws Exception`,
+		`public String greet()`,
 	)
 }
 
@@ -1749,7 +1749,7 @@ class Dog {
 		`public static class Dog {`,
 		`private String name;`,
 		`private String breed;`,
-		`String speak() throws Exception {`,
+		`String speak() {`,
 		`return "Woof!";`,
 	)
 }
@@ -1778,7 +1778,7 @@ class Puppy : Dog {
 `,
 		`public static class Puppy extends Dog {`,
 		`private String name;`,
-		`String speak() throws Exception {`,
+		`String speak() {`,
 	)
 }
 
@@ -1878,6 +1878,7 @@ class Counter {
 }
 
 func TestClassMethodDirect(t *testing.T) {
+	// toString() with simple return — can't throw, no try/catch needed
 	assertContains(t, `
 class Foo {
     fn toString(): String {
@@ -1886,9 +1887,9 @@ class Foo {
 }
 `,
 		`String toString() {`,
-		`try {`,
 		`return "Foo";`,
 	)
+	// Should NOT have throws Exception or try/catch (body can't throw)
 	assertNotContains(t, `
 class Foo {
     fn toString(): String {
@@ -1896,7 +1897,8 @@ class Foo {
     }
 }
 `,
-		`@Override`,
+		`throws Exception`,
+		`try {`,
 	)
 }
 

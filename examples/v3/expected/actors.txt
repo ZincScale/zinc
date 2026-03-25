@@ -1,12 +1,9 @@
-count: 10
+direct: 10
 hello zinc
 order: abcde
 size: 3
 items: x,y,z
 sum: 42
 doubled: 40
-total: 120
-concurrent: 100
-before kill: 3
-killed
+capacity: 50000
 Actors OK
