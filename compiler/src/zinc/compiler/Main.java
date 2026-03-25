@@ -35,6 +35,7 @@ public class Main {
         switch (command) {
             case "build" -> cmdBuild(rest);
             case "run" -> cmdRun(rest);
+            case "init" -> cmdInit(rest);
             default -> {
                 // No subcommand — treat as file to compile (backwards compat)
                 if (command.endsWith(".zn")) {
@@ -53,6 +54,7 @@ public class Main {
         System.err.println("commands:");
         System.err.println("  build <file.zn|dir> [-o outdir]   compile to Java");
         System.err.println("  run <file.zn|dir> [args...]       compile and run");
+        System.err.println("  init <name>                       create a new project");
     }
 
     // --- build ---------------------------------------------------------------
@@ -297,6 +299,65 @@ public class Main {
         }
 
         return Result.ok(javaFiles);
+    }
+
+    // --- init ----------------------------------------------------------------
+
+    private static void cmdInit(List<String> args) {
+        if (args.isEmpty()) {
+            System.err.println("usage: zinc init <project-name>");
+            System.exit(1);
+        }
+
+        String name = args.getFirst();
+        var dir = Path.of(name);
+
+        try {
+            Files.createDirectories(dir.resolve("src"));
+            Files.createDirectories(dir.resolve("test"));
+
+            // build.mill.yaml
+            Files.writeString(dir.resolve("build.mill.yaml"), """
+                # %s — Zinc project
+                extends: JavaModule
+                jvmVersion: 25
+
+                javacOptions:
+                  - --enable-preview
+                  - --release
+                  - "25"
+
+                forkArgs:
+                  - --enable-preview
+
+                mainClass: Main
+
+                mvnDeps: []
+                """.formatted(name).stripIndent());
+
+            // src/main.zn
+            Files.writeString(dir.resolve("src/main.zn"), """
+                fn main() {
+                    print("Hello from %s!")
+                }
+                """.formatted(name).stripIndent());
+
+            // .gitignore
+            Files.writeString(dir.resolve(".gitignore"), """
+                out/
+                *.class
+                .mill-*
+                """.stripIndent());
+
+            System.out.println("created project: " + name);
+            System.out.println("  " + dir + "/src/main.zn");
+            System.out.println("  " + dir + "/build.mill.yaml");
+            System.out.println("\nrun: zinc run " + name + "/src");
+
+        } catch (IOException e) {
+            System.err.println("error: " + e.getMessage());
+            System.exit(1);
+        }
     }
 
     // --- Mill integration ----------------------------------------------------

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Zinc compiler launcher
+# Uses the Java-based compiler (replaces Go compiler)
+DIR="$(cd "$(dirname "$0")" && pwd)"
+JAR="$DIR/zinc-compiler.jar"
+
+if [ ! -f "$JAR" ]; then
+    echo "error: zinc-compiler.jar not found. Run 'make' in compiler/ first."
+    exit 1
+fi
+
+exec java --enable-preview -jar "$JAR" "$@"

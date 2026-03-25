@@ -719,8 +719,22 @@ public class Transformer {
         return new TryStmt(tryBody, new NodeList<>(catchClause), null);
     }
 
-    /** match stmt → chain of if/else if */
+    /**
+     * match stmt → Java switch with pattern matching (Java 21+) or if/else chain.
+     * Record patterns: case Single(f) → case Single(var f)
+     * Value patterns: case "ok" → case "ok"
+     * Wildcard: case _ → default
+     */
     private Statement transformMatchStmt(Ast.MatchStmt m) {
+        // Detect if any pattern is a record deconstruction (CallExpr pattern)
+        boolean hasRecordPatterns = m.cases().stream()
+            .anyMatch(c -> c.pattern() instanceof CallExpr);
+
+        if (hasRecordPatterns) {
+            return transformMatchAsSwitch(m);
+        }
+
+        // Simple value matching → if/else chain with Objects.equals
         var subject = transformExpr(m.subject());
         IfStmt firstIf = null;
         IfStmt lastIf = null;
@@ -728,18 +742,14 @@ public class Transformer {
 
         for (var c : m.cases()) {
             if (c.pattern() == null) {
-                // wildcard: _ { body }
                 defaultCase = transformBlock(c.body());
             } else {
                 var cond = new MethodCallExpr(
                     new NameExpr("java.util.Objects"), "equals",
                     new NodeList<>(subject.clone(), transformExpr(c.pattern())));
                 var ifStmt = new IfStmt(cond, transformBlock(c.body()), null);
-                if (firstIf == null) {
-                    firstIf = ifStmt;
-                } else {
-                    lastIf.setElseStmt(ifStmt);
-                }
+                if (firstIf == null) firstIf = ifStmt;
+                else lastIf.setElseStmt(ifStmt);
                 lastIf = ifStmt;
             }
         }
@@ -747,6 +757,61 @@ public class Transformer {
         if (firstIf == null) return defaultCase != null ? defaultCase : new BlockStmt();
         if (defaultCase != null && lastIf != null) lastIf.setElseStmt(defaultCase);
         return firstIf;
+    }
+
+    /**
+     * Generate Java switch with record patterns (Java 21+):
+     * switch (subject) {
+     *     case Single(var f) -> { body }
+     *     case Multiple(var ffs) -> { body }
+     *     case Drop _ -> { body }
+     *     default -> { body }
+     * }
+     */
+    private Statement transformMatchAsSwitch(Ast.MatchStmt m) {
+        var subject = transformExpr(m.subject());
+        // Build switch expression as string since JavaParser may not support record patterns natively
+        var sb = new StringBuilder();
+        sb.append("switch (").append(subject).append(") {\n");
+        for (var c : m.cases()) {
+            if (c.pattern() == null) {
+                // wildcard
+                sb.append("    default -> ");
+                sb.append(transformBlock(c.body()));
+                sb.append("\n");
+            } else if (c.pattern() instanceof CallExpr call && call.callee() instanceof Ident typeName) {
+                // Record pattern: case Type(var a, var b) -> { body }
+                sb.append("    case ").append(typeName.name()).append("(");
+                var args = call.args();
+                if (args.isEmpty()) {
+                    sb.append("var _"); // Empty record: Drop() → Drop _
+                    sb.setLength(sb.length() - "var _".length());
+                    // Drop with no args → Drop _
+                    sb.setLength(sb.length() - 1); // remove (
+                    sb.append(" _");
+                } else {
+                    for (int i = 0; i < args.size(); i++) {
+                        if (i > 0) sb.append(", ");
+                        if (args.get(i) instanceof Ident id) {
+                            sb.append("var ").append(id.name());
+                        } else {
+                            sb.append("var _p").append(i);
+                        }
+                    }
+                    sb.append(")");
+                }
+                sb.append(" -> ");
+                sb.append(transformBlock(c.body()));
+                sb.append("\n");
+            } else {
+                // Value pattern
+                sb.append("    case ").append(transformExpr(c.pattern())).append(" -> ");
+                sb.append(transformBlock(c.body()));
+                sb.append("\n");
+            }
+        }
+        sb.append("}");
+        return parseStmt(sb.toString());
     }
 
     // --- Concurrency ---------------------------------------------------------
@@ -1537,8 +1602,14 @@ public class Transformer {
         return com.github.javaparser.StaticJavaParser.parseExpression(code);
     }
 
-    /** Parse a Java statement from a string via JavaParser. */
+    /** Parse a Java statement from a string via JavaParser (with Java 21+ features). */
     private Statement parseStmt(String code) {
+        var config = new com.github.javaparser.ParserConfiguration()
+            .setLanguageLevel(com.github.javaparser.ParserConfiguration.LanguageLevel.JAVA_25);
+        var parser = new com.github.javaparser.JavaParser(config);
+        var result = parser.parseStatement(code);
+        if (result.isSuccessful()) return result.getResult().get();
+        // Fallback to default parser
         return com.github.javaparser.StaticJavaParser.parseStatement(code);
     }
 
