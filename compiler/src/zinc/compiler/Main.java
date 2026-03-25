@@ -62,15 +62,19 @@ public class Main {
     private static void cmdBuild(List<String> args) {
         String input = null;
         Path outDir = null;
-        boolean nativeImage = true; // default: build native binaries
+        boolean nativeImage = false;
         boolean fatJar = false;
+        boolean packageApp = true; // default: jpackage + jlink (works with any library)
+        boolean docker = false;
 
         for (int i = 0; i < args.size(); i++) {
             switch (args.get(i)) {
                 case "-o" -> { if (i + 1 < args.size()) outDir = Path.of(args.get(++i)); }
-                case "--native" -> nativeImage = true;
-                case "--no-native" -> nativeImage = false;
-                case "--fat-jar" -> { fatJar = true; nativeImage = false; }
+                case "--native" -> { nativeImage = true; packageApp = false; }
+                case "--fat-jar" -> { fatJar = true; packageApp = false; }
+                case "--package" -> { packageApp = true; nativeImage = false; }
+                case "--docker" -> { docker = true; packageApp = false; }
+                case "--no-package" -> packageApp = false;
                 default -> { if (!args.get(i).startsWith("-")) input = args.get(i); }
             }
         }
@@ -115,13 +119,24 @@ public class Main {
                 if (exitCode != 0) System.exit(exitCode);
             }
 
-            // Fat jar option
+            // Fat jar
             if (fatJar) {
                 System.out.println("building fat jar...");
-                int jarExitCode = runMill(projectDir, "assembly");
-                if (jarExitCode != 0) {
-                    System.err.println("mill assembly failed — trying manual jar");
-                }
+                runMill(projectDir, "assembly");
+            }
+
+            // Packaged app (jpackage + jlink = bundled JVM)
+            if (packageApp) {
+                System.out.println("building packaged app...");
+                int pkgExit = buildPackagedApp(projectDir);
+                if (pkgExit != 0) System.exit(pkgExit);
+            }
+
+            // Docker
+            if (docker) {
+                System.out.println("building Docker image...");
+                int dkrExit = buildDocker(projectDir);
+                if (dkrExit != 0) System.exit(dkrExit);
             }
 
             System.out.println("build complete: " + projectDir + " (Mill project)");
@@ -538,6 +553,121 @@ public class Main {
             return exitCode;
         } catch (Exception e) {
             System.err.println("native-image failed: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    // --- jpackage + jlink ----------------------------------------------------
+
+    /**
+     * Build a packaged app with bundled minimal JVM via jpackage.
+     * jdeps detects modules → jpackage bundles only what's needed.
+     */
+    private static int buildPackagedApp(Path projectDir) {
+        try {
+            // Step 1: Build fat jar via Mill
+            runMill(projectDir, "assembly");
+            var fatJar = projectDir.resolve("out/assembly.dest/out.jar");
+            if (!Files.exists(fatJar)) {
+                System.err.println("error: fat jar not found at " + fatJar);
+                return 1;
+            }
+
+            // Step 2: Detect required modules via jdeps
+            var jdepsProcess = new ProcessBuilder(
+                "jdeps", "--print-module-deps", "--ignore-missing-deps",
+                "--multi-release", "25", fatJar.toString())
+                .redirectErrorStream(true).start();
+            var modules = new String(jdepsProcess.getInputStream().readAllBytes()).trim();
+            jdepsProcess.waitFor();
+
+            if (modules.isEmpty() || modules.contains("Error")) {
+                // Fallback: common modules for server apps
+                modules = "java.base,java.desktop,java.instrument,java.management,java.naming,java.security.jgss,java.sql";
+            }
+            System.out.println("modules: " + modules);
+
+            // Step 3: Find main class
+            String mainClass = "Main";
+            var buildYaml = projectDir.resolve("build.mill.yaml");
+            if (Files.exists(buildYaml)) {
+                for (var line : Files.readAllLines(buildYaml)) {
+                    if (line.trim().startsWith("mainClass:"))
+                        mainClass = line.trim().substring("mainClass:".length()).trim();
+                }
+            }
+
+            // Step 4: jpackage
+            var appName = projectDir.getFileName().toString().toLowerCase().replace("-", "");
+            var cmd = List.of(
+                "jpackage",
+                "--type", "app-image",
+                "--name", appName,
+                "--input", fatJar.getParent().toString(),
+                "--main-jar", fatJar.getFileName().toString(),
+                "--main-class", mainClass,
+                "--dest", projectDir.resolve("dist").toString(),
+                "--add-modules", modules,
+                "--java-options", "--enable-preview");
+
+            System.out.println("jpackage: " + appName);
+            var process = new ProcessBuilder(cmd).inheritIO().start();
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                var dist = projectDir.resolve("dist/" + appName);
+                System.out.println("packaged app: " + dist);
+                // Show size
+                try (var walk = Files.walk(dist)) {
+                    long totalSize = walk.filter(Files::isRegularFile).mapToLong(p -> {
+                        try { return Files.size(p); } catch (IOException e) { return 0; }
+                    }).sum();
+                    System.out.println("total size: " + totalSize / 1024 / 1024 + "MB");
+                }
+            }
+            return exitCode;
+        } catch (Exception e) {
+            System.err.println("jpackage failed: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    // --- Docker ---------------------------------------------------------------
+
+    private static int buildDocker(Path projectDir) {
+        try {
+            // Build fat jar first
+            runMill(projectDir, "assembly");
+            var fatJar = projectDir.resolve("out/assembly.dest/out.jar");
+
+            var appName = projectDir.getFileName().toString().toLowerCase();
+
+            // Find main class
+            String mainClass = "Main";
+            var buildYaml = projectDir.resolve("build.mill.yaml");
+            if (Files.exists(buildYaml)) {
+                for (var line : Files.readAllLines(buildYaml)) {
+                    if (line.trim().startsWith("mainClass:"))
+                        mainClass = line.trim().substring("mainClass:".length()).trim();
+                }
+            }
+
+            // Generate Dockerfile
+            var dockerfile = projectDir.resolve("Dockerfile");
+            Files.writeString(dockerfile, """
+                FROM eclipse-temurin:25-jre-alpine
+                WORKDIR /app
+                COPY %s app.jar
+                EXPOSE 8080
+                CMD ["java", "--enable-preview", "-jar", "app.jar"]
+                """.formatted(fatJar.getFileName()));
+
+            // Build
+            var cmd = List.of("docker", "build", "-t", appName, "-f", dockerfile.toString(), fatJar.getParent().toString());
+            System.out.println("docker build: " + appName);
+            var process = new ProcessBuilder(cmd).inheritIO().start();
+            return process.waitFor();
+        } catch (Exception e) {
+            System.err.println("docker build failed: " + e.getMessage());
             return 1;
         }
     }
