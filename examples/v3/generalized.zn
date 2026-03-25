@@ -1,0 +1,42 @@
+// Generalized — Zinc v3
+// Tests general-case behavior that shouldn't be special-cased
+
+// Primitive equality uses Java ==
+var a = 5 == 5
+var b = 3.14 != 2.71
+print("int eq: {a}")
+print("float neq: {b}")
+
+// Object equality uses Objects.equals
+var s1 = "hello"
+var s2 = "hello"
+print("str eq: {s1 == s2}")
+print("str neq: {s1 != "world"}")
+
+// Expression lambda in void context (forEach)
+var items = [1, 2, 3]
+items.forEach(x -> print("item: {x}"))
+
+// Expression lambda in value context (filter)
+var evens = items.filter(x -> x % 2 == 0)
+print("evens: {evens}")
+
+// Map with insertion order preserved
+Map<String, int> ages = {"alice": 30, "bob": 25, "charlie": 35}
+for k, v in ages {
+    print("{k}: {v}")
+}
+
+// Array field in class
+class Config {
+    int[] ports = [80, 443, 8080]
+
+    pub fn firstPort(): int {
+        return ports[0]
+    }
+}
+
+var cfg = new Config()
+print("first port: {cfg.firstPort()}")
+
+print("Generalized OK")

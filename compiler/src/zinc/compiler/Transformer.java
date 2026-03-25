@@ -66,6 +66,7 @@ public class Transformer {
     private String className = "Main";
     private java.util.Map<String, TypeInfo> resolvedTypes = java.util.Map.of();
     private java.util.Set<String> interfaceNames = new java.util.HashSet<>();
+    private final JavaTypeResolver javaResolver = new JavaTypeResolver();
 
     public Transformer() {}
 
@@ -317,7 +318,8 @@ public class Transformer {
             var jField = jClass.addField(type, field.name(), visibility);
             if (field.isInit()) jField.addModifier(Keyword.FINAL);
             if (field.defaultValue() != null) {
-                jField.getVariable(0).setInitializer(transformExpr(field.defaultValue()));
+                jField.getVariable(0).setInitializer(
+                    transformExprInContext(field.defaultValue(), field.type()));
             }
 
             // Getters for pub/readonly/init fields
@@ -588,29 +590,16 @@ public class Transformer {
     }
 
     private Statement transformVarStmt(Ast.VarStmt v) {
-        Expression init = v.value() != null ? transformExpr(v.value()) : null;
         if (v.type() != null) {
             var type = transformType(v.type());
-
-            // Array type + list literal → new Type[]{elem1, elem2, ...}
-            if (v.type() instanceof Ast.ArrayType arrType && v.value() instanceof ListLit list) {
-                var elemType = transformType(arrType.elementType());
-                var elems = new NodeList<Expression>();
-                for (var el : list.elements()) elems.add(transformExpr(el));
-                var arrayInit = new ArrayCreationExpr(elemType, new NodeList<>(new ArrayCreationLevel()),
-                    new ArrayInitializerExpr(elems));
-                var decl = new VariableDeclarationExpr(type, v.name());
-                decl.getVariable(0).setInitializer(arrayInit);
-                return new ExpressionStmt(decl);
-            }
-
             var decl = new VariableDeclarationExpr(type, v.name());
-            if (init != null) decl.getVariable(0).setInitializer(init);
+            if (v.value() != null) decl.getVariable(0).setInitializer(
+                transformExprInContext(v.value(), v.type()));
             return new ExpressionStmt(decl);
         }
         // var inference
         var decl = new VariableDeclarationExpr(new VarType(), v.name());
-        if (init != null) decl.getVariable(0).setInitializer(init);
+        if (v.value() != null) decl.getVariable(0).setInitializer(transformExpr(v.value()));
         return new ExpressionStmt(decl);
     }
 
@@ -1018,18 +1007,22 @@ public class Transformer {
             }
             case StringInterpLit interp -> transformInterpString(interp);
             case MapLit map -> {
-                // Build map imperatively to preserve insertion order
-                // new LinkedHashMap<>() {{ put(k1, v1); put(k2, v2); }}
-                var initBlock = new StringBuilder("new java.util.LinkedHashMap<>()");
-                if (!map.keys().isEmpty()) {
-                    initBlock.append(" {{ ");
-                    for (int i = 0; i < map.keys().size(); i++) {
-                        initBlock.append("put(").append(exprToJava(map.keys().get(i)))
-                            .append(", ").append(exprToJava(map.values().get(i))).append("); ");
-                    }
-                    initBlock.append("}}");
+                // Preserve insertion order via LinkedHashMap
+                // Use java.util.SequencedMap factory or build inline
+                if (map.keys().isEmpty()) {
+                    yield new ObjectCreationExpr(null, new ClassOrInterfaceType(null, "LinkedHashMap<>"), new NodeList<>());
                 }
-                yield parseExpr(initBlock.toString());
+                // For small maps, use inline double-brace initialization
+                // This creates an anonymous subclass but is the simplest way to preserve order
+                // in an expression context without a helper method
+                var sb = new StringBuilder("new java.util.LinkedHashMap<>()");
+                sb.append(" {{ ");
+                for (int i = 0; i < map.keys().size(); i++) {
+                    sb.append("put(").append(exprToJava(map.keys().get(i)))
+                        .append(", ").append(exprToJava(map.values().get(i))).append("); ");
+                }
+                sb.append("}}");
+                yield parseExpr(sb.toString());
             }
             case RawStringLit raw -> new StringLiteralExpr(raw.value());
             case SafeNavExpr nav -> {
@@ -1070,13 +1063,20 @@ public class Transformer {
         var left = transformExpr(bin.left());
         var right = transformExpr(bin.right());
 
-        // == in Zinc is structural equality → Objects.equals(a, b)
+        // == in Zinc is structural equality
+        // For primitives (int, double, etc.): use Java ==
+        // For objects (String, etc.): use Objects.equals()
         if (bin.op().equals("==")) {
+            if (isPrimitiveLiteral(bin.left()) && isPrimitiveLiteral(bin.right())) {
+                return new com.github.javaparser.ast.expr.BinaryExpr(left, right, BinaryExpr.Operator.EQUALS);
+            }
             return new MethodCallExpr(new NameExpr("java.util.Objects"), "equals",
                 new NodeList<>(left, right));
         }
-        // != → !Objects.equals(a, b)
         if (bin.op().equals("!=")) {
+            if (isPrimitiveLiteral(bin.left()) && isPrimitiveLiteral(bin.right())) {
+                return new com.github.javaparser.ast.expr.BinaryExpr(left, right, BinaryExpr.Operator.NOT_EQUALS);
+            }
             return new com.github.javaparser.ast.expr.UnaryExpr(
                 new MethodCallExpr(new NameExpr("java.util.Objects"), "equals",
                     new NodeList<>(left, right)),
@@ -1169,7 +1169,12 @@ public class Transformer {
                 return transformStreamChain(call);
             }
 
-            return new MethodCallExpr(transformExpr(sel.object()), methodName, args);
+            var result = new MethodCallExpr(transformExpr(sel.object()), methodName, args);
+            // Auto-unwrap Optional returns
+            if (javaResolver.returnsOptional(getTypeName(sel.object()), methodName)) {
+                return new MethodCallExpr(result, "orElse", new NodeList<>(new NullLiteralExpr()));
+            }
+            return result;
         }
 
         // Simple function call: func(args)
@@ -1363,6 +1368,35 @@ public class Transformer {
         };
     }
 
+    /**
+     * Transform expression with type context — handles array literal assignment to array type.
+     */
+    private Expression transformExprInContext(Expr expr, Ast.TypeExpr targetType) {
+        if (targetType instanceof Ast.ArrayType arrType && expr instanceof ListLit list) {
+            var elemType = transformType(arrType.elementType());
+            var elems = new NodeList<Expression>();
+            for (var el : list.elements()) elems.add(transformExpr(el));
+            return new ArrayCreationExpr(elemType, new NodeList<>(new ArrayCreationLevel()),
+                new ArrayInitializerExpr(elems));
+        }
+        return transformExpr(expr);
+    }
+
+    /** Check if expression is definitely a primitive (literal or known primitive var). */
+    private boolean isPrimitiveLiteral(Expr expr) {
+        return expr instanceof IntLit || expr instanceof FloatLit || expr instanceof BoolLit
+            || (expr instanceof Ast.UnaryExpr un && isPrimitiveLiteral(un.operand()));
+    }
+
+    /** Get Zinc type name from an expression (best-effort). */
+    private String getTypeName(Expr expr) {
+        return switch (expr) {
+            case Ident id -> id.name();
+            case CallExpr call -> call.callee() instanceof Ident id ? id.name() : "Object";
+            default -> "Object";
+        };
+    }
+
     /** Quick expression to Java source string for inline use. */
     private String exprToJava(Expr expr) {
         return transformExpr(expr).toString();
@@ -1488,6 +1522,10 @@ public class Transformer {
         };
     }
 
+    /**
+     * Java Stream API methods. When called on a collection, auto-insert .stream()/.toList().
+     * This is a fixed set — Java's Stream API doesn't change often.
+     */
     private static boolean isStreamMethod(String name) {
         return switch (name) {
             case "filter", "map", "flatMap", "reduce", "forEach", "sorted", "sortBy",

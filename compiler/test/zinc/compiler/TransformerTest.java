@@ -48,6 +48,10 @@ public class TransformerTest {
         testForWithIndex();
         testInheritance();
         testDataClassToString();
+        testPrimitiveEquality();
+        testExpressionLambdaVoidContext();
+        testExpressionLambdaValueContext();
+        testArrayFieldDefault();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -430,6 +434,46 @@ public class TransformerTest {
         var java = transpile("data Point(int x, int y)");
         assertContains("data_str: toString", java, "toString");
         assertContains("data_str: Point[", java, "Point[");
+    }
+
+    static void testPrimitiveEquality() {
+        // Primitives: use Java ==, not Objects.equals
+        var java = transpile("var x = 5 == 5\nvar y = 3.14 == 3.14");
+        assertNotContains("prim_eq: no Objects.equals for int", java, "Objects.equals(5, 5)");
+        assertContains("prim_eq: int ==", java, "5 == 5");
+
+        // Objects: use Objects.equals
+        var java2 = transpile("var x = a == b");
+        assertContains("obj_eq: Objects.equals", java2, "Objects.equals(a, b)");
+    }
+
+    static void testExpressionLambdaVoidContext() {
+        // forEach with print → expression lambda, no return
+        var java = transpile("""
+            var items = [1, 2, 3]
+            items.forEach(x -> print(x))
+            """);
+        assertNotContains("void_lambda: no return", java, "return System");
+        assertContains("void_lambda: expression", java, "System.out.println(x)");
+    }
+
+    static void testExpressionLambdaValueContext() {
+        // filter with condition → expression lambda returns value
+        var java = transpile("""
+            var items = [1, 2, 3]
+            var evens = items.filter(x -> x % 2 == 0)
+            """);
+        assertContains("val_lambda: expression", java, "x % 2");
+    }
+
+    static void testArrayFieldDefault() {
+        var java = transpile("""
+            class Config {
+                int[] ports = [80, 443]
+            }
+            """);
+        assertContains("arr_field: new int[]", java, "new int[]");
+        assertContains("arr_field: 80, 443", java, "80, 443");
     }
 
     // --- Helpers -------------------------------------------------------------

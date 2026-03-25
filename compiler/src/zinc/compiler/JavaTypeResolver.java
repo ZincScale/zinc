@@ -79,6 +79,21 @@ public class JavaTypeResolver {
     }
 
     /**
+     * Check if a method on a Java class returns Optional.
+     */
+    public boolean returnsOptional(String zincType, String methodName) {
+        String javaClassName = ZINC_TO_JAVA.getOrDefault(zincType, zincType);
+        var clazz = loadClass(javaClassName);
+        if (clazz == null) return false;
+        for (Method m : clazz.getMethods()) {
+            if (m.getName().equals(methodName)) {
+                return java.util.Optional.class.isAssignableFrom(m.getReturnType());
+            }
+        }
+        return false;
+    }
+
+    /**
      * Check if a method on a Java class is declared as throwing a checked exception.
      */
     public boolean methodThrows(String zincType, String methodName) {
