@@ -46,6 +46,14 @@ import zinc.compiler.Ast.CtorDecl;
 import zinc.compiler.Ast.FieldDecl;
 import zinc.compiler.Ast.ParamDecl;
 import zinc.compiler.Ast.Annotation;
+import zinc.compiler.Ast.MapLit;
+import zinc.compiler.Ast.SafeNavExpr;
+import zinc.compiler.Ast.TypeAssertExpr;
+import zinc.compiler.Ast.RawStringLit;
+import zinc.compiler.Ast.TupleLit;
+import zinc.compiler.Ast.SliceExpr;
+import zinc.compiler.Ast.SpreadExpr;
+import zinc.compiler.Ast.SuperCallExpr;
 
 /**
  * Transforms Zinc AST into JavaParser AST.
@@ -76,16 +84,58 @@ public class Transformer {
     public Result<List<CompilationUnit>> transformAll(Program program) {
         var units = new java.util.ArrayList<CompilationUnit>();
 
-        // Script mode — single Main class with everything
+        // Script mode — Main class for stmts + top-level fns, separate CUs for types
         if (!program.stmts().isEmpty()) {
             var result = transform(program);
             if (result.isErr()) return Result.err(((Result.Err<?>) result).errors());
             units.add(result.unwrap());
+
+            // Types declared in script mode get their own files
+            for (var decl : program.decls()) {
+                if (decl instanceof FnDecl) continue; // already in Main
+                var cu = new CompilationUnit();
+                if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
+                for (var imp : program.imports()) cu.addImport(imp.path());
+                switch (decl) {
+                    case ClassDecl cls -> cu.addType(transformClassDecl(cls));
+                    case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
+                    case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
+                    case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
+                    case EnumDecl en -> cu.addType(transformEnumDecl(en));
+                    default -> { continue; }
+                }
+                units.add(cu);
+            }
             return Result.ok(units);
         }
 
-        // Multi-type mode — one CU per top-level declaration
+        // Collect top-level functions — group into one class
+        var topFns = program.decls().stream()
+            .filter(d -> d instanceof FnDecl).map(d -> (FnDecl) d).toList();
+
+        if (!topFns.isEmpty()) {
+            var cu = new CompilationUnit();
+            if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
+            for (var imp : program.imports()) cu.addImport(imp.path());
+
+            var mainClass = cu.addClass(className, Keyword.PUBLIC);
+            for (var fn : topFns) {
+                var jMethod = transformFnDecl(fn);
+                // fn main() → public static void main(String[] args) throws Exception
+                if (fn.name().equals("main")) {
+                    jMethod.getParameters().clear();
+                    jMethod.addParameter("String[]", "args");
+                    jMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
+                }
+                mainClass.addMember(jMethod);
+            }
+            units.add(cu);
+        }
+
+        // Other declarations — one CU per type
         for (var decl : program.decls()) {
+            if (decl instanceof FnDecl) continue; // already handled
+
             var cu = new CompilationUnit();
             if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
             for (var imp : program.imports()) cu.addImport(imp.path());
@@ -96,12 +146,8 @@ public class Transformer {
                 case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
                 case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
                 case EnumDecl en -> cu.addType(transformEnumDecl(en));
-                case FnDecl fn -> {
-                    // Top-level function without script — wrap in utility class
-                    var utilClass = cu.addClass(className, Keyword.PUBLIC);
-                    utilClass.addMember(transformFnDecl(fn));
-                }
                 case ConstDecl c -> {}
+                default -> {}
             }
             units.add(cu);
         }
@@ -141,25 +187,6 @@ public class Transformer {
                 if (decl instanceof FnDecl fn) {
                     mainClass.addMember(transformFnDecl(fn));
                 }
-            }
-        }
-
-        // Top-level declarations (non-script mode)
-        for (var decl : program.decls()) {
-            switch (decl) {
-                case ClassDecl cls -> cu.addType(transformClassDecl(cls));
-                case InterfaceDecl iface -> cu.addType(transformInterfaceDecl(iface));
-                case DataClassDecl data -> cu.addType(transformDataClassDecl(data));
-                case SealedClassDecl sealed -> cu.addType(transformSealedClassDecl(sealed));
-                case EnumDecl en -> cu.addType(transformEnumDecl(en));
-                case FnDecl fn -> {
-                    // Already handled in script mode above
-                    if (program.stmts().isEmpty()) {
-                        // Non-script: need a class to hold static functions
-                        // This is handled by the caller or by wrapping
-                    }
-                }
-                case ConstDecl c -> {} // handled as static fields
             }
         }
 
@@ -779,17 +806,48 @@ public class Transformer {
             case SelectorExpr sel -> new FieldAccessExpr(transformExpr(sel.object()), sel.field());
             case IndexExpr idx -> new ArrayAccessExpr(transformExpr(idx.object()), transformExpr(idx.index()));
             case ListLit list -> {
-                var init = new ArrayInitializerExpr();
-                var values = new NodeList<Expression>();
-                for (var el : list.elements()) values.add(transformExpr(el));
-                init.setValues(values);
-                yield new MethodCallExpr(new NameExpr("java.util.List"), "of",
-                    new NodeList<>(list.elements().stream().map(this::transformExpr).toArray(Expression[]::new)));
+                var listArgs = new NodeList<Expression>();
+                for (var el : list.elements()) listArgs.add(transformExpr(el));
+                yield new MethodCallExpr(new NameExpr("java.util.List"), "of", listArgs);
             }
             case StringInterpLit interp -> transformInterpString(interp);
+            case MapLit map -> {
+                // {k: v, ...} → java.util.Map.of(k, v, ...)
+                var mapArgs = new NodeList<Expression>();
+                for (int i = 0; i < map.keys().size(); i++) {
+                    mapArgs.add(transformExpr(map.keys().get(i)));
+                    mapArgs.add(transformExpr(map.values().get(i)));
+                }
+                yield new MethodCallExpr(new NameExpr("java.util.Map"), "of", mapArgs);
+            }
+            case RawStringLit raw -> new StringLiteralExpr(raw.value());
+            case SafeNavExpr nav -> {
+                // obj?.field → (obj != null ? obj.field : null)
+                var obj = transformExpr(nav.object());
+                var access = new FieldAccessExpr(obj, nav.field());
+                yield new ConditionalExpr(
+                    new com.github.javaparser.ast.expr.BinaryExpr(obj.clone(), new NullLiteralExpr(),
+                        com.github.javaparser.ast.expr.BinaryExpr.Operator.NOT_EQUALS),
+                    nav.call() != null ? transformCallExpr(nav.call()) : access,
+                    new NullLiteralExpr());
+            }
+            case TypeAssertExpr ta -> {
+                if (ta.isCheck()) {
+                    // x is Type → x instanceof Type
+                    yield new InstanceOfExpr(transformExpr(ta.object()), new ClassOrInterfaceType(null, ta.typeName()));
+                } else {
+                    // x as Type → (Type) x
+                    yield new CastExpr(new ClassOrInterfaceType(null, ta.typeName()), transformExpr(ta.object()));
+                }
+            }
             case Ast.LambdaExpr lam -> transformLambda(lam);
             case Ast.SpawnExpr spawn -> transformSpawn(spawn);
             case RangeExpr range -> transformRange(range);
+            case TupleLit tuple -> {
+                // Tuples → just use the first element for now (simplified)
+                if (!tuple.elements().isEmpty()) yield transformExpr(tuple.elements().getFirst());
+                yield new NullLiteralExpr();
+            }
             default -> new NameExpr("/* unsupported: " + expr.getClass().getSimpleName() + " */");
         };
     }
@@ -826,12 +884,40 @@ public class Transformer {
         return new com.github.javaparser.ast.expr.UnaryExpr(operand, op);
     }
 
+    // Zinc method name → Java method name
+    private static final java.util.Map<String, String> METHOD_ALIASES = java.util.Map.ofEntries(
+        java.util.Map.entry("upper", "toUpperCase"),
+        java.util.Map.entry("lower", "toLowerCase"),
+        java.util.Map.entry("trim", "strip"),
+        java.util.Map.entry("trimStart", "stripLeading"),
+        java.util.Map.entry("trimEnd", "stripTrailing"),
+        java.util.Map.entry("chars", "toCharArray"),
+        java.util.Map.entry("startsWith", "startsWith"),
+        java.util.Map.entry("endsWith", "endsWith"),
+        java.util.Map.entry("contains", "contains"),
+        java.util.Map.entry("replace", "replace"),
+        java.util.Map.entry("repeat", "repeat"),
+        java.util.Map.entry("isEmpty", "isEmpty"),
+        java.util.Map.entry("split", "split"),
+        java.util.Map.entry("substring", "substring"),
+        java.util.Map.entry("charAt", "charAt"),
+        java.util.Map.entry("indexOf", "indexOf")
+    );
+
+    // Zinc type → Java type for constructors
+    private static final java.util.Map<String, String> TYPE_MAP = java.util.Map.ofEntries(
+        java.util.Map.entry("Channel", "java.util.concurrent.ArrayBlockingQueue"),
+        java.util.Map.entry("Lock", "java.util.concurrent.locks.ReentrantLock")
+    );
+
     private Expression transformCallExpr(CallExpr call) {
         var args = new NodeList<Expression>();
         for (var arg : call.args()) args.add(transformExpr(arg));
 
         if (call.isNew()) {
-            var type = new ClassOrInterfaceType(null, ((Ident) call.callee()).name());
+            String typeName = ((Ident) call.callee()).name();
+            typeName = TYPE_MAP.getOrDefault(typeName, typeName);
+            var type = new ClassOrInterfaceType(null, typeName);
             if (!call.typeArgs().isEmpty()) {
                 var typeArgs = new NodeList<Type>();
                 for (var ta : call.typeArgs()) typeArgs.add(new ClassOrInterfaceType(null, ta));
@@ -840,15 +926,19 @@ public class Transformer {
             return new ObjectCreationExpr(null, type, args);
         }
 
-        // Method call on object: obj.method(args)
+        // Method call on object: obj.method(args) with alias resolution
         if (call.callee() instanceof SelectorExpr sel) {
-            return new MethodCallExpr(transformExpr(sel.object()), sel.field(), args);
+            String methodName = METHOD_ALIASES.getOrDefault(sel.field(), sel.field());
+            return new MethodCallExpr(transformExpr(sel.object()), methodName, args);
         }
 
         // Simple function call: func(args)
         if (call.callee() instanceof Ident id) {
             if (id.name().equals("print")) {
                 return new MethodCallExpr(new NameExpr("System.out"), "println", args);
+            }
+            if (id.name().equals("len") && !args.isEmpty()) {
+                return new MethodCallExpr(args.get(0), "size");
             }
             return new MethodCallExpr(null, id.name(), args);
         }
