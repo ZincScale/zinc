@@ -1,6 +1,6 @@
 JP = $(HOME)/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 
-.PHONY: build test clean
+.PHONY: build test native clean
 
 build:
 	@mkdir -p out
@@ -16,5 +16,15 @@ test: build
 	java --enable-preview -cp out:$(JP) zinc.compiler.TransformerTest
 	bash run_e2e.sh
 
+native: build
+	native-image --enable-preview \
+		-jar zinc-compiler.jar \
+		-o zinc \
+		--no-fallback \
+		-O2 -march=native \
+		-H:+ReportExceptionStackTraces
+	@echo "built: zinc (native binary)"
+	@ls -lh zinc
+
 clean:
-	rm -rf out zinc-compiler.jar
+	rm -rf out zinc-compiler.jar zinc

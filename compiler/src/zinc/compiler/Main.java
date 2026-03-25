@@ -62,12 +62,14 @@ public class Main {
     private static void cmdBuild(List<String> args) {
         String input = null;
         Path outDir = null;
+        boolean nativeImage = true; // default: build native binaries
 
         for (int i = 0; i < args.size(); i++) {
-            if (args.get(i).equals("-o") && i + 1 < args.size()) {
-                outDir = Path.of(args.get(++i));
-            } else if (!args.get(i).startsWith("-")) {
-                input = args.get(i);
+            switch (args.get(i)) {
+                case "-o" -> { if (i + 1 < args.size()) outDir = Path.of(args.get(++i)); }
+                case "--native" -> nativeImage = true;
+                case "--no-native" -> nativeImage = false;
+                default -> { if (!args.get(i).startsWith("-")) input = args.get(i); }
             }
         }
 
@@ -103,7 +105,28 @@ public class Main {
             System.out.println("mill compile");
             int exitCode = runMill(projectDir, "compile");
             if (exitCode != 0) System.exit(exitCode);
+
+            if (nativeImage) {
+                // Build native binary via native-image
+                System.out.println("building native image...");
+                exitCode = runNativeImage(projectDir, outDir);
+                if (exitCode != 0) System.exit(exitCode);
+            }
+
             System.out.println("build complete: " + projectDir + " (Mill project)");
+        } else if (nativeImage) {
+            // Single-file native build: javac first, then native-image
+            var javacResult = runJavac(result.unwrap(), outDir);
+            if (javacResult.isErr()) {
+                for (var e : ((Result.Err<?>) javacResult).errors()) System.err.println(e);
+                System.exit(1);
+            }
+            String mainClass = findMainClass(result.unwrap(), outDir);
+            if (mainClass != null) {
+                System.out.println("building native image...");
+                int exitCode = runNativeImage(mainClass, outDir);
+                if (exitCode != 0) System.exit(exitCode);
+            }
         }
     }
 
@@ -384,6 +407,40 @@ public class Main {
             System.err.println("failed to run mill: " + e.getMessage());
             return 1;
         }
+    }
+
+    // --- native-image --------------------------------------------------------
+
+    /** Build native binary from a classpath directory. */
+    private static int runNativeImage(String mainClass, Path classDir) {
+        var outputName = mainClass.toLowerCase();
+        try {
+            var cmd = List.of(
+                "native-image", "--enable-preview",
+                "-cp", classDir.toString(),
+                "-o", classDir.resolve(outputName).toString(),
+                "--no-fallback", "-O2", "-march=native",
+                mainClass);
+            var process = new ProcessBuilder(cmd).inheritIO().start();
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                System.out.println("native binary: " + classDir.resolve(outputName));
+            }
+            return exitCode;
+        } catch (Exception e) {
+            System.err.println("native-image not found. Install GraalVM JDK 25.");
+            return 1;
+        }
+    }
+
+    /** Build native binary from a Mill project. */
+    private static int runNativeImage(Path projectDir, Path outDir) {
+        // Mill projects: use mill nativeImage if available, otherwise manual
+        int exitCode = runMill(projectDir, "nativeImage");
+        if (exitCode == 0) return 0;
+        // Fallback: find the jar and native-image it directly
+        System.out.println("mill nativeImage not available, trying direct...");
+        return runNativeImage("Main", projectDir.resolve("out/compile.dest/classes"));
     }
 
     // --- javac ----------------------------------------------------------------
