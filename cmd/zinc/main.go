@@ -582,13 +582,18 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Convention: directory = package
 		inferredPkg := inferPackageFromDir(znFile, sourceRoot)
 
+		// Check if file is under source root (not stdlib)
+		absFile, _ := filepath.Abs(znFile)
+		absRoot, _ := filepath.Abs(sourceRoot)
+		isUnderSourceRoot := strings.HasPrefix(absFile, absRoot)
+
 		if prog.Package != nil {
-			// Validate declared package matches directory
-			if inferredPkg != "" && prog.Package.Path != inferredPkg {
+			// Validate declared package matches directory — only for project files
+			if isUnderSourceRoot && inferredPkg != "" && prog.Package.Path != inferredPkg {
 				fmt.Fprintf(os.Stderr, "warning: %s declares package '%s' but directory suggests '%s'\n",
 					znFile, prog.Package.Path, inferredPkg)
 			}
-		} else if inferredPkg != "" {
+		} else if inferredPkg != "" && isUnderSourceRoot {
 			// Auto-set package from directory
 			prog.Package = &parser.PackageDecl{Path: inferredPkg}
 			if verbose {
@@ -626,22 +631,34 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		}
 	}
 
-	// Resolve stdlib imports: if any file imports zinc.*, include the stdlib .zn files
+	// Resolve stdlib imports: if any file imports zinc.*, include ALL stdlib .zn files
 	stdlibDir := findStdlibDir()
 	if stdlibDir != "" {
-		var stdlibNeeded []string
+		hasZincImport := false
 		for _, pf := range parsed {
 			for _, imp := range pf.prog.Imports {
 				if strings.HasPrefix(imp.Path, "zinc.") {
-					parts := strings.SplitN(imp.Path, ".", 2)
-					if len(parts) == 2 {
-						znFile := filepath.Join(stdlibDir, "zinc", parts[1]+".zn")
-						if _, err := os.Stat(znFile); err == nil {
-							stdlibNeeded = append(stdlibNeeded, znFile)
-						}
-					}
+					hasZincImport = true
+					break
 				}
 			}
+			if hasZincImport {
+				break
+			}
+		}
+		var stdlibNeeded []string
+		if hasZincImport {
+			// Include all stdlib files when any zinc.* import is present
+			stdlibZincDir := filepath.Join(stdlibDir, "zinc")
+			filepath.Walk(stdlibZincDir, func(path string, fi os.FileInfo, err error) error {
+				if err != nil || fi.IsDir() {
+					return nil
+				}
+				if strings.HasSuffix(fi.Name(), ".zn") {
+					stdlibNeeded = append(stdlibNeeded, path)
+				}
+				return nil
+			})
 		}
 		// Parse and include stdlib files
 		seen := make(map[string]bool)
@@ -760,6 +777,7 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 		// Generate Java files
 		className := classNameFromFile(pf.path)
 		gen := codegen_java.New()
+		gen.SkipActorRuntime = true // generated once at the end, not per-file
 		// Register cross-file type names for codegen
 		for _, other := range parsed {
 			for _, d := range other.prog.Decls {
@@ -800,6 +818,9 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 
 		for _, of := range outputFiles {
 			path := filepath.Join(pkgDir, of.Name)
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return nil, fmt.Errorf("creating dir for %s: %w", path, err)
+			}
 			if err := os.WriteFile(path, []byte(of.Content), 0644); err != nil {
 				return nil, fmt.Errorf("writing %s: %w", path, err)
 			}
@@ -808,6 +829,31 @@ func transpileMultiFile(znFiles []string, outDir string, verbose bool) ([]string
 				fmt.Fprintf(os.Stderr, "[verbose] wrote %s\n", path)
 			}
 		}
+	}
+
+	// Generate DefaultActorRuntime once if any actors exist
+	hasActors := false
+	for _, pf := range parsed {
+		for _, d := range pf.prog.Decls {
+			if cls, ok := d.(*parser.ClassDecl); ok {
+				for _, parent := range cls.Parents {
+					if parent == "Actor" || parent == "Supervisor" {
+						hasActors = true
+					}
+				}
+			}
+		}
+	}
+	if hasActors {
+		runtimeContent := codegen_java.GenerateDefaultActorRuntimeFile()
+		runtimePath := filepath.Join(outDir, "zinc", "DefaultActorRuntime.java")
+		if err := os.MkdirAll(filepath.Dir(runtimePath), 0755); err != nil {
+			return nil, fmt.Errorf("creating zinc dir: %w", err)
+		}
+		if err := os.WriteFile(runtimePath, []byte(runtimeContent), 0644); err != nil {
+			return nil, fmt.Errorf("writing DefaultActorRuntime: %w", err)
+		}
+		allJavaFiles = append(allJavaFiles, runtimePath)
 	}
 
 	return allJavaFiles, nil
@@ -836,6 +882,9 @@ func transpileSingleFile(inFile, outDir string, verbose bool) ([]string, error) 
 	var javaFiles []string
 	for _, of := range outputFiles {
 		path := filepath.Join(pkgDir, of.Name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return nil, fmt.Errorf("creating dir for %s: %w", path, err)
+		}
 		if err := os.WriteFile(path, []byte(of.Content), 0644); err != nil {
 			return nil, fmt.Errorf("writing %s: %w", path, err)
 		}

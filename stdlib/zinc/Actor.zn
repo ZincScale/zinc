@@ -11,8 +11,8 @@ package zinc
 import java.util.concurrent.ArrayBlockingQueue
 
 abstract class Actor {
-    var int mailboxCapacity = 1000
-    var ArrayBlockingQueue mailbox = null
-    var Thread actorThread = null
-    var boolean running = false
+    pub int mailboxCapacity = 1000
+    pub ArrayBlockingQueue<Runnable> mailbox = null
+    pub Thread actorThread = null
+    pub boolean running = false
 }

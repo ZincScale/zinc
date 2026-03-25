@@ -36,6 +36,7 @@ type Generator struct {
 	zincMethods        map[string]map[string]bool // className → methodName → canThrow
 	errVarStack        []string        // stack of catch variable names for nested or-blocks
 	currentClassParents []string       // parents of the class currently being emitted
+	SkipActorRuntime   bool            // when true, don't generate DefaultActorRuntime in GenerateFiles
 }
 
 // New creates a new Java code generator.
@@ -370,13 +371,14 @@ func (g *Generator) GenerateFiles(prog *parser.Program, className string) []Outp
 	}
 
 	// Generate DefaultActorRuntime if actors/supervisors are used
-	// (Actor, Supervisor, ActorRuntime come from stdlib .zn files)
-	if hasActors {
+	// Placed in zinc package alongside Actor, Supervisor, ActorRuntime
+	if hasActors && !g.SkipActorRuntime {
 		g.buf.Reset()
 		g.indent = 0
-		g.emitPackageAndImports(prog.Package, prog.Imports)
+		zincPkg := &parser.PackageDecl{Path: "zinc"}
+		g.emitPackageAndImports(zincPkg, nil)
 		g.emitDefaultActorRuntime()
-		files = append(files, OutputFile{Name: "DefaultActorRuntime.java", Content: g.buf.String()})
+		files = append(files, OutputFile{Name: "zinc" + string(os.PathSeparator) + "DefaultActorRuntime.java", Content: g.buf.String()})
 	}
 
 	// Main class file: top-level functions + script statements
@@ -493,10 +495,11 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 	// User fields
 	g.pendingAccessors = nil
 	for _, f := range cls.Fields {
-		if isActor {
-			// Actor fields are private, no accessors — state is owned
+		if isActor && !cls.IsAbstract {
+			// Concrete actor subclass fields are private, no accessors — state is owned
 			g.emitActorFieldDecl(f)
 		} else {
+			// Normal fields (including Actor base class — needs getters/setters)
 			g.emitFieldDecl(f)
 		}
 	}
@@ -513,7 +516,9 @@ func (g *Generator) emitClassBody(cls *parser.ClassDecl, classPrefix string) {
 		g.emitCtor(cls.Name, cls.Ctor, cls.Parents)
 	}
 
-	if !isActor {
+	if !isActor || cls.IsAbstract {
+		// Emit accessors for non-actors AND abstract actor base classes
+		// (Actor base class fields need getters/setters for supervisor access)
 		g.emitAccessors()
 	}
 
@@ -1038,7 +1043,7 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 	g.writeln("")
 
 	// kill() — brutal
-	g.writeln("public void kill() {")
+	g.writeln("public void kill() throws Exception {")
 	g.indent++
 	for _, name := range actorFields {
 		g.writeln("if (%s != null && %s.getActorThread() != null) {", name, name)
@@ -1055,6 +1060,16 @@ func (g *Generator) emitSupervisorMethods(actorFields []string) {
 }
 
 // --- Stdlib Generators (emitted when actors are used) ------------------------
+
+// GenerateDefaultActorRuntimeFile returns the complete Java source for DefaultActorRuntime.
+// Used by the multi-file compiler to generate it once outside the per-file loop.
+func GenerateDefaultActorRuntimeFile() string {
+	g := New()
+	g.writeln("package zinc;")
+	g.writeln("")
+	g.emitDefaultActorRuntime()
+	return g.buf.String()
+}
 
 // emitDefaultActorRuntime generates the production ActorRuntime implementation.
 // This is generated (not from stdlib) because it needs low-level Java constructs

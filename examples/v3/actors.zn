@@ -134,15 +134,15 @@ var r2 = doubler.twice(r1)
 var r3 = doubler.twice(r2)
 print("doubled: {r3}")
 
-// === Test 7: Override mailboxCapacity ===
+// === Test 7: Custom mailboxCapacity ===
 
 class BigQueue : Actor {
-    override fn mailboxCapacity(): int {
-        return 50000
+    init() {
+        setMailboxCapacity(50000)
     }
 
     pub fn getCapacity(): int {
-        return mailboxCapacity()
+        return getMailboxCapacity()
     }
 }
 
