@@ -9,51 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  package:
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            platform: linux-amd64
-          - runner: ubuntu-22.04
-            platform: linux-amd64-rhel9
-          - runner: ubuntu-20.04
-            platform: linux-amd64-rhel8
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up GraalVM JDK 25
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '25'
-          distribution: 'graalvm-community'
-
-      - name: Download JavaParser
-        run: |
-          mkdir -p ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/
-          curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
-            -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
-
-      - name: Build self-contained package (JDK + Mill + compiler)
-        working-directory: compiler
-        run: make package
-
-      - name: Run e2e tests
-        working-directory: compiler
-        run: bash run_e2e.sh
-
-      - name: Package release artifact
-        run: tar czf zinc-${{ matrix.platform }}.tar.gz -C compiler/dist zinc
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: zinc-${{ matrix.platform }}.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  jar:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,13 +26,23 @@ jobs:
           curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
             -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 
-      - name: Build jar (for users with existing JDK 25)
+      - name: Build self-contained package
         working-directory: compiler
-        run: make build
+        run: make package
 
-      - name: Upload jar to release
+      - name: Run e2e tests
+        working-directory: compiler
+        run: bash run_e2e.sh
+
+      - name: Package artifacts
+        run: |
+          tar czf zinc-linux-amd64.tar.gz -C compiler/dist zinc
+
+      - name: Create release and upload
         uses: softprops/action-gh-release@v2
         with:
-          files: compiler/zinc-compiler.jar
+          files: |
+            zinc-linux-amd64.tar.gz
+            compiler/zinc-compiler.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
