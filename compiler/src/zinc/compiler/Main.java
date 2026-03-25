@@ -436,18 +436,46 @@ public class Main {
         return null;
     }
 
-    /** Run a Mill command in the project directory. */
+    /** Run a Mill command in the project directory. Uses bundled Mill if available. */
     private static int runMill(Path projectDir, String command) {
         try {
-            var process = new ProcessBuilder("mill", command)
+            // Find Mill: bundled jar > system mill
+            var millPath = findBundledMill();
+            List<String> cmd;
+            if (millPath != null) {
+                cmd = List.of(millPath.toString(), command);
+            } else {
+                cmd = List.of("mill", command);
+            }
+            var process = new ProcessBuilder(cmd)
                 .directory(projectDir.toFile())
                 .inheritIO()
                 .start();
             return process.waitFor();
         } catch (Exception e) {
             System.err.println("failed to run mill: " + e.getMessage());
+            System.err.println("install mill: curl -L https://raw.githubusercontent.com/com-lihaoyi/mill/main/mill > mill && chmod +x mill");
             return 1;
         }
+    }
+
+    /** Find bundled Mill launcher relative to zinc binary location. */
+    private static Path findBundledMill() {
+        try {
+            var zincDir = Path.of(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent();
+            for (var candidate : List.of(
+                zincDir.resolve("mill"),
+                zincDir.resolve("lib/mill"),
+                zincDir.resolve("../lib/mill"))) {
+                if (Files.exists(candidate)) return candidate;
+            }
+        } catch (Exception e) { /* ignore */ }
+
+        var jarDir = Path.of(System.getProperty("user.dir"));
+        var candidate = jarDir.resolve("lib/mill");
+        if (Files.exists(candidate)) return candidate;
+
+        return null;
     }
 
     // --- native-image --------------------------------------------------------
@@ -695,48 +723,64 @@ public class Main {
     // --- javac ----------------------------------------------------------------
 
     private static Result<Void> runJavac(List<Path> javaFiles, Path outDir) {
-        var cmd = new ArrayList<String>();
-        cmd.add("javac");
-        cmd.add("--enable-preview");
-        cmd.add("--source");
-        cmd.add("25");
-        cmd.add("-d");
-        cmd.add(outDir.toString());
-        for (var f : javaFiles) cmd.add(f.toString());
+        var compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            return Result.err("javac not available — jdk.compiler module missing");
+        }
 
         try {
-            var process = new ProcessBuilder(cmd)
-                .redirectErrorStream(true)
-                .start();
-            var output = new String(process.getInputStream().readAllBytes());
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                return Result.err("javac failed:\n" + output);
-            }
-            return Result.ok(null);
-        } catch (Exception e) {
-            return Result.err("failed to run javac: " + e.getMessage());
+            Files.createDirectories(outDir);
+        } catch (IOException e) {
+            return Result.err("cannot create output dir: " + e.getMessage());
         }
+
+        var fileManager = compiler.getStandardFileManager(null, null, null);
+        var sourceFiles = fileManager.getJavaFileObjectsFromPaths(javaFiles);
+        var options = List.of(
+            "--enable-preview", "--source", "25",
+            "-d", outDir.toString());
+
+        var diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>();
+        var task = compiler.getTask(null, fileManager, diagnostics, options, null, sourceFiles);
+        boolean success = task.call();
+
+        try { fileManager.close(); } catch (IOException e) { /* ignore */ }
+
+        if (!success) {
+            var errors = new StringBuilder("javac failed:\n");
+            for (var d : diagnostics.getDiagnostics()) {
+                if (d.getKind() == javax.tools.Diagnostic.Kind.ERROR) {
+                    errors.append(d.toString()).append("\n");
+                }
+            }
+            return Result.err(errors.toString());
+        }
+
+        return Result.ok(null);
     }
 
     // --- java ----------------------------------------------------------------
 
+    /**
+     * Run a compiled class in-process via class loading.
+     * No external java process needed — zinc is self-contained.
+     */
     private static int runJava(String mainClass, Path classDir, List<String> args) {
-        var cmd = new ArrayList<String>();
-        cmd.add("java");
-        cmd.add("--enable-preview");
-        cmd.add("-cp");
-        cmd.add(classDir.toString());
-        cmd.add(mainClass);
-        cmd.addAll(args);
-
         try {
-            var process = new ProcessBuilder(cmd)
-                .inheritIO()
-                .start();
-            return process.waitFor();
+            var classLoader = new java.net.URLClassLoader(
+                new java.net.URL[]{classDir.toUri().toURL()},
+                ClassLoader.getSystemClassLoader());
+            var clazz = classLoader.loadClass(mainClass);
+            var main = clazz.getMethod("main", String[].class);
+            main.invoke(null, (Object) args.toArray(new String[0]));
+            return 0;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            if (e.getCause() != null) {
+                e.getCause().printStackTrace();
+            }
+            return 1;
         } catch (Exception e) {
-            System.err.println("failed to run java: " + e.getMessage());
+            System.err.println("failed to run " + mainClass + ": " + e.getMessage());
             return 1;
         }
     }

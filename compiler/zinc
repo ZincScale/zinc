@@ -1,15 +1,3 @@
 #!/bin/bash
-# Zinc compiler launcher
 DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Prefer jpackaged version, fallback to native, fallback to jar
-if [ -x "$DIR/dist/zinc/bin/zinc" ]; then
-    exec "$DIR/dist/zinc/bin/zinc" "$@"
-elif [ -x "$DIR/zinc-native" ]; then
-    exec "$DIR/zinc-native" "$@"
-elif [ -f "$DIR/zinc-compiler.jar" ]; then
-    exec java --enable-preview -jar "$DIR/zinc-compiler.jar" "$@"
-else
-    echo "error: no zinc compiler found. Run 'make package' or 'make build' in compiler/"
-    exit 1
-fi
+exec "$DIR/dist/zinc/bin/zinc" "$@"
