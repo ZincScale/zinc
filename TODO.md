@@ -1,158 +1,61 @@
-# Zinc v3 Roadmap
+# Zinc Roadmap
 
-Convention-over-configuration JVM language. Transpiles `.zn` → `.java` → javac → JVM.
+Convention-over-configuration JVM language. `.zn` → Java 25 → native binary.
 
 ---
 
-## Completed (v3.0-dev) — Phase 1
+## Completed — Java Compiler (v1.0-dev)
+
+### Compiler Rewrite
+- [x] Rewritten from Go to Java (self-hosted on Java 25)
+- [x] JavaParser-based code generation (no string concatenation)
+- [x] Static JDK type database (no reflection)
+- [x] GraalVM native-image for compiler binary (20MB, sub-second)
+- [x] 232 unit tests + 14 e2e tests
 
 ### Language
-- [x] Brace-block syntax `{ }`, `fn` keyword, script mode
-- [x] Java-native types: `int`, `double`, `boolean`, `char`, `long`, `String`, `List<T>`, `Map<K,V>`, `Set<T>`
-- [x] Data classes → Java records: `data User(String name, int age)`
-- [x] Enums: `enum Color { Red, Green, Blue }`
-- [x] Classes with inheritance (`:` syntax), fields, methods
-- [x] Visibility: fields private by default, `pub var` → getter+setter, `read var` → getter only
-- [x] `init` fields → `private final` + getter
-- [x] `override fn` → `@Override` annotation
-- [x] `const` → `public static final`
-- [x] Errors as values: `return Error()`, `or {}`, `or match` — no try/catch/throw
-- [x] `and`/`or`/`not`, `not in`, `is not`
-- [x] `is` type checks: `x is String` → `instanceof`
-- [x] Kotlin-style equality: `==` structural (Objects.equals), `===` reference identity
-- [x] Expression if (condition-first ternary)
-- [x] Lambdas: `x -> expr`, `(a, b) -> expr`, block lambdas
-- [x] `it` keyword: `items.filter(it > 0)` → lambda expansion
-- [x] String interpolation: `"Hello, {name}!"` → concatenation
-- [x] Single-quote strings (literal, no interpolation)
-- [x] Triple-quote strings (multi-line)
-- [x] `**` power operator → `Math.pow()`
-- [x] `in` / `not in` → `.contains()`
-- [x] `match`/`case` → Java pattern-matching switch
-- [x] `break`/`continue`
-- [x] `null` (not `none`)
-- [x] Variadic args: `String... messages`
-- [x] Named arguments (call-site reordering)
-- [x] Arrays: `Type[]` syntax, context-dependent inference, `fn main()` entry point
-- [x] Constructor auto-`new`: `User("Alice")` → `new User("Alice")`
-- [x] Java annotations pass-through: `@Deprecated`, `@Path`, `@GET`
-
-### Type System
-- [x] Type mismatches: `int x = "hello"` → error
-- [x] Return type verification: all code paths must return
-- [x] Function call arg type and count checking
-- [x] Type narrowing after `is` checks
-- [x] `break`/`continue` outside loop detection
-- [x] Undefined variable detection
-
-### Codegen
-- [x] Multi-file output: each `data`, `enum`, `class` → separate `.java` file
-- [x] Top-level functions + statements → main class with `main()`
-- [x] Builtin mapping: `print` → `System.out.println`, `len` → `.size()`
-- [x] Type mapping: primitives pass-through, boxed types for generics
+- [x] Data classes → Java records
+- [x] Sealed classes → sealed interfaces with permits + record variants
+- [x] Pattern matching → Java 25 switch with record patterns
+- [x] Errors as values: `or {}`, `return Error()`, no throws Exception
+- [x] Virtual threads: spawn (CompletableFuture), concurrent, parallel for
+- [x] StructuredTaskScope with Joiner for error propagation
+- [x] Fluent collections: .filter(it > 0).map(it * 2).sum()
+- [x] String interpolation, method aliases, expression-if, match expressions
+- [x] Classes, interfaces, inheritance, constructors, default params, varargs
+- [x] Native binary output via GraalVM native-image (13MB, 22ms)
 
 ### CLI
-- [x] `zinc build <file.zn>` — transpile to Java + compile with javac
-- [x] `zinc run <file.zn>` — transpile + compile + run
-- [x] `zinc fmt` — format source code
-- [x] `zinc repl` — Java-backed REPL
-- [x] 100 codegen tests + parser/typechecker tests
+- [x] `zinc run <file|dir>` — compile and execute
+- [x] `zinc build <file|dir>` — compile to Java (+ native by default)
+- [x] `zinc init <name>` — scaffold project
+- [x] Mill integration for project builds with dependencies
+
+### Infrastructure
+- [x] CI/CD: GitHub Actions with GraalVM JDK 25
+- [x] Release: native binaries for Linux/macOS + universal jar
+- [x] zinc-flow dogfooding: compiles and runs with Java compiler
 
 ---
 
-## Completed — Phase 2
+## Next
 
-### Collections & Stream API
-- [x] Collection methods → Stream API: `.filter()`, `.map()`, `.sortBy()`, `.limit()`, `.skip()`, `.distinct()`
-- [x] Terminal ops: `.sum()`, `.anyMatch()`, `.allMatch()`, `.findFirst()`, `.forEach()`, `.groupBy()`, `.reduce()`
-- [x] Chain detection: `items.filter(x).map(y).sum()` → single stream pipeline
-- [x] `it` keyword in streams: `items.filter(it > 0).map(it * 2).sortBy(it.age)`
-- [x] Auto-imports: `java.util.*` and `java.util.stream.*`
+### Language
+- [ ] REPL
+- [ ] `zinc fmt` — code formatter
+- [ ] Parameter annotations (`@Body String body`)
+- [ ] Class literals (`Foo.class`)
+- [ ] Match guard clauses (`case X if cond`)
+- [ ] Nested expression-if
+- [ ] Named arg reordering
 
-### Error Handling
-- [x] `or` error handler: `var x = call() or default` → try/catch with fallback
-- [x] `or { block }` handler with multi-statement fallback
-- [x] `&&` / `||` for boolean (freed `or` keyword for error handling)
+### Tooling
+- [ ] LSP server for editor support
+- [ ] Dependency management (`zinc add`, `zinc remove`, `zinc deps`)
+- [ ] `zinc test` — built-in test runner
+- [ ] Source mapping (JSR-45 SMAP) for debugger integration
 
-### Tuples
-- [x] Tuple literals: `(a, b)` → `new Tuple2(a, b)` with auto-generated record
-- [x] Tuple destructuring: `var x, y = swap(1, 2)` → `_tuple._0()`, `_tuple._1()`
-- [x] Tuple records auto-generated as inner classes
-
-### Packages & Imports
-- [x] Directory-as-package convention: `src/models/user.zn` → `package models` (auto-inferred)
-- [x] Cross-package type auto-import: use `User` from `models` without explicit import
-- [x] Wildcard import resolution: `import models.*` → specific type imports (tree-shaken)
-- [x] External imports pass-through: `import java.time.Instant`, `import java.nio.file.*`
-- [x] Recursive directory scanning: `zinc build src/` finds all nested `.zn` files
-- [x] Multi-file run: auto-discovers all `.zn` files in project
-
-### Type Features
-- [x] Safe navigation: `obj?.field`, `obj?.method()` → null-check ternary
-- [x] `sealed class` → sealed interface + variant records (separate files)
-- [x] 100 codegen tests passing
-
-### Deferred
-- [ ] Source mapping: JSR-45 SMAP for debugger integration (.zn → .java line mapping)
-
-## Phase 3 — Concurrency
-
-- [x] `spawn` → `Thread.startVirtualThread()`
-- [x] `concurrent { }` → `StructuredTaskScope` fan-out/fan-in
-- [x] `parallel for` → `StructuredTaskScope` with bounded concurrency
-- [x] `lock` → `ReentrantLock`
-- [x] `timeout(dur) { }` → deadline-aware execution
-- [x] `Channel<T>` → `ArrayBlockingQueue` with close semantics
-- [x] Errors as values: `return Error()`, `or match`, no try/catch/throw
-
-## Phase 4 — Packaging & Production
-
-- [x] Mill is Zinc's build tool — full dependency management, fat JARs, native images
-- [x] `zinc init [name]` — scaffold project with `build.mill.yaml`, `src/main.zn`, `.gitignore`
-- [x] `zinc build` — delegates to `mill compile` for projects
-- [x] `zinc run` — delegates to `mill run` for projects
-- [x] `zinc build --native` → `mill nativeImage` (GraalVM AOT)
-- [x] `zinc build --docker` → native binary + distroless Dockerfile (or JVM fallback)
-- [x] `zinc build --k8s` → Docker + K8s manifest
-- [x] `zinc update` — update toolchain (GraalVM, Mill, Quarkus)
-- [x] Single installer (`install.sh`) for full toolchain
-
-## Phase 5 — Ecosystem
-
-- [x] `zinc update` — toolchain updater (done in Phase 4)
-- [ ] Standard library: HTTP client, JSON, file I/O wrappers
-- [ ] Quarkus dev mode integration (hot-reload)
-- [ ] IDE support: syntax highlighting, LSP
-
----
-
-## May Work On in the Future
-
-Syntax features observed in other modern languages (Dart, Kotlin, Swift, Rust, Gleam, Julia, etc.) that could improve Zinc DX. None are committed — just ideas worth revisiting.
-
-- [ ] **`??` null coalesce** — `user?.name ?? "Anonymous"` → ternary null check. Dart, Kotlin (`?:`), Swift.
-- [ ] **Extension methods** — add methods to types you don't own. `extend String { fn isPalindrome() -> boolean { ... } }` → static utility method. Dart, Kotlin, Scala 3, Swift.
-- [ ] **Spread operator `...`** — `[...first, 99, ...second]` → collection construction. Dart, JS, Python.
-- [ ] **Collection `if`/`for`** — inline conditionals and loops in collection literals. Dart.
-- [ ] **Copy-and-update for data classes** — `user with { age: 31 }` → new record with one field changed. F#, Kotlin `.copy()`.
-- [ ] **Pipe operator `|>`** — `data |> parse |> validate |> save` → nested calls read left-to-right. F#, Elixir, Julia, Gleam.
-- [ ] **Operator overloading** — `operator fn plus(other: Vec) -> Vec` for domain types (money, vectors). Kotlin, Rust.
-
----
-
-## Docs
-
-- [Language Reference](docs/language-reference.md) — index + links to topic guides
-- [Design Doc](docs/design-zinc-v3-java.md) — v3 philosophy, Java transpilation
-- [Concurrency](docs/design-zinc-concurrency.md) — virtual threads, structured concurrency
-- [Transpilation Mapping](docs/design-zinc-java-transpilation.md) — Zinc → Java for every feature
-- [Build Guide](docs/guide-mill-build.md) — Mill, dependencies, Docker, native-image, CI/CD
-
-## Related Projects
-
-- [Zinc Flow](https://github.com/victorybhg/zinc-flow) — NiFi-inspired data flow engine, dogfooding Zinc
-
-## Previous Versions
-
-- v2 (Python target) — shelved
-- v1 (C# AOT + Go backends) — shelved
+### Performance
+- [ ] Incremental compilation
+- [ ] Parallel file compilation
+- [ ] Compile-time constant folding

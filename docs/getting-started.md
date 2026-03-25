@@ -1,14 +1,14 @@
 # Getting Started with Zinc
 
-Zinc is a convention-over-configuration JVM language. Write `.zn` files, run them with `zinc run`. The transpiler catches type errors, generates clean Java, and stays out of your way.
+Zinc is a convention-over-configuration JVM language. Write `.zn` files, run them with `zinc run`. The compiler generates clean Java 25, compiles it, and optionally produces native binaries.
 
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/victorybhg/zinc/master/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/ZincScale/zinc/master/install.sh | sh
 ```
 
-Installs Zinc + GraalVM JDK 25, Mill, and Quarkus CLI.
+Requires: GraalVM JDK 25+.
 
 ## Hello World
 
@@ -22,208 +22,70 @@ zinc run hello.zn
 # Hello, world!
 ```
 
-That's it. No `public static void main`, no project setup. Top-level code just runs.
+No `public static void main`, no project setup. Top-level code just runs.
 
-For projects, use `fn main()` as the entry point:
+## Create a Project
+
+```bash
+zinc init my-app
+```
+
+Creates:
+```
+my-app/
+  src/main.zn
+  build.mill.yaml
+  .gitignore
+```
+
+```bash
+zinc run my-app/src/main.zn
+# Hello from my-app!
+```
+
+## Build a Native Binary
+
+```bash
+zinc build hello.zn
+./hello    # 13MB binary, 22ms startup
+```
+
+For projects with dependencies (Mill):
+
+```bash
+zinc build my-app/src
+# Transpiles .zn → .java, runs mill compile, builds native binary
+```
+
+## What Zinc Generates
 
 ```zinc
+// hello.zn
+data Point(int x, int y)
+
 fn main() {
-    print("Hello, world!")
+    var p = new Point(3, 4)
+    print("Point: {p}")
 }
 ```
 
-## Your First Script
+Generates:
+```java
+public record Point(int x, int y) {}
 
-```zinc
-// greet.zn
-fn greet(String name): String {
-    return "Hello, {name}!"
-}
-
-var name = if args.length > 0 { args[0] } else { "world" }
-print(greet(name))
-```
-
-```bash
-zinc run greet.zn -- Alice
-# Hello, Alice!
-```
-
-## Key Differences from Java
-
-| Java | Zinc | Why |
-|---|---|---|
-| `public static void main(String[] args)` | Top-level code | No ceremony |
-| `String greet(String name) { }` | `fn greet(String name): String` | Return type after params (colon-separated) |
-| `var x = new ArrayList<Integer>()` | `var x = List<int>()` | No `new`, no boxing |
-| `record User(String name, int age) {}` | `data User { String name, int age }` | Cleaner syntax |
-| `list.stream().filter(...).toList()` | `list.filter(...)` | Auto stream chains |
-| `"Hello, " + name + "!"` | `"Hello, {name}!"` | String interpolation |
-| `x == null ? null : x.foo()` | `x?.foo()` | Safe navigation |
-| Semicolons everywhere | No semicolons | Less noise |
-
-## Variables
-
-```zinc
-var name = "Alice"          // type inferred
-int age = 30                // explicit type
-List<int> scores = []       // generic type
-```
-
-## Functions
-
-```zinc
-fn add(int a, int b): int {
-    return a + b
-}
-
-// Single-expression shorthand
-fn double(int x): int = x * 2
-
-fn sum(int[] numbers): int {
-    int total = 0
-    for n in numbers { total = total + n }
-    return total
+public class Hello {
+    public static void main(String[] args) throws Exception {
+        var p = new Point(3, 4);
+        System.out.println("Point: " + p);
+    }
 }
 ```
 
-## Control Flow
-
-```zinc
-if x > 0 {
-    print("positive")
-} else if x == 0 {
-    print("zero")
-} else {
-    print("negative")
-}
-
-for item in items {
-    print(item)
-}
-
-while running {
-    process()
-}
-```
-
-## Data Classes
-
-```zinc
-data User(String name, String email, int age = 0)
-
-var u = User("Alice", "alice@example.com")
-```
-
-## Error Handling
-
-Zinc uses errors as values — no try/catch/throw.
-
-```zinc
-// Expected errors use Result<T>
-fn parse_port(String s): Result<int> {
-    var n = Integer.parseInt(s) or { return Error("not a number") }
-    return n
-}
-
-var port = parse_port("8080") or 80
-
-// Pattern match on errors
-var result = riskyCall() or match err {
-    case TimeoutError -> defaultValue
-    case NotFoundError -> fallback
-}
-```
-
-## Collections
-
-```zinc
-var items = [1, 2, 3, 4, 5]
-
-// Stream chains — no .stream() or .toList() needed
-var evens = items.filter(it > 0).map(it * 2)
-var total = items.filter(it > 10).sum()
-
-// it keyword — implicit lambda parameter
-items.sortBy(it.age)
-items.forEach(print(it))
-```
-
-## Match
-
-```zinc
-match status {
-    case 1 -> "running"
-    case 2 -> "stopped"
-    case _ -> "unknown"
-}
-```
-
-## Packages
-
-Directory = package. Put files in subdirectories and Zinc handles the rest:
-
-```
-src/
-  main.zn              # root package
-  models/
-    user.zn            # package models (automatic)
-  services/
-    report.zn          # package services (automatic)
-```
-
-Types from other packages are auto-imported — just use them:
-
-```zinc
-// src/main.zn
-var u = User("Alice", 30)     // auto-imported from models
-print(u)
-```
-
-## Concurrency
-
-```zinc
-// Virtual threads
-spawn {
-    expensive_computation()
-}
-
-// Parallel iteration
-parallel for item in items {
-    process(item)
-}
-```
-
-## Type Safety
-
-Type errors are caught automatically during transpilation:
-
-```bash
-$ zinc run broken.zn
-error: type errors in broken.zn:
-  line 2: return type mismatch: expected int, got String
-  argument 1 of "greet": expected String, got int
-```
-
-No separate `check` command — checking IS transpilation.
-
-## CLI
-
-```bash
-zinc init myapp                       # scaffold a new project
-zinc run src/main.zn                  # transpile + compile + run (Mill if project)
-zinc run script.zn -- arg1            # pass args to script
-zinc build src/                       # transpile + compile (Mill if project)
-zinc build --native src/              # GraalVM native binary via Mill
-zinc build --docker src/              # generate Dockerfile + build
-zinc build --k8s src/                 # Docker + K8s manifest
-zinc fmt script.zn                    # format source code
-zinc repl                             # interactive REPL
-zinc update                           # update toolchain (GraalVM, Mill, Quarkus)
-```
+Standard Java 25 — records, sealed interfaces, pattern matching, virtual threads.
 
 ## Next Steps
 
 - [Language Reference](language-reference.md) — full syntax guide
-- [Build Guide](guide-mill-build.md) — dependencies, deployment, Docker, K8s, native-image, CI/CD
-- [Design Doc](design-zinc-v3-java.md) — philosophy and decisions
+- [Concurrency](lang/concurrency.md) — spawn, concurrent, parallel for
+- [Error Handling](lang/error-handling.md) — errors as values, or handlers
+- [Examples](../examples/v3/) — working code with expected output

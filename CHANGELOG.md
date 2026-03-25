@@ -4,6 +4,37 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-25
+
+### Changed
+- **Compiler rewritten from Go to Java** — self-hosted on Java 25, produces Java 25 output
+- **JavaParser-based codegen** — generates Java AST instead of string concatenation
+- **Static JDK type database** — replaces runtime reflection for type resolution
+- **GraalVM native-image by default** — `zinc build` produces native binaries (~13MB, ~22ms)
+- **No throws Exception** — interfaces and methods never declare throws, errors are values
+- **Data classes → Java records** — `data Point(int x, int y)` → `record Point(int x, int y) {}`
+- **Sealed classes → sealed interfaces** — enables Java 25 pattern matching in switch
+- **Spawn → CompletableFuture** — with or-handler supervision and join error propagation
+- **Concurrent/parallel → StructuredTaskScope** — with Joiner.awaitAllSuccessfulOrThrow
+
+### Added
+- `zinc run <file|dir>` — compile and execute in one command
+- `zinc build <file|dir> [--native|--no-native]` — compile to Java + native binary
+- `zinc init <name>` — scaffold new project
+- Multi-file compilation with cross-file interface resolution
+- Mill integration for project builds with Maven dependencies
+- Expression lambdas for automatic void/value context inference
+- Stream chain detection: `.filter().map().sum()` as single pipeline
+- `it` keyword rewriting in stream operations
+- `in` operator for contains checks
+- Static type database for JDK stdlib (no runtime reflection)
+- GraalVM native-image reflection config bundled
+
+### Removed
+- Go compiler (~15K lines)
+- javap-based type introspection
+- goreleaser, Homebrew formula
+
 ## [0.10.0] - 2026-03-17
 
 ### Added

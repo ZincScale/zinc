@@ -10,21 +10,68 @@ permissions:
 
 jobs:
   release:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+
+      - name: Download JavaParser
+        run: |
+          mkdir -p ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/
+          curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
+            -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
+
+      - name: Build native binary
+        working-directory: compiler
+        run: make build && make native
+
+      - name: Package
+        run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          [ "$ARCH" = "x86_64" ] && ARCH="amd64"
+          [ "$ARCH" = "aarch64" ] && ARCH="arm64"
+          tar czf zinc-${OS}-${ARCH}.tar.gz -C compiler zinc
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: zinc-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  jar:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
         with:
-          go-version: '1.26'
+          java-version: '25'
+          distribution: 'graalvm-community'
 
-      - name: Run Goreleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Download JavaParser
+        run: |
+          mkdir -p ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/
+          curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
+            -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
+
+      - name: Build jar
+        working-directory: compiler
+        run: make build
+
+      - name: Upload jar to release
+        uses: softprops/action-gh-release@v2
         with:
-          version: latest
-          args: release --clean
+          files: compiler/zinc-compiler.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
