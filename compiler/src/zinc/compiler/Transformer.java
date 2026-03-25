@@ -1328,7 +1328,8 @@ public class Transformer {
         //   }); return _f; }).get()
         var tryBody = new BlockStmt();
         for (var stmt : body.getStatements()) tryBody.addStatement(stmt.clone());
-        tryBody.addStatement(parseStmt("_f.complete(null);"));
+        tryBody.addStatement(new ExpressionStmt(
+            new MethodCallExpr(new NameExpr("_f"), "complete", new NodeList<>(new NullLiteralExpr()))));
 
         var catchBody = new BlockStmt();
         if (!orHandler.isEmpty()) {
@@ -1339,7 +1340,8 @@ public class Transformer {
                 }
             }
         }
-        catchBody.addStatement(parseStmt("_f.completeExceptionally(err);"));
+        catchBody.addStatement(new ExpressionStmt(
+            new MethodCallExpr(new NameExpr("_f"), "completeExceptionally", new NodeList<>(new NameExpr("err")))));
 
         var catchClause = new CatchClause(
             new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"), catchBody);
@@ -1350,7 +1352,10 @@ public class Transformer {
         var threadLambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), threadBody);
 
         var outerBody = new BlockStmt();
-        outerBody.addStatement(parseStmt("var _f = new java.util.concurrent.CompletableFuture<Void>();"));
+        var futureDecl = new VariableDeclarationExpr(new VarType(), "_f");
+        futureDecl.getVariable(0).setInitializer(new ObjectCreationExpr(null,
+            new ClassOrInterfaceType(null, "java.util.concurrent.CompletableFuture<Void>"), new NodeList<>()));
+        outerBody.addStatement(new ExpressionStmt(futureDecl));
         outerBody.addStatement(new ExpressionStmt(
             new MethodCallExpr(
                 new MethodCallExpr(new NameExpr("Thread"), "ofVirtual"),
@@ -1596,19 +1601,28 @@ public class Transformer {
         };
     }
 
-    /** Parse a Java expression from a string via JavaParser. */
+    /** Parse a Java expression from a string via JavaParser (no validation for native-image compat). */
     private Expression parseExpr(String code) {
+        var config = new com.github.javaparser.ParserConfiguration()
+            .setLanguageLevel(com.github.javaparser.ParserConfiguration.LanguageLevel.JAVA_25)
+;
+        config.getProcessors().clear();
+        var parser = new com.github.javaparser.JavaParser(config);
+        var result = parser.parseExpression(code);
+        if (result.isSuccessful()) return result.getResult().get();
         return com.github.javaparser.StaticJavaParser.parseExpression(code);
     }
 
-    /** Parse a Java statement from a string via JavaParser (with Java 21+ features). */
+    /** Parse a Java statement from a string via JavaParser (with Java 25 features, no validation). */
     private Statement parseStmt(String code) {
         var config = new com.github.javaparser.ParserConfiguration()
-            .setLanguageLevel(com.github.javaparser.ParserConfiguration.LanguageLevel.JAVA_25);
+            .setLanguageLevel(com.github.javaparser.ParserConfiguration.LanguageLevel.JAVA_25)
+;
+        // Disable validators to avoid reflection issues in native-image
+        config.getProcessors().clear();
         var parser = new com.github.javaparser.JavaParser(config);
         var result = parser.parseStatement(code);
         if (result.isSuccessful()) return result.getResult().get();
-        // Fallback to default parser
         return com.github.javaparser.StaticJavaParser.parseStatement(code);
     }
 
