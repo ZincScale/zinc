@@ -67,6 +67,8 @@ public class Transformer {
     private java.util.Map<String, TypeInfo> resolvedTypes = java.util.Map.of();
     private java.util.Set<String> interfaceNames = new java.util.HashSet<>();
     private final JavaTypeResolver javaResolver = new JavaTypeResolver();
+    // Variables that are assigned inside spawn/parallel lambdas — need Object[] wrapping
+    private final java.util.Set<String> capturedMutables = new java.util.HashSet<>();
 
     public Transformer() {}
 
@@ -100,11 +102,46 @@ public class Transformer {
      * Transforms a Zinc program into multiple CompilationUnits — one per top-level type.
      * Script mode programs get a single Main class.
      */
+    /** Pre-scan statements for spawns that capture and mutate outer variables. */
+    private void prescanCapturedMutables(List<Ast.Stmt> stmts) {
+        for (var stmt : stmts) {
+            prescanStmt(stmt);
+        }
+    }
+
+    private void prescanStmt(Ast.Stmt stmt) {
+        switch (stmt) {
+            case Ast.ExprStmt e -> prescanExpr(e.expr());
+            case Ast.VarStmt v -> { if (v.value() != null) prescanExpr(v.value()); }
+            case Ast.AssignStmt a -> { if (a.value() != null) prescanExpr(a.value()); }
+            case Ast.IfStmt i -> {
+                prescanStmt(i.then());
+                if (i.elseStmt() != null) prescanStmt(i.elseStmt());
+            }
+            case Ast.BlockStmt b -> prescanCapturedMutables(b.stmts());
+            case Ast.ForStmt f -> prescanStmt(f.body());
+            case Ast.WhileStmt w -> prescanStmt(w.body());
+            default -> {}
+        }
+    }
+
+    private void prescanExpr(Ast.Expr expr) {
+        if (expr instanceof Ast.SpawnExpr spawn) {
+            capturedMutables.addAll(collectAssignedVars(spawn.body()));
+            if (spawn.orHandler() != null && spawn.orHandler().body() != null) {
+                capturedMutables.addAll(collectAssignedVars(spawn.orHandler().body()));
+            }
+        }
+    }
+
     public Result<List<CompilationUnit>> transformAll(Program program) {
         // Pre-scan: collect interface names
         for (var decl : program.decls()) {
             if (decl instanceof InterfaceDecl iface) interfaceNames.add(iface.name());
         }
+
+        // Pre-scan: collect variables captured by spawns (need Object[] wrapping)
+        prescanCapturedMutables(program.stmts());
 
         var units = new java.util.ArrayList<CompilationUnit>();
 
@@ -576,6 +613,19 @@ public class Transformer {
     }
 
     private Statement transformVarStmt(Ast.VarStmt v) {
+        // If this variable will be captured by a spawn lambda, wrap in Object[]
+        if (capturedMutables.contains(v.name())) {
+            var init = v.value() != null ? transformExpr(v.value()) : new NullLiteralExpr();
+            // var _name = new Object[]{value}
+            var arrayInit = new ArrayCreationExpr(
+                new ClassOrInterfaceType(null, "Object"),
+                new NodeList<>(new ArrayCreationLevel()),
+                new ArrayInitializerExpr(new NodeList<>(init)));
+            var decl = new VariableDeclarationExpr(new VarType(), "_" + v.name());
+            decl.getVariable(0).setInitializer(arrayInit);
+            return new ExpressionStmt(decl);
+        }
+
         if (v.type() != null) {
             var type = transformType(v.type());
             var decl = new VariableDeclarationExpr(type, v.name());
@@ -1049,6 +1099,10 @@ public class Transformer {
             case NullLit n -> new NullLiteralExpr();
             case Ident id -> {
                 if (id.name().equals("print")) yield new NameExpr("System.out.println");
+                // Captured mutable variable → _name[0]
+                if (capturedMutables.contains(id.name())) {
+                    yield new ArrayAccessExpr(new NameExpr("_" + id.name()), new IntegerLiteralExpr("0"));
+                }
                 yield new NameExpr(id.name());
             }
             case ThisExpr t -> new com.github.javaparser.ast.expr.ThisExpr();
@@ -1339,7 +1393,37 @@ public class Transformer {
      * spawn { body } or { handler }
      * → CompletableFuture<Void> via inline supplier that starts a virtual thread
      */
+    /** Collect variable names assigned inside a Zinc statement tree. */
+    private java.util.Set<String> collectAssignedVars(Ast.Stmt stmt) {
+        var vars = new java.util.HashSet<String>();
+        switch (stmt) {
+            case Ast.AssignStmt a -> {
+                if (a.target() instanceof Ast.Ident id) vars.add(id.name());
+            }
+            case Ast.BlockStmt b -> { for (var s : b.stmts()) vars.addAll(collectAssignedVars(s)); }
+            case Ast.IfStmt i -> {
+                vars.addAll(collectAssignedVars(i.then()));
+                if (i.elseStmt() != null) vars.addAll(collectAssignedVars(i.elseStmt()));
+            }
+            case Ast.ForStmt f -> vars.addAll(collectAssignedVars(f.body()));
+            case Ast.WhileStmt w -> vars.addAll(collectAssignedVars(w.body()));
+            case Ast.ExprStmt e -> {}
+            default -> {}
+        }
+        return vars;
+    }
+
     private Expression transformSpawn(Ast.SpawnExpr spawn) {
+        // Detect variables assigned inside spawn body/or-handler that need wrapping
+        var capturedMutables = new java.util.HashSet<String>();
+        capturedMutables.addAll(collectAssignedVars(spawn.body()));
+        if (spawn.orHandler() != null && spawn.orHandler().body() != null) {
+            capturedMutables.addAll(collectAssignedVars(spawn.orHandler().body()));
+        }
+        // Register these so transformExpr wraps them as _var[0]
+        var prevCaptured = new java.util.HashSet<>(this.capturedMutables);
+        this.capturedMutables.addAll(capturedMutables);
+
         var body = transformBlock(spawn.body());
 
         // Build or-handler code
@@ -1403,6 +1487,11 @@ public class Transformer {
             new ClassOrInterfaceType(null, "java.util.function.Supplier")
                 .setTypeArguments(new NodeList<>(new ClassOrInterfaceType(null, "java.util.concurrent.CompletableFuture<Void>"))),
             new EnclosedExpr(supplierLambda));
+
+        // Restore captured mutables to pre-spawn state
+        this.capturedMutables.clear();
+        this.capturedMutables.addAll(prevCaptured);
+
         return new MethodCallExpr(new EnclosedExpr(cast), "get");
     }
 

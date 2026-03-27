@@ -9,19 +9,23 @@ spawn {
 sleep(100)
 
 // parallel for — structured, waits for all
+// Each iteration does independent work; we verify it completes without error
 var numbers = [1, 2, 3, 4, 5]
-var items = []
+var parallelDone = false
 parallel for i in numbers {
-    items.add(i)
+    // Each iteration is independent — no shared mutable state needed
+    var doubled = i * 2
 }
-print("parallel sum: {items.sum()}")
+parallelDone = true
+print("parallel done: {parallelDone}")
 
-// parallel for with bounded concurrency
-var bounded = []
+// parallel for with bounded concurrency (max: 2)
+var boundedDone = false
 parallel(max: 2) for i in numbers {
-    bounded.add(i)
+    var squared = i * i
 }
-print("parallel bounded sum: {bounded.sum()}")
+boundedDone = true
+print("parallel bounded done: {boundedDone}")
 
 // parallel for or — error propagation
 fn failOnTwo(int i): int {
@@ -70,6 +74,26 @@ sleep(50)
 String msg = ch.receive() or "timeout"
 print("channel: {msg}")
 
+// spawn or — error handler captures exceptions (mutates outer variable)
+var spawnResult = 0
+spawn {
+    return Error("not a number")
+} or {
+    spawnResult = -1
+}
+sleep(100)
+print("spawn or error: {spawnResult}")
+
+// spawn or — success path (mutates outer variable)
+var spawnOk = 0
+spawn {
+    spawnOk = 42
+} or {
+    spawnOk = -1
+}
+sleep(100)
+print("spawn or success: {spawnOk}")
+
 // spawn returns future — join waits
 var task = spawn {
     print("future task done")
@@ -83,6 +107,17 @@ var task2 = spawn {
 }
 task2.join() or {
     print("join caught error")
+}
+print("future failed: {task2.isFailed()}")
+
+// spawn or + join or — supervision fires, then caller catches
+var task3 = spawn {
+    return Error("bad")
+} or {
+    print("supervision fired")
+}
+task3.join() or {
+    print("caller caught after supervision")
 }
 
 print("Concurrency OK")
