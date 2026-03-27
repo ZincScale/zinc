@@ -188,3 +188,204 @@ fn divide(int a, int b): int {
 
 var result = divide(10, 0) or -1
 ```
+
+## Change 3: Chained Comparisons
+
+### Current syntax
+```zinc
+if x > 1 && x < 10 {
+    print("in range")
+}
+
+if a >= 0 && a <= 255 && b >= 0 && b <= 255 {
+    print("both are bytes")
+}
+```
+
+### New syntax
+```zinc
+if 1 < x < 10 {
+    print("in range")
+}
+
+if 0 <= a <= 255 && 0 <= b <= 255 {
+    print("both are bytes")
+}
+```
+
+### Rules
+
+- Any sequence of comparison operators can be chained: `<`, `<=`, `>`, `>=`, `==`, `!=`
+- `a < b < c` desugars to `a < b && b < c` — each intermediate operand is evaluated once
+- Chains of arbitrary length are allowed: `0 <= x < y < z <= 100`
+- Mixed operators are allowed: `a < b == c <= d`
+- `==` and `!=` can appear in chains but should not be mixed with each other: `a == b != c` is confusing and should be written as two separate conditions
+- Chaining does **not** apply to `===`, `!==`, `is`, `is not` — these remain binary only
+
+### Transpilation
+
+| Zinc | Java |
+|---|---|
+| `1 < x < 10` | `1 < x && x < 10` |
+| `0 <= a <= 255` | `0 <= a && a <= 255` |
+| `a < b < c < d` | `a < b && b < c && c < d` |
+
+When the middle operand is a method call or expression with side effects, the transpiler extracts it to a temporary variable to avoid double evaluation:
+
+```zinc
+1 < expensive() < 10
+```
+Transpiles to:
+```java
+var _tmp = expensive();
+1 < _tmp && _tmp < 10;
+```
+
+### Parser changes
+
+- In expression parsing, after parsing a comparison `a < b`, check if the next token is also a comparison operator. If so, continue the chain.
+- Build an AST node `ChainedComparison(List<Expr> operands, List<CompOp> operators)` alongside the existing `BinaryExpr`.
+
+### Codegen changes
+
+- Emit `&&`-joined pairwise comparisons in Java output.
+- Extract non-trivial middle operands to temp variables.
+- Python output: emit directly (Python supports chained comparisons natively).
+
+## Change 4: Rest Unpacking
+
+### Current syntax
+```zinc
+var (x, y) = getPoint()
+var (name, age) = getUser()
+```
+
+### New syntax — adds `...rest` patterns
+```zinc
+var (first, ...rest) = items          // first = items[0], rest = items[1..]
+var (first, second, ...rest) = items  // first = items[0], second = items[1], rest = items[2..]
+var (first, ...middle, last) = items  // first, last split, middle gets everything between
+```
+
+### Rules
+
+- `...name` captures remaining elements as a `List<T>`
+- Only one `...` allowed per unpacking pattern
+- `...rest` can appear at any position: beginning, middle, or end
+- Works in:
+  - Variable declarations: `var (first, ...rest) = items`
+  - For-loop destructuring: `for (key, ...values) in grouped { }`
+  - Match case patterns: `case [first, ...rest] -> ...`
+- The rest variable is always a `List<T>` (or array, matching the source type)
+
+### Examples
+
+```zinc
+List<int> nums = [1, 2, 3, 4, 5]
+
+// Head and tail
+var (head, ...tail) = nums       // head = 1, tail = [2, 3, 4, 5]
+
+// First, last, and middle
+var (first, ...middle, last) = nums  // first = 1, middle = [2, 3, 4], last = 5
+
+// In match expressions
+match args {
+    case [cmd, ...flags] -> run(cmd, flags)
+    case [] -> showHelp()
+}
+
+// Practical: processing CSV header + rows
+var (header, ...rows) = lines
+for row in rows {
+    process(header, row)
+}
+```
+
+### Transpilation
+
+| Zinc | Java |
+|---|---|
+| `var (first, ...rest) = items` | `var first = items.get(0); var rest = items.subList(1, items.size());` |
+| `var (first, ...mid, last) = items` | `var first = items.get(0); var last = items.get(items.size()-1); var mid = items.subList(1, items.size()-1);` |
+| `var (...init, last) = items` | `var last = items.get(items.size()-1); var init = items.subList(0, items.size()-1);` |
+
+Python output: emit directly — Python supports `first, *rest = items` natively.
+
+### Parser changes
+
+- In tuple/destructuring patterns, recognize `...identifier` as a rest pattern.
+- Validate at most one `...` per pattern.
+- New AST node: `RestPattern(String name)` within `TupleUnpack`.
+
+### Codegen changes
+
+- Emit `List.subList()` calls for rest extraction in Java.
+- Emit `*name` in Python.
+
+## Change 5: Assert Statements
+
+### Syntax
+```zinc
+assert x > 0
+assert x > 0, "x must be positive, got {x}"
+```
+
+### Rules
+
+- `assert condition` — if condition is false, throws `AssertionError`
+- `assert condition, message` — includes a message (supports string interpolation)
+- Asserts are **always enabled** — no silent removal in production builds. If you assert something, you mean it.
+- Asserts are for **invariants and programmer errors**, not for input validation. Use `return Error(...)` for expected failure cases.
+
+### When to use assert vs Error
+
+| Situation | Use | Why |
+|---|---|---|
+| User provided bad input | `return Error("...")` | Expected — caller handles it |
+| External API returned garbage | `return Error("...")` | Expected — caller handles it |
+| Internal logic invariant violated | `assert x > 0` | Bug — should never happen |
+| Precondition on internal function | `assert list.size() > 0` | Bug — caller is broken |
+| Post-condition sanity check | `assert result >= 0` | Bug — this function is broken |
+
+### Examples
+
+```zinc
+fn binarySearch(List<int> sorted, int target): int {
+    assert sorted.size() > 0, "cannot search empty list"
+
+    int lo = 0
+    int hi = sorted.size() - 1
+
+    while lo <= hi {
+        int mid = (lo + hi) / 2
+        assert 0 <= mid < sorted.size(), "mid out of bounds: {mid}"
+
+        if sorted.get(mid) == target { return mid }
+        if sorted.get(mid) < target { lo = mid + 1 }
+        else { hi = mid - 1 }
+    }
+    return -1
+}
+```
+
+### Transpilation
+
+| Zinc | Java |
+|---|---|
+| `assert x > 0` | `assert x > 0;` (Java assert — enabled via `-ea`) |
+| `assert x > 0, "msg {x}"` | `assert x > 0 : "msg " + x;` |
+
+Note: Java asserts are disabled by default and enabled with `-ea`. Since Zinc controls the runner (`zinc run`), we always pass `-ea`. For jpackaged/native builds, the transpiler can optionally emit `if (!cond) throw new AssertionError(msg)` instead to guarantee asserts are never stripped.
+
+Python output: `assert x > 0, f"msg {x}"` — Python asserts are stripped with `-O` but we don't use `-O`.
+
+### Parser changes
+
+- New statement type: `AssertStmt(Expr condition, Expr? message)`
+- Keyword `assert` added to lexer
+
+### Codegen changes
+
+- Emit Java `assert` or `if + throw AssertionError` depending on build mode.
+- Emit Python `assert` directly.
