@@ -46,6 +46,7 @@ public class StmtParser {
             case PARALLEL -> parseParallelForStmt();
             case CONCURRENT -> parseConcurrentStmt();
             case TIMEOUT -> parseTimeoutStmt();
+            case LOCK -> parseLockStmt();
             case FN -> new DeclParser(ctx, exprs, types, this).parseFnDecl();
             case DEFER -> { ctx.advance(); yield new DeferStmt(exprs.parseExpr()); }
             default -> {
@@ -296,6 +297,14 @@ public class StmtParser {
         OrHandler orHandler = null;
         if (ctx.check(OR)) orHandler = parseOrHandler();
         return new TimeoutStmt(line, duration, body, orHandler);
+    }
+
+    private LockStmt parseLockStmt() {
+        int line = ctx.peek().line();
+        ctx.expect(LOCK);
+        var mutex = exprs.parseExpr();
+        var body = parseBlock();
+        return new LockStmt(line, mutex, body);
     }
 
     private WithStmt parseWithStmt() {

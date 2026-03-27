@@ -9,23 +9,26 @@ spawn {
 sleep(100)
 
 // parallel for — structured, waits for all
-// Each iteration does independent work; we verify it completes without error
+// Uses lock for thread-safe shared mutable state
 var numbers = [1, 2, 3, 4, 5]
-var parallelDone = false
+var mu = new Lock()
+var total = 0
 parallel for i in numbers {
-    // Each iteration is independent — no shared mutable state needed
-    var doubled = i * 2
+    lock mu {
+        total = total + i
+    }
 }
-parallelDone = true
-print("parallel done: {parallelDone}")
+print("parallel sum: {total}")
 
 // parallel for with bounded concurrency (max: 2)
-var boundedDone = false
+var mu2 = new Lock()
+var boundedTotal = 0
 parallel(max: 2) for i in numbers {
-    var squared = i * i
+    lock mu2 {
+        boundedTotal = boundedTotal + i
+    }
 }
-boundedDone = true
-print("parallel bounded done: {boundedDone}")
+print("parallel bounded sum: {boundedTotal}")
 
 // parallel for or — error propagation
 fn failOnTwo(int i): int {

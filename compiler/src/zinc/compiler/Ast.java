@@ -108,7 +108,7 @@ public final class Ast {
         IfStmt, ForStmt, WhileStmt, MatchStmt,
         BreakStmt, ContinueStmt, ExprStmt,
         ParallelForStmt, ConcurrentStmt, TimeoutStmt,
-        WithStmt, DeferStmt, FnDecl {}
+        WithStmt, DeferStmt, LockStmt, FnDecl {}
 
     public record BlockStmt(List<Stmt> stmts) implements Stmt {}
 
@@ -158,6 +158,8 @@ public final class Ast {
     public record WithResource(String name, Expr value, OrHandler orHandler) {}
 
     public record DeferStmt(Expr expr) implements Stmt {}
+
+    public record LockStmt(int line, Expr mutex, BlockStmt body) implements Stmt {}
 
     // --- Error handling ------------------------------------------------------
 

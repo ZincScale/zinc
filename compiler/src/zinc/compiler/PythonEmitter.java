@@ -489,6 +489,7 @@ public class PythonEmitter {
             case Ast.ExprStmt expr -> emitExprStmt(expr);
             case Ast.FnDecl fn -> emitFnDecl(fn);
             case Ast.WithStmt with -> emitWithStmt(with);
+            case Ast.LockStmt lock -> emitLockStmt(lock);
             case Ast.DeferStmt defer -> emitDeferStmt(defer);
             // Concurrency stubs — Phase 3
             case Ast.ParallelForStmt pf -> emitParallelForStmt(pf);
@@ -724,6 +725,15 @@ public class PythonEmitter {
         line("with " + String.join(", ", parts) + ":");
         indent++;
         emitBlock(with.body());
+        indent--;
+    }
+
+    private void emitLockStmt(Ast.LockStmt lock) {
+        // lock mu { body } → with mu:
+        addImport("threading");
+        line("with " + emitExpr(lock.mutex()) + ":");
+        indent++;
+        emitBlock(lock.body());
         indent--;
     }
 
@@ -1402,6 +1412,8 @@ public class PythonEmitter {
             case "List" -> "list";
             case "Map" -> "dict";
             case "Set" -> "set";
+            case "Lock" -> "threading.Lock";
+            case "Channel" -> "ZincChannel";
             default -> name;
         };
     }

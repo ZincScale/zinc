@@ -1,6 +1,6 @@
 background task started
-parallel done: true
-parallel bounded done: true
+parallel sum: 15
+parallel bounded sum: 15
 parallel for or: caught
 concurrent: done
 concurrent or: caught

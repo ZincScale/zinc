@@ -121,6 +121,13 @@ public class Transformer {
             case Ast.BlockStmt b -> prescanCapturedMutables(b.stmts());
             case Ast.ForStmt f -> prescanStmt(f.body());
             case Ast.WhileStmt w -> prescanStmt(w.body());
+            // Parallel for body runs in a lambda — vars assigned inside need wrapping
+            case Ast.ParallelForStmt p -> {
+                capturedMutables.addAll(collectAssignedVars(p.body()));
+                if (p.orHandler() != null && p.orHandler().body() != null) {
+                    capturedMutables.addAll(collectAssignedVars(p.orHandler().body()));
+                }
+            }
             default -> {}
         }
     }
@@ -605,6 +612,7 @@ public class Transformer {
             case Ast.ParallelForStmt p -> List.of(transformParallelFor(p));
             case Ast.ConcurrentStmt c -> List.of(transformConcurrent(c));
             case Ast.TimeoutStmt t -> List.of(transformTimeout(t));
+            case Ast.LockStmt l -> List.of(transformLock(l));
             case Ast.WithStmt w -> List.of(transformWith(w));
             case Ast.DeferStmt d -> List.of(new ExpressionStmt(transformExpr(d.expr()))); // TODO: proper defer
             case FnDecl fn -> List.of(); // nested fn — handled elsewhere
@@ -613,12 +621,35 @@ public class Transformer {
     }
 
     private Statement transformVarStmt(Ast.VarStmt v) {
-        // If this variable will be captured by a spawn lambda, wrap in Object[]
+        // If this variable will be captured by a lambda (spawn/parallel), wrap in array holder
         if (capturedMutables.contains(v.name())) {
             var init = v.value() != null ? transformExpr(v.value()) : new NullLiteralExpr();
-            // var _name = new Object[]{value}
-            var arrayInit = new ArrayCreationExpr(
-                new ClassOrInterfaceType(null, "Object"),
+            // Determine array element type from the initializer or declared type
+            String elemType = "Object";
+            if (v.type() != null) {
+                String tn = v.type() instanceof Ast.SimpleType s ? s.name() : "Object";
+                elemType = switch (tn) {
+                    case "int", "Integer" -> "int";
+                    case "double", "Double" -> "double";
+                    case "boolean", "Boolean" -> "boolean";
+                    case "long", "Long" -> "long";
+                    default -> "Object";
+                };
+            } else if (v.value() instanceof Ast.IntLit) {
+                elemType = "int";
+            } else if (v.value() instanceof Ast.FloatLit) {
+                elemType = "double";
+            } else if (v.value() instanceof Ast.BoolLit) {
+                elemType = "boolean";
+            } else if (v.value() instanceof Ast.StringLit || v.value() instanceof Ast.StringInterpLit) {
+                elemType = "Object"; // String needs Object[] since no String[]
+            }
+            // var _name = new type[]{value}
+            var arrayType = elemType.equals("Object")
+                ? new ClassOrInterfaceType(null, "Object")
+                : new com.github.javaparser.ast.type.PrimitiveType(
+                    com.github.javaparser.ast.type.PrimitiveType.Primitive.valueOf(elemType.toUpperCase()));
+            var arrayInit = new ArrayCreationExpr(arrayType,
                 new NodeList<>(new ArrayCreationLevel()),
                 new ArrayInitializerExpr(new NodeList<>(init)));
             var decl = new VariableDeclarationExpr(new VarType(), "_" + v.name());
@@ -1021,6 +1052,28 @@ public class Transformer {
     }
 
     /**
+     * lock mu { body }
+     * → mu.lock(); try { body } finally { mu.unlock(); }
+     */
+    private Statement transformLock(Ast.LockStmt l) {
+        var mutex = transformExpr(l.mutex());
+
+        // mu.lock()
+        var lockCall = new ExpressionStmt(new MethodCallExpr(mutex.clone(), "lock"));
+
+        // try { body } finally { mu.unlock() }
+        var tryBody = transformBlock(l.body());
+        var finallyBody = new BlockStmt();
+        finallyBody.addStatement(new ExpressionStmt(new MethodCallExpr(mutex.clone(), "unlock")));
+
+        var outerBlock = new BlockStmt();
+        outerBlock.addStatement(lockCall);
+        outerBlock.addStatement(new TryStmt(tryBody, new NodeList<>(), finallyBody));
+
+        return outerBlock;
+    }
+
+    /**
      * with expr as name { body } → try (var name = expr) { body }
      */
     private Statement transformWith(Ast.WithStmt w) {
@@ -1407,6 +1460,7 @@ public class Transformer {
             }
             case Ast.ForStmt f -> vars.addAll(collectAssignedVars(f.body()));
             case Ast.WhileStmt w -> vars.addAll(collectAssignedVars(w.body()));
+            case Ast.LockStmt l -> vars.addAll(collectAssignedVars(l.body()));
             case Ast.ExprStmt e -> {}
             default -> {}
         }

@@ -47,7 +47,7 @@ public class Lexer {
         Map.entry("from", FROM), Map.entry("parallel", PARALLEL),
         Map.entry("init", INIT), Map.entry("concurrent", CONCURRENT),
         Map.entry("timeout", TIMEOUT), Map.entry("abstract", ABSTRACT),
-        Map.entry("sealed", SEALED)
+        Map.entry("sealed", SEALED), Map.entry("lock", LOCK)
     );
 
     public Lexer(String source) {
