@@ -125,15 +125,15 @@ Only `ZincError` exists. Missing:
 
 `new Channel(10)` emits as `Channel(10)`. Should emit `ZincChannel(maxsize=10)` from zinc_runtime.
 
-## Priority Order for Fixes
+## Status
 
-| # | Issue | Severity | Effort | Order |
-|---|-------|----------|--------|-------|
-| 1 | Bounded parallel for bug | Bug | Medium | Fix first |
-| 2 | return Error in spawn | Bug | Low | Fix first |
-| 3 | Effectively final capture | Bug | Medium | Fix first |
-| 4 | sortBy(it) Comparator | Bug | Low | Fix first |
-| 5 | lock keyword | Feature | Medium | Fix second |
-| 6 | Concurrent result binding | Feature | Medium | Fix second |
-| 7 | Formal stdlib | Design | High | Fix later |
-| 8-13 | Python concurrency | Phase 3 | High | Fix after Java bugs |
+| # | Issue | Severity | Status |
+|---|-------|----------|--------|
+| 1 | Bounded parallel for bug | Bug | **FIXED** (4c3df27) — semaphore release moved inside forked lambda |
+| 2 | return Error in spawn | Bug | **FIXED** (4c3df27) — skip _f.complete after throw |
+| 3 | Effectively final capture | Bug | OPEN — needs AtomicReference/holder wrapping |
+| 4 | sortBy(it) Comparator | Bug | **FIXED** (4c3df27) — detect identity, use natural order |
+| 5 | lock keyword | Feature | OPEN |
+| 6 | Concurrent result binding | Feature | OPEN |
+| 7 | Formal stdlib | Design | OPEN |
+| 8-13 | Python concurrency | Phase 3 | OPEN — stubs in PythonEmitter, need zinc_runtime.py |
