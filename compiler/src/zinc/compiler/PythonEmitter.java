@@ -25,6 +25,8 @@ public class PythonEmitter {
     private final Set<String> fromImports = new LinkedHashSet<>();
     private final String className;
     private String currentClass = null;  // track which class we're inside
+    private Set<String> currentClassFields = new HashSet<>();  // field names of current class
+    private boolean insideMethod = false;  // track if we're inside a method body
 
     public PythonEmitter(String className) {
         this.className = className;
@@ -39,6 +41,14 @@ public class PythonEmitter {
         sb.setLength(0);
         imports.clear();
         fromImports.clear();
+
+        // Map Java imports to Python imports
+        for (var imp : program.imports()) {
+            String pyImport = mapJavaImport(imp.path());
+            if (pyImport != null) {
+                addFromImport(pyImport);
+            }
+        }
 
         // Collect body first (so imports accumulate)
         var body = new StringBuilder();
@@ -171,6 +181,10 @@ public class PythonEmitter {
 
     private void emitClassDecl(Ast.ClassDecl cls) {
         currentClass = cls.name();
+        currentClassFields.clear();
+        for (var field : cls.fields()) {
+            currentClassFields.add(field.name());
+        }
         for (var ann : cls.annotations()) {
             emitAnnotation(ann);
         }
@@ -222,6 +236,7 @@ public class PythonEmitter {
 
         indent--;
         currentClass = null;
+        currentClassFields.clear();
     }
 
     private void emitConstructor(Ast.ClassDecl cls, Ast.CtorDecl ctor) {
@@ -433,11 +448,13 @@ public class PythonEmitter {
         }
 
         indent++;
+        insideMethod = true;
         if (method.isAbstract() || method.body() == null || method.body().stmts().isEmpty()) {
             line("pass");
         } else {
             emitBlock(method.body());
         }
+        insideMethod = false;
         indent--;
         blank();
     }
@@ -762,7 +779,16 @@ public class PythonEmitter {
             line("except Exception as err:");
             indent++;
             if (handler.body() != null && !handler.body().stmts().isEmpty()) {
-                emitBlock(handler.body());
+                // Check if the body is a single expression (the fallback value)
+                // e.g., `divide(10, 0) or -1` → body is just the expr `-1`
+                var stmts = handler.body().stmts();
+                if (target != null && stmts.size() == 1 && stmts.getFirst() instanceof Ast.ExprStmt expr
+                        && expr.orHandler() == null) {
+                    // Simple fallback: assign the expression as the default value
+                    line(target + " = " + emitExpr(expr.expr()));
+                } else {
+                    emitBlock(handler.body());
+                }
             } else {
                 if (target != null) {
                     line(target + " = None");
@@ -818,7 +844,13 @@ public class PythonEmitter {
             case "null" -> "None";
             case "true" -> "True";
             case "false" -> "False";
-            default -> id.name();
+            default -> {
+                // Inside a class method, bare field references → self._field
+                if (insideMethod && currentClassFields.contains(id.name())) {
+                    yield "self._" + id.name();
+                }
+                yield id.name();
+            }
         };
     }
 
@@ -874,6 +906,18 @@ public class PythonEmitter {
             String method = sel.field();
             String mapped = mapMethodCall(obj, method, call.args());
             if (mapped != null) return mapped;
+
+            // Map Java static calls to Python equivalents
+            String fullCall = obj + "." + method;
+            String staticMapped = mapStaticCall(fullCall, call.args());
+            if (staticMapped != null) return staticMapped;
+        }
+
+        // Map top-level Java calls
+        if (call.callee() instanceof Ast.Ident id) {
+            // Handle known static methods without an object
+            String mapped = mapStaticCall(id.name(), call.args());
+            if (mapped != null) return mapped;
         }
 
         var args = new ArrayList<String>();
@@ -885,6 +929,48 @@ public class PythonEmitter {
         }
 
         return callee + "(" + String.join(", ", args) + ")";
+    }
+
+    /**
+     * Map Java static method calls to Python equivalents.
+     */
+    private String mapStaticCall(String fullName, List<Ast.Expr> args) {
+        return switch (fullName) {
+            // Set.of(...) → {...}
+            case "Set.of" -> {
+                var elements = args.stream().map(this::emitExpr)
+                    .collect(java.util.stream.Collectors.joining(", "));
+                yield "{" + elements + "}";
+            }
+            // List.of(...) → [...]
+            case "List.of" -> {
+                var elements = args.stream().map(this::emitExpr)
+                    .collect(java.util.stream.Collectors.joining(", "));
+                yield "[" + elements + "]";
+            }
+            // Map.of(k1, v1, k2, v2) → {k1: v1, k2: v2}
+            case "Map.of" -> {
+                var entries = new ArrayList<String>();
+                for (int i = 0; i + 1 < args.size(); i += 2) {
+                    entries.add(emitExpr(args.get(i)) + ": " + emitExpr(args.get(i + 1)));
+                }
+                yield "{" + String.join(", ", entries) + "}";
+            }
+            // Math methods
+            case "Math.sqrt" -> "math.sqrt(" + emitExpr(args.getFirst()) + ")";
+            case "Math.abs" -> "abs(" + emitExpr(args.getFirst()) + ")";
+            case "Math.max" -> "max(" + emitExpr(args.get(0)) + ", " + emitExpr(args.get(1)) + ")";
+            case "Math.min" -> "min(" + emitExpr(args.get(0)) + ", " + emitExpr(args.get(1)) + ")";
+            case "Math.PI" -> "math.pi";
+            // String.valueOf → str()
+            case "String.valueOf" -> "str(" + emitExpr(args.getFirst()) + ")";
+            // Integer.parseInt → int()
+            case "Integer.parseInt" -> "int(" + emitExpr(args.getFirst()) + ")";
+            case "Double.parseDouble" -> "float(" + emitExpr(args.getFirst()) + ")";
+            // Arrays.toString → str()
+            case "java.util.Arrays.toString" -> "str(" + emitExpr(args.getFirst()) + ")";
+            default -> null;
+        };
     }
 
     /**
@@ -952,20 +1038,25 @@ public class PythonEmitter {
             }
 
             // String methods
-            case "toUpperCase" -> obj + ".upper()";
-            case "toLowerCase" -> obj + ".lower()";
+            case "toUpperCase", "upper" -> obj + ".upper()";
+            case "toLowerCase", "lower" -> obj + ".lower()";
             case "trim" -> obj + ".strip()";
+            case "trimStart", "stripLeading" -> obj + ".lstrip()";
+            case "trimEnd", "stripTrailing" -> obj + ".rstrip()";
             case "startsWith" -> obj + ".startswith(" + emitExpr(args.getFirst()) + ")";
             case "endsWith" -> obj + ".endswith(" + emitExpr(args.getFirst()) + ")";
             case "length" -> "len(" + obj + ")";
             case "charAt" -> obj + "[" + emitExpr(args.getFirst()) + "]";
-            case "indexOf" -> obj + ".index(" + emitExpr(args.getFirst()) + ")";
+            case "indexOf" -> obj + ".find(" + emitExpr(args.getFirst()) + ")";
             case "substring" -> {
                 if (args.size() == 1) yield obj + "[" + emitExpr(args.getFirst()) + ":]";
                 yield obj + "[" + emitExpr(args.get(0)) + ":" + emitExpr(args.get(1)) + "]";
             }
             case "split" -> obj + ".split(" + emitExpr(args.getFirst()) + ")";
             case "replace" -> obj + ".replace(" + emitExpr(args.get(0)) + ", " + emitExpr(args.get(1)) + ")";
+            case "repeat" -> "(" + obj + " * " + emitExpr(args.getFirst()) + ")";
+            case "isBlank" -> "(len(" + obj + ".strip()) == 0)";
+            case "toString" -> "str(" + obj + ")";
 
             // Map methods
             case "put" -> {
@@ -976,6 +1067,10 @@ public class PythonEmitter {
             case "entrySet" -> obj + ".items()";
             case "keySet" -> obj + ".keys()";
             case "values" -> obj + ".values()";
+
+            // Map.Entry methods (entry.getKey() → key, entry.getValue() → value)
+            case "getKey" -> obj + "[0]";
+            case "getValue" -> obj + "[1]";
 
             // Getter methods generated by Zinc → direct attribute access in Python
             default -> {
@@ -990,13 +1085,26 @@ public class PythonEmitter {
     }
 
     /**
-     * Apply a lambda to a variable. Handles both lambda expressions and simple identifiers.
+     * Apply a lambda to a variable, inlining when possible.
+     * "lambda x: x * 2" with varName "_x" → "(_x * 2)" (inline the body).
+     * Falls back to calling the lambda if parsing fails.
      */
     private String applyLambda(String lambdaStr, String varName) {
-        // If it's a lambda like "(x) -> x * 2", extract the body and substitute
-        // For simple cases, just call the function
-        // This is a simplification — works for the common cases
-        return lambdaStr.startsWith("lambda ") ? "(" + lambdaStr + ")(" + varName + ")" : lambdaStr + "(" + varName + ")";
+        // Try to inline: "lambda x: BODY" → substitute x with varName in BODY
+        if (lambdaStr.startsWith("lambda ")) {
+            int colonIdx = lambdaStr.indexOf(": ");
+            if (colonIdx > 0) {
+                String paramPart = lambdaStr.substring(7, colonIdx).strip();
+                String body = lambdaStr.substring(colonIdx + 2);
+                // Single-param lambda: inline by replacing param with varName
+                if (!paramPart.contains(",")) {
+                    String param = paramPart.strip();
+                    // Word-boundary replacement to avoid replacing substrings
+                    return body.replaceAll("\\b" + java.util.regex.Pattern.quote(param) + "\\b", varName);
+                }
+            }
+        }
+        return lambdaStr + "(" + varName + ")";
     }
 
     private String emitSelectorExpr(Ast.SelectorExpr sel) {
@@ -1007,7 +1115,26 @@ public class PythonEmitter {
             return "self._" + sel.field();
         }
 
-        // Class.CONSTANT → Class.CONSTANT
+        // .length on arrays → len()
+        if (sel.field().equals("length")) {
+            return "len(" + obj + ")";
+        }
+
+        // .class → type reference (for reflection)
+        if (sel.field().equals("class")) {
+            return obj;
+        }
+
+        // Math.PI → math.pi
+        if (obj.equals("Math") && sel.field().equals("PI")) {
+            addImport("math");
+            return "math.pi";
+        }
+        if (obj.equals("Math") && sel.field().equals("E")) {
+            addImport("math");
+            return "math.e";
+        }
+
         return obj + "." + sel.field();
     }
 
@@ -1234,6 +1361,43 @@ public class PythonEmitter {
 
     private void addFromImport(String stmt) {
         fromImports.add(stmt);
+    }
+
+    /**
+     * Map Java import paths to Python equivalents.
+     * Returns null to drop imports that have no Python equivalent.
+     */
+    private String mapJavaImport(String javaImport) {
+        // java.util.* → auto-available in Python (list, dict, set are builtins)
+        if (javaImport.startsWith("java.util")) return null;
+        // java.io / java.nio → Python has builtins for these
+        if (javaImport.startsWith("java.io")) return null;
+        if (javaImport.startsWith("java.nio")) return "from pathlib import Path";
+        // java.time → datetime
+        if (javaImport.startsWith("java.time")) return "from datetime import datetime, timedelta, date, time";
+        // java.math → math
+        if (javaImport.equals("java.math.BigDecimal") || javaImport.equals("java.math.BigInteger"))
+            return "from decimal import Decimal";
+        if (javaImport.startsWith("java.math")) return "import math";
+        // java.net.http → httpx
+        if (javaImport.startsWith("java.net.http")) return "import httpx";
+        // java.concurrent → threading + concurrent.futures
+        if (javaImport.startsWith("java.util.concurrent"))
+            return "from concurrent.futures import ThreadPoolExecutor, Future";
+        // Drop remaining java.* imports — no Python equivalent
+        if (javaImport.startsWith("java.") || javaImport.startsWith("javax.")) return null;
+        // Project-internal imports — keep as Python imports
+        // e.g., "models.User" → "from models import User"
+        int lastDot = javaImport.lastIndexOf('.');
+        if (lastDot > 0) {
+            String module = javaImport.substring(0, lastDot);
+            String name = javaImport.substring(lastDot + 1);
+            if (name.equals("*")) {
+                return "from " + module + " import *";
+            }
+            return "from " + module + " import " + name;
+        }
+        return "import " + javaImport;
     }
 
     private static String escapeString(String s) {
