@@ -66,6 +66,7 @@ public class Main {
         boolean fatJar = false;
         boolean packageApp = true; // default: jpackage + jlink (works with any library)
         boolean docker = false;
+        boolean targetPython = false;
 
         for (int i = 0; i < args.size(); i++) {
             switch (args.get(i)) {
@@ -75,6 +76,7 @@ public class Main {
                 case "--package" -> { packageApp = true; nativeImage = false; }
                 case "--docker" -> { docker = true; packageApp = false; }
                 case "--no-package" -> packageApp = false;
+                case "--python", "--target-python" -> { targetPython = true; packageApp = false; }
                 default -> { if (!args.get(i).startsWith("-")) input = args.get(i); }
             }
         }
@@ -95,7 +97,9 @@ public class Main {
             projectDir = findProjectDir(inputPath);
         }
 
-        var result = compileProject(inputPath, outDir);
+        var result = targetPython
+            ? compileToPython(inputPath, outDir)
+            : compileProject(inputPath, outDir);
         switch (result) {
             case Result.Ok<List<Path>> ok -> {
                 for (var f : ok.value()) System.out.println("compiled: " + f);
@@ -104,6 +108,12 @@ public class Main {
                 for (var e : err.errors()) System.err.println("error: " + e);
                 System.exit(1);
             }
+        }
+
+        // Python target — done after transpilation, no javac/Mill/jpackage
+        if (targetPython) {
+            System.out.println("python transpilation complete: " + outDir);
+            return;
         }
 
         // If Mill project, run mill compile after transpilation
@@ -363,6 +373,60 @@ public class Main {
         }
 
         return Result.ok(javaFiles);
+    }
+
+    // --- Python compilation --------------------------------------------------
+
+    /**
+     * Compile .zn files to Python (.py) instead of Java.
+     * Bypasses Transformer entirely — emits directly from Zinc AST.
+     */
+    public static Result<List<Path>> compileToPython(Path input, Path outDir) {
+        List<Path> znFiles = new ArrayList<>();
+
+        if (Files.isDirectory(input)) {
+            try (var stream = Files.walk(input)) {
+                stream.filter(p -> p.toString().endsWith(".zn"))
+                    .forEach(znFiles::add);
+            } catch (IOException e) {
+                return Result.err("cannot scan directory " + input + ": " + e.getMessage());
+            }
+        } else {
+            znFiles.add(input);
+        }
+
+        if (znFiles.isEmpty()) {
+            return Result.err("no .zn files found in " + input);
+        }
+
+        var pyFiles = new ArrayList<Path>();
+
+        for (var znFile : znFiles) {
+            String source;
+            try { source = Files.readString(znFile); }
+            catch (IOException e) { return Result.err("cannot read " + znFile + ": " + e.getMessage()); }
+
+            String fileName = znFile.getFileName().toString();
+            String className = capitalize(fileName.replace(".zn", ""));
+
+            // Lex
+            var lexResult = new Lexer(source).tokenize();
+            if (lexResult.isErr()) return Result.err(((Result.Err<?>) lexResult).errors());
+
+            // Parse
+            var parser = new Parser(lexResult.unwrap());
+            var parseResult = parser.parseResult();
+            if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
+            var program = parseResult.unwrap();
+
+            // Emit Python (skip TypeChecker and Transformer)
+            var emitter = new PythonEmitter(className);
+            var emitResult = emitter.emit(program, outDir);
+            if (emitResult.isErr()) return Result.err(((Result.Err<?>) emitResult).errors());
+            pyFiles.add(emitResult.unwrap());
+        }
+
+        return Result.ok(pyFiles);
     }
 
     // --- init ----------------------------------------------------------------
