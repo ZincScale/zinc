@@ -24,6 +24,7 @@ public class PythonEmitter {
     private final Set<String> imports = new LinkedHashSet<>();
     private final Set<String> fromImports = new LinkedHashSet<>();
     private final String className;
+    private final TargetRuntime target = new TargetRuntime.Python();
     private String currentClass = null;  // track which class we're inside
     private Set<String> currentClassFields = new HashSet<>();  // field names of current class
     private boolean insideMethod = false;  // track if we're inside a method body
@@ -42,11 +43,11 @@ public class PythonEmitter {
         imports.clear();
         fromImports.clear();
 
-        // Map Java imports to Python imports
+        // Resolve imports through target runtime
         for (var imp : program.imports()) {
-            String pyImport = mapJavaImport(imp.path());
-            if (pyImport != null) {
-                addFromImport(pyImport);
+            String resolved = target.resolveImport(imp.path());
+            if (resolved != null) {
+                addFromImport(resolved);
             }
         }
 
@@ -106,8 +107,8 @@ public class PythonEmitter {
 
         sb.append(body);
 
-        // Write file
-        String moduleName = className.toLowerCase();
+        // Write file — prefix with zn_ to avoid shadowing Python stdlib modules
+        String moduleName = "zn_" + className.toLowerCase();
         try {
             Files.createDirectories(outDir);
         } catch (IOException e) {
@@ -863,8 +864,8 @@ public class PythonEmitter {
             case "===" -> "is";
             case "!==" -> "is not";
             case "**" -> "**";
+            case "/" -> "//";  // Zinc int division → Python floor division
             case "is" -> {
-                // x is String → isinstance(x, str)
                 yield null; // handled below
             }
             case "is not" -> {
@@ -915,6 +916,13 @@ public class PythonEmitter {
 
         // Map top-level Java calls
         if (call.callee() instanceof Ast.Ident id) {
+            // Inside a method, bare getter calls → self.property
+            if (insideMethod && id.name().startsWith("get") && id.name().length() > 3
+                    && call.args().isEmpty()) {
+                String fieldName = Character.toLowerCase(id.name().charAt(3)) + id.name().substring(4);
+                return "self." + fieldName;
+            }
+
             // Handle known static methods without an object
             String mapped = mapStaticCall(id.name(), call.args());
             if (mapped != null) return mapped;
@@ -1164,6 +1172,8 @@ public class PythonEmitter {
         return "{" + String.join(", ", entries) + "}";
     }
 
+    private int lambdaCounter = 0;
+
     private String emitLambdaExpr(Ast.LambdaExpr lam) {
         var params = lam.params().stream()
             .map(Ast.ParamDecl::name)
@@ -1180,20 +1190,16 @@ public class PythonEmitter {
             }
         }
 
-        // Multi-statement lambda → named inner function
-        // This is a limitation of Python — lambdas must be single-expression
-        // For now, emit as lambda with the last expression
-        if (!lam.body().stmts().isEmpty()) {
-            var last = lam.body().stmts().getLast();
-            if (last instanceof Ast.ReturnStmt ret) {
-                return "lambda " + params + ": " + emitExpr(ret.value());
-            }
-            if (last instanceof Ast.ExprStmt expr) {
-                return "lambda " + params + ": " + emitExpr(expr.expr());
-            }
-        }
+        // Multi-statement lambda → emit a named inner function before this line
+        // Python lambdas must be single-expression, so we hoist the block
+        String fnName = "_lambda_" + (lambdaCounter++);
+        line("def " + fnName + "(" + params + "):");
+        indent++;
+        emitBlock(lam.body());
+        indent--;
 
-        return "lambda " + params + ": None";
+        // Return the function name — it will be used as a callable
+        return fnName;
     }
 
     private String emitSpawnExpr(Ast.SpawnExpr spawn) {
@@ -1361,43 +1367,6 @@ public class PythonEmitter {
 
     private void addFromImport(String stmt) {
         fromImports.add(stmt);
-    }
-
-    /**
-     * Map Java import paths to Python equivalents.
-     * Returns null to drop imports that have no Python equivalent.
-     */
-    private String mapJavaImport(String javaImport) {
-        // java.util.* → auto-available in Python (list, dict, set are builtins)
-        if (javaImport.startsWith("java.util")) return null;
-        // java.io / java.nio → Python has builtins for these
-        if (javaImport.startsWith("java.io")) return null;
-        if (javaImport.startsWith("java.nio")) return "from pathlib import Path";
-        // java.time → datetime
-        if (javaImport.startsWith("java.time")) return "from datetime import datetime, timedelta, date, time";
-        // java.math → math
-        if (javaImport.equals("java.math.BigDecimal") || javaImport.equals("java.math.BigInteger"))
-            return "from decimal import Decimal";
-        if (javaImport.startsWith("java.math")) return "import math";
-        // java.net.http → httpx
-        if (javaImport.startsWith("java.net.http")) return "import httpx";
-        // java.concurrent → threading + concurrent.futures
-        if (javaImport.startsWith("java.util.concurrent"))
-            return "from concurrent.futures import ThreadPoolExecutor, Future";
-        // Drop remaining java.* imports — no Python equivalent
-        if (javaImport.startsWith("java.") || javaImport.startsWith("javax.")) return null;
-        // Project-internal imports — keep as Python imports
-        // e.g., "models.User" → "from models import User"
-        int lastDot = javaImport.lastIndexOf('.');
-        if (lastDot > 0) {
-            String module = javaImport.substring(0, lastDot);
-            String name = javaImport.substring(lastDot + 1);
-            if (name.equals("*")) {
-                return "from " + module + " import *";
-            }
-            return "from " + module + " import " + name;
-        }
-        return "import " + javaImport;
     }
 
     private static String escapeString(String s) {
