@@ -1229,6 +1229,12 @@ public class Transformer {
                 return transformStreamChain(call);
             }
 
+            // parts.join(", ") → String.join(", ", parts)
+            if (methodName.equals("join") && !args.isEmpty()) {
+                return new MethodCallExpr(new NameExpr("String"), "join",
+                    new NodeList<>(args.get(0), transformExpr(sel.object())));
+            }
+
             var result = new MethodCallExpr(transformExpr(sel.object()), methodName, args);
             // Auto-unwrap Optional returns
             if (javaResolver.returnsOptional(getTypeName(sel.object()), methodName)) {

@@ -34,10 +34,10 @@ print("trim: [{padded.trim()}]")
 print("trimStart: [{padded.trimStart()}]")
 print("trimEnd: [{padded.trimEnd()}]")
 
-// Split
+// Split and join
 var csv = "a,b,c,d"
 var parts = csv.split(",")
-print("split: {java.util.Arrays.toString(parts)}")
+print("split: {parts.join(", ")}")
 
 // Repeat
 print("repeat: {"-".repeat(10)}")

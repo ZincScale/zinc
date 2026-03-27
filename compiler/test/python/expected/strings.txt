@@ -5,9 +5,9 @@ multiline
 
 upper: HELLO, WORLD!
 lower: hello, world!
-contains 'World': true
-startsWith 'Hello': true
-endsWith '!': true
+contains 'World': True
+startsWith 'Hello': True
+endsWith '!': True
 replace: Hello, Zinc!
 indexOf 'World': 7
 charAt(0): H
@@ -17,7 +17,7 @@ trimStart: [hello  ]
 trimEnd: [  hello]
 split: a, b, c, d
 repeat: ----------
-empty: true
-not empty: false
-in: true
+empty: True
+not empty: False
+in: True
 Strings OK

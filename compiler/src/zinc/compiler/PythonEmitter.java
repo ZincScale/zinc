@@ -27,7 +27,9 @@ public class PythonEmitter {
     private final TargetRuntime target = new TargetRuntime.Python();
     private String currentClass = null;  // track which class we're inside
     private Set<String> currentClassFields = new HashSet<>();  // field names of current class
+    private Set<String> currentClassMethods = new HashSet<>(); // method names of current class
     private boolean insideMethod = false;  // track if we're inside a method body
+    private final Map<String, String> renamedVars = new HashMap<>(); // original → renamed (for builtin shadowing)
 
     public PythonEmitter(String className) {
         this.className = className;
@@ -157,11 +159,11 @@ public class PythonEmitter {
         String retType = fn.returnType() != null ? emitType(fn.returnType()) : null;
         String params = emitParams(fn.params());
 
-        if (fn.name().equals("main")) {
-            line("def main(" + params + ")" + (retType != null ? " -> " + retType : "") + ":");
-        } else {
-            line("def " + fn.name() + "(" + params + ")" + (retType != null ? " -> " + retType : "") + ":");
+        String fnName = fn.name().equals("main") ? "main" : safeVarName(fn.name());
+        if (!fnName.equals(fn.name())) {
+            renamedVars.put(fn.name(), fnName);
         }
+        line("def " + fnName + "(" + params + ")" + (retType != null ? " -> " + retType : "") + ":");
 
         indent++;
 
@@ -183,8 +185,12 @@ public class PythonEmitter {
     private void emitClassDecl(Ast.ClassDecl cls) {
         currentClass = cls.name();
         currentClassFields.clear();
+        currentClassMethods.clear();
         for (var field : cls.fields()) {
             currentClassFields.add(field.name());
+        }
+        for (var method : cls.methods()) {
+            currentClassMethods.add(method.name());
         }
         for (var ann : cls.annotations()) {
             emitAnnotation(ann);
@@ -238,6 +244,11 @@ public class PythonEmitter {
         indent--;
         currentClass = null;
         currentClassFields.clear();
+        currentClassMethods.clear();
+    }
+
+    private boolean isMethodOfCurrentClass(String name) {
+        return currentClassMethods.contains(name);
     }
 
     private void emitConstructor(Ast.ClassDecl cls, Ast.CtorDecl ctor) {
@@ -497,17 +508,21 @@ public class PythonEmitter {
     }
 
     private void emitVarStmt(Ast.VarStmt var_) {
+        String name = safeVarName(var_.name());
+        if (!name.equals(var_.name())) {
+            renamedVars.put(var_.name(), name);
+        }
         String value = emitExpr(var_.value());
 
         if (var_.orHandler() != null) {
-            emitOrWrapped(var_.name(), value, var_.orHandler());
+            emitOrWrapped(name, value, var_.orHandler());
             return;
         }
 
         if (var_.type() != null) {
-            line(var_.name() + ": " + emitType(var_.type()) + " = " + value);
+            line(name + ": " + emitType(var_.type()) + " = " + value);
         } else {
-            line(var_.name() + " = " + value);
+            line(name + " = " + value);
         }
     }
 
@@ -839,6 +854,21 @@ public class PythonEmitter {
         };
     }
 
+    // Python builtins that Zinc variable names might shadow
+    private static final Set<String> PYTHON_BUILTINS = Set.of(
+        "sum", "sorted", "min", "max", "len", "list", "dict", "set", "map",
+        "filter", "range", "type", "id", "input", "open", "print", "hash",
+        "abs", "all", "any", "int", "float", "str", "bool", "bytes", "next",
+        "iter", "zip", "enumerate", "reversed", "object", "super", "vars",
+        "format", "round", "pow", "dir", "help", "hex", "oct", "bin"
+    );
+
+    /** Map a Zinc variable name, avoiding Python builtin shadowing. */
+    private String safeVarName(String name) {
+        if (PYTHON_BUILTINS.contains(name)) return name + "_";
+        return name;
+    }
+
     private String emitIdent(Ast.Ident id) {
         return switch (id.name()) {
             case "print" -> "print";
@@ -850,7 +880,8 @@ public class PythonEmitter {
                 if (insideMethod && currentClassFields.contains(id.name())) {
                     yield "self._" + id.name();
                 }
-                yield id.name();
+                // Use renamed name if it was declared as a renamed var/fn
+                yield renamedVars.getOrDefault(id.name(), id.name());
             }
         };
     }
@@ -921,6 +952,26 @@ public class PythonEmitter {
                     && call.args().isEmpty()) {
                 String fieldName = Character.toLowerCase(id.name().charAt(3)) + id.name().substring(4);
                 return "self." + fieldName;
+            }
+
+            // Inside a method, bare function calls that aren't builtins/globals → self.method()
+            // This handles both own methods and inherited methods (address(), speak(), etc.)
+            if (insideMethod && currentClass != null
+                    && !id.name().equals("print") && !id.name().equals("len")
+                    && !id.name().equals("str") && !id.name().equals("int")
+                    && !id.name().equals("float") && !id.name().equals("bool")
+                    && !id.name().equals("super") && !id.name().equals("type")
+                    && !id.name().equals("isinstance") && !id.name().equals("range")
+                    && !id.name().equals("enumerate") && !id.name().equals("abs")
+                    && !PYTHON_BUILTINS.contains(id.name())
+                    && !id.name().startsWith("_lambda_")) {
+                // Check if it looks like a method call (not a top-level function or constructor)
+                // Heuristic: if it starts with lowercase and isn't a known function, assume self
+                if (Character.isLowerCase(id.name().charAt(0))) {
+                    var callArgs = new ArrayList<String>();
+                    for (var arg : call.args()) callArgs.add(emitExpr(arg));
+                    return "self." + id.name() + "(" + String.join(", ", callArgs) + ")";
+                }
             }
 
             // Handle known static methods without an object
@@ -1002,16 +1053,29 @@ public class PythonEmitter {
 
             // Functional collection methods → list comprehensions / builtins
             case "filter" -> {
-                String pred = emitExpr(args.getFirst());
-                yield "[_x for _x in " + obj + " if " + applyLambda(pred, "_x") + "]";
+                var arg = args.getFirst();
+                String cond = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "[_x for _x in " + obj + " if " + cond + "]";
             }
             case "map" -> {
-                String fn = emitExpr(args.getFirst());
-                yield "[" + applyLambda(fn, "_x") + " for _x in " + obj + "]";
+                var arg = args.getFirst();
+                String expr = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "[" + expr + " for _x in " + obj + "]";
             }
             case "forEach" -> {
-                String fn = emitExpr(args.getFirst());
-                yield "[" + applyLambda(fn, "_x") + " for _x in " + obj + "]";
+                // forEach is a statement, not an expression — emit as a for loop
+                // This returns a string that will be emitted as a line
+                var arg = args.getFirst();
+                if (arg instanceof Ast.LambdaExpr lam && lam.body().stmts().size() == 1) {
+                    // Simple lambda: x -> print(x) → for _x in obj: print(_x)
+                    String paramName = lam.params().getFirst().name();
+                    var body = lam.body().stmts().getFirst();
+                    if (body instanceof Ast.ExprStmt es) {
+                        yield "for " + paramName + " in " + obj + ":\n" + "    ".repeat(indent + 1) + emitExpr(es.expr());
+                    }
+                }
+                String fn = emitExpr(arg);
+                yield "for _x in " + obj + ":\n" + "    ".repeat(indent + 1) + applyLambda(fn, "_x");
             }
             case "sum" -> "sum(" + obj + ")";
             case "min" -> "min(" + obj + ")";
@@ -1021,28 +1085,45 @@ public class PythonEmitter {
             case "toList" -> "list(" + obj + ")";
             case "toSet" -> "set(" + obj + ")";
             case "sortBy" -> {
-                String key = emitExpr(args.getFirst());
-                yield "sorted(" + obj + ", key=lambda _x: " + applyLambda(key, "_x") + ")";
+                var arg = args.getFirst();
+                String key = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "sorted(" + obj + ", key=lambda _x: " + key + ")";
             }
             case "reduce" -> {
                 addImport("functools");
                 yield "functools.reduce(" + emitExpr(args.get(1)) + ", " + obj + ", " + emitExpr(args.get(0)) + ")";
             }
-            case "anyMatch" -> "any(" + applyLambda(emitExpr(args.getFirst()), "_x") + " for _x in " + obj + ")";
-            case "allMatch" -> "all(" + applyLambda(emitExpr(args.getFirst()), "_x") + " for _x in " + obj + ")";
+            case "anyMatch" -> {
+                var arg = args.getFirst();
+                String cond = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "any(" + cond + " for _x in " + obj + ")";
+            }
+            case "allMatch" -> {
+                var arg = args.getFirst();
+                String cond = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "all(" + cond + " for _x in " + obj + ")";
+            }
+            case "noneMatch" -> {
+                var arg = args.getFirst();
+                String cond = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "not any(" + cond + " for _x in " + obj + ")";
+            }
             case "findFirst" -> {
                 if (args.isEmpty()) {
                     yield "next(iter(" + obj + "), None)";
                 }
-                String pred = emitExpr(args.getFirst());
-                yield "next((_x for _x in " + obj + " if " + applyLambda(pred, "_x") + "), None)";
+                var arg = args.getFirst();
+                String cond = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                yield "next((_x for _x in " + obj + " if " + cond + "), None)";
             }
             case "limit" -> obj + "[:" + emitExpr(args.getFirst()) + "]";
             case "skip" -> obj + "[" + emitExpr(args.getFirst()) + ":]";
             case "groupBy" -> {
-                addImport("itertools");
-                String key = emitExpr(args.getFirst());
-                yield "{k: list(v) for k, v in itertools.groupby(sorted(" + obj + ", key=lambda _x: " + applyLambda(key, "_x") + "), key=lambda _x: " + applyLambda(key, "_x") + ")}";
+                var arg = args.getFirst();
+                String key = containsIt(arg) ? emitItExpr(arg, "_x") : applyLambda(emitExpr(arg), "_x");
+                // Use defaultdict for proper grouping (itertools.groupby requires pre-sorted)
+                addFromImport("from collections import defaultdict");
+                yield "(lambda _d: [_d[" + key.replace("_x", "_item") + "].append(_item) for _item in " + obj + "] and dict(_d) or dict(_d))(defaultdict(list))";
             }
 
             // String methods
@@ -1065,6 +1146,7 @@ public class PythonEmitter {
             case "repeat" -> "(" + obj + " * " + emitExpr(args.getFirst()) + ")";
             case "isBlank" -> "(len(" + obj + ".strip()) == 0)";
             case "toString" -> "str(" + obj + ")";
+            case "join" -> emitExpr(args.getFirst()) + ".join(" + obj + ")";
 
             // Map methods
             case "put" -> {
@@ -1149,9 +1231,18 @@ public class PythonEmitter {
     private String emitSafeNavExpr(Ast.SafeNavExpr safe) {
         String obj = emitExpr(safe.object());
         if (safe.call() != null) {
+            // Try method mapping first (e.g., length() → len())
+            String mapped = mapMethodCall(obj, safe.field(), safe.call().args());
+            if (mapped != null) {
+                return "(" + mapped + " if " + obj + " is not None else None)";
+            }
             var args = safe.call().args().stream().map(this::emitExpr)
                 .collect(java.util.stream.Collectors.joining(", "));
             return "(" + obj + "." + safe.field() + "(" + args + ") if " + obj + " is not None else None)";
+        }
+        // .length → len()
+        if (safe.field().equals("length")) {
+            return "(len(" + obj + ") if " + obj + " is not None else None)";
         }
         return "(" + obj + "." + safe.field() + " if " + obj + " is not None else None)";
     }
@@ -1367,6 +1458,68 @@ public class PythonEmitter {
 
     private void addFromImport(String stmt) {
         fromImports.add(stmt);
+    }
+
+    /** Check if an expression uses the `it` implicit parameter. */
+    private boolean containsIt(Ast.Expr expr) {
+        return switch (expr) {
+            case Ast.Ident id -> id.name().equals("it");
+            case Ast.BinaryExpr bin -> containsIt(bin.left()) || containsIt(bin.right());
+            case Ast.UnaryExpr un -> containsIt(un.operand());
+            case Ast.CallExpr call -> {
+                boolean inCallee = containsIt(call.callee());
+                boolean inArgs = call.args().stream().anyMatch(this::containsIt);
+                yield inCallee || inArgs;
+            }
+            case Ast.SelectorExpr sel -> containsIt(sel.object());
+            case Ast.IndexExpr idx -> containsIt(idx.object()) || containsIt(idx.index());
+            case Ast.IfExpr ife -> containsIt(ife.cond()) || containsIt(ife.then()) || containsIt(ife.elseExpr());
+            default -> false;
+        };
+    }
+
+    /** Emit an expression with `it` replaced by varName. */
+    private String emitItExpr(Ast.Expr expr, String varName) {
+        return switch (expr) {
+            case Ast.Ident id -> id.name().equals("it") ? varName : emitExpr(id);
+            case Ast.BinaryExpr bin ->
+                "(" + emitItExpr(bin.left(), varName) + " " + mapOp(bin.op()) + " " + emitItExpr(bin.right(), varName) + ")";
+            case Ast.UnaryExpr un -> {
+                String op = un.op().equals("!") || un.op().equals("not") ? "not " : un.op();
+                yield op + emitItExpr(un.operand(), varName);
+            }
+            case Ast.SelectorExpr sel -> {
+                String obj = emitItExpr(sel.object(), varName);
+                // .length() → len()
+                if (sel.field().equals("length")) yield "len(" + obj + ")";
+                else yield obj + "." + sel.field();
+            }
+            case Ast.CallExpr call -> {
+                // it.charAt(0) → _x[0], it.length() → len(_x)
+                if (call.callee() instanceof Ast.SelectorExpr sel && containsIt(sel.object())) {
+                    String obj = emitItExpr(sel.object(), varName);
+                    var callArgs = call.args().stream().map(this::emitExpr)
+                        .collect(java.util.stream.Collectors.joining(", "));
+                    String mapped = mapMethodCall(obj, sel.field(), call.args());
+                    if (mapped != null) yield mapped.replace(obj, emitItExpr(sel.object(), varName));
+                    yield obj + "." + sel.field() + "(" + callArgs + ")";
+                }
+                yield emitExpr(call);
+            }
+            default -> emitExpr(expr);
+        };
+    }
+
+    /** Map Zinc operator to Python operator. */
+    private String mapOp(String op) {
+        return switch (op) {
+            case "&&" -> "and";
+            case "||" -> "or";
+            case "===" -> "is";
+            case "!==" -> "is not";
+            case "/" -> "//";
+            default -> op;
+        };
     }
 
     private static String escapeString(String s) {

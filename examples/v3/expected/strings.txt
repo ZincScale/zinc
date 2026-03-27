@@ -16,7 +16,7 @@ substring(7,12): World
 trim: [hello]
 trimStart: [hello  ]
 trimEnd: [  hello]
-split: [a, b, c, d]
+split: a, b, c, d
 repeat: ----------
 empty: true
 not empty: false
