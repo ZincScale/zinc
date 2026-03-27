@@ -841,13 +841,22 @@ public class Transformer {
         // for (var item : range) { _scope.fork(...) }
         var forBody = new BlockStmt();
         if (p.max() > 0) {
+            // Bounded: acquire semaphore before fork, release INSIDE the forked lambda
+            // The semaphore limits how many tasks run concurrently
             forBody.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_semaphore"), "acquire")));
-            // Wrap fork in try-finally for semaphore release
-            var tryBody = new BlockStmt();
-            tryBody.addStatement(new ExpressionStmt(forkCall));
-            var finallyBody = new BlockStmt();
-            finallyBody.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_semaphore"), "release")));
-            forBody.addStatement(new TryStmt(tryBody, new NodeList<>(), finallyBody));
+            // Rebuild the fork lambda to include semaphore release after body
+            var boundedBody = transformBlock(p.body());
+            // try { body } finally { _semaphore.release() }; return null;
+            var innerTry = new BlockStmt();
+            for (var s : boundedBody.getStatements()) innerTry.addStatement(s);
+            var innerFinally = new BlockStmt();
+            innerFinally.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_semaphore"), "release")));
+            var boundedLambdaBody = new BlockStmt();
+            boundedLambdaBody.addStatement(new TryStmt(innerTry, new NodeList<>(), innerFinally));
+            boundedLambdaBody.addStatement(new ReturnStmt(new NullLiteralExpr()));
+            var boundedForkLambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), boundedLambdaBody);
+            var boundedForkCall = new MethodCallExpr(new NameExpr("_scope"), "fork", new NodeList<>(boundedForkLambda));
+            forBody.addStatement(new ExpressionStmt(boundedForkCall));
         } else {
             forBody.addStatement(new ExpressionStmt(forkCall));
         }
@@ -1347,8 +1356,15 @@ public class Transformer {
         //   }); return _f; }).get()
         var tryBody = new BlockStmt();
         for (var stmt : body.getStatements()) tryBody.addStatement(stmt.clone());
-        tryBody.addStatement(new ExpressionStmt(
-            new MethodCallExpr(new NameExpr("_f"), "complete", new NodeList<>(new NullLiteralExpr()))));
+        // Only add _f.complete(null) if the body doesn't end with throw/return (unreachable otherwise)
+        var lastStmt = body.getStatements().isEmpty() ? null
+            : body.getStatements().get(body.getStatements().size() - 1);
+        boolean endsWithThrowOrReturn = lastStmt instanceof com.github.javaparser.ast.stmt.ThrowStmt
+            || lastStmt instanceof ReturnStmt;
+        if (!endsWithThrowOrReturn) {
+            tryBody.addStatement(new ExpressionStmt(
+                new MethodCallExpr(new NameExpr("_f"), "complete", new NodeList<>(new NullLiteralExpr()))));
+        }
 
         var catchBody = new BlockStmt();
         if (!orHandler.isEmpty()) {
@@ -1525,9 +1541,15 @@ public class Transformer {
                     stream = new MethodCallExpr(stream, "sum");
                 }
                 case "sortBy" -> {
+                    // sortBy(it) → sorted() [natural order]
                     // sortBy(key) → sorted(Comparator.comparing(key))
-                    var comparator = new MethodCallExpr(new NameExpr("Comparator"), "comparing", streamArgs);
-                    stream = new MethodCallExpr(stream, "sorted", new NodeList<>(comparator));
+                    var originalArg = op.args().isEmpty() ? null : op.args().getFirst();
+                    if (originalArg instanceof Ast.Ident id && id.name().equals("it")) {
+                        stream = new MethodCallExpr(stream, "sorted");
+                    } else {
+                        var comparator = new MethodCallExpr(new NameExpr("Comparator"), "comparing", streamArgs);
+                        stream = new MethodCallExpr(stream, "sorted", new NodeList<>(comparator));
+                    }
                 }
                 case "groupBy" -> {
                     var collector = new MethodCallExpr(new NameExpr("java.util.stream.Collectors"), "groupingBy", streamArgs);
