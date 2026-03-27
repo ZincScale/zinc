@@ -1,37 +1,32 @@
 // Concurrency — Zinc v3
-// Demonstrates: spawn, parallel for, concurrent, channel, timeout
-// All generate standard Java — no Zinc runtime
+// Demonstrates: spawn, parallel for, concurrent, channel
+// Target-agnostic — no Java or Python specific imports
 
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.TimeUnit
-
-// spawn — fire a virtual thread
+// spawn — fire a background thread
 spawn {
     print("background task started")
 }
-Thread.sleep(100)
+sleep(100)
 
-// parallel for — StructuredTaskScope under the hood
-// Use AtomicInteger to collect results deterministically
+// parallel for — structured, waits for all
 var numbers = [1, 2, 3, 4, 5]
-AtomicInteger sum = new AtomicInteger(0)
+var items = []
 parallel for i in numbers {
-    sum.addAndGet(i)
+    items.add(i)
 }
-print("parallel sum: {sum.get()}")
+print("parallel sum: {items.sum()}")
 
 // parallel for with bounded concurrency
-AtomicInteger bounded = new AtomicInteger(0)
+var bounded = []
 parallel(max: 2) for i in numbers {
-    bounded.addAndGet(i)
+    bounded.add(i)
 }
-print("parallel bounded sum: {bounded.get()}")
+print("parallel bounded sum: {bounded.sum()}")
 
 // parallel for or — error propagation
 fn failOnTwo(int i): int {
     if i == 2 {
-        int x = Integer.parseInt("bad")
-        return x
+        return Error("fail on 2")
     }
     return i
 }
@@ -45,28 +40,17 @@ parallel for i in [1, 2, 3] {
 print("parallel for or: {parallelErr}")
 
 // concurrent — fan-out multiple tasks
-fn setTen(AtomicInteger a): int {
-    a.set(10)
-    return 10
-}
-
-fn setTwenty(AtomicInteger a): int {
-    a.set(20)
-    return 20
-}
-
-AtomicInteger c1 = new AtomicInteger(0)
-AtomicInteger c2 = new AtomicInteger(0)
+fn computeA(): int { return 10 }
+fn computeB(): int { return 20 }
 concurrent {
-    setTen(c1)
-    setTwenty(c2)
+    computeA()
+    computeB()
 }
-print("concurrent: {c1.get()} {c2.get()}")
+print("concurrent: done")
 
 // concurrent or — error propagation
 fn parseBad(): int {
-    int x = Integer.parseInt("bad")
-    return x
+    return Error("bad input")
 }
 
 var concurrentErr = "none"
@@ -80,57 +64,25 @@ print("concurrent or: {concurrentErr}")
 // Channel — bounded queue for producer/consumer
 Channel<String> ch = new Channel(10)
 spawn {
-    ch.put("hello from channel") or { }
+    ch.send("hello from channel")
 }
-Thread.sleep(50)
-String msg = ch.poll(100, TimeUnit.MILLISECONDS) or { "timeout" }
+sleep(50)
+String msg = ch.receive() or "timeout"
 print("channel: {msg}")
 
-// spawn or — error handler captures exceptions
-var result = new AtomicInteger(0)
-spawn {
-    int x = Integer.parseInt("not_a_number")
-    result.set(x)
-} or {
-    result.set(-1)
-}
-Thread.sleep(100)
-print("spawn or error: {result.get()}")
-
-// spawn or — success path (no error)
-var ok = new AtomicInteger(0)
-spawn {
-    ok.set(42)
-} or {
-    ok.set(-1)
-}
-Thread.sleep(100)
-print("spawn or success: {ok.get()}")
-
-// spawn returns CompletableFuture — join propagates errors to caller
+// spawn returns future — join waits
 var task = spawn {
     print("future task done")
 }
 task.join()
 print("future isDone: {task.isDone()}")
 
-// spawn join or — caller catches error from spawned thread
+// spawn join or — caller catches error
 var task2 = spawn {
-    Integer.parseInt("bad")
+    parseBad()
 }
 task2.join() or {
     print("join caught error")
-}
-print("future failed: {task2.isCompletedExceptionally()}")
-
-// spawn or + join or — supervision fires, then caller catches
-var task3 = spawn {
-    Integer.parseInt("bad")
-} or {
-    print("supervision fired")
-}
-task3.join() or {
-    print("caller caught after supervision")
 }
 
 print("Concurrency OK")

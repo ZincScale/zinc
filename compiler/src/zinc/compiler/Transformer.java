@@ -1195,7 +1195,12 @@ public class Transformer {
         java.util.Map.entry("split", "split"),
         java.util.Map.entry("substring", "substring"),
         java.util.Map.entry("charAt", "charAt"),
-        java.util.Map.entry("indexOf", "indexOf")
+        java.util.Map.entry("indexOf", "indexOf"),
+        // Channel methods
+        java.util.Map.entry("send", "put"),
+        java.util.Map.entry("receive", "take"),
+        // Future/spawn result methods
+        java.util.Map.entry("isFailed", "isCompletedExceptionally")
     );
 
     // Zinc type → Java type for constructors
@@ -1250,6 +1255,14 @@ public class Transformer {
             }
             if (id.name().equals("len") && !args.isEmpty()) {
                 return new MethodCallExpr(args.get(0), "size");
+            }
+            // sleep(ms) → Thread.sleep(ms)
+            if (id.name().equals("sleep")) {
+                return new MethodCallExpr(new NameExpr("Thread"), "sleep", args);
+            }
+            // parseInt(s) → Integer.parseInt(s)
+            if (id.name().equals("parseInt")) {
+                return new MethodCallExpr(new NameExpr("Integer"), "parseInt", args);
             }
             return new MethodCallExpr(null, id.name(), args);
         }
