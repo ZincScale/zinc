@@ -133,7 +133,7 @@ Only `ZincError` exists. Missing:
 | 2 | return Error in spawn | Bug | **FIXED** (4c3df27) — skip _f.complete after throw |
 | 3 | Effectively final capture | Bug | OPEN — needs AtomicReference/holder wrapping |
 | 4 | sortBy(it) Comparator | Bug | **FIXED** (4c3df27) — detect identity, use natural order |
-| 5 | lock keyword | Feature | OPEN |
+| 5 | lock keyword | Feature | **FIXED** (f66b2e3) — LOCK token, LockStmt AST, parser, both backends |
 | 6 | Concurrent result binding | Feature | OPEN |
 | 7 | Formal stdlib | Design | OPEN |
 | 8-13 | Python concurrency | Phase 3 | OPEN — stubs in PythonEmitter, need zinc_runtime.py |
