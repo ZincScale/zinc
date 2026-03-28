@@ -1,8 +1,0 @@
-User(name='Alice', email='alice@example.com', age=30)
-Rex says Woof
-Dog(Rex, Lab)
-host: localhost
-port: 8080
-version: 1.0
-Good day, World.
-Classes OK
