@@ -57,7 +57,7 @@ def find_zn_files(path: Path) -> list[Path]:
     return sorted(path.rglob("*.zn"))
 
 
-def transpile_project(input_path: Path, out_dir: Path) -> list[Path]:
+def transpile_project(input_path: Path, out_dir: Path, config: dict | None = None) -> list[Path]:
     """Transpile all .zn files, preserving directory structure."""
     zn_files = find_zn_files(input_path)
     if not zn_files:
@@ -65,11 +65,20 @@ def transpile_project(input_path: Path, out_dir: Path) -> list[Path]:
         sys.exit(1)
 
     source_root = input_path if input_path.is_dir() else input_path.parent
+
+    # Determine which file is the entry point
+    main_zn = None
+    if config and "project" in config:
+        main_zn = config["project"].get("main", "main.zn")
+    if main_zn is None:
+        main_zn = "main.zn"
+
     py_files = []
 
     for zn in zn_files:
         source = zn.read_text()
-        py_source = transpile(source, str(zn))
+        is_entry = (zn.name == main_zn) or (len(zn_files) == 1)
+        py_source = transpile(source, str(zn), entry_point=is_entry)
 
         rel = zn.relative_to(source_root)
         py_path = out_dir / rel.with_suffix(".py")
@@ -124,7 +133,7 @@ def cmd_run(args):
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
 
-    py_files = transpile_project(project_input, tmp_dir)
+    py_files = transpile_project(project_input, tmp_dir, config)
     main_py = find_main(py_files, config)
     # If running a specific file, use that as entry point
     if input_path.is_file():
@@ -148,7 +157,7 @@ def cmd_build(args):
     config = load_config(input_path)
     out_dir = Path(args.output) if args.output else Path("build")
 
-    py_files = transpile_project(input_path, out_dir)
+    py_files = transpile_project(input_path, out_dir, config)
     for f in py_files:
         print(f"compiled: {f}")
 

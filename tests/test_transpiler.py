@@ -158,7 +158,7 @@ run("full class",
     def create(name):
         return Greeter(name)''')
 
-run("main with __name__ guard",
+run("__name__ guard stripped",
     '''def main() {
     print("hello")
 }
@@ -166,6 +166,26 @@ run("main with __name__ guard",
 if __name__ == "__main__" {
     main()
 }''',
+    '''def main():
+    print("hello")''')
+
+def test_raw(name, actual, expected):
+    global passed, failed
+    result_lines = [l.rstrip() for l in actual.strip().split("\n")]
+    expected_lines = [l.rstrip() for l in expected.strip().split("\n")]
+    if result_lines == expected_lines:
+        print(f"PASS: {name}")
+        passed += 1
+    else:
+        print(f"FAIL: {name}")
+        for l in expected_lines:
+            print(f"  expected: |{l}|")
+        for l in result_lines:
+            print(f"  got:      |{l}|")
+        failed += 1
+
+test_raw("entry_point injects guard",
+    transpile('def main() {\n    print("hello")\n}', entry_point=True),
     '''def main():
     print("hello")
 

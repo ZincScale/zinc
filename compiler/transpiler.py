@@ -36,14 +36,62 @@ STRING_PATTERN = re.compile(
 )
 
 
-def transpile(source: str, filename: str = "<stdin>") -> str:
-    """Transpile a .zn source string to Python source."""
+def transpile(source: str, filename: str = "<stdin>", entry_point: bool = False) -> str:
+    """Transpile a .zn source string to Python source.
+
+    If entry_point=True and the file defines main(), appends
+    if __name__ == "__main__": main() automatically.
+    """
     lines = source.split("\n")
     result = _braces_to_indent(lines)
+    result = _strip_name_guard(result)
     result = _rename_methods(result)
     result = _inject_self(result)
     result = _fstrings(result)
+
+    if entry_point and _has_main(result):
+        while result and result[-1].strip() == "":
+            result.pop()
+        result.append("")
+        result.append('if __name__ == "__main__":')
+        result.append("    main()")
+
     return "\n".join(result)
+
+
+def _strip_name_guard(lines: list[str]) -> list[str]:
+    """Remove if __name__ == '__main__' blocks — zinc handles entry points."""
+    out = []
+    skip_depth = 0
+    skipping = False
+
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        if not skipping:
+            if stripped.startswith('if __name__') and '__main__' in stripped:
+                skipping = True
+                skip_indent = indent
+                continue
+            out.append(line)
+        else:
+            # Inside the guard block — skip indented lines
+            if stripped == "" or indent > skip_indent:
+                continue
+            # Back to same/lower indent — stop skipping
+            skipping = False
+            out.append(line)
+
+    return out
+
+
+def _has_main(lines: list[str]) -> bool:
+    """Check if the file defines a top-level main() function."""
+    for line in lines:
+        if line.startswith("def main("):
+            return True
+    return False
 
 
 def _braces_to_indent(lines: list[str]) -> list[str]:
