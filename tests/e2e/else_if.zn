@@ -1,0 +1,15 @@
+def classify(x) {
+    if x > 0 {
+        return "positive"
+    } else if x == 0 {
+        return "zero"
+    } else {
+        return "negative"
+    }
+}
+
+def main() {
+    print(classify(5))
+    print(classify(0))
+    print(classify(-3))
+}

@@ -1,0 +1,8 @@
+def main() {
+    name = "Zinc"
+    version = 2
+    print("Hello, {name}!")
+    print("{name} v{version} is {1 + 1}x better")
+    print("plain string no interpolation")
+    print("{name.upper()} rocks")
+}

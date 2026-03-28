@@ -1,0 +1,4 @@
+divide called
+5.0
+divide called
+error: division by zero

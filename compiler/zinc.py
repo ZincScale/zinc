@@ -266,18 +266,18 @@ def cmd_build(args):
 
 
 def cmd_init(args):
-    name = args.name
-    project_dir = Path(name)
+    project_dir = Path(args.name)
+    project_name = project_dir.name  # just the basename, not full path
     src_dir = project_dir / "src"
     src_dir.mkdir(parents=True, exist_ok=True)
 
     (src_dir / "main.zn").write_text(f'''def main() {{
-    print("Hello from {name}!")
+    print("Hello from {project_name}!")
 }}
 ''')
 
     (project_dir / "zinc.toml").write_text(f'''[project]
-name = "{name}"
+name = "{project_name}"
 version = "0.1.0"
 main = "main.zn"
 
@@ -292,10 +292,10 @@ __pycache__/
 .venv/
 """)
 
-    print(f"created project: {name}")
+    print(f"created project: {project_name}")
     print(f"  {src_dir}/main.zn")
     print(f"  {project_dir}/zinc.toml")
-    print(f"\nrun: cd {name} && zinc run src/")
+    print(f"\nrun: cd {project_dir} && zinc run src/")
 
 
 # --- Main -------------------------------------------------------------------

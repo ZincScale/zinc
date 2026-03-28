@@ -1,0 +1,4 @@
+Hello, Zinc!
+Zinc v2 is 2x better
+plain string no interpolation
+ZINC rocks
