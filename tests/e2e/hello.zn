@@ -1,0 +1,7 @@
+def main() {
+    print("Hello, Zinc!")
+}
+
+if __name__ == "__main__" {
+    main()
+}

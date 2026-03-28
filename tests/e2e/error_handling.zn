@@ -1,0 +1,21 @@
+def divide(a, b) {
+    if b == 0 {
+        raise ValueError("division by zero")
+    }
+    return a / b
+}
+
+def main() {
+    try {
+        print(divide(10, 2))
+        print(divide(10, 0))
+    } except ValueError as e {
+        print("caught: {e}")
+    } finally {
+        print("done")
+    }
+}
+
+if __name__ == "__main__" {
+    main()
+}

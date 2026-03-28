@@ -1,0 +1,23 @@
+def main() {
+    # List comprehension
+    squares = [x * x for x in range(6)]
+    print(squares)
+
+    # Dict comprehension
+    names = ["alice", "bob", "charlie"]
+    lengths = {name: len(name) for name in names}
+    print(lengths)
+
+    # Filter
+    evens = [x for x in range(10) if x % 2 == 0]
+    print(evens)
+
+    # Nested
+    matrix = [[1, 2], [3, 4], [5, 6]]
+    flat = [x for row in matrix for x in row]
+    print(flat)
+}
+
+if __name__ == "__main__" {
+    main()
+}

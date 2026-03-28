@@ -1,0 +1,3 @@
+5.0
+caught: division by zero
+done

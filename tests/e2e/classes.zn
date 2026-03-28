@@ -1,0 +1,33 @@
+class Counter {
+    def init(start=0) {
+        self.count = start
+    }
+
+    def increment(n=1) {
+        self.count += n
+    }
+
+    def toString() {
+        return "Counter({self.count})"
+    }
+
+    def equals(other) {
+        return self.count == other.count
+    }
+}
+
+def main() {
+    c = Counter(10)
+    c.increment()
+    c.increment(5)
+    print(c)
+    print(c.count)
+
+    c2 = Counter(16)
+    print(c == c2)
+    print(c != c2)
+}
+
+if __name__ == "__main__" {
+    main()
+}
