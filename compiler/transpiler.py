@@ -132,9 +132,16 @@ def _is_block_open(stripped: str) -> bool:
 
 
 def _braces_to_indent(lines: list[str]) -> list[str]:
-    """Convert brace-delimited blocks to Python indentation."""
+    """Convert brace-delimited blocks to Python indentation.
+
+    Tracks a stack to distinguish block braces (if/def/class/etc.) from
+    literal braces (dict/set). Block braces become indentation; literal
+    braces pass through unchanged.
+    """
     out = []
     indent = 0
+    # Stack: True = block brace (converted to indent), False = literal brace (pass through)
+    brace_stack = []
 
     for raw_line in lines:
         stripped = raw_line.strip()
@@ -145,31 +152,49 @@ def _braces_to_indent(lines: list[str]) -> list[str]:
             continue
 
         # `else if` → `elif`
-        stripped = stripped.replace("else if ", "elif ", 1) if stripped.startswith("} else if ") or stripped.startswith("else if ") else stripped
+        if stripped.startswith("} else if ") or stripped.startswith("else if "):
+            stripped = stripped.replace("else if ", "elif ", 1)
 
-        # Line is just a closing brace — decrease indent, skip the line
+        # Line is just a closing brace
         if stripped == "}":
-            indent = max(0, indent - 1)
-            continue
+            if brace_stack and brace_stack[-1]:
+                # Block brace — decrease indent, consume the line
+                brace_stack.pop()
+                indent = max(0, indent - 1)
+                continue
+            else:
+                # Literal brace — pass through
+                if brace_stack:
+                    brace_stack.pop()
+                out.append("    " * indent + stripped)
+                continue
 
-        # Handle closing brace followed by else/elif/except/finally
-        continuation = None
+        # Closing brace followed by continuation (} else {, } except {, etc.)
         if stripped.startswith("}"):
-            indent = max(0, indent - 1)
+            if brace_stack and brace_stack[-1]:
+                brace_stack.pop()
+                indent = max(0, indent - 1)
             rest = stripped[1:].strip()
             if rest:
                 stripped = rest
             else:
                 continue
 
-        # Check if line ends with opening brace — but only for block keywords,
-        # not dict/set literals like `x = {` or `return {`
-        if stripped.endswith("{") and _is_block_open(stripped):
-            content = stripped[:-1].rstrip()
-            if content:
-                out.append("    " * indent + content + ":")
-            indent += 1
-            continue
+        # Line ends with opening brace
+        if stripped.endswith("{"):
+            if _is_block_open(stripped):
+                # Block brace — convert to colon + indent
+                brace_stack.append(True)
+                content = stripped[:-1].rstrip()
+                if content:
+                    out.append("    " * indent + content + ":")
+                indent += 1
+                continue
+            else:
+                # Literal brace (dict/set) — pass through
+                brace_stack.append(False)
+                out.append("    " * indent + stripped)
+                continue
 
         # Regular line — emit with current indent
         out.append("    " * indent + stripped)
@@ -253,9 +278,16 @@ def _fstrings(lines: list[str]) -> list[str]:
             continue
 
         # Only add f prefix to strings that contain {identifier...} interpolation
-        line = STRING_PATTERN.sub(
-            lambda m: ("f" + m.group(0)) if _INTERP_PATTERN.search(m.group(0)) else m.group(0),
-            line,
-        )
+        # but NOT strings followed by .format( — those use explicit formatting
+        def _maybe_fstring(m):
+            if not _INTERP_PATTERN.search(m.group(0)):
+                return m.group(0)
+            # Check if followed by .format(
+            after = line[m.end():]
+            if after.lstrip().startswith(".format("):
+                return m.group(0)
+            return "f" + m.group(0)
+
+        line = STRING_PATTERN.sub(_maybe_fstring, line)
         out.append(line)
     return out
