@@ -65,7 +65,7 @@ Requires Python 3.12+.
 zinc run hello.zn              # transpile and run
 zinc run src/                  # run a multi-file project
 zinc build src/ -o build/      # transpile to .py files
-zinc build src/ --native       # native binary via Nuitka
+zinc build src/ --native       # native binary via PyInstaller
 zinc init myapp                # scaffold a new project
 ```
 

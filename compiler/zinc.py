@@ -5,7 +5,7 @@ zinc — braces Python CLI
 Usage:
     zinc run <file.zn|dir> [args...]        transpile and run
     zinc build <file.zn|dir> [-o outdir]    transpile to .py project
-    zinc build --native <file.zn|dir>       transpile + Nuitka native binary
+    zinc build --native <file.zn|dir>       transpile + PyInstaller native binary
     zinc init <name>                        scaffold a new project
 """
 
@@ -60,8 +60,12 @@ def _get_deps(config: dict | None) -> list[str]:
 
 def _get_python_version(config: dict | None) -> str:
     if not config:
-        return ">=3.12"
-    return config.get("python", {}).get("version", ">=3.12")
+        return ">=3.14"
+    return config.get("python", {}).get("version", ">=3.14")
+
+
+# Default Python for uv — free-threading build
+UV_PYTHON = "3.14t"
 
 
 # --- Transpile --------------------------------------------------------------
@@ -190,16 +194,17 @@ def cmd_run(args):
         print("hint: add main = \"main.zn\" to zinc.toml [project]", file=sys.stderr)
         sys.exit(1)
 
-    deps = _get_deps(config)
     main_rel = str(main_py.relative_to(tmp_dir))
+    uv = _find_uv()
 
-    if deps and _find_uv():
-        # Has dependencies — use uv to manage venv + deps
+    if uv:
+        # Use uv — manages Python version + deps
         _write_pyproject(tmp_dir, config)
-        cmd = [_find_uv(), "run", "--project", str(tmp_dir), "python", main_rel] + args.run_args
+        cmd = [uv, "run", "--quiet", "--python", UV_PYTHON, "--project", str(tmp_dir),
+               "python", main_rel] + args.run_args
         sys.exit(subprocess.call(cmd, cwd=tmp_dir))
     else:
-        # No deps — run directly
+        # Fallback — run directly with system python
         cmd = [sys.executable, main_rel] + args.run_args
         sys.exit(subprocess.call(cmd, cwd=tmp_dir))
 
@@ -222,20 +227,26 @@ def cmd_build(args):
             print("error: could not determine entry point for native build", file=sys.stderr)
             sys.exit(1)
 
-        # Use nuitka via uv if available, else direct
         uv = _find_uv()
-        if uv:
-            print("building native binary via nuitka (uv)...")
-            cmd = [uv, "run", "--project", str(out_dir),
-                   "--with", "nuitka",
-                   "python", "-m", "nuitka", "--standalone", "--onefile",
-                   str(main_py.relative_to(out_dir))]
-            sys.exit(subprocess.call(cmd, cwd=out_dir))
-        else:
-            print("building native binary via nuitka...")
-            cmd = ["python3", "-m", "nuitka", "--standalone", "--onefile",
-                   str(main_py)]
-            sys.exit(subprocess.call(cmd))
+        if not uv:
+            print("error: uv is required for native builds (curl -LsSf https://astral.sh/uv/install.sh | sh)", file=sys.stderr)
+            sys.exit(1)
+
+        print("building native binary via pyinstaller...")
+        binary_name = main_py.stem
+        cmd = [uv, "run", "--python", UV_PYTHON, "--project", str(out_dir),
+               "--with", "pyinstaller",
+               "python", "-m", "PyInstaller", "--onefile",
+               "--name", binary_name,
+               "--distpath", str(out_dir / "dist"),
+               "--workpath", str(out_dir / "build"),
+               "--specpath", str(out_dir),
+               str(main_py.relative_to(out_dir))]
+        result = subprocess.call(cmd, cwd=out_dir)
+        if result == 0:
+            binary = out_dir / "dist" / binary_name
+            print(f"native binary: {binary}")
+        sys.exit(result)
 
     print(f"build complete: {out_dir}")
 
@@ -286,7 +297,7 @@ def main():
     build_p = sub.add_parser("build", help="transpile to .py")
     build_p.add_argument("input", help=".zn file or directory")
     build_p.add_argument("-o", "--output", help="output directory")
-    build_p.add_argument("--native", action="store_true", help="build native binary via Nuitka")
+    build_p.add_argument("--native", action="store_true", help="build native binary via PyInstaller")
 
     init_p = sub.add_parser("init", help="scaffold a new project")
     init_p.add_argument("name", help="project name")
