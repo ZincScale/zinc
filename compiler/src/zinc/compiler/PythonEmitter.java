@@ -176,4 +176,22 @@ public class PythonEmitter {
         emit(program, Path.of("/dev/null"));
         return ctx.sb.toString();
     }
+
+    /**
+     * Returns the set of stdlib module names actually used by this compilation.
+     * Call after emit() — scans fromImports for zinc_runtime references.
+     */
+    public Set<String> usedStdlibModules() {
+        var used = new HashSet<String>();
+        for (var imp : ctx.fromImports) {
+            // Match: from .zinc_runtime import X, from ..zinc_runtime import X, etc.
+            if (imp.matches("from \\.+\\w+ import .+")) {
+                String modulePart = imp.replaceFirst("from \\.+", "").replaceFirst(" import .+", "");
+                if (ZincStdlib.isPythonStdlibModule(modulePart)) {
+                    used.add(modulePart + ".py");
+                }
+            }
+        }
+        return used;
+    }
 }

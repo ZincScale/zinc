@@ -170,22 +170,22 @@ public class PythonDeclEmitter {
     }
 
     private void emitProperty(Ast.FieldDecl field) {
-        // Getter
-        ctx.line("@property");
-        ctx.line("def " + field.name() + "(self)" +
-            (field.type() != null ? " -> " + types.emitType(field.type()) : "") + ":");
+        String capName = Character.toUpperCase(field.name().charAt(0)) + field.name().substring(1);
+        String retType = field.type() != null ? " -> " + types.emitType(field.type()) : "";
+        String paramType = field.type() != null ? ": " + types.emitType(field.type()) : "";
+
+        // Getter: getFoo(self) → self._foo
+        ctx.line("def get" + capName + "(self)" + retType + ":");
         ctx.indent++;
         ctx.line("return self._" + field.name());
         ctx.indent--;
         ctx.blank();
 
-        // Setter (only for pub, not readonly/init)
+        // Setter: setFoo(self, value) → self._foo = value (pub only, not readonly/init)
         if (field.isPub() && !field.isReadonly() && !field.isInit()) {
-            ctx.line("@" + field.name() + ".setter");
-            ctx.line("def " + field.name() + "(self, value" +
-                (field.type() != null ? ": " + types.emitType(field.type()) : "") + "):");
+            ctx.line("def set" + capName + "(self, " + field.name() + paramType + "):");
             ctx.indent++;
-            ctx.line("self._" + field.name() + " = value");
+            ctx.line("self._" + field.name() + " = " + field.name());
             ctx.indent--;
             ctx.blank();
         }

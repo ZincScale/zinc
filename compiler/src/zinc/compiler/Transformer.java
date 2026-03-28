@@ -120,17 +120,7 @@ public class Transformer {
     }
 
     public Result<CompilationUnit> transform(Program program) {
-        var cu = new CompilationUnit();
-
-        if (program.pkg() != null) {
-            cu.setPackageDeclaration(program.pkg().path());
-        }
-
-        cu.addImport("java.util", false, true);
-        cu.addImport("java.util.stream", false, true);
-        for (var imp : program.imports()) {
-            cu.addImport(imp.path());
-        }
+        var cu = ctx.newCU(program);
 
         if (!program.stmts().isEmpty()) {
             var mainClass = cu.addClass(ctx.className, Keyword.PUBLIC);

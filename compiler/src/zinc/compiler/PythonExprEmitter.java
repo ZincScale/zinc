@@ -154,13 +154,6 @@ public class PythonExprEmitter {
 
         // Map top-level Java calls
         if (call.callee() instanceof Ast.Ident id) {
-            // Inside a method, bare getter calls → self.property
-            if (ctx.insideMethod && id.name().startsWith("get") && id.name().length() > 3
-                    && call.args().isEmpty()) {
-                String fieldName = Character.toLowerCase(id.name().charAt(3)) + id.name().substring(4);
-                return "self." + fieldName;
-            }
-
             // Inside a method, bare function calls that aren't builtins/globals → self.method()
             if (ctx.insideMethod && ctx.currentClass != null
                     && !id.name().equals("print") && !id.name().equals("len")
@@ -199,40 +192,37 @@ public class PythonExprEmitter {
     // --- Static call mapping --------------------------------------------------
 
     /**
-     * Map Java static method calls to Python equivalents.
+     * Map static method calls to Python equivalents via declarative mapping table.
      */
     String mapStaticCall(String fullName, List<Ast.Expr> args) {
-        return switch (fullName) {
-            case "Set.of" -> {
-                var elements = args.stream().map(this::emitExpr).collect(Collectors.joining(", "));
-                yield "{" + elements + "}";
+        // Split "Class.method" or try as top-level function
+        int dot = fullName.indexOf('.');
+        if (dot > 0) {
+            String className = fullName.substring(0, dot);
+            String method = fullName.substring(dot + 1);
+            var emittedArgs = args.stream().map(this::emitExpr).toList();
+            var resolved = PythonStdlibMapping.resolveStaticCall(className, method, emittedArgs);
+            if (resolved != null) {
+                if (resolved.importStmt() != null) ctx.addImport(resolved.importStmt());
+                return resolved.expr();
             }
-            case "List.of" -> {
-                var elements = args.stream().map(this::emitExpr).collect(Collectors.joining(", "));
-                yield "[" + elements + "]";
-            }
-            case "Map.of" -> {
-                var entries = new ArrayList<String>();
-                for (int i = 0; i + 1 < args.size(); i += 2) {
-                    entries.add(emitExpr(args.get(i)) + ": " + emitExpr(args.get(i + 1)));
+        } else {
+            // Top-level function (e.g., sleep)
+            var emittedArgs = args.stream().map(this::emitExpr).toList();
+            var resolved = PythonStdlibMapping.resolveTopLevelCall(fullName, emittedArgs, ctx.runtimeImportPrefix());
+            if (resolved != null) {
+                if (resolved.importStmt() != null) {
+                    // "from .zinc_runtime import X" style
+                    if (resolved.importStmt().startsWith("from ")) {
+                        ctx.addFromImport(resolved.importStmt());
+                    } else {
+                        ctx.addImport(resolved.importStmt());
+                    }
                 }
-                yield "{" + String.join(", ", entries) + "}";
+                return resolved.expr();
             }
-            case "Math.sqrt" -> "math.sqrt(" + emitExpr(args.getFirst()) + ")";
-            case "Math.abs" -> "abs(" + emitExpr(args.getFirst()) + ")";
-            case "Math.max" -> "max(" + emitExpr(args.get(0)) + ", " + emitExpr(args.get(1)) + ")";
-            case "Math.min" -> "min(" + emitExpr(args.get(0)) + ", " + emitExpr(args.get(1)) + ")";
-            case "Math.PI" -> "math.pi";
-            case "String.valueOf" -> "str(" + emitExpr(args.getFirst()) + ")";
-            case "Integer.parseInt" -> "int(" + emitExpr(args.getFirst()) + ")";
-            case "Double.parseDouble" -> "float(" + emitExpr(args.getFirst()) + ")";
-            case "java.util.Arrays.toString" -> "str(" + emitExpr(args.getFirst()) + ")";
-            case "sleep" -> {
-                ctx.addFromImport("from " + ctx.runtimeImportPrefix() + "zinc_runtime import zinc_sleep");
-                yield "zinc_sleep(" + emitExpr(args.getFirst()) + ")";
-            }
-            default -> null;
-        };
+        }
+        return null;
     }
 
     // --- Method call mapping --------------------------------------------------
@@ -375,13 +365,7 @@ public class PythonExprEmitter {
             case "receive" -> obj + ".receive()";
 
             // Getter methods → direct attribute access
-            default -> {
-                if (method.startsWith("get") && method.length() > 3 && args.isEmpty()) {
-                    String fieldName = Character.toLowerCase(method.charAt(3)) + method.substring(4);
-                    yield obj + "." + fieldName;
-                }
-                yield null;
-            }
+            default -> null;
         };
     }
 
@@ -399,13 +383,14 @@ public class PythonExprEmitter {
         if (sel.field().equals("class")) {
             return obj;
         }
-        if (obj.equals("Math") && sel.field().equals("PI")) {
-            ctx.addImport("math");
-            return "math.pi";
-        }
-        if (obj.equals("Math") && sel.field().equals("E")) {
-            ctx.addImport("math");
-            return "math.e";
+
+        // Check declarative static field mapping (Math.PI, Math.E, etc.)
+        if (sel.object() instanceof Ast.Ident id) {
+            var resolved = PythonStdlibMapping.resolveStaticField(id.name(), sel.field());
+            if (resolved != null) {
+                if (resolved.importStmt() != null) ctx.addImport(resolved.importStmt());
+                return resolved.expr();
+            }
         }
 
         return obj + "." + sel.field();

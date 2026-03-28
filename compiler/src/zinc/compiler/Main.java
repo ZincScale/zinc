@@ -112,13 +112,8 @@ public class Main {
             }
         }
 
-        // Python target — copy stdlib, generate project files, done
+        // Python target — generate project files, done (stdlib already tree-shaken by compileToPython)
         if (targetPython) {
-            try {
-                ZincStdlib.copyPythonStdlib(outDir.resolve("app"));
-            } catch (IOException e) {
-                System.err.println("warning: could not copy stdlib: " + e.getMessage());
-            }
 
             ZincConfig config = null;
             var configFile = ZincConfig.findConfigFile(inputPath);
@@ -260,9 +255,6 @@ public class Main {
                 for (var e : ((Result.Err<?>) compileResult).errors()) System.err.println("error: " + e);
                 System.exit(1);
             }
-            try { ZincStdlib.copyPythonStdlib(outDir.resolve("app")); }
-            catch (IOException e) { System.err.println("warning: could not copy stdlib: " + e.getMessage()); }
-
             if (config != null && !config.pythonDeps.isEmpty()) {
                 try {
                     Files.writeString(outDir.resolve("requirements.txt"), config.toRequirementsTxt());

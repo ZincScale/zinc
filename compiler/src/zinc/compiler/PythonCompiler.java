@@ -60,6 +60,7 @@ public class PythonCompiler {
 
         var packageDirs = new java.util.HashSet<Path>();
         packageDirs.add(appDir);
+        var usedStdlib = new java.util.HashSet<String>();
 
         for (var znFile : znFiles) {
             String source;
@@ -95,6 +96,14 @@ public class PythonCompiler {
             var emitResult = emitter.emit(program, targetDir);
             if (emitResult.isErr()) return Result.err(((Result.Err<?>) emitResult).errors());
             pyFiles.add(emitResult.unwrap());
+            usedStdlib.addAll(emitter.usedStdlibModules());
+        }
+
+        // Tree-shake stdlib: only copy modules actually referenced
+        try {
+            ZincStdlib.copyPythonStdlib(appDir, usedStdlib);
+        } catch (IOException e) {
+            return Result.err("failed to copy stdlib: " + e.getMessage());
         }
 
         // Create __init__.py in every package directory
@@ -112,23 +121,17 @@ public class PythonCompiler {
 
     // --- Python execution -----------------------------------------------------
 
+    /**
+     * Run a Python project via uv. uv handles venv, deps, and Python version.
+     */
     static int runPythonProject(Path outDir, String moduleName, ZincConfig config, List<String> args) {
-        boolean hasUv = hasCommand("uv");
-        if (hasUv) {
-            return runWithUv(outDir, moduleName, config, args);
-        } else {
-            return runWithPip(outDir, moduleName, config, args);
-        }
-    }
-
-    private static int runWithUv(Path outDir, String moduleName, ZincConfig config, List<String> args) {
         String uv = findBundledTool("uv");
         try {
             var pyproject = new StringBuilder();
             pyproject.append("[project]\n");
             pyproject.append("name = \"zinc-app\"\n");
             pyproject.append("version = \"0.0.1\"\n");
-            pyproject.append("requires-python = \"").append(config != null ? config.pythonVersion : ">=3.10").append("\"\n");
+            pyproject.append("requires-python = \"").append(config != null ? config.pythonVersion : ">=3.14").append("\"\n");
             if (config != null && !config.pythonDeps.isEmpty()) {
                 pyproject.append("dependencies = [\n");
                 for (var dep : config.pythonDeps) {
@@ -150,40 +153,7 @@ public class PythonCompiler {
             return proc.waitFor();
         } catch (Exception e) {
             System.err.println("uv run failed: " + e.getMessage());
-            return 1;
-        }
-    }
-
-    private static int runWithPip(Path outDir, String moduleName, ZincConfig config, List<String> args) {
-        String python = findPython();
-        if (python == null) {
-            System.err.println("error: python3 not found. Install Python 3.10+ or uv to use --python");
-            return 1;
-        }
-
-        var reqs = outDir.resolve("requirements.txt");
-        if (Files.exists(reqs)) {
-            try {
-                var pip = new ProcessBuilder(python, "-m", "pip", "install", "-q", "-r", reqs.toString())
-                    .inheritIO().start();
-                int exit = pip.waitFor();
-                if (exit != 0) System.err.println("warning: pip install failed");
-            } catch (Exception e) {
-                System.err.println("warning: could not install deps: " + e.getMessage());
-            }
-        }
-
-        try {
-            var cmd = new ArrayList<>(List.of(python, "-m", moduleName));
-            cmd.addAll(args);
-
-            var proc = new ProcessBuilder(cmd)
-                .inheritIO()
-                .directory(outDir.toFile())
-                .start();
-            return proc.waitFor();
-        } catch (Exception e) {
-            System.err.println("failed to run python: " + e.getMessage());
+            System.err.println("uv is bundled with zinc — check lib/uv exists");
             return 1;
         }
     }
@@ -241,13 +211,6 @@ public class PythonCompiler {
     }
 
     // --- Tool discovery -------------------------------------------------------
-
-    static String findPython() {
-        for (var candidate : List.of("python3.14t", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3", "python")) {
-            if (hasCommand(candidate)) return candidate;
-        }
-        return null;
-    }
 
     /**
      * Find a tool bundled alongside the zinc binary (e.g. uv, mill).

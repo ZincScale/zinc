@@ -9,6 +9,8 @@
 package zinc.compiler;
 
 import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
 
 /**
  * Target runtime configuration for Zinc compilation.
@@ -150,38 +152,38 @@ public sealed interface TargetRuntime permits TargetRuntime.Java, TargetRuntime.
         Map.entry("zinc.concurrent.*", "java.util.concurrent.*")
     );
 
-    /** Zinc stdlib → Python imports */
-    Map<String, String> ZINC_TO_PYTHON = Map.ofEntries(
+    /** Zinc stdlib → Python imports (null value = no import needed, it's a builtin) */
+    Map<String, String> ZINC_TO_PYTHON = Collections.unmodifiableMap(new HashMap<>() {{
         // Collections — builtins, no import needed
-        Map.entry("zinc.collections", null),
-        Map.entry("zinc.collections.*", null),
+        put("zinc.collections", null);
+        put("zinc.collections.*", null);
 
         // I/O
-        Map.entry("zinc.io", "from pathlib import Path"),
-        Map.entry("zinc.io.*", "from pathlib import Path"),
-        Map.entry("zinc.io.Path", "from pathlib import Path"),
+        put("zinc.io", "from pathlib import Path");
+        put("zinc.io.*", "from pathlib import Path");
+        put("zinc.io.Path", "from pathlib import Path");
 
         // HTTP
-        Map.entry("zinc.http", "import httpx"),
-        Map.entry("zinc.http.*", "import httpx"),
-        Map.entry("zinc.http.HttpClient", "import httpx"),
+        put("zinc.http", "import httpx");
+        put("zinc.http.*", "import httpx");
+        put("zinc.http.HttpClient", "import httpx");
 
         // JSON
-        Map.entry("zinc.json", "import msgspec"),
-        Map.entry("zinc.json.*", "import msgspec"),
+        put("zinc.json", "import msgspec");
+        put("zinc.json.*", "import msgspec");
 
         // Time
-        Map.entry("zinc.time", "from datetime import datetime, timedelta, date, time"),
-        Map.entry("zinc.time.*", "from datetime import datetime, timedelta, date, time"),
+        put("zinc.time", "from datetime import datetime, timedelta, date, time");
+        put("zinc.time.*", "from datetime import datetime, timedelta, date, time");
 
         // Math
-        Map.entry("zinc.math", "import math"),
-        Map.entry("zinc.math.*", "import math"),
+        put("zinc.math", "import math");
+        put("zinc.math.*", "import math");
 
         // Concurrency
-        Map.entry("zinc.concurrent", "from concurrent.futures import ThreadPoolExecutor, Future"),
-        Map.entry("zinc.concurrent.*", "from concurrent.futures import ThreadPoolExecutor, Future")
-    );
+        put("zinc.concurrent", "from concurrent.futures import ThreadPoolExecutor, Future");
+        put("zinc.concurrent.*", "from concurrent.futures import ThreadPoolExecutor, Future");
+    }});
 
     /** Java standard library → Python equivalents (specific classes) */
     Map<String, String> JAVA_TO_PYTHON = Map.ofEntries(
@@ -201,19 +203,19 @@ public sealed interface TargetRuntime permits TargetRuntime.Java, TargetRuntime.
         Map.entry("java.util.concurrent.ExecutorService", "from concurrent.futures import ThreadPoolExecutor")
     );
 
-    /** Java standard library → Python equivalents (package prefixes) */
-    Map<String, String> JAVA_TO_PYTHON_PREFIX = Map.ofEntries(
-        Map.entry("java.util.stream", null),       // Streams are implicit in Python
-        Map.entry("java.util.function", null),      // Lambdas are native in Python
-        Map.entry("java.util.concurrent", "from concurrent.futures import ThreadPoolExecutor, Future"),
-        Map.entry("java.util", null),               // Collections are builtins
-        Map.entry("java.io", null),                 // Use pathlib
-        Map.entry("java.nio.file", "from pathlib import Path"),
-        Map.entry("java.nio", null),                // Rarely needed
-        Map.entry("java.time", "from datetime import datetime, timedelta, date, time"),
-        Map.entry("java.math", "import math"),
-        Map.entry("java.net.http", "import httpx"),
-        Map.entry("java.net", null),                // Low-level, rarely used directly
-        Map.entry("java.lang", null)                // Builtins
-    );
+    /** Java standard library → Python equivalents (package prefixes, null = drop) */
+    Map<String, String> JAVA_TO_PYTHON_PREFIX = Collections.unmodifiableMap(new HashMap<>() {{
+        put("java.util.stream", null);       // Streams are implicit in Python
+        put("java.util.function", null);      // Lambdas are native in Python
+        put("java.util.concurrent", "from concurrent.futures import ThreadPoolExecutor, Future");
+        put("java.util", null);               // Collections are builtins
+        put("java.io", null);                 // Use pathlib
+        put("java.nio.file", "from pathlib import Path");
+        put("java.nio", null);                // Rarely needed
+        put("java.time", "from datetime import datetime, timedelta, date, time");
+        put("java.math", "import math");
+        put("java.net.http", "import httpx");
+        put("java.net", null);                // Low-level, rarely used directly
+        put("java.lang", null);                // Builtins
+    }});
 }

@@ -42,6 +42,13 @@ public class PythonEmitterTest {
         testChannel();
         testInOperator();
         testDefaultParams();
+        testImportPythonNative();
+        testImportZincStdlib();
+        testImportZincStdlibDropped();
+        testImportJavaStdlibMapped();
+        testImportJavaStdlibDropped();
+        testTreeShakeNoRuntime();
+        testTreeShakeWithRuntime();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -289,6 +296,66 @@ public class PythonEmitterTest {
     static void testDefaultParams() {
         var py = transpile("fn greet(String name = \"World\"): String { return \"Hi {name}\" }");
         assertContains("default: param", py, "name: str = \"World\"");
+    }
+
+    // --- Imports ---
+
+    static void testImportPythonNative() {
+        var py = transpile("import sys\nprint(\"hello\")");
+        assertContains("import-native: sys", py, "import sys");
+    }
+
+    static void testImportZincStdlib() {
+        var py = transpile("import zinc.math\nprint(\"hello\")");
+        assertContains("import-stdlib: math", py, "import math");
+    }
+
+    static void testImportZincStdlibDropped() {
+        // zinc.collections maps to None (builtins in Python) — should not appear in output
+        var py = transpile("import zinc.collections\nprint(\"hello\")");
+        assertNotContains("import-dropped: collections", py, "import zinc");
+        assertNotContains("import-dropped: collections2", py, "collections");
+    }
+
+    static void testImportJavaStdlibMapped() {
+        var py = transpile("import java.time.Instant\nprint(\"hello\")");
+        assertContains("import-java-mapped: datetime", py, "from datetime import datetime");
+    }
+
+    static void testImportJavaStdlibDropped() {
+        // java.util is builtins in Python — should be dropped
+        var py = transpile("import java.util.List\nprint(\"hello\")");
+        assertNotContains("import-java-dropped: util", py, "java.util");
+    }
+
+    static void testTreeShakeNoRuntime() {
+        // Simple print — should NOT need zinc_runtime
+        var tokens = new Lexer("print(\"hello\")").tokenize().unwrap();
+        var program = new Parser(tokens).parse();
+        var emitter = new PythonEmitter("Test");
+        emitter.emit(program, java.nio.file.Path.of("/dev/null"));
+        var used = emitter.usedStdlibModules();
+        if (used.isEmpty()) {
+            passed++;
+        } else {
+            failed++;
+            System.out.println("FAIL: tree-shake-no-runtime — expected empty, got " + used);
+        }
+    }
+
+    static void testTreeShakeWithRuntime() {
+        // spawn uses ZincFuture — should need zinc_runtime
+        var tokens = new Lexer("var f = spawn { print(\"async\") }\nf.join()").tokenize().unwrap();
+        var program = new Parser(tokens).parse();
+        var emitter = new PythonEmitter("Test");
+        emitter.emit(program, java.nio.file.Path.of("/dev/null"));
+        var used = emitter.usedStdlibModules();
+        if (used.contains("zinc_runtime.py")) {
+            passed++;
+        } else {
+            failed++;
+            System.out.println("FAIL: tree-shake-with-runtime — expected zinc_runtime.py, got " + used);
+        }
     }
 
     // --- Helpers ---

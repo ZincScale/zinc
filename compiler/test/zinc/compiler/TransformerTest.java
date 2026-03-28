@@ -50,6 +50,11 @@ public class TransformerTest {
         testExpressionLambdaVoidContext();
         testExpressionLambdaValueContext();
         testArrayFieldDefault();
+        testImportJavaNative();
+        testImportZincStdlib();
+        testImportMavenEcosystem();
+        testImportZincMath();
+        testImportZincCollections();
 
         System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
@@ -443,6 +448,35 @@ public class TransformerTest {
             """);
         assertContains("arr_field: new int[]", java, "new int[]");
         assertContains("arr_field: 80, 443", java, "80, 443");
+    }
+
+    // --- Imports ---
+
+    static void testImportJavaNative() {
+        var java = transpile("import java.time.Instant\nprint(\"hello\")");
+        assertContains("import-java: time", java, "import java.time.Instant");
+    }
+
+    static void testImportZincStdlib() {
+        var java = transpile("import zinc.http\nprint(\"hello\")");
+        assertContains("import-zinc-stdlib: http", java, "import java.net.http");
+        assertNotContains("import-zinc-stdlib: no raw zinc", java, "import zinc.http");
+    }
+
+    static void testImportZincMath() {
+        // java.lang.Math is auto-imported in Java — JavaParser correctly omits it
+        var java = transpile("import zinc.math\nprint(\"hello\")");
+        assertNotContains("import-zinc-math: no raw zinc", java, "import zinc.math");
+    }
+
+    static void testImportZincCollections() {
+        var java = transpile("import zinc.collections\nprint(\"hello\")");
+        assertContains("import-zinc-collections: util", java, "import java.util");
+    }
+
+    static void testImportMavenEcosystem() {
+        var java = transpile("import io.javalin.Javalin\nprint(\"hello\")");
+        assertContains("import-maven: javalin", java, "import io.javalin.Javalin");
     }
 
     // --- Helpers -------------------------------------------------------------

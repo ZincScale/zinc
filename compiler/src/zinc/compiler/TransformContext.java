@@ -35,6 +35,7 @@ public class TransformContext {
     final java.util.Set<String> capturedMutables = new java.util.HashSet<>();
     final java.util.Map<String, java.util.List<DataClassDecl>> sealedVariantMap = new java.util.HashMap<>();
 
+
     // Zinc method name → Java method name
     static final java.util.Map<String, String> METHOD_ALIASES = java.util.Map.ofEntries(
         java.util.Map.entry("upper", "toUpperCase"),
@@ -151,12 +152,17 @@ public class TransformContext {
 
     // --- CompilationUnit factory ----------------------------------------------
 
+    private final TargetRuntime.Java javaTarget = new TargetRuntime.Java();
+
     CompilationUnit newCU(Program program) {
         var cu = new CompilationUnit();
         if (program.pkg() != null) cu.setPackageDeclaration(program.pkg().path());
         cu.addImport("java.util", false, true);
         cu.addImport("java.util.stream", false, true);
-        for (var imp : program.imports()) cu.addImport(imp.path());
+        for (var imp : program.imports()) {
+            String resolved = javaTarget.resolveImport(imp.path());
+            if (resolved != null) cu.addImport(resolved);
+        }
         return cu;
     }
 
