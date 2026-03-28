@@ -1,18 +1,11 @@
 # Known Issues — Compiler Bugs and Missing Features
 
-> **Last updated**: 2026-03-27
+> **Last updated**: 2026-03-28
 > **Found during**: Python backend Phase 3 (concurrency cleanup)
 
 ## Java Transformer Bugs
 
-### 1. Bounded parallel for loses items
-**Severity**: Bug
-**Location**: `Transformer.java` — `transformParallelFor()` with `max > 0`
-
-`parallel(max: 2) for i in numbers { items.add(i) }` produces sum of 11 instead of 15. The `StructuredTaskScope` + `Semaphore` pattern drops items — likely the semaphore prevents some forks from executing before `_scope.join()` returns.
-
-**Reproduction**: `concurrency.zn` — "parallel bounded sum" test
-**Expected**: 15, **Actual**: 11
+### ~~1. Bounded parallel for~~ — REMOVED (parallel for removed from language)
 
 ### 2. return Error() inside spawn → unreachable statement
 **Severity**: Bug
@@ -25,15 +18,7 @@ _f.complete(null);  // unreachable — javac error
 ```
 The `_f.complete(null)` should not be emitted after a `throw`.
 
-### 3. Script-mode variables not effectively final for lambdas
-**Severity**: Bug
-**Location**: `Transformer.java` — script mode variable capture
-
-Variables declared in script mode (`var spawnResult = -1`) and mutated inside a spawn/parallel lambda fail:
-```java
-spawnResult = -1;  // error: must be final or effectively final
-```
-The Transformer should wrap mutable captured variables in `AtomicReference<>` or an array holder (`var _holder = new Object[]{initialValue}`) when they're captured by lambdas.
+### ~~3. Script-mode variables not effectively final for lambdas~~ — FIXED (5a6993f)
 
 ### 4. sortBy(it) generates invalid Comparator
 **Severity**: Bug
@@ -58,21 +43,7 @@ Not in the lexer keyword list, no AST node, no parser rule. Concurrency tests ca
 **Impact**: Shared mutable state in parallel for requires workarounds (thread-safe collection ops).
 **Fix**: Add `LOCK` token, `LockStmt(Expr mutex, BlockStmt body)` AST node, parser rule, Transformer mapping to `ReentrantLock.lock()/unlock()` try-finally, PythonEmitter mapping to `threading.Lock()` context manager.
 
-### 6. Concurrent result binding not implemented
-**Severity**: Feature gap
-**Location**: Parser — `parseConcurrentStmt()`
-
-Designed syntax:
-```zinc
-var (user, orders, prefs) = concurrent {
-    fetchUser(id)
-    fetchOrders(id)
-    fetchPrefs(id)
-}
-```
-The parser creates `ConcurrentStmt` with `names = List.of()` — the result-binding `var (a, b) = concurrent { }` syntax isn't parsed. The `ConcurrentStmt` AST record has the `names` field but it's always empty.
-
-**Impact**: Can't collect results from concurrent fan-out. Workaround: use side effects (mutate shared state) or return from functions.
+### ~~6. Concurrent result binding~~ — REMOVED (concurrent block removed from language)
 
 ### 7. No formal Zinc stdlib
 **Severity**: Design gap
@@ -84,33 +55,14 @@ Functions like `sleep()`, `parseInt()`, `print()` are mapped ad-hoc in the Trans
 
 ## Python Emitter Gaps
 
-### 8. Spawn emission is stub
-**Severity**: Phase 3 incomplete
-**Location**: `PythonEmitter.java` — `emitSpawnExpr()`
-
-Emits `_executor.submit(lambda: None)` placeholder. Needs real `threading.Thread` or `ThreadPoolExecutor` emission with the `ZincScope` lifecycle manager.
-
-### 9. Parallel for emission is stub
-**Severity**: Phase 3 incomplete
-**Location**: `PythonEmitter.java` — `emitParallelForStmt()`
-
-Emits a simplified `executor.map()` pattern that doesn't work correctly. Needs `ZincScope` with proper structured lifecycle.
-
-### 10. Concurrent emission is stub
-**Severity**: Phase 3 incomplete
-**Location**: `PythonEmitter.java` — `emitConcurrentStmt()`
-
-Emits basic future submission without structured cancellation. Needs `ZincScope` integration.
+### ~~8-10. Parallel for, concurrent, timeout stubs~~ — REMOVED (features removed from language)
 
 ### 11. No zinc_runtime.py concurrency primitives
 **Severity**: Phase 3 incomplete
 **Location**: `test/python/zinc_runtime.py`
 
 Only `ZincError` exists. Missing:
-- `ZincScope` — structured concurrency scope (executor + future tracking + cancellation)
 - `ZincChannel` — `queue.Queue` wrapper with `close()` and iteration
-- `ZincTimeout` — executor + `future.result(timeout=N)` + cancel
-- `zinc_main()` — entry point wrapper with signal handlers + scope cleanup
 - `sleep()` — mapped to `time.sleep(ms / 1000)`
 
 ### 12. sleep() not mapped in PythonEmitter
@@ -129,11 +81,11 @@ Only `ZincError` exists. Missing:
 
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
-| 1 | Bounded parallel for bug | Bug | **FIXED** (4c3df27) — semaphore release moved inside forked lambda |
+| 1 | Bounded parallel for bug | Bug | **REMOVED** — parallel for removed to simplify compiler |
 | 2 | return Error in spawn | Bug | **FIXED** (4c3df27) — skip _f.complete after throw |
-| 3 | Effectively final capture | Bug | OPEN — needs AtomicReference/holder wrapping |
+| 3 | Effectively final capture | Bug | **FIXED** (5a6993f) — Object[]/int[] holder wrapping |
 | 4 | sortBy(it) Comparator | Bug | **FIXED** (4c3df27) — detect identity, use natural order |
 | 5 | lock keyword | Feature | **FIXED** (f66b2e3) — LOCK token, LockStmt AST, parser, both backends |
-| 6 | Concurrent result binding | Feature | OPEN |
+| 6 | Concurrent result binding | Feature | **REMOVED** — concurrent block removed to simplify compiler |
 | 7 | Formal stdlib | Design | OPEN |
-| 8-13 | Python concurrency | Phase 3 | OPEN — stubs in PythonEmitter, need zinc_runtime.py |
+| 8-13 | Python concurrency stubs | Phase 3 | **REMOVED** — parallel for, concurrent, timeout removed from both backends |

@@ -15,7 +15,7 @@ import static zinc.compiler.TokenType.*;
 import static zinc.compiler.Ast.*;
 
 /**
- * Parses statements: var, if, for, while, match, return, spawn, concurrent, parallel, etc.
+ * Parses statements: var, if, for, while, match, return, spawn, lock, etc.
  */
 public class StmtParser {
     private final ParseContext ctx;
@@ -43,9 +43,6 @@ public class StmtParser {
             case MATCH -> parseMatchStmt();
             case WITH -> parseWithStmt();
             case SPAWN -> parseSpawnStmt();
-            case PARALLEL -> parseParallelForStmt();
-            case CONCURRENT -> parseConcurrentStmt();
-            case TIMEOUT -> parseTimeoutStmt();
             case LOCK -> parseLockStmt();
             case FN -> new DeclParser(ctx, exprs, types, this).parseFnDecl();
             case DEFER -> { ctx.advance(); yield new DeferStmt(exprs.parseExpr()); }
@@ -239,64 +236,6 @@ public class StmtParser {
         OrHandler orHandler = null;
         if (ctx.check(OR)) orHandler = parseOrHandler();
         return new ExprStmt(line, new SpawnExpr(line, body, orHandler), null);
-    }
-
-    private ParallelForStmt parseParallelForStmt() {
-        int line = ctx.peek().line();
-        ctx.expect(PARALLEL);
-        int max = 0;
-        if (ctx.match(LPAREN)) {
-            if (ctx.check(IDENT) && ctx.peek().literal().equals("max")) {
-                ctx.advance(); ctx.expect(COLON);
-                max = Integer.parseInt(ctx.expect(INT_LIT).literal());
-            }
-            ctx.expect(RPAREN);
-        }
-        ctx.expect(FOR);
-        String item = ctx.expect(IDENT).literal();
-        ctx.expect(IN);
-        var range = exprs.parseExpr();
-        var body = parseBlock();
-        OrHandler orHandler = null;
-        if (ctx.check(OR)) orHandler = parseOrHandler();
-        return new ParallelForStmt(line, item, "", range, body, orHandler, max);
-    }
-
-    private ConcurrentStmt parseConcurrentStmt() {
-        int line = ctx.peek().line();
-        ctx.expect(CONCURRENT);
-        boolean firstOnly = false;
-        if (ctx.match(LPAREN)) {
-            if (ctx.check(IDENT) && ctx.peek().literal().equals("first")) {
-                ctx.advance(); ctx.expect(COLON); ctx.advance(); // true
-                firstOnly = true;
-            }
-            ctx.expect(RPAREN);
-        }
-        ctx.expect(LBRACE);
-        var tasks = new ArrayList<Expr>();
-        while (!ctx.check(RBRACE) && !ctx.check(EOF)) {
-            ctx.skipSemis();
-            if (ctx.check(RBRACE)) break;
-            tasks.add(exprs.parseExpr());
-            ctx.skipSemis();
-        }
-        ctx.expect(RBRACE);
-        OrHandler orHandler = null;
-        if (ctx.check(OR)) orHandler = parseOrHandler();
-        return new ConcurrentStmt(line, tasks, firstOnly, List.of(), orHandler);
-    }
-
-    private TimeoutStmt parseTimeoutStmt() {
-        int line = ctx.peek().line();
-        ctx.expect(TIMEOUT);
-        ctx.expect(LPAREN);
-        var duration = exprs.parseExpr();
-        ctx.expect(RPAREN);
-        var body = parseBlock();
-        OrHandler orHandler = null;
-        if (ctx.check(OR)) orHandler = parseOrHandler();
-        return new TimeoutStmt(line, duration, body, orHandler);
     }
 
     private LockStmt parseLockStmt() {

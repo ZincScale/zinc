@@ -67,7 +67,7 @@ public class Transformer {
     private java.util.Map<String, TypeInfo> resolvedTypes = java.util.Map.of();
     private java.util.Set<String> interfaceNames = new java.util.HashSet<>();
     private final JavaTypeResolver javaResolver = new JavaTypeResolver();
-    // Variables that are assigned inside spawn/parallel lambdas — need Object[] wrapping
+    // Variables that are assigned inside spawn lambdas — need Object[] wrapping
     private final java.util.Set<String> capturedMutables = new java.util.HashSet<>();
 
     public Transformer() {}
@@ -121,13 +121,6 @@ public class Transformer {
             case Ast.BlockStmt b -> prescanCapturedMutables(b.stmts());
             case Ast.ForStmt f -> prescanStmt(f.body());
             case Ast.WhileStmt w -> prescanStmt(w.body());
-            // Parallel for body runs in a lambda — vars assigned inside need wrapping
-            case Ast.ParallelForStmt p -> {
-                capturedMutables.addAll(collectAssignedVars(p.body()));
-                if (p.orHandler() != null && p.orHandler().body() != null) {
-                    capturedMutables.addAll(collectAssignedVars(p.orHandler().body()));
-                }
-            }
             default -> {}
         }
     }
@@ -609,9 +602,6 @@ public class Transformer {
             case Ast.BreakStmt b -> List.of(new BreakStmt());
             case Ast.ContinueStmt c -> List.of(new ContinueStmt());
             case Ast.BlockStmt b -> List.of(transformBlock(b));
-            case Ast.ParallelForStmt p -> List.of(transformParallelFor(p));
-            case Ast.ConcurrentStmt c -> List.of(transformConcurrent(c));
-            case Ast.TimeoutStmt t -> List.of(transformTimeout(t));
             case Ast.LockStmt l -> List.of(transformLock(l));
             case Ast.WithStmt w -> List.of(transformWith(w));
             case Ast.DeferStmt d -> List.of(new ExpressionStmt(transformExpr(d.expr()))); // TODO: proper defer
@@ -895,161 +885,6 @@ public class Transformer {
     }
 
     // --- Concurrency ---------------------------------------------------------
-
-    /**
-     * parallel for item in items { body }
-     * → try (var _scope = StructuredTaskScope.open(Joiner.awaitAllSuccessfulOrThrow())) {
-     *       for (var item : items) { _scope.fork(() -> { body; return null; }); }
-     *       _scope.join();
-     *   }
-     */
-    private Statement transformParallelFor(Ast.ParallelForStmt p) {
-        var scopeType = "java.util.concurrent.StructuredTaskScope";
-        var joiner = "java.util.concurrent.StructuredTaskScope.Joiner.awaitAllSuccessfulOrThrow()";
-
-        // Build: _scope.fork(() -> { body; return null; })
-        var lambdaBody = transformBlock(p.body());
-        lambdaBody.addStatement(new ReturnStmt(new NullLiteralExpr()));
-        var forkLambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), lambdaBody);
-        var forkCall = new MethodCallExpr(new NameExpr("_scope"), "fork", new NodeList<>(forkLambda));
-
-        // Semaphore for bounded concurrency
-        var outerBlock = new BlockStmt();
-        if (p.max() > 0) {
-            outerBlock.addStatement(parseStmt("var _semaphore = new java.util.concurrent.Semaphore(" + p.max() + ");"));
-        }
-
-        // for (var item : range) { _scope.fork(...) }
-        var forBody = new BlockStmt();
-        if (p.max() > 0) {
-            // Bounded: acquire semaphore before fork, release INSIDE the forked lambda
-            // The semaphore limits how many tasks run concurrently
-            forBody.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_semaphore"), "acquire")));
-            // Rebuild the fork lambda to include semaphore release after body
-            var boundedBody = transformBlock(p.body());
-            // try { body } finally { _semaphore.release() }; return null;
-            var innerTry = new BlockStmt();
-            for (var s : boundedBody.getStatements()) innerTry.addStatement(s);
-            var innerFinally = new BlockStmt();
-            innerFinally.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_semaphore"), "release")));
-            var boundedLambdaBody = new BlockStmt();
-            boundedLambdaBody.addStatement(new TryStmt(innerTry, new NodeList<>(), innerFinally));
-            boundedLambdaBody.addStatement(new ReturnStmt(new NullLiteralExpr()));
-            var boundedForkLambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), boundedLambdaBody);
-            var boundedForkCall = new MethodCallExpr(new NameExpr("_scope"), "fork", new NodeList<>(boundedForkLambda));
-            forBody.addStatement(new ExpressionStmt(boundedForkCall));
-        } else {
-            forBody.addStatement(new ExpressionStmt(forkCall));
-        }
-
-        var forEach = new ForEachStmt(
-            new VariableDeclarationExpr(new VarType(), p.item()),
-            transformExpr(p.range()), forBody);
-
-        // try (var _scope = ...) { forEach; _scope.join(); }
-        var tryBody = new BlockStmt();
-        tryBody.addStatement(forEach);
-        tryBody.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_scope"), "join")));
-
-        var scopeInit = new VariableDeclarationExpr(new VarType(), "_scope");
-        scopeInit.getVariable(0).setInitializer(parseExpr(scopeType + ".open(" + joiner + ")"));
-
-        if (p.orHandler() != null) {
-            var catchBody = new BlockStmt();
-            if (p.orHandler().body() != null) {
-                for (var stmt : p.orHandler().body().stmts()) {
-                    for (var jStmt : transformStmt(stmt)) catchBody.addStatement(jStmt);
-                }
-            }
-            var catchClause = new CatchClause(
-                new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"), catchBody);
-            outerBlock.addStatement(new TryStmt(
-                new NodeList<>(scopeInit), tryBody,
-                new NodeList<>(catchClause), null));
-        } else {
-            outerBlock.addStatement(new TryStmt(
-                new NodeList<>(scopeInit), tryBody,
-                new NodeList<>(), null));
-        }
-
-        return outerBlock;
-    }
-
-    /**
-     * concurrent { task1; task2 }
-     * → try (var _scope = StructuredTaskScope.open(Joiner.awaitAllSuccessfulOrThrow())) {
-     *       _scope.fork(() -> task1);
-     *       _scope.fork(() -> task2);
-     *       _scope.join();
-     *   }
-     */
-    private Statement transformConcurrent(Ast.ConcurrentStmt c) {
-        var joiner = c.firstOnly()
-            ? "java.util.concurrent.StructuredTaskScope.Joiner.anySuccessfulResultOrThrow()"
-            : "java.util.concurrent.StructuredTaskScope.Joiner.awaitAllSuccessfulOrThrow()";
-
-        var tryBody = new BlockStmt();
-        for (var task : c.tasks()) {
-            var lambdaBody = new BlockStmt();
-            lambdaBody.addStatement(new ReturnStmt(transformExpr(task)));
-            var lambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), lambdaBody);
-            tryBody.addStatement(new ExpressionStmt(
-                new MethodCallExpr(new NameExpr("_scope"), "fork", new NodeList<>(lambda))));
-        }
-        tryBody.addStatement(new ExpressionStmt(new MethodCallExpr(new NameExpr("_scope"), "join")));
-
-        var scopeInit = new VariableDeclarationExpr(new VarType(), "_scope");
-        scopeInit.getVariable(0).setInitializer(parseExpr(
-            "java.util.concurrent.StructuredTaskScope.open(" + joiner + ")"));
-
-        if (c.orHandler() != null) {
-            var catchBody = new BlockStmt();
-            if (c.orHandler().body() != null) {
-                for (var stmt : c.orHandler().body().stmts()) {
-                    for (var jStmt : transformStmt(stmt)) catchBody.addStatement(jStmt);
-                }
-            }
-            var catchClause = new CatchClause(
-                new Parameter(new ClassOrInterfaceType(null, "Exception"), "err"), catchBody);
-            return new TryStmt(new NodeList<>(scopeInit), tryBody, new NodeList<>(catchClause), null);
-        }
-
-        return new TryStmt(new NodeList<>(scopeInit), tryBody, new NodeList<>(), null);
-    }
-
-    /**
-     * timeout(dur) { body } or { fallback }
-     * → try (var _scope = StructuredTaskScope.open()) { ... joinUntil ... }
-     */
-    private Statement transformTimeout(Ast.TimeoutStmt t) {
-        var tryBody = new BlockStmt();
-        var lambdaBody = transformBlock(t.body());
-        lambdaBody.addStatement(new ReturnStmt(new NullLiteralExpr()));
-        var lambda = new com.github.javaparser.ast.expr.LambdaExpr(new NodeList<>(), lambdaBody);
-        tryBody.addStatement(new ExpressionStmt(
-            new MethodCallExpr(new NameExpr("_scope"), "fork", new NodeList<>(lambda))));
-        tryBody.addStatement(new ExpressionStmt(
-            new MethodCallExpr(new NameExpr("_scope"), "joinUntil",
-                new NodeList<>(parseExpr("java.time.Instant.now().plus(" + transformExpr(t.duration()) + ")")))));
-
-        var scopeInit = new VariableDeclarationExpr(new VarType(), "_scope");
-        scopeInit.getVariable(0).setInitializer(parseExpr("java.util.concurrent.StructuredTaskScope.open()"));
-
-        if (t.orHandler() != null) {
-            var catchBody = new BlockStmt();
-            if (t.orHandler().body() != null) {
-                for (var stmt : t.orHandler().body().stmts()) {
-                    for (var jStmt : transformStmt(stmt)) catchBody.addStatement(jStmt);
-                }
-            }
-            var catchClause = new CatchClause(
-                new Parameter(new ClassOrInterfaceType(null, "java.util.concurrent.TimeoutException"), "err"),
-                catchBody);
-            return new TryStmt(new NodeList<>(scopeInit), tryBody, new NodeList<>(catchClause), null);
-        }
-
-        return new TryStmt(new NodeList<>(scopeInit), tryBody, new NodeList<>(), null);
-    }
 
     /**
      * lock mu { body }

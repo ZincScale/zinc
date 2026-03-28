@@ -107,7 +107,6 @@ public final class Ast {
         BlockStmt, VarStmt, TupleVarStmt, AssignStmt, ReturnStmt,
         IfStmt, ForStmt, WhileStmt, MatchStmt,
         BreakStmt, ContinueStmt, ExprStmt,
-        ParallelForStmt, ConcurrentStmt, TimeoutStmt,
         WithStmt, DeferStmt, LockStmt, FnDecl {}
 
     public record BlockStmt(List<Stmt> stmts) implements Stmt {}
@@ -141,18 +140,6 @@ public final class Ast {
     public record ContinueStmt() implements Stmt {}
 
     public record ExprStmt(int line, Expr expr, OrHandler orHandler) implements Stmt {}
-
-    public record ParallelForStmt(
-        int line, String item, String indexVar, Expr range,
-        BlockStmt body, OrHandler orHandler, int max
-    ) implements Stmt {}
-
-    public record ConcurrentStmt(
-        int line, List<Expr> tasks, boolean firstOnly,
-        List<String> names, OrHandler orHandler
-    ) implements Stmt {}
-
-    public record TimeoutStmt(int line, Expr duration, BlockStmt body, OrHandler orHandler) implements Stmt {}
 
     public record WithStmt(int line, List<WithResource> resources, BlockStmt body) implements Stmt {}
     public record WithResource(String name, Expr value, OrHandler orHandler) {}

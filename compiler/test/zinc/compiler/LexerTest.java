@@ -44,7 +44,7 @@ public class LexerTest {
     }
 
     static void testKeywords() {
-        var tokens = lexer("fn class interface var pub init spawn concurrent parallel for if else match");
+        var tokens = lexer("fn class interface var pub init spawn for if else match");
         expect("kw: fn", tokens.get(0).type(), FN);
         expect("kw: class", tokens.get(1).type(), CLASS);
         expect("kw: interface", tokens.get(2).type(), INTERFACE);
@@ -52,12 +52,10 @@ public class LexerTest {
         expect("kw: pub", tokens.get(4).type(), PUB);
         expect("kw: init", tokens.get(5).type(), INIT);
         expect("kw: spawn", tokens.get(6).type(), SPAWN);
-        expect("kw: concurrent", tokens.get(7).type(), CONCURRENT);
-        expect("kw: parallel", tokens.get(8).type(), PARALLEL);
-        expect("kw: for", tokens.get(9).type(), FOR);
-        expect("kw: if", tokens.get(10).type(), IF);
-        expect("kw: else", tokens.get(11).type(), ELSE);
-        expect("kw: match", tokens.get(12).type(), MATCH);
+        expect("kw: for", tokens.get(7).type(), FOR);
+        expect("kw: if", tokens.get(8).type(), IF);
+        expect("kw: else", tokens.get(9).type(), ELSE);
+        expect("kw: match", tokens.get(10).type(), MATCH);
     }
 
     static void testOperators() {

@@ -178,12 +178,6 @@ public class TypeChecker {
                 if (e.orHandler() != null && e.orHandler().body() != null) checkBlock(e.orHandler().body());
             }
             case BlockStmt b -> checkBlock(b);
-            case ParallelForStmt p -> {
-                var rangeType = inferType(p.range());
-                if (!rangeType.args().isEmpty()) scope.set(p.item(), rangeType.args().getFirst());
-                checkBlock(p.body());
-            }
-            case ConcurrentStmt c -> { for (var t : c.tasks()) inferType(t); }
             default -> {}
         }
     }

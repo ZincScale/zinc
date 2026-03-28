@@ -65,13 +65,13 @@ public class ParseContext {
     // --- Lookahead helpers ---------------------------------------------------
 
     public boolean isIdentLike(TokenType t) {
-        return t == IDENT || t == CONCURRENT || t == DATA || t == MATCH
+        return t == IDENT || t == DATA || t == MATCH
             || t == PRINT || t == SPAWN || t == INTERFACE || t == SEALED;
     }
 
     public boolean isTypeStart() {
         var t = peek().type();
-        return t == IDENT || t == DATA || t == MATCH || t == CONCURRENT || t == SPAWN || t == PRINT;
+        return t == IDENT || t == DATA || t == MATCH || t == SPAWN || t == PRINT;
     }
 
     public String expectIdentOrKeyword() {

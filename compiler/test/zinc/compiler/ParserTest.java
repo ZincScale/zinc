@@ -38,8 +38,6 @@ public class ParserTest {
         testMapLit();
         testStringInterp();
         testSpawn();
-        testParallelFor();
-        testConcurrent();
         testSealedClass();
         testAnnotation();
 
@@ -260,24 +258,6 @@ public class ParserTest {
         var spawn = (SpawnExpr) stmt.value();
         expect("spawn: has body", spawn.body().stmts().size(), 1);
         expect("spawn: has or", spawn.orHandler() != null, true);
-    }
-
-    static void testParallelFor() {
-        var prog = parse("parallel(max: 4) for item in items { process(item) }");
-        var stmt = (ParallelForStmt) prog.stmts().getFirst();
-        expect("pfor: item", stmt.item(), "item");
-        expect("pfor: max", stmt.max(), 4);
-    }
-
-    static void testConcurrent() {
-        var prog = parse("""
-            concurrent {
-                fetchUser(id)
-                fetchOrders(id)
-            }
-            """);
-        var stmt = (ConcurrentStmt) prog.stmts().getFirst();
-        expect("concurrent: 2 tasks", stmt.tasks().size(), 2);
     }
 
     static void testSealedClass() {

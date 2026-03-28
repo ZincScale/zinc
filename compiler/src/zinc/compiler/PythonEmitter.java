@@ -491,10 +491,6 @@ public class PythonEmitter {
             case Ast.WithStmt with -> emitWithStmt(with);
             case Ast.LockStmt lock -> emitLockStmt(lock);
             case Ast.DeferStmt defer -> emitDeferStmt(defer);
-            // Concurrency stubs — Phase 3
-            case Ast.ParallelForStmt pf -> emitParallelForStmt(pf);
-            case Ast.ConcurrentStmt cs -> emitConcurrentStmt(cs);
-            case Ast.TimeoutStmt ts -> emitTimeoutStmt(ts);
         }
     }
 
@@ -742,44 +738,6 @@ public class PythonEmitter {
         // For now emit as a comment + atexit
         addImport("atexit");
         line("atexit.register(lambda: " + emitExpr(defer.expr()) + ")");
-    }
-
-    // --- Concurrency (Phase 3 stubs) -----------------------------------------
-
-    private void emitParallelForStmt(Ast.ParallelForStmt pf) {
-        addFromImport("from concurrent.futures import ThreadPoolExecutor");
-        int max = pf.max() > 0 ? pf.max() : 0;
-        String maxWorkers = max > 0 ? "max_workers=" + max : "";
-        line("with ThreadPoolExecutor(" + maxWorkers + ") as _executor:");
-        indent++;
-        line("list(_executor.map(lambda " + pf.item() + ": (lambda: None)(), " + emitExpr(pf.range()) + "))");
-        // TODO: Phase 3 — proper structured scope with ZincScope
-        indent--;
-    }
-
-    private void emitConcurrentStmt(Ast.ConcurrentStmt cs) {
-        addFromImport("from concurrent.futures import ThreadPoolExecutor, wait");
-        line("with ThreadPoolExecutor() as _executor:");
-        indent++;
-        line("_futures = []");
-        for (var task : cs.tasks()) {
-            line("_futures.append(_executor.submit(lambda: " + emitExpr(task) + "))");
-        }
-        line("wait(_futures)");
-        if (!cs.names().isEmpty()) {
-            for (int i = 0; i < cs.names().size(); i++) {
-                line(cs.names().get(i) + " = _futures[" + i + "].result()");
-            }
-        }
-        indent--;
-    }
-
-    private void emitTimeoutStmt(Ast.TimeoutStmt ts) {
-        // Stub: timeout as a comment for now
-        line("# TODO: timeout(" + emitExpr(ts.duration()) + ")");
-        indent++;
-        emitBlock(ts.body());
-        indent--;
     }
 
     // --- Or handler ----------------------------------------------------------

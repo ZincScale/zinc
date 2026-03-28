@@ -1,5 +1,5 @@
 // Concurrency — Zinc v3
-// Demonstrates: spawn, parallel for, concurrent, channel
+// Demonstrates: spawn, lock, channel
 // Target-agnostic — no Java or Python specific imports
 
 // spawn — fire a background thread
@@ -8,65 +8,19 @@ spawn {
 }
 sleep(100)
 
-// parallel for — structured, waits for all
-// Uses lock for thread-safe shared mutable state
+// lock — thread-safe shared mutable state
 var numbers = [1, 2, 3, 4, 5]
 var mu = new Lock()
 var total = 0
-parallel for i in numbers {
-    lock mu {
-        total = total + i
+for i in numbers {
+    spawn {
+        lock mu {
+            total = total + i
+        }
     }
 }
-print("parallel sum: {total}")
-
-// parallel for with bounded concurrency (max: 2)
-var mu2 = new Lock()
-var boundedTotal = 0
-parallel(max: 2) for i in numbers {
-    lock mu2 {
-        boundedTotal = boundedTotal + i
-    }
-}
-print("parallel bounded sum: {boundedTotal}")
-
-// parallel for or — error propagation
-fn failOnTwo(int i): int {
-    if i == 2 {
-        return Error("fail on 2")
-    }
-    return i
-}
-
-var parallelErr = "none"
-parallel for i in [1, 2, 3] {
-    failOnTwo(i)
-} or {
-    parallelErr = "caught"
-}
-print("parallel for or: {parallelErr}")
-
-// concurrent — fan-out multiple tasks
-fn computeA(): int { return 10 }
-fn computeB(): int { return 20 }
-concurrent {
-    computeA()
-    computeB()
-}
-print("concurrent: done")
-
-// concurrent or — error propagation
-fn parseBad(): int {
-    return Error("bad input")
-}
-
-var concurrentErr = "none"
-concurrent {
-    parseBad()
-} or {
-    concurrentErr = "caught"
-}
-print("concurrent or: {concurrentErr}")
+sleep(200)
+print("spawn sum: {total}")
 
 // Channel — bounded queue for producer/consumer
 Channel<String> ch = new Channel(10)
@@ -105,6 +59,10 @@ task.join()
 print("future isDone: {task.isDone()}")
 
 // spawn join or — caller catches error
+fn parseBad(): int {
+    return Error("bad input")
+}
+
 var task2 = spawn {
     parseBad()
 }
