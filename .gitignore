@@ -16,3 +16,5 @@ zinc-out/
 compiler/out/
 compiler/lib/
 .claude/
+__pycache__/
+*.pyc
