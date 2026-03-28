@@ -66,6 +66,38 @@ ZincFuture, ZincChannel, zinc_sleep added to zinc_runtime.py.
 ### ~~13. Channel type not mapped in PythonEmitter~~ — FIXED
 `new Channel(10)` now emits `ZincChannel(10)` via mapTypeName on constructor calls.
 
+## Roadmap
+
+### 14. Zinc error line numbers
+**Severity**: Feature
+**Priority**: High
+
+Compiler errors should reference the `.zn` source file and line number. Currently errors lack source location context, making debugging difficult.
+
+### 15. Cross-file type checking for Python
+**Severity**: Feature
+**Priority**: High
+
+Python backend has no type info shared between files. When file A imports a class from file B, the emitter has no knowledge of B's field types or method signatures.
+
+### 16. Native binary via Nuitka/PyInstaller
+**Severity**: Feature
+**Priority**: Medium
+
+`zinc build --python --native` — compile Python output to a standalone binary. Evaluate Nuitka (ahead-of-time compilation) and PyInstaller (bundled interpreter). Nuitka preferred for performance.
+
+### 17. Docker support for Python
+**Severity**: Feature
+**Priority**: Low (trivial once 14-16 are done)
+
+`zinc build --python --docker` — generate a Dockerfile for Python apps. Java backend already has Docker support via `BuildTools.buildDocker()`.
+
+### 18. Fix Java stdlib — Math.max/min stream method collision
+**Severity**: Bug
+**Priority**: Medium
+
+`Math.max(a, b)` and `Math.min(a, b)` are misidentified as stream methods in `TransformExpr.isStreamMethod()`, causing incorrect `.stream().max()` wrapping. Also: clean up remaining hardcoded method mappings in TransformExpr to match the declarative approach used on the Python side (PythonStdlibMapping).
+
 ## Status
 
 | # | Issue | Severity | Status |
@@ -81,3 +113,8 @@ ZincFuture, ZincChannel, zinc_sleep added to zinc_runtime.py.
 | 11 | zinc_runtime.py primitives | Phase 3 | **FIXED** — ZincFuture, ZincChannel, zinc_sleep |
 | 12 | sleep() mapping | Phase 3 | **FIXED** — sleep(ms) → zinc_sleep(ms) |
 | 13 | Channel mapping | Phase 3 | **FIXED** — new Channel(n) → ZincChannel(n) |
+| 14 | Zinc error line numbers | Feature | TODO |
+| 15 | Cross-file type checking (Python) | Feature | TODO |
+| 16 | Native binary (Nuitka/PyInstaller) | Feature | TODO |
+| 17 | Docker for Python | Feature | TODO |
+| 18 | Java stdlib Math.max/min bug | Bug | TODO |
