@@ -263,26 +263,29 @@ def _inject_self(lines: list[str]) -> list[str]:
     return out
 
 
-# Pattern to detect actual interpolation: {word_chars...} not {\n or {} or {special
-_INTERP_PATTERN = re.compile(r"\{[a-zA-Z_]")
+# Detect actual interpolation: {identifier...} but NOT escaped {{
+_INTERP_PATTERN = re.compile(r"(?<!\{)\{[a-zA-Z_]")
+
+
+def _has_interpolation(s: str) -> bool:
+    """Check if a string contains real interpolation {expr}, not escaped {{."""
+    return bool(_INTERP_PATTERN.search(s))
 
 
 def _fstrings(lines: list[str]) -> list[str]:
-    """Prefix all string literals with f to make them f-strings."""
+    """Prefix all string literals with f to make them f-strings.
+    Strings with {{}} are literal braces — same convention as Python f-strings."""
     out = []
     for line in lines:
-        # Don't touch lines that are comments or already have f-strings
         stripped = line.lstrip()
         if stripped.startswith("#"):
             out.append(line)
             continue
 
-        # Only add f prefix to strings that contain {identifier...} interpolation
-        # but NOT strings followed by .format( — those use explicit formatting
         def _maybe_fstring(m):
-            if not _INTERP_PATTERN.search(m.group(0)):
+            if not _has_interpolation(m.group(0)):
                 return m.group(0)
-            # Check if followed by .format(
+            # Skip strings followed by .format( — already using explicit formatting
             after = line[m.end():]
             if after.lstrip().startswith(".format("):
                 return m.group(0)
