@@ -54,7 +54,7 @@ Four transforms, everything else is Python:
 
 ```bash
 git clone https://github.com/ZincScale/zinc.git
-export PATH="$PWD/zinc:$PATH"
+export PATH="$PWD/zinc/compiler:$PATH"
 ```
 
 Requires Python 3.12+.

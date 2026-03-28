@@ -1,7 +1,7 @@
 #!/bin/bash
 # E2E test runner for zinc (Python-based transpiler)
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ZINC="$DIR/../zinc.py"
+ZINC="$DIR/../compiler/zinc"
 E2E_DIR="$DIR/e2e"
 PASS=0
 FAIL=0
