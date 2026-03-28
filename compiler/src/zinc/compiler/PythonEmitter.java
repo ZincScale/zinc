@@ -109,8 +109,8 @@ public class PythonEmitter {
 
         sb.append(body);
 
-        // Write file — prefix with zn_ to avoid shadowing Python stdlib modules
-        String moduleName = "zn_" + className.toLowerCase();
+        // Write file — clean name, runs inside app/ package to avoid stdlib conflicts
+        String moduleName = className.toLowerCase();
         try {
             Files.createDirectories(outDir);
         } catch (IOException e) {
@@ -556,7 +556,7 @@ public class PythonEmitter {
         } else if (ret.value() instanceof Ast.CallExpr call
                 && call.callee() instanceof Ast.Ident id && id.name().equals("Error")) {
             // return Error("msg") → raise ZincError("msg")
-            addFromImport("from zinc_runtime import ZincError");
+            addFromImport("from .zinc_runtime import ZincError");
             var args = call.args().stream().map(this::emitExpr)
                 .collect(java.util.stream.Collectors.joining(", "));
             line("raise ZincError(" + args + ")");
@@ -992,7 +992,7 @@ public class PythonEmitter {
             case "java.util.Arrays.toString" -> "str(" + emitExpr(args.getFirst()) + ")";
             // sleep(ms) → zinc_sleep(ms) (converts ms to seconds)
             case "sleep" -> {
-                addFromImport("from zinc_runtime import zinc_sleep");
+                addFromImport("from .zinc_runtime import zinc_sleep");
                 yield "zinc_sleep(" + emitExpr(args.getFirst()) + ")";
             }
             default -> null;
@@ -1275,7 +1275,7 @@ public class PythonEmitter {
     }
 
     private String emitSpawnExpr(Ast.SpawnExpr spawn) {
-        addFromImport("from zinc_runtime import ZincFuture");
+        addFromImport("from .zinc_runtime import ZincFuture");
 
         // Collect variables assigned inside spawn body/or-handler that need global decl
         var globals = new java.util.LinkedHashSet<String>();
@@ -1437,7 +1437,7 @@ public class PythonEmitter {
                 yield "threading.Lock";
             }
             case "Channel" -> {
-                addFromImport("from zinc_runtime import ZincChannel");
+                addFromImport("from .zinc_runtime import ZincChannel");
                 yield "ZincChannel";
             }
             default -> name;

@@ -62,26 +62,25 @@ for expected_file in "$EXPECTED_DIR"/*.txt; do
         continue
     fi
 
-    # Find the generated .py file (prefixed with zn_ to avoid stdlib conflicts)
-    py_name=$(echo "$name" | tr -d '_')
-    py_file="$OUT_DIR/zn_${py_name}.py"
+    # Find the generated .py file in app/ subdirectory
+    APP_DIR="$OUT_DIR/app"
+    py_file="$APP_DIR/${name}.py"
     if [ ! -f "$py_file" ]; then
-        # Try without prefix
-        py_file="$OUT_DIR/${py_name}.py"
-    fi
-    if [ ! -f "$py_file" ]; then
-        py_file="$OUT_DIR/zn_${name}.py"
+        # Try without underscores (error_handling → errorhandling)
+        py_name=$(echo "$name" | tr -d '_')
+        py_file="$APP_DIR/${py_name}.py"
     fi
 
     if [ ! -f "$py_file" ]; then
         echo "FAIL: $name (no .py output found)"
-        ERRORS="$ERRORS\n--- $name ---\nExpected output at $py_file but not found. Files: $(ls $OUT_DIR/)"
+        ERRORS="$ERRORS\n--- $name ---\nExpected output at $py_file but not found. Files: $(ls $APP_DIR/ 2>/dev/null)"
         FAIL=$((FAIL + 1))
         continue
     fi
 
-    # Step 2: Run with Python (with runtime dir on PYTHONPATH for zinc_runtime)
-    actual=$(PYTHONPATH="$RUNTIME_DIR:$PYTHONPATH" $PYTHON "$py_file" 2>&1)
+    # Step 2: Run as module from parent dir (avoids stdlib shadowing)
+    module_name="app.$(basename "$py_file" .py)"
+    actual=$(cd "$OUT_DIR" && $PYTHON -m "$module_name" 2>&1)
     run_exit=$?
 
     if [ $run_exit -ne 0 ]; then

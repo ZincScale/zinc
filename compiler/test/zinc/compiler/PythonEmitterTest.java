@@ -79,7 +79,7 @@ public class PythonEmitterTest {
             }
             """);
         assertContains("err: raise", py, "raise ZincError(\"bad\")");
-        assertContains("err: import", py, "from zinc_runtime import ZincError");
+        assertContains("err: import", py, "from .zinc_runtime import ZincError");
         assertNotContains("err: no return Error", py, "return Error");
     }
 
@@ -230,7 +230,7 @@ public class PythonEmitterTest {
         var py = transpile("spawn { print(\"bg\") }");
         assertContains("spawn: ZincFuture", py, "ZincFuture(_spawn_0)");
         assertContains("spawn: def", py, "def _spawn_0():");
-        assertContains("spawn: import", py, "from zinc_runtime import ZincFuture");
+        assertContains("spawn: import", py, "from .zinc_runtime import ZincFuture");
     }
 
     static void testSpawnOr() {
@@ -272,13 +272,13 @@ public class PythonEmitterTest {
     static void testSleep() {
         var py = transpile("sleep(100)");
         assertContains("sleep: call", py, "zinc_sleep(100)");
-        assertContains("sleep: import", py, "from zinc_runtime import zinc_sleep");
+        assertContains("sleep: import", py, "from .zinc_runtime import zinc_sleep");
     }
 
     static void testChannel() {
         var py = transpile("Channel<String> ch = new Channel(10)");
         assertContains("chan: type", py, "ZincChannel");
-        assertContains("chan: import", py, "from zinc_runtime import ZincChannel");
+        assertContains("chan: import", py, "from .zinc_runtime import ZincChannel");
     }
 
     static void testInOperator() {

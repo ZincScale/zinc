@@ -52,9 +52,12 @@ public class Main {
     private static void printUsage() {
         System.err.println("usage: zinc <command> [args]");
         System.err.println("commands:");
-        System.err.println("  build <file.zn|dir> [-o outdir]   compile to Java");
-        System.err.println("  run <file.zn|dir> [args...]       compile and run");
-        System.err.println("  init <name>                       create a new project");
+        System.err.println("  build <file.zn|dir> [-o outdir]        compile to Java");
+        System.err.println("  build --python <file.zn|dir> [-o dir]  transpile to Python");
+        System.err.println("  run <file.zn|dir> [args...]            compile and run (Java)");
+        System.err.println("  run --python <file.zn> [args...]        transpile and run (Python)");
+        System.err.println("  run --python --main <file.zn>          transpile src/, run entry point");
+        System.err.println("  init <name>                            create a new project");
     }
 
     // --- build ---------------------------------------------------------------
@@ -113,7 +116,7 @@ public class Main {
         // Python target — copy stdlib + done, no javac/Mill/jpackage
         if (targetPython) {
             try {
-                ZincStdlib.copyPythonStdlib(outDir);
+                ZincStdlib.copyPythonStdlib(outDir.resolve("app"));
             } catch (IOException e) {
                 System.err.println("warning: could not copy stdlib: " + e.getMessage());
             }
@@ -179,9 +182,88 @@ public class Main {
             System.exit(1);
         }
 
-        String input = args.getFirst();
-        var runArgs = args.size() > 1 ? args.subList(1, args.size()) : List.<String>of();
+        // Parse flags
+        boolean targetPython = false;
+        String input = null;
+        String mainFile = null;
+        var runArgs = new ArrayList<String>();
+        boolean pastFlags = false;
+
+        for (int i = 0; i < args.size(); i++) {
+            var arg = args.get(i);
+            if (arg.equals("--python") || arg.equals("--target-python")) {
+                targetPython = true;
+            } else if (arg.equals("--main") && i + 1 < args.size()) {
+                mainFile = args.get(++i);
+            } else if (!arg.startsWith("-") && input == null) {
+                input = arg;
+            } else if (input != null) {
+                runArgs.add(arg);
+            }
+        }
+
+        // Default input to src/ for Python projects, or current .zn file
+        if (input == null && targetPython) {
+            if (Files.isDirectory(Path.of("src"))) {
+                input = "src";
+            } else {
+                System.err.println("error: no input file (no src/ directory found)");
+                System.exit(1);
+            }
+        } else if (input == null) {
+            System.err.println("error: no input file");
+            System.exit(1);
+        }
+
         var inputPath = Path.of(input);
+
+        // Python target: transpile → copy stdlib → install deps → python
+        if (targetPython) {
+            // Check for zinc.toml project config
+            ZincConfig config = null;
+            var configFile = ZincConfig.findConfigFile(inputPath);
+            if (configFile != null) {
+                try {
+                    config = ZincConfig.parse(configFile);
+                    // Use project root's src/ as input if input is a directory
+                    if (input.equals("src") || Files.isDirectory(inputPath)) {
+                        var projectRoot = configFile.getParent();
+                        inputPath = projectRoot.resolve("src");
+                    }
+                    // Use main from config if not specified on CLI
+                    if (mainFile == null) mainFile = config.main;
+                } catch (IOException e) {
+                    System.err.println("warning: could not read zinc.toml: " + e.getMessage());
+                }
+            }
+
+            var outDir = Path.of("/tmp/zinc-run-py-" + inputPath.getFileName().toString().replace(".zn", ""));
+            var compileResult = compileToPython(inputPath, outDir);
+            if (compileResult.isErr()) {
+                for (var e : ((Result.Err<?>) compileResult).errors()) System.err.println("error: " + e);
+                System.exit(1);
+            }
+            try { ZincStdlib.copyPythonStdlib(outDir.resolve("app")); }
+            catch (IOException e) { System.err.println("warning: could not copy stdlib: " + e.getMessage()); }
+
+            // Install Python deps from zinc.toml if present
+            if (config != null && !config.pythonDeps.isEmpty()) {
+                installPythonDeps(config.pythonDeps);
+            }
+
+            var pyFiles = compileResult.unwrap();
+            Path mainPy = findMainPy(pyFiles, inputPath, mainFile);
+            if (mainPy == null) {
+                System.err.println("error: could not determine entry point");
+                if (Files.isDirectory(inputPath)) {
+                    System.err.println("hint: use --main <file.zn> to specify the entry point, or add main to zinc.toml");
+                }
+                System.exit(1);
+            }
+            // Run as module from parent dir to avoid stdlib shadowing
+            System.exit(runPythonModule(outDir, mainPy, runArgs));
+            return;
+        }
 
         // Check for Mill project (directory with build.mill.yaml)
         if (Files.isDirectory(inputPath)) {
@@ -404,6 +486,9 @@ public class Main {
             return Result.err("no .zn files found in " + input);
         }
 
+        // Output into app/ subdirectory — avoids Python stdlib name conflicts
+        // when run with `python -m app.<module>`
+        var appDir = outDir.resolve("app");
         var pyFiles = new ArrayList<Path>();
 
         for (var znFile : znFiles) {
@@ -426,9 +511,16 @@ public class Main {
 
             // Emit Python (skip TypeChecker and Transformer)
             var emitter = new PythonEmitter(className);
-            var emitResult = emitter.emit(program, outDir);
+            var emitResult = emitter.emit(program, appDir);
             if (emitResult.isErr()) return Result.err(((Result.Err<?>) emitResult).errors());
             pyFiles.add(emitResult.unwrap());
+        }
+
+        // Create __init__.py for the app package
+        try {
+            Files.writeString(appDir.resolve("__init__.py"), "");
+        } catch (IOException e) {
+            return Result.err("failed to write __init__.py: " + e.getMessage());
         }
 
         return Result.ok(pyFiles);
@@ -438,35 +530,16 @@ public class Main {
 
     private static void cmdInit(List<String> args) {
         if (args.isEmpty()) {
-            System.err.println("usage: zinc init <project-name>");
+            System.err.println("usage: zinc init <project-name> [--python]");
             System.exit(1);
         }
 
-        String name = args.getFirst();
+        boolean python = args.contains("--python");
+        String name = args.stream().filter(a -> !a.startsWith("-")).findFirst().orElse("app");
         var dir = Path.of(name);
 
         try {
             Files.createDirectories(dir.resolve("src"));
-            Files.createDirectories(dir.resolve("test"));
-
-            // build.mill.yaml
-            Files.writeString(dir.resolve("build.mill.yaml"), """
-                # %s — Zinc project
-                extends: JavaModule
-                jvmVersion: 25
-
-                javacOptions:
-                  - --enable-preview
-                  - --release
-                  - "25"
-
-                forkArgs:
-                  - --enable-preview
-
-                mainClass: Main
-
-                mvnDeps: []
-                """.formatted(name).stripIndent());
 
             // src/main.zn
             Files.writeString(dir.resolve("src/main.zn"), """
@@ -475,17 +548,65 @@ public class Main {
                 }
                 """.formatted(name).stripIndent());
 
-            // .gitignore
-            Files.writeString(dir.resolve(".gitignore"), """
-                out/
-                *.class
-                .mill-*
-                """.stripIndent());
+            if (python) {
+                // zinc.toml for Python projects
+                Files.writeString(dir.resolve("zinc.toml"), """
+                    [project]
+                    name = "%s"
+                    version = "0.1.0"
+                    main = "main.zn"
 
-            System.out.println("created project: " + name);
-            System.out.println("  " + dir + "/src/main.zn");
-            System.out.println("  " + dir + "/build.mill.yaml");
-            System.out.println("\nrun: zinc run " + name + "/src");
+                    [python]
+                    version = ">=3.10"
+                    deps = []
+                    """.formatted(name).stripIndent());
+
+                // .gitignore
+                Files.writeString(dir.resolve(".gitignore"), """
+                    out/
+                    __pycache__/
+                    *.pyc
+                    .venv/
+                    """.stripIndent());
+
+                System.out.println("created project: " + name);
+                System.out.println("  " + dir + "/src/main.zn");
+                System.out.println("  " + dir + "/zinc.toml");
+                System.out.println("\nrun: cd " + name + " && zinc run --python");
+            } else {
+                Files.createDirectories(dir.resolve("test"));
+
+                // build.mill.yaml for Java projects
+                Files.writeString(dir.resolve("build.mill.yaml"), """
+                    # %s — Zinc project
+                    extends: JavaModule
+                    jvmVersion: 25
+
+                    javacOptions:
+                      - --enable-preview
+                      - --release
+                      - "25"
+
+                    forkArgs:
+                      - --enable-preview
+
+                    mainClass: Main
+
+                    mvnDeps: []
+                    """.formatted(name).stripIndent());
+
+                // .gitignore
+                Files.writeString(dir.resolve(".gitignore"), """
+                    out/
+                    *.class
+                    .mill-*
+                    """.stripIndent());
+
+                System.out.println("created project: " + name);
+                System.out.println("  " + dir + "/src/main.zn");
+                System.out.println("  " + dir + "/build.mill.yaml");
+                System.out.println("\nrun: zinc run " + name + "/src");
+            }
 
         } catch (IOException e) {
             System.err.println("error: " + e.getMessage());
@@ -852,6 +973,146 @@ public class Main {
             System.err.println("failed to run " + mainClass + ": " + e.getMessage());
             return 1;
         }
+    }
+
+    // --- python --------------------------------------------------------------
+
+    /**
+     * Find the main .py file to run.
+     *
+     * Resolution order:
+     * 1. --main flag (explicit entry point)
+     * 2. Single file input (the only file)
+     * 3. File matching input name (concurrency.zn → zn_concurrency.py)
+     * 4. main.zn convention (→ zn_main.py)
+     * 5. null (error — user must specify --main)
+     */
+    private static Path findMainPy(List<Path> pyFiles, Path inputPath, String mainFile) {
+        if (pyFiles.isEmpty()) return null;
+
+        // 1. Explicit --main flag
+        if (mainFile != null) {
+            String target = mainFile.replace(".zn", ".py").toLowerCase();
+            for (var f : pyFiles) {
+                if (f.getFileName().toString().equals(target)) return f;
+            }
+            System.err.println("error: --main " + mainFile + " not found in transpiled output");
+            return null;
+        }
+
+        // 2. Single file — obvious
+        if (pyFiles.size() == 1) return pyFiles.getFirst();
+
+        // 3. Match by input filename (single .zn file, not directory)
+        if (!Files.isDirectory(inputPath)) {
+            String target = inputPath.getFileName().toString().replace(".zn", ".py").toLowerCase();
+            for (var f : pyFiles) {
+                if (f.getFileName().toString().equals(target)) return f;
+            }
+        }
+
+        // 4. Convention: main.zn → main.py
+        for (var f : pyFiles) {
+            if (f.getFileName().toString().equals("main.py")) return f;
+        }
+
+        // 5. Directory with multiple files and no main — error
+        return null;
+    }
+
+    /**
+     * Run a Python module via `python -m app.<module>` from the output root.
+     * Using -m avoids the script directory being added to sys.path,
+     * which prevents generated files from shadowing Python stdlib modules.
+     */
+    private static int runPythonModule(Path outDir, Path pyFile, List<String> args) {
+        String python = findPython();
+        if (python == null) {
+            System.err.println("error: python3 not found. Install Python 3.10+ to use --python");
+            return 1;
+        }
+
+        // Convert app/hello.py → app.hello
+        String moduleName = "app." + pyFile.getFileName().toString().replace(".py", "");
+
+        try {
+            var cmd = new ArrayList<String>();
+            cmd.add(python);
+            cmd.add("-m");
+            cmd.add(moduleName);
+            cmd.addAll(args);
+
+            var pb = new ProcessBuilder(cmd)
+                .inheritIO()
+                .directory(outDir.toFile());
+            var proc = pb.start();
+            return proc.waitFor();
+        } catch (Exception e) {
+            System.err.println("failed to run python: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Run a Python file via subprocess (direct execution).
+     */
+    private static int runPython(Path pyFile, List<String> args) {
+        String python = findPython();
+        if (python == null) {
+            System.err.println("error: python3 not found. Install Python 3.10+ to use --python");
+            return 1;
+        }
+
+        try {
+            var cmd = new ArrayList<String>();
+            cmd.add(python);
+            cmd.add(pyFile.toString());
+            cmd.addAll(args);
+
+            var pb = new ProcessBuilder(cmd)
+                .inheritIO()
+                .directory(pyFile.getParent().toFile());
+            var proc = pb.start();
+            return proc.waitFor();
+        } catch (Exception e) {
+            System.err.println("failed to run python: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Install Python dependencies via pip.
+     */
+    private static void installPythonDeps(List<String> deps) {
+        String python = findPython();
+        if (python == null) return;
+
+        try {
+            var cmd = new ArrayList<>(List.of(python, "-m", "pip", "install", "-q"));
+            cmd.addAll(deps);
+            var proc = new ProcessBuilder(cmd)
+                .inheritIO()
+                .start();
+            int exit = proc.waitFor();
+            if (exit != 0) {
+                System.err.println("warning: pip install failed (exit " + exit + ")");
+            }
+        } catch (Exception e) {
+            System.err.println("warning: could not install deps: " + e.getMessage());
+        }
+    }
+
+    private static String findPython() {
+        for (var candidate : List.of("python3.14t", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3", "python")) {
+            try {
+                var proc = new ProcessBuilder(candidate, "--version")
+                    .redirectErrorStream(true)
+                    .start();
+                int exit = proc.waitFor();
+                if (exit == 0) return candidate;
+            } catch (Exception e) { /* not found, try next */ }
+        }
+        return null;
     }
 
     // --- Helpers --------------------------------------------------------------
