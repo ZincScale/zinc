@@ -45,6 +45,11 @@ public class PythonEmitter {
         ctx.modulePackage = pkg;
     }
 
+    /** Set the cross-file type registry for type-aware emission. */
+    public void setTypeRegistry(TypeRegistry registry) {
+        ctx.typeRegistry = registry;
+    }
+
     // --- Public API -----------------------------------------------------------
 
     /**
@@ -123,9 +128,48 @@ public class PythonEmitter {
 
         // Always emit the entry point guard if there's a main function
         if (hasMainFn || !program.stmts().isEmpty()) {
+            // Build source map from the body so far, then inject embedded trace rewriting
+            var bodySourceMap = SourceMap.fromRendered(body.toString(), ctx.className.toLowerCase() + ".zn");
+
             ctx.line("if __name__ == \"__main__\":");
             ctx.indent++;
-            ctx.line("main()");
+            if (!bodySourceMap.isEmpty()) {
+                ctx.line("import sys as _sys, traceback as _tb");
+                ctx.line("_ZN_FILE = \"" + ctx.className.toLowerCase() + ".zn\"");
+                ctx.line("_ZN_MAP = " + bodySourceMap.toPythonDict());
+                ctx.line("try:");
+                ctx.indent++;
+                ctx.line("main()");
+                ctx.indent--;
+                ctx.line("except BaseException as _ex:");
+                ctx.indent++;
+                ctx.line("if isinstance(_ex, (SystemExit, KeyboardInterrupt)):");
+                ctx.indent++;
+                ctx.line("raise");
+                ctx.indent--;
+                ctx.line("print(\"Traceback (most recent call last):\", file=_sys.stderr)");
+                ctx.line("for _fi, _ln, _nm, _li in _tb.extract_tb(_ex.__traceback__):");
+                ctx.indent++;
+                ctx.line("_zn = _ZN_MAP.get(_ln) or _ZN_MAP.get(_ln - 1)");
+                ctx.line("if _zn:");
+                ctx.indent++;
+                ctx.line("print(f\"  File \\\"{_ZN_FILE}\\\", line {_zn}, in {_nm}\", file=_sys.stderr)");
+                ctx.indent--;
+                ctx.line("else:");
+                ctx.indent++;
+                ctx.line("print(f\"  File \\\"{_fi}\\\", line {_ln}, in {_nm}\", file=_sys.stderr)");
+                ctx.indent--;
+                ctx.line("if _li:");
+                ctx.indent++;
+                ctx.line("print(f\"    {_li}\", file=_sys.stderr)");
+                ctx.indent--;
+                ctx.indent--;
+                ctx.line("print(f\"{type(_ex).__name__}: {_ex}\", file=_sys.stderr)");
+                ctx.line("_sys.exit(1)");
+                ctx.indent--;
+            } else {
+                ctx.line("main()");
+            }
             ctx.indent--;
         }
 

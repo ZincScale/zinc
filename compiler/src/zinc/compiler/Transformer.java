@@ -98,11 +98,14 @@ public class Transformer {
         if (!topFns.isEmpty()) {
             var cu = ctx.newCU(program);
             var mainClass = cu.addClass(ctx.className, Keyword.PUBLIC);
+            boolean hasMain = topFns.stream().anyMatch(fn -> fn.name().equals("main"));
+            if (hasMain) addZnTraceSupport(mainClass);
             for (var fn : topFns) {
                 for (var jMethod : decls.transformFnDeclWithOverloads(fn)) {
                     if (fn.name().equals("main") && jMethod.getParameters().isEmpty()) {
                         jMethod.addParameter("String[]", "args");
                         jMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
+                        jMethod.setBody(wrapMainBody(jMethod.getBody().orElse(new BlockStmt())));
                     }
                     mainClass.addMember(jMethod);
                 }
@@ -119,11 +122,68 @@ public class Transformer {
         return Result.ok(units);
     }
 
+    /** Add source map field and trace helper to a class that contains main(). */
+    private void addZnTraceSupport(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration mainClass) {
+        // Placeholder field — Emitter replaces with actual map data
+        var field = mainClass.addFieldWithInitializer(
+            "String", "_ZN",
+            new StringLiteralExpr("__ZN_PLACEHOLDER__"),
+            Keyword.PRIVATE, Keyword.STATIC, Keyword.FINAL);
+
+        // Trace rewriting helper method
+        var helper = ctx.parseStmt("""
+            {
+                var _parts = _ZN.split(":", 2);
+                var _file = _parts[0];
+                var _map = new java.util.HashMap<Integer, Integer>();
+                if (_parts.length > 1 && !_parts[1].isEmpty()) {
+                    for (var _e : _parts[1].split(",")) {
+                        var _kv = _e.split("=");
+                        _map.put(Integer.parseInt(_kv[0]), Integer.parseInt(_kv[1]));
+                    }
+                }
+                System.err.println(ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                for (var _f : ex.getStackTrace()) {
+                    var _zn = _map.get(_f.getLineNumber());
+                    if (_zn == null) _zn = _map.get(_f.getLineNumber() - 1);
+                    if (_zn != null) {
+                        System.err.println("    at " + _file + ":" + _zn + " (" + _f.getMethodName() + ")");
+                    }
+                }
+            }
+            """);
+        var method = mainClass.addMethod("_znTrace", Keyword.PRIVATE, Keyword.STATIC);
+        method.addParameter("Throwable", "ex");
+        method.setBody((BlockStmt) helper);
+    }
+
+    /** Wrap a main() body in try-catch that calls _znTrace on error. */
+    private BlockStmt wrapMainBody(BlockStmt originalBody) {
+        var tryBody = new BlockStmt();
+        for (var stmt : originalBody.getStatements()) tryBody.addStatement(stmt.clone());
+
+        var catchBody = new BlockStmt();
+        catchBody.addStatement(ctx.parseStmt("_znTrace(_znEx);"));
+        catchBody.addStatement(ctx.parseStmt("System.exit(1);"));
+
+        var catchClause = new com.github.javaparser.ast.stmt.CatchClause(
+            new com.github.javaparser.ast.body.Parameter(
+                new ClassOrInterfaceType(null, "Throwable"), "_znEx"),
+            catchBody);
+
+        var wrapped = new BlockStmt();
+        wrapped.addStatement(new com.github.javaparser.ast.stmt.TryStmt(
+            tryBody, new NodeList<>(catchClause), null));
+        return wrapped;
+    }
+
     public Result<CompilationUnit> transform(Program program) {
         var cu = ctx.newCU(program);
 
         if (!program.stmts().isEmpty()) {
             var mainClass = cu.addClass(ctx.className, Keyword.PUBLIC);
+            addZnTraceSupport(mainClass);
+
             var mainMethod = mainClass.addMethod("main", Keyword.PUBLIC, Keyword.STATIC);
             mainMethod.addParameter("String[]", "args");
             mainMethod.setThrownExceptions(new NodeList<>(new ClassOrInterfaceType(null, "Exception")));
@@ -133,7 +193,7 @@ public class Transformer {
                     body.addStatement(jStmt);
                 }
             }
-            mainMethod.setBody(body);
+            mainMethod.setBody(wrapMainBody(body));
 
             for (var decl : program.decls()) {
                 if (decl instanceof FnDecl fn) {

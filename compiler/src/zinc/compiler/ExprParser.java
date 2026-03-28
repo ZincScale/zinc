@@ -34,8 +34,9 @@ public class ExprParser {
     private Expr parseOr() {
         var left = parseAnd();
         while (ctx.check(PIPE_PIPE)) {
+            int line = ctx.peek().line();
             ctx.advance();
-            left = new BinaryExpr(left, "||", parseAnd());
+            left = new BinaryExpr(line, left, "||", parseAnd());
         }
         return left;
     }
@@ -43,8 +44,9 @@ public class ExprParser {
     private Expr parseAnd() {
         var left = parseEquality();
         while (ctx.check(AMP_AMP) || ctx.check(AND)) {
+            int line = ctx.peek().line();
             ctx.advance();
-            left = new BinaryExpr(left, "&&", parseEquality());
+            left = new BinaryExpr(line, left, "&&", parseEquality());
         }
         return left;
     }
@@ -52,8 +54,9 @@ public class ExprParser {
     private Expr parseEquality() {
         var left = parseComparison();
         while (ctx.check(EQ) || ctx.check(NEQ) || ctx.check(REF_EQ) || ctx.check(REF_NEQ)) {
+            int line = ctx.peek().line();
             String op = ctx.advance().literal();
-            left = new BinaryExpr(left, op, parseComparison());
+            left = new BinaryExpr(line, left, op, parseComparison());
         }
         return left;
     }
@@ -61,8 +64,9 @@ public class ExprParser {
     private Expr parseComparison() {
         var left = parseIs();
         while (ctx.check(LT) || ctx.check(LTE) || ctx.check(GT) || ctx.check(GTE)) {
+            int line = ctx.peek().line();
             String op = ctx.advance().literal();
-            left = new BinaryExpr(left, op, parseIs());
+            left = new BinaryExpr(line, left, op, parseIs());
         }
         return left;
     }
@@ -81,11 +85,12 @@ public class ExprParser {
         }
         // "hello" in str → str.contains("hello")
         if (ctx.check(IN)) {
+            int line = ctx.peek().line();
             ctx.advance();
             var container = parseRange();
             // Rewrite as: container.contains(left) — represented as CallExpr
-            return new CallExpr(
-                new SelectorExpr(container, "contains"),
+            return new CallExpr(line,
+                new SelectorExpr(line, container, "contains"),
                 java.util.List.of(left), java.util.List.of(), java.util.List.of(), false);
         }
         return left;
@@ -107,8 +112,9 @@ public class ExprParser {
     private Expr parseAddition() {
         var left = parseMultiplication();
         while (ctx.check(PLUS) || ctx.check(MINUS)) {
+            int line = ctx.peek().line();
             String op = ctx.advance().literal();
-            left = new BinaryExpr(left, op, parseMultiplication());
+            left = new BinaryExpr(line, left, op, parseMultiplication());
         }
         return left;
     }
@@ -116,8 +122,9 @@ public class ExprParser {
     private Expr parseMultiplication() {
         var left = parsePower();
         while (ctx.check(STAR) || ctx.check(SLASH) || ctx.check(PERCENT)) {
+            int line = ctx.peek().line();
             String op = ctx.advance().literal();
-            left = new BinaryExpr(left, op, parsePower());
+            left = new BinaryExpr(line, left, op, parsePower());
         }
         return left;
     }
@@ -125,17 +132,19 @@ public class ExprParser {
     private Expr parsePower() {
         var left = parseUnary();
         if (ctx.check(STAR_STAR)) {
+            int line = ctx.peek().line();
             ctx.advance();
-            return new BinaryExpr(left, "**", parsePower()); // right-associative
+            return new BinaryExpr(line, left, "**", parsePower()); // right-associative
         }
         return left;
     }
 
     private Expr parseUnary() {
         if (ctx.check(MINUS) || ctx.check(BANG) || ctx.check(NOT)) {
+            int line = ctx.peek().line();
             String op = ctx.advance().literal();
             if (op.equals("not")) op = "!";
-            return new UnaryExpr(op, parseUnary());
+            return new UnaryExpr(line, op, parseUnary());
         }
         return parsePostfix();
     }
@@ -146,19 +155,21 @@ public class ExprParser {
         var expr = parsePrimary();
         while (true) {
             if (ctx.check(DOT)) {
+                int line = ctx.peek().line();
                 ctx.advance();
                 String field = ctx.expectIdentOrKeyword();
                 if (ctx.check(LPAREN)) {
-                    expr = parseCallArgs(new SelectorExpr(expr, field));
+                    expr = parseCallArgs(new SelectorExpr(line, expr, field));
                 } else {
-                    expr = new SelectorExpr(expr, field);
+                    expr = new SelectorExpr(line, expr, field);
                 }
             } else if (ctx.check(QUESTION_DOT)) {
+                int line = ctx.peek().line();
                 ctx.advance();
                 String field = ctx.expectIdentOrKeyword();
                 CallExpr call = null;
                 if (ctx.check(LPAREN)) {
-                    call = (CallExpr) parseCallArgs(new SelectorExpr(expr, field));
+                    call = (CallExpr) parseCallArgs(new SelectorExpr(line, expr, field));
                 }
                 expr = new SafeNavExpr(expr, field, call);
             } else if (ctx.check(LBRACKET)) {
@@ -176,6 +187,7 @@ public class ExprParser {
     }
 
     Expr parseCallArgs(Expr callee) {
+        int line = ctx.peek().line();
         ctx.expect(LPAREN);
         var args = new ArrayList<Expr>();
         var namedArgs = new ArrayList<NamedArg>();
@@ -187,7 +199,7 @@ public class ExprParser {
             }
         }
         ctx.expect(RPAREN);
-        return new CallExpr(callee, args, namedArgs, List.of(), false);
+        return new CallExpr(line, callee, args, namedArgs, List.of(), false);
     }
 
     private void parseCallArg(List<Expr> args, List<NamedArg> namedArgs) {
@@ -220,7 +232,7 @@ public class ExprParser {
             case MATCH -> parseMatchExpr();
             case IDENT, PRINT, DATA, SEALED -> {
                 if (ctx.peekAt(1).type() == ARROW) yield parseLambda();
-                else { ctx.advance(); yield new Ident(tok.literal()); }
+                else { ctx.advance(); yield new Ident(tok.line(), tok.literal()); }
             }
             case LPAREN -> parseParenOrLambda();
             case LBRACKET -> parseListLit();
@@ -228,7 +240,7 @@ public class ExprParser {
             default -> {
                 ctx.error("unexpected token " + tok.type() + " (" + tok.literal() + ") in expression");
                 ctx.advance();
-                yield new Ident("__error__");
+                yield new Ident(tok.line(), "__error__");
             }
         };
     }
@@ -246,6 +258,7 @@ public class ExprParser {
     }
 
     private Expr parseNewExpr() {
+        int line = ctx.peek().line();
         ctx.advance(); // new
         String name = ctx.expect(IDENT).literal();
         while (ctx.check(DOT) && ctx.isIdentLike(ctx.peekAt(1).type())) {
@@ -258,8 +271,8 @@ public class ExprParser {
             while (ctx.match(COMMA)) typeArgs.add(types.formatType(types.parseType()));
             ctx.expect(GT);
         }
-        var callExpr = (CallExpr) parseCallArgs(new Ident(name));
-        return new CallExpr(callExpr.callee(), callExpr.args(), callExpr.namedArgs(), typeArgs, true);
+        var callExpr = (CallExpr) parseCallArgs(new Ident(line, name));
+        return new CallExpr(line, callExpr.callee(), callExpr.args(), callExpr.namedArgs(), typeArgs, true);
     }
 
     private Expr parseSpawnExpr() {

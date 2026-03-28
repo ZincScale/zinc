@@ -221,6 +221,11 @@ public class TransformExpr {
         if (call.callee() instanceof SelectorExpr sel) {
             String methodName = TransformContext.METHOD_ALIASES.getOrDefault(sel.field(), sel.field());
 
+            // Static library calls (Math.max, String.valueOf, etc.) — never enter stream chain
+            if (sel.object() instanceof Ident id && JavaStdlibMapping.isStaticClass(id.name())) {
+                return JavaStdlibMapping.resolveStaticCall(id.name(), methodName, args);
+            }
+
             if (isStreamMethod(methodName)) {
                 return transformStreamChain(call);
             }
@@ -238,18 +243,8 @@ public class TransformExpr {
         }
 
         if (call.callee() instanceof Ident id) {
-            if (id.name().equals("print")) {
-                return new MethodCallExpr(new NameExpr("System.out"), "println", args);
-            }
-            if (id.name().equals("len") && !args.isEmpty()) {
-                return new MethodCallExpr(args.get(0), "size");
-            }
-            if (id.name().equals("sleep")) {
-                return new MethodCallExpr(new NameExpr("Thread"), "sleep", args);
-            }
-            if (id.name().equals("parseInt")) {
-                return new MethodCallExpr(new NameExpr("Integer"), "parseInt", args);
-            }
+            var topLevel = JavaStdlibMapping.resolveTopLevelCall(id.name(), args);
+            if (topLevel != null) return topLevel;
             return new MethodCallExpr(null, id.name(), args);
         }
 

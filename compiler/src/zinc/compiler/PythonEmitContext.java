@@ -29,6 +29,7 @@ public class PythonEmitContext {
     final Map<String, String> renamedVars = new HashMap<>();
     Set<String> projectModules = Set.of();
     String modulePackage = "";
+    TypeRegistry typeRegistry = null;
     int lambdaCounter = 0;
     int spawnCounter = 0;
 

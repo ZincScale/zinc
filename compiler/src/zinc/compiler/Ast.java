@@ -171,18 +171,18 @@ public final class Ast {
     public record RawStringLit(String value) implements Expr {}
     public record BoolLit(boolean value) implements Expr {}
     public record NullLit() implements Expr {}
-    public record Ident(String name) implements Expr {}
+    public record Ident(int line, String name) implements Expr {}
     public record ThisExpr() implements Expr {}
 
-    public record BinaryExpr(Expr left, String op, Expr right) implements Expr {}
-    public record UnaryExpr(String op, Expr operand) implements Expr {}
+    public record BinaryExpr(int line, Expr left, String op, Expr right) implements Expr {}
+    public record UnaryExpr(int line, String op, Expr operand) implements Expr {}
 
     public record CallExpr(
-        Expr callee, List<Expr> args, List<NamedArg> namedArgs,
+        int line, Expr callee, List<Expr> args, List<NamedArg> namedArgs,
         List<String> typeArgs, boolean isNew
     ) implements Expr {}
 
-    public record SelectorExpr(Expr object, String field) implements Expr {}
+    public record SelectorExpr(int line, Expr object, String field) implements Expr {}
     public record SafeNavExpr(Expr object, String field, CallExpr call) implements Expr {}
     public record IndexExpr(Expr object, Expr index) implements Expr {}
     public record SliceExpr(Expr object, Expr low, Expr high) implements Expr {}

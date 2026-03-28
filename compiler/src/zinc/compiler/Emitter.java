@@ -24,6 +24,12 @@ import java.nio.file.Path;
  */
 public class Emitter {
 
+    /** Source maps built during emission, keyed by class name. */
+    private final java.util.Map<String, SourceMap> sourceMaps = new java.util.HashMap<>();
+
+    /** Get source maps built during emission. Call after emit(). */
+    public java.util.Map<String, SourceMap> sourceMaps() { return sourceMaps; }
+
     /**
      * Writes a CompilationUnit to a .java file in the given output directory.
      * Creates subdirectories for packages.
@@ -52,6 +58,15 @@ public class Emitter {
 
         Path file = dir.resolve(className + ".java");
         String source = cu.toString();
+
+        // Build source map from @zn markers in rendered output
+        String znFile = className.toLowerCase() + ".zn";
+        var sourceMap = SourceMap.fromRendered(source, znFile);
+        if (!sourceMap.isEmpty()) {
+            sourceMaps.put(className, sourceMap);
+            // Replace placeholder with actual map data for embedded runtime trace rewriting
+            source = source.replace("\"__ZN_PLACEHOLDER__\"", "\"" + sourceMap.toCompactString() + "\"");
+        }
 
         try {
             Files.writeString(file, source);

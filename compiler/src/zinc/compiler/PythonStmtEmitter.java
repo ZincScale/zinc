@@ -29,6 +29,8 @@ public class PythonStmtEmitter {
     // --- Main dispatch --------------------------------------------------------
 
     void emitStmt(Ast.Stmt stmt) {
+        int znLine = getStmtLine(stmt);
+        if (znLine > 0) ctx.line("# @zn:" + znLine);
         switch (stmt) {
             case Ast.BlockStmt block -> emitBlock(block);
             case Ast.VarStmt var_ -> emitVarStmt(var_);
@@ -47,6 +49,23 @@ public class PythonStmtEmitter {
             case Ast.LockStmt lock -> emitLockStmt(lock);
             case Ast.DeferStmt defer -> emitDeferStmt(defer);
         }
+    }
+
+    private int getStmtLine(Ast.Stmt stmt) {
+        return switch (stmt) {
+            case Ast.VarStmt v -> v.line();
+            case Ast.TupleVarStmt t -> t.line();
+            case Ast.AssignStmt a -> a.line();
+            case Ast.ReturnStmt r -> r.line();
+            case Ast.IfStmt i -> i.line();
+            case Ast.ForStmt f -> f.line();
+            case Ast.WhileStmt w -> w.line();
+            case Ast.ExprStmt e -> e.line();
+            case Ast.MatchStmt m -> m.line();
+            case Ast.WithStmt w -> w.line();
+            case Ast.LockStmt l -> l.line();
+            default -> 0;
+        };
     }
 
     void emitBlock(Ast.BlockStmt block) {

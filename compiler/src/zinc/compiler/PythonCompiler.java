@@ -20,6 +20,11 @@ import java.util.List;
  */
 public class PythonCompiler {
 
+    /** Maps generated .py filename → source .zn filename, from the most recent compilation. */
+    static java.util.Map<String, String> lastPyToZnMap = java.util.Map.of();
+    /** Output directory from most recent compilation (for reading generated files). */
+    static Path lastOutDir = null;
+
     /**
      * Compile .zn files to Python (.py) instead of Java.
      */
@@ -62,6 +67,11 @@ public class PythonCompiler {
         packageDirs.add(appDir);
         var usedStdlib = new java.util.HashSet<String>();
 
+        // Pass 1: parse all files and build cross-file type registry
+        record ParsedFile(Path path, String fileName, String className, String modulePkg, Path targetDir, Ast.Program program) {}
+        var parsed = new ArrayList<ParsedFile>();
+        var typeRegistry = new TypeRegistry();
+
         for (var znFile : znFiles) {
             String source;
             try { source = Files.readString(znFile); }
@@ -80,24 +90,39 @@ public class PythonCompiler {
             }
 
             var lexResult = new Lexer(source).tokenize();
-            if (lexResult.isErr()) return Result.err(((Result.Err<?>) lexResult).errors());
+            if (lexResult.isErr()) return Result.err(JavaCompiler.prefixErrors(fileName, ((Result.Err<?>) lexResult).errors()));
 
             var parser = new Parser(lexResult.unwrap());
             var parseResult = parser.parseResult();
-            if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
+            if (parseResult.isErr()) return Result.err(JavaCompiler.prefixErrors(fileName, ((Result.Err<?>) parseResult).errors()));
             var program = parseResult.unwrap();
 
             String modulePkg = relPath.toString().replace("/", ".").replace("\\", ".");
             if (modulePkg.equals(".")) modulePkg = "";
 
-            var emitter = new PythonEmitter(className);
+            // Register types from this file
+            String modulePath = modulePkg.isEmpty() ? className.toLowerCase() : modulePkg + "." + className.toLowerCase();
+            typeRegistry.register(modulePath, program);
+
+            parsed.add(new ParsedFile(znFile, fileName, className, modulePkg, targetDir, program));
+        }
+
+        // Pass 2: emit each file with cross-file type knowledge
+        var pyToZn = new java.util.HashMap<String, String>();
+        for (var pf : parsed) {
+            var emitter = new PythonEmitter(pf.className());
             emitter.setProjectModules(projectModules);
-            emitter.setModulePackage(modulePkg);
-            var emitResult = emitter.emit(program, targetDir);
+            emitter.setModulePackage(pf.modulePkg());
+            emitter.setTypeRegistry(typeRegistry);
+            var emitResult = emitter.emit(pf.program(), pf.targetDir());
             if (emitResult.isErr()) return Result.err(((Result.Err<?>) emitResult).errors());
             pyFiles.add(emitResult.unwrap());
             usedStdlib.addAll(emitter.usedStdlibModules());
+            // Track .py → .zn mapping for source map trace rewriting
+            pyToZn.put(pf.className().toLowerCase() + ".py", pf.fileName());
         }
+        lastPyToZnMap = pyToZn;
+        lastOutDir = outDir;
 
         // Tree-shake stdlib: only copy modules actually referenced
         try {
@@ -147,10 +172,37 @@ public class PythonCompiler {
             cmd.addAll(args);
 
             var proc = new ProcessBuilder(cmd)
-                .inheritIO()
+                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
                 .directory(outDir.toFile())
                 .start();
-            return proc.waitFor();
+
+            // Read stderr in a separate thread to avoid deadlock
+            var stderrReader = new Thread(() -> {
+                try {
+                    var stderr = new String(proc.getErrorStream().readAllBytes());
+                    if (!stderr.isEmpty()) {
+                        if (!lastPyToZnMap.isEmpty() && lastOutDir != null) {
+                            var maps = new java.util.HashMap<String, SourceMap>();
+                            var appDir = lastOutDir.resolve("app");
+                            for (var entry : lastPyToZnMap.entrySet()) {
+                                var pyFile = appDir.resolve(entry.getKey());
+                                if (Files.exists(pyFile)) {
+                                    maps.put(entry.getKey(), SourceMap.fromGeneratedFile(pyFile, entry.getValue()));
+                                }
+                            }
+                            System.err.print(SourceMap.rewritePythonTrace(stderr, maps));
+                        } else {
+                            System.err.print(stderr);
+                        }
+                    }
+                } catch (IOException e) { /* ignore */ }
+            });
+            stderrReader.setDaemon(true);
+            stderrReader.start();
+
+            int exitCode = proc.waitFor();
+            stderrReader.join(5000);
+            return exitCode;
         } catch (Exception e) {
             System.err.println("uv run failed: " + e.getMessage());
             System.err.println("uv is bundled with zinc — check lib/uv exists");

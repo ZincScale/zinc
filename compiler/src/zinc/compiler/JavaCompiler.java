@@ -20,6 +20,9 @@ import java.util.Map;
  */
 public class JavaCompiler {
 
+    /** Source maps from the most recent compilation, keyed by class name. */
+    static java.util.Map<String, SourceMap> lastSourceMaps = java.util.Map.of();
+
     /**
      * Compile a .zn file or directory of .zn files to .java files.
      * Multi-file: two-pass (collect signatures, then transform with cross-file knowledge).
@@ -50,10 +53,9 @@ public class JavaCompiler {
         // Multi-file: parse all, collect cross-file info, then transform
         record ParsedFile(Path path, String className, Ast.Program program) {}
         var parsed = new ArrayList<ParsedFile>();
-        var allInterfaces = new java.util.HashSet<String>();
-        var allClasses = new java.util.HashSet<String>();
+        var typeRegistry = new TypeRegistry();
 
-        // Pass 1: parse all files, collect interface/class names
+        // Pass 1: parse all files, build cross-file type registry
         for (var znFile : znFiles) {
             String source;
             try { source = Files.readString(znFile); }
@@ -68,12 +70,14 @@ public class JavaCompiler {
                 pkg = relative.toString().replace("/", ".").replace("\\", ".");
             }
 
+            String fileName = znFile.getFileName().toString();
+
             var lexResult = new Lexer(source).tokenize();
-            if (lexResult.isErr()) return Result.err(((Result.Err<?>) lexResult).errors());
+            if (lexResult.isErr()) return Result.err(prefixErrors(fileName, ((Result.Err<?>) lexResult).errors()));
 
             var parser = new Parser(lexResult.unwrap());
             var parseResult = parser.parseResult();
-            if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
+            if (parseResult.isErr()) return Result.err(prefixErrors(fileName, ((Result.Err<?>) parseResult).errors()));
             var program = parseResult.unwrap();
 
             if (program.pkg() == null && pkg != null) {
@@ -83,21 +87,11 @@ public class JavaCompiler {
 
             parsed.add(new ParsedFile(znFile, className, program));
 
-            for (var decl : program.decls()) {
-                switch (decl) {
-                    case Ast.InterfaceDecl iface -> allInterfaces.add(iface.name());
-                    case Ast.ClassDecl cls -> allClasses.add(cls.name());
-                    case Ast.DataClassDecl data -> allClasses.add(data.name());
-                    case Ast.SealedClassDecl sealed -> {
-                        allClasses.add(sealed.name());
-                        for (var v : sealed.variants()) allClasses.add(v.name());
-                    }
-                    default -> {}
-                }
-            }
+            String modulePath = pkg != null ? pkg + "." + className.toLowerCase() : className.toLowerCase();
+            typeRegistry.register(modulePath, program);
         }
 
-        // Pass 2: transform each file with cross-file interface knowledge
+        // Pass 2: transform each file with cross-file type knowledge
         var allJavaFiles = new ArrayList<Path>();
         var emitter = new Emitter();
 
@@ -107,7 +101,7 @@ public class JavaCompiler {
             var resolvedTypes = typeResult.isOk() ? typeResult.unwrap() : Map.<String, TypeInfo>of();
 
             var transformer = new Transformer(pf.className(), resolvedTypes);
-            for (var ifaceName : allInterfaces) transformer.registerInterface(ifaceName);
+            for (var ifaceName : typeRegistry.allInterfaces()) transformer.registerInterface(ifaceName);
 
             var transformResult = transformer.transformAll(pf.program());
             if (transformResult.isErr()) return Result.err(((Result.Err<?>) transformResult).errors());
@@ -119,6 +113,7 @@ public class JavaCompiler {
             }
         }
 
+        lastSourceMaps = emitter.sourceMaps();
         return Result.ok(allJavaFiles);
     }
 
@@ -137,12 +132,12 @@ public class JavaCompiler {
         String className = Main.capitalize(fileName.replace(".zn", ""));
 
         var lexResult = new Lexer(source).tokenize();
-        if (lexResult.isErr()) return Result.err(((Result.Err<?>) lexResult).errors());
+        if (lexResult.isErr()) return Result.err(prefixErrors(fileName, ((Result.Err<?>) lexResult).errors()));
         var tokens = lexResult.unwrap();
 
         var parser = new Parser(tokens);
         var parseResult = parser.parseResult();
-        if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
+        if (parseResult.isErr()) return Result.err(prefixErrors(fileName, ((Result.Err<?>) parseResult).errors()));
         var program = parseResult.unwrap();
 
         var typeChecker = new TypeChecker();
@@ -162,7 +157,13 @@ public class JavaCompiler {
             javaFiles.add(emitResult.unwrap());
         }
 
+        lastSourceMaps = emitter.sourceMaps();
         return Result.ok(javaFiles);
+    }
+
+    /** Prefix each error string with the source filename: "file.zn:3:5: msg". */
+    static List<String> prefixErrors(String fileName, List<String> errors) {
+        return errors.stream().map(e -> fileName + ":" + e).toList();
     }
 
     // --- javac ----------------------------------------------------------------
@@ -217,7 +218,11 @@ public class JavaCompiler {
             return 0;
         } catch (java.lang.reflect.InvocationTargetException e) {
             if (e.getCause() != null) {
-                e.getCause().printStackTrace();
+                if (!lastSourceMaps.isEmpty()) {
+                    System.err.print(SourceMap.rewriteJavaTrace(e.getCause(), lastSourceMaps));
+                } else {
+                    e.getCause().printStackTrace();
+                }
             }
             return 1;
         } catch (Exception e) {

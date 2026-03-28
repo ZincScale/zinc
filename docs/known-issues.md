@@ -113,8 +113,8 @@ Python backend has no type info shared between files. When file A imports a clas
 | 11 | zinc_runtime.py primitives | Phase 3 | **FIXED** — ZincFuture, ZincChannel, zinc_sleep |
 | 12 | sleep() mapping | Phase 3 | **FIXED** — sleep(ms) → zinc_sleep(ms) |
 | 13 | Channel mapping | Phase 3 | **FIXED** — new Channel(n) → ZincChannel(n) |
-| 14 | Zinc error line numbers | Feature | TODO |
-| 15 | Cross-file type checking (Python) | Feature | TODO |
+| 14 | Zinc error line numbers | Feature | **FIXED** — filename:line:col error format, line info on key Expr nodes |
+| 15 | Cross-file type checking (Python) | Feature | **FIXED** — TypeRegistry, two-pass compilation on both backends |
 | 16 | Native binary (Nuitka/PyInstaller) | Feature | TODO |
 | 17 | Docker for Python | Feature | TODO |
-| 18 | Java stdlib Math.max/min bug | Bug | TODO |
+| 18 | Java stdlib Math.max/min bug | Bug | **FIXED** — JavaStdlibMapping, static calls bypass stream dispatch |

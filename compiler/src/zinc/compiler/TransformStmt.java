@@ -17,6 +17,8 @@ import com.github.javaparser.ast.Modifier.Keyword;
 
 import java.util.List;
 
+import com.github.javaparser.ast.comments.LineComment;
+
 import zinc.compiler.Ast.Stmt;
 import zinc.compiler.Ast.FnDecl;
 import zinc.compiler.Ast.Expr;
@@ -51,7 +53,8 @@ public class TransformStmt {
     // --- Main dispatch --------------------------------------------------------
 
     List<Statement> transformStmt(Stmt stmt) {
-        return switch (stmt) {
+        int znLine = getStmtLine(stmt);
+        List<Statement> result = switch (stmt) {
             case Ast.VarStmt v -> {
                 if (v.orHandler() != null && v.value() != null) yield transformVarWithOrHandlerStmts(v);
                 else yield List.of(transformVarStmt(v));
@@ -76,6 +79,33 @@ public class TransformStmt {
             case Ast.DeferStmt d -> List.of(new ExpressionStmt(exprs.transformExpr(d.expr())));
             case FnDecl fn -> List.of();
             default -> List.of(new ExpressionStmt(new StringLiteralExpr("/* unsupported: " + stmt.getClass().getSimpleName() + " */")));
+        };
+        // Attach Zinc source line marker for runtime trace rewriting
+        if (znLine > 0) {
+            for (var jStmt : result) {
+                if (jStmt.getComment().isEmpty()) {
+                    jStmt.setComment(new LineComment(" @zn:" + znLine));
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Extract line number from a Zinc AST statement. */
+    private int getStmtLine(Stmt stmt) {
+        return switch (stmt) {
+            case Ast.VarStmt v -> v.line();
+            case Ast.TupleVarStmt t -> t.line();
+            case Ast.AssignStmt a -> a.line();
+            case Ast.ReturnStmt r -> r.line();
+            case Ast.IfStmt i -> i.line();
+            case Ast.ForStmt f -> f.line();
+            case Ast.WhileStmt w -> w.line();
+            case Ast.ExprStmt e -> e.line();
+            case Ast.MatchStmt m -> m.line();
+            case Ast.WithStmt w -> w.line();
+            case Ast.LockStmt l -> l.line();
+            default -> 0;
         };
     }
 
