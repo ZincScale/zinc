@@ -1,6 +1,6 @@
 # Python Backend: Design Document
 
-> **Status**: DESIGN COMPLETE — ready for implementation
+> **Status**: IMPLEMENTED — 13/13 e2e tests passing (including concurrency)
 > **Target**: Python 3.14t (free-threading, no GIL)
 > **Scope**: Zinc → Python transpilation, translation matrix, concurrency runtime, deployment, stdlib candidates
 
@@ -186,56 +186,42 @@ Python's exception model is actually a natural fit — no impedance mismatch. Zi
 
 ### The model
 
-Python 3.14t removes the GIL. Threads run in true parallel. Zinc's concurrency primitives map directly to `threading` + `concurrent.futures` — no async/await coloring needed.
+Python 3.14t removes the GIL. Threads run in true parallel. Zinc's concurrency primitives map directly to `threading` — no async/await coloring needed.
 
 ### Mapping
 
-| Zinc | Python 3.14t | Lifecycle |
+| Zinc | Python 3.14t | Notes |
 |---|---|---|
-| `spawn { task() }` | `scope.submit(task)` | Tracked by parent scope |
-| `concurrent { a(); b(); c() }` | `ZincScope` context manager + `executor.submit` per task | All complete or all cancel |
-| `concurrent(first: true)` | `concurrent.futures.wait(FIRST_COMPLETED)` + cancel rest | First wins, rest cancelled |
-| `parallel for x in xs { f(x) }` | `ZincScope` + `executor.map(f, xs)` | Structured — waits for all |
-| `parallel(max: 10) for` | `ThreadPoolExecutor(max_workers=10)` | Bounded directly |
-| `lock mu {}` | `with threading.Lock():` | Real mutex (GIL-free, actually needed) |
-| `Channel<T>(100)` | `ZincChannel(maxsize=100)` (wraps `queue.Queue` + close) | Bounded, blocking |
-| `timeout(5.seconds) { }` | `future.result(timeout=5)` + cancel | Raises on timeout |
+| `spawn { task() }` | `ZincFuture(fn)` | Daemon thread + result tracking |
+| `spawn { } or { handler }` | `ZincFuture(fn, or_handler)` | Error supervision |
+| `task.join()` | `task.join()` | Block + rethrow on failure |
+| `task.isDone()` | `task.isDone()` | Non-blocking status check |
+| `task.isFailed()` | `task.isFailed()` | Check if thread threw |
+| `lock mu { }` | `with mu:` | `threading.Lock` context manager |
+| `new Channel<T>(n)` | `ZincChannel(maxsize=n)` | `queue.Queue` wrapper |
+| `ch.send(v)` / `ch.receive()` | `ch.send(v)` / `ch.receive()` | Blocking put/get |
+| `sleep(ms)` | `zinc_sleep(ms)` | Converts ms → seconds |
 | `with resource { }` | `with resource:` | Context manager — identical |
 
-### zinc_runtime.py — The "Good Children" Runtime
+### zinc_runtime.py
 
-The transpiler generates code that imports a thin runtime library. This library enforces structured concurrency — threads are good children that clean up after themselves.
+The transpiler generates code that imports a thin runtime library:
 
 ```
 zinc_runtime.py
-  ZincScope           Structured scope — tracks children, cancels on failure, waits on exit
-  ZincChannel         queue.Queue wrapper with close() and iteration (for x in channel)
-  ZincTimeout         Executor + future.result(timeout=N) + cancellation
-  zinc_main(fn)       Entry point wrapper — signal handlers, top-level scope, clean shutdown
-  ZincError           Base exception for Zinc error values
+  ZincError           Base exception for Zinc error values (return Error("msg"))
+  ZincFuture          Thread + result tracking — .join(), .isDone(), .isFailed()
+  ZincChannel         queue.Queue wrapper with .send() / .receive()
+  zinc_sleep(ms)      Sleep with ms-to-seconds conversion
 ```
 
-**ZincScope contract:**
+**ZincFuture** wraps a daemon thread with error tracking:
+- Body runs in a new thread
+- If the body raises, the `or_handler` (if provided) runs in the same thread
+- `.join()` blocks and rethrows any exception from the body
+- `.isDone()` / `.isFailed()` for non-blocking status checks
 
-1. All child tasks (spawn, concurrent, parallel) are submitted to the scope's executor
-2. Scope tracks all futures
-3. On child failure: cancel all siblings, propagate exception to parent
-4. On scope exit (normal): wait for all children to complete
-5. On scope exit (exception): cancel all children, then propagate
-6. On SIGTERM/SIGINT: cancel all scopes top-down, allow cleanup
-
-This is the Ktor Job / Java ExecutorService / Erlang supervisor pattern — cooperative shutdown with a managed lifecycle. No orphaned threads, no leaked resources.
-
-**Unstructured spawn:**
-
-For fire-and-forget `spawn` blocks, two modes:
-
-| Mode | Behavior | When |
-|---|---|---|
-| Daemon thread | Dies when main exits — no cleanup | spawn with no result used, no resources |
-| Tracked task | Cancelled gracefully on exit | spawn that writes to files/network/DB |
-
-The transpiler decides based on whether the spawn block contains resource operations (file I/O, network, DB). If it does, track. If it's pure computation or logging, daemon.
+Spawn body functions use `nonlocal` declarations for variables assigned in the outer scope, enabling mutation of captured variables from the spawned thread.
 
 ### Free-Threading Library Compatibility
 

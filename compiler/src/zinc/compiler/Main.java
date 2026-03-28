@@ -110,8 +110,13 @@ public class Main {
             }
         }
 
-        // Python target — done after transpilation, no javac/Mill/jpackage
+        // Python target — copy stdlib + done, no javac/Mill/jpackage
         if (targetPython) {
+            try {
+                ZincStdlib.copyPythonStdlib(outDir);
+            } catch (IOException e) {
+                System.err.println("warning: could not copy stdlib: " + e.getMessage());
+            }
             System.out.println("python transpilation complete: " + outDir);
             return;
         }

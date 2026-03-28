@@ -34,7 +34,7 @@ Java 25 is the best runtime for server applications. But it has ceremony. Zinc r
 - **`data` → Java records** — `data User(String name, int age)` with equals/hashCode/toString
 - **Sealed classes** — `sealed class Shape { data Circle(double r) }` with pattern matching
 - **Errors as values** — `or {}` handler, no try/catch in user code
-- **Virtual threads** — `spawn`, `parallel for`, `concurrent` with `StructuredTaskScope`
+- **Virtual threads** — `spawn`, `lock`, `Channel` — simple concurrency primitives
 - **Fluent collections** — `.filter(it > 0).map(it * 2)` without `.stream()/.toList()`
 - **`==` is structural** — `===` for reference identity
 - **Native binaries** — GraalVM native-image by default (~13MB, ~22ms startup)
@@ -103,16 +103,7 @@ fn loadConfig(String path): String {
 }
 var config = loadConfig("app.conf") or { "{}" }
 
-// Virtual threads + structured concurrency
-var (user, orders) = concurrent {
-    fetchUser(id)
-    fetchOrders(id)
-}
-
-parallel for order in orders {
-    process(order)
-}
-
+// Virtual threads — spawn, lock, channels
 var worker = spawn {
     while running {
         var msg = inbox.take() or { return }
@@ -121,6 +112,7 @@ var worker = spawn {
 } or {
     print("worker crashed: {err}")
 }
+worker.join()
 
 // Fluent collections with it keyword
 var active = orders.filter(it.status == "active")
@@ -167,7 +159,7 @@ See [`examples/v3/`](examples/v3/) for working examples with expected output:
 | [hello.zn](examples/v3/hello.zn) | Functions, string interpolation |
 | [classes.zn](examples/v3/classes.zn) | Classes, data records, inheritance, visibility |
 | [sealed.zn](examples/v3/sealed.zn) | Sealed classes, pattern matching |
-| [concurrency.zn](examples/v3/concurrency.zn) | spawn, concurrent, parallel for, channels |
+| [concurrency.zn](examples/v3/concurrency.zn) | spawn, lock, channels, futures |
 | [error_handling.zn](examples/v3/error_handling.zn) | or handlers, return Error |
 | [streams.zn](examples/v3/streams.zn) | Collection methods, it keyword, stream chains |
 | [functions.zn](examples/v3/functions.zn) | Default params, varargs, lambdas |

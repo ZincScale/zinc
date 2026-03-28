@@ -57,25 +57,14 @@ Functions like `sleep()`, `parseInt()`, `print()` are mapped ad-hoc in the Trans
 
 ### ~~8-10. Parallel for, concurrent, timeout stubs~~ — REMOVED (features removed from language)
 
-### 11. No zinc_runtime.py concurrency primitives
-**Severity**: Phase 3 incomplete
-**Location**: `test/python/zinc_runtime.py`
+### ~~11. No zinc_runtime.py concurrency primitives~~ — FIXED
+ZincFuture, ZincChannel, zinc_sleep added to zinc_runtime.py.
 
-Only `ZincError` exists. Missing:
-- `ZincChannel` — `queue.Queue` wrapper with `close()` and iteration
-- `sleep()` — mapped to `time.sleep(ms / 1000)`
+### ~~12. sleep() not mapped in PythonEmitter~~ — FIXED
+`sleep(ms)` now emits `zinc_sleep(ms)` which converts ms to seconds.
 
-### 12. sleep() not mapped in PythonEmitter
-**Severity**: Phase 3 incomplete
-**Location**: `PythonEmitter.java`
-
-`sleep(100)` emits as-is. Should emit `time.sleep(0.1)` (Python uses seconds, Zinc uses milliseconds).
-
-### 13. Channel type not mapped in PythonEmitter
-**Severity**: Phase 3 incomplete
-**Location**: `PythonEmitter.java`
-
-`new Channel(10)` emits as `Channel(10)`. Should emit `ZincChannel(maxsize=10)` from zinc_runtime.
+### ~~13. Channel type not mapped in PythonEmitter~~ — FIXED
+`new Channel(10)` now emits `ZincChannel(10)` via mapTypeName on constructor calls.
 
 ## Status
 
@@ -88,4 +77,7 @@ Only `ZincError` exists. Missing:
 | 5 | lock keyword | Feature | **FIXED** (f66b2e3) — LOCK token, LockStmt AST, parser, both backends |
 | 6 | Concurrent result binding | Feature | **REMOVED** — concurrent block removed to simplify compiler |
 | 7 | Formal stdlib | Design | OPEN |
-| 8-13 | Python concurrency stubs | Phase 3 | **REMOVED** — parallel for, concurrent, timeout removed from both backends |
+| 8-10 | Python concurrency stubs | Phase 3 | **REMOVED** — parallel for, concurrent, timeout removed from both backends |
+| 11 | zinc_runtime.py primitives | Phase 3 | **FIXED** — ZincFuture, ZincChannel, zinc_sleep |
+| 12 | sleep() mapping | Phase 3 | **FIXED** — sleep(ms) → zinc_sleep(ms) |
+| 13 | Channel mapping | Phase 3 | **FIXED** — new Channel(n) → ZincChannel(n) |

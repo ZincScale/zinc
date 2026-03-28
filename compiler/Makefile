@@ -17,10 +17,11 @@ deps:
 		curl -sL $(MILL_LAUNCHER_URL) -o lib/mill && chmod +x lib/mill; \
 	fi
 
-# Build fat jar (zinc-compiler.jar = zinc compiler + JavaParser)
+# Build fat jar (zinc-compiler.jar = zinc compiler + JavaParser + stdlib)
 build: deps
 	@mkdir -p out
 	javac --enable-preview --source 25 -cp $(JP) -d out src/zinc/compiler/*.java
+	cp -r src/zinc/stdlib out/zinc/
 	cd out && jar xf $(JP)
 	cd out && jar cfe ../zinc-compiler.jar zinc.compiler.Main .
 	@echo "built: zinc-compiler.jar"
@@ -31,6 +32,7 @@ test: package
 	java --enable-preview -cp out zinc.compiler.LexerTest
 	java --enable-preview -cp out zinc.compiler.ParserTest
 	java --enable-preview -cp out:$(JP) zinc.compiler.TransformerTest
+	java --enable-preview -cp out zinc.compiler.PythonEmitterTest
 	bash run_e2e.sh
 
 # Default: jpackage + jlink with JDK modules + bundled Mill

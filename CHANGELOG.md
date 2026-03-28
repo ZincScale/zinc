@@ -4,6 +4,27 @@ All notable changes to Zinc are documented in this file. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+- **Simplified concurrency model** — removed `parallel for`, `concurrent`, `timeout` keywords. Concurrency is now just `spawn`, `lock`, and `Channel`. Parallel work uses `for` + `spawn`. Removes ~450 lines of compiler complexity for niche use cases better served by libraries.
+- **Python concurrency is real** — `spawn` emits `ZincFuture` with hoisted function defs and `nonlocal` capture. `lock` emits `threading.Lock` context manager. `Channel` emits `ZincChannel` wrapper.
+
+### Added
+- `zinc_runtime.py` concurrency primitives: `ZincFuture`, `ZincChannel`, `zinc_sleep(ms)`
+- `sleep(ms)` mapping for Python backend (ms → seconds conversion)
+- Constructor type mapping in Python emitter (`new Lock()` → `threading.Lock()`, `new Channel(n)` → `ZincChannel(n)`)
+- `PythonEmitterTest` — 58 unit tests covering classes, control flow, expressions, concurrency, error handling
+- Python e2e test for `concurrency.zn` (13 → 14 Python e2e tests)
+- Python e2e test for `generalized.zn` (14/14 parity with Java)
+
+### Fixed
+- `return Error("msg")` in single-return functions was bypassing `emitReturnStmt` and emitting raw `return Error()` instead of `raise ZincError()` in Python backend
+- `for k, v in map` now consistently emits `.items()` in Python (was inconsistent based on expression type)
+
+### Removed
+- `PARALLEL`, `CONCURRENT`, `TIMEOUT` tokens, AST nodes, parser rules, transformer methods, emitter stubs
+- `ParallelForStmt`, `ConcurrentStmt`, `TimeoutStmt` from entire compiler pipeline
+- Related unit tests in ParserTest and TransformerTest
+
 ## [1.0.1] - 2026-03-25
 
 ### Changed

@@ -1,0 +1,13 @@
+int eq: True
+float neq: True
+str eq: True
+str neq: True
+item: 1
+item: 2
+item: 3
+evens: [2]
+alice: 30
+bob: 25
+charlie: 35
+first port: 80
+Generalized OK

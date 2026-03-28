@@ -2,69 +2,60 @@
 
 Zinc runs on Java 25 virtual threads. No async/await, no colored functions. Every function is synchronous — blocking is cheap because virtual threads unmount from carrier threads on I/O.
 
-All structured primitives (`concurrent`, `parallel for`, `timeout`) transpile to Java 25's `StructuredTaskScope`.
-
 ## spawn
 
-Run a block on a new virtual thread (unstructured, fire-and-forget):
+Run a block on a new virtual thread. Returns a future you can join or ignore:
 
 ```zinc
+// Fire-and-forget
 spawn {
     sendEmail(user, "Welcome!")
 }
-```
 
-`spawn` is unstructured — the thread outlives the calling scope. Use `concurrent` or `parallel for` for structured work.
-
-## concurrent
-
-Fan-out multiple tasks, collect all results. If any task fails, all others are cancelled:
-
-```zinc
-var (user, orders, prefs) = concurrent {
-    fetchUser(id)
-    fetchOrders(id)
-    fetchPrefs(id)
+// Get a future back
+var task = spawn {
+    doExpensiveWork()
 }
-// All three complete or all cancel — no orphaned threads
+task.join()  // block until done
+print("isDone: {task.isDone()}")
 ```
 
-Race — take the first result, cancel the rest:
+With error supervision — the `or` handler runs in the thread if the body throws:
 
 ```zinc
-var fastest = concurrent(first: true) {
-    fetchFromCacheA(key)
-    fetchFromCacheB(key)
-    fetchFromDB(key)
+var task = spawn {
+    return Error("something broke")
+} or {
+    print("supervisor caught error")
+}
+
+// Caller can also catch on join
+task.join() or {
+    print("caller caught it too")
 }
 ```
 
-## parallel for
+Future methods:
+- `.join()` — block until the thread completes; rethrows if the task failed
+- `.isDone()` — check if the thread has completed (success or failure)
+- `.isFailed()` — check if the thread threw an exception
 
-Process items concurrently. All iterations must complete before the next statement:
+## Parallel loops with spawn
 
-```zinc
-parallel for order in orders {
-    process(order)
-}
-// All orders processed here
-```
-
-With concurrency limit:
+For parallel iteration, combine `for` + `spawn`:
 
 ```zinc
-parallel(max: 10) for order in orders {
-    process(order)
+var mu = new Lock()
+var total = 0
+for item in items {
+    spawn {
+        var result = compute(item)
+        lock mu {
+            total = total + result
+        }
+    }
 }
-```
-
-With results (parallel map):
-
-```zinc
-var results = parallel for order in orders {
-    enrich(order)
-}
-// results: List<Order> — same order as input
+sleep(500)  // wait for threads to finish
 ```
 
 ## lock
@@ -73,80 +64,51 @@ Mutual exclusion for shared mutable state:
 
 ```zinc
 var mu = new Lock()
-int counter = 0
+var counter = 0
 
-parallel for item in items {
-    int result = compute(item)
-    lock mu {
-        counter = counter + result
+for i in 1..10 {
+    spawn {
+        lock mu {
+            counter = counter + 1
+        }
     }
 }
 ```
 
-The transpiler may optimize simple cases to `AtomicInteger` / `AtomicLong` instead of a lock.
-
-## timeout
-
-Deadline-aware execution with fallback:
-
-```zinc
-var result = timeout(5.seconds) {
-    slowExternalApi(request)
-} or {
-    cachedFallback(request)
-}
-```
+Transpiles to `ReentrantLock.lock()` / `unlock()` with try-finally (Java) or `with` context manager (Python).
 
 ## Channel
 
 Bounded producer/consumer queue for communicating between threads:
 
 ```zinc
-var ch = new Channel<Order>(capacity: 100)
+Channel<String> ch = new Channel(10)
 
 // Producer
 spawn {
     for order in incomingOrders() {
         ch.send(order)
     }
-    ch.close()
 }
 
 // Consumer
-for order in ch {
-    process(order)
-}
-```
-
-Fan-out with multiple consumers:
-
-```zinc
-var ch = new Channel<Order>(capacity: 100)
-
-parallel(max: 4) {
-    for order in ch {
-        process(order)
-    }
-}
+var msg = ch.receive() or "timeout"
 ```
 
 ## Summary
 
-| Primitive | Purpose | Structured? |
-|---|---|---|
-| `spawn { }` | Fire a virtual thread | No |
-| `concurrent { }` | Fan-out tasks, collect results | Yes |
-| `concurrent(first: true)` | Race, take first result | Yes |
-| `parallel for` | Fan-out loop, wait for all | Yes |
-| `parallel(max: N) for` | Bounded fan-out | Yes |
-| `lock mu { }` | Mutual exclusion | N/A |
-| `timeout(dur) { }` | Deadline-aware execution | Yes |
-| `new Channel<T>(n)` | Bounded producer/consumer | N/A |
+| Primitive | Purpose |
+|---|---|
+| `spawn { }` | Fire a virtual thread, get a future |
+| `spawn { } or { }` | Spawn with error supervision |
+| `task.join()` | Block until thread completes |
+| `lock mu { }` | Mutual exclusion |
+| `new Channel<T>(n)` | Bounded producer/consumer queue |
 
 ### What's NOT in Zinc
 
 - **No `async`/`await`** — virtual threads make blocking cheap. No colored functions.
 - **No `synchronized`** — use `lock` (generates `ReentrantLock`).
-- **No raw `Thread` API** — use `spawn`, `concurrent`, `parallel`.
-- **No `CompletableFuture` chaining** — use `concurrent { }` for fan-out/fan-in.
+- **No raw `Thread` API** — use `spawn`.
+- **No `CompletableFuture` chaining** — use `spawn` + `.join()`.
 - **No reactive streams** — virtual threads replace the need for reactive programming.

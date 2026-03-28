@@ -86,6 +86,6 @@ Standard Java 25 — records, sealed interfaces, pattern matching, virtual threa
 ## Next Steps
 
 - [Language Reference](language-reference.md) — full syntax guide
-- [Concurrency](lang/concurrency.md) — spawn, concurrent, parallel for
+- [Concurrency](lang/concurrency.md) — spawn, lock, channels
 - [Error Handling](lang/error-handling.md) — errors as values, or handlers
 - [Examples](../examples/v3/) — working code with expected output
