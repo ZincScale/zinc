@@ -8,7 +8,6 @@
 
 import re
 
-# Sane name → Python dunder mapping
 METHOD_MAP = {
     "init": "__init__",
     "toString": "__repr__",
@@ -89,9 +88,34 @@ def _has_main(lines) {
 }
 
 
+_BLOCK_KEYWORDS = {"if", "else", "elif", "for", "while", "def", "class",
+                    "try", "except", "finally", "with"}
+
+
+def _is_block_open(stripped) {
+    content = stripped[:-1].rstrip()
+    if not content {
+        return True
+    }
+    first_word = content.split()[0].lstrip("}")
+    if first_word in _BLOCK_KEYWORDS {
+        return True
+    }
+    if content.startswith("}") {
+        rest = content[1:].strip()
+        if rest {
+            first_word = rest.split()[0]
+            return first_word in _BLOCK_KEYWORDS
+        }
+    }
+    return False
+}
+
+
 def _braces_to_indent(lines) {
     out = []
     indent = 0
+    brace_stack = []
 
     for raw_line in lines {
         stripped = raw_line.strip()
@@ -101,20 +125,29 @@ def _braces_to_indent(lines) {
             continue
         }
 
-        # else if → elif
         if stripped.startswith("} else if ") or stripped.startswith("else if ") {
             stripped = stripped.replace("else if ", "elif ", 1)
         }
 
-        # Just a closing brace
         if stripped == "}" {
-            indent = max(0, indent - 1)
-            continue
+            if brace_stack and brace_stack[-1] {
+                brace_stack.pop()
+                indent = max(0, indent - 1)
+                continue
+            } else {
+                if brace_stack {
+                    brace_stack.pop()
+                }
+                out.append("    " * indent + stripped)
+                continue
+            }
         }
 
-        # Closing brace followed by continuation
         if stripped.startswith("}") {
-            indent = max(0, indent - 1)
+            if brace_stack and brace_stack[-1] {
+                brace_stack.pop()
+                indent = max(0, indent - 1)
+            }
             rest = stripped[1:].strip()
             if rest {
                 stripped = rest
@@ -123,17 +156,22 @@ def _braces_to_indent(lines) {
             }
         }
 
-        # Line ends with opening brace
         if stripped.endswith("{") {
-            content = stripped[:-1].rstrip()
-            if content {
-                out.append("    " * indent + content + ":")
+            if _is_block_open(stripped) {
+                brace_stack.append(True)
+                content = stripped[:-1].rstrip()
+                if content {
+                    out.append("    " * indent + content + ":")
+                }
+                indent += 1
+                continue
+            } else {
+                brace_stack.append(False)
+                out.append("    " * indent + stripped)
+                continue
             }
-            indent += 1
-            continue
         }
 
-        # Regular line
         out.append("    " * indent + stripped)
     }
 
@@ -148,7 +186,7 @@ def _rename_methods(lines) {
         if m {
             name = m.group(2)
             if name in METHOD_MAP {
-                line = line.replace("def {name}(".format(name=name), "def {dunder}(".format(dunder=METHOD_MAP[name]), 1)
+                line = line.replace("def " + name + "(", "def " + METHOD_MAP[name] + "(", 1)
             }
         }
         out.append(line)
@@ -194,12 +232,12 @@ def _inject_self(lines) {
                 after_paren = line[m.end():]
                 if after_paren.startswith(")") {
                     if after_paren.startswith("):") {
-                        line = "{ws}def {name}(self):{rest}".format(ws=ws, name=name, rest=after_paren[2:])
+                        line = ws + "def " + name + "(self):" + after_paren[2:]
                     } else {
-                        line = "{ws}def {name}(self){rest}".format(ws=ws, name=name, rest=after_paren)
+                        line = ws + "def " + name + "(self)" + after_paren
                     }
                 } else {
-                    line = "{ws}def {name}(self, {rest}".format(ws=ws, name=name, rest=after_paren)
+                    line = ws + "def " + name + "(self, " + after_paren
                 }
             }
         }
@@ -207,6 +245,14 @@ def _inject_self(lines) {
         out.append(line)
     }
     return out
+}
+
+
+_INTERP_PATTERN = re.compile(r"(?<!\{)\{[a-zA-Z_]")
+
+
+def _has_interpolation(s) {
+    return bool(_INTERP_PATTERN.search(s))
 }
 
 
@@ -219,10 +265,18 @@ def _fstrings(lines) {
             continue
         }
 
-        line = STRING_PATTERN.sub(
-            lambda m: ("f" + m.group(0)) if "{" in m.group(0) else m.group(0),
-            line,
-        )
+        def _maybe_fstring(m) {
+            if not _has_interpolation(m.group(0)) {
+                return m.group(0)
+            }
+            after = line[m.end():]
+            if after.lstrip().startswith(".format(") {
+                return m.group(0)
+            }
+            return "f" + m.group(0)
+        }
+
+        line = STRING_PATTERN.sub(_maybe_fstring, line)
         out.append(line)
     }
     return out
