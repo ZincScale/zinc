@@ -30,9 +30,27 @@ public class PythonEmitter {
     private Set<String> currentClassMethods = new HashSet<>(); // method names of current class
     private boolean insideMethod = false;  // track if we're inside a method body
     private final Map<String, String> renamedVars = new HashMap<>(); // original → renamed (for builtin shadowing)
+    private Set<String> projectModules = Set.of(); // sibling .zn modules in the project
+    private String modulePackage = ""; // this module's package path (e.g. "models" for models/user.zn)
 
     public PythonEmitter(String className) {
         this.className = className;
+    }
+
+    /** Set the names of other .zn modules in the project (for relative imports). */
+    public void setProjectModules(Set<String> modules) {
+        this.projectModules = modules;
+    }
+
+    /** Set this module's subpackage (e.g. "services" for services/greeting.zn). */
+    public void setModulePackage(String pkg) {
+        this.modulePackage = pkg;
+    }
+
+    /** Relative import prefix to reach the app root from this module's package. */
+    private String runtimeImportPrefix() {
+        if (modulePackage.isEmpty()) return ".";
+        return ".".repeat(modulePackage.split("\\.").length + 1);
     }
 
     // --- Public API -----------------------------------------------------------
@@ -45,9 +63,51 @@ public class PythonEmitter {
         imports.clear();
         fromImports.clear();
 
-        // Resolve imports through target runtime
+        // Resolve imports — project-local modules first, then target runtime
         for (var imp : program.imports()) {
-            String resolved = target.resolveImport(imp.path());
+            String path = imp.path();
+            String pathLower = path.toLowerCase();
+
+            // Check if import refers to a project-local .zn file or package
+            // import models → from .models import *
+            // import models.User → from .models import User
+            // import models.user → from .models.user import *
+            // import models.* → from .models import *
+            // Compute relative import prefix based on this module's depth
+            // Root (main.zn) → ".", subpackage (services/greeting.zn) → ".."
+            int depth = modulePackage.isEmpty() ? 0 : modulePackage.split("\\.").length;
+            String relPrefix = ".".repeat(depth + 1); // +1 for the base "."
+
+            if (projectModules.contains(pathLower)) {
+                // Exact module match: import models.user → from ..models.user import *
+                addFromImport("from " + relPrefix + pathLower + " import *");
+                continue;
+            }
+
+            // Check if it's a module path + class name: import models.User
+            int lastDot = path.lastIndexOf('.');
+            if (lastDot > 0) {
+                String modulepart = path.substring(0, lastDot).toLowerCase();
+                String name = path.substring(lastDot + 1);
+                if (projectModules.contains(modulepart)) {
+                    addFromImport("from " + relPrefix + modulepart + " import " + (name.equals("*") ? "*" : name));
+                    continue;
+                }
+            }
+
+            // Check if first segment matches a project package/module
+            String firstSegment = path.contains(".") ? path.substring(0, path.indexOf('.')).toLowerCase() : pathLower;
+            if (projectModules.contains(firstSegment)) {
+                if (path.contains(".")) {
+                    String rest = path.substring(path.indexOf('.') + 1);
+                    addFromImport("from " + relPrefix + firstSegment + " import " + (rest.equals("*") ? "*" : rest));
+                } else {
+                    addFromImport("from " + relPrefix + firstSegment + " import *");
+                }
+                continue;
+            }
+
+            String resolved = target.resolveImport(path);
             if (resolved != null) {
                 addFromImport(resolved);
             }
@@ -556,7 +616,7 @@ public class PythonEmitter {
         } else if (ret.value() instanceof Ast.CallExpr call
                 && call.callee() instanceof Ast.Ident id && id.name().equals("Error")) {
             // return Error("msg") → raise ZincError("msg")
-            addFromImport("from .zinc_runtime import ZincError");
+            addFromImport("from " + runtimeImportPrefix() + "zinc_runtime import ZincError");
             var args = call.args().stream().map(this::emitExpr)
                 .collect(java.util.stream.Collectors.joining(", "));
             line("raise ZincError(" + args + ")");
@@ -992,7 +1052,7 @@ public class PythonEmitter {
             case "java.util.Arrays.toString" -> "str(" + emitExpr(args.getFirst()) + ")";
             // sleep(ms) → zinc_sleep(ms) (converts ms to seconds)
             case "sleep" -> {
-                addFromImport("from .zinc_runtime import zinc_sleep");
+                addFromImport("from " + runtimeImportPrefix() + "zinc_runtime import zinc_sleep");
                 yield "zinc_sleep(" + emitExpr(args.getFirst()) + ")";
             }
             default -> null;
@@ -1275,7 +1335,7 @@ public class PythonEmitter {
     }
 
     private String emitSpawnExpr(Ast.SpawnExpr spawn) {
-        addFromImport("from .zinc_runtime import ZincFuture");
+        addFromImport("from " + runtimeImportPrefix() + "zinc_runtime import ZincFuture");
 
         // Collect variables assigned inside spawn body/or-handler that need global decl
         var globals = new java.util.LinkedHashSet<String>();
@@ -1437,7 +1497,7 @@ public class PythonEmitter {
                 yield "threading.Lock";
             }
             case "Channel" -> {
-                addFromImport("from .zinc_runtime import ZincChannel");
+                addFromImport("from " + runtimeImportPrefix() + "zinc_runtime import ZincChannel");
                 yield "ZincChannel";
             }
             default -> name;

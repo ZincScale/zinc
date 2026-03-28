@@ -113,14 +113,47 @@ public class Main {
             }
         }
 
-        // Python target — copy stdlib + done, no javac/Mill/jpackage
+        // Python target — copy stdlib, generate project files, done
         if (targetPython) {
             try {
                 ZincStdlib.copyPythonStdlib(outDir.resolve("app"));
             } catch (IOException e) {
                 System.err.println("warning: could not copy stdlib: " + e.getMessage());
             }
-            System.out.println("python transpilation complete: " + outDir);
+
+            // Read zinc.toml for project metadata + deps
+            ZincConfig config = null;
+            var configFile = ZincConfig.findConfigFile(inputPath);
+            if (configFile != null) {
+                try { config = ZincConfig.parse(configFile); }
+                catch (IOException e) { /* non-fatal */ }
+            }
+            // Also check cwd
+            if (config == null) {
+                var cwdConfig = Path.of("zinc.toml");
+                if (Files.exists(cwdConfig)) {
+                    try { config = ZincConfig.parse(cwdConfig); }
+                    catch (IOException e) { /* non-fatal */ }
+                }
+            }
+
+            // Generate requirements.txt
+            if (config != null && !config.pythonDeps.isEmpty()) {
+                try {
+                    Files.writeString(outDir.resolve("requirements.txt"), config.toRequirementsTxt());
+                } catch (IOException e) { /* non-fatal */ }
+            }
+
+            // Generate pyproject.toml for pip-installable package
+            try {
+                var pyproject = buildPyProjectToml(config, outDir);
+                Files.writeString(outDir.resolve("pyproject.toml"), pyproject);
+            } catch (IOException e) { /* non-fatal */ }
+
+            System.out.println("python build complete: " + outDir);
+            System.out.println("  run:     cd " + outDir + " && uv run --python 3.14t -m app."
+                + (config != null ? config.main.replace(".zn", "").toLowerCase() : "main") + "");
+            System.out.println("  install: cd " + outDir + " && pip install .");
             return;
         }
 
@@ -493,6 +526,26 @@ public class Main {
         // when run with `python -m app.<module>`
         var appDir = outDir.resolve("app");
         var pyFiles = new ArrayList<Path>();
+        var sourceRoot = Files.isDirectory(input) ? input.toAbsolutePath() : input.toAbsolutePath().getParent();
+
+        // Collect project module paths so imports between .zn files resolve as relative
+        // e.g. src/models/user.zn → "models.user", src/main.zn → "main"
+        var projectModules = new java.util.HashSet<String>();
+        for (var znFile : znFiles) {
+            var rel = sourceRoot.relativize(znFile.toAbsolutePath());
+            String modulePath = rel.toString()
+                .replace(".zn", "").replace("/", ".").replace("\\", ".").toLowerCase();
+            projectModules.add(modulePath);
+            // Also add the directory as a module (for `import models` to match `models/`)
+            if (rel.getNameCount() > 1) {
+                projectModules.add(rel.getParent().toString()
+                    .replace("/", ".").replace("\\", ".").toLowerCase());
+            }
+        }
+
+        // Track directories that need __init__.py
+        var packageDirs = new java.util.HashSet<Path>();
+        packageDirs.add(appDir);
 
         for (var znFile : znFiles) {
             String source;
@@ -501,6 +554,17 @@ public class Main {
 
             String fileName = znFile.getFileName().toString();
             String className = capitalize(fileName.replace(".zn", ""));
+
+            // Compute output subdirectory preserving source structure
+            var relPath = sourceRoot.relativize(znFile.toAbsolutePath().getParent());
+            var targetDir = appDir.resolve(relPath);
+            packageDirs.add(targetDir);
+            // Add parent dirs too (for nested packages)
+            var parent = targetDir;
+            while (!parent.equals(appDir) && parent.startsWith(appDir)) {
+                packageDirs.add(parent);
+                parent = parent.getParent();
+            }
 
             // Lex
             var lexResult = new Lexer(source).tokenize();
@@ -512,18 +576,27 @@ public class Main {
             if (parseResult.isErr()) return Result.err(((Result.Err<?>) parseResult).errors());
             var program = parseResult.unwrap();
 
+            // Compute this module's subpackage (e.g. "models" for src/models/user.zn)
+            String modulePkg = relPath.toString().replace("/", ".").replace("\\", ".");
+            if (modulePkg.equals(".")) modulePkg = "";
+
             // Emit Python (skip TypeChecker and Transformer)
             var emitter = new PythonEmitter(className);
-            var emitResult = emitter.emit(program, appDir);
+            emitter.setProjectModules(projectModules);
+            emitter.setModulePackage(modulePkg);
+            var emitResult = emitter.emit(program, targetDir);
             if (emitResult.isErr()) return Result.err(((Result.Err<?>) emitResult).errors());
             pyFiles.add(emitResult.unwrap());
         }
 
-        // Create __init__.py for the app package
-        try {
-            Files.writeString(appDir.resolve("__init__.py"), "");
-        } catch (IOException e) {
-            return Result.err("failed to write __init__.py: " + e.getMessage());
+        // Create __init__.py in every package directory
+        for (var dir : packageDirs) {
+            try {
+                Files.createDirectories(dir);
+                Files.writeString(dir.resolve("__init__.py"), "");
+            } catch (IOException e) {
+                return Result.err("failed to write __init__.py in " + dir + ": " + e.getMessage());
+            }
         }
 
         return Result.ok(pyFiles);
@@ -976,6 +1049,30 @@ public class Main {
             System.err.println("failed to run " + mainClass + ": " + e.getMessage());
             return 1;
         }
+    }
+
+    private static String buildPyProjectToml(ZincConfig config, Path outDir) {
+        String name = config != null ? config.name : outDir.getFileName().toString();
+        String version = config != null ? config.version : "0.1.0";
+        String pyVersion = config != null ? config.pythonVersion : ">=3.14";
+        String mainModule = config != null ? config.main.replace(".zn", "").toLowerCase() : "main";
+        var deps = config != null ? config.pythonDeps : List.<String>of();
+
+        var sb = new StringBuilder();
+        sb.append("[project]\n");
+        sb.append("name = \"").append(name).append("\"\n");
+        sb.append("version = \"").append(version).append("\"\n");
+        sb.append("requires-python = \"").append(pyVersion).append("\"\n");
+        if (!deps.isEmpty()) {
+            sb.append("dependencies = [\n");
+            for (var dep : deps) sb.append("    \"").append(dep).append("\",\n");
+            sb.append("]\n");
+        } else {
+            sb.append("dependencies = []\n");
+        }
+        sb.append("\n[project.scripts]\n");
+        sb.append(name).append(" = \"app.").append(mainModule).append(":main\"\n");
+        return sb.toString();
     }
 
     // --- python --------------------------------------------------------------
