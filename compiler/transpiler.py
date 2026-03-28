@@ -108,6 +108,29 @@ def _has_main(lines: list[str]) -> bool:
     return False
 
 
+_BLOCK_KEYWORDS = {"if", "else", "elif", "for", "while", "def", "class",
+                    "try", "except", "finally", "with", "elif"}
+
+
+def _is_block_open(stripped: str) -> bool:
+    """Check if a line ending with { is a block opening (not a dict/set literal).
+    Block openings follow keywords: if x {, def foo() {, class Bar {, etc."""
+    content = stripped[:-1].rstrip()
+    if not content:
+        return True  # bare { on a line — treat as block (rare)
+    # First word of the line (after } prefix removal) must be a block keyword
+    first_word = content.split()[0].lstrip("}")
+    if first_word in _BLOCK_KEYWORDS:
+        return True
+    # Also handle: } else {, } except {, etc.
+    if content.startswith("}"):
+        rest = content[1:].strip()
+        if rest:
+            first_word = rest.split()[0]
+            return first_word in _BLOCK_KEYWORDS
+    return False
+
+
 def _braces_to_indent(lines: list[str]) -> list[str]:
     """Convert brace-delimited blocks to Python indentation."""
     out = []
@@ -139,19 +162,12 @@ def _braces_to_indent(lines: list[str]) -> list[str]:
             else:
                 continue
 
-        # Check if line ends with opening brace
-        if stripped.endswith("{"):
-            # Emit the line (without the brace) with colon
+        # Check if line ends with opening brace — but only for block keywords,
+        # not dict/set literals like `x = {` or `return {`
+        if stripped.endswith("{") and _is_block_open(stripped):
             content = stripped[:-1].rstrip()
             if content:
                 out.append("    " * indent + content + ":")
-            indent += 1
-            continue
-
-        # Handle `} else {`, `} elif ...:`, `} except ... {`, `} finally {`
-        if stripped.endswith("{") and any(stripped.startswith(kw) for kw in ("else", "elif", "except", "finally")):
-            content = stripped[:-1].rstrip()
-            out.append("    " * indent + content + ":")
             indent += 1
             continue
 
@@ -222,6 +238,10 @@ def _inject_self(lines: list[str]) -> list[str]:
     return out
 
 
+# Pattern to detect actual interpolation: {word_chars...} not {\n or {} or {special
+_INTERP_PATTERN = re.compile(r"\{[a-zA-Z_]")
+
+
 def _fstrings(lines: list[str]) -> list[str]:
     """Prefix all string literals with f to make them f-strings."""
     out = []
@@ -232,9 +252,9 @@ def _fstrings(lines: list[str]) -> list[str]:
             out.append(line)
             continue
 
-        # Only add f prefix to strings that contain { (interpolation)
+        # Only add f prefix to strings that contain {identifier...} interpolation
         line = STRING_PATTERN.sub(
-            lambda m: ("f" + m.group(0)) if "{" in m.group(0) else m.group(0),
+            lambda m: ("f" + m.group(0)) if _INTERP_PATTERN.search(m.group(0)) else m.group(0),
             line,
         )
         out.append(line)

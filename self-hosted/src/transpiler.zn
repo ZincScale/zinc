@@ -1,0 +1,229 @@
+# Copyright 2026 ZincScale
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+import re
+
+# Sane name → Python dunder mapping
+METHOD_MAP = {
+    "init": "__init__",
+    "toString": "__repr__",
+    "toStr": "__str__",
+    "equals": "__eq__",
+    "notEquals": "__ne__",
+    "hashCode": "__hash__",
+    "getItem": "__getitem__",
+    "setItem": "__setitem__",
+    "delItem": "__delitem__",
+    "enter": "__enter__",
+    "exit": "__exit__",
+}
+
+DEF_PATTERN = re.compile(r"^(\s*)def\s+(\w+)\s*\(")
+STRING_PATTERN = re.compile(
+    r'''(?<!f)("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')'''
+)
+
+
+def transpile(source, filename="<stdin>", entry_point=False) {
+    lines = source.split("\n")
+    result = _braces_to_indent(lines)
+    result = _strip_name_guard(result)
+    result = _rename_methods(result)
+    result = _inject_self(result)
+    result = _fstrings(result)
+
+    if entry_point and _has_main(result) {
+        while result and result[-1].strip() == "" {
+            result.pop()
+        }
+        result.append("")
+        result.append('if __name__ == "__main__":')
+        result.append("    main()")
+    }
+
+    return "\n".join(result)
+}
+
+
+def _strip_name_guard(lines) {
+    out = []
+    skipping = False
+    skip_indent = 0
+
+    for line in lines {
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        if not skipping {
+            if stripped.startswith('if __name__') and '__main__' in stripped {
+                skipping = True
+                skip_indent = indent
+                continue
+            }
+            out.append(line)
+        } else {
+            if stripped == "" or indent > skip_indent {
+                continue
+            }
+            skipping = False
+            out.append(line)
+        }
+    }
+
+    return out
+}
+
+
+def _has_main(lines) {
+    for line in lines {
+        if line.startswith("def main(") {
+            return True
+        }
+    }
+    return False
+}
+
+
+def _braces_to_indent(lines) {
+    out = []
+    indent = 0
+
+    for raw_line in lines {
+        stripped = raw_line.strip()
+
+        if not stripped {
+            out.append("")
+            continue
+        }
+
+        # else if → elif
+        if stripped.startswith("} else if ") or stripped.startswith("else if ") {
+            stripped = stripped.replace("else if ", "elif ", 1)
+        }
+
+        # Just a closing brace
+        if stripped == "}" {
+            indent = max(0, indent - 1)
+            continue
+        }
+
+        # Closing brace followed by continuation
+        if stripped.startswith("}") {
+            indent = max(0, indent - 1)
+            rest = stripped[1:].strip()
+            if rest {
+                stripped = rest
+            } else {
+                continue
+            }
+        }
+
+        # Line ends with opening brace
+        if stripped.endswith("{") {
+            content = stripped[:-1].rstrip()
+            if content {
+                out.append("    " * indent + content + ":")
+            }
+            indent += 1
+            continue
+        }
+
+        # Regular line
+        out.append("    " * indent + stripped)
+    }
+
+    return out
+}
+
+
+def _rename_methods(lines) {
+    out = []
+    for line in lines {
+        m = DEF_PATTERN.match(line)
+        if m {
+            name = m.group(2)
+            if name in METHOD_MAP {
+                line = line.replace("def {name}(".format(name=name), "def {dunder}(".format(dunder=METHOD_MAP[name]), 1)
+            }
+        }
+        out.append(line)
+    }
+    return out
+}
+
+
+def _inject_self(lines) {
+    out = []
+    in_class = False
+    class_indent = 0
+
+    for line in lines {
+        stripped = line.lstrip()
+        current_indent = len(line) - len(stripped)
+
+        if stripped.startswith("class ") and stripped.endswith(":") {
+            in_class = True
+            class_indent = current_indent
+            out.append(line)
+            continue
+        }
+
+        if in_class and stripped and current_indent <= class_indent and not stripped.startswith("class ") {
+            in_class = False
+        }
+
+        if in_class and stripped.startswith("def ") and current_indent > class_indent {
+            if out and out[-1].strip().startswith("@staticmethod") {
+                out.append(line)
+                continue
+            }
+            if out and out[-1].strip().startswith("@classmethod") {
+                out.append(line)
+                continue
+            }
+
+            m = DEF_PATTERN.match(line)
+            if m {
+                ws = m.group(1)
+                name = m.group(2)
+                after_paren = line[m.end():]
+                if after_paren.startswith(")") {
+                    if after_paren.startswith("):") {
+                        line = "{ws}def {name}(self):{rest}".format(ws=ws, name=name, rest=after_paren[2:])
+                    } else {
+                        line = "{ws}def {name}(self){rest}".format(ws=ws, name=name, rest=after_paren)
+                    }
+                } else {
+                    line = "{ws}def {name}(self, {rest}".format(ws=ws, name=name, rest=after_paren)
+                }
+            }
+        }
+
+        out.append(line)
+    }
+    return out
+}
+
+
+def _fstrings(lines) {
+    out = []
+    for line in lines {
+        stripped = line.lstrip()
+        if stripped.startswith("#") {
+            out.append(line)
+            continue
+        }
+
+        line = STRING_PATTERN.sub(
+            lambda m: ("f" + m.group(0)) if "{" in m.group(0) else m.group(0),
+            line,
+        )
+        out.append(line)
+    }
+    return out
+}

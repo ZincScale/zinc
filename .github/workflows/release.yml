@@ -14,35 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up GraalVM JDK 25
-        uses: graalvm/setup-graalvm@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          java-version: '25'
-          distribution: 'graalvm-community'
+          python-version: '3.12'
 
-      - name: Download JavaParser
+      - name: Run tests
         run: |
-          mkdir -p ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/
-          curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
-            -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
+          python3 tests/test_transpiler.py
+          bash tests/run_e2e.sh
 
-      - name: Build self-contained package
-        working-directory: compiler
-        run: make package
-
-      - name: Run e2e tests
-        working-directory: compiler
-        run: bash run_e2e.sh
-
-      - name: Package artifacts
-        run: |
-          tar czf zinc-linux-amd64.tar.gz -C compiler/dist zinc
-
-      - name: Create release and upload
+      - name: Create release
         uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            zinc-linux-amd64.tar.gz
-            compiler/zinc-compiler.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

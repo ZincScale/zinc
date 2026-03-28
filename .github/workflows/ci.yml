@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [master]
-    tags-ignore:
-      - 'v*'
   pull_request:
     branches: [master]
 
@@ -14,28 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up GraalVM JDK 25
-        uses: graalvm/setup-graalvm@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          java-version: '25'
-          distribution: 'graalvm-community'
+          python-version: '3.12'
 
-      - name: Download JavaParser
-        run: |
-          mkdir -p ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/
-          curl -sL https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar \
-            -o ~/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
+      - name: Run unit tests
+        run: python3 tests/test_transpiler.py
 
-      - name: Build self-contained package
-        working-directory: compiler
-        run: make package
-
-      - name: Run all tests
-        working-directory: compiler
-        run: make test
-
-      - name: Verify zinc binary
-        working-directory: compiler
-        run: |
-          ./zinc run ../examples/v3/hello.zn
-          ./zinc run ../examples/v3/concurrency.zn
+      - name: Run e2e tests
+        run: bash tests/run_e2e.sh

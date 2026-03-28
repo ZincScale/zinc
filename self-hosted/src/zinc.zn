@@ -1,0 +1,335 @@
+# Copyright 2026 ZincScale
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+import argparse
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from transpiler import transpile
+
+try {
+    import tomllib
+} except ImportError {
+    import tomli as tomllib
+}
+
+UV_PYTHON = "3.14t"
+
+
+# --- Config -----------------------------------------------------------------
+
+def load_config(start) {
+    p = start if start.is_dir() else start.parent
+    for _ in range(10) {
+        cfg = p / "zinc.toml"
+        if cfg.exists() {
+            with open(cfg, "rb") as f {
+                return tomllib.load(f)
+            }
+        }
+        if p.parent == p {
+            break
+        }
+        p = p.parent
+    }
+    return None
+}
+
+
+def _find_config_dir(start) {
+    p = start if start.is_dir() else start.parent
+    for _ in range(10) {
+        if (p / "zinc.toml").exists() {
+            return p
+        }
+        if p.parent == p {
+            break
+        }
+        p = p.parent
+    }
+    return None
+}
+
+
+def _get_deps(config) {
+    if not config {
+        return []
+    }
+    return config.get("python", {}).get("deps", [])
+}
+
+
+def _get_python_version(config) {
+    if not config {
+        return ">=3.14"
+    }
+    return config.get("python", {}).get("version", ">=3.14")
+}
+
+
+# --- Transpile --------------------------------------------------------------
+
+def find_zn_files(path) {
+    if path.is_file() {
+        return [path]
+    }
+    return sorted(path.rglob("*.zn"))
+}
+
+
+def transpile_project(input_path, out_dir, config=None) {
+    zn_files = find_zn_files(input_path)
+    if not zn_files {
+        print("error: no .zn files found in {input_path}".format(input_path=input_path), file=sys.stderr)
+        sys.exit(1)
+    }
+
+    source_root = input_path if input_path.is_dir() else input_path.parent
+
+    main_zn = "main.zn"
+    if config and "project" in config {
+        main_zn = config["project"].get("main", "main.zn")
+    }
+
+    py_files = []
+    for zn in zn_files {
+        source = zn.read_text()
+        is_entry = (zn.name == main_zn) or (len(zn_files) == 1)
+        py_source = transpile(source, str(zn), entry_point=is_entry)
+
+        rel = zn.relative_to(source_root)
+        py_path = out_dir / rel.with_suffix(".py")
+        py_path.parent.mkdir(parents=True, exist_ok=True)
+        py_path.write_text(py_source)
+        py_files.append(py_path)
+
+        pkg_dir = py_path.parent
+        while pkg_dir != out_dir {
+            init_file = pkg_dir / "__init__.py"
+            if not init_file.exists() {
+                init_file.write_text("")
+            }
+            pkg_dir = pkg_dir.parent
+        }
+    }
+
+    return py_files
+}
+
+
+def find_main(py_files, config) {
+    if config and "project" in config {
+        main_name = config["project"].get("main", "").replace(".zn", ".py")
+        for f in py_files {
+            if f.name == main_name {
+                return f
+            }
+        }
+    }
+    if len(py_files) == 1 {
+        return py_files[0]
+    }
+    for f in py_files {
+        if f.name == "main.py" {
+            return f
+        }
+    }
+    return None
+}
+
+
+def _write_pyproject(out_dir, config) {
+    name = "zinc-app"
+    version = "0.1.0"
+    py_version = _get_python_version(config)
+    deps = _get_deps(config)
+
+    if config and "project" in config {
+        name = config["project"].get("name", name)
+        version = config["project"].get("version", version)
+    }
+
+    lines = [
+        "[project]",
+        'name = "{name}"'.format(name=name),
+        'version = "{version}"'.format(version=version),
+        'requires-python = "{py_version}"'.format(py_version=py_version),
+    ]
+    if deps {
+        lines.append("dependencies = [")
+        for d in deps {
+            lines.append('    "{d}",'.format(d=d))
+        }
+        lines.append("]")
+    } else {
+        lines.append("dependencies = []")
+    }
+
+    (out_dir / "pyproject.toml").write_text("\n".join(lines) + "\n")
+}
+
+
+def _find_uv() {
+    return shutil.which("uv")
+}
+
+
+# --- Commands ---------------------------------------------------------------
+
+def cmd_run(args) {
+    input_path = Path(args.input)
+    config = load_config(input_path)
+
+    project_input = input_path
+    if input_path.is_file() and config and "project" in config {
+        config_dir = _find_config_dir(input_path)
+        if config_dir {
+            src_dir = config_dir / "src"
+            if src_dir.is_dir() {
+                project_input = src_dir
+            }
+        }
+    }
+
+    tmp_dir = Path("/tmp/zinc-run-{stem}".format(stem=project_input.stem))
+    if tmp_dir.exists() {
+        shutil.rmtree(tmp_dir)
+    }
+
+    py_files = transpile_project(project_input, tmp_dir, config)
+    main_py = find_main(py_files, config)
+
+    if input_path.is_file() {
+        target_name = input_path.stem + ".py"
+        for f in py_files {
+            if f.name == target_name {
+                main_py = f
+                break
+            }
+        }
+    }
+
+    if not main_py {
+        print("error: could not determine entry point", file=sys.stderr)
+        sys.exit(1)
+    }
+
+    main_rel = str(main_py.relative_to(tmp_dir))
+    uv = _find_uv()
+
+    if uv {
+        _write_pyproject(tmp_dir, config)
+        cmd = [uv, "run", "--quiet", "--python", UV_PYTHON, "--project", str(tmp_dir),
+               "python", main_rel] + args.run_args
+        sys.exit(subprocess.call(cmd, cwd=tmp_dir))
+    } else {
+        cmd = [sys.executable, main_rel] + args.run_args
+        sys.exit(subprocess.call(cmd, cwd=tmp_dir))
+    }
+}
+
+
+def cmd_build(args) {
+    input_path = Path(args.input)
+    config = load_config(input_path)
+    out_dir = Path(args.output) if args.output else Path("build")
+
+    py_files = transpile_project(input_path, out_dir, config)
+    for f in py_files {
+        print("compiled: {f}".format(f=f))
+    }
+
+    _write_pyproject(out_dir, config)
+
+    if args.native {
+        main_py = find_main(py_files, config)
+        if not main_py {
+            print("error: could not determine entry point for native build", file=sys.stderr)
+            sys.exit(1)
+        }
+
+        uv = _find_uv()
+        if not uv {
+            print("error: uv required for native builds", file=sys.stderr)
+            sys.exit(1)
+        }
+
+        print("building native binary via pyinstaller...")
+        binary_name = main_py.stem
+        cmd = [uv, "run", "--python", UV_PYTHON, "--project", str(out_dir),
+               "--with", "pyinstaller",
+               "python", "-m", "PyInstaller", "--onefile",
+               "--name", binary_name,
+               "--distpath", str(out_dir / "dist"),
+               "--workpath", str(out_dir / "build"),
+               "--specpath", str(out_dir),
+               str(main_py.relative_to(out_dir))]
+        result = subprocess.call(cmd, cwd=out_dir)
+        if result == 0 {
+            print("native binary: {path}".format(path=out_dir / "dist" / binary_name))
+        }
+        sys.exit(result)
+    }
+
+    print("build complete: {out_dir}".format(out_dir=out_dir))
+}
+
+
+def cmd_init(args) {
+    project_dir = Path(args.name)
+    project_name = project_dir.name
+    src_dir = project_dir / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+
+    (src_dir / "main.zn").write_text('def main() {\n    print("Hello from ' + project_name + '!")\n}\n')
+
+    (project_dir / "zinc.toml").write_text(
+        '[project]\nname = "' + project_name + '"\nversion = "0.1.0"\nmain = "main.zn"\n\n'
+        '[python]\nversion = ">=3.12"\ndeps = []\n'
+    )
+
+    (project_dir / ".gitignore").write_text("build/\n__pycache__/\n*.pyc\n.venv/\n")
+
+    print("created project: {name}".format(name=project_name))
+    print("  {src}/main.zn".format(src=src_dir))
+    print("  {dir}/zinc.toml".format(dir=project_dir))
+    print("\nrun: cd {dir} && zinc run src/".format(dir=project_dir))
+}
+
+
+def main() {
+    parser = argparse.ArgumentParser(prog="zinc", description="braces Python")
+    sub = parser.add_subparsers(dest="command")
+
+    run_p = sub.add_parser("run", help="transpile and run")
+    run_p.add_argument("input", help=".zn file or directory")
+    run_p.add_argument("run_args", nargs="*", help="args passed to the program")
+
+    build_p = sub.add_parser("build", help="transpile to .py")
+    build_p.add_argument("input", help=".zn file or directory")
+    build_p.add_argument("-o", "--output", help="output directory")
+    build_p.add_argument("--native", action="store_true", help="native binary via PyInstaller")
+
+    init_p = sub.add_parser("init", help="scaffold a new project")
+    init_p.add_argument("name", help="project name")
+
+    args = parser.parse_args()
+
+    if args.command == "run" {
+        cmd_run(args)
+    } else if args.command == "build" {
+        cmd_build(args)
+    } else if args.command == "init" {
+        cmd_init(args)
+    } else {
+        parser.print_help()
+        sys.exit(1)
+    }
+}
