@@ -39,7 +39,7 @@ public final class ZincConfig {
     public String main = "main.zn";
 
     // [python]
-    public String pythonVersion = ">=3.10";
+    public String pythonVersion = ">=3.14";
     public List<String> pythonDeps = List.of();
 
     private ZincConfig() {}

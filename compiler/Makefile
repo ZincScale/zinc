@@ -1,6 +1,8 @@
 JP = $(HOME)/.cache/coursier/v1/https/repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.28.0/javaparser-core-3.28.0.jar
 MILL_VERSION = 1.1.3
 MILL_LAUNCHER_URL = https://raw.githubusercontent.com/com-lihaoyi/mill/main/mill
+UV_VERSION = 0.7.12
+UV_URL = https://github.com/astral-sh/uv/releases/download/$(UV_VERSION)/uv-$(shell uname -m)-unknown-linux-gnu.tar.gz
 
 .PHONY: build test package native clean deps
 
@@ -15,6 +17,10 @@ deps:
 	@if [ ! -f lib/mill ]; then \
 		echo "downloading Mill launcher..."; \
 		curl -sL $(MILL_LAUNCHER_URL) -o lib/mill && chmod +x lib/mill; \
+	fi
+	@if [ ! -f lib/uv ]; then \
+		echo "downloading uv $(UV_VERSION)..."; \
+		curl -sL $(UV_URL) | tar xz -C lib/ --strip-components=1 uv-$(shell uname -m)-unknown-linux-gnu/uv && chmod +x lib/uv; \
 	fi
 
 # Build fat jar (zinc-compiler.jar = zinc compiler + JavaParser + stdlib)
@@ -41,6 +47,7 @@ package: build deps
 	@mkdir -p pkg-input
 	cp zinc-compiler.jar pkg-input/
 	cp lib/mill pkg-input/
+	cp lib/uv pkg-input/
 	jdeps --print-module-deps --ignore-missing-deps --multi-release 25 zinc-compiler.jar > /tmp/zinc-modules.txt 2>/dev/null || echo "java.base" > /tmp/zinc-modules.txt
 	@echo "modules: $$(cat /tmp/zinc-modules.txt)"
 	@which jpackage >/dev/null 2>&1 || (echo "error: jpackage not found. Install JDK 25 (not just JRE)." && exit 1)

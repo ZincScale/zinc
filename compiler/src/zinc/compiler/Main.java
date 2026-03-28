@@ -246,9 +246,11 @@ public class Main {
             try { ZincStdlib.copyPythonStdlib(outDir.resolve("app")); }
             catch (IOException e) { System.err.println("warning: could not copy stdlib: " + e.getMessage()); }
 
-            // Install Python deps from zinc.toml if present
+            // Write requirements.txt if deps exist
             if (config != null && !config.pythonDeps.isEmpty()) {
-                installPythonDeps(config.pythonDeps);
+                try {
+                    Files.writeString(outDir.resolve("requirements.txt"), config.toRequirementsTxt());
+                } catch (IOException e) { /* non-fatal */ }
             }
 
             var pyFiles = compileResult.unwrap();
@@ -260,8 +262,9 @@ public class Main {
                 }
                 System.exit(1);
             }
-            // Run as module from parent dir to avoid stdlib shadowing
-            System.exit(runPythonModule(outDir, mainPy, runArgs));
+
+            String moduleName = "app." + mainPy.getFileName().toString().replace(".py", "");
+            System.exit(runPythonProject(outDir, moduleName, config, runArgs));
             return;
         }
 
@@ -557,7 +560,7 @@ public class Main {
                     main = "main.zn"
 
                     [python]
-                    version = ">=3.10"
+                    version = ">=3.14"
                     deps = []
                     """.formatted(name).stripIndent());
 
@@ -1021,98 +1024,139 @@ public class Main {
     }
 
     /**
-     * Run a Python module via `python -m app.<module>` from the output root.
-     * Using -m avoids the script directory being added to sys.path,
-     * which prevents generated files from shadowing Python stdlib modules.
+     * Run a Python project. Uses uv if available, falls back to pip + python.
+     *
+     * uv path:  uv run --project outDir -m app.module [args]
+     *           uv handles venv, deps (from requirements.txt), and execution.
+     *
+     * pip path: pip install -q -r requirements.txt && python -m app.module [args]
      */
-    private static int runPythonModule(Path outDir, Path pyFile, List<String> args) {
-        String python = findPython();
-        if (python == null) {
-            System.err.println("error: python3 not found. Install Python 3.10+ to use --python");
-            return 1;
-        }
+    private static int runPythonProject(Path outDir, String moduleName, ZincConfig config, List<String> args) {
+        boolean hasUv = hasCommand("uv");
 
-        // Convert app/hello.py → app.hello
-        String moduleName = "app." + pyFile.getFileName().toString().replace(".py", "");
-
-        try {
-            var cmd = new ArrayList<String>();
-            cmd.add(python);
-            cmd.add("-m");
-            cmd.add(moduleName);
-            cmd.addAll(args);
-
-            var pb = new ProcessBuilder(cmd)
-                .inheritIO()
-                .directory(outDir.toFile());
-            var proc = pb.start();
-            return proc.waitFor();
-        } catch (Exception e) {
-            System.err.println("failed to run python: " + e.getMessage());
-            return 1;
+        if (hasUv) {
+            return runWithUv(outDir, moduleName, config, args);
+        } else {
+            return runWithPip(outDir, moduleName, config, args);
         }
     }
 
-    /**
-     * Run a Python file via subprocess (direct execution).
-     */
-    private static int runPython(Path pyFile, List<String> args) {
-        String python = findPython();
-        if (python == null) {
-            System.err.println("error: python3 not found. Install Python 3.10+ to use --python");
-            return 1;
-        }
-
+    private static int runWithUv(Path outDir, String moduleName, ZincConfig config, List<String> args) {
+        String uv = findBundledTool("uv");
         try {
-            var cmd = new ArrayList<String>();
-            cmd.add(python);
-            cmd.add(pyFile.toString());
+            // Generate pyproject.toml for uv (it needs this for --project)
+            var pyproject = new StringBuilder();
+            pyproject.append("[project]\n");
+            pyproject.append("name = \"zinc-app\"\n");
+            pyproject.append("version = \"0.0.1\"\n");
+            pyproject.append("requires-python = \"").append(config != null ? config.pythonVersion : ">=3.10").append("\"\n");
+            if (config != null && !config.pythonDeps.isEmpty()) {
+                pyproject.append("dependencies = [\n");
+                for (var dep : config.pythonDeps) {
+                    pyproject.append("    \"").append(dep).append("\",\n");
+                }
+                pyproject.append("]\n");
+            } else {
+                pyproject.append("dependencies = []\n");
+            }
+            Files.writeString(outDir.resolve("pyproject.toml"), pyproject.toString());
+
+            // Request free-threading Python (3.14t) — real thread parallelism, no GIL
+            var cmd = new ArrayList<>(List.of(uv, "run", "--python", "3.14t", "--project", outDir.toString(), "-m", moduleName));
             cmd.addAll(args);
 
-            var pb = new ProcessBuilder(cmd)
-                .inheritIO()
-                .directory(pyFile.getParent().toFile());
-            var proc = pb.start();
-            return proc.waitFor();
-        } catch (Exception e) {
-            System.err.println("failed to run python: " + e.getMessage());
-            return 1;
-        }
-    }
-
-    /**
-     * Install Python dependencies via pip.
-     */
-    private static void installPythonDeps(List<String> deps) {
-        String python = findPython();
-        if (python == null) return;
-
-        try {
-            var cmd = new ArrayList<>(List.of(python, "-m", "pip", "install", "-q"));
-            cmd.addAll(deps);
             var proc = new ProcessBuilder(cmd)
                 .inheritIO()
+                .directory(outDir.toFile())
                 .start();
-            int exit = proc.waitFor();
-            if (exit != 0) {
-                System.err.println("warning: pip install failed (exit " + exit + ")");
-            }
+            return proc.waitFor();
         } catch (Exception e) {
-            System.err.println("warning: could not install deps: " + e.getMessage());
+            System.err.println("uv run failed: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    private static int runWithPip(Path outDir, String moduleName, ZincConfig config, List<String> args) {
+        String python = findPython();
+        if (python == null) {
+            System.err.println("error: python3 not found. Install Python 3.10+ or uv to use --python");
+            return 1;
+        }
+
+        // Install deps if requirements.txt exists
+        var reqs = outDir.resolve("requirements.txt");
+        if (Files.exists(reqs)) {
+            try {
+                var pip = new ProcessBuilder(python, "-m", "pip", "install", "-q", "-r", reqs.toString())
+                    .inheritIO().start();
+                int exit = pip.waitFor();
+                if (exit != 0) System.err.println("warning: pip install failed");
+            } catch (Exception e) {
+                System.err.println("warning: could not install deps: " + e.getMessage());
+            }
+        }
+
+        // Run
+        try {
+            var cmd = new ArrayList<>(List.of(python, "-m", moduleName));
+            cmd.addAll(args);
+
+            var proc = new ProcessBuilder(cmd)
+                .inheritIO()
+                .directory(outDir.toFile())
+                .start();
+            return proc.waitFor();
+        } catch (Exception e) {
+            System.err.println("failed to run python: " + e.getMessage());
+            return 1;
         }
     }
 
     private static String findPython() {
         for (var candidate : List.of("python3.14t", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3", "python")) {
-            try {
-                var proc = new ProcessBuilder(candidate, "--version")
-                    .redirectErrorStream(true)
-                    .start();
-                int exit = proc.waitFor();
-                if (exit == 0) return candidate;
-            } catch (Exception e) { /* not found, try next */ }
+            if (hasCommand(candidate)) return candidate;
         }
         return null;
+    }
+
+    /**
+     * Find a tool bundled alongside the zinc binary (e.g. uv, mill).
+     * Checks: same dir as zinc jar → lib/ → system PATH.
+     */
+    private static String findBundledTool(String name) {
+        // Check next to the running jar
+        try {
+            var jarPath = Main.class.getProtectionDomain().getCodeSource().getLocation().toURI();
+            var jarDir = Path.of(jarPath).getParent();
+            if (jarDir != null) {
+                var bundled = jarDir.resolve(name);
+                if (Files.isExecutable(bundled)) return bundled.toString();
+                // jpackage puts tools in the input dir alongside the jar
+                var libBundled = jarDir.resolve("../lib/app/" + name);
+                if (Files.isExecutable(libBundled)) return libBundled.toRealPath().toString();
+            }
+        } catch (Exception e) { /* fall through */ }
+
+        // Check lib/ in cwd
+        var local = Path.of("lib", name);
+        if (Files.isExecutable(local)) return local.toAbsolutePath().toString();
+
+        // Fall back to system PATH
+        return name;
+    }
+
+    private static boolean hasCommand(String cmd) {
+        // Check bundled path first
+        String resolved = cmd.equals("uv") ? findBundledTool("uv") : cmd;
+        try {
+            var proc = new ProcessBuilder(resolved, "--version")
+                .redirectErrorStream(true)
+                .start();
+            proc.getInputStream().readAllBytes(); // drain
+            return proc.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // --- Helpers --------------------------------------------------------------
