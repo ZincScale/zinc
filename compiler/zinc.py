@@ -4,13 +4,12 @@ zinc — braces Python CLI
 
 Usage:
     zinc run <file.zn|dir> [args...]        transpile and run
-    zinc build <file.zn|dir> [-o outdir]    transpile to .py
+    zinc build <file.zn|dir> [-o outdir]    transpile to .py project
     zinc build --native <file.zn|dir>       transpile + Nuitka native binary
     zinc init <name>                        scaffold a new project
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -23,6 +22,8 @@ try:
 except ImportError:
     import tomli as tomllib
 
+
+# --- Config -----------------------------------------------------------------
 
 def load_config(start: Path) -> dict | None:
     """Find and load zinc.toml walking up from start."""
@@ -50,8 +51,22 @@ def _find_config_dir(start: Path) -> Path | None:
     return None
 
 
+def _get_deps(config: dict | None) -> list[str]:
+    """Extract dependencies from zinc.toml."""
+    if not config:
+        return []
+    return config.get("python", {}).get("deps", [])
+
+
+def _get_python_version(config: dict | None) -> str:
+    if not config:
+        return ">=3.12"
+    return config.get("python", {}).get("version", ">=3.12")
+
+
+# --- Transpile --------------------------------------------------------------
+
 def find_zn_files(path: Path) -> list[Path]:
-    """Collect all .zn files from a file or directory."""
     if path.is_file():
         return [path]
     return sorted(path.rglob("*.zn"))
@@ -66,15 +81,11 @@ def transpile_project(input_path: Path, out_dir: Path, config: dict | None = Non
 
     source_root = input_path if input_path.is_dir() else input_path.parent
 
-    # Determine which file is the entry point
-    main_zn = None
+    main_zn = "main.zn"
     if config and "project" in config:
         main_zn = config["project"].get("main", "main.zn")
-    if main_zn is None:
-        main_zn = "main.zn"
 
     py_files = []
-
     for zn in zn_files:
         source = zn.read_text()
         is_entry = (zn.name == main_zn) or (len(zn_files) == 1)
@@ -98,20 +109,50 @@ def transpile_project(input_path: Path, out_dir: Path, config: dict | None = Non
 
 
 def find_main(py_files: list[Path], config: dict | None) -> Path | None:
-    """Determine the entry point .py file."""
     if config and "project" in config:
         main = config["project"].get("main", "").replace(".zn", ".py")
         for f in py_files:
             if f.name == main:
                 return f
-
-    # Convention: main.py or single file
     if len(py_files) == 1:
         return py_files[0]
     for f in py_files:
         if f.name == "main.py":
             return f
     return None
+
+
+def _write_pyproject(out_dir: Path, config: dict | None):
+    """Generate pyproject.toml for uv."""
+    name = "zinc-app"
+    version = "0.1.0"
+    py_version = _get_python_version(config)
+    deps = _get_deps(config)
+
+    if config and "project" in config:
+        name = config["project"].get("name", name)
+        version = config["project"].get("version", version)
+
+    lines = [
+        "[project]",
+        f'name = "{name}"',
+        f'version = "{version}"',
+        f'requires-python = "{py_version}"',
+    ]
+    if deps:
+        lines.append("dependencies = [")
+        for d in deps:
+            lines.append(f'    "{d}",')
+        lines.append("]")
+    else:
+        lines.append("dependencies = []")
+
+    (out_dir / "pyproject.toml").write_text("\n".join(lines) + "\n")
+
+
+def _find_uv() -> str | None:
+    """Find uv on PATH."""
+    return shutil.which("uv")
 
 
 # --- Commands ---------------------------------------------------------------
@@ -135,6 +176,7 @@ def cmd_run(args):
 
     py_files = transpile_project(project_input, tmp_dir, config)
     main_py = find_main(py_files, config)
+
     # If running a specific file, use that as entry point
     if input_path.is_file():
         target_name = input_path.stem + ".py"
@@ -142,14 +184,24 @@ def cmd_run(args):
             if f.name == target_name:
                 main_py = f
                 break
+
     if not main_py:
         print("error: could not determine entry point", file=sys.stderr)
         print("hint: add main = \"main.zn\" to zinc.toml [project]", file=sys.stderr)
         sys.exit(1)
 
-    # Run with python directly, cwd=tmp_dir so imports resolve
-    cmd = [sys.executable, str(main_py.relative_to(tmp_dir))] + args.run_args
-    sys.exit(subprocess.call(cmd, cwd=tmp_dir))
+    deps = _get_deps(config)
+    main_rel = str(main_py.relative_to(tmp_dir))
+
+    if deps and _find_uv():
+        # Has dependencies — use uv to manage venv + deps
+        _write_pyproject(tmp_dir, config)
+        cmd = [_find_uv(), "run", "--project", str(tmp_dir), "python", main_rel] + args.run_args
+        sys.exit(subprocess.call(cmd, cwd=tmp_dir))
+    else:
+        # No deps — run directly
+        cmd = [sys.executable, main_rel] + args.run_args
+        sys.exit(subprocess.call(cmd, cwd=tmp_dir))
 
 
 def cmd_build(args):
@@ -161,14 +213,29 @@ def cmd_build(args):
     for f in py_files:
         print(f"compiled: {f}")
 
+    # Always generate pyproject.toml for the build output
+    _write_pyproject(out_dir, config)
+
     if args.native:
         main_py = find_main(py_files, config)
         if not main_py:
             print("error: could not determine entry point for native build", file=sys.stderr)
             sys.exit(1)
-        print(f"building native binary via nuitka...")
-        cmd = ["python3", "-m", "nuitka", "--standalone", "--onefile", str(main_py)]
-        sys.exit(subprocess.call(cmd))
+
+        # Use nuitka via uv if available, else direct
+        uv = _find_uv()
+        if uv:
+            print("building native binary via nuitka (uv)...")
+            cmd = [uv, "run", "--project", str(out_dir),
+                   "--with", "nuitka",
+                   "python", "-m", "nuitka", "--standalone", "--onefile",
+                   str(main_py.relative_to(out_dir))]
+            sys.exit(subprocess.call(cmd, cwd=out_dir))
+        else:
+            print("building native binary via nuitka...")
+            cmd = ["python3", "-m", "nuitka", "--standalone", "--onefile",
+                   str(main_py)]
+            sys.exit(subprocess.call(cmd))
 
     print(f"build complete: {out_dir}")
 
@@ -181,10 +248,6 @@ def cmd_init(args):
 
     (src_dir / "main.zn").write_text(f'''def main() {{
     print("Hello from {name}!")
-}}
-
-if __name__ == "__main__" {{
-    main()
 }}
 ''')
 
@@ -207,7 +270,7 @@ __pycache__/
     print(f"created project: {name}")
     print(f"  {src_dir}/main.zn")
     print(f"  {project_dir}/zinc.toml")
-    print(f"\nrun: cd {name} && zinc run src/main.zn")
+    print(f"\nrun: cd {name} && zinc run src/")
 
 
 # --- Main -------------------------------------------------------------------
