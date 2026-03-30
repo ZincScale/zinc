@@ -273,6 +273,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.dataClasses = make(map[string]bool)
 	g.collectDecls(prog.Decls)
 
+	// Add user imports from Zinc source
+	for _, imp := range prog.Imports {
+		g.needImport(imp.Path)
+	}
+
 	// First pass: generate body into a separate buffer to collect imports
 	bodyGen := *g
 	bodyGen.buf.Reset()
@@ -1296,6 +1301,15 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		g.emitOrAssignment("_", es.Expr, es.OrHandler)
 		return
 	}
+	// spawn { body } → go func() { body }()
+	if spawn, ok := es.Expr.(*parser.SpawnExpr); ok {
+		g.writeln("go func() {")
+		g.indent++
+		g.emitBlock(spawn.Body)
+		g.indent--
+		g.writeln("}()")
+		return
+	}
 	// print("msg {x}") → fmt.Printf("msg %v\n", x)
 	if call, ok := es.Expr.(*parser.CallExpr); ok {
 		if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "print" && len(call.Args) == 1 {
@@ -1655,9 +1669,9 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		// Go doesn't have tuples — use a struct or slice
 		return fmt.Sprintf("[]interface{}{%s}", g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
-		// spawn { body } → go func() { body }()
-		g.needImport("sync")
-		return "/* spawn: use goroutine */"
+		// spawn as expression — emit inline goroutine
+		// Note: spawn as statement is handled in emitExprStmt
+		return "/* spawn */"
 	case *parser.IfExpr:
 		return fmt.Sprintf("func() interface{} { if %s { return %s }; return %s }()",
 			g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
