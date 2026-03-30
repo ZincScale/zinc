@@ -6,8 +6,8 @@ data User(String name, String email, int age = 0)
 
 // Class with constructor and methods
 class Animal {
-    init String name
-    init String sound
+    String name
+    String sound
 
     init(String name, String sound) {
         this.name = name
@@ -20,7 +20,7 @@ class Animal {
 }
 
 class Dog : Animal {
-    init String breed
+    String breed
 
     init(String name, String breed) {
         super(name, "Woof")

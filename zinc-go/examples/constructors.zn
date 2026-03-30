@@ -2,8 +2,8 @@
 // Demonstrates: init constructor, fields, super calls, default params
 
 class Server {
-    init String host
-    init int port
+    String host
+    int port
 
     init(String host, int port = 8080) {
         this.host = host
@@ -20,7 +20,7 @@ class Server {
 }
 
 class SecureServer : Server {
-    init String certPath
+    String certPath
 
     init(String host, int port, String certPath) {
         super(host, port)

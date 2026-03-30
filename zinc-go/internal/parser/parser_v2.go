@@ -1200,7 +1200,13 @@ func (p *Parser) v2IsClassFieldDecl() bool {
 	// NOT ( which would be a method call
 	next := p.peekAt(i)
 	return next.Type == lexer.TOKEN_ASSIGN || next.Type == lexer.TOKEN_RBRACE ||
-		next.Type == lexer.TOKEN_EOF
+		next.Type == lexer.TOKEN_EOF || next.Type == lexer.TOKEN_SEMICOLON ||
+		next.Type == lexer.TOKEN_IDENT || // next field or method
+		next.Type == lexer.TOKEN_PUB || next.Type == lexer.TOKEN_READONLY ||
+		next.Type == lexer.TOKEN_FN || next.Type == lexer.TOKEN_INIT ||
+		next.Type == lexer.TOKEN_CONST || next.Type == lexer.TOKEN_VAR ||
+		next.Type == lexer.TOKEN_OVERRIDE || next.Type == lexer.TOKEN_STATIC ||
+		next.Type == lexer.TOKEN_AT // annotation
 }
 
 // v2ParseDataClassDecl: data Name(Type field, Type field = default) [{ methods }]
