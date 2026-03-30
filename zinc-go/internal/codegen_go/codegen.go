@@ -476,13 +476,26 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		// Generate default constructor with field defaults
 		g.writeln("func New%s() *%s {", name, name)
 		g.indent++
-		g.writeln("s := &%s{}", name)
+		// Collect fields with defaults into a struct literal
+		var litFields []string
 		for _, f := range cls.Fields {
 			if f.Default != nil {
-				g.writeln("s.%s = %s", exportName(f.Name), g.formatExpr(f.Default))
+				litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), g.formatExpr(f.Default)))
 			}
 		}
-		g.writeln("return s")
+		if len(litFields) == 0 {
+			g.writeln("return &%s{}", name)
+		} else if len(litFields) <= 3 {
+			g.writeln("return &%s{%s}", name, strings.Join(litFields, ", "))
+		} else {
+			g.writeln("return &%s{", name)
+			g.indent++
+			for _, lf := range litFields {
+				g.writeln("%s,", lf)
+			}
+			g.indent--
+			g.writeln("}")
+		}
 		g.indent--
 		g.writeln("}")
 		g.writeln("")
@@ -1065,6 +1078,11 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.ptrVars[v.Name] = true
 		}
 
+		// Track scalar variable types for is/is-not optimization
+		if scalarType := g.inferExprType(v.Value, g.varTypes); scalarType != "" && scalarType != "interface{}" {
+			g.varTypes[v.Name] = scalarType
+		}
+
 		varName := v.Name
 		if goBuiltins[varName] {
 			safe := "_" + varName
@@ -1340,12 +1358,18 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 			return
 		}
 		// .forEach() as statement
-		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "forEach" {
-			obj := g.formatExpr(sel.Object)
-			if len(call.Args) == 1 {
-				g.emitForEachStmt(obj, call.Args[0])
-				return
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "forEach" && len(call.Args) == 1 {
+			// Check if the object is a stream chain (e.g., numbers.filter(pred).forEach(fn))
+			if innerCall, ok := sel.Object.(*parser.CallExpr); ok {
+				if innerSel, ok := innerCall.Callee.(*parser.SelectorExpr); ok && streamMethods[innerSel.Field] {
+					// Fuse the chain: collect filter/map ops and emit a single loop
+					g.emitFusedForEachChain(sel.Object, call.Args[0])
+					return
+				}
 			}
+			obj := g.formatExpr(sel.Object)
+			g.emitForEachStmt(obj, call.Args[0])
+			return
 		}
 	}
 	g.writeln("%s", g.formatExpr(es.Expr))
@@ -1382,6 +1406,93 @@ func (g *Generator) emitForEachStmt(obj string, fn parser.Expr) {
 	g.writeln("for _, _v := range %s {", obj)
 	g.indent++
 	g.writeln("%s(_v)", fnStr)
+	g.indent--
+	g.writeln("}")
+}
+
+// emitFusedForEachChain fuses a stream chain ending in forEach into a single loop.
+// Example: numbers.filter(pred).forEach(fn) → for _, _it := range numbers { if pred { fn(_it) } }
+func (g *Generator) emitFusedForEachChain(chainExpr parser.Expr, forEachFn parser.Expr) {
+	// Collect the chain of stream operations (innermost to outermost)
+	type chainOp struct {
+		method string
+		args   []parser.Expr
+	}
+	var chain []chainOp
+	obj := chainExpr
+	for {
+		if call, ok := obj.(*parser.CallExpr); ok {
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && streamMethods[sel.Field] {
+				chain = append(chain, chainOp{method: sel.Field, args: call.Args})
+				obj = sel.Object
+				continue
+			}
+		}
+		break
+	}
+	// Reverse so chain goes from source to terminal
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+
+	// Check if all operations are fusible (filter/map only)
+	fusible := true
+	for _, op := range chain {
+		if op.method != "filter" && op.method != "map" {
+			fusible = false
+			break
+		}
+	}
+
+	if !fusible {
+		// Fallback: evaluate the chain normally and iterate
+		source := g.formatExpr(chainExpr)
+		g.emitForEachStmt(source, forEachFn)
+		return
+	}
+
+	source := g.formatExpr(obj)
+
+	// Determine the forEach body
+	var forEachBody func(iterVar string)
+	if lambda, ok := forEachFn.(*parser.LambdaExpr); ok && len(lambda.Params) == 1 {
+		paramName := lambda.Params[0].Name
+		forEachBody = func(iterVar string) {
+			if paramName != iterVar {
+				g.writeln("%s := %s", paramName, iterVar)
+			}
+			if lambda.Expr != nil {
+				g.writeln("%s", g.formatExpr(lambda.Expr))
+			} else if lambda.Body != nil {
+				g.emitBlock(lambda.Body)
+			}
+		}
+	} else if containsIt(forEachFn) {
+		forEachBody = func(_ string) {
+			g.writeln("%s", g.formatExprIt(forEachFn))
+		}
+	} else {
+		fnStr := g.formatExpr(forEachFn)
+		forEachBody = func(iterVar string) {
+			g.writeln("%s(%s)", fnStr, iterVar)
+		}
+	}
+
+	// Emit fused loop
+	g.writeln("for _, _it := range %s {", source)
+	g.indent++
+	iterVar := "_it"
+	for _, op := range chain {
+		switch op.method {
+		case "filter":
+			pred := g.streamLambdaBody(op.args)
+			g.writeln("if !(%s) { continue }", pred)
+		case "map":
+			transform := g.streamLambdaBody(op.args)
+			g.writeln("_it = %s", transform)
+		}
+	}
+	forEachBody(iterVar)
 	g.indent--
 	g.writeln("}")
 }
@@ -1673,8 +1784,18 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		// Note: spawn as statement is handled in emitExprStmt
 		return "/* spawn */"
 	case *parser.IfExpr:
-		return fmt.Sprintf("func() interface{} { if %s { return %s }; return %s }()",
-			g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
+		retType := "interface{}"
+		thenType := g.inferExprType(expr.Then, g.varTypes)
+		elseType := g.inferExprType(expr.Else, g.varTypes)
+		if thenType != "" && thenType == elseType {
+			retType = thenType
+		} else if thenType != "" && thenType != "interface{}" {
+			retType = thenType
+		} else if elseType != "" && elseType != "interface{}" {
+			retType = elseType
+		}
+		return fmt.Sprintf("func() %s { if %s { return %s }; return %s }()",
+			retType, g.formatExpr(expr.Cond), g.formatExpr(expr.Then), g.formatExpr(expr.Else))
 	case *parser.MatchExpr:
 		return g.formatMatchExpr(expr)
 	case *parser.RangeExpr:
@@ -1719,10 +1840,21 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "is":
 		// Map Zinc type name to Go reflect name
 		goType := g.formatType(&parser.SimpleType{Name: right})
+		// If the variable has a known concrete type that matches, avoid reflect
+		knownType := g.inferExprType(b.Left, g.varTypes)
+		if knownType != "" && knownType != "interface{}" && knownType == goType {
+			// Use a no-op reference to keep the variable "used" in Go
+			return fmt.Sprintf("func() bool { _ = %s; return true }()", left)
+		}
 		g.needImport("reflect")
 		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	case "is not":
 		goType := g.formatType(&parser.SimpleType{Name: right})
+		// If the variable has a known concrete type that matches, avoid reflect
+		knownType := g.inferExprType(b.Left, g.varTypes)
+		if knownType != "" && knownType != "interface{}" && knownType == goType {
+			return fmt.Sprintf("func() bool { _ = %s; return false }()", left)
+		}
 		g.needImport("reflect")
 		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	default:
@@ -2319,13 +2451,15 @@ func (g *Generator) formatSingleStreamOp(source string, sourceExpr parser.Expr, 
 		if len(args) > 0 {
 			g.needImport("sort")
 			key := g.streamLambdaBody(args)
-			return fmt.Sprintf("func() %s { _r := make(%s, len(%s)); copy(_r, %s); sort.Slice(_r, func(_i, _j int) bool { _it := _r[_i]; _ = _it; _a := %s; _it = _r[_j]; _b := %s; return fmt.Sprint(_a) < fmt.Sprint(_b) }); return _r }()", sliceType, sliceType, source, source, key, key)
+			cmp := g.sortByComparison(key, elemType)
+			return fmt.Sprintf("func() %s { _r := make(%s, len(%s)); copy(_r, %s); sort.Slice(_r, func(_i, _j int) bool { _it := _r[_i]; _ = _it; _a := %s; _it = _r[_j]; _b := %s; return %s }); return _r }()", sliceType, sliceType, source, source, key, key, cmp)
 		}
 		return source
 	case "groupBy":
 		if len(args) > 0 {
 			key := g.streamLambdaBody(args)
-			return fmt.Sprintf("func() map[interface{}]%s { _r := map[interface{}]%s{}; for _, _it := range %s { _k := %s; _r[_k] = append(_r[_k], _it) }; return _r }()", sliceType, sliceType, source, key)
+			keyType := g.inferGroupByKeyType(key, args)
+			return fmt.Sprintf("func() map[%s]%s { _r := map[%s]%s{}; for _, _it := range %s { _k := %s; _r[_k] = append(_r[_k], _it) }; return _r }()", keyType, sliceType, keyType, sliceType, source, key)
 		}
 		return source
 	default:
@@ -2392,22 +2526,71 @@ func (g *Generator) formatSingleStreamAssignTyped(varName, source, method string
 	case "sortBy":
 		if len(args) > 0 {
 			g.needImport("sort")
-			g.needImport("fmt")
 			key := g.streamLambdaBody(args)
-			return fmt.Sprintf("%s := make(%s, len(%s))\ncopy(%s, %s)\nsort.Slice(%s, func(_i, _j int) bool { _it := %s[_i]; _ = _it; _a := %s; _it = %s[_j]; _b := %s; return fmt.Sprint(_a) < fmt.Sprint(_b) })\n",
-				varName, sliceType, source, varName, source, varName, varName, key, varName, key)
+			cmp := g.sortByComparison(key, elemType)
+			return fmt.Sprintf("%s := make(%s, len(%s))\ncopy(%s, %s)\nsort.Slice(%s, func(_i, _j int) bool { _it := %s[_i]; _ = _it; _a := %s; _it = %s[_j]; _b := %s; return %s })\n",
+				varName, sliceType, source, varName, source, varName, varName, key, varName, key, cmp)
 		}
 		return fmt.Sprintf("%s := %s\n", varName, source)
 	case "groupBy":
 		if len(args) > 0 {
 			key := g.streamLambdaBody(args)
-			return fmt.Sprintf("%s := map[interface{}]%s{}\nfor _, _it := range %s { _k := %s; %s[_k] = append(%s[_k], _it) }\n",
-				varName, sliceType, source, key, varName, varName)
+			keyType := g.inferGroupByKeyType(key, args)
+			return fmt.Sprintf("%s := map[%s]%s{}\nfor _, _it := range %s { _k := %s; %s[_k] = append(%s[_k], _it) }\n",
+				varName, keyType, sliceType, source, key, varName, varName)
 		}
 		return fmt.Sprintf("%s := %s\n", varName, source)
 	default:
 		return fmt.Sprintf("%s := %s\n", varName, source)
 	}
+}
+
+// sortByComparison returns the comparison expression for sortBy.
+// For known types (int, float64, string), compares directly: _a < _b.
+// For interface{}, falls back to fmt.Sprint(_a) < fmt.Sprint(_b).
+func (g *Generator) sortByComparison(keyExpr string, elemType string) string {
+	// Infer key type from the key expression
+	keyType := ""
+	switch {
+	case elemType == "int" || elemType == "float64" || elemType == "string":
+		keyType = elemType
+	case strings.HasPrefix(keyExpr, "string("):
+		keyType = "string"
+	case strings.HasPrefix(keyExpr, "int(") || strings.HasPrefix(keyExpr, "len("):
+		keyType = "int"
+	case strings.HasPrefix(keyExpr, "float64("):
+		keyType = "float64"
+	}
+	if keyType == "int" || keyType == "float64" || keyType == "string" {
+		return "_a < _b"
+	}
+	g.needImport("fmt")
+	return "fmt.Sprint(_a) < fmt.Sprint(_b)"
+}
+
+// inferGroupByKeyType infers the key type for groupBy from the lambda expression.
+// Returns "string" for string conversions/methods, "int" for int conversions/len, otherwise "interface{}".
+func (g *Generator) inferGroupByKeyType(keyExpr string, args []parser.Expr) string {
+	// Check the generated key expression for type hints
+	switch {
+	case strings.HasPrefix(keyExpr, "string("):
+		return "string"
+	case strings.HasPrefix(keyExpr, "int(") || strings.HasPrefix(keyExpr, "len("):
+		return "int"
+	case strings.HasPrefix(keyExpr, "float64("):
+		return "float64"
+	}
+	// Try to infer from the lambda's expression AST
+	if len(args) > 0 {
+		if lambda, ok := args[0].(*parser.LambdaExpr); ok && lambda.Expr != nil {
+			t := g.inferExprType(lambda.Expr, g.varTypes)
+			if t != "" && t != "interface{}" {
+				return t
+			}
+		}
+	}
+	// Default to string as it's the most common groupBy key type
+	return "string"
 }
 
 // streamLambdaBody extracts the body expression from a lambda or `it`-expression arg.
@@ -2920,6 +3103,19 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 	case *parser.AssignStmt:
 		return fmt.Sprintf("%s %s %s", g.formatExpr(stmt.Target), stmt.Op, g.formatExpr(stmt.Value))
 	case *parser.ExprStmt:
+		// Optimize print with string interpolation: use fmt.Printf instead of fmt.Println(fmt.Sprintf(...))
+		if call, ok := stmt.Expr.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "print" && len(call.Args) == 1 {
+				if interp, ok := call.Args[0].(*parser.StringInterpLit); ok {
+					g.needImport("fmt")
+					fmtStr, args := g.formatPrintf(interp)
+					if len(args) > 0 {
+						return fmt.Sprintf("fmt.Printf(%q, %s)", fmtStr+"\n", strings.Join(args, ", "))
+					}
+					return fmt.Sprintf("fmt.Println(%q)", fmtStr)
+				}
+			}
+		}
 		return g.formatExpr(stmt.Expr)
 	case *parser.ReturnStmt:
 		if stmt.Value != nil {
