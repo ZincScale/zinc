@@ -14,8 +14,8 @@ for name in names {
 Map<String, int> ages = {"Alice": 30, "Bob": 25, "Charlie": 35}
 ages.put("Dave", 28)
 
-for entry in ages.entrySet() {
-    print("{entry.getKey()} is {entry.getValue()}")
+for name, age in ages {
+    print("{name} is {age}")
 }
 
 // Lambda filtering

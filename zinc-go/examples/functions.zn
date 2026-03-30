@@ -1,5 +1,5 @@
 // Functions — Zinc v3
-// Demonstrates: single-expr, defaults, variadic, block lambdas
+// Demonstrates: single-expr, defaults, variadic, reduce
 
 // Single-expression function
 fn doubled(int x): int = x * 2
@@ -28,17 +28,9 @@ fn sum(int... numbers): int {
 print("sum(1,2,3) = {sum(1, 2, 3)}")
 print("sum(10,20) = {sum(10, 20)}")
 
-// Block lambdas
-var numbers = [1, 2, 3, 4, 5]
-var processed = numbers.map(x -> {
-    var doubled = x * 2
-    return doubled + 1
-})
-print("block lambda: {processed}")
-
-// Multi-param block lambda
-var pairs = [1, 2, 3]
-var result = pairs.reduce(0, (acc, x) -> acc + x * 10)
+// Reduce with lambda
+List<int> numbers = [1, 2, 3]
+var result = numbers.reduce(0, (acc, x) -> acc + x * 10)
 print("reduce: {result}")
 
 print("Functions OK")

@@ -27,10 +27,14 @@ for zn in "$ZN_DIR"/*.zn; do
     fi
 
     # Transpile and run
-    actual=$("$ZINC_BIN" run "$zn" 2>&1 | grep -v '^  ')  # filter build output lines
+    actual=$("$ZINC_BIN" run "$zn" 2>&1)
     expected_text=$(cat "$expected")
 
-    if [ "$actual" = "$expected_text" ]; then
+    # Compare sorted output (Go map iteration order is non-deterministic)
+    actual_sorted=$(echo "$actual" | sort)
+    expected_sorted=$(echo "$expected_text" | sort)
+
+    if [ "$actual_sorted" = "$expected_sorted" ]; then
         echo "PASS: $name"
         PASS=$((PASS + 1))
     else

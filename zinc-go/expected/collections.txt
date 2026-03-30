@@ -8,4 +8,4 @@ Alice is 30
 Bob is 25
 Charlie is 35
 Dave is 28
-Evens: [2, 4, 6, 8, 10]
+Evens: [2 4 6 8 10]

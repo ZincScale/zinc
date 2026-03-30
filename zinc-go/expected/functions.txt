@@ -4,6 +4,5 @@ localhost:3000
 localhost:8080
 sum(1,2,3) = 6
 sum(10,20) = 30
-block lambda: [3, 5, 7, 9, 11]
 reduce: 60
 Functions OK

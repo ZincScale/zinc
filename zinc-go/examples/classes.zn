@@ -1,10 +1,10 @@
 // Classes — Zinc v3
-// Demonstrates: data records, classes, constructors, visibility, inheritance, override
+// Demonstrates: data records, classes, constructors, inheritance, interfaces
 
-// Data class → Java record (separate .java file)
+// Data class — auto-generates struct with String() method
 data User(String name, String email, int age = 0)
 
-// Class with constructor, visibility modifiers, methods
+// Class with constructor and methods
 class Animal {
     init String name
     init String sound
@@ -14,7 +14,7 @@ class Animal {
         this.sound = sound
     }
 
-    pub fn speak(): String {
+    fn speak(): String {
         return "{name} says {sound}"
     }
 }
@@ -27,18 +27,19 @@ class Dog : Animal {
         this.breed = breed
     }
 
-    override fn toString(): String {
-        return "Dog({getName()}, {getBreed()})"
+    fn toString(): String {
+        return "Dog({name}, {breed})"
     }
 }
 
-// Class with pub, readonly, private fields
+// Class with field defaults
 class Config {
     pub String host = "localhost"
-    readonly int port = 8080
-    int maxRetries = 3
-    const String VERSION = "1.0"
+    pub int port = 8080
+    pub int maxRetries = 3
 }
+
+const String VERSION = "1.0"
 
 // Interface + implementation
 interface Greeter {
@@ -46,25 +47,25 @@ interface Greeter {
 }
 
 class FormalGreeter : Greeter {
-    pub fn greet(String name): String {
+    fn greet(String name): String {
         return "Good day, {name}."
     }
 }
 
-// Script mode — test all features
-var u = new User("Alice", "alice@example.com", 30)
+// Test all features
+var u = User("Alice", "alice@example.com", 30)
 print(u)
 
-var dog = new Dog("Rex", "Lab")
+var dog = Dog("Rex", "Lab")
 print(dog.speak())
 print(dog)
 
-var cfg = new Config()
-print("host: {cfg.getHost()}")
-print("port: {cfg.getPort()}")
-print("version: {Config.VERSION}")
+var cfg = Config()
+print("host: {cfg.host}")
+print("port: {cfg.port}")
+print("version: {VERSION}")
 
-Greeter g = new FormalGreeter()
+Greeter g = FormalGreeter()
 print(g.greet("World"))
 
 print("Classes OK")

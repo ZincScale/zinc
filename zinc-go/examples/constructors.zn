@@ -1,5 +1,5 @@
 // Constructors — Zinc v3
-// Demonstrates: init constructor, init fields, super calls, default params
+// Demonstrates: init constructor, fields, super calls, default params
 
 class Server {
     init String host
@@ -10,11 +10,11 @@ class Server {
         this.port = port
     }
 
-    pub fn address(): String {
+    fn address(): String {
         return "{host}:{port}"
     }
 
-    override fn toString(): String {
+    fn toString(): String {
         return "Server({address()})"
     }
 }
@@ -27,20 +27,20 @@ class SecureServer : Server {
         this.certPath = certPath
     }
 
-    override fn toString(): String {
-        return "SecureServer({address()}, cert={getCertPath()})"
+    fn toString(): String {
+        return "SecureServer({address()}, cert={certPath})"
     }
 }
 
 // Basic construction with all params
-var s = new Server("localhost", 3000)
+var s = Server("localhost", 3000)
 print(s.address())
 print(s)
 
 // Default parameter — port defaults to 8080
-var s2 = new Server("0.0.0.0")
+var s2 = Server("0.0.0.0")
 print(s2.address())
 
 // Inheritance with super
-var ss = new SecureServer("prod.example.com", 443, "/etc/ssl/cert.pem")
+var ss = SecureServer("prod.example.com", 443, "/etc/ssl/cert.pem")
 print(ss)

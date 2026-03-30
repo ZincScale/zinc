@@ -1,7 +1,7 @@
 // Streams — Zinc v3
 // Demonstrates: all collection stream operations, it keyword, chains
 
-var numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 // Filter with lambda
 var evens = numbers.filter(x -> x % 2 == 0)
@@ -40,12 +40,12 @@ var limited = numbers.limit(3)
 print("Limit 3: {limited}")
 
 // Distinct
-var dupes = [1, 2, 2, 3, 3, 3]
+List<int> dupes = [1, 2, 2, 3, 3, 3]
 var unique = dupes.distinct()
 print("Distinct: {unique}")
 
 // SortBy
-var words = ["banana", "apple", "cherry"]
+List<String> words = ["banana", "apple", "cherry"]
 var sorted = words.sortBy(it.length())
 print("Sorted by length: {sorted}")
 
@@ -58,7 +58,7 @@ print("ForEach:")
 numbers.filter(it > 8).forEach(x -> print("  {x}"))
 
 // GroupBy
-var items = ["cat", "car", "dog", "cup"]
+List<String> items = ["cat", "car", "dog", "cup"]
 var grouped = items.groupBy(it.charAt(0))
 print("Grouped by first char: {grouped}")
 

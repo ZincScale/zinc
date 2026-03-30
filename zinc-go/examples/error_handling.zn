@@ -1,5 +1,5 @@
 // Error Handling — Zinc v3
-// Demonstrates: Error return, or default, or block, or with return/continue, custom errors
+// Demonstrates: Error return, or default, or block, or with return/continue
 
 // Function that can fail — returns Error on bad input
 fn divide(int a, int b): int {
@@ -21,9 +21,9 @@ divide(10, 0) or {
 }
 print("or block done")
 
-// Custom error types
+// Validate with simple Error
 fn validate(int x): int {
-    if x < 0 { return Error(IllegalArgumentException("must be positive")) }
+    if x < 0 { return Error("must be positive") }
     return x
 }
 
@@ -43,7 +43,7 @@ fn loadAndProcess(): String {
 print("loadAndProcess: {loadAndProcess()}")
 
 // or block with continue — skip items in loop
-var inputs = [2, 0, 5, 0, 3]
+List<int> inputs = [2, 0, 5, 0, 3]
 for b in inputs {
     var val = divide(100, b) or {
         continue

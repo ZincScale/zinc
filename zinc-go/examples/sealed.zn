@@ -6,8 +6,8 @@ sealed class Shape {
     data Rect(double width, double height)
 }
 
-var c = new Circle(5.0)
-var r = new Rect(3.0, 4.0)
+var c = Circle(5.0)
+var r = Rect(3.0, 4.0)
 
 print(c)
 print(r)

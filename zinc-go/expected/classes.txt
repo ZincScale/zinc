@@ -1,4 +1,4 @@
-User[name=Alice, email=alice@example.com, age=30]
+User(name=Alice, email=alice@example.com, age=30)
 Rex says Woof
 Dog(Rex, Lab)
 host: localhost

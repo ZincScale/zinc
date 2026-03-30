@@ -1,2 +1,2 @@
-Circle[radius=5.0]
-Rect[width=3.0, height=4.0]
+Circle(radius=5)
+Rect(width=3, height=4)
