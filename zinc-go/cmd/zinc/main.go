@@ -38,41 +38,53 @@ func main() {
 		}
 
 	case "build":
-		if len(os.Args) < 3 {
-			errs.Error("zinc build requires a file or directory")
-			fmt.Fprintln(os.Stderr, "Usage: zinc build <file.zn|dir> [-o outdir] [--native]")
-			os.Exit(1)
+		input := "."
+		if len(os.Args) >= 3 && !strings.HasPrefix(os.Args[2], "-") {
+			input = os.Args[2]
 		}
-		input := os.Args[2]
 		outDir := "zinc-out"
 		for i, arg := range os.Args {
 			if arg == "-o" && i+1 < len(os.Args) {
 				outDir = os.Args[i+1]
 			}
 		}
-		if err := build(input, outDir, false); err != nil {
-			errs.Errorf("%s", err)
-			os.Exit(1)
+		// Detect project mode: zinc.toml present
+		if info, err := os.Stat(input); err == nil && info.IsDir() && isProjectDir(input) {
+			if err := buildProject(input, outDir, false); err != nil {
+				errs.Errorf("%s", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := build(input, outDir, false); err != nil {
+				errs.Errorf("%s", err)
+				os.Exit(1)
+			}
 		}
 
 	case "run":
-		if len(os.Args) < 3 {
-			errs.Error("zinc run requires a file or directory")
-			fmt.Fprintln(os.Stderr, "Usage: zinc run <file.zn|dir> [-- args...]")
-			os.Exit(1)
+		input := "."
+		if len(os.Args) >= 3 && !strings.HasPrefix(os.Args[2], "-") {
+			input = os.Args[2]
 		}
-		input := os.Args[2]
 		// Collect program args after "--"
 		var progArgs []string
-		for i := 3; i < len(os.Args); i++ {
+		for i := 2; i < len(os.Args); i++ {
 			if os.Args[i] == "--" {
 				progArgs = os.Args[i+1:]
 				break
 			}
 		}
-		if err := run(input, progArgs); err != nil {
-			errs.Errorf("%s", err)
-			os.Exit(1)
+		// Detect project mode: zinc.toml present
+		if info, err := os.Stat(input); err == nil && info.IsDir() && isProjectDir(input) {
+			if err := runProject(input, progArgs); err != nil {
+				errs.Errorf("%s", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := run(input, progArgs); err != nil {
+				errs.Errorf("%s", err)
+				os.Exit(1)
+			}
 		}
 
 	case "fmt":
@@ -97,6 +109,24 @@ func main() {
 				errs.Errorf("%s", err)
 				os.Exit(1)
 			}
+		}
+
+	case "add":
+		if len(os.Args) < 3 {
+			errs.Error("zinc add requires a Go module path")
+			fmt.Fprintln(os.Stderr, "Usage: zinc add <module@version>")
+			fmt.Fprintln(os.Stderr, "  e.g.: zinc add github.com/gorilla/mux@v1.8.1")
+			os.Exit(1)
+		}
+		if err := addDep(os.Args[2]); err != nil {
+			errs.Errorf("%s", err)
+			os.Exit(1)
+		}
+
+	case "deps":
+		if err := listDeps(); err != nil {
+			errs.Errorf("%s", err)
+			os.Exit(1)
 		}
 
 	case "--version", "version":
@@ -132,13 +162,16 @@ func printUsage() {
 	fmt.Println("zinc - Zinc to Go transpiler")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  zinc init <name>                         Create a new Zinc project")
-	fmt.Println("  zinc build <file.zn|dir> [-o outdir]     Transpile and compile")
-	fmt.Println("  zinc run <file.zn|dir> [-- args...]      Transpile and run")
-	fmt.Println("  zinc fmt <file.zn|dir>                   Format Zinc source code")
-	fmt.Println("  zinc <file.zn> [-- args...]              Shorthand for zinc run")
-	fmt.Println("  zinc version                             Show version")
-	fmt.Println("  zinc help                                Show this help")
+	fmt.Println("  zinc init <name>                       Create a new Zinc project")
+	fmt.Println("  zinc build [dir] [-o outdir]           Transpile and compile to native binary")
+	fmt.Println("  zinc run [file.zn|dir] [-- args...]    Transpile and run")
+	fmt.Println("  zinc fmt <file.zn|dir>                 Format Zinc source code")
+	fmt.Println("  zinc add <module@version>              Add a Go dependency")
+	fmt.Println("  zinc deps                              List dependencies")
+	fmt.Println("  zinc <file.zn> [-- args...]            Shorthand for zinc run")
+	fmt.Println("  zinc version                           Show version")
+	fmt.Println()
+	fmt.Println("Project mode: when a zinc.toml is present, build/run use the project config.")
 }
 
 // ---------------------------------------------------------------------------
@@ -358,31 +391,42 @@ func initProject(name string) error {
 		return fmt.Errorf("create src/: %w", err)
 	}
 
+	// zinc.toml — project config
+	baseName := filepath.Base(name)
+	zincToml := fmt.Sprintf(`[project]
+name = "%s"
+version = "0.1.0"
+main = "main.zn"
+
+[go]
+version = "1.26"
+deps = []
+`, baseName)
+	if err := os.WriteFile(filepath.Join(name, "zinc.toml"), []byte(zincToml), 0o644); err != nil {
+		return fmt.Errorf("write zinc.toml: %w", err)
+	}
+
 	// src/main.zn
-	mainZn := `fn main() {
-    print("Hello from Zinc!")
+	mainZn := fmt.Sprintf(`fn main() {
+    print("Hello from %s!")
 }
-`
+`, baseName)
 	if err := os.WriteFile(filepath.Join(srcDir, "main.zn"), []byte(mainZn), 0o644); err != nil {
 		return fmt.Errorf("write main.zn: %w", err)
 	}
 
-	// go.mod
-	goMod := fmt.Sprintf("module %s\n\ngo 1.26\n", name)
-	if err := os.WriteFile(filepath.Join(name, "go.mod"), []byte(goMod), 0o644); err != nil {
-		return fmt.Errorf("write go.mod: %w", err)
-	}
-
 	// .gitignore
-	gitignore := "zinc-out/\n*.exe\n"
+	gitignore := "zinc-out/\n*.exe\ngo.mod\ngo.sum\n*.go\n"
 	if err := os.WriteFile(filepath.Join(name, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 
 	fmt.Printf("Created project %s/\n", name)
+	fmt.Printf("  %s/zinc.toml\n", name)
 	fmt.Printf("  %s/src/main.zn\n", name)
-	fmt.Printf("  %s/go.mod\n", name)
 	fmt.Printf("  %s/.gitignore\n", name)
+	fmt.Println()
+	fmt.Printf("Run: cd %s && zinc run\n", name)
 	return nil
 }
 
@@ -471,4 +515,298 @@ func formatZinc(src string) string {
 		result += "\n"
 	}
 	return result
+}
+
+// ---------------------------------------------------------------------------
+// zinc.toml project config
+// ---------------------------------------------------------------------------
+
+// zincConfig holds parsed zinc.toml fields.
+type zincConfig struct {
+	Name    string
+	Version string
+	Main    string
+	GoVer   string
+	Deps    []string
+}
+
+// findZincToml walks up from dir looking for zinc.toml.
+func findZincToml(dir string) string {
+	abs, _ := filepath.Abs(dir)
+	for {
+		candidate := filepath.Join(abs, "zinc.toml")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return ""
+		}
+		abs = parent
+	}
+}
+
+// loadZincToml parses a zinc.toml file (simple line-based TOML subset).
+func loadZincToml(path string) (*zincConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &zincConfig{
+		Version: "0.1.0",
+		Main:    "main.zn",
+		GoVer:   "1.26",
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		val = strings.Trim(val, "\"")
+		switch key {
+		case "name":
+			cfg.Name = val
+		case "version":
+			if strings.Contains(val, ".") && !strings.Contains(val, ">") {
+				cfg.Version = val
+			} else {
+				cfg.GoVer = strings.Trim(val, "\">=")
+			}
+		case "main":
+			cfg.Main = val
+		case "deps":
+			// Parse simple TOML array: ["dep1", "dep2"]
+			val = strings.Trim(val, "[]")
+			if val != "" {
+				for _, d := range strings.Split(val, ",") {
+					d = strings.TrimSpace(d)
+					d = strings.Trim(d, "\"")
+					if d != "" {
+						cfg.Deps = append(cfg.Deps, d)
+					}
+				}
+			}
+		}
+	}
+	return cfg, nil
+}
+
+// generateGoMod creates a go.mod from zinc.toml config.
+func generateGoMod(cfg *zincConfig, dir string) error {
+	var buf strings.Builder
+	modName := cfg.Name
+	if modName == "" {
+		modName = "zinc_project"
+	}
+	buf.WriteString(fmt.Sprintf("module %s\n\ngo %s\n", modName, cfg.GoVer))
+	if len(cfg.Deps) > 0 {
+		buf.WriteString("\nrequire (\n")
+		for _, dep := range cfg.Deps {
+			// dep format: "github.com/foo/bar v1.2.3"
+			buf.WriteString(fmt.Sprintf("\t%s\n", dep))
+		}
+		buf.WriteString(")\n")
+	}
+	return os.WriteFile(filepath.Join(dir, "go.mod"), []byte(buf.String()), 0o644)
+}
+
+// isProjectDir returns true if dir contains a zinc.toml.
+func isProjectDir(dir string) bool {
+	return findZincToml(dir) != ""
+}
+
+// buildProject transpiles a zinc.toml project: src/*.zn → zinc-out/ → go build.
+func buildProject(projectDir, outDir string, quiet bool) error {
+	tomlPath := findZincToml(projectDir)
+	if tomlPath == "" {
+		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
+	}
+	cfg, err := loadZincToml(tomlPath)
+	if err != nil {
+		return fmt.Errorf("read zinc.toml: %w", err)
+	}
+
+	root := filepath.Dir(tomlPath)
+	srcDir := filepath.Join(root, "src")
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return fmt.Errorf("no src/ directory in project %s", root)
+	}
+
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	// Transpile src/ → outDir/
+	if err := compileDir(srcDir, outDir, quiet); err != nil {
+		return err
+	}
+
+	// Generate go.mod from zinc.toml
+	if err := generateGoMod(cfg, outDir); err != nil {
+		return fmt.Errorf("generate go.mod: %w", err)
+	}
+
+	// If there are deps, run go mod tidy
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = outDir
+		tidy.Stdout = os.Stdout
+		tidy.Stderr = os.Stderr
+		if err := tidy.Run(); err != nil {
+			return fmt.Errorf("go mod tidy: %w", err)
+		}
+	}
+
+	// Build
+	binName := cfg.Name
+	if binName == "" {
+		binName = "zinc-app"
+	}
+	cmd := exec.Command("go", "build", "-o", binName, ".")
+	cmd.Dir = outDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build failed: %w", err)
+	}
+
+	if !quiet {
+		absOut, _ := filepath.Abs(filepath.Join(outDir, binName))
+		fmt.Printf("  Built: %s\n", absOut)
+	}
+	return nil
+}
+
+// runProject transpiles a zinc.toml project to a temp dir and runs it.
+func runProject(projectDir string, progArgs []string) error {
+	tomlPath := findZincToml(projectDir)
+	if tomlPath == "" {
+		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
+	}
+	cfg, err := loadZincToml(tomlPath)
+	if err != nil {
+		return fmt.Errorf("read zinc.toml: %w", err)
+	}
+
+	root := filepath.Dir(tomlPath)
+	srcDir := filepath.Join(root, "src")
+
+	tmpDir, err := os.MkdirTemp("", "zinc-run-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Transpile
+	if err := compileDir(srcDir, tmpDir, true); err != nil {
+		return err
+	}
+
+	// Generate go.mod
+	if err := generateGoMod(cfg, tmpDir); err != nil {
+		return err
+	}
+
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = tmpDir
+		tidy.Stderr = os.Stderr
+		if err := tidy.Run(); err != nil {
+			return fmt.Errorf("go mod tidy: %w", err)
+		}
+	}
+
+	// Build and run
+	binPath := filepath.Join(tmpDir, "zinc-app")
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd.Dir = tmpDir
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build failed: %w", err)
+	}
+
+	runCmd := exec.Command(binPath, progArgs...)
+	runCmd.Stdout = os.Stdout
+	runCmd.Stderr = os.Stderr
+	runCmd.Stdin = os.Stdin
+	return runCmd.Run()
+}
+
+// ---------------------------------------------------------------------------
+// Dependency management
+// ---------------------------------------------------------------------------
+
+// addDep adds a Go module dependency to zinc.toml.
+func addDep(dep string) error {
+	tomlPath := findZincToml(".")
+	if tomlPath == "" {
+		return fmt.Errorf("no zinc.toml found — run zinc init first")
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return err
+	}
+
+	content := string(data)
+
+	// Parse module@version → "module version"
+	depEntry := strings.Replace(dep, "@", " ", 1)
+
+	// Check for duplicate
+	if strings.Contains(content, depEntry) || strings.Contains(content, dep) {
+		return fmt.Errorf("dependency %s already exists", dep)
+	}
+
+	// Find deps = [...] and add to it
+	if strings.Contains(content, "deps = []") {
+		content = strings.Replace(content, "deps = []",
+			fmt.Sprintf("deps = [\"%s\"]", depEntry), 1)
+	} else if strings.Contains(content, "deps = [") {
+		// Append to existing array — find the closing ]
+		idx := strings.Index(content, "deps = [")
+		closeBracket := strings.Index(content[idx:], "]")
+		if closeBracket > 0 {
+			insertAt := idx + closeBracket
+			content = content[:insertAt] + fmt.Sprintf(", \"%s\"", depEntry) + content[insertAt:]
+		}
+	} else {
+		// No deps line — add under [go] section
+		content += fmt.Sprintf("deps = [\"%s\"]\n", depEntry)
+	}
+
+	if err := os.WriteFile(tomlPath, []byte(content), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  added: %s\n", dep)
+	return nil
+}
+
+// listDeps lists dependencies from zinc.toml.
+func listDeps() error {
+	tomlPath := findZincToml(".")
+	if tomlPath == "" {
+		return fmt.Errorf("no zinc.toml found")
+	}
+	cfg, err := loadZincToml(tomlPath)
+	if err != nil {
+		return err
+	}
+
+	if len(cfg.Deps) == 0 {
+		fmt.Println("No dependencies.")
+		return nil
+	}
+
+	fmt.Printf("Dependencies (%s):\n", cfg.Name)
+	for _, d := range cfg.Deps {
+		fmt.Printf("  %s\n", d)
+	}
+	return nil
 }
