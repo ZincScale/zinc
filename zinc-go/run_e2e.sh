@@ -46,6 +46,36 @@ for zn in "$ZN_DIR"/*.zn; do
     fi
 done
 
+# --- Multi-file project tests ---
+for projdir in "$ZN_DIR"/*/; do
+    [ -d "$projdir" ] || continue
+    name=$(basename "$projdir")
+    expected="$EXPECTED_DIR/${name}.txt"
+
+    if [ ! -f "$expected" ]; then
+        echo "SKIP: $name (no expected output)"
+        SKIP=$((SKIP + 1))
+        continue
+    fi
+
+    actual=$("$ZINC_BIN" run "$projdir" 2>&1)
+    expected_text=$(cat "$expected")
+
+    actual_sorted=$(echo "$actual" | sort)
+    expected_sorted=$(echo "$expected_text" | sort)
+
+    if [ "$actual_sorted" = "$expected_sorted" ]; then
+        echo "PASS: $name (project)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: $name (project)"
+        echo "  Expected: $(echo "$expected_text" | head -3)"
+        echo "  Actual:   $(echo "$actual" | head -3)"
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  $name"
+    fi
+done
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $SKIP skipped"
 if [ -n "$ERRORS" ]; then

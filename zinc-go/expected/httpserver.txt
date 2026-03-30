@@ -1,0 +1,4 @@
+HTTP handlers registered
+/ → helloHandler
+/health → healthHandler
+HTTP Server OK

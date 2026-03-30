@@ -194,62 +194,104 @@ func printUsage() {
 // Compilation
 // ---------------------------------------------------------------------------
 
-// compileFile reads a .zn file, parses it, and generates Go source.
-func compileFile(path string) ([]codegen.OutputFile, error) {
+// parseFile reads and parses a .zn file, returning the AST.
+func parseFile(path string) (*parser.Program, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	// Lex
 	l := lexer.New(string(src))
 	tokens := l.Tokenize()
 	if len(l.Errors) > 0 {
 		return nil, fmt.Errorf("lex errors in %s:\n%s", path, strings.Join(l.Errors, "\n"))
 	}
 
-	// Parse
 	p := parser.New(tokens)
 	prog := p.ParseV2()
 	if len(p.Errors) > 0 {
 		return nil, fmt.Errorf("parse errors in %s:\n%s", path, strings.Join(p.Errors, "\n"))
 	}
 
-	// Set source file for //line directives
 	absPath, _ := filepath.Abs(path)
 	prog.SourceFile = absPath
+	return prog, nil
+}
+
+// compileFile reads a .zn file, parses it, and generates Go source.
+func compileFile(path string) ([]codegen.OutputFile, error) {
+	prog, err := parseFile(path)
+	if err != nil {
+		return nil, err
+	}
+
 	className := strings.TrimSuffix(filepath.Base(path), ".zn")
 	if len(className) > 0 {
 		className = strings.ToUpper(className[:1]) + className[1:]
 	}
 
 	gen := codegen.New()
-	gen.SetSourceFile(absPath)
+	gen.SetSourceFile(prog.SourceFile)
 	files := gen.GenerateFiles(prog, className)
 	return files, nil
 }
 
-// compileDir compiles all .zn files in a directory (recursively) and writes
-// the generated .go files into outDir. If quiet is true, the "file -> out"
-// progress lines are suppressed.
-func compileDir(dir, outDir string, quiet bool) error {
+// mergePrograms combines multiple parsed Programs into one.
+// Imports are deduplicated, all Decls and Stmts are concatenated.
+func mergePrograms(progs []*parser.Program) *parser.Program {
+	merged := &parser.Program{}
+	seen := make(map[string]bool)
+	for _, p := range progs {
+		if merged.SourceFile == "" {
+			merged.SourceFile = p.SourceFile
+		}
+		if merged.Package == nil && p.Package != nil {
+			merged.Package = p.Package
+		}
+		for _, imp := range p.Imports {
+			if !seen[imp.Path] {
+				seen[imp.Path] = true
+				merged.Imports = append(merged.Imports, imp)
+			}
+		}
+		merged.Decls = append(merged.Decls, p.Decls...)
+		merged.Stmts = append(merged.Stmts, p.Stmts...)
+	}
+	return merged
+}
+
+// collectZnFiles walks a directory and returns all .zn file paths (sorted).
+func collectZnFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".zn") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}
+
+// compileMultiFile parses all .zn files, merges their ASTs, and runs codegen
+// once on the combined program. This gives the generator cross-file knowledge
+// of types, constructors, and error-returning functions.
+func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
 
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if len(znFiles) == 0 {
+		return nil
+	}
+
+	// If there's only one file, use the single-file path (simpler output naming)
+	if len(znFiles) == 1 {
+		files, err := compileFile(znFiles[0])
 		if err != nil {
 			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".zn") {
-			return nil
-		}
-		files, cErr := compileFile(path)
-		if cErr != nil {
-			return cErr
 		}
 		for _, f := range files {
 			outPath := filepath.Join(outDir, f.Name)
@@ -257,11 +299,55 @@ func compileDir(dir, outDir string, quiet bool) error {
 				return fmt.Errorf("write %s: %w", outPath, wErr)
 			}
 			if !quiet {
-				fmt.Printf("  %s → %s\n", path, outPath)
+				fmt.Printf("  %s → %s\n", znFiles[0], outPath)
 			}
 		}
 		return nil
-	})
+	}
+
+	// Parse all files
+	progs := make([]*parser.Program, 0, len(znFiles))
+	for _, path := range znFiles {
+		prog, err := parseFile(path)
+		if err != nil {
+			return err
+		}
+		progs = append(progs, prog)
+	}
+
+	// Merge into one combined program
+	merged := mergePrograms(progs)
+
+	// Determine a className from the directory name
+	dirName := filepath.Base(filepath.Dir(znFiles[0]))
+	className := strings.ToUpper(dirName[:1]) + dirName[1:]
+
+	// Generate with full cross-file context
+	gen := codegen.New()
+	gen.SetSourceFile(merged.SourceFile)
+	files := gen.GenerateFiles(merged, className)
+
+	for _, f := range files {
+		outPath := filepath.Join(outDir, f.Name)
+		if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+			return fmt.Errorf("write %s: %w", outPath, wErr)
+		}
+		if !quiet {
+			fmt.Printf("  [%d files] → %s\n", len(znFiles), outPath)
+		}
+	}
+	return nil
+}
+
+// compileDir compiles all .zn files in a directory using multi-file merging
+// for cross-file type resolution. Writes generated .go files into outDir.
+// If quiet is true, the progress lines are suppressed.
+func compileDir(dir, outDir string, quiet bool) error {
+	znFiles, err := collectZnFiles(dir)
+	if err != nil {
+		return err
+	}
+	return compileMultiFile(znFiles, outDir, quiet)
 }
 
 // ---------------------------------------------------------------------------

@@ -1170,6 +1170,10 @@ func (p *Parser) v2IsClassFieldDecl() bool {
 	}
 	// Scan past the type to find the name
 	i := 1
+	// Dotted type: sync.Mutex, http.ResponseWriter, etc.
+	for p.peekAt(i).Type == lexer.TOKEN_DOT && isIdentLike(p.peekAt(i+1).Type) {
+		i += 2
+	}
 	// Generic: Type<...>
 	if p.peekAt(i).Type == lexer.TOKEN_LT {
 		depth := 1

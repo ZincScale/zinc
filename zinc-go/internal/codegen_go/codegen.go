@@ -47,6 +47,11 @@ type Generator struct {
 	// Data class tracking (for implicit constructor calls)
 	dataClasses map[string]bool          // data class names that have NewType constructors
 	typeAliases map[string]parser.TypeExpr // type alias name → underlying type
+	goResolver  *GoTypeResolver            // introspects Go packages at transpile time
+	importMap   map[string]string           // import prefix → full Go package path
+	// Smart import resolution: short type name → qualified Go name
+	// e.g. "Mutex" → "sync.Mutex" from `import sync.Mutex`
+	typeImports map[string]string
 }
 
 // New creates a new Go code generator.
@@ -65,6 +70,9 @@ func New() *Generator {
 		varStructTypes: make(map[string]string),
 		dataClasses:    make(map[string]bool),
 		typeAliases:    make(map[string]parser.TypeExpr),
+		goResolver:     NewGoTypeResolver(),
+		importMap:      make(map[string]string),
+		typeImports:    make(map[string]string),
 	}
 }
 
@@ -275,11 +283,32 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.varTypes = make(map[string]string)
 	g.varStructTypes = make(map[string]string)
 	g.dataClasses = make(map[string]bool)
+	g.typeImports = make(map[string]string)
 	g.collectDecls(prog.Decls)
 
-	// Add user imports from Zinc source
+	// Add user imports from Zinc source with smart resolution.
+	// Heuristic: if the last segment starts with uppercase, it's a specific
+	// type import (e.g. sync.Mutex → import "sync", Mutex → sync.Mutex).
+	// Otherwise it's a whole-package import (e.g. net.http → import "net/http").
 	for _, imp := range prog.Imports {
-		g.needImport(imp.Path)
+		parts := strings.Split(imp.Path, ".")
+		lastSeg := parts[len(parts)-1]
+		if len(parts) >= 2 && len(lastSeg) > 0 && lastSeg[0] >= 'A' && lastSeg[0] <= 'Z' {
+			// Type import: import sync.Mutex → package "sync", register Mutex → sync.Mutex
+			pkgParts := parts[:len(parts)-1]
+			goPath := strings.Join(pkgParts, "/")
+			// The Go qualified name uses the last package segment as prefix
+			goPkg := pkgParts[len(pkgParts)-1]
+			typeName := lastSeg
+			g.needImport(goPath)
+			g.typeImports[typeName] = goPkg + "." + typeName
+		} else {
+			// Package import: import net.http → import "net/http"
+			goPath := strings.ReplaceAll(imp.Path, ".", "/")
+			g.needImport(goPath)
+			// Build import map for Go type resolution: "http" → "net/http"
+			g.importMap[lastSeg] = goPath
+		}
 	}
 
 	// First pass: generate body into a separate buffer to collect imports
@@ -335,7 +364,12 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 func (g *Generator) GenerateFiles(prog *parser.Program, className string) []OutputFile {
 	// For now, generate everything into a single file
 	content := g.Generate(prog, className)
-	return []OutputFile{{Name: strings.ToLower(className) + ".go", Content: content}}
+	outName := strings.ToLower(className) + ".go"
+	// Avoid generating _test.go files — Go treats those as test files
+	if strings.HasSuffix(outName, "_test.go") {
+		outName = strings.TrimSuffix(outName, "_test.go") + "_main.go"
+	}
+	return []OutputFile{{Name: outName, Content: content}}
 }
 
 // --- Declarations ------------------------------------------------------------
@@ -1373,6 +1407,18 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 			g.writeln("%s = append(%s, %s)", obj, obj, args)
 			return
 		}
+		// .send() → ch <- val
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "send" && len(call.Args) == 1 {
+			obj := g.formatExpr(sel.Object)
+			g.writeln("%s <- %s", obj, g.formatExpr(call.Args[0]))
+			return
+		}
+		// .close() → close(ch)
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "close" && len(call.Args) == 0 {
+			obj := g.formatExpr(sel.Object)
+			g.writeln("close(%s)", obj)
+			return
+		}
 		// .put() → map[key] = value
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "put" && len(call.Args) == 2 {
 			obj := g.formatExpr(sel.Object)
@@ -1946,6 +1992,17 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			if len(c.Args) == 2 {
 				return fmt.Sprintf("func() { %s[%s] = %s }()", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
 			}
+		case "send":
+			// ch.send(val) → ch <- val
+			if len(c.Args) == 1 {
+				return fmt.Sprintf("func() { %s <- %s }()", obj, g.formatExpr(c.Args[0]))
+			}
+		case "recv":
+			// ch.recv() → <-ch
+			return fmt.Sprintf("<-%s", obj)
+		case "close":
+			// ch.close() → close(ch)
+			return fmt.Sprintf("close(%s)", obj)
 		case "size":
 			return fmt.Sprintf("len(%s)", obj)
 		case "isEmpty":
@@ -2092,6 +2149,31 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	case "input":
 		g.needImport("fmt")
 		return fmt.Sprintf("func() string { var s string; fmt.Scanln(&s); return s }()")
+	case "make":
+		return fmt.Sprintf("make(%s)", args)
+	case "delete":
+		return fmt.Sprintf("delete(%s)", args)
+	case "append":
+		return fmt.Sprintf("append(%s)", args)
+	case "close":
+		return fmt.Sprintf("close(%s)", args)
+	}
+
+	// Channel(size) → make(chan interface{}, size)
+	// channel(size) → make(chan interface{}, size)
+	if callee == "Channel" || callee == "channel" || callee == "Chan" {
+		chanType := "interface{}"
+		if len(c.TypeArgs) > 0 {
+			if mapped, ok := zincToGoType[c.TypeArgs[0]]; ok {
+				chanType = mapped
+			} else {
+				chanType = c.TypeArgs[0]
+			}
+		}
+		if args != "" {
+			return fmt.Sprintf("make(chan %s, %s)", chanType, args)
+		}
+		return fmt.Sprintf("make(chan %s)", chanType)
 	}
 
 	// Constructor calls: new Type() → NewType()
@@ -3034,6 +3116,20 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		// Type alias — use the alias name (Go will resolve it via type declaration)
 		if _, ok := g.typeAliases[typ.Name]; ok {
 			return typ.Name
+		}
+		// Smart import resolution: Mutex → sync.Mutex if imported via `import sync.Mutex`
+		if qualified, ok := g.typeImports[typ.Name]; ok {
+			return qualified
+		}
+		// Auto pointer inference for Go struct types: http.Request → *http.Request
+		// Interfaces (http.ResponseWriter) stay as-is.
+		if strings.Contains(typ.Name, ".") {
+			parts := strings.SplitN(typ.Name, ".", 2)
+			if pkgPath, ok := g.importMap[parts[0]]; ok {
+				if g.goResolver != nil && g.goResolver.IsStruct(pkgPath, parts[1]) {
+					return "*" + typ.Name
+				}
+			}
 		}
 		return typ.Name
 	case *parser.GenericType:

@@ -113,6 +113,7 @@ const (
 	TOKEN_STAR_EQ    // *=
 	TOKEN_SLASH_EQ   // /=
 	TOKEN_ARROW              // ->
+	TOKEN_CHAN_ARROW         // <- (channel send/receive)
 	TOKEN_QUESTION           // ?
 	TOKEN_QUESTION_DOT       // ?.
 	TOKEN_QUESTION_QUESTION  // ??
@@ -221,6 +222,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_STAR_EQ:   "*=",
 	TOKEN_SLASH_EQ:  "/=",
 	TOKEN_ARROW:             "->",
+	TOKEN_CHAN_ARROW:         "<-",
 	TOKEN_QUESTION:          "?",
 	TOKEN_QUESTION_DOT:      "?.",
 	TOKEN_QUESTION_QUESTION: "??",

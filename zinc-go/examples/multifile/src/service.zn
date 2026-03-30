@@ -1,0 +1,13 @@
+// Service — business logic using types from model.zn
+
+fn greetUser(User u): String {
+    return "Hello, {u.name}!"
+}
+
+fn isAdult(User u): bool {
+    return u.age >= 18
+}
+
+fn formatPrice(Product p): String {
+    return "{p.name}: ${p.price}"
+}
