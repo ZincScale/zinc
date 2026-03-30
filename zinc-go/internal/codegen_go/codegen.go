@@ -45,7 +45,8 @@ type Generator struct {
 	// Variable struct type tracking (for getter rewriting)
 	varStructTypes map[string]string // variable name → struct type name
 	// Data class tracking (for implicit constructor calls)
-	dataClasses map[string]bool // data class names that have NewType constructors
+	dataClasses map[string]bool          // data class names that have NewType constructors
+	typeAliases map[string]parser.TypeExpr // type alias name → underlying type
 }
 
 // New creates a new Go code generator.
@@ -63,6 +64,7 @@ func New() *Generator {
 		renamedVars:         make(map[string]string),
 		varStructTypes: make(map[string]string),
 		dataClasses:    make(map[string]bool),
+		typeAliases:    make(map[string]parser.TypeExpr),
 	}
 }
 
@@ -114,6 +116,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 					g.errorFuncs[key] = true
 				}
 			}
+		case *parser.TypeAliasDecl:
+			g.typeAliases[decl.Name] = decl.Type
 		case *parser.FnDecl:
 			g.funcSigs[decl.Name] = decl.Params
 			if canReturnError(decl.Body) {
@@ -354,6 +358,8 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitInterfaceDecl(decl)
 	case *parser.ConstDecl:
 		g.emitConstDecl(decl)
+	case *parser.TypeAliasDecl:
+		g.writeln("type %s = %s", decl.Name, g.formatType(decl.Type))
 	}
 }
 
@@ -2868,10 +2874,16 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 				return rt
 			}
 			// Check if callee is a param with function type
-			if t, ok := known[ident.Name]; ok && strings.HasPrefix(t, "func(") {
-				// Extract return type from "func(...) RetType"
-				if idx := strings.LastIndex(t, ") "); idx >= 0 {
-					return strings.TrimSpace(t[idx+2:])
+			if t, ok := known[ident.Name]; ok {
+				// Resolve type aliases
+				resolved := t
+				if alias, ok := g.typeAliases[t]; ok {
+					resolved = g.formatType(alias)
+				}
+				if strings.HasPrefix(resolved, "func(") {
+					if idx := strings.LastIndex(resolved, ") "); idx >= 0 {
+						return strings.TrimSpace(resolved[idx+2:])
+					}
 				}
 			}
 			switch ident.Name {
@@ -3002,6 +3014,10 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 	case *parser.SimpleType:
 		if mapped, ok := zincToGoType[typ.Name]; ok {
 			return mapped
+		}
+		// Type alias — use the alias name (Go will resolve it via type declaration)
+		if _, ok := g.typeAliases[typ.Name]; ok {
+			return typ.Name
 		}
 		return typ.Name
 	case *parser.GenericType:

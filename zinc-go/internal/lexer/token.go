@@ -78,6 +78,7 @@ const (
 	TOKEN_CONCURRENT // concurrent { } (fan-out/fan-in)
 	TOKEN_TIMEOUT    // timeout(dur) { }
 	TOKEN_ABSTRACT   // abstract (abstract class/method)
+	TOKEN_TYPE       // type (type alias)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -186,6 +187,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_CONCURRENT: "concurrent",
 	TOKEN_TIMEOUT:    "timeout",
 	TOKEN_ABSTRACT:   "abstract",
+	TOKEN_TYPE:       "type",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -302,6 +304,7 @@ var keywords = map[string]TokenType{
 	"concurrent": TOKEN_CONCURRENT,
 	"timeout":    TOKEN_TIMEOUT,
 	"abstract":   TOKEN_ABSTRACT,
+	"type":       TOKEN_TYPE,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

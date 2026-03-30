@@ -78,6 +78,8 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
+		case lexer.TOKEN_TYPE:
+			prog.Decls = append(prog.Decls, p.v2ParseTypeAlias())
 		case lexer.TOKEN_ABSTRACT:
 			// abstract class Name { ... }
 			p.advance() // consume "abstract"
@@ -1315,6 +1317,16 @@ func (p *Parser) v2ParseConstDecl() *ConstDecl {
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.v2ParseExpr()
 	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
+}
+
+// v2ParseTypeAlias: type Name = TypeExpr
+func (p *Parser) v2ParseTypeAlias() *TypeAliasDecl {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_TYPE)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.expect(lexer.TOKEN_ASSIGN)
+	typ := p.v2ParseType()
+	return &TypeAliasDecl{Line: line, Name: name, Type: typ}
 }
 
 // v2ParseEnumDecl: enum Name { variants }

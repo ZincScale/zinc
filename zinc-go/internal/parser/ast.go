@@ -167,6 +167,16 @@ type ConstDecl struct {
 func (c *ConstDecl) nodeTag()      {}
 func (c *ConstDecl) topLevelTag() {}
 
+// TypeAliasDecl: type Name = TypeExpr
+type TypeAliasDecl struct {
+	Line int
+	Name string
+	Type TypeExpr
+}
+
+func (t *TypeAliasDecl) nodeTag()      {}
+func (t *TypeAliasDecl) topLevelTag() {}
+
 // Annotation: @Name or @Name("arg1", "arg2")
 type Annotation struct {
 	Name string   // annotation name (e.g. "JsonPropertyName", "Route")

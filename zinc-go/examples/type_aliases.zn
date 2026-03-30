@@ -1,0 +1,49 @@
+// Type Aliases — Zinc for Go
+// Demonstrates: type keyword for naming complex types
+
+type Handler = Fn<(String), String>
+type Transformer = Fn<(int), int>
+type Predicate = Fn<(int), boolean>
+
+// Use alias as parameter and return type
+fn apply(int x, Transformer f): int {
+    return f(x)
+}
+
+fn wrap(Handler next): Handler {
+    return (String s) -> {
+        print("wrapped: {s}")
+        return next(s)
+    }
+}
+
+fn endpoint(String path): String {
+    return "200 OK: {path}"
+}
+
+fn countIf(List<int> items, Predicate test): int {
+    var count = 0
+    for item in items {
+        if test(item) {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+fn main() {
+    // Transformer alias
+    var doubled = apply(5, (int x) -> x * 2)
+    print("apply doubled: {doubled}")
+
+    // Handler alias with middleware
+    var handler = wrap((String p) -> endpoint(p))
+    print(handler("/api"))
+
+    // Predicate alias
+    List<int> nums = [1, 2, 3, 4, 5, 6, 7, 8]
+    var evens = countIf(nums, (int x) -> x % 2 == 0)
+    print("evens: {evens}")
+
+    print("Type Aliases OK")
+}
