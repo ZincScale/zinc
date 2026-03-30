@@ -155,6 +155,47 @@ func (r *GoTypeResolver) IsStruct(pkgPath, name string) bool {
 	return isStruct
 }
 
+// FuncParamSignature returns the full Go type string for the i-th parameter.
+// For callback params like func(ResponseWriter, *Request), returns the full signature.
+func (r *GoTypeResolver) FuncParamSignature(pkgPath, funcName string, paramIndex int) string {
+	sig := r.lookupFunc(pkgPath, funcName)
+	if sig == nil {
+		return ""
+	}
+	params := sig.Params()
+	if paramIndex >= params.Len() {
+		return ""
+	}
+	return params.At(paramIndex).Type().String()
+}
+
+// FuncParamCallbackSignature checks if the i-th param of pkgPath.funcName is a function type.
+// If so, returns the param types of that callback (e.g., for http.HandleFunc param 1,
+// returns ["net/http.ResponseWriter", "*net/http.Request"]).
+func (r *GoTypeResolver) FuncParamCallbackSignature(pkgPath, funcName string, paramIndex int) []string {
+	sig := r.lookupFunc(pkgPath, funcName)
+	if sig == nil {
+		return nil
+	}
+	params := sig.Params()
+	if paramIndex >= params.Len() {
+		return nil
+	}
+	// Check if param is a function type
+	paramType := params.At(paramIndex).Type()
+	fnSig, ok := paramType.(*types.Signature)
+	if !ok {
+		return nil
+	}
+	// Extract param types of the callback
+	cbParams := fnSig.Params()
+	var result []string
+	for i := 0; i < cbParams.Len(); i++ {
+		result = append(result, cbParams.At(i).Type().String())
+	}
+	return result
+}
+
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	if !ok {

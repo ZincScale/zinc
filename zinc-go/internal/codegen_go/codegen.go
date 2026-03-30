@@ -2111,11 +2111,28 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// Rewrite `it` keyword in args
+	// Resolve Go function's expected param types for callback adaptation
+	var goExpectedParams [][]string // per-arg: expected callback param types (nil if not callback)
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok {
+			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				goExpectedParams = make([][]string, len(c.Args))
+				for i := range c.Args {
+					goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
+				}
+			}
+		}
+	}
+
+	// Rewrite `it` keyword in args + adapt callback signatures
 	var argStrs []string
-	for _, arg := range c.Args {
+	for i, arg := range c.Args {
 		if containsIt(arg) {
 			argStrs = append(argStrs, g.formatExprIt(arg))
+		} else if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
+			// This arg is a function reference being passed to a Go function that expects
+			// a specific callback signature. Emit an adapter wrapper if needed.
+			argStrs = append(argStrs, g.adaptCallback(ident.Name, goExpectedParams[i]))
 		} else {
 			argStrs = append(argStrs, g.formatExpr(arg))
 		}
@@ -2198,6 +2215,90 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	}
 
 	return fmt.Sprintf("%s(%s)", callee, args)
+}
+
+// adaptCallback generates an adapter for a Zinc function being passed to a Go
+// function that expects a specific callback signature. If the Zinc function's
+// param types don't match (e.g., Go expects *http.Request but Zinc has http.Request),
+// emit a wrapper that converts. If types match, just pass the function directly.
+func (g *Generator) adaptCallback(funcName string, goExpectedTypes []string) string {
+	// Look up the Zinc function's params
+	zincParams, ok := g.funcSigs[funcName]
+	if !ok || len(zincParams) != len(goExpectedTypes) {
+		return funcName // can't adapt, pass as-is
+	}
+
+	// Check if any param types differ (need adaptation)
+	needsAdapter := false
+	for i, expected := range goExpectedTypes {
+		zincType := "interface{}"
+		if zincParams[i].Type != nil {
+			zincType = g.formatType(zincParams[i].Type)
+		}
+		// Normalize: strip package paths for comparison
+		// Go gives us "net/http.ResponseWriter" but we have "http.ResponseWriter"
+		normalizedExpected := expected
+		if idx := strings.LastIndex(expected, "/"); idx >= 0 {
+			// "*net/http.Request" → "*http.Request"
+			prefix := ""
+			if strings.HasPrefix(expected, "*") {
+				prefix = "*"
+				expected = expected[1:]
+			}
+			if idx := strings.LastIndex(expected, "/"); idx >= 0 {
+				normalizedExpected = prefix + expected[idx+1:]
+			}
+		}
+		if normalizedExpected != zincType {
+			needsAdapter = true
+			break
+		}
+	}
+
+	if !needsAdapter {
+		return funcName
+	}
+
+	// Generate adapter: func(goParam1, goParam2) { funcName(adapted1, adapted2) }
+	var adapterParams []string
+	var callArgs []string
+	for i, expected := range goExpectedTypes {
+		paramName := fmt.Sprintf("_p%d", i)
+		// Normalize expected type for Go code
+		goType := expected
+		isPointer := strings.HasPrefix(goType, "*")
+		if idx := strings.LastIndex(goType, "/"); idx >= 0 {
+			prefix := ""
+			rest := goType
+			if strings.HasPrefix(goType, "*") {
+				prefix = "*"
+				rest = goType[1:]
+			}
+			if idx := strings.LastIndex(rest, "/"); idx >= 0 {
+				goType = prefix + rest[idx+1:]
+			}
+		}
+		adapterParams = append(adapterParams, paramName+" "+goType)
+
+		// Check if Zinc function expects value but Go passes pointer → deref
+		zincType := "interface{}"
+		if i < len(zincParams) && zincParams[i].Type != nil {
+			zincType = g.formatType(zincParams[i].Type)
+		}
+		zincIsPointer := strings.HasPrefix(zincType, "*")
+		if isPointer && !zincIsPointer {
+			callArgs = append(callArgs, "*"+paramName) // deref pointer for Zinc function
+		} else if !isPointer && zincIsPointer {
+			callArgs = append(callArgs, "&"+paramName) // take address for Zinc function
+		} else {
+			callArgs = append(callArgs, paramName)
+		}
+	}
+
+	return fmt.Sprintf("func(%s) { %s(%s) }",
+		strings.Join(adapterParams, ", "),
+		funcName,
+		strings.Join(callArgs, ", "))
 }
 
 // fillDefaultArgs fills in missing positional args with defaults from funcSigs.
@@ -3120,16 +3221,6 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		// Smart import resolution: Mutex → sync.Mutex if imported via `import sync.Mutex`
 		if qualified, ok := g.typeImports[typ.Name]; ok {
 			return qualified
-		}
-		// Auto pointer inference for Go struct types: http.Request → *http.Request
-		// Interfaces (http.ResponseWriter) stay as-is.
-		if strings.Contains(typ.Name, ".") {
-			parts := strings.SplitN(typ.Name, ".", 2)
-			if pkgPath, ok := g.importMap[parts[0]]; ok {
-				if g.goResolver != nil && g.goResolver.IsStruct(pkgPath, parts[1]) {
-					return "*" + typ.Name
-				}
-			}
 		}
 		return typ.Name
 	case *parser.GenericType:
