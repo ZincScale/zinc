@@ -21,8 +21,9 @@ type Generator struct {
 	currentParams  map[string]bool // parameter names (shadow field names)
 
 	// Error handling
-	errorFuncs        map[string]bool       // functions that can return errors
-	currentReturnType string                // return type of current function (for zero values)
+	errorFuncs            map[string]bool   // functions that can return errors
+	currentReturnType     string            // return type of current function (for zero values)
+	currentReturnOptional bool              // true if current function returns T? (pointer type)
 
 	// Default parameters
 	funcSigs map[string][]*parser.ParamDecl // function name → param list
@@ -36,6 +37,9 @@ type Generator struct {
 
 	// Variable type tracking (for typed slices and stream operations)
 	varTypes map[string]string // variable name → element type (e.g. "int", "string")
+	ptrVars            map[string]bool // variables that are pointers (*T from T? returns)
+	funcReturnsOptional map[string]bool // functions that return T? (optional)
+	renamedVars         map[string]string // original name → safe name (for builtin shadows)
 	// Variable struct type tracking (for getter rewriting)
 	varStructTypes map[string]string // variable name → struct type name
 	// Data class tracking (for implicit constructor calls)
@@ -51,6 +55,9 @@ func New() *Generator {
 		errorFuncs:     make(map[string]bool),
 		funcSigs:       make(map[string][]*parser.ParamDecl),
 		varTypes:       make(map[string]string),
+		ptrVars:            make(map[string]bool),
+		funcReturnsOptional: make(map[string]bool),
+		renamedVars:         make(map[string]string),
 		varStructTypes: make(map[string]string),
 		dataClasses:    make(map[string]bool),
 	}
@@ -108,6 +115,9 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			g.funcSigs[decl.Name] = decl.Params
 			if canReturnError(decl.Body) {
 				g.errorFuncs[decl.Name] = true
+			}
+			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
+				g.funcReturnsOptional[decl.Name] = true
 			}
 		}
 	}
@@ -368,8 +378,14 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	// Save/restore state for function scope
 	prevRetType := g.currentReturnType
+	prevRetOpt := g.currentReturnOptional
 	prevErrCount := g.errVarCount
 	if canError {
+		g.currentReturnType = goRetType
+	}
+	_, isOptional := fn.ReturnType.(*parser.OptionalType)
+	g.currentReturnOptional = isOptional
+	if isOptional && !canError {
 		g.currentReturnType = goRetType
 	}
 	g.errVarCount = 0
@@ -383,6 +399,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.writeln("}")
 
 	g.currentReturnType = prevRetType
+	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
 }
 
@@ -958,13 +975,38 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
-		g.writeln("%s := %s", v.Name, g.formatExpr(v.Value))
+		// Track pointer vars: variables assigned from T?-returning functions or safe nav
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				if g.funcReturnsOptional[ident.Name] {
+					g.ptrVars[v.Name] = true
+				}
+			}
+		}
+		// Safe navigation results are also pointers
+		if _, ok := v.Value.(*parser.SafeNavExpr); ok {
+			g.ptrVars[v.Name] = true
+		}
+
+		varName := v.Name
+		if goBuiltins[varName] {
+			safe := "_" + varName
+			g.renamedVars[varName] = safe
+			varName = safe
+		}
+		g.writeln("%s := %s", varName, g.formatExpr(v.Value))
 	} else {
 		typeName := "interface{}"
 		if v.Type != nil {
 			typeName = g.formatType(v.Type)
 		}
-		g.writeln("var %s %s", v.Name, typeName)
+		varName := v.Name
+		if goBuiltins[varName] {
+			safe := "_" + varName
+			g.renamedVars[varName] = safe
+			varName = safe
+		}
+		g.writeln("var %s %s", varName, typeName)
 	}
 }
 
@@ -1049,6 +1091,19 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 			}
 			return
 		}
+	}
+
+	// Optional return: wrap value with new() for pointer type (Go 1.26)
+	if g.currentReturnOptional {
+		// return null → return nil
+		if _, ok := r.Value.(*parser.NullLit); ok {
+			g.writeln("return nil")
+			return
+		}
+		// return value → return new(value) to create *T from T
+		val := g.formatExpr(r.Value)
+		g.writeln("return new(%s)", val)
+		return
 	}
 
 	// Normal return in an error-returning function → return val, nil
@@ -1394,6 +1449,12 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] {
 			return "s." + exportName(expr.Name)
 		}
+		// Rename vars that shadow Go builtins (tracked at declaration)
+		if g.renamedVars != nil {
+			if renamed, ok := g.renamedVars[expr.Name]; ok {
+				return renamed
+			}
+		}
 		return expr.Name
 	case *parser.IntLit:
 		return expr.Value
@@ -1471,17 +1532,39 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
 	case *parser.TypeAssertExpr:
+		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		if expr.IsCheck {
-			return fmt.Sprintf("func() bool { _, ok := %s.(%s); return ok }()", g.formatExpr(expr.Object), expr.TypeName)
+			obj := g.formatExpr(expr.Object)
+			// For interface types, use type assertion; for concrete types, use reflect
+			// Simple approach: try type assertion, fall back to reflect
+			g.needImport("reflect")
+			return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", obj, goType, obj, goType)
 		}
-		return fmt.Sprintf("%s.(%s)", g.formatExpr(expr.Object), expr.TypeName)
+		return fmt.Sprintf("%s.(%s)", g.formatExpr(expr.Object), goType)
 	case *parser.SafeNavExpr:
 		obj := g.formatExpr(expr.Object)
+		deref := "*" + obj // dereference pointer for method calls
 		if expr.Call != nil {
 			args := g.formatExprList(expr.Call.Args)
-			return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s(%s) }; return nil }()", obj, obj, exportName(expr.Field), args)
+			// Handle string methods on *string
+			field := expr.Field
+			if field == "length" {
+				return fmt.Sprintf("func() *int { if %s == nil { return nil }; _v := len(%s); return new(_v) }()", obj, deref)
+			}
+			// Check string method mapping
+			if goFunc, ok := stringMethodMapping[field]; ok {
+				g.needImport("strings")
+				if args != "" {
+					return fmt.Sprintf("func() *string { if %s == nil { return nil }; _v := %s(%s, %s); return new(_v) }()", obj, goFunc, deref, args)
+				}
+				return fmt.Sprintf("func() *string { if %s == nil { return nil }; _v := %s(%s); return new(_v) }()", obj, goFunc, deref)
+			}
+			return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s(%s) }; return nil }()", obj, deref, exportName(field), args)
 		}
-		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s }; return nil }()", obj, obj, exportName(expr.Field))
+		if expr.Field == "length" {
+			return fmt.Sprintf("func() *int { if %s == nil { return nil }; _v := len(%s); return new(_v) }()", obj, deref)
+		}
+		return fmt.Sprintf("func() interface{} { if %s != nil { return %s.%s }; return nil }()", obj, deref, exportName(expr.Field))
 	case *parser.TupleLit:
 		// Go doesn't have tuples — use a struct or slice
 		return fmt.Sprintf("[]interface{}{%s}", g.formatExprList(expr.Elements))
@@ -1534,9 +1617,11 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "not in":
 		return "!" + g.formatInExpr(b.Left, b.Right, left, right)
 	case "is":
-		return fmt.Sprintf("func() bool { _, ok := %s.(%s); return ok }()", left, right)
+		g.needImport("reflect")
+		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, right, left, right)
 	case "is not":
-		return fmt.Sprintf("func() bool { _, ok := %s.(%s); return !ok }()", left, right)
+		g.needImport("reflect")
+		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, right, left, right)
 	default:
 		return fmt.Sprintf("%s %s %s", left, b.Op, right)
 	}
@@ -2208,7 +2293,16 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 			fmtStr.WriteString(escaped)
 		default:
 			fmtStr.WriteString("%v")
-			args = append(args, g.formatExpr(part))
+			expr := g.formatExpr(part)
+			// Deref pointer vars for clean printing
+			isPtr := false
+			if ident, ok := part.(*parser.Ident); ok {
+				isPtr = g.ptrVars[ident.Name]
+			}
+			if isPtr {
+				expr = fmt.Sprintf("func() interface{} { if %s != nil { return *%s }; return \"null\" }()", expr, expr)
+			}
+			args = append(args, expr)
 		}
 	}
 	if len(args) == 0 {
@@ -2519,4 +2613,20 @@ func exportName(name string) string {
 		return name
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// goBuiltins are Go builtin names that can't be used as variable names.
+var goBuiltins = map[string]bool{
+	"len": true, "cap": true, "make": true, "new": true, "append": true,
+	"copy": true, "delete": true, "close": true, "panic": true, "recover": true,
+	"complex": true, "real": true, "imag": true,
+	"min": true, "max": true, "clear": true,
+}
+
+// safeVarName returns a variable name that doesn't shadow Go builtins.
+func safeVarName(name string) string {
+	if goBuiltins[name] {
+		return "_" + name
+	}
+	return name
 }
