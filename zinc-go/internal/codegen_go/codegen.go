@@ -502,9 +502,13 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	params := g.formatParams(ctor.Params)
 	g.writeln("func New%s(%s) *%s {", typeName, params, typeName)
 	g.indent++
-	g.writeln("s := &%s{}", typeName)
 
-	// super() call — embed parent struct
+	// Extract field assignments from ctor body: this.field = value → Field: value
+	// and separate remaining statements
+	var litFields []string
+	var remainingStmts []parser.Stmt
+
+	// Handle super() → embedded parent in struct literal
 	if len(ctor.SuperArgs) > 0 {
 		parentType := ""
 		for _, p := range cls.Parents {
@@ -515,17 +519,68 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		}
 		if parentType != "" {
 			args := g.formatExprList(ctor.SuperArgs)
-			g.writeln("s.%s = *New%s(%s)", parentType, parentType, args)
+			litFields = append(litFields, fmt.Sprintf("%s: *New%s(%s)", parentType, parentType, args))
 		}
 	}
 
 	if ctor.Body != nil {
 		for _, stmt := range ctor.Body.Stmts {
-			g.emitStmt(stmt)
+			if assign, ok := stmt.(*parser.AssignStmt); ok && assign.Op == "=" {
+				// this.field = value → Field: value in literal
+				if sel, ok := assign.Target.(*parser.SelectorExpr); ok {
+					if _, isThis := sel.Object.(*parser.ThisExpr); isThis {
+						litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(sel.Field), g.formatExpr(assign.Value)))
+						continue
+					}
+					if ident, isIdent := sel.Object.(*parser.Ident); isIdent && ident.Name == "this" {
+						litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(sel.Field), g.formatExpr(assign.Value)))
+						continue
+					}
+				}
+			}
+			// Skip super() call expression (handled above)
+			if es, ok := stmt.(*parser.ExprStmt); ok {
+				if _, isSuper := es.Expr.(*parser.SuperCallExpr); isSuper {
+					continue
+				}
+			}
+			remainingStmts = append(remainingStmts, stmt)
 		}
 	}
 
-	g.writeln("return s")
+	// Emit struct literal
+	if len(litFields) > 0 {
+		if len(remainingStmts) == 0 {
+			// Pure literal return — clean one-liner or multi-line
+			if len(litFields) <= 3 {
+				g.writeln("return &%s{%s}", typeName, strings.Join(litFields, ", "))
+			} else {
+				g.writeln("return &%s{", typeName)
+				g.indent++
+				for _, f := range litFields {
+					g.writeln("%s,", f)
+				}
+				g.indent--
+				g.writeln("}")
+			}
+		} else {
+			// Literal + extra logic
+			g.writeln("s := &%s{%s}", typeName, strings.Join(litFields, ", "))
+			for _, stmt := range remainingStmts {
+				g.emitStmt(stmt)
+			}
+			g.writeln("return s")
+		}
+	} else if len(remainingStmts) > 0 {
+		g.writeln("s := &%s{}", typeName)
+		for _, stmt := range remainingStmts {
+			g.emitStmt(stmt)
+		}
+		g.writeln("return s")
+	} else {
+		g.writeln("return &%s{}", typeName)
+	}
+
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
@@ -781,7 +836,17 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitExprStmt(stmt)
 	case *parser.PrintStmt:
 		g.needImport("fmt")
-		g.writeln("fmt.Println(%s)", g.formatExpr(stmt.Value))
+		// Unwrap: print("msg {x}") → fmt.Printf("msg %v\n", x) instead of fmt.Println(fmt.Sprintf(...))
+		if interp, ok := stmt.Value.(*parser.StringInterpLit); ok {
+			fmtStr, args := g.formatPrintf(interp)
+			if len(args) > 0 {
+				g.writeln("fmt.Printf(%q, %s)", fmtStr+"\n", strings.Join(args, ", "))
+			} else {
+				g.writeln("fmt.Println(%q)", fmtStr)
+			}
+		} else {
+			g.writeln("fmt.Println(%s)", g.formatExpr(stmt.Value))
+		}
 	case *parser.BreakStmt:
 		g.writeln("break")
 	case *parser.ContinueStmt:
@@ -1221,9 +1286,23 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 
 func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 	if es.OrHandler != nil {
-		// expr or { handler } → if _, err := expr; err != nil { handler }
 		g.emitOrAssignment("_", es.Expr, es.OrHandler)
 		return
+	}
+	// print("msg {x}") → fmt.Printf("msg %v\n", x)
+	if call, ok := es.Expr.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "print" && len(call.Args) == 1 {
+			if interp, ok := call.Args[0].(*parser.StringInterpLit); ok {
+				g.needImport("fmt")
+				fmtStr, args := g.formatPrintf(interp)
+				if len(args) > 0 {
+					g.writeln("fmt.Printf(%q, %s)", fmtStr+"\n", strings.Join(args, ", "))
+				} else {
+					g.writeln("fmt.Println(%q)", fmtStr)
+				}
+				return
+			}
+		}
 	}
 	// .add() → x = append(x, elem)
 	if call, ok := es.Expr.(*parser.CallExpr); ok {
@@ -1617,11 +1696,14 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "not in":
 		return "!" + g.formatInExpr(b.Left, b.Right, left, right)
 	case "is":
+		// Map Zinc type name to Go reflect name
+		goType := g.formatType(&parser.SimpleType{Name: right})
 		g.needImport("reflect")
-		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, right, left, right)
+		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	case "is not":
+		goType := g.formatType(&parser.SimpleType{Name: right})
 		g.needImport("reflect")
-		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, right, left, right)
+		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	default:
 		return fmt.Sprintf("%s %s %s", left, b.Op, right)
 	}
@@ -2309,6 +2391,31 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 		return fmt.Sprintf("%q", fmtStr.String())
 	}
 	return fmt.Sprintf("fmt.Sprintf(%q, %s)", fmtStr.String(), strings.Join(args, ", "))
+}
+
+// formatPrintf returns the format string and args separately for use in fmt.Printf.
+func (g *Generator) formatPrintf(s *parser.StringInterpLit) (string, []string) {
+	var fmtStr strings.Builder
+	var args []string
+	for _, p := range s.Parts {
+		switch part := p.(type) {
+		case *parser.StringLit:
+			escaped := strings.ReplaceAll(part.Value, "%", "%%")
+			fmtStr.WriteString(escaped)
+		default:
+			fmtStr.WriteString("%v")
+			expr := g.formatExpr(part)
+			isPtr := false
+			if ident, ok := part.(*parser.Ident); ok {
+				isPtr = g.ptrVars[ident.Name]
+			}
+			if isPtr {
+				expr = fmt.Sprintf("func() interface{} { if %s != nil { return *%s }; return \"null\" }()", expr, expr)
+			}
+			args = append(args, expr)
+		}
+	}
+	return fmtStr.String(), args
 }
 
 func (g *Generator) formatMatchExpr(m *parser.MatchExpr) string {
