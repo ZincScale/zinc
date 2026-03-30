@@ -1,0 +1,63 @@
+// KV Store — a real app combining all features
+// Tests: classes, error handling, function types, imports, maps
+
+import strings
+
+// Error-returning lookup
+fn mustGet(Map<String, String> data, String key): String {
+    var val = data[key]
+    if val == "" {
+        return Error("key not found: {key}")
+    }
+    return val
+}
+
+fn main() {
+    // Build a store
+    Map<String, String> store = {}
+    store["user:1"] = "Alice"
+    store["user:2"] = "Bob"
+    store["user:3"] = "Charlie"
+    store["config:timeout"] = "30"
+    store["config:retries"] = "3"
+    print("size: {len(store)}")
+
+    // Get
+    print("user:1 = {store["user:1"]}")
+
+    // Error handling with or
+    var val = mustGet(store, "user:1") or "not found"
+    print("mustGet user:1: {val}")
+
+    var missing = mustGet(store, "user:999") or "not found"
+    print("mustGet user:999: {missing}")
+
+    // Collect keys and filter
+    var userCount = 0
+    var configCount = 0
+    for k in store {
+        if strings.HasPrefix(k, "user:") {
+            userCount = userCount + 1
+        }
+        if strings.HasPrefix(k, "config:") {
+            configCount = configCount + 1
+        }
+    }
+    print("user keys: {userCount}")
+    print("config keys: {configCount}")
+
+    // Delete
+    delete(store, "user:3")
+    print("after delete size: {len(store)}")
+
+    // List all users
+    List<String> users = []
+    for k, v in store {
+        if strings.HasPrefix(k, "user:") {
+            users = append(users, v)
+        }
+    }
+    print("users: {users}")
+
+    print("KV Store OK")
+}

@@ -1035,6 +1035,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 			if mapLit, ok := v.Value.(*parser.MapLit); ok {
 				goType := g.formatType(genType)
+				g.varTypes[v.Name] = goType // track as map type for iteration
 				var pairs []string
 				for i := range mapLit.Keys {
 					pairs = append(pairs, fmt.Sprintf("%s: %s", g.formatExpr(mapLit.Keys[i]), g.formatExpr(mapLit.Values[i])))
@@ -1250,15 +1251,16 @@ func (g *Generator) emitForStmt(f *parser.ForStmt) {
 			g.writeln("for %s := %s; %s %s %s; %s++ {", f.Item, start, f.Item, op, end, f.Item)
 		} else if f.IndexVar != "" {
 			// for key, value in map → for key, value := range map
-			// Strip .entrySet() if present
 			rangeExpr := g.stripEntrySet(f.Range)
 			g.writeln("for %s, %s := range %s {", f.IndexVar, f.Item, rangeExpr)
 		} else {
 			// for item in list → for _, item := range list
-			// Check if range is .entrySet() — single-var iteration over a map
+			// for item in map → for item := range map (keys only)
 			if g.isEntrySetCall(f.Range) {
 				mapExpr := g.stripEntrySet(f.Range)
-				g.writeln("for %s, _ := range %s {", f.Item, mapExpr)
+				g.writeln("for %s := range %s {", f.Item, mapExpr)
+			} else if g.isMapVar(f.Range) {
+				g.writeln("for %s := range %s {", f.Item, g.formatExpr(f.Range))
 			} else {
 				g.writeln("for _, %s := range %s {", f.Item, g.formatExpr(f.Range))
 			}
@@ -1289,6 +1291,20 @@ func (g *Generator) emitForStmt(f *parser.ForStmt) {
 func (g *Generator) isEntrySetCall(e parser.Expr) bool {
 	if call, ok := e.(*parser.CallExpr); ok {
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "entrySet" {
+			return true
+		}
+	}
+	return false
+}
+
+// isMapVar checks if the range expression is a variable declared as a Map type.
+func (g *Generator) isMapVar(e parser.Expr) bool {
+	if ident, ok := e.(*parser.Ident); ok {
+		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "map[") {
+			return true
+		}
+		// Also check if it was declared with a Map<K,V> generic type (tracked as "map" prefix)
+		if t, ok := g.varTypes[ident.Name]; ok && t == "map" {
 			return true
 		}
 	}

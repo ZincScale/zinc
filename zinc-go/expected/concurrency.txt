@@ -1,5 +1,5 @@
-Concurrency OK
+spawn: done
+parallel: 30
 parallel: 10
 parallel: 20
-parallel: 30
-spawn: done
+Concurrency OK
