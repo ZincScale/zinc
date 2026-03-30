@@ -450,6 +450,15 @@ func (p *Parser) isLambdaStart() bool {
 				return true
 			}
 		} else {
+			// Check if it's a lowercase builtin type: (int x) -> ...
+			switch ahead1.Literal {
+			case "int", "long", "double", "float", "boolean", "bool", "byte", "char", "string", "void":
+				// Lowercase type name followed by param name
+				ahead2 := p.peekAt(2)
+				if ahead2.Type == lexer.TOKEN_IDENT {
+					return true // (int x) -> ...
+				}
+			}
 			// lowercase ident — untyped param
 			ahead2 := p.peekAt(2)
 			if ahead2.Type == lexer.TOKEN_COMMA {
@@ -492,8 +501,24 @@ func (p *Parser) parseLambda() *LambdaExpr {
 //   - name           (untyped shorthand — type inferred from context)
 func (p *Parser) parseLambdaParam() *ParamDecl {
 	tok := p.peek()
-	// If current token is uppercase, it's a typed param (type-before-name)
-	if tok.Type == lexer.TOKEN_IDENT && len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
+	// Typed param: Type name — detect by checking if next-next token is also an ident
+	// This handles both uppercase (String x) and lowercase (int x) types
+	isTyped := false
+	if tok.Type == lexer.TOKEN_IDENT {
+		// Uppercase type name (String, List, Map, etc.)
+		if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
+			isTyped = true
+		}
+		// Lowercase builtin types followed by an ident name
+		next := p.peekAt(1)
+		if next.Type == lexer.TOKEN_IDENT || next.Type == lexer.TOKEN_DOTDOTDOT {
+			switch tok.Literal {
+			case "int", "long", "double", "float", "boolean", "bool", "byte", "char", "string", "void":
+				isTyped = true
+			}
+		}
+	}
+	if isTyped {
 		typ := p.parseType()
 		variadic := false
 		if p.check(lexer.TOKEN_DOTDOTDOT) {

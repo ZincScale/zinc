@@ -1437,8 +1437,28 @@ func (p *Parser) v2ParseType() TypeExpr {
 
 	var typ TypeExpr
 
-	// Angle-bracket generics: List<int>, Map<String, int>
-	if p.check(lexer.TOKEN_LT) {
+	// Function type: Fn<(ParamTypes), ReturnType> or Fn<(ParamTypes)>
+	if name == "Fn" && p.check(lexer.TOKEN_LT) {
+		p.advance() // consume <
+		p.expect(lexer.TOKEN_LPAREN)
+		var params []TypeExpr
+		if !p.check(lexer.TOKEN_RPAREN) {
+			params = append(params, p.v2ParseType())
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				params = append(params, p.v2ParseType())
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+		var retType TypeExpr
+		if p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			retType = p.v2ParseType()
+		}
+		p.expect(lexer.TOKEN_GT)
+		typ = &FuncTypeExpr{Params: params, ReturnType: retType}
+	} else if p.check(lexer.TOKEN_LT) {
+		// Angle-bracket generics: List<int>, Map<String, int>
 		p.advance() // consume <
 		var args []TypeExpr
 		args = append(args, p.v2ParseType())
@@ -1963,18 +1983,26 @@ func (p *Parser) v2ParseParenOrLambda() Expr {
 }
 
 // v2LooksLikeLambdaParams checks if ( starts lambda params.
+// Handles both untyped: (a, b) -> and typed: (int a, String b) ->
 func (p *Parser) v2LooksLikeLambdaParams() bool {
-	// Quick check: ( ident ) ->  or  ( ident , ... ) ->
 	off := 1
 	for {
-		if p.peekAt(off).Type != lexer.TOKEN_IDENT {
+		tok := p.peekAt(off)
+		if tok.Type != lexer.TOKEN_IDENT {
 			return false
 		}
 		off++
-		if p.peekAt(off).Type == lexer.TOKEN_RPAREN {
+		next := p.peekAt(off)
+		// Typed param: Type name — the next token is another ident (the name)
+		if next.Type == lexer.TOKEN_IDENT {
+			off++ // skip the name
+			next = p.peekAt(off)
+		}
+		// After param (typed or untyped), expect ) or ,
+		if next.Type == lexer.TOKEN_RPAREN {
 			return p.peekAt(off+1).Type == lexer.TOKEN_ARROW
 		}
-		if p.peekAt(off).Type == lexer.TOKEN_COMMA {
+		if next.Type == lexer.TOKEN_COMMA {
 			off++
 			continue
 		}
@@ -1986,10 +2014,10 @@ func (p *Parser) v2LooksLikeLambdaParams() bool {
 func (p *Parser) v2ParseMultiParamLambda() Expr {
 	p.advance() // consume (
 	var params []*ParamDecl
-	params = append(params, &ParamDecl{Name: p.expect(lexer.TOKEN_IDENT).Literal})
+	params = append(params, p.parseLambdaParam())
 	for p.check(lexer.TOKEN_COMMA) {
 		p.advance()
-		params = append(params, &ParamDecl{Name: p.expect(lexer.TOKEN_IDENT).Literal})
+		params = append(params, p.parseLambdaParam())
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_ARROW)

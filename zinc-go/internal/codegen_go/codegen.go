@@ -2347,20 +2347,125 @@ func (g *Generator) replaceIdent(e parser.Expr, oldName, newName string) string 
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 	var params []string
+	var firstParamType string
+	allTyped := true
 	for _, p := range l.Params {
 		typeName := "interface{}"
 		if p.Type != nil {
 			typeName = g.formatType(p.Type)
+			if firstParamType == "" {
+				firstParamType = typeName
+			}
+		} else {
+			allTyped = false
 		}
 		params = append(params, p.Name+" "+typeName)
 	}
 	paramStr := strings.Join(params, ", ")
 
 	if l.Expr != nil {
-		return fmt.Sprintf("func(%s) interface{} { return %s }", paramStr, g.formatExpr(l.Expr))
+		// Infer return type
+		retType := "interface{}"
+		if l.ReturnType != nil {
+			retType = g.formatType(l.ReturnType)
+		} else if allTyped && firstParamType != "" {
+			// Infer from expression: if it's arithmetic on typed params, return same type
+			retType = g.inferLambdaReturnType(l.Expr, l.Params)
+		}
+
+		// Void lambda (expression is a print/void call)
+		if g.isVoidExpr(l.Expr) {
+			return fmt.Sprintf("func(%s) { %s }", paramStr, g.formatExpr(l.Expr))
+		}
+
+		return fmt.Sprintf("func(%s) %s { return %s }", paramStr, retType, g.formatExpr(l.Expr))
 	}
 	// Block lambda
-	return fmt.Sprintf("func(%s) { /* block lambda */ }", paramStr)
+	if l.Body != nil && len(l.Body.Stmts) > 0 {
+		var stmts []string
+		for _, s := range l.Body.Stmts {
+			stmts = append(stmts, g.formatStmtInline(s))
+		}
+		return fmt.Sprintf("func(%s) { %s }", paramStr, strings.Join(stmts, "; "))
+	}
+	return fmt.Sprintf("func(%s) {}", paramStr)
+}
+
+// inferLambdaReturnType infers the return type of a lambda from its expression and param types.
+func (g *Generator) inferLambdaReturnType(expr parser.Expr, params []*parser.ParamDecl) string {
+	paramTypes := map[string]string{}
+	for _, p := range params {
+		if p.Type != nil {
+			paramTypes[p.Name] = g.formatType(p.Type)
+		}
+	}
+
+	return g.inferExprType(expr, paramTypes)
+}
+
+// inferExprType infers the Go type of an expression given known variable types.
+func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) string {
+	switch e := expr.(type) {
+	case *parser.IntLit:
+		return "int"
+	case *parser.FloatLit:
+		return "float64"
+	case *parser.StringLit, *parser.StringInterpLit:
+		return "string"
+	case *parser.BoolLit:
+		return "bool"
+	case *parser.Ident:
+		if t, ok := known[e.Name]; ok {
+			return t
+		}
+	case *parser.BinaryExpr:
+		lt := g.inferExprType(e.Left, known)
+		rt := g.inferExprType(e.Right, known)
+		// Arithmetic/comparison on same numeric types
+		if lt == rt && lt != "" {
+			switch e.Op {
+			case "+", "-", "*", "/", "%":
+				return lt
+			case ">", "<", ">=", "<=", "==", "!=":
+				return "bool"
+			}
+		}
+		if lt == "int" || rt == "int" {
+			switch e.Op {
+			case "+", "-", "*", "/", "%":
+				return "int"
+			}
+		}
+		if lt == "string" || rt == "string" {
+			if e.Op == "+" {
+				return "string"
+			}
+		}
+	case *parser.CallExpr:
+		// print returns void; len returns int
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			switch ident.Name {
+			case "len":
+				return "int"
+			case "str":
+				return "string"
+			}
+		}
+	}
+	return "interface{}"
+}
+
+// isVoidExpr checks if an expression is a void call (print, etc.)
+func (g *Generator) isVoidExpr(expr parser.Expr) bool {
+	if call, ok := expr.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok {
+			switch ident.Name {
+			case "print", "println":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
