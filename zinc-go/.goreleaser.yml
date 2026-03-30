@@ -1,0 +1,41 @@
+version: 2
+
+before:
+  hooks:
+    - bash run_e2e.sh
+
+builds:
+  - main: ./cmd/zinc/
+    binary: zinc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "zinc_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  use: git
+  sort: asc
+
+release:
+  github:
+    owner: ZincScale
+    name: zinc
+  draft: false
+  prerelease: auto

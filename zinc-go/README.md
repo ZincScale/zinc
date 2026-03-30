@@ -1,99 +1,131 @@
 # zinc-go — Zinc to Go transpiler
 
-Zinc syntax → clean, readable Go output.
+Zinc syntax → clean, readable Go output. OO-friendly language that compiles to native Go binaries.
 
-## Status
-
-**Working:**
-- Functions with typed params and return types
-- String interpolation → `fmt.Sprintf`
-- Control flow: if/else if/else, for-range, while, match/switch, break/continue
-- Arrays with typed declarations
-- Structs (classes) with constructors, methods, implicit self
-- Data classes (records) with auto-generated String()
-- Sealed types → interface + variant structs
-- Interfaces
-- Enums → iota
-- Concurrency: `spawn` → goroutine, `parallel for` → WaitGroup
-- String methods → `strings.*` stdlib
-- Source maps via `//line` directives — Go errors point to .zn files
-- `new Type()` → `NewType()`
-
-**Known issues (to fix):**
-- **Function types**: `Fn<(Params), Return>` → `func(params) return` — parsed but needs testing
-- **Default parameters**: Go doesn't have them — needs variadic/builder pattern
-- **Error handling**: `return Error()` / `or` handler → needs `(T, error)` multi-return
-- **Stream operations**: `.filter()`, `.map()` on slices — needs Go generics or codegen helpers
-- **Nullable types**: `String?` → `*string` pointer semantics
-- **Inherited method calls**: cross-struct method resolution
-- **Collection methods**: `.add()`, `.put()` work as statements, but chained operations don't yet
-
-## Usage
+## Install
 
 ```bash
-# Build the compiler
-cd zinc-go
-go build -o zinc ./cmd/zinc/
-
-# Transpile and run
-./zinc run examples/hello.zn
-
-# Transpile to .go files
-./zinc build examples/hello.zn -o output/
-
-# Run directly
-./zinc examples/hello.zn
+curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-go/install.sh | bash
 ```
 
-## Example
+Or build from source:
+```bash
+cd zinc-go && make build && sudo make install
+```
 
-**hello.zn:**
+## Quick Start
+
+```bash
+# Create a project
+zinc init myapp
+cd myapp
+
+# Run it
+zinc run
+
+# Build a native binary
+zinc build
+./zinc-out/myapp
+
+# Cross-compile
+zinc build --cross linux/arm64
+```
+
+## Language Features
+
 ```zinc
-fn greet(String name): String {
-    return "Hello, {name}!"
+// Classes with inheritance
+class Server {
+    pub String host
+    pub int port
+
+    init(String host, int port = 8080) {
+        this.host = host
+        this.port = port
+    }
+
+    pub fn address(): String {
+        return "{host}:{port}"
+    }
 }
 
-fn main() {
-    print(greet("World"))
+// Error handling — no if err != nil
+fn divide(int a, int b): int {
+    if b == 0 { return Error("division by zero") }
+    return a / b
 }
+var result = divide(10, 0) or -1
+
+// Streams with loop fusion
+var total = numbers.filter(it > 5).map(it * 10).sum()
+
+// Function types
+type Handler = Fn<(String), String>
+fn middleware(Handler next): Handler { ... }
+
+// Nullable with safe navigation
+fn find(String id): String? { ... }
+var len = find("1")?.length()
+
+// Concurrency
+spawn { doWork() }
+parallel for item in items { process(item) }
 ```
 
-**Output (hello.go):**
-```go
-package main
+## CLI
 
-import "fmt"
+| Command | Description |
+|---------|-------------|
+| `zinc init <name>` | Create a new Zinc project |
+| `zinc build [dir] [-o outdir]` | Transpile and compile to native binary |
+| `zinc build --cross os/arch` | Cross-compile (linux/amd64, darwin/arm64, etc.) |
+| `zinc run [file\|dir] [-- args]` | Transpile and run |
+| `zinc fmt <file\|dir>` | Format Zinc source code |
+| `zinc add <module@version>` | Add a Go dependency |
+| `zinc deps` | List dependencies |
 
-func greet(name string) string {
-    return fmt.Sprintf("Hello, %v!", name)
-}
+## Project Structure
 
-func main() {
-    fmt.Println(greet("World"))
-}
+```
+myapp/
+  zinc.toml          — project config
+  src/
+    main.zn          — entry point
+  zinc-out/          — build output (generated)
+```
+
+**zinc.toml:**
+```toml
+[project]
+name = "myapp"
+version = "0.1.0"
+main = "main.zn"
+
+[go]
+version = "1.26"
+deps = []
 ```
 
 ## E2E Tests
 
 ```bash
-bash run_e2e.sh
+make test    # 18/18 passing
 ```
-
-Currently 3/12 passing (hello, arrays, control_flow). The remaining tests exercise features that need deeper Go-specific design work (error handling, generics, default params).
 
 ## Architecture
 
 ```
 zinc-go/
-  cmd/zinc/         — CLI: build, run
+  cmd/zinc/           — CLI (build, run, init, fmt, add, deps)
   internal/
-    lexer/          — tokenizer
-    parser/         — AST builder (shared with Java-era compiler)
-    typechecker/    — type inference
-    codegen_go/     — Go code generator (new)
-    errs/           — colored error output
-  examples/         — .zn test files
-  expected/         — expected outputs for e2e
+    lexer/            — tokenizer
+    parser/           — AST builder (v2 syntax: braces, fn, class)
+    typechecker/      — type inference
+    codegen_go/       — Go code generator with loop fusion
+    errs/             — colored error output
+  examples/           — 18 e2e test files
+  expected/           — expected outputs
+  install.sh          — one-command installer
+  Makefile            — build, test, cross, release
+  .goreleaser.yml     — GitHub release automation
 ```
-
-The compiler is written in Go. The lexer, parser, and AST are restored from the pre-Java-pivot codebase. The codegen is new — it replaces the Java emitter with a Go emitter.

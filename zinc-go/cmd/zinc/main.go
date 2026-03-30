@@ -13,7 +13,8 @@ import (
 	"zinc-go/internal/parser"
 )
 
-const version = "3.0.0-go"
+// version is set via ldflags: -X main.version=v1.0.0
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -43,9 +44,13 @@ func main() {
 			input = os.Args[2]
 		}
 		outDir := "zinc-out"
+		crossTarget := ""
 		for i, arg := range os.Args {
 			if arg == "-o" && i+1 < len(os.Args) {
 				outDir = os.Args[i+1]
+			}
+			if arg == "--cross" && i+1 < len(os.Args) {
+				crossTarget = os.Args[i+1] // e.g. "linux/amd64"
 			}
 		}
 		// Detect project mode: zinc.toml present
@@ -56,6 +61,13 @@ func main() {
 			}
 		} else {
 			if err := build(input, outDir, false); err != nil {
+				errs.Errorf("%s", err)
+				os.Exit(1)
+			}
+		}
+		// Cross-compile if requested
+		if crossTarget != "" {
+			if err := crossCompile(outDir, crossTarget); err != nil {
 				errs.Errorf("%s", err)
 				os.Exit(1)
 			}
@@ -162,16 +174,20 @@ func printUsage() {
 	fmt.Println("zinc - Zinc to Go transpiler")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  zinc init <name>                       Create a new Zinc project")
-	fmt.Println("  zinc build [dir] [-o outdir]           Transpile and compile to native binary")
-	fmt.Println("  zinc run [file.zn|dir] [-- args...]    Transpile and run")
-	fmt.Println("  zinc fmt <file.zn|dir>                 Format Zinc source code")
-	fmt.Println("  zinc add <module@version>              Add a Go dependency")
-	fmt.Println("  zinc deps                              List dependencies")
-	fmt.Println("  zinc <file.zn> [-- args...]            Shorthand for zinc run")
-	fmt.Println("  zinc version                           Show version")
+	fmt.Println("  zinc init <name>                         Create a new Zinc project")
+	fmt.Println("  zinc build [dir] [-o outdir] [--cross os/arch]")
+	fmt.Println("                                           Transpile and compile to native binary")
+	fmt.Println("  zinc run [file.zn|dir] [-- args...]      Transpile and run")
+	fmt.Println("  zinc fmt <file.zn|dir>                   Format Zinc source code")
+	fmt.Println("  zinc add <module@version>                Add a Go dependency")
+	fmt.Println("  zinc deps                                List dependencies")
+	fmt.Println("  zinc <file.zn> [-- args...]              Shorthand for zinc run")
+	fmt.Println("  zinc version                             Show version")
 	fmt.Println()
 	fmt.Println("Project mode: when a zinc.toml is present, build/run use the project config.")
+	fmt.Println()
+	fmt.Println("Cross-compilation targets: linux/amd64, linux/arm64, darwin/amd64,")
+	fmt.Println("  darwin/arm64, windows/amd64, windows/arm64")
 }
 
 // ---------------------------------------------------------------------------
@@ -808,5 +824,51 @@ func listDeps() error {
 	for _, d := range cfg.Deps {
 		fmt.Printf("  %s\n", d)
 	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Cross-compilation
+// ---------------------------------------------------------------------------
+
+// crossCompile builds for a target platform. Target format: "os/arch" e.g. "linux/amd64"
+func crossCompile(outDir, target string) error {
+	parts := strings.SplitN(target, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid cross target %q — use os/arch (e.g. linux/amd64)", target)
+	}
+	goos, goarch := parts[0], parts[1]
+
+	// Determine binary name
+	binName := "zinc-app"
+	tomlPath := findZincToml(".")
+	if tomlPath != "" {
+		if cfg, err := loadZincToml(tomlPath); err == nil && cfg.Name != "" {
+			binName = cfg.Name
+		}
+	}
+	if goos == "windows" {
+		binName += ".exe"
+	}
+	outBin := binName + "-" + goos + "-" + goarch
+	if goos == "windows" {
+		outBin = binName[:len(binName)-4] + "-" + goos + "-" + goarch + ".exe"
+	}
+
+	cmd := exec.Command("go", "build", "-o", outBin, ".")
+	cmd.Dir = outDir
+	cmd.Env = append(os.Environ(),
+		"GOOS="+goos,
+		"GOARCH="+goarch,
+		"CGO_ENABLED=0",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("cross-compile %s failed: %w", target, err)
+	}
+
+	absOut, _ := filepath.Abs(filepath.Join(outDir, outBin))
+	fmt.Printf("  Cross-compiled: %s (%s/%s)\n", absOut, goos, goarch)
 	return nil
 }
