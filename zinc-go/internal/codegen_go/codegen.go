@@ -24,6 +24,7 @@ type Generator struct {
 	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values)
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
+	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
 
 	// Default parameters
 	funcSigs map[string][]*parser.ParamDecl // function name → param list
@@ -38,7 +39,8 @@ type Generator struct {
 	// Variable type tracking (for typed slices and stream operations)
 	varTypes map[string]string // variable name → element type (e.g. "int", "string")
 	ptrVars            map[string]bool // variables that are pointers (*T from T? returns)
-	funcReturnsOptional map[string]bool // functions that return T? (optional)
+	funcReturnsOptional map[string]bool   // functions that return T? (optional)
+	funcReturnTypes     map[string]string // function name → Go return type string
 	renamedVars         map[string]string // original name → safe name (for builtin shadows)
 	// Variable struct type tracking (for getter rewriting)
 	varStructTypes map[string]string // variable name → struct type name
@@ -57,6 +59,7 @@ func New() *Generator {
 		varTypes:       make(map[string]string),
 		ptrVars:            make(map[string]bool),
 		funcReturnsOptional: make(map[string]bool),
+		funcReturnTypes:     make(map[string]string),
 		renamedVars:         make(map[string]string),
 		varStructTypes: make(map[string]string),
 		dataClasses:    make(map[string]bool),
@@ -118,6 +121,9 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			}
 			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
 				g.funcReturnsOptional[decl.Name] = true
+			}
+			if decl.ReturnType != nil {
+				g.funcReturnTypes[decl.Name] = g.formatType(decl.ReturnType)
 			}
 		}
 	}
@@ -389,6 +395,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		g.currentReturnType = goRetType
 	}
 	g.errVarCount = 0
+	g.currentFuncParams = fn.Params
 
 	params := g.formatParams(fn.Params)
 
@@ -2380,11 +2387,37 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 
 		return fmt.Sprintf("func(%s) %s { return %s }", paramStr, retType, g.formatExpr(l.Expr))
 	}
-	// Block lambda
+	// Block lambda — infer return type from return statements in body
 	if l.Body != nil && len(l.Body.Stmts) > 0 {
+		// Build param type map for inference (include enclosing function params)
+		paramTypes := map[string]string{}
+		for _, p := range g.currentFuncParams {
+			if p.Type != nil {
+				paramTypes[p.Name] = g.formatType(p.Type)
+			}
+		}
+		for _, p := range l.Params {
+			if p.Type != nil {
+				paramTypes[p.Name] = g.formatType(p.Type)
+			}
+		}
+
+		// Check for return statements to infer return type
+		blockRetType := ""
+		for _, s := range l.Body.Stmts {
+			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
+				blockRetType = g.inferExprType(ret.Value, paramTypes)
+				break
+			}
+		}
+
 		var stmts []string
 		for _, s := range l.Body.Stmts {
 			stmts = append(stmts, g.formatStmtInline(s))
+		}
+
+		if blockRetType != "" && blockRetType != "interface{}" {
+			return fmt.Sprintf("func(%s) %s { %s }", paramStr, blockRetType, strings.Join(stmts, "; "))
 		}
 		return fmt.Sprintf("func(%s) { %s }", paramStr, strings.Join(stmts, "; "))
 	}
@@ -2394,6 +2427,13 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 // inferLambdaReturnType infers the return type of a lambda from its expression and param types.
 func (g *Generator) inferLambdaReturnType(expr parser.Expr, params []*parser.ParamDecl) string {
 	paramTypes := map[string]string{}
+	// Include enclosing function's params (for closures like middleware)
+	for _, p := range g.currentFuncParams {
+		if p.Type != nil {
+			paramTypes[p.Name] = g.formatType(p.Type)
+		}
+	}
+	// Lambda's own params override
 	for _, p := range params {
 		if p.Type != nil {
 			paramTypes[p.Name] = g.formatType(p.Type)
@@ -2442,8 +2482,18 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 			}
 		}
 	case *parser.CallExpr:
-		// print returns void; len returns int
 		if ident, ok := e.Callee.(*parser.Ident); ok {
+			// Check known function return types
+			if rt, ok := g.funcReturnTypes[ident.Name]; ok {
+				return rt
+			}
+			// Check if callee is a param with function type
+			if t, ok := known[ident.Name]; ok && strings.HasPrefix(t, "func(") {
+				// Extract return type from "func(...) RetType"
+				if idx := strings.LastIndex(t, ") "); idx >= 0 {
+					return strings.TrimSpace(t[idx+2:])
+				}
+			}
 			switch ident.Name {
 			case "len":
 				return "int"
