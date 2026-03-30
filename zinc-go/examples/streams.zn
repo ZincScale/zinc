@@ -1,0 +1,65 @@
+// Streams — Zinc v3
+// Demonstrates: all collection stream operations, it keyword, chains
+
+var numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Filter with lambda
+var evens = numbers.filter(x -> x % 2 == 0)
+print("Evens: {evens}")
+
+// Filter with it keyword
+var big = numbers.filter(it > 5)
+print("Big: {big}")
+
+// Map with it
+var doubled = numbers.map(it * 2)
+print("Doubled: {doubled}")
+
+// Chained operations
+var total = numbers.filter(it > 5).map(it * 10).sum()
+print("Sum of >5 * 10: {total}")
+
+// Terminal operations
+var hasNine = numbers.anyMatch(it > 8)
+print("Has >8: {hasNine}")
+
+var allPositive = numbers.allMatch(it > 0)
+print("All positive: {allPositive}")
+
+var noneNegative = numbers.noneMatch(it < 0)
+print("None negative: {noneNegative}")
+
+var first = numbers.findFirst(it > 7)
+print("First >7: {first}")
+
+// Skip and limit
+var skipped = numbers.skip(7)
+print("Skip 7: {skipped}")
+
+var limited = numbers.limit(3)
+print("Limit 3: {limited}")
+
+// Distinct
+var dupes = [1, 2, 2, 3, 3, 3]
+var unique = dupes.distinct()
+print("Distinct: {unique}")
+
+// SortBy
+var words = ["banana", "apple", "cherry"]
+var sorted = words.sortBy(it.length())
+print("Sorted by length: {sorted}")
+
+// Reduce
+var sum = numbers.reduce(0, (acc, x) -> acc + x)
+print("Reduce sum: {sum}")
+
+// ForEach
+print("ForEach:")
+numbers.filter(it > 8).forEach(x -> print("  {x}"))
+
+// GroupBy
+var items = ["cat", "car", "dog", "cup"]
+var grouped = items.groupBy(it.charAt(0))
+print("Grouped by first char: {grouped}")
+
+print("Streams OK")

@@ -1,0 +1,44 @@
+// Functions — Zinc v3
+// Demonstrates: single-expr, defaults, variadic, block lambdas
+
+// Single-expression function
+fn doubled(int x): int = x * 2
+fn triple(int x): int = x * 3
+
+print("doubled(5) = {doubled(5)}")
+print("triple(5) = {triple(5)}")
+
+// Default parameters
+fn connect(String host, int port = 8080): String {
+    return "{host}:{port}"
+}
+
+print(connect("localhost", 3000))
+print(connect("localhost"))
+
+// Variadic parameters
+fn sum(int... numbers): int {
+    var total = 0
+    for n in numbers {
+        total = total + n
+    }
+    return total
+}
+
+print("sum(1,2,3) = {sum(1, 2, 3)}")
+print("sum(10,20) = {sum(10, 20)}")
+
+// Block lambdas
+var numbers = [1, 2, 3, 4, 5]
+var processed = numbers.map(x -> {
+    var doubled = x * 2
+    return doubled + 1
+})
+print("block lambda: {processed}")
+
+// Multi-param block lambda
+var pairs = [1, 2, 3]
+var result = pairs.reduce(0, (acc, x) -> acc + x * 10)
+print("reduce: {result}")
+
+print("Functions OK")
