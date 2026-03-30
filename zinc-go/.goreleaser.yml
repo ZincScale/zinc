@@ -30,8 +30,18 @@ checksum:
   name_template: 'checksums.txt'
 
 changelog:
-  use: git
   sort: asc
+  filters:
+    exclude:
+      - '^merge'
+      - '^Merge'
+  groups:
+    - title: Features
+      regexp: '^.*[Aa]dd|[Ii]mplement|[Ss]upport.*$'
+    - title: Fixes
+      regexp: '^.*[Ff]ix|[Rr]esolve|[Cc]orrect.*$'
+    - title: Other
+      order: 999
 
 release:
   github:
