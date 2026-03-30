@@ -9,16 +9,30 @@ import (
 
 // Generator produces Go source from a Zinc AST.
 type Generator struct {
-	buf           strings.Builder
-	indent        int
-	className     string // derived from filename or "main"
-	imports       map[string]bool
-	interfaces    map[string]bool
-	structs       map[string]*parser.ClassDecl
-	sourceFile    string // for //line directives
+	buf            strings.Builder
+	indent         int
+	className      string // derived from filename or "main"
+	imports        map[string]bool
+	interfaces     map[string]bool
+	structs        map[string]*parser.ClassDecl
+	sourceFile     string // for //line directives
 	currentFields  map[string]bool // field names of current class (for implicit self)
 	currentMethods map[string]bool // method names of current class (for implicit self)
 	currentParams  map[string]bool // parameter names (shadow field names)
+
+	// Error handling
+	errorFuncs        map[string]bool       // functions that can return errors
+	currentReturnType string                // return type of current function (for zero values)
+
+	// Default parameters
+	funcSigs map[string][]*parser.ParamDecl // function name → param list
+
+	// Stream operations
+	chainCounter int // counter for _chain variables
+
+	// Scope tracking
+	errVarCount   int    // counter for unique _err variables in same scope
+	currentErrVar string // current error variable name (for or-blocks)
 }
 
 // New creates a new Go code generator.
@@ -27,6 +41,8 @@ func New() *Generator {
 		imports:    make(map[string]bool),
 		interfaces: make(map[string]bool),
 		structs:    make(map[string]*parser.ClassDecl),
+		errorFuncs: make(map[string]bool),
+		funcSigs:   make(map[string][]*parser.ParamDecl),
 	}
 }
 
@@ -54,7 +70,138 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			g.interfaces[decl.Name] = true
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
+			// Collect constructor signatures
+			if decl.Ctor != nil {
+				g.funcSigs["New"+decl.Name] = decl.Ctor.Params
+			} else if len(decl.Ctors) > 0 {
+				g.funcSigs["New"+decl.Name] = decl.Ctors[0].Params
+			}
+			// Scan methods for error returns
+			for _, m := range decl.Methods {
+				key := decl.Name + "." + m.Name
+				if canReturnError(m.Body) {
+					g.errorFuncs[key] = true
+				}
+			}
+		case *parser.FnDecl:
+			g.funcSigs[decl.Name] = decl.Params
+			if canReturnError(decl.Body) {
+				g.errorFuncs[decl.Name] = true
+			}
 		}
+	}
+}
+
+// canReturnError walks a function body looking for return Error(...) statements.
+func canReturnError(body *parser.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if stmtCanReturnError(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtCanReturnError(s parser.Stmt) bool {
+	switch stmt := s.(type) {
+	case *parser.ReturnStmt:
+		if stmt.Value == nil {
+			return false
+		}
+		if call, ok := stmt.Value.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+				return true
+			}
+		}
+		return false
+	case *parser.VarStmt:
+		// or { return Error(err) } means the function can return errors
+		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
+			if blockCanReturnError(stmt.OrHandler.Body) {
+				return true
+			}
+		}
+		return false
+	case *parser.ExprStmt:
+		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
+			if blockCanReturnError(stmt.OrHandler.Body) {
+				return true
+			}
+		}
+		return false
+	case *parser.AssignStmt:
+		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
+			if blockCanReturnError(stmt.OrHandler.Body) {
+				return true
+			}
+		}
+		return false
+	case *parser.IfStmt:
+		if blockCanReturnError(stmt.Then) {
+			return true
+		}
+		if stmt.ElseStmt != nil {
+			if stmtCanReturnError(stmt.ElseStmt) {
+				return true
+			}
+		}
+		return false
+	case *parser.BlockStmt:
+		return blockCanReturnError(stmt)
+	case *parser.ForStmt:
+		return blockCanReturnError(stmt.Body)
+	case *parser.WhileStmt:
+		return blockCanReturnError(stmt.Body)
+	case *parser.MatchStmt:
+		for _, c := range stmt.Cases {
+			if blockCanReturnError(c.Body) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func blockCanReturnError(block *parser.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, s := range block.Stmts {
+		if stmtCanReturnError(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// zeroValueFor returns the Go zero value for a given type string.
+func zeroValueFor(goType string) string {
+	switch goType {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"byte", "rune":
+		return "0"
+	case "float32", "float64":
+		return "0.0"
+	case "string":
+		return `""`
+	case "bool":
+		return "false"
+	case "":
+		return ""
+	default:
+		if strings.HasPrefix(goType, "*") || strings.HasPrefix(goType, "[]") ||
+			strings.HasPrefix(goType, "map[") || strings.HasPrefix(goType, "chan ") ||
+			strings.HasPrefix(goType, "func(") || goType == "interface{}" || goType == "error" {
+			return "nil"
+		}
+		// Struct types — use zero value literal
+		return goType + "{}"
 	}
 }
 
@@ -69,6 +216,8 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.indent = 0
 	g.className = className
 	g.imports = make(map[string]bool)
+	g.errorFuncs = make(map[string]bool)
+	g.funcSigs = make(map[string][]*parser.ParamDecl)
 	g.collectDecls(prog.Decls)
 
 	// First pass: generate body into a separate buffer to collect imports
@@ -167,7 +316,27 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		return
 	}
 
-	ret := g.formatReturnType(fn.ReturnType, fn.Body)
+	canError := g.errorFuncs[name]
+	goRetType := g.goReturnTypeStr(fn.ReturnType)
+	var ret string
+	if canError {
+		if goRetType == "" {
+			ret = " error"
+		} else {
+			ret = fmt.Sprintf(" (%s, error)", goRetType)
+		}
+	} else {
+		ret = g.formatReturnType(fn.ReturnType, fn.Body)
+	}
+
+	// Save/restore state for function scope
+	prevRetType := g.currentReturnType
+	prevErrCount := g.errVarCount
+	if canError {
+		g.currentReturnType = goRetType
+	}
+	g.errVarCount = 0
+
 	params := g.formatParams(fn.Params)
 
 	g.writeln("func %s(%s)%s {", name, params, ret)
@@ -175,6 +344,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.emitBlock(fn.Body)
 	g.indent--
 	g.writeln("}")
+
+	g.currentReturnType = prevRetType
+	g.errVarCount = prevErrCount
 }
 
 // --- Structs (Classes) -------------------------------------------------------
@@ -198,6 +370,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	}
 
 	for _, f := range cls.Fields {
+		if f.IsConst {
+			continue // const fields → package-level consts
+		}
 		typeName := "interface{}"
 		if f.Type != nil {
 			typeName = g.formatType(f.Type)
@@ -208,11 +383,43 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	g.writeln("}")
 	g.writeln("")
 
+	// Emit const fields as package-level constants
+	for _, f := range cls.Fields {
+		if f.IsConst && f.Default != nil {
+			g.writeln("const %s_%s = %s", name, exportName(f.Name), g.formatExpr(f.Default))
+		}
+	}
+	if len(cls.Fields) > 0 {
+		hasConsts := false
+		for _, f := range cls.Fields {
+			if f.IsConst {
+				hasConsts = true
+			}
+		}
+		if hasConsts {
+			g.writeln("")
+		}
+	}
+
 	// Constructor → NewType() function
 	if cls.Ctor != nil {
 		g.emitConstructor(name, cls.Ctor, cls)
 	} else if len(cls.Ctors) > 0 {
 		g.emitConstructor(name, cls.Ctors[0], cls)
+	} else {
+		// Generate default constructor with field defaults
+		g.writeln("func New%s() *%s {", name, name)
+		g.indent++
+		g.writeln("s := &%s{}", name)
+		for _, f := range cls.Fields {
+			if f.Default != nil {
+				g.writeln("s.%s = %s", exportName(f.Name), g.formatExpr(f.Default))
+			}
+		}
+		g.writeln("return s")
+		g.indent--
+		g.writeln("}")
+		g.writeln("")
 	}
 
 	// Methods
@@ -243,9 +450,24 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	g.indent++
 	g.writeln("s := &%s{}", typeName)
 
+	// super() call — embed parent struct
+	if len(ctor.SuperArgs) > 0 {
+		parentType := ""
+		for _, p := range cls.Parents {
+			if !g.interfaces[p] {
+				parentType = p
+				break
+			}
+		}
+		if parentType != "" {
+			args := g.formatExprList(ctor.SuperArgs)
+			g.writeln("s.%s = *New%s(%s)", parentType, parentType, args)
+		}
+	}
+
 	if ctor.Body != nil {
 		for _, stmt := range ctor.Body.Stmts {
-			g.emitCtorStmt(stmt)
+			g.emitStmt(stmt)
 		}
 	}
 
@@ -255,57 +477,71 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	g.writeln("")
 }
 
-func (g *Generator) emitCtorStmt(s parser.Stmt) {
-	// Just emit normally — ThisExpr already maps to "s" in formatExpr
-	g.emitStmt(s)
-}
-
-// formatCtorExpr formats an expression in constructor context,
-// replacing this.field with s.Field and bare field references with s.Field.
-func (g *Generator) formatCtorExpr(e parser.Expr) string {
-	switch expr := e.(type) {
-	case *parser.SelectorExpr:
-		if _, ok := expr.Object.(*parser.ThisExpr); ok {
-			return "s." + exportName(expr.Field)
-		}
-		return g.formatExpr(e)
-	case *parser.Ident:
-		return expr.Name
-	default:
-		return g.formatExpr(e)
-	}
-}
-
 func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	// Set current fields/methods for implicit self resolution
 	if cls, ok := g.structs[receiver]; ok {
 		g.currentFields = make(map[string]bool)
 		g.currentMethods = make(map[string]bool)
 		g.currentParams = make(map[string]bool)
+		// Own fields
 		for _, f := range cls.Fields {
 			g.currentFields[f.Name] = true
 		}
+		// Parent fields (walk inheritance chain)
+		g.collectParentFields(cls, g.currentFields)
+		// Own methods
 		for _, method := range cls.Methods {
 			g.currentMethods[method.Name] = true
 		}
+		// Parent methods
+		g.collectParentMethods(cls, g.currentMethods)
 		for _, p := range m.Params {
 			g.currentParams[p.Name] = true
 		}
 	}
 	defer func() { g.currentFields = nil; g.currentMethods = nil; g.currentParams = nil }()
 
+	methodKey := receiver + "." + m.Name
+	canError := g.errorFuncs[methodKey]
+	goRetType := g.goReturnTypeStr(m.ReturnType)
+
+	var ret string
+	if canError {
+		if goRetType == "" {
+			ret = " error"
+		} else {
+			ret = fmt.Sprintf(" (%s, error)", goRetType)
+		}
+	} else {
+		ret = g.formatReturnType(m.ReturnType, m.Body)
+	}
+
+	// Save/restore currentReturnType for error return emission
+	prevRetType := g.currentReturnType
+	if canError {
+		g.currentReturnType = goRetType
+	}
+
+	// Map Zinc method names to Go equivalents
+	goMethodName := m.Name
+	switch m.Name {
+	case "toString":
+		goMethodName = "String"
+	case "equals":
+		goMethodName = "Equal"
+	case "hashCode":
+		goMethodName = "Hash"
+	}
+
 	if m.IsStatic {
-		// Static methods → package-level functions prefixed with type name
-		name := receiver + exportName(m.Name)
-		ret := g.formatReturnType(m.ReturnType, m.Body)
+		name := receiver + exportName(goMethodName)
 		params := g.formatParams(m.Params)
 		g.writeln("func %s(%s)%s {", name, params, ret)
 	} else {
-		vis := strings.ToLower(m.Name[:1]) + m.Name[1:]
-		if m.IsPub {
-			vis = exportName(m.Name)
+		vis := strings.ToLower(goMethodName[:1]) + goMethodName[1:]
+		if m.IsPub || goMethodName != m.Name {
+			vis = exportName(goMethodName)
 		}
-		ret := g.formatReturnType(m.ReturnType, m.Body)
 		params := g.formatParams(m.Params)
 		g.writeln("func (s *%s) %s(%s)%s {", receiver, vis, params, ret)
 	}
@@ -313,6 +549,38 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	g.emitBlock(m.Body)
 	g.indent--
 	g.writeln("}")
+
+	g.currentReturnType = prevRetType
+}
+
+// collectParentFields walks the inheritance chain and adds parent fields to the map.
+func (g *Generator) collectParentFields(cls *parser.ClassDecl, fields map[string]bool) {
+	for _, p := range cls.Parents {
+		if g.interfaces[p] {
+			continue
+		}
+		if parentCls, ok := g.structs[p]; ok {
+			for _, f := range parentCls.Fields {
+				fields[f.Name] = true
+			}
+			g.collectParentFields(parentCls, fields)
+		}
+	}
+}
+
+// collectParentMethods walks the inheritance chain and adds parent methods to the map.
+func (g *Generator) collectParentMethods(cls *parser.ClassDecl, methods map[string]bool) {
+	for _, p := range cls.Parents {
+		if g.interfaces[p] {
+			continue
+		}
+		if parentCls, ok := g.structs[p]; ok {
+			for _, m := range parentCls.Methods {
+				methods[m.Name] = true
+			}
+			g.collectParentMethods(parentCls, methods)
+		}
+	}
 }
 
 // --- Data Classes (Structs) --------------------------------------------------
@@ -554,34 +822,81 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	if r.Value == nil {
-		g.writeln("return")
+		// Bare return in error-returning function → return nil (error only)
+		if g.currentReturnType != "" {
+			zv := zeroValueFor(g.currentReturnType)
+			g.writeln("return %s, nil", zv)
+		} else if g.currentReturnType == "" && g.errorFuncs != nil {
+			// Check if we're in an error function with no return type
+			// bare return → just return nil for the error
+			g.writeln("return")
+		} else {
+			g.writeln("return")
+		}
 		return
 	}
 
 	// return Error(...) → return zero, fmt.Errorf(...)
 	if call, ok := r.Value.(*parser.CallExpr); ok {
 		if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
-			g.needImport("fmt")
+			zv := zeroValueFor(g.currentReturnType)
 			if len(call.Args) == 1 {
 				arg := call.Args[0]
-				// return Error(CustomType(...)) → return zero, CustomType(...)
+				// return Error(CustomType("msg")) → return zero, fmt.Errorf("msg")
 				if innerCall, ok := arg.(*parser.CallExpr); ok {
-					if innerIdent, ok := innerCall.Callee.(*parser.Ident); ok {
-						args := g.formatExprList(innerCall.Args)
-						g.writeln("return *new(T), fmt.Errorf(\"%%v\", New%s(%s))", innerIdent.Name, args)
+					if _, ok := innerCall.Callee.(*parser.Ident); ok {
+						// Use the inner call's first arg as the error message
+						g.needImport("fmt")
+						if len(innerCall.Args) > 0 {
+							msg := g.formatExpr(innerCall.Args[0])
+							if zv != "" {
+								g.writeln("return %s, fmt.Errorf(%s)", zv, msg)
+							} else {
+								g.writeln("return fmt.Errorf(%s)", msg)
+							}
+						} else {
+							if zv != "" {
+								g.writeln("return %s, fmt.Errorf(\"error\")", zv)
+							} else {
+								g.writeln("return fmt.Errorf(\"error\")")
+							}
+						}
 						return
 					}
 				}
-				// return Error(err) → return zero, err
-				if ident, ok := arg.(*parser.Ident); ok && ident.Name == "err" {
-					g.writeln("return *new(T), err")
+				// return Error(err) where err is an identifier → return zero, err
+				if id, ok := arg.(*parser.Ident); ok {
+					if zv != "" {
+						g.writeln("return %s, %s", zv, id.Name)
+					} else {
+						g.writeln("return %s", id.Name)
+					}
 					return
 				}
 				// return Error("message") → return zero, fmt.Errorf("message")
-				g.writeln("return *new(T), fmt.Errorf(%s)", g.formatExpr(arg))
+				g.needImport("fmt")
+				if zv != "" {
+					g.writeln("return %s, fmt.Errorf(%s)", zv, g.formatExpr(arg))
+				} else {
+					g.writeln("return fmt.Errorf(%s)", g.formatExpr(arg))
+				}
 				return
 			}
+			// Error() with no args
+			g.needImport("fmt")
+			if zv != "" {
+				g.writeln("return %s, fmt.Errorf(\"error\")", zv)
+			} else {
+				g.writeln("return fmt.Errorf(\"error\")")
+			}
+			return
 		}
+	}
+
+	// Normal return in an error-returning function → return val, nil
+	if g.currentReturnType != "" {
+		g.writeln("return %s, nil", g.formatExpr(r.Value))
+		return
 	}
 
 	g.writeln("return %s", g.formatExpr(r.Value))
@@ -683,36 +998,116 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 			g.writeln("%s[%s] = %s", obj, g.formatExpr(call.Args[0]), g.formatExpr(call.Args[1]))
 			return
 		}
+		// .forEach() as statement
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "forEach" {
+			obj := g.formatExpr(sel.Object)
+			if len(call.Args) == 1 {
+				g.emitForEachStmt(obj, call.Args[0])
+				return
+			}
+		}
 	}
 	g.writeln("%s", g.formatExpr(es.Expr))
+}
+
+// emitForEachStmt emits a for-range loop for .forEach()
+func (g *Generator) emitForEachStmt(obj string, fn parser.Expr) {
+	if lambda, ok := fn.(*parser.LambdaExpr); ok {
+		if len(lambda.Params) == 1 {
+			paramName := lambda.Params[0].Name
+			g.writeln("for _, %s := range %s {", paramName, obj)
+			g.indent++
+			if lambda.Expr != nil {
+				g.writeln("%s", g.formatExpr(lambda.Expr))
+			} else if lambda.Body != nil {
+				g.emitBlock(lambda.Body)
+			}
+			g.indent--
+			g.writeln("}")
+			return
+		}
+	}
+	// Fallback: check for `it` keyword
+	if containsIt(fn) {
+		g.writeln("for _, _it := range %s {", obj)
+		g.indent++
+		g.writeln("%s", g.formatExprIt(fn))
+		g.indent--
+		g.writeln("}")
+		return
+	}
+	// General case: fn is a function reference
+	fnStr := g.formatExpr(fn)
+	g.writeln("for _, _v := range %s {", obj)
+	g.indent++
+	g.writeln("%s(_v)", fnStr)
+	g.indent--
+	g.writeln("}")
 }
 
 // emitOrAssignment handles: target = call() or default / or { block }
 func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *parser.OrHandler) {
 	callExpr := g.formatExpr(value)
 
+	// Use unique error variable name to avoid redeclaration
+	errVar := "_err"
+	if g.errVarCount > 0 {
+		errVar = fmt.Sprintf("_err%d", g.errVarCount)
+	}
+	g.errVarCount++
+	savedErrVar := g.currentErrVar
+	g.currentErrVar = errVar
+
 	if handler.Body != nil && len(handler.Body.Stmts) == 1 {
 		// Single-statement or handler
 		if es, ok := handler.Body.Stmts[0].(*parser.ExprStmt); ok {
 			// or default_value
-			g.writeln("%s, _err := %s", target, callExpr)
-			g.writeln("if _err != nil {")
+			g.writeln("%s, %s := %s", target, errVar, callExpr)
+			g.writeln("if %s != nil {", errVar)
 			g.indent++
 			g.writeln("%s = %s", target, g.formatExpr(es.Expr))
 			g.indent--
 			g.writeln("}")
+			g.currentErrVar = savedErrVar
 			return
 		}
 	}
 
-	g.writeln("%s, _err := %s", target, callExpr)
-	g.writeln("if _err != nil {")
+	g.writeln("%s, %s := %s", target, errVar, callExpr)
+	g.writeln("if %s != nil {", errVar)
 	g.indent++
 	if handler.Body != nil {
-		g.emitBlock(handler.Body)
+		g.emitOrBlock(handler.Body)
 	}
 	g.indent--
 	g.writeln("}")
+	g.currentErrVar = savedErrVar
+}
+
+// emitOrBlock emits a block inside an or-handler, mapping `err` to `_err`.
+func (g *Generator) emitOrBlock(block *parser.BlockStmt) {
+	for _, s := range block.Stmts {
+		// Special handling for return Error(err) in or-blocks
+		if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
+			if call, ok := ret.Value.(*parser.CallExpr); ok {
+				if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+					if len(call.Args) == 1 {
+						if argId, ok := call.Args[0].(*parser.Ident); ok && argId.Name == "err" {
+							// return Error(err) in or-block → return zeroVal, errVar
+							zv := zeroValueFor(g.currentReturnType)
+							if zv != "" {
+								g.writeln("return %s, %s", zv, g.currentErrVar)
+							} else {
+								g.writeln("return %s", g.currentErrVar)
+							}
+							continue
+						}
+					}
+				}
+			}
+		}
+		g.emitStmt(s)
+	}
 }
 
 func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
@@ -804,6 +1199,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		if expr.Name == "this" {
 			return "s"
 		}
+		// Map `err` to current error variable in or-block context
+		if expr.Name == "err" && g.currentErrVar != "" {
+			return g.currentErrVar
+		}
 		// Implicit self: bare field name → s.Field in method/ctor context
 		// But not if it's a parameter name (params shadow fields)
 		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] {
@@ -836,8 +1235,18 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return g.formatCallExpr(expr)
 	case *parser.SelectorExpr:
 		// .length → len()
-		if expr.Field == "length" {
+		if expr.Field == "length" || expr.Field == "size" {
 			return fmt.Sprintf("len(%s)", g.formatExpr(expr.Object))
+		}
+		// Check if accessing a const field on a class: Config.VERSION → Config_VERSION
+		if ident, ok := expr.Object.(*parser.Ident); ok {
+			if cls, ok := g.structs[ident.Name]; ok {
+				for _, f := range cls.Fields {
+					if f.IsConst && f.Name == expr.Field {
+						return fmt.Sprintf("%s_%s", ident.Name, exportName(expr.Field))
+					}
+				}
+			}
 		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))
 	case *parser.IndexExpr:
@@ -890,7 +1299,6 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return fmt.Sprintf("[]interface{}{%s}", g.formatExprList(expr.Elements))
 	case *parser.SpawnExpr:
 		// spawn { body } → go func() { body }()
-		// Returns as expression is tricky — use a channel or future pattern
 		g.needImport("sync")
 		return "/* spawn: use goroutine */"
 	case *parser.IfExpr:
@@ -934,10 +1342,9 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	case "!==":
 		return fmt.Sprintf("%s != %s", left, right)
 	case "in":
-		// x in collection — no direct Go equivalent, use helper
-		return fmt.Sprintf("/* %s in %s */", left, right)
+		return g.formatInExpr(b.Left, b.Right, left, right)
 	case "not in":
-		return fmt.Sprintf("/* %s not in %s */", left, right)
+		return "!" + g.formatInExpr(b.Left, b.Right, left, right)
 	case "is":
 		return fmt.Sprintf("func() bool { _, ok := %s.(%s); return ok }()", left, right)
 	case "is not":
@@ -947,19 +1354,38 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	}
 }
 
+// formatInExpr handles the `in` operator for strings, maps, and slices.
+func (g *Generator) formatInExpr(leftExpr, rightExpr parser.Expr, left, right string) string {
+	// String "in" check: "x" in str → strings.Contains(str, "x")
+	if _, ok := leftExpr.(*parser.StringLit); ok {
+		g.needImport("strings")
+		return fmt.Sprintf("strings.Contains(%s, %s)", right, left)
+	}
+	// If the right side looks like it could be a map, use _, ok pattern
+	// We use an IIFE to handle both map and slice cases
+	return fmt.Sprintf("func() bool { for _, _v := range %s { if _v == %s { return true } }; return false }()", right, left)
+}
+
 // stringMethodMapping maps Zinc string methods to Go equivalents.
 var stringMethodMapping = map[string]string{
 	"upper":      "strings.ToUpper",
 	"lower":      "strings.ToLower",
 	"trim":       "strings.TrimSpace",
-	// trimStart/trimEnd need special handling
 	"contains":   "strings.Contains",
 	"startsWith": "strings.HasPrefix",
 	"endsWith":   "strings.HasSuffix",
-	// replace needs special handling (4th arg for Go)
 	"split":      "strings.Split",
 	"repeat":     "strings.Repeat",
 	"indexOf":    "strings.Index",
+}
+
+// streamMethods is the set of methods that trigger stream/inline-loop codegen.
+var streamMethods = map[string]bool{
+	"filter": true, "map": true, "sum": true,
+	"anyMatch": true, "allMatch": true, "noneMatch": true,
+	"findFirst": true, "skip": true, "limit": true,
+	"distinct": true, "reduce": true, "forEach": true,
+	"sortBy": true, "groupBy": true,
 }
 
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
@@ -975,16 +1401,18 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			return fmt.Sprintf("%s(%s)", goFunc, obj)
 		}
 
+		// Stream operations — detect chains and single calls
+		if streamMethods[sel.Field] {
+			return g.formatStreamExpr(sel, c.Args)
+		}
+
 		// Collection methods
 		obj := g.formatExpr(sel.Object)
 		switch sel.Field {
 		case "add":
-			// append returns a new slice — but in Zinc it mutates, so wrap as assignment
-			// This is called as a statement, so we handle it in emitExprStmt too
 			args := g.formatExprList(c.Args)
 			return fmt.Sprintf("append(%s, %s)", obj, args)
 		case "put":
-			// map.put(key, value) → map[key] = value
 			if len(c.Args) == 2 {
 				return fmt.Sprintf("func() { %s[%s] = %s }()", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
 			}
@@ -1023,14 +1451,47 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			// map.entrySet() → just the map (used in for range)
 			return obj
 		case "getKey":
-			// entry.getKey() for map iteration — handled by for-range rewrite
 			return obj + ".Key"
 		case "getValue":
 			return obj + ".Value"
+		case "join":
+			g.needImport("strings")
+			if len(c.Args) == 1 {
+				return fmt.Sprintf("strings.Join(%s, %s)", obj, g.formatExpr(c.Args[0]))
+			}
+			return fmt.Sprintf("strings.Join(%s, \"\")", obj)
+		case "keys":
+			return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", obj, obj)
+		case "values":
+			return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", obj, obj)
+		case "containsKey":
+			if len(c.Args) == 1 {
+				return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, g.formatExpr(c.Args[0]))
+			}
+		case "remove":
+			if len(c.Args) == 1 {
+				return fmt.Sprintf("delete(%s, %s)", obj, g.formatExpr(c.Args[0]))
+			}
+		case "sort":
+			g.needImport("sort")
+			return fmt.Sprintf("func() { sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] }) }()", obj, obj, obj)
+		case "reverse":
+			return fmt.Sprintf("func() { for _i, _j := 0, len(%s)-1; _i < _j; _i, _j = _i+1, _j-1 { %s[_i], %s[_j] = %s[_j], %s[_i] } }()", obj, obj, obj, obj, obj)
 		}
 	}
 
 	callee := g.formatExpr(c.Callee)
+
+	// Set.of(...) → map[T]struct{}{...}
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok && ident.Name == "Set" && sel.Field == "of" {
+			var elems []string
+			for _, a := range c.Args {
+				elems = append(elems, fmt.Sprintf("%s: {}", g.formatExpr(a)))
+			}
+			return fmt.Sprintf("map[interface{}]struct{}{%s}", strings.Join(elems, ", "))
+		}
+	}
 
 	// Implicit self method calls: address() → s.Address() in method context
 	if ident, ok := c.Callee.(*parser.Ident); ok && g.currentMethods != nil {
@@ -1048,10 +1509,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 
 	// Rewrite `it` keyword in args
 	var argStrs []string
-	hasItRewrite := false
 	for _, arg := range c.Args {
 		if containsIt(arg) {
-			hasItRewrite = true
 			argStrs = append(argStrs, g.formatExprIt(arg))
 		} else {
 			argStrs = append(argStrs, g.formatExpr(arg))
@@ -1060,8 +1519,12 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	for _, na := range c.NamedArgs {
 		argStrs = append(argStrs, g.formatExpr(na.Value))
 	}
-	_ = hasItRewrite
 	args := strings.Join(argStrs, ", ")
+
+	// Default parameters: fill in missing args
+	if ident, ok := c.Callee.(*parser.Ident); ok {
+		args = g.fillDefaultArgs(ident.Name, c.Args, c.NamedArgs, args)
+	}
 
 	// Builtin rewrites
 	switch callee {
@@ -1086,11 +1549,313 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 
 	// Constructor calls: new Type() → NewType()
 	if c.IsNew {
-		return fmt.Sprintf("New%s(%s)", callee, args)
+		ctorName := "New" + callee
+		args = g.fillDefaultArgs(ctorName, c.Args, c.NamedArgs, args)
+		return fmt.Sprintf("%s(%s)", ctorName, args)
 	}
 
 	return fmt.Sprintf("%s(%s)", callee, args)
 }
+
+// fillDefaultArgs fills in missing positional args with defaults from funcSigs.
+func (g *Generator) fillDefaultArgs(funcName string, posArgs []parser.Expr, namedArgs []parser.NamedArg, currentArgs string) string {
+	sig, ok := g.funcSigs[funcName]
+	if !ok {
+		return currentArgs
+	}
+	totalProvided := len(posArgs) + len(namedArgs)
+	if totalProvided >= len(sig) {
+		return currentArgs
+	}
+	// Fill in defaults for missing params
+	var parts []string
+	// Add existing positional args
+	for _, a := range posArgs {
+		parts = append(parts, g.formatExpr(a))
+	}
+	for _, na := range namedArgs {
+		parts = append(parts, g.formatExpr(na.Value))
+	}
+	// Fill in defaults
+	for i := totalProvided; i < len(sig); i++ {
+		if sig[i].Default != nil {
+			parts = append(parts, g.formatExpr(sig[i].Default))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// --- Stream operations (inline loop codegen) ---------------------------------
+
+// formatStreamExpr handles stream method calls, including chains.
+// It unwraps chained calls, generates each step as a separate variable,
+// and returns the final value.
+func (g *Generator) formatStreamExpr(sel *parser.SelectorExpr, args []parser.Expr) string {
+	// Collect the chain of stream operations from innermost to outermost
+	type streamOp struct {
+		method string
+		args   []parser.Expr
+	}
+	var chain []streamOp
+	chain = append(chain, streamOp{method: sel.Field, args: args})
+
+	// Walk the chain downward
+	obj := sel.Object
+	for {
+		if call, ok := obj.(*parser.CallExpr); ok {
+			if innerSel, ok := call.Callee.(*parser.SelectorExpr); ok && streamMethods[innerSel.Field] {
+				chain = append(chain, streamOp{method: innerSel.Field, args: call.Args})
+				obj = innerSel.Object
+				continue
+			}
+		}
+		break
+	}
+
+	// Reverse chain so it goes from source → terminal
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+
+	sourceExpr := g.formatExpr(obj)
+
+	// Single operation (no chain) → use IIFE
+	if len(chain) == 1 {
+		return g.formatSingleStreamOp(sourceExpr, obj, chain[0].method, chain[0].args)
+	}
+
+	// Chained operations → use IIFE with intermediate variables
+	var sb strings.Builder
+	sb.WriteString("func() interface{} {\n")
+	currentVar := sourceExpr
+	for i, op := range chain {
+		varName := fmt.Sprintf("_chain%d", i)
+		innerCode := g.formatSingleStreamAssign(varName, currentVar, op.method, op.args)
+		sb.WriteString(innerCode)
+		currentVar = varName
+	}
+	sb.WriteString(fmt.Sprintf("return %s\n", currentVar))
+	sb.WriteString("}()")
+	return sb.String()
+}
+
+// formatSingleStreamOp generates an IIFE for a single stream operation.
+func (g *Generator) formatSingleStreamOp(source string, sourceExpr parser.Expr, method string, args []parser.Expr) string {
+	switch method {
+	case "filter":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() []interface{} { var _r []interface{}; for _, _it := range %s { if %s { _r = append(_r, _it) } }; return _r }()", source, pred)
+	case "map":
+		transform := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() []interface{} { _r := make([]interface{}, len(%s)); for _i, _it := range %s { _r[_i] = %s }; return _r }()", source, source, transform)
+	case "sum":
+		return fmt.Sprintf("func() int { _s := 0; for _, _it := range %s { _s += _it.(int) }; return _s }()", source)
+	case "anyMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() bool { for _, _it := range %s { if %s { return true } }; return false }()", source, pred)
+	case "allMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() bool { for _, _it := range %s { if !(%s) { return false } }; return true }()", source, pred)
+	case "noneMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() bool { for _, _it := range %s { if %s { return false } }; return true }()", source, pred)
+	case "findFirst":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("func() interface{} { for _, _it := range %s { if %s { return _it } }; return nil }()", source, pred)
+	case "skip":
+		if len(args) > 0 {
+			n := g.formatExpr(args[0])
+			return fmt.Sprintf("%s[%s:]", source, n)
+		}
+		return source
+	case "limit":
+		if len(args) > 0 {
+			n := g.formatExpr(args[0])
+			return fmt.Sprintf("%s[:%s]", source, n)
+		}
+		return source
+	case "distinct":
+		return fmt.Sprintf("func() []interface{} { _seen := map[interface{}]bool{}; var _r []interface{}; for _, _it := range %s { if !_seen[_it] { _seen[_it] = true; _r = append(_r, _it) } }; return _r }()", source)
+	case "reduce":
+		if len(args) >= 2 {
+			init := g.formatExpr(args[0])
+			fn := g.streamReduceBody(args[1])
+			return fmt.Sprintf("func() interface{} { _acc := %s; for _, _it := range %s { _acc = %s }; return _acc }()", init, source, fn)
+		}
+		return source
+	case "forEach":
+		if len(args) > 0 {
+			body := g.streamLambdaBody(args)
+			return fmt.Sprintf("func() { for _, _it := range %s { _ = %s } }()", source, body)
+		}
+		return source
+	case "sortBy":
+		if len(args) > 0 {
+			g.needImport("sort")
+			key := g.streamLambdaBody(args)
+			return fmt.Sprintf("func() []interface{} { _r := make([]interface{}, len(%s)); copy(_r, %s); sort.Slice(_r, func(_i, _j int) bool { _it := _r[_i]; _ = _it; _a := %s; _it = _r[_j]; _b := %s; return fmt.Sprint(_a) < fmt.Sprint(_b) }); return _r }()", source, source, key, key)
+		}
+		return source
+	case "groupBy":
+		if len(args) > 0 {
+			key := g.streamLambdaBody(args)
+			return fmt.Sprintf("func() map[interface{}][]interface{} { _r := map[interface{}][]interface{}{}; for _, _it := range %s { _k := %s; _r[_k] = append(_r[_k], _it) }; return _r }()", source, key)
+		}
+		return source
+	default:
+		return fmt.Sprintf("%s.%s()", source, method)
+	}
+}
+
+// formatSingleStreamAssign generates code that assigns the result of a stream op to a variable.
+func (g *Generator) formatSingleStreamAssign(varName, source, method string, args []parser.Expr) string {
+	switch method {
+	case "filter":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("var %s []interface{}\nfor _, _it := range %s { if %s { %s = append(%s, _it) } }\n", varName, source, pred, varName, varName)
+	case "map":
+		transform := g.streamLambdaBody(args)
+		return fmt.Sprintf("%s := make([]interface{}, len(%s))\nfor _i, _it := range %s { %s[_i] = %s }\n", varName, source, source, varName, transform)
+	case "sum":
+		return fmt.Sprintf("%s := 0\nfor _, _it := range %s { %s += _it.(int) }\n", varName, source, varName)
+	case "anyMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("%s := false\nfor _, _it := range %s { if %s { %s = true; break } }\n", varName, source, pred, varName)
+	case "allMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("%s := true\nfor _, _it := range %s { if !(%s) { %s = false; break } }\n", varName, source, pred, varName)
+	case "noneMatch":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("%s := true\nfor _, _it := range %s { if %s { %s = false; break } }\n", varName, source, pred, varName)
+	case "findFirst":
+		pred := g.streamLambdaBody(args)
+		return fmt.Sprintf("var %s interface{}\nfor _, _it := range %s { if %s { %s = _it; break } }\n", varName, source, pred, varName)
+	case "skip":
+		if len(args) > 0 {
+			n := g.formatExpr(args[0])
+			return fmt.Sprintf("%s := %s[%s:]\n", varName, source, n)
+		}
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	case "limit":
+		if len(args) > 0 {
+			n := g.formatExpr(args[0])
+			return fmt.Sprintf("%s := %s[:%s]\n", varName, source, n)
+		}
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	case "distinct":
+		return fmt.Sprintf("_seen_%s := map[interface{}]bool{}\nvar %s []interface{}\nfor _, _it := range %s { if !_seen_%s[_it] { _seen_%s[_it] = true; %s = append(%s, _it) } }\n",
+			varName, varName, source, varName, varName, varName, varName)
+	case "reduce":
+		if len(args) >= 2 {
+			init := g.formatExpr(args[0])
+			fn := g.streamReduceBody(args[1])
+			return fmt.Sprintf("%s := %s\nfor _, _it := range %s { %s = %s }\n", varName, init, source, varName, fn)
+		}
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	case "forEach":
+		if len(args) > 0 {
+			body := g.streamLambdaBody(args)
+			return fmt.Sprintf("for _, _it := range %s { _ = %s }\n%s := 0\n_ = %s\n", source, body, varName, varName)
+		}
+		return fmt.Sprintf("%s := 0\n_ = %s\n", varName, varName)
+	case "sortBy":
+		if len(args) > 0 {
+			g.needImport("sort")
+			g.needImport("fmt")
+			key := g.streamLambdaBody(args)
+			return fmt.Sprintf("%s := make([]interface{}, len(%s))\ncopy(%s, %s)\nsort.Slice(%s, func(_i, _j int) bool { _it := %s[_i]; _ = _it; _a := %s; _it = %s[_j]; _b := %s; return fmt.Sprint(_a) < fmt.Sprint(_b) })\n",
+				varName, source, varName, source, varName, varName, key, varName, key)
+		}
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	case "groupBy":
+		if len(args) > 0 {
+			key := g.streamLambdaBody(args)
+			return fmt.Sprintf("%s := map[interface{}][]interface{}{}\nfor _, _it := range %s { _k := %s; %s[_k] = append(%s[_k], _it) }\n",
+				varName, source, key, varName, varName)
+		}
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	default:
+		return fmt.Sprintf("%s := %s\n", varName, source)
+	}
+}
+
+// streamLambdaBody extracts the body expression from a lambda or `it`-expression arg.
+func (g *Generator) streamLambdaBody(args []parser.Expr) string {
+	if len(args) == 0 {
+		return "true"
+	}
+	arg := args[0]
+	// Lambda with explicit params
+	if lambda, ok := arg.(*parser.LambdaExpr); ok {
+		if lambda.Expr != nil {
+			if len(lambda.Params) == 1 {
+				// Replace param name with _it
+				return g.replaceIdent(lambda.Expr, lambda.Params[0].Name, "_it")
+			}
+			return g.formatExpr(lambda.Expr)
+		}
+	}
+	// Expression using `it`
+	if containsIt(arg) {
+		return g.formatExprIt(arg)
+	}
+	// Just a plain expression or function reference
+	return g.formatExpr(arg) + "(_it)"
+}
+
+// streamReduceBody extracts the body for a reduce operation.
+// The accumulator is referenced as _acc.
+func (g *Generator) streamReduceBody(arg parser.Expr) string {
+	if lambda, ok := arg.(*parser.LambdaExpr); ok {
+		if lambda.Expr != nil && len(lambda.Params) == 2 {
+			// Replace first param with _acc, second with _it
+			replaced := g.replaceIdent(lambda.Expr, lambda.Params[0].Name, "_acc")
+			// Need to do second replacement in the string
+			replaced = strings.ReplaceAll(replaced, lambda.Params[1].Name, "_it")
+			return replaced
+		}
+	}
+	return g.formatExpr(arg) + "(_acc, _it)"
+}
+
+// replaceIdent formats an expression, replacing occurrences of oldName with newName.
+func (g *Generator) replaceIdent(e parser.Expr, oldName, newName string) string {
+	switch expr := e.(type) {
+	case *parser.Ident:
+		if expr.Name == oldName {
+			return newName
+		}
+		return g.formatExpr(e)
+	case *parser.BinaryExpr:
+		left := g.replaceIdent(expr.Left, oldName, newName)
+		right := g.replaceIdent(expr.Right, oldName, newName)
+		op := expr.Op
+		switch op {
+		case "and":
+			op = "&&"
+		case "or":
+			op = "||"
+		}
+		return fmt.Sprintf("%s %s %s", left, op, right)
+	case *parser.UnaryExpr:
+		return fmt.Sprintf("%s%s", expr.Op, g.replaceIdent(expr.Operand, oldName, newName))
+	case *parser.SelectorExpr:
+		return fmt.Sprintf("%s.%s", g.replaceIdent(expr.Object, oldName, newName), exportName(expr.Field))
+	case *parser.CallExpr:
+		callee := g.replaceIdent(expr.Callee, oldName, newName)
+		var args []string
+		for _, a := range expr.Args {
+			args = append(args, g.replaceIdent(a, oldName, newName))
+		}
+		return fmt.Sprintf("%s(%s)", callee, strings.Join(args, ", "))
+	case *parser.IndexExpr:
+		return fmt.Sprintf("%s[%s]", g.replaceIdent(expr.Object, oldName, newName), g.replaceIdent(expr.Index, oldName, newName))
+	default:
+		return g.formatExpr(e)
+	}
+}
+
+// --- Lambda and misc expression formatting -----------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 	var params []string
@@ -1152,14 +1917,27 @@ func (g *Generator) formatMatchExpr(m *parser.MatchExpr) string {
 
 var zincToGoType = map[string]string{
 	"int":     "int",
+	"Int":     "int",
 	"double":  "float64",
+	"Double":  "float64",
+	"float":   "float64",
+	"Float":   "float64",
 	"String":  "string",
+	"string":  "string",
 	"boolean": "bool",
+	"Boolean": "bool",
+	"bool":    "bool",
+	"Bool":    "bool",
 	"char":    "rune",
+	"Char":    "rune",
 	"long":    "int64",
+	"Long":    "int64",
 	"byte":    "byte",
+	"Byte":    "byte",
 	"void":    "",
+	"Void":    "",
 	"Object":  "interface{}",
+	"Any":     "interface{}",
 }
 
 func (g *Generator) formatType(t parser.TypeExpr) string {
@@ -1192,8 +1970,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			}
 			return "chan interface{}"
 		default:
-			// Generic struct — Go doesn't have generics for user types easily,
-			// but Go 1.18+ supports them
+			// Generic struct — Go 1.18+ generics
 			var args []string
 			for _, a := range typ.TypeArgs {
 				args = append(args, g.formatType(a))
@@ -1205,8 +1982,6 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 	case *parser.OptionalType:
 		return "*" + g.formatType(typ.Inner)
 	case *parser.FuncTypeExpr:
-		// TODO: Function types — Fn<(Params), Return> → func(params) return
-		// This is the known open issue for the Go backend.
 		var params []string
 		for _, p := range typ.Params {
 			params = append(params, g.formatType(p))
@@ -1219,6 +1994,14 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 	default:
 		return "interface{}"
 	}
+}
+
+// goReturnTypeStr returns the Go type string for a return type (without leading space).
+func (g *Generator) goReturnTypeStr(retType parser.TypeExpr) string {
+	if retType == nil {
+		return ""
+	}
+	return g.formatType(retType)
 }
 
 // formatReturnType builds the Go return type string including error if needed.
