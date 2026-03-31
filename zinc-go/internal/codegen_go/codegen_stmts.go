@@ -525,14 +525,18 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 			return
 		}
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "send" && len(call.Args) == 1 {
-			obj := g.formatExpr(sel.Object)
-			g.writeln("%s <- %s", obj, g.formatExpr(call.Args[0]))
-			return
+			if !g.isStructVar(sel.Object) {
+				obj := g.formatExpr(sel.Object)
+				g.writeln("%s <- %s", obj, g.formatExpr(call.Args[0]))
+				return
+			}
 		}
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "close" && len(call.Args) == 0 {
-			obj := g.formatExpr(sel.Object)
-			g.writeln("close(%s)", obj)
-			return
+			if !g.isStructVar(sel.Object) {
+				obj := g.formatExpr(sel.Object)
+				g.writeln("close(%s)", obj)
+				return
+			}
 		}
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "put" && len(call.Args) == 2 {
 			obj := g.formatExpr(sel.Object)
@@ -553,6 +557,17 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		}
 	}
 	g.writeln("%s", g.formatExpr(es.Expr))
+}
+
+// isStructVar checks if an expression refers to a known struct instance variable.
+// Used to distinguish channel ops (send/recv/close) from method calls on structs.
+func (g *Generator) isStructVar(e parser.Expr) bool {
+	if ident, ok := e.(*parser.Ident); ok {
+		if _, ok := g.varStructTypes[ident.Name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // emitForEachStmt emits a for-range loop for .forEach().

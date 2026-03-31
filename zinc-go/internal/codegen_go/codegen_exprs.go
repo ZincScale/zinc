@@ -278,13 +278,22 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("func() { %s[%s] = %s }()", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
 			}
 		case "send":
-			if len(c.Args) == 1 {
+			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("func() { %s <- %s }()", obj, g.formatExpr(c.Args[0]))
 			}
 		case "recv":
-			return fmt.Sprintf("<-%s", obj)
+			if !g.isStructVar(sel.Object) {
+				// If we're in a method with a known return type and the channel is
+				// chan interface{}, add type assertion for the recv result.
+				if g.currentMethodRetType != "" && g.currentMethodRetType != "interface{}" {
+					return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
+				}
+				return fmt.Sprintf("<-%s", obj)
+			}
 		case "close":
-			return fmt.Sprintf("close(%s)", obj)
+			if !g.isStructVar(sel.Object) {
+				return fmt.Sprintf("close(%s)", obj)
+			}
 		case "size":
 			return fmt.Sprintf("len(%s)", obj)
 		case "isEmpty":

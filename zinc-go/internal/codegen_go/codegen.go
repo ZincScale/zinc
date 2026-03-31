@@ -31,9 +31,10 @@ type Generator struct {
 
 	// Error handling
 	errorFuncs            map[string]bool   // functions that can return errors
-	currentReturnType     string            // return type of current function (for zero values)
+	currentReturnType     string            // return type of current function (for zero values in error returns)
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
 	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
+	currentMethodRetType  string            // Go return type of current method (for channel recv type assertions)
 
 	// Default parameters
 	funcSigs map[string][]*parser.ParamDecl // function name → param list

@@ -317,9 +317,11 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	}
 
 	prevRetType := g.currentReturnType
+	prevMethodRetType := g.currentMethodRetType
 	if canError {
 		g.currentReturnType = goRetType
 	}
+	g.currentMethodRetType = goRetType
 
 	// Map Zinc method names to Go equivalents
 	goMethodName := m.Name
@@ -347,6 +349,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	g.writeln("}")
 
 	g.currentReturnType = prevRetType
+	g.currentMethodRetType = prevMethodRetType
 }
 
 // collectParentFields walks the inheritance chain and adds parent fields to the map.

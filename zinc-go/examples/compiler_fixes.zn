@@ -63,10 +63,29 @@ fn testToBytes() {
     print("toBytes len: {len(b)}")
 }
 
+// --- Fix 5: Channel as class field ---
+class MsgQueue {
+    var inbox = Channel(10)
+    pub fn send(String msg) {
+        inbox.send(msg)
+    }
+    pub fn recv(): String {
+        return inbox.recv()
+    }
+}
+
+fn testChannelField() {
+    var q = MsgQueue()
+    q.send("test message")
+    var msg = q.recv()
+    print("chan field: {msg}")
+}
+
 fn main() {
     testTypedChannels()
     testIntCast()
     testPointerValue()
     testToBytes()
+    testChannelField()
     print("All fixes OK")
 }
