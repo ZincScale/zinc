@@ -95,6 +95,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		typeName := "interface{}"
 		if f.Type != nil {
 			typeName = g.formatType(f.Type)
+		} else if f.Default != nil {
+			// Infer field type from initializer expression
+			typeName = g.inferFieldType(f.Default)
 		}
 		g.writeln("%s %s", exportName(f.Name), typeName)
 	}
@@ -288,12 +291,26 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	canError := g.errorFuncs[methodKey]
 	goRetType := g.goReturnTypeStr(m.ReturnType)
 
+	// If the return type is a known class (not data class), return *Type
+	// to match constructor return types (NewType() returns *Type).
+	if simpleType, ok := m.ReturnType.(*parser.SimpleType); ok {
+		if _, isStruct := g.structs[simpleType.Name]; isStruct {
+			goRetType = "*" + simpleType.Name
+		}
+	}
+
 	var ret string
 	if canError {
 		if goRetType == "" {
 			ret = " error"
 		} else {
 			ret = fmt.Sprintf(" (%s, error)", goRetType)
+		}
+	} else if simpleType, ok := m.ReturnType.(*parser.SimpleType); ok {
+		if _, isStruct := g.structs[simpleType.Name]; isStruct {
+			ret = " *" + simpleType.Name
+		} else {
+			ret = g.formatReturnType(m.ReturnType, m.Body)
 		}
 	} else {
 		ret = g.formatReturnType(m.ReturnType, m.Body)
@@ -474,6 +491,35 @@ func (g *Generator) emitInterfaceDecl(iface *parser.InterfaceDecl) {
 	}
 	g.indent--
 	g.writeln("}")
+}
+
+// --- Field type inference -----------------------------------------------------
+
+// inferFieldType infers the Go type for a class field from its initializer expression.
+// Handles Channel() → chan interface{}, literals, and constructor calls.
+func (g *Generator) inferFieldType(expr parser.Expr) string {
+	if call, ok := expr.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok {
+			switch ident.Name {
+			case "Channel", "channel", "Chan":
+				chanType := "interface{}"
+				if len(call.TypeArgs) > 0 {
+					if mapped, ok := zincToGoType[call.TypeArgs[0]]; ok {
+						chanType = mapped
+					} else {
+						chanType = call.TypeArgs[0]
+					}
+				}
+				return "chan " + chanType
+			}
+		}
+	}
+	// Fall back to general expression type inference
+	t := g.inferExprType(expr, g.varTypes)
+	if t != "" && t != "interface{}" {
+		return t
+	}
+	return "interface{}"
 }
 
 // --- Constants ---------------------------------------------------------------

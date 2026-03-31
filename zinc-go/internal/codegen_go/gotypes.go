@@ -196,6 +196,24 @@ func (r *GoTypeResolver) FuncParamCallbackSignature(pkgPath, funcName string, pa
 	return result
 }
 
+// ParamIsBytes reports whether the i-th parameter of pkgPath.funcName is []byte.
+func (r *GoTypeResolver) ParamIsBytes(pkgPath, funcName string, paramIndex int) bool {
+	sig := r.lookupFunc(pkgPath, funcName)
+	if sig == nil {
+		return false
+	}
+	params := sig.Params()
+	if paramIndex >= params.Len() {
+		return false
+	}
+	slice, ok := params.At(paramIndex).Type().(*types.Slice)
+	if !ok {
+		return false
+	}
+	basic, ok := slice.Elem().(*types.Basic)
+	return ok && basic.Kind() == types.Byte
+}
+
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	if !ok {

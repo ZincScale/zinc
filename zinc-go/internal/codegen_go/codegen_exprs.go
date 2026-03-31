@@ -291,6 +291,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			return fmt.Sprintf("len(%s) == 0", obj)
 		case "length":
 			return fmt.Sprintf("len(%s)", obj)
+		case "toBytes":
+			return fmt.Sprintf("[]byte(%s)", obj)
 		case "charAt":
 			return fmt.Sprintf("string(%s[%s])", obj, g.formatExprList(c.Args))
 		case "substring":
@@ -435,11 +437,25 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		g.needImport("fmt")
 		return fmt.Sprintf("fmt.Sprint(%s)", args)
 	case "int":
-		g.needImport("strconv")
-		return fmt.Sprintf("strconv.Atoi(%s)", args)
+		// If the argument is a string literal or known string type, use strconv.Atoi.
+		// Otherwise, emit a Go type conversion: int(expr).
+		if len(c.Args) == 1 {
+			argType := g.inferExprType(c.Args[0], g.varTypes)
+			if argType == "string" {
+				g.needImport("strconv")
+				return fmt.Sprintf("strconv.Atoi(%s)", args)
+			}
+		}
+		return fmt.Sprintf("int(%s)", args)
 	case "float":
-		g.needImport("strconv")
-		return fmt.Sprintf("strconv.ParseFloat(%s, 64)", args)
+		if len(c.Args) == 1 {
+			argType := g.inferExprType(c.Args[0], g.varTypes)
+			if argType == "string" {
+				g.needImport("strconv")
+				return fmt.Sprintf("strconv.ParseFloat(%s, 64)", args)
+			}
+		}
+		return fmt.Sprintf("float64(%s)", args)
 	case "input":
 		g.needImport("fmt")
 		return fmt.Sprintf("func() string { var s string; fmt.Scanln(&s); return s }()")
@@ -470,6 +486,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	}
 
 	// Constructor calls: new Type() → NewType()
+	// Regular class constructors return *Type, so dereference for value semantics.
+	// Data class constructors return Type (by value), no dereference needed.
 	if c.IsNew {
 		ctorName := "New" + callee
 		args = g.fillDefaultArgs(ctorName, c.Args, c.NamedArgs, args)
