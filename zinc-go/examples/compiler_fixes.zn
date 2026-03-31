@@ -1,0 +1,72 @@
+// Test compiler fixes that work
+
+import time
+
+// Fix 1: Typed channels
+data Msg(String text, int priority)
+
+fn testTypedChannels() {
+    var ch = Channel<Msg>(5)
+    spawn {
+        ch.send(Msg("urgent", 1))
+        ch.send(Msg("normal", 5))
+    }
+    var m1 = ch.recv()
+    var m2 = ch.recv()
+    print("typed chan 1: {m1}")
+    print("typed chan 2: {m2}")
+}
+
+// Fix 2: int() cast on numeric types
+fn testIntCast() {
+    var ts = time.Now().Unix()
+    var asInt = int(ts)
+    print("int cast: {asInt}")
+
+    var f = 3.14
+    var rounded = int(f)
+    print("float to int: {rounded}")
+}
+
+// Fix 3: Pointer/value — method returns class type
+class Point {
+    int x
+    int y
+    init(int x, int y) {
+        this.x = x
+        this.y = y
+    }
+    pub fn moved(int dx, int dy): Point {
+        return Point(x + dx, y + dy)
+    }
+    pub fn scaled(int factor): Point {
+        return Point(x * factor, y * factor)
+    }
+    fn toString(): String {
+        return "({x}, {y})"
+    }
+}
+
+fn testPointerValue() {
+    var p = Point(1, 2)
+    var p2 = p.moved(3, 4)
+    var p3 = p2.scaled(2)
+    print("original: {p}")
+    print("moved: {p2}")
+    print("scaled: {p3}")
+}
+
+// Fix 4: .toBytes()
+fn testToBytes() {
+    var s = "hello"
+    var b = s.toBytes()
+    print("toBytes len: {len(b)}")
+}
+
+fn main() {
+    testTypedChannels()
+    testIntCast()
+    testPointerValue()
+    testToBytes()
+    print("All fixes OK")
+}
