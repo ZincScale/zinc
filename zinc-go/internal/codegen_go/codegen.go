@@ -133,6 +133,12 @@ func CollectExports(prog *parser.Program) map[string]string {
 			exports[decl.Name] = "data"
 		case *parser.ClassDecl:
 			exports[decl.Name] = "class"
+			// Export sealed class variants (they are data classes)
+			if decl.IsSealed {
+				for _, v := range decl.Variants {
+					exports[v.Name] = "data"
+				}
+			}
 		case *parser.InterfaceDecl:
 			exports[decl.Name] = "interface"
 		case *parser.FnDecl:

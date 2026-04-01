@@ -588,6 +588,15 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
+	// In subpackages, export plain function calls (same-package)
+	if g.isSubpackage() {
+		if ident, ok := c.Callee.(*parser.Ident); ok {
+			if _, ok := g.funcSigs[ident.Name]; ok {
+				callee = exportName(ident.Name)
+			}
+		}
+	}
+
 	return fmt.Sprintf("%s%s(%s)", callee, goTypeArgStr, args)
 }
 

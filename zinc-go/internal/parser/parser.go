@@ -201,6 +201,10 @@ func (p *Parser) looksLikeTypeArgs() bool {
 			return false
 		}
 		off++ // skip ident
+		// Support dotted type args: core.FlowFile
+		for p.peekAt(off).Type == lexer.TOKEN_DOT && p.peekAt(off+1).Type == lexer.TOKEN_IDENT {
+			off += 2 // skip . and ident
+		}
 		if p.peekAt(off).Type == lexer.TOKEN_GT {
 			// Check that '>' is followed by '(' — confirms call syntax
 			return p.peekAt(off+1).Type == lexer.TOKEN_LPAREN
@@ -213,13 +217,24 @@ func (p *Parser) looksLikeTypeArgs() bool {
 }
 
 // parseCallTypeArgs parses <Type, Type, ...> at a call site.
+// Supports dotted names: <core.FlowFile, String>
 func (p *Parser) parseCallTypeArgs() []string {
 	p.expect(lexer.TOKEN_LT)
 	var args []string
-	args = append(args, p.expect(lexer.TOKEN_IDENT).Literal)
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+		p.advance()
+		name += "." + p.advance().Literal
+	}
+	args = append(args, name)
 	for p.check(lexer.TOKEN_COMMA) {
 		p.advance()
-		args = append(args, p.expect(lexer.TOKEN_IDENT).Literal)
+		name = p.expect(lexer.TOKEN_IDENT).Literal
+		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+			p.advance()
+			name += "." + p.advance().Literal
+		}
+		args = append(args, name)
 	}
 	p.expect(lexer.TOKEN_GT)
 	return args
