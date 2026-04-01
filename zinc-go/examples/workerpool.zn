@@ -12,14 +12,13 @@ fn main() {
 
     // 3 workers each take jobs
     for w in 0..3 {
-        var id = w
         spawn {
             while true {
                 var job = jobs.recv()
                 if job == "STOP" {
                     return
                 }
-                results.send("worker {id}: {job}")
+                results.send("done: {job}")
             }
         }
     }

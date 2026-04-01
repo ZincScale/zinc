@@ -1,0 +1,6 @@
+done: fetch
+done: parse
+done: transform
+done: validate
+done: store
+Worker Pool OK

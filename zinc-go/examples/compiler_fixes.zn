@@ -1,7 +1,5 @@
 // Test compiler fixes that work
 
-import time
-
 // Fix 1: Typed channels
 data Msg(String text, int priority)
 
@@ -19,8 +17,8 @@ fn testTypedChannels() {
 
 // Fix 2: int() cast on numeric types
 fn testIntCast() {
-    var ts = time.Now().Unix()
-    var asInt = int(ts)
+    var big = 9876543210
+    var asInt = int(big)
     print("int cast: {asInt}")
 
     var f = 3.14
