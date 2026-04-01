@@ -7,4 +7,8 @@ Hello, Alice!
 Hello, Bob!
 Greeter(Hello)
 Widget on sale: $9.790000000000001
+pair: Pair(first=hello, second=42)
+box: Box(zinc)
+unbox: zinc
+first: apple
 Multi-package OK

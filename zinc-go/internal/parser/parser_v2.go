@@ -1810,8 +1810,10 @@ func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 		case p.check(lexer.TOKEN_LPAREN):
 			expr = p.v2ParseCallArgs(expr)
 		case p.check(lexer.TOKEN_LT):
-			// Check for generic call: ident<Type>(args)
-			if _, ok := expr.(*Ident); ok && p.looksLikeTypeArgs() {
+			// Check for generic call: ident<Type>(args) or pkg.Type<Args>(args)
+			_, isIdent := expr.(*Ident)
+			_, isSel := expr.(*SelectorExpr)
+			if (isIdent || isSel) && p.looksLikeTypeArgs() {
 				typeArgs := p.parseCallTypeArgs()
 				p.expect(lexer.TOKEN_LPAREN)
 				call := p.finishCallArgsNoLParen(expr).(*CallExpr)

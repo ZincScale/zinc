@@ -25,5 +25,16 @@ fn main() {
     // Use function from services subpackage
     print(services.discountPrice(widget, 0.2))
 
+    // Cross-package generics
+    var pair = core.Pair<String, int>("hello", 42)
+    print("pair: {pair}")
+
+    var box = core.Box<String>("zinc")
+    print("box: {box}")
+    print("unbox: {box.get()}")
+
+    List<String> fruits = ["apple", "banana", "cherry"]
+    print("first: {core.first(fruits)}")
+
     print("Multi-package OK")
 }
