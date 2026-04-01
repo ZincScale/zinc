@@ -68,6 +68,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 					}
 				}
 			}
+			// Auto-import: if the identifier is a known imported package, add the import
+			if goPath, ok := g.importMap[ident.Name]; ok {
+				g.needImport(goPath)
+			}
 		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))
 	case *parser.IndexExpr:

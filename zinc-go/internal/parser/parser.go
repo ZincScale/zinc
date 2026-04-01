@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// parser.go — legacy v1 parser with shared utilities.
+//
+// The v2 parser (parser_v2.go) is the active parser. This file remains because
+// v2 calls parseLambdaParam() and finishCallArgsNoLParen(), which transitively
+// depend on v1's expression/type parsing. Once those two functions are migrated
+// to use v2ParseExpr/v2ParseType, this file can be deleted.
 package parser
 
 import (

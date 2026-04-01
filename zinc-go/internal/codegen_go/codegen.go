@@ -295,23 +295,23 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.typeImports = make(map[string]string)
 	g.collectDecls(prog.Decls)
 
-	// Add user imports with smart resolution.
-	// If the last segment starts with uppercase, it's a specific type import
-	// (e.g. sync.Mutex → import "sync", register Mutex → sync.Mutex).
-	// Otherwise it's a whole-package import (e.g. net.http → import "net/http").
+	// Register user imports for resolution — but don't add to g.imports yet.
+	// The codegen will call needImport() when it actually references a package,
+	// so only used imports appear in the output.
 	for _, imp := range prog.Imports {
 		parts := strings.Split(imp.Path, ".")
 		lastSeg := parts[len(parts)-1]
 		if len(parts) >= 2 && len(lastSeg) > 0 && lastSeg[0] >= 'A' && lastSeg[0] <= 'Z' {
+			// Type import: sync.Mutex → register Mutex → sync.Mutex
 			pkgParts := parts[:len(parts)-1]
 			goPath := strings.Join(pkgParts, "/")
 			goPkg := pkgParts[len(pkgParts)-1]
 			typeName := lastSeg
-			g.needImport(goPath)
 			g.typeImports[typeName] = goPkg + "." + typeName
+			g.importMap[goPkg] = goPath
 		} else {
+			// Package import: net.http → import "net/http"
 			goPath := strings.ReplaceAll(imp.Path, ".", "/")
-			g.needImport(goPath)
 			g.importMap[lastSeg] = goPath
 		}
 	}
@@ -438,6 +438,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			return typ.Name
 		}
 		if qualified, ok := g.typeImports[typ.Name]; ok {
+			// Add the package import for this type reference
+			pkgPrefix := strings.SplitN(qualified, ".", 2)[0]
+			if goPath, ok := g.importMap[pkgPrefix]; ok {
+				g.needImport(goPath)
+			}
 			return qualified
 		}
 		return typ.Name
