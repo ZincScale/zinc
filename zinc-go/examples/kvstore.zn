@@ -2,6 +2,7 @@
 // Tests: classes, error handling, function types, imports, maps
 
 import strings
+import sort
 
 // Error-returning lookup
 fn mustGet(Map<String, String> data, String key): String {
@@ -57,6 +58,7 @@ fn main() {
             users = append(users, v)
         }
     }
+    sort.Strings(users)
     print("users: {users}")
 
     print("KV Store OK")
