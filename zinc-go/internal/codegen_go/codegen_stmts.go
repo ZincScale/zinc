@@ -471,6 +471,13 @@ func (g *Generator) stripEntrySet(e parser.Expr) string {
 }
 
 func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
+	// Detect type-switch match: if any case pattern is a data class constructor call,
+	// emit a Go type switch instead of a value switch.
+	if g.isTypeSwitchMatch(m) {
+		g.emitTypeSwitchMatch(m)
+		return
+	}
+
 	g.writeln("switch %s {", g.formatExpr(m.Subject))
 	for _, c := range m.Cases {
 		if c.Pattern == nil {
@@ -483,6 +490,132 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 		g.indent--
 	}
 	g.writeln("}")
+}
+
+// isTypeSwitchMatch checks if a match statement should use a Go type switch.
+// Returns true if any non-wildcard case pattern is a data class constructor call.
+func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			continue
+		}
+		if call, ok := c.Pattern.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				if g.dataClasses[ident.Name] {
+					return true
+				}
+			}
+			// Qualified: core.Single(ff)
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if pkg, ok := sel.Object.(*parser.Ident); ok {
+					if exports, ok := g.subpkgExports[pkg.Name]; ok {
+						if exports[sel.Field] == "data" {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// emitTypeSwitchMatch generates a Go type switch for sealed class / data class matching.
+// match result {
+//     case Single(ff) { ... }
+//     case Multiple(ffs) { ... }
+// }
+// →
+// switch _v := result.(type) {
+// case Single:
+//     ff := _v.Ff
+//     ...
+// case Multiple:
+//     ffs := _v.Ffs
+//     ...
+// }
+func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
+	g.writeln("switch _v := %s.(type) {", g.formatExpr(m.Subject))
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			g.writeln("default:")
+			g.indent++
+			g.emitBlock(c.Body)
+			g.indent--
+			continue
+		}
+
+		call, ok := c.Pattern.(*parser.CallExpr)
+		if !ok {
+			// Plain identifier pattern (e.g. case Drop without args)
+			g.writeln("case %s:", g.formatExpr(c.Pattern))
+			g.indent++
+			g.emitBlock(c.Body)
+			g.indent--
+			continue
+		}
+
+		// Get the type name (local or qualified)
+		typeName := ""
+		var dataDecl *parser.DataClassDecl
+		if ident, ok := call.Callee.(*parser.Ident); ok {
+			typeName = ident.Name
+			// Look up the data class declaration to get field names
+			for _, d := range g.currentSealedVariants(ident.Name) {
+				if d.Name == ident.Name {
+					dataDecl = d
+					break
+				}
+			}
+		} else if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+			if pkg, ok := sel.Object.(*parser.Ident); ok {
+				typeName = pkg.Name + "." + sel.Field
+			}
+		}
+
+		g.writeln("case %s:", typeName)
+		g.indent++
+
+		// Bind destructured variables: case Single(ff) → ff := _v.Ff
+		if dataDecl != nil && len(call.Args) > 0 {
+			for i, arg := range call.Args {
+				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
+					if i < len(dataDecl.Params) {
+						fieldName := exportName(dataDecl.Params[i].Name)
+						g.writeln("%s := _v.%s", ident.Name, fieldName)
+					}
+				}
+			}
+		} else if len(call.Args) > 0 {
+			// No data decl found — try positional binding with generic field names
+			for i, arg := range call.Args {
+				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
+					// Use the arg name as a field guess (capitalize first letter)
+					fieldName := exportName(ident.Name)
+					g.writeln("%s := _v.%s", ident.Name, fieldName)
+				}
+				_ = i
+			}
+		}
+
+		g.emitBlock(c.Body)
+		g.indent--
+	}
+	g.writeln("}")
+}
+
+// currentSealedVariants returns the variants of the sealed class that contains the given variant name.
+func (g *Generator) currentSealedVariants(variantName string) []*parser.DataClassDecl {
+	for _, cls := range g.structs {
+		if cls.IsSealed {
+			for _, v := range cls.Variants {
+				if v.Name == variantName {
+					return cls.Variants
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // --- Expression statements (spawn, print, collection methods, forEach) -------
