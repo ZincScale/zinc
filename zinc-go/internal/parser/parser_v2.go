@@ -1478,6 +1478,12 @@ func (p *Parser) v2ParseType() TypeExpr {
 		name += "." + p.advance().Literal
 	}
 
+	return p.v2ParseTypeFrom(name)
+}
+
+// v2ParseTypeFrom continues parsing a type expression given a name already consumed.
+func (p *Parser) v2ParseTypeFrom(name string) TypeExpr {
+
 	var typ TypeExpr
 
 	// Function type: Fn<(ParamTypes), ReturnType> or Fn<(ParamTypes)>
@@ -1975,6 +1981,62 @@ func (p *Parser) v2ParsePrimary() Expr {
 		// Check for lambda: name -> expr
 		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			return p.v2ParseLambda()
+		}
+		// Check for typed literal: List<Type>[] or Map<K,V>{}
+		if p.peekAt(1).Type == lexer.TOKEN_LT && p.looksLikeTypedLiteralAt(1) {
+			name := p.advance().Literal
+			// Parse <TypeArgs> manually (don't use v2ParseTypeFrom which eats [])
+			p.advance() // consume <
+			var typeArgs []TypeExpr
+			typeArgs = append(typeArgs, p.v2ParseType())
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				typeArgs = append(typeArgs, p.v2ParseType())
+			}
+			p.expect(lexer.TOKEN_GT)
+			typ := &GenericType{Name: name, TypeArgs: typeArgs}
+
+			if p.check(lexer.TOKEN_LBRACKET) {
+				p.advance() // consume [
+				if p.check(lexer.TOKEN_RBRACKET) {
+					p.advance() // consume ]
+					return &ListLit{ExplicitType: typ}
+				}
+				// Non-empty: List<String>["a", "b", "c"]
+				var elems []Expr
+				elems = append(elems, p.v2ParseExpr())
+				for p.check(lexer.TOKEN_COMMA) {
+					p.advance()
+					if p.check(lexer.TOKEN_RBRACKET) { break }
+					elems = append(elems, p.v2ParseExpr())
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				return &ListLit{Elements: elems, ExplicitType: typ}
+			} else if p.check(lexer.TOKEN_LBRACE) {
+				p.advance() // {
+				if p.check(lexer.TOKEN_RBRACE) {
+					p.advance() // }
+					return &MapLit{ExplicitType: typ}
+				}
+				// Non-empty: Map<K,V>{"a": 1}
+				var keys, vals []Expr
+				k := p.v2ParseExpr()
+				p.expect(lexer.TOKEN_COLON)
+				v := p.v2ParseExpr()
+				keys = append(keys, k)
+				vals = append(vals, v)
+				for p.check(lexer.TOKEN_COMMA) {
+					p.advance()
+					if p.check(lexer.TOKEN_RBRACE) { break }
+					k = p.v2ParseExpr()
+					p.expect(lexer.TOKEN_COLON)
+					v = p.v2ParseExpr()
+					keys = append(keys, k)
+					vals = append(vals, v)
+				}
+				p.expect(lexer.TOKEN_RBRACE)
+				return &MapLit{Keys: keys, Values: vals, ExplicitType: typ}
+			}
 		}
 		p.advance()
 		return &Ident{Name: tok.Literal}

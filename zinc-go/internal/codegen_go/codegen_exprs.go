@@ -87,6 +87,11 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		return fmt.Sprintf("%s[%s:%s]", g.formatExpr(expr.Object), low, high)
 	case *parser.ListLit:
+		if expr.ExplicitType != nil {
+			goType := g.formatType(expr.ExplicitType)
+			elems := g.formatExprList(expr.Elements)
+			return fmt.Sprintf("%s{%s}", goType, elems)
+		}
 		if len(expr.Elements) == 0 {
 			return "[]interface{}{}"
 		}
@@ -94,6 +99,17 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		elemType := inferListLitElemType(expr.Elements)
 		return fmt.Sprintf("[]%s{%s}", elemType, elems)
 	case *parser.MapLit:
+		if expr.ExplicitType != nil {
+			goType := g.formatType(expr.ExplicitType)
+			if len(expr.Keys) == 0 {
+				return goType + "{}"
+			}
+			var pairs []string
+			for i := range expr.Keys {
+				pairs = append(pairs, fmt.Sprintf("%s: %s", g.formatExpr(expr.Keys[i]), g.formatExpr(expr.Values[i])))
+			}
+			return fmt.Sprintf("%s{%s}", goType, strings.Join(pairs, ", "))
+		}
 		if len(expr.Keys) == 0 {
 			return "map[string]interface{}{}"
 		}

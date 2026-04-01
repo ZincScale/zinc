@@ -115,8 +115,15 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		if f.Type != nil {
 			typeName = g.formatType(f.Type)
 		} else if f.Default != nil {
-			// Infer field type from initializer expression
-			typeName = g.inferFieldType(f.Default)
+			// Use explicit type from typed literals: var x = List<Item>[] or Map<K,V>{}
+			if listLit, ok := f.Default.(*parser.ListLit); ok && listLit.ExplicitType != nil {
+				typeName = g.formatType(listLit.ExplicitType)
+			} else if mapLit, ok := f.Default.(*parser.MapLit); ok && mapLit.ExplicitType != nil {
+				typeName = g.formatType(mapLit.ExplicitType)
+			} else {
+				// Infer field type from initializer expression
+				typeName = g.inferFieldType(f.Default)
+			}
 		}
 		g.writeln("%s %s", exportName(f.Name), typeName)
 	}

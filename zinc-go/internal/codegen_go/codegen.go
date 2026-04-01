@@ -573,6 +573,13 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				}
 			}
 		}
+		// Classes (non-data, non-sealed) are always pointers in Go.
+		// Sealed classes and interfaces are Go interfaces — no pointer.
+		if cls, isStruct := g.structs[typ.Name]; isStruct {
+			if !g.dataClasses[typ.Name] && !cls.IsSealed {
+				return "*" + typ.Name
+			}
+		}
 		return typ.Name
 	case *parser.GenericType:
 		switch typ.Name {

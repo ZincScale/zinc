@@ -216,6 +216,43 @@ func (p *Parser) looksLikeTypeArgs() bool {
 	}
 }
 
+// looksLikeTypedLiteral checks if we're at < and the pattern is <Type, ...>[] or <Type, ...>{}.
+// This enables: var x = List<int>[]  or  var m = Map<String, int>{}
+func (p *Parser) looksLikeTypedLiteral() bool {
+	return p.looksLikeTypedLiteralAt(0)
+}
+
+// looksLikeTypedLiteralAt checks from a given offset whether we see <Type, ...>[] or <Type, ...>{}.
+func (p *Parser) looksLikeTypedLiteralAt(base int) bool {
+	off := base + 1 // skip '<'
+	for {
+		if p.peekAt(off).Type != lexer.TOKEN_IDENT {
+			return false
+		}
+		off++ // skip ident
+		// Support dotted type args: core.FlowFile
+		for p.peekAt(off).Type == lexer.TOKEN_DOT && p.peekAt(off+1).Type == lexer.TOKEN_IDENT {
+			off += 2
+		}
+		if p.peekAt(off).Type == lexer.TOKEN_GT {
+			next := p.peekAt(off + 1).Type
+			// >[] or >[...] — typed list literal (empty or non-empty)
+			if next == lexer.TOKEN_LBRACKET {
+				return true
+			}
+			// >{} or >{...} — typed map literal (empty or non-empty)
+			if next == lexer.TOKEN_LBRACE {
+				return true
+			}
+			return false
+		}
+		if p.peekAt(off).Type != lexer.TOKEN_COMMA {
+			return false
+		}
+		off++ // skip comma
+	}
+}
+
 // parseCallTypeArgs parses <Type, Type, ...> at a call site.
 // Supports dotted names: <core.FlowFile, String>
 func (p *Parser) parseCallTypeArgs() []string {

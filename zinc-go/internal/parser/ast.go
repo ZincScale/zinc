@@ -709,7 +709,8 @@ func (n *NullLit) exprTag() {}
 // ListLit: [a, b, c]
 type ListLit struct {
 	Elements     []Expr
-	ResolvedType string // set by typechecker; Go type string like "[]int"
+	ResolvedType string   // set by typechecker; Go type string like "[]int"
+	ExplicitType TypeExpr // set when parsed as List<Type>[] — the generic type
 }
 
 func (l *ListLit) nodeTag() {}
@@ -719,7 +720,8 @@ func (l *ListLit) exprTag() {}
 type MapLit struct {
 	Keys         []Expr
 	Values       []Expr
-	ResolvedType string // set by typechecker; Go type string like "map[string]int"
+	ResolvedType string   // set by typechecker; Go type string like "map[string]int"
+	ExplicitType TypeExpr // set when parsed as Map<K,V>{} — the generic type
 }
 
 func (m *MapLit) nodeTag() {}
