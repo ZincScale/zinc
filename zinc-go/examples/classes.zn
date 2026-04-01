@@ -68,4 +68,42 @@ print("version: {VERSION}")
 Greeter g = FormalGreeter()
 print(g.greet("World"))
 
+// --- Generic class: typed container ---
+class Box<T> {
+    T value
+
+    init(T value) {
+        this.value = value
+    }
+
+    fn get(): T {
+        return value
+    }
+
+    fn toString(): String {
+        return "Box({value})"
+    }
+}
+
+var strBox = Box<String>("hello")
+print("box: {strBox}")
+print("unbox: {strBox.get()}")
+
+var intBox = Box<int>(42)
+print("int box: {intBox}")
+
+// --- Generic interface ---
+interface Mapper<A, B> {
+    fn apply(A input): B
+}
+
+class IntToString : Mapper<int, String> {
+    fn apply(int input): String {
+        return "val={input}"
+    }
+}
+
+var mapper = IntToString()
+print("mapped: {mapper.apply(7)}")
+
 print("Classes OK")

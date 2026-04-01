@@ -33,4 +33,24 @@ List<int> numbers = [1, 2, 3]
 var result = numbers.reduce(0, (acc, x) -> acc + x * 10)
 print("reduce: {result}")
 
+// --- Generic functions ---
+fn identity<T>(T x): T {
+    return x
+}
+
+print("identity str: {identity("zinc")}")
+print("identity int: {identity(99)}")
+
+fn swap<A, B>(A a, B b): String {
+    return "{b}, {a}"
+}
+
+print("swap: {swap(1, "two")}")
+
+// Generic single-expression function
+fn second<T>(List<T> items): T = items[1]
+
+List<String> fruits = ["apple", "banana", "cherry"]
+print("second: {second(fruits)}")
+
 print("Functions OK")

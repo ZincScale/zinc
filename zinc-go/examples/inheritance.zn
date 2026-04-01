@@ -111,4 +111,38 @@ Vehicle v2 = bike
 print("7. bike as Vehicle: {v2.describe()}")
 print("   category={v2.category()}")
 
+// --- Generic interface + class inheritance ---
+interface Container<T> {
+    fn get(): T
+    fn set(T value)
+}
+
+class NamedContainer<T> : Container<T> {
+    String label
+    T stored
+
+    init(String label, T stored) {
+        this.label = label
+        this.stored = stored
+    }
+
+    fn get(): T {
+        return stored
+    }
+
+    fn set(T value) {
+        stored = value
+    }
+
+    fn describe(): String {
+        return "{label}: {stored}"
+    }
+}
+
+var nc = NamedContainer<int>("counter", 0)
+print("8. {nc.describe()}")
+nc.set(42)
+print("   after set: {nc.describe()}")
+print("   get: {nc.get()}")
+
 print("Inheritance OK")

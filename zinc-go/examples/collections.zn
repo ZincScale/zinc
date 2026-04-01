@@ -22,3 +22,49 @@ for name, age in ages {
 List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 var evens = numbers.filter(x -> x % 2 == 0)
 print("Evens: {evens}")
+
+// --- Generic stack (collection pattern) ---
+class Stack<T> {
+    List<T> items = []
+
+    pub fn push(T item) {
+        items = append(items, item)
+    }
+
+    pub fn pop(): T {
+        var item = items[len(items) - 1]
+        items = items[:len(items) - 1]
+        return item
+    }
+
+    pub fn peek(): T {
+        return items[len(items) - 1]
+    }
+
+    pub fn size(): int {
+        return len(items)
+    }
+
+    pub fn isEmpty(): bool {
+        return len(items) == 0
+    }
+}
+
+var stack = Stack<String>()
+stack.push("first")
+stack.push("second")
+stack.push("third")
+print("stack size: {stack.size()}")
+print("peek: {stack.peek()}")
+print("pop: {stack.pop()}")
+print("pop: {stack.pop()}")
+print("stack size after: {stack.size()}")
+
+// --- Generic data class as map entry ---
+data Entry<K, V>(K key, V value)
+
+var e1 = Entry<String, int>("score", 100)
+print("entry: {e1}")
+
+var e2 = Entry<int, String>(1, "one")
+print("entry: {e2}")

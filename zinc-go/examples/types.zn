@@ -34,4 +34,20 @@ var b = "hello"
 print("structural eq: {a == b}")
 print("reference eq: {a === b}")
 
+// --- Generic type alias-like pattern ---
+data Result<T>(T value, bool ok)
+
+var success = Result<String>("data", true)
+print("result: {success}")
+print("ok? {success.ok}")
+
+var failure = Result<int>(0, false)
+print("failure: {failure}")
+
+// --- Generic with nullable ---
+data Maybe<T>(T value)
+
+var some = Maybe<String>("present")
+print("maybe: {some}")
+
 print("Types OK")
