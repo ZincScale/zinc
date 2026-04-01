@@ -328,10 +328,14 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 		case "recv":
 			if !g.isStructVar(sel.Object) {
-				// If we're in a method with a known return type and the channel is
-				// chan interface{}, add type assertion for the recv result.
+				// Add type assertion only for untyped channels (chan interface{}).
+				// Typed channels (chan Job, chan FlowFile) already return the correct type.
 				if g.currentMethodRetType != "" && g.currentMethodRetType != "interface{}" {
-					return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
+					// Check if the channel variable has a known element type
+					chanElemType := g.varTypes[obj]
+					if chanElemType == "" || chanElemType == "interface{}" {
+						return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
+					}
 				}
 				return fmt.Sprintf("<-%s", obj)
 			}

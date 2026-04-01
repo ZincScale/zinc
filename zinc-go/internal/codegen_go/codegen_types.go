@@ -263,6 +263,25 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		}
 	}
 
+	// Add field defaults for fields not assigned in the constructor body
+	assignedFields := make(map[string]bool)
+	for _, lf := range litFields {
+		// Extract field name from "FieldName: value"
+		if idx := strings.Index(lf, ":"); idx > 0 {
+			assignedFields[lf[:idx]] = true
+		}
+	}
+	for _, f := range cls.Fields {
+		if f.Default != nil && !assignedFields[exportName(f.Name)] {
+			val := g.formatExpr(f.Default)
+			if _, isListLit := f.Default.(*parser.ListLit); isListLit && f.Type != nil {
+				goType := g.formatType(f.Type)
+				val = goType + "{}"
+			}
+			litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
+		}
+	}
+
 	// Emit struct literal
 	typeNameTA := typeName + tpArgs
 	if len(litFields) > 0 {
