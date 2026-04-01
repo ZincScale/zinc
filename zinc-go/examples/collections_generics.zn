@@ -1,0 +1,112 @@
+// Comprehensive test: typed literals, var vs explicit type, generics in collections
+
+data Item(String name, int price)
+data Pair<A, B>(A first, B second)
+
+class Cart {
+    var items = List<Item>[]
+    var totals = Map<String, int>{}
+
+    pub fn add(Item item) {
+        items = append(items, item)
+        totals[item.name] = item.price
+    }
+
+    pub fn count(): int {
+        return len(items)
+    }
+
+    pub fn total(): int {
+        var sum = 0
+        for item in items {
+            sum = sum + item.price
+        }
+        return sum
+    }
+
+    pub fn lookup(String name): int {
+        return totals[name]
+    }
+}
+
+class Registry<T> {
+    var entries = List<T>[]
+    var index = Map<String, T>{}
+
+    pub fn register(String name, T entry) {
+        entries = append(entries, entry)
+        index[name] = entry
+    }
+
+    pub fn get(String name): T {
+        return index[name]
+    }
+
+    pub fn count(): int {
+        return len(entries)
+    }
+
+    pub fn all(): List<T> {
+        return entries
+    }
+}
+
+fn main() {
+    // 1. var with typed empty list
+    var names = List<String>[]
+    names = append(names, "alice")
+    names = append(names, "bob")
+    print("1. names: {names}")
+
+    // 2. var with typed non-empty list
+    var nums = List<int>[10, 20, 30]
+    print("2. nums: {nums}")
+
+    // 3. explicit type with empty list
+    List<String> tags = []
+    tags = append(tags, "urgent")
+    print("3. tags: {tags}")
+
+    // 4. explicit type with non-empty list
+    List<int> scores = [95, 87, 92]
+    print("4. scores: {scores}")
+
+    // 5. var with typed empty map
+    var ages = Map<String, int>{}
+    ages["alice"] = 30
+    ages["bob"] = 25
+    print("5. alice: {ages["alice"]}")
+
+    // 6. explicit type with empty map
+    Map<String, int> config = {}
+    config["timeout"] = 30
+    print("6. timeout: {config["timeout"]}")
+
+    // 7. Class with generic collection fields (var form)
+    var cart = Cart()
+    cart.add(Item("widget", 999))
+    cart.add(Item("gadget", 1499))
+    print("7. count: {cart.count()}")
+    print("7. total: {cart.total()}")
+    print("7. widget: {cart.lookup("widget")}")
+
+    // 8. Generic data class
+    var p = Pair<String, int>("hello", 42)
+    print("8. pair: {p}")
+
+    // 9. Generic class with typed collection fields
+    var reg = Registry<Item>()
+    reg.register("w", Item("widget", 999))
+    reg.register("g", Item("gadget", 1499))
+    print("9. count: {reg.count()}")
+    print("9. get: {reg.get("w")}")
+
+    // 10. Map with non-primitive value type
+    var inventory = Map<String, Item>{}
+    inventory["sword"] = Item("sword", 50)
+    inventory["shield"] = Item("shield", 30)
+    print("10. sword: {inventory["sword"]}")
+    print("10. shield: {inventory["shield"]}")
+
+    print("Collections generics OK")
+}
