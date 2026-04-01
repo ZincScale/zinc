@@ -651,7 +651,7 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 	}
 	// Collection method rewrites as statements
 	if call, ok := es.Expr.(*parser.CallExpr); ok {
-		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "add" {
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "add" && !g.isStructVar(sel.Object) {
 			obj := g.formatExpr(sel.Object)
 			args := g.formatExprList(call.Args)
 			g.writeln("%s = append(%s, %s)", obj, obj, args)

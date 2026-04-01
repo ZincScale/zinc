@@ -316,10 +316,12 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		obj := g.formatExpr(sel.Object)
 		switch sel.Field {
 		case "add":
-			args := g.formatExprList(c.Args)
-			return fmt.Sprintf("append(%s, %s)", obj, args)
+			if !g.isStructVar(sel.Object) {
+				args := g.formatExprList(c.Args)
+				return fmt.Sprintf("append(%s, %s)", obj, args)
+			}
 		case "put":
-			if len(c.Args) == 2 {
+			if len(c.Args) == 2 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("func() { %s[%s] = %s }()", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
 			}
 		case "send":

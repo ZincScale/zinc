@@ -157,10 +157,14 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		for _, f := range cls.Fields {
 			if f.Default != nil {
 				val := g.formatExpr(f.Default)
-				// Use typed empty literal for typed list fields: List<T> x = [] → []T{}
-				if _, isListLit := f.Default.(*parser.ListLit); isListLit && f.Type != nil {
-					goType := g.formatType(f.Type)
-					val = goType + "{}"
+				// Use typed empty literal for typed fields: List<T> x = [] → []T{}, Map<K,V> x = {} → map[K]V{}
+				if f.Type != nil {
+					if _, isListLit := f.Default.(*parser.ListLit); isListLit {
+						val = g.formatType(f.Type) + "{}"
+					}
+					if _, isMapLit := f.Default.(*parser.MapLit); isMapLit {
+						val = g.formatType(f.Type) + "{}"
+					}
 				}
 				litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
 			}
@@ -274,9 +278,13 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	for _, f := range cls.Fields {
 		if f.Default != nil && !assignedFields[exportName(f.Name)] {
 			val := g.formatExpr(f.Default)
-			if _, isListLit := f.Default.(*parser.ListLit); isListLit && f.Type != nil {
-				goType := g.formatType(f.Type)
-				val = goType + "{}"
+			if f.Type != nil {
+				if _, isListLit := f.Default.(*parser.ListLit); isListLit {
+					val = g.formatType(f.Type) + "{}"
+				}
+				if _, isMapLit := f.Default.(*parser.MapLit); isMapLit {
+					val = g.formatType(f.Type) + "{}"
+				}
 			}
 			litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
 		}
