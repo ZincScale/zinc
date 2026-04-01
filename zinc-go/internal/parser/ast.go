@@ -75,11 +75,12 @@ type ClassDecl struct {
 func (c *ClassDecl) nodeTag()      {}
 func (c *ClassDecl) topLevelTag() {}
 
-// InterfaceDecl: interface Speaker { ... }
+// InterfaceDecl: interface Speaker[<T>] { ... }
 type InterfaceDecl struct {
-	Line    int
-	Name    string
-	Methods []*MethodSig
+	Line       int
+	Name       string
+	TypeParams []string // generic type parameter names
+	Methods    []*MethodSig
 }
 
 func (i *InterfaceDecl) nodeTag()      {}

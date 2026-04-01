@@ -54,9 +54,17 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.errVarCount = 0
 	g.currentFuncParams = fn.Params
 
+	// Set active type params for generic functions
+	if len(fn.TypeParams) > 0 {
+		g.activeTypeParams = make(map[string]bool)
+		for _, tp := range fn.TypeParams {
+			g.activeTypeParams[tp] = true
+		}
+	}
+
 	params := g.formatParams(fn.Params)
 
-	g.writeln("func %s(%s)%s {", name, params, ret)
+	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
 	g.indent++
 	g.emitBlock(fn.Body)
 	g.indent--
@@ -65,6 +73,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.currentReturnType = prevRetType
 	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
+	if len(fn.TypeParams) > 0 {
+		g.activeTypeParams = nil
+	}
 }
 
 // --- Classes (structs with constructors and methods) -------------------------
@@ -77,8 +88,16 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	name := cls.Name
 
+	// Set active type params for generic classes
+	if len(cls.TypeParams) > 0 {
+		g.activeTypeParams = make(map[string]bool)
+		for _, tp := range cls.TypeParams {
+			g.activeTypeParams[tp] = true
+		}
+	}
+
 	// Struct definition
-	g.writeln("type %s struct {", name)
+	g.writeln("type %s%s struct {", name, goTypeParams(cls.TypeParams))
 	g.indent++
 
 	// Embedded parent (first non-interface parent for inheritance)
@@ -130,20 +149,29 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		g.emitConstructor(name, cls.Ctors[0], cls)
 	} else {
 		// Generate default constructor with field defaults
-		g.writeln("func New%s() *%s {", name, name)
+		tpDecl := goTypeParams(cls.TypeParams)
+		tpArgs := goTypeArgs(cls.TypeParams)
+		g.writeln("func New%s%s() *%s%s {", name, tpDecl, name, tpArgs)
 		g.indent++
 		var litFields []string
 		for _, f := range cls.Fields {
 			if f.Default != nil {
-				litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), g.formatExpr(f.Default)))
+				val := g.formatExpr(f.Default)
+				// Use typed empty literal for typed list fields: List<T> x = [] → []T{}
+				if _, isListLit := f.Default.(*parser.ListLit); isListLit && f.Type != nil {
+					goType := g.formatType(f.Type)
+					val = goType + "{}"
+				}
+				litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
 			}
 		}
+		nameTA := name + tpArgs
 		if len(litFields) == 0 {
-			g.writeln("return &%s{}", name)
+			g.writeln("return &%s{}", nameTA)
 		} else if len(litFields) <= 3 {
-			g.writeln("return &%s{%s}", name, strings.Join(litFields, ", "))
+			g.writeln("return &%s{%s}", nameTA, strings.Join(litFields, ", "))
 		} else {
-			g.writeln("return &%s{", name)
+			g.writeln("return &%s{", nameTA)
 			g.indent++
 			for _, lf := range litFields {
 				g.writeln("%s,", lf)
@@ -158,8 +186,12 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	// Methods
 	for _, m := range cls.Methods {
-		g.emitMethodDecl(name, m)
+		g.emitMethodDecl(name, m, cls.TypeParams)
 		g.writeln("")
+	}
+
+	if len(cls.TypeParams) > 0 {
+		g.activeTypeParams = nil
 	}
 }
 
@@ -181,8 +213,10 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	}
 	defer func() { g.currentFields = nil; g.currentMethods = nil; g.currentParams = nil }()
 
+	tpDecl := goTypeParams(cls.TypeParams)
+	tpArgs := goTypeArgs(cls.TypeParams)
 	params := g.formatParams(ctor.Params)
-	g.writeln("func New%s(%s) *%s {", typeName, params, typeName)
+	g.writeln("func New%s%s(%s) *%s%s {", typeName, tpDecl, params, typeName, tpArgs)
 	g.indent++
 
 	// Extract field assignments from ctor body: this.field = value → Field: value
@@ -230,12 +264,13 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	}
 
 	// Emit struct literal
+	typeNameTA := typeName + tpArgs
 	if len(litFields) > 0 {
 		if len(remainingStmts) == 0 {
 			if len(litFields) <= 3 {
-				g.writeln("return &%s{%s}", typeName, strings.Join(litFields, ", "))
+				g.writeln("return &%s{%s}", typeNameTA, strings.Join(litFields, ", "))
 			} else {
-				g.writeln("return &%s{", typeName)
+				g.writeln("return &%s{", typeNameTA)
 				g.indent++
 				for _, f := range litFields {
 					g.writeln("%s,", f)
@@ -244,20 +279,20 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 				g.writeln("}")
 			}
 		} else {
-			g.writeln("s := &%s{%s}", typeName, strings.Join(litFields, ", "))
+			g.writeln("s := &%s{%s}", typeNameTA, strings.Join(litFields, ", "))
 			for _, stmt := range remainingStmts {
 				g.emitStmt(stmt)
 			}
 			g.writeln("return s")
 		}
 	} else if len(remainingStmts) > 0 {
-		g.writeln("s := &%s{}", typeName)
+		g.writeln("s := &%s{}", typeNameTA)
 		for _, stmt := range remainingStmts {
 			g.emitStmt(stmt)
 		}
 		g.writeln("return s")
 	} else {
-		g.writeln("return &%s{}", typeName)
+		g.writeln("return &%s{}", typeNameTA)
 	}
 
 	g.indent--
@@ -267,7 +302,12 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 
 // emitMethodDecl generates a method on a receiver struct.
 // Maps Zinc method names to Go equivalents (toString → String, etc.).
-func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
+// typeParams is optional — set when the receiver is a generic type.
+func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typeParams ...[]string) {
+	var tps []string
+	if len(typeParams) > 0 {
+		tps = typeParams[0]
+	}
 	// Set current fields/methods for implicit self resolution
 	if cls, ok := g.structs[receiver]; ok {
 		g.currentFields = make(map[string]bool)
@@ -334,6 +374,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 		goMethodName = "Hash"
 	}
 
+	receiverTA := receiver + goTypeArgs(tps)
 	if m.IsStatic {
 		name := receiver + exportName(goMethodName)
 		params := g.formatParams(m.Params)
@@ -341,7 +382,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl) {
 	} else {
 		vis := exportName(goMethodName)
 		params := g.formatParams(m.Params)
-		g.writeln("func (s *%s) %s(%s)%s {", receiver, vis, params, ret)
+		g.writeln("func (s *%s) %s(%s)%s {", receiverTA, vis, params, ret)
 	}
 	g.indent++
 	g.emitBlock(m.Body)
@@ -389,7 +430,19 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 		g.writeln("//line %s:%d", g.sourceFile, d.Line)
 	}
 
-	g.writeln("type %s struct {", d.Name)
+	// Set active type params for generic data classes
+	if len(d.TypeParams) > 0 {
+		g.activeTypeParams = make(map[string]bool)
+		for _, tp := range d.TypeParams {
+			g.activeTypeParams[tp] = true
+		}
+	}
+
+	tpDecl := goTypeParams(d.TypeParams)
+	tpArgs := goTypeArgs(d.TypeParams)
+	nameTA := d.Name + tpArgs
+
+	g.writeln("type %s%s struct {", d.Name, tpDecl)
 	g.indent++
 	for _, f := range d.Params {
 		typeName := "interface{}"
@@ -413,9 +466,9 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 		params = append(params, fmt.Sprintf("%s %s", f.Name, typeName))
 		assignments = append(assignments, fmt.Sprintf("%s: %s", exportName(f.Name), f.Name))
 	}
-	g.writeln("func New%s(%s) %s {", d.Name, strings.Join(params, ", "), d.Name)
+	g.writeln("func New%s%s(%s) %s {", d.Name, tpDecl, strings.Join(params, ", "), nameTA)
 	g.indent++
-	g.writeln("return %s{%s}", d.Name, strings.Join(assignments, ", "))
+	g.writeln("return %s{%s}", nameTA, strings.Join(assignments, ", "))
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
@@ -428,7 +481,7 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 		fmtParts = append(fmtParts, f.Name+"=%v")
 		fmtArgs = append(fmtArgs, "s."+exportName(f.Name))
 	}
-	g.writeln("func (s %s) String() string {", d.Name)
+	g.writeln("func (s %s) String() string {", nameTA)
 	g.indent++
 	g.writeln("return fmt.Sprintf(\"%s(%s)\", %s)", d.Name, strings.Join(fmtParts, ", "), strings.Join(fmtArgs, ", "))
 	g.indent--
@@ -437,7 +490,11 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 	// Methods
 	for _, m := range d.Methods {
 		g.writeln("")
-		g.emitMethodDecl(d.Name, m)
+		g.emitMethodDecl(d.Name, m, d.TypeParams)
+	}
+
+	if len(d.TypeParams) > 0 {
+		g.activeTypeParams = nil
 	}
 }
 
@@ -482,7 +539,15 @@ func (g *Generator) emitEnumDecl(e *parser.EnumDecl) {
 // --- Interfaces --------------------------------------------------------------
 
 func (g *Generator) emitInterfaceDecl(iface *parser.InterfaceDecl) {
-	g.writeln("type %s interface {", iface.Name)
+	// Set active type params for generic interfaces
+	if len(iface.TypeParams) > 0 {
+		g.activeTypeParams = make(map[string]bool)
+		for _, tp := range iface.TypeParams {
+			g.activeTypeParams[tp] = true
+		}
+	}
+
+	g.writeln("type %s%s interface {", iface.Name, goTypeParams(iface.TypeParams))
 	g.indent++
 	for _, m := range iface.Methods {
 		ret := ""
@@ -494,6 +559,10 @@ func (g *Generator) emitInterfaceDecl(iface *parser.InterfaceDecl) {
 	}
 	g.indent--
 	g.writeln("}")
+
+	if len(iface.TypeParams) > 0 {
+		g.activeTypeParams = nil
+	}
 }
 
 // --- Field type inference -----------------------------------------------------

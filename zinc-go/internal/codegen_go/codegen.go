@@ -58,6 +58,7 @@ type Generator struct {
 	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
 	importMap           map[string]string     // import prefix → full Go package path
 	typeImports         map[string]string     // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
+	activeTypeParams    map[string]bool       // currently-in-scope generic type parameter names
 }
 
 // New creates a new Go code generator.
@@ -427,10 +428,36 @@ var zincToGoType = map[string]string{
 	"Any":     "interface{}",
 }
 
+// goTypeParams returns the Go type parameter clause, e.g. "[T any, U any]".
+// Returns "" when params is empty.
+func goTypeParams(params []string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, p := range params {
+		parts = append(parts, p+" any")
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// goTypeArgs returns the Go type argument clause, e.g. "[T, U]".
+// Returns "" when params is empty.
+func goTypeArgs(params []string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(params, ", ") + "]"
+}
+
 // formatType converts a Zinc type expression to its Go type string.
 func (g *Generator) formatType(t parser.TypeExpr) string {
 	switch typ := t.(type) {
 	case *parser.SimpleType:
+		// If it's an active generic type parameter, keep as-is
+		if g.activeTypeParams[typ.Name] {
+			return typ.Name
+		}
 		if mapped, ok := zincToGoType[typ.Name]; ok {
 			return mapped
 		}

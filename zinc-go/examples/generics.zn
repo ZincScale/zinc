@@ -13,10 +13,10 @@ data Pair<A, B>(A first, B second)
 
 // --- Generic class implementing generic interface ---
 class SimpleQueue<T> : Queue<T> {
-    var items = List<T>[]
+    List<T> items = []
 
     pub fn push(T item) {
-        items.add(item)
+        items = append(items, item)
     }
 
     pub fn pop(): T {

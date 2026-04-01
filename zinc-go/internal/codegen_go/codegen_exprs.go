@@ -56,7 +56,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.CallExpr:
 		return g.formatCallExpr(expr)
 	case *parser.SelectorExpr:
-		if expr.Field == "length" || expr.Field == "size" {
+		if (expr.Field == "length" || expr.Field == "size") && !g.isStructVar(expr.Object) {
 			return fmt.Sprintf("len(%s)", g.formatExpr(expr.Object))
 		}
 		// Const field access: Config.VERSION → Config_VERSION
@@ -299,10 +299,22 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("close(%s)", obj)
 			}
 		case "size":
+			if g.isStructVar(sel.Object) {
+				args := g.formatExprList(c.Args)
+				return fmt.Sprintf("%s.%s(%s)", obj, exportName(sel.Field), args)
+			}
 			return fmt.Sprintf("len(%s)", obj)
 		case "isEmpty":
+			if g.isStructVar(sel.Object) {
+				args := g.formatExprList(c.Args)
+				return fmt.Sprintf("%s.%s(%s)", obj, exportName(sel.Field), args)
+			}
 			return fmt.Sprintf("len(%s) == 0", obj)
 		case "length":
+			if g.isStructVar(sel.Object) {
+				args := g.formatExprList(c.Args)
+				return fmt.Sprintf("%s.%s(%s)", obj, exportName(sel.Field), args)
+			}
 			return fmt.Sprintf("len(%s)", obj)
 		case "toBytes":
 			return fmt.Sprintf("[]byte(%s)", obj)
@@ -498,30 +510,44 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("make(chan %s)", chanType)
 	}
 
+	// Format Go type arguments from Zinc type args (e.g. <String, int> → [string, int])
+	goTypeArgStr := ""
+	if len(c.TypeArgs) > 0 {
+		var goTA []string
+		for _, ta := range c.TypeArgs {
+			if mapped, ok := zincToGoType[ta]; ok {
+				goTA = append(goTA, mapped)
+			} else {
+				goTA = append(goTA, ta)
+			}
+		}
+		goTypeArgStr = "[" + strings.Join(goTA, ", ") + "]"
+	}
+
 	// Constructor calls: new Type() → NewType()
 	// Regular class constructors return *Type, so dereference for value semantics.
 	// Data class constructors return Type (by value), no dereference needed.
 	if c.IsNew {
-		ctorName := "New" + callee
-		args = g.fillDefaultArgs(ctorName, c.Args, c.NamedArgs, args)
+		ctorName := "New" + callee + goTypeArgStr
+		args = g.fillDefaultArgs("New"+callee, c.Args, c.NamedArgs, args)
 		return fmt.Sprintf("%s(%s)", ctorName, args)
 	}
 
 	// Implicit constructor: Type(args) → NewType(args) when Type is known
 	if ident, ok := c.Callee.(*parser.Ident); ok {
 		if _, isStruct := g.structs[ident.Name]; isStruct {
-			ctorName := "New" + ident.Name
-			args = g.fillDefaultArgs(ctorName, c.Args, c.NamedArgs, args)
+			ctorName := "New" + ident.Name + goTypeArgStr
+			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)
 		}
 		if g.dataClasses[ident.Name] {
-			ctorName := "New" + ident.Name
-			args = g.fillDefaultArgs(ctorName, c.Args, c.NamedArgs, args)
+			ctorName := "New" + ident.Name + goTypeArgStr
+			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)
 		}
 	}
 
-	return fmt.Sprintf("%s(%s)", callee, args)
+	return fmt.Sprintf("%s%s(%s)", callee, goTypeArgStr, args)
 }
 
 // --- Callback adaptation -----------------------------------------------------
@@ -956,8 +982,19 @@ func (g *Generator) formatExprIt(e parser.Expr) string {
 			for _, a := range expr.Args {
 				itArgs = append(itArgs, g.formatExprIt(a))
 			}
+			// Check if the object is a known struct variable — if so, call its method
+			isStructVar := false
+			if ident, ok := sel.Object.(*parser.Ident); ok {
+				if st, ok := g.varStructTypes[ident.Name]; ok {
+					_ = st
+					isStructVar = true
+				}
+			}
 			switch sel.Field {
 			case "length", "size":
+				if isStructVar {
+					return fmt.Sprintf("%s.%s()", obj, exportName(sel.Field))
+				}
 				return fmt.Sprintf("len(%s)", obj)
 			case "charAt":
 				if len(itArgs) > 0 {

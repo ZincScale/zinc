@@ -959,14 +959,29 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
 
-	// Optional parent class/interfaces: class Dog : Animal, Serializable
+	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>
 	var parents []string
 	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
 		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		// Skip generic type args on parent: Queue<T> → consume <T>
+		if p.check(lexer.TOKEN_LT) {
+			p.advance()
+			for !p.check(lexer.TOKEN_GT) && !p.check(lexer.TOKEN_EOF) {
+				p.advance()
+			}
+			p.expect(lexer.TOKEN_GT)
+		}
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
 			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+			if p.check(lexer.TOKEN_LT) {
+				p.advance()
+				for !p.check(lexer.TOKEN_GT) && !p.check(lexer.TOKEN_EOF) {
+					p.advance()
+				}
+				p.expect(lexer.TOKEN_GT)
+			}
 		}
 	}
 
@@ -1287,6 +1302,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_INTERFACE)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	typeParams := p.parseTypeParams()
 	p.expect(lexer.TOKEN_LBRACE)
 	var methods []*MethodSig
 	p.skipSemis()
@@ -1303,7 +1319,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &InterfaceDecl{Line: line, Name: name, Methods: methods}
+	return &InterfaceDecl{Line: line, Name: name, TypeParams: typeParams, Methods: methods}
 }
 
 // v2ParseConstDecl: const [type] NAME = expr (top-level constant)
