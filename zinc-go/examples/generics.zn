@@ -1,0 +1,67 @@
+// Generics — Zinc for Go
+// Tests: user-defined generic classes, generic interfaces, generic methods
+
+// --- Generic interface ---
+interface Queue<T> {
+    fn push(T item)
+    fn pop(): T
+    fn size(): int
+}
+
+// --- Generic data class ---
+data Pair<A, B>(A first, B second)
+
+// --- Generic class implementing generic interface ---
+class SimpleQueue<T> : Queue<T> {
+    var items = List<T>[]
+
+    pub fn push(T item) {
+        items.add(item)
+    }
+
+    pub fn pop(): T {
+        var item = items[0]
+        items = items[1:]
+        return item
+    }
+
+    pub fn size(): int {
+        return len(items)
+    }
+}
+
+// --- Generic function ---
+fn first<T>(List<T> items): T {
+    return items[0]
+}
+
+fn main() {
+    // 1. Generic data class
+    var p1 = Pair<String, int>("hello", 42)
+    print("pair: {p1}")
+
+    var p2 = Pair<int, int>(1, 2)
+    print("int pair: {p2}")
+
+    // 2. Generic class
+    var q = SimpleQueue<String>()
+    q.push("alpha")
+    q.push("beta")
+    q.push("gamma")
+    print("size: {q.size()}")
+    print("pop: {q.pop()}")
+    print("pop: {q.pop()}")
+    print("size after: {q.size()}")
+
+    // 3. Generic with data class
+    var intQ = SimpleQueue<int>()
+    intQ.push(10)
+    intQ.push(20)
+    print("int pop: {intQ.pop()}")
+
+    // 4. Generic function
+    List<String> names = ["alice", "bob", "charlie"]
+    print("first: {first(names)}")
+
+    print("Generics OK")
+}
