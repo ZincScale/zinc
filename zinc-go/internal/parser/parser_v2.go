@@ -959,11 +959,17 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	typeParams := p.parseTypeParams()
 
-	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>
+	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>, core.Describable
 	var parents []string
 	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
-		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		parentName := p.expect(lexer.TOKEN_IDENT).Literal
+		// Dotted parent: core.Describable
+		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+			p.advance()
+			parentName += "." + p.advance().Literal
+		}
+		parents = append(parents, parentName)
 		// Skip generic type args on parent: Queue<T> → consume <T>
 		if p.check(lexer.TOKEN_LT) {
 			p.advance()
@@ -974,7 +980,12 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		}
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+			parentName = p.expect(lexer.TOKEN_IDENT).Literal
+			for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+				p.advance()
+				parentName += "." + p.advance().Literal
+			}
+			parents = append(parents, parentName)
 			if p.check(lexer.TOKEN_LT) {
 				p.advance()
 				for !p.check(lexer.TOKEN_GT) && !p.check(lexer.TOKEN_EOF) {

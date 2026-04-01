@@ -16,8 +16,8 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		g.writeln("//line %s:%d", g.sourceFile, fn.Line)
 	}
 
-	name := fn.Name
-	if name == "main" {
+	name := g.exportIfSubpackage(fn.Name)
+	if fn.Name == "main" {
 		g.writeln("func main() {")
 		g.indent++
 		g.emitBlock(fn.Body)

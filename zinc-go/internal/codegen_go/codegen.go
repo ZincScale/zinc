@@ -59,6 +59,12 @@ type Generator struct {
 	importMap           map[string]string     // import prefix → full Go package path
 	typeImports         map[string]string     // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
 	activeTypeParams    map[string]bool       // currently-in-scope generic type parameter names
+
+	// Subpackage support
+	packageName      string            // Go package name (default: "main")
+	moduleName       string            // Go module name from zinc.toml (for subpackage import paths)
+	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
+	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
 }
 
 // New creates a new Go code generator.
@@ -92,6 +98,70 @@ type OutputFile struct {
 // SetSourceFile sets the source .zn filename for //line directives.
 func (g *Generator) SetSourceFile(path string) {
 	g.sourceFile = path
+}
+
+// SetPackageName sets the Go package name (default: "main").
+func (g *Generator) SetPackageName(name string) {
+	g.packageName = name
+}
+
+// SetModuleName sets the Go module name for resolving subpackage imports.
+func (g *Generator) SetModuleName(name string) {
+	g.moduleName = name
+}
+
+// SetZincSubpackages sets the known zinc subpackage names.
+func (g *Generator) SetZincSubpackages(pkgs map[string]bool) {
+	g.zincSubpackages = pkgs
+}
+
+// SetSubpackageExports registers exported names from a subpackage.
+func (g *Generator) SetSubpackageExports(pkg string, exports map[string]string) {
+	if g.subpkgExports == nil {
+		g.subpkgExports = make(map[string]map[string]string)
+	}
+	g.subpkgExports[pkg] = exports
+}
+
+// CollectExports returns a map of exported names from a parsed program.
+// Keys are zinc names, values are kinds: "data", "class", "func", "interface".
+func CollectExports(prog *parser.Program) map[string]string {
+	exports := make(map[string]string)
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.DataClassDecl:
+			exports[decl.Name] = "data"
+		case *parser.ClassDecl:
+			exports[decl.Name] = "class"
+		case *parser.InterfaceDecl:
+			exports[decl.Name] = "interface"
+		case *parser.FnDecl:
+			if decl.Name != "main" {
+				exports[decl.Name] = "func"
+			}
+		case *parser.EnumDecl:
+			exports[decl.Name] = "enum"
+		case *parser.ConstDecl:
+			exports[decl.Name] = "const"
+		case *parser.TypeAliasDecl:
+			exports[decl.Name] = "type"
+		}
+	}
+	return exports
+}
+
+// isSubpackage returns true if generating code for a non-main package.
+func (g *Generator) isSubpackage() bool {
+	return g.packageName != "" && g.packageName != "main"
+}
+
+// exportIfSubpackage uppercases the first letter of a name when generating
+// a subpackage (non-main). In Go, only uppercase names are exported.
+func (g *Generator) exportIfSubpackage(name string) string {
+	if g.isSubpackage() {
+		return exportName(name)
+	}
+	return name
 }
 
 // RegisterInterface allows external callers to register interface names.
@@ -302,6 +372,18 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	for _, imp := range prog.Imports {
 		parts := strings.Split(imp.Path, ".")
 		lastSeg := parts[len(parts)-1]
+
+		// Check if this is a zinc subpackage import (e.g. "import core")
+		if len(parts) == 1 && g.zincSubpackages[imp.Path] {
+			// Zinc subpackage: import core → import "module-name/core"
+			goPath := imp.Path
+			if g.moduleName != "" {
+				goPath = g.moduleName + "/" + imp.Path
+			}
+			g.importMap[imp.Path] = goPath
+			continue
+		}
+
 		if len(parts) >= 2 && len(lastSeg) > 0 && lastSeg[0] >= 'A' && lastSeg[0] <= 'Z' {
 			// Type import: sync.Mutex → register Mutex → sync.Mutex
 			pkgParts := parts[:len(parts)-1]
@@ -348,7 +430,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.imports = bodyGen.imports
 
 	// Write final output: package + imports + body
-	g.writeln("package main")
+	pkgName := g.packageName
+	if pkgName == "" {
+		pkgName = "main"
+	}
+	g.writeln("package %s", pkgName)
 	g.writeln("")
 
 	if len(g.imports) > 0 {
@@ -471,6 +557,15 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				g.needImport(goPath)
 			}
 			return qualified
+		}
+		// Zinc subpackage qualified type: core.FlowFile → add import for core
+		if strings.Contains(typ.Name, ".") {
+			pkgPrefix := strings.SplitN(typ.Name, ".", 2)[0]
+			if g.zincSubpackages[pkgPrefix] {
+				if goPath, ok := g.importMap[pkgPrefix]; ok {
+					g.needImport(goPath)
+				}
+			}
 		}
 		return typ.Name
 	case *parser.GenericType:

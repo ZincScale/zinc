@@ -350,6 +350,154 @@ func compileDir(dir, outDir string, quiet bool) error {
 	return compileMultiFile(znFiles, outDir, quiet)
 }
 
+// collectZnFilesFlat collects .zn files in a directory (non-recursive, single level only).
+func collectZnFilesFlat(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".zn") {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
+	return files, nil
+}
+
+// collectSubdirs returns the names of immediate subdirectories in dir.
+func collectSubdirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs, nil
+}
+
+// compileDirWithSubpackages compiles a project with subpackage support.
+// Root .zn files → package main; each subdirectory → its own Go package.
+func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) error {
+	// 1. Discover subpackages (subdirectories of src/)
+	subdirs, err := collectSubdirs(srcDir)
+	if err != nil {
+		return err
+	}
+
+	subpackages := make(map[string]bool)
+	for _, d := range subdirs {
+		subpackages[d] = true
+	}
+
+	// 2. Compile each subpackage first, collect their exports
+	allExports := make(map[string]map[string]string) // pkg → name → kind
+	for _, pkg := range subdirs {
+		pkgDir := filepath.Join(srcDir, pkg)
+		pkgOutDir := filepath.Join(outDir, pkg)
+
+		znFiles, err := collectZnFilesFlat(pkgDir)
+		if err != nil {
+			return fmt.Errorf("collect files in %s: %w", pkgDir, err)
+		}
+		if len(znFiles) == 0 {
+			continue
+		}
+
+		// Parse and merge files in this subpackage
+		progs := make([]*parser.Program, 0, len(znFiles))
+		for _, path := range znFiles {
+			prog, err := parseFile(path)
+			if err != nil {
+				return err
+			}
+			progs = append(progs, prog)
+		}
+		merged := mergePrograms(progs)
+
+		// Collect exports before generating
+		exports := codegen.CollectExports(merged)
+		allExports[pkg] = exports
+
+		// Generate Go code for this subpackage
+		if err := os.MkdirAll(pkgOutDir, 0o755); err != nil {
+			return err
+		}
+
+		gen := codegen.New()
+		gen.SetSourceFile(merged.SourceFile)
+		gen.SetPackageName(pkg)
+		gen.SetModuleName(moduleName)
+		gen.SetZincSubpackages(subpackages)
+		// Subpackages can import other subpackages
+		for otherPkg, otherExports := range allExports {
+			if otherPkg != pkg {
+				gen.SetSubpackageExports(otherPkg, otherExports)
+			}
+		}
+
+		className := strings.ToUpper(pkg[:1]) + pkg[1:]
+		files := gen.GenerateFiles(merged, className)
+
+		for _, f := range files {
+			outPath := filepath.Join(pkgOutDir, f.Name)
+			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+				return fmt.Errorf("write %s: %w", outPath, wErr)
+			}
+			if !quiet {
+				fmt.Printf("  [%s] %d files → %s\n", pkg, len(znFiles), outPath)
+			}
+		}
+	}
+
+	// 3. Compile root files (package main) with knowledge of all subpackages
+	rootFiles, err := collectZnFilesFlat(srcDir)
+	if err != nil {
+		return err
+	}
+	if len(rootFiles) == 0 {
+		return nil
+	}
+
+	progs := make([]*parser.Program, 0, len(rootFiles))
+	for _, path := range rootFiles {
+		prog, err := parseFile(path)
+		if err != nil {
+			return err
+		}
+		progs = append(progs, prog)
+	}
+	merged := mergePrograms(progs)
+
+	gen := codegen.New()
+	gen.SetSourceFile(merged.SourceFile)
+	gen.SetModuleName(moduleName)
+	gen.SetZincSubpackages(subpackages)
+	for pkg, exports := range allExports {
+		gen.SetSubpackageExports(pkg, exports)
+	}
+
+	dirName := filepath.Base(srcDir)
+	className := strings.ToUpper(dirName[:1]) + dirName[1:]
+	files := gen.GenerateFiles(merged, className)
+
+	for _, f := range files {
+		outPath := filepath.Join(outDir, f.Name)
+		if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+			return fmt.Errorf("write %s: %w", outPath, wErr)
+		}
+		if !quiet {
+			fmt.Printf("  [main] %d files → %s\n", len(rootFiles), outPath)
+		}
+	}
+
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
@@ -745,8 +893,21 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	}
 
 	// Transpile src/ → outDir/
-	if err := compileDir(srcDir, outDir, quiet); err != nil {
-		return err
+	// Check if there are subdirectories (subpackages)
+	subdirs, _ := collectSubdirs(srcDir)
+	moduleName := cfg.Name
+	if moduleName == "" {
+		moduleName = "zinc_project"
+	}
+
+	if len(subdirs) > 0 {
+		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, quiet); err != nil {
+			return err
+		}
+	} else {
+		if err := compileDir(srcDir, outDir, quiet); err != nil {
+			return err
+		}
 	}
 
 	// Generate go.mod from zinc.toml
@@ -806,8 +967,20 @@ func runProject(projectDir string, progArgs []string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Transpile
-	if err := compileDir(srcDir, tmpDir, true); err != nil {
-		return err
+	subdirs, _ := collectSubdirs(srcDir)
+	moduleName := cfg.Name
+	if moduleName == "" {
+		moduleName = "zinc_project"
+	}
+
+	if len(subdirs) > 0 {
+		if err := compileDirWithSubpackages(srcDir, tmpDir, moduleName, true); err != nil {
+			return err
+		}
+	} else {
+		if err := compileDir(srcDir, tmpDir, true); err != nil {
+			return err
+		}
 	}
 
 	// Generate go.mod

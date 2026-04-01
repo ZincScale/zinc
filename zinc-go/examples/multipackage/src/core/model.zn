@@ -1,0 +1,9 @@
+// Core data types and interfaces
+
+data User(String name, int age)
+
+data Product(String name, double price)
+
+interface Describable {
+    fn describe(): String
+}

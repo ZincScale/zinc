@@ -254,6 +254,47 @@ var streamMethods = map[string]bool{
 // --- Call expressions --------------------------------------------------------
 
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
+	// Zinc subpackage qualified calls: core.FlowFile(...) → core.NewFlowFile(...)
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok && g.zincSubpackages[ident.Name] {
+			pkg := ident.Name
+			name := sel.Field
+			if goPath, ok := g.importMap[pkg]; ok {
+				g.needImport(goPath)
+			}
+			args := g.formatExprList(c.Args)
+
+			// Check what kind of export this is
+			kind := ""
+			if exports, ok := g.subpkgExports[pkg]; ok {
+				kind = exports[name]
+			}
+
+			// Format Go type args if present
+			goTypeArgStr := ""
+			if len(c.TypeArgs) > 0 {
+				var goTA []string
+				for _, ta := range c.TypeArgs {
+					if mapped, ok := zincToGoType[ta]; ok {
+						goTA = append(goTA, mapped)
+					} else {
+						goTA = append(goTA, ta)
+					}
+				}
+				goTypeArgStr = "[" + strings.Join(goTA, ", ") + "]"
+			}
+
+			switch kind {
+			case "data", "class":
+				// Constructor: core.FlowFile(...) → core.NewFlowFile(...)
+				return fmt.Sprintf("%s.New%s%s(%s)", pkg, name, goTypeArgStr, args)
+			default:
+				// Function or unknown: core.greet(...) → core.Greet(...)
+				return fmt.Sprintf("%s.%s%s(%s)", pkg, exportName(name), goTypeArgStr, args)
+			}
+		}
+	}
+
 	// String method rewrites
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
 		if goFunc, ok := stringMethodMapping[sel.Field]; ok {
