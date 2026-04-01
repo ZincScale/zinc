@@ -62,4 +62,42 @@ List<String> items = ["cat", "car", "dog", "cup"]
 var grouped = items.groupBy(it.charAt(0))
 print("Grouped by first char: {grouped}")
 
+// --- Streams on generic data classes ---
+data Score<T>(T name, int value)
+
+List<Score<String>> scores = [
+    Score<String>("alice", 85),
+    Score<String>("bob", 92),
+    Score<String>("charlie", 78),
+    Score<String>("dave", 95),
+    Score<String>("eve", 88)
+]
+
+// Filter high scores
+var high = scores.filter(x -> x.value >= 90)
+print("High scores: {len(high)}")
+
+// Map to extract names
+var topNames = scores.filter(x -> x.value >= 90).map(x -> x.name)
+print("Top names: {topNames}")
+
+// Reduce: sum all scores
+var totalScore = scores.reduce(0, (acc, x) -> acc + x.value)
+print("Total score: {totalScore}")
+
+// FindFirst
+var first90 = scores.findFirst(x -> x.value >= 90)
+print("First >=90: {first90}")
+
+// AnyMatch / AllMatch
+var anyPerfect = scores.anyMatch(x -> x.value == 100)
+print("Any perfect: {anyPerfect}")
+
+var allPassing = scores.allMatch(x -> x.value >= 70)
+print("All passing: {allPassing}")
+
+// ForEach on filtered generic list
+print("90+ scores:")
+scores.filter(x -> x.value >= 90).forEach(x -> print("  {x}"))
+
 print("Streams OK")

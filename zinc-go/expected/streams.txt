@@ -15,4 +15,13 @@ ForEach:
   9
   10
 Grouped by first char: map[c:[cat car cup] d:[dog]]
+High scores: 2
+Top names: [bob dave]
+Total score: 438
+First >=90: Score(name=bob, value=92)
+Any perfect: false
+All passing: true
+90+ scores:
+  Score(name=bob, value=92)
+  Score(name=dave, value=95)
 Streams OK

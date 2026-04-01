@@ -68,7 +68,20 @@ func (g *Generator) formatStreamExpr(sel *parser.SelectorExpr, args []parser.Exp
 	case "anyMatch", "allMatch", "noneMatch":
 		retType = "bool"
 	case "reduce":
-		retType = elemType
+		// Infer from initializer if available
+		if len(chain) > 0 {
+			for _, op := range chain {
+				if op.method == "reduce" && len(op.args) >= 1 {
+					if t := g.inferExprType(op.args[0], g.varTypes); t != "" && t != "interface{}" {
+						retType = t
+					} else {
+						retType = elemType
+					}
+				}
+			}
+		} else {
+			retType = elemType
+		}
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("func() %s {\n", retType))
@@ -273,7 +286,21 @@ func (g *Generator) formatSingleStreamOp(source string, sourceExpr parser.Expr, 
 		return fmt.Sprintf("func() %s { var _r %s; for _, _it := range %s { if %s { _r = append(_r, _it) } }; return _r }()", sliceType, sliceType, source, pred)
 	case "map":
 		transform := g.streamLambdaBody(args)
-		return fmt.Sprintf("func() %s { _r := make(%s, len(%s)); for _i, _it := range %s { _r[_i] = %s }; return _r }()", sliceType, sliceType, source, source, transform)
+		// Infer the mapped result type from the lambda expression
+		mappedType := elemType
+		if len(args) > 0 {
+			if lambda, ok := args[0].(*parser.LambdaExpr); ok && lambda.Expr != nil {
+				if t := g.inferExprType(lambda.Expr, g.varTypes); t != "" && t != "interface{}" {
+					mappedType = t
+				}
+			}
+		}
+		// If the transform accesses a field (x.Name), the result type differs from element type
+		if mappedType == elemType && strings.Contains(transform, ".") {
+			mappedType = "interface{}"
+		}
+		mapSliceType := "[]" + mappedType
+		return fmt.Sprintf("func() %s { _r := make(%s, len(%s)); for _i, _it := range %s { _r[_i] = %s }; return _r }()", mapSliceType, mapSliceType, source, source, transform)
 	case "sum":
 		if elemType == "int" {
 			return fmt.Sprintf("func() int { _s := 0; for _, _it := range %s { _s += _it }; return _s }()", source)
@@ -315,10 +342,12 @@ func (g *Generator) formatSingleStreamOp(source string, sourceExpr parser.Expr, 
 		if len(args) >= 2 {
 			init := g.formatExpr(args[0])
 			fn := g.streamReduceBody(args[1])
-			if elemType != "interface{}" {
-				return fmt.Sprintf("func() %s { _acc := %s; for _, _it := range %s { _acc = %s }; return _acc }()", elemType, init, source, fn)
+			// Infer return type from the initializer, not the element type
+			reduceType := g.inferExprType(args[0], g.varTypes)
+			if reduceType == "" || reduceType == "interface{}" {
+				reduceType = elemType
 			}
-			return fmt.Sprintf("func() interface{} { _acc := %s; for _, _it := range %s { _acc = %s }; return _acc }()", init, source, fn)
+			return fmt.Sprintf("func() %s { _acc := %s; for _, _it := range %s { _acc = %s }; return _acc }()", reduceType, init, source, fn)
 		}
 		return source
 	case "forEach":
@@ -356,7 +385,20 @@ func (g *Generator) formatSingleStreamAssignTyped(varName, source, method string
 		return fmt.Sprintf("var %s %s\nfor _, _it := range %s { if %s { %s = append(%s, _it) } }\n", varName, sliceType, source, pred, varName, varName)
 	case "map":
 		transform := g.streamLambdaBody(args)
-		return fmt.Sprintf("%s := make(%s, len(%s))\nfor _i, _it := range %s { %s[_i] = %s }\n", varName, sliceType, source, source, varName, transform)
+		// Infer the mapped result type
+		mappedType := elemType
+		if len(args) > 0 {
+			if lambda, ok := args[0].(*parser.LambdaExpr); ok && lambda.Expr != nil {
+				if t := g.inferExprType(lambda.Expr, g.varTypes); t != "" && t != "interface{}" {
+					mappedType = t
+				}
+			}
+		}
+		if mappedType == elemType && strings.Contains(transform, ".") {
+			mappedType = "interface{}"
+		}
+		mapSliceType := "[]" + mappedType
+		return fmt.Sprintf("%s := make(%s, len(%s))\nfor _i, _it := range %s { %s[_i] = %s }\n", varName, mapSliceType, source, source, varName, transform)
 	case "sum":
 		if elemType == "int" || elemType == "float64" {
 			return fmt.Sprintf("%s := 0\nfor _, _it := range %s { %s += _it }\n", varName, source, varName)
