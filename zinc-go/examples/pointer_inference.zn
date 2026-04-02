@@ -6,6 +6,8 @@ import fmt
 
 data Person(String name, int age)
 
+import os.exec
+
 fn main() {
     // Marshal a struct to JSON
     var p = Person("Alice", 30)
@@ -39,4 +41,16 @@ fn main() {
     }
     var val = m2["key"]
     print("map key: {val}")
+
+    // Test method-level error-only: exec.Cmd.Start() returns only error
+    var proc = exec.Command("echo", "hello")
+    proc.Start() or {
+        print("start failed")
+        return
+    }
+    proc.Wait() or {
+        print("wait failed")
+        return
+    }
+    print("exec done")
 }

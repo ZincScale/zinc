@@ -11,6 +11,7 @@ package codegen_go
 
 import (
 	"fmt"
+	"go/types"
 	"strings"
 
 	"zinc-go/internal/parser"
@@ -47,9 +48,10 @@ type Generator struct {
 	currentErrVar string // current error variable name (for or-blocks)
 
 	// Variable type tracking
-	varTypes            map[string]string     // variable name → element type
+	varTypes            map[string]string       // variable name → element type
 	varTypeExprs        map[string]parser.TypeExpr // variable name → original AST type (for generics)
-	ptrVars             map[string]bool       // variables that are pointers (*T from T? returns)
+	varGoTypes          map[string]types.Type   // variable name → Go type (from stdlib call returns)
+	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
 	funcReturnsOptional map[string]bool       // functions that return T? (optional)
 	funcReturnTypes     map[string]string     // function name → Go return type string
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
@@ -100,6 +102,7 @@ func New() *Generator {
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		varTypeExprs:        make(map[string]parser.TypeExpr),
+		varGoTypes:          make(map[string]types.Type),
 		ptrVars:             make(map[string]bool),
 		funcReturnsOptional: make(map[string]bool),
 		funcReturnTypes:     make(map[string]string),
@@ -392,6 +395,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.funcSigs = make(map[string][]*parser.ParamDecl)
 	g.varTypes = make(map[string]string)
 	g.varTypeExprs = make(map[string]parser.TypeExpr)
+	g.varGoTypes = make(map[string]types.Type)
 	g.varStructTypes = make(map[string]string)
 	g.dataClasses = make(map[string]bool)
 	g.typeImports = make(map[string]string)

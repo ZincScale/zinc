@@ -59,6 +59,48 @@ func (r *GoTypeResolver) lookupFunc(pkgPath, funcName string) *types.Signature {
 	return fn.Type().(*types.Signature)
 }
 
+// FuncReturnType returns the full Go type string of the first return value of pkgPath.funcName.
+// Used to track variable types from Go stdlib calls (e.g. exec.Command → *exec.Cmd).
+func (r *GoTypeResolver) FuncReturnType(pkgPath, funcName string) types.Type {
+	sig := r.lookupFunc(pkgPath, funcName)
+	if sig == nil {
+		return nil
+	}
+	results := sig.Results()
+	if results.Len() == 0 {
+		return nil
+	}
+	return results.At(0).Type()
+}
+
+// MethodReturnsErrorOnly reports whether typObj.methodName returns exactly one value and it's error.
+// typObj is a types.Type obtained from FuncReturnType or similar.
+func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName string) bool {
+	if typ == nil {
+		return false
+	}
+	// Check method set of the type (and pointer-to-type)
+	mset := types.NewMethodSet(typ)
+	sel := mset.Lookup(nil, methodName)
+	if sel == nil {
+		// Try pointer-to-type if not a pointer already
+		if _, isPtr := typ.(*types.Pointer); !isPtr {
+			mset = types.NewMethodSet(types.NewPointer(typ))
+			sel = mset.Lookup(nil, methodName)
+		}
+	}
+	if sel == nil {
+		return false
+	}
+	fn, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return false
+	}
+	sig := fn.Type().(*types.Signature)
+	results := sig.Results()
+	return results.Len() == 1 && isErrorType(results.At(0).Type())
+}
+
 // ParamIsPointer reports whether the i-th parameter of pkgPath.funcName is a pointer type.
 func (r *GoTypeResolver) ParamIsPointer(pkgPath, funcName string, paramIndex int) bool {
 	sig := r.lookupFunc(pkgPath, funcName)

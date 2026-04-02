@@ -250,6 +250,19 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.ptrVars[v.Name] = true
 		}
 
+		// Track Go types from stdlib function calls (e.g. exec.Command → *exec.Cmd)
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if ident, ok := sel.Object.(*parser.Ident); ok {
+					if pkgPath, ok := g.importMap[ident.Name]; ok {
+						if retType := g.goResolver.FuncReturnType(pkgPath, sel.Field); retType != nil {
+							g.varGoTypes[v.Name] = retType
+						}
+					}
+				}
+			}
+		}
+
 		// Track scalar variable types
 		if scalarType := g.inferExprType(v.Value, g.varTypes); scalarType != "" && scalarType != "interface{}" {
 			g.varTypes[v.Name] = scalarType
@@ -867,8 +880,8 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 	g.currentErrVar = savedErrVar
 }
 
-// isErrorOnlyCall checks if a call expression calls a Go stdlib function
-// that returns only error (no other values), e.g. json.Unmarshal.
+// isErrorOnlyCall checks if a call expression returns only error (no other values).
+// Handles both package-level functions (json.Unmarshal) and method calls (proc.Start).
 func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
 	call, ok := expr.(*parser.CallExpr)
 	if !ok {
@@ -882,12 +895,19 @@ func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
 	if !ok {
 		return false
 	}
-	pkgPath, ok := g.importMap[ident.Name]
-	if !ok {
-		return false
+
+	// Case 1: Package-level function — pkg.Func()
+	if pkgPath, ok := g.importMap[ident.Name]; ok {
+		return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
 	}
-	// Check if function returns only error (no other values)
-	return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
+
+	// Case 2: Method call on a variable — obj.Method()
+	// Look up the variable's Go type and check the method signature
+	if goType, ok := g.varGoTypes[ident.Name]; ok {
+		return g.goResolver.MethodReturnsErrorOnly(goType, sel.Field)
+	}
+
+	return false
 }
 
 // emitOrBlock emits a block inside an or-handler, mapping `err` to the current error variable.
