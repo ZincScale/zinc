@@ -30,6 +30,7 @@ type Generator struct {
 	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
 	currentMethods map[string]bool // method names of current class (for implicit self)
 	currentParams  map[string]bool // parameter names (shadow field names)
+	currentClass   string          // current class name (for pub member lookups)
 
 	// Error handling
 	errorFuncs            map[string]bool   // functions that can return errors

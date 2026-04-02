@@ -33,6 +33,12 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				return renamed
 			}
 		}
+		// Function references as values (e.g. passing addAttributeFactory to register)
+		if g.isSubpackage() {
+			if _, ok := g.funcSigs[expr.Name]; ok {
+				return g.exportIfSubpackage(expr.Name)
+			}
+		}
 		return expr.Name
 	case *parser.IntLit:
 		return expr.Value
@@ -563,8 +569,8 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		if g.currentMethods[ident.Name] {
 			// Method calls on self — look up pub status from class
 			methodGoName := exportName(ident.Name) // default
-			if g.packageName != "" && g.packageName != "main" {
-				methodGoName = goName(ident.Name, g.isPubMember(g.className, ident.Name))
+			if g.isSubpackage() && g.currentClass != "" {
+				methodGoName = goName(ident.Name, g.isPubMember(g.currentClass, ident.Name))
 			}
 			callee = "s." + methodGoName
 		}
@@ -730,11 +736,11 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// In subpackages, export plain function calls (same-package)
+	// In subpackages, apply pub visibility to plain function calls (same-package)
 	if g.isSubpackage() {
 		if ident, ok := c.Callee.(*parser.Ident); ok {
 			if _, ok := g.funcSigs[ident.Name]; ok {
-				callee = exportName(ident.Name)
+				callee = g.exportIfSubpackage(ident.Name)
 			}
 		}
 	}

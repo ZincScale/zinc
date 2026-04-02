@@ -202,7 +202,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	// Register field type expressions for type-aware codegen (e.g. map.keys())
 	for _, f := range cls.Fields {
-		fieldExpr := "s." + exportName(f.Name)
+		fieldExpr := "s." + goName(f.Name, f.IsPub || !g.isSubpackage())
 		if f.Type != nil {
 			if genType, ok := f.Type.(*parser.GenericType); ok {
 				g.varTypeExprs[fieldExpr] = genType
@@ -245,7 +245,8 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	for _, p := range ctor.Params {
 		g.currentParams[p.Name] = true
 	}
-	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil }()
+	g.currentClass = typeName
+	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil; g.currentClass = "" }()
 
 	tpDecl := goTypeParams(cls.TypeParams)
 	tpArgs := goTypeArgs(cls.TypeParams)
@@ -392,7 +393,8 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			g.currentParams[p.Name] = true
 		}
 	}
-	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil }()
+	g.currentClass = receiver
+	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil; g.currentClass = "" }()
 
 	methodKey := receiver + "." + m.Name
 	canError := g.errorFuncs[methodKey]
