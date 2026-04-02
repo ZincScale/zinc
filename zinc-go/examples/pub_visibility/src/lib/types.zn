@@ -1,0 +1,23 @@
+// Test pub visibility on data classes, interfaces, and functions
+
+data Item(String name, int value)
+
+// pub function — accessible from other packages
+pub fn formatItem(Item item): String {
+    return item.name + "=" + str(item.value)
+}
+
+// non-pub function — only accessible within lib package
+fn doubleValue(Item item): Item {
+    return Item(item.name, item.value * 2)
+}
+
+// pub function that calls non-pub function internally
+pub fn makeDouble(Item item): Item {
+    return doubleValue(item)
+}
+
+// Interface with pub fn
+interface Processor {
+    pub fn process(Item item): Item
+}

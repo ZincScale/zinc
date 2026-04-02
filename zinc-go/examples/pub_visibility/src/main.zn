@@ -1,0 +1,37 @@
+// E2E test: pub visibility across subpackages
+// Tests: pub/non-pub functions, function references as values,
+// implicit self method calls, .keys() on class fields,
+// pub fn in interfaces, cross-package access
+
+import lib
+import engine
+
+fn main() {
+    // 1. Cross-package pub function call
+    var item = lib.Item("widget", 42)
+    print(lib.formatItem(item))
+
+    // 2. Pub function calling non-pub function internally
+    var doubled = lib.makeDouble(item)
+    print(lib.formatItem(doubled))
+
+    // 3. Registry: function references as values, .keys(), implicit self
+    var reg = lib.Registry()
+    lib.registerDefaults(reg)
+    reg.createAll()
+    var names = reg.listNames()
+    print("registered: " + str(len(names)))
+    print(lib.formatItem(reg.getItem("basic")))
+    print(lib.formatItem(reg.getItem("premium")))
+
+    // 4. Interface with pub fn, cross-package processor
+    var proc = engine.Doubler()
+    var result = engine.runProcessor(proc, item)
+    print(lib.formatItem(result))
+
+    // 5. Sealed class match
+    print(engine.applyAction(engine.Transform(item)))
+    print(engine.applyAction(engine.Skip("testing")))
+
+    print("pub_visibility OK")
+}

@@ -1,0 +1,9 @@
+widget=42
+widget=84
+registered: 2
+basic=10
+premium=100
+widget=84
+widget=42
+skipped: testing
+pub_visibility OK

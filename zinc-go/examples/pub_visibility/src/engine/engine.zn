@@ -1,0 +1,33 @@
+// Test: cross-package pub calls, interface with pub fn, sealed class match
+
+import lib
+
+// Implements lib.Processor interface (which has pub fn process)
+class Doubler : lib.Processor {
+    pub fn process(lib.Item item): lib.Item {
+        return lib.makeDouble(item)
+    }
+}
+
+sealed class Action {
+    data Transform(lib.Item item)
+    data Skip(String reason)
+}
+
+// pub function for cross-package access
+pub fn runProcessor(lib.Processor proc, lib.Item item): lib.Item {
+    return proc.process(item)
+}
+
+// pub function that uses sealed class match
+pub fn applyAction(Action action): String {
+    match action {
+        case Transform(item) {
+            return lib.formatItem(item)
+        }
+        case Skip(reason) {
+            return "skipped: " + reason
+        }
+    }
+    return "unknown"
+}
