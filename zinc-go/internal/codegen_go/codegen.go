@@ -68,6 +68,7 @@ type Generator struct {
 	moduleName       string            // Go module name from zinc.toml (for subpackage import paths)
 	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
+	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 }
 
 // isZincSubpackage checks if an identifier is a zinc subpackage alias.
@@ -87,6 +88,23 @@ func (g *Generator) isZincSubpackage(name string) bool {
 		}
 		if g.zincSubpackages[subPath] {
 			return true
+		}
+	}
+	return false
+}
+
+// isImportAlias checks if an identifier is a package alias from [imports] in zinc.toml.
+func (g *Generator) isImportAlias(name string) bool {
+	if g.importAliases == nil {
+		return false
+	}
+	// Check if name is a Go package alias that came from an import alias expansion.
+	// e.g. "logging" from "import stdlib.logging" where stdlib is aliased
+	if goPath, ok := g.importMap[name]; ok {
+		for _, modulePath := range g.importAliases {
+			if strings.HasPrefix(goPath, modulePath) {
+				return true
+			}
 		}
 	}
 	return false
@@ -140,6 +158,11 @@ func (g *Generator) SetModuleName(name string) {
 // SetZincSubpackages sets the known zinc subpackage names.
 func (g *Generator) SetZincSubpackages(pkgs map[string]bool) {
 	g.zincSubpackages = pkgs
+}
+
+// SetImportAliases sets the import alias → module path mappings from zinc.toml [imports].
+func (g *Generator) SetImportAliases(aliases map[string]string) {
+	g.importAliases = aliases
 }
 
 // SetSubpackageExports registers exported names from a subpackage.
@@ -407,6 +430,17 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	for _, imp := range prog.Imports {
 		parts := strings.Split(imp.Path, ".")
 		lastSeg := parts[len(parts)-1]
+
+		// Check import aliases: "import stdlib.config" where stdlib → "github.com/ZincScale/zinc-stdlib"
+		// Resolves to Go import "github.com/ZincScale/zinc-stdlib/config", alias "config"
+		if len(parts) >= 2 && g.importAliases != nil {
+			if modulePath, ok := g.importAliases[parts[0]]; ok {
+				subPath := strings.Join(parts[1:], "/")
+				goPath := modulePath + "/" + subPath
+				g.importMap[lastSeg] = goPath
+				continue
+			}
+		}
 
 		// Check if this is a zinc subpackage import.
 		// Convert dots to slashes and check against subpackages map.

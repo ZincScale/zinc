@@ -270,10 +270,11 @@ var streamMethods = map[string]bool{
 // --- Call expressions --------------------------------------------------------
 
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
-	// Zinc subpackage qualified calls: core.FlowFile(...) → core.NewFlowFile(...)
-	// Also handles nested packages: router.RulesEngine(...) where "router" is an alias for "fabric/router"
+	// Zinc subpackage or import alias qualified calls:
+	//   core.FlowFile(...) → core.NewFlowFile(...)
+	//   logging.Logger(...) → logging.NewLogger(...)  (from import alias)
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok && g.isZincSubpackage(ident.Name) {
+		if ident, ok := sel.Object.(*parser.Ident); ok && (g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
 			pkg := ident.Name
 			name := sel.Field
 			if goPath, ok := g.importMap[pkg]; ok {
@@ -285,6 +286,15 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			kind := ""
 			if exports, ok := g.subpkgExports[pkg]; ok {
 				kind = exports[name]
+			}
+
+			// For import aliases (external deps), use naming convention:
+			// PascalCase = class constructor (needs New prefix)
+			// camelCase = function (just export the name)
+			if kind == "" && g.isImportAlias(ident.Name) {
+				if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+					kind = "class"
+				}
 			}
 
 			// Format Go type args if present

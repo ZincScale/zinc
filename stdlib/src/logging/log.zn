@@ -1,0 +1,79 @@
+// log — structured logging with configurable levels.
+//
+// Usage:
+//   var logger = log.Logger("myapp", log.INFO)
+//   logger.info("server started on port {port}")
+//   logger.debug("request details: {req}")  // filtered out at INFO level
+
+import fmt
+import time
+
+// Log levels — higher value = more severe.
+const int DEBUG = 0
+const int INFO = 1
+const int WARN = 2
+const int ERROR = 3
+
+// Logger provides leveled logging with a component prefix.
+class Logger {
+    String name
+    int level
+
+    init(String name, int level) {
+        this.name = name
+        this.level = level
+    }
+
+    pub fn debug(String msg) {
+        if level <= DEBUG {
+            emit("DEBUG", name, msg)
+        }
+    }
+
+    pub fn info(String msg) {
+        if level <= INFO {
+            emit("INFO", name, msg)
+        }
+    }
+
+    pub fn warn(String msg) {
+        if level <= WARN {
+            emit("WARN", name, msg)
+        }
+    }
+
+    pub fn error(String msg) {
+        if level <= ERROR {
+            emit("ERROR", name, msg)
+        }
+    }
+
+    // setLevel changes the log level at runtime.
+    pub fn setLevel(int newLevel) {
+        level = newLevel
+    }
+}
+
+// emit formats and prints a log line.
+fn emit(String level, String name, String msg) {
+    var ts = time.Now().Format("2006-01-02 15:04:05")
+    fmt.Println("{ts} [{level}] [{name}] {msg}")
+}
+
+// levelFromString converts a string level name to int.
+// Returns INFO as default for unrecognized values.
+fn levelFromString(String s): int {
+    if s == "DEBUG" || s == "debug" {
+        return DEBUG
+    }
+    if s == "INFO" || s == "info" {
+        return INFO
+    }
+    if s == "WARN" || s == "warn" {
+        return WARN
+    }
+    if s == "ERROR" || s == "error" {
+        return ERROR
+    }
+    return INFO
+}

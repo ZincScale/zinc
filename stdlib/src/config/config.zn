@@ -1,0 +1,137 @@
+// config — hierarchical configuration with properties files, env override, and profiles.
+//
+// Priority (highest wins):
+//   1. Environment variables (server.port → SERVER_PORT)
+//   2. Profile-specific properties (config-{profile}.properties)
+//   3. Base properties (config.properties)
+//   4. Defaults passed in code
+//
+// Usage:
+//   var cfg = config.load("config.properties")
+//   var port = cfg.getString("server.port", "8080")
+
+import os
+import strings
+import bufio
+import strconv
+import fmt
+
+// Config holds the merged configuration from all sources.
+class Config {
+    var props = Map<String, String>{}
+
+    init() {}
+
+    // getString returns the value for key, or defaultVal if not found.
+    pub fn getString(String key, String defaultVal): String {
+        var envKey = toEnvKey(key)
+        var envVal = os.Getenv(envKey)
+        if envVal != "" {
+            return envVal
+        }
+        if props.containsKey(key) {
+            return props[key]
+        }
+        return defaultVal
+    }
+
+    // getInt returns the value as int, or defaultVal if not found or not parseable.
+    pub fn getInt(String key, int defaultVal): int {
+        var val = getString(key, "")
+        if val == "" {
+            return defaultVal
+        }
+        var n = strconv.Atoi(val) or {
+            return defaultVal
+        }
+        return n
+    }
+
+    // getBool returns the value as boolean, or defaultVal if not found.
+    pub fn getBool(String key, boolean defaultVal): boolean {
+        var val = getString(key, "")
+        if val == "" {
+            return defaultVal
+        }
+        return val == "true" || val == "1" || val == "yes"
+    }
+
+    // set a property value programmatically.
+    pub fn set(String key, String value) {
+        props[key] = value
+    }
+
+    // has returns true if the key exists in properties or environment.
+    pub fn has(String key): boolean {
+        var envKey = toEnvKey(key)
+        if os.Getenv(envKey) != "" {
+            return true
+        }
+        return props.containsKey(key)
+    }
+
+    // getAll returns all properties matching a prefix.
+    pub fn getAll(String prefix): Map<String, String> {
+        var result = Map<String, String>{}
+        var keys = props.keys()
+        for k in keys {
+            if strings.HasPrefix(k, prefix) {
+                result[k] = props[k]
+            }
+        }
+        return result
+    }
+
+    // dump prints all config for debugging.
+    pub fn dump() {
+        var keys = props.keys()
+        for k in keys {
+            fmt.Println("  {k} = {props[k]}")
+        }
+    }
+}
+
+// load reads a properties file and returns a Config.
+// If ZINC_PROFILE is set, also loads config-{profile}.properties.
+fn load(String path): Config {
+    var cfg = Config()
+    loadFile(cfg, path)
+
+    var profile = os.Getenv("ZINC_PROFILE")
+    if profile != "" {
+        var profilePath = strings.TrimSuffix(path, ".properties") + "-" + profile + ".properties"
+        loadFile(cfg, profilePath)
+    }
+
+    return cfg
+}
+
+// loadFile reads a .properties file into the Config.
+// Format: key=value, # comments, blank lines ignored.
+fn loadFile(Config cfg, String path) {
+    var file = os.Open(path) or {
+        return
+    }
+
+    var scanner = bufio.NewScanner(file)
+    while scanner.Scan() {
+        var line = strings.TrimSpace(scanner.Text())
+        if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+            continue
+        }
+        var idx = strings.Index(line, "=")
+        if idx > 0 {
+            var key = strings.TrimSpace(line[:idx])
+            var value = strings.TrimSpace(line[idx+1:])
+            cfg.set(key, value)
+        }
+    }
+    file.Close()
+}
+
+// toEnvKey converts a dotted property key to an env variable name.
+// server.port → SERVER_PORT
+fn toEnvKey(String key): String {
+    var envKey = strings.ReplaceAll(key, ".", "_")
+    return strings.ToUpper(envKey)
+}

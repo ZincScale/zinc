@@ -385,7 +385,7 @@ func collectSubdirs(dir string) ([]string, error) {
 
 // compileDirWithSubpackages compiles a project with subpackage support.
 // Root .zn files → package main; each subdirectory → its own Go package.
-func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) error {
+func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, importAliases ...map[string]string) error {
 	// 1. Discover subpackages (subdirectories of src/)
 	subdirs, err := collectSubdirs(srcDir)
 	if err != nil {
@@ -450,6 +450,9 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) er
 		gen.SetPackageName(goPkgName)
 		gen.SetModuleName(moduleName)
 		gen.SetZincSubpackages(subpackages)
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			gen.SetImportAliases(importAliases[0])
+		}
 		// Subpackages can import other subpackages
 		for otherPkg, otherExports := range allExports {
 			if otherPkg != pkg {
@@ -496,6 +499,9 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) er
 	gen.SetSourceFile(merged.SourceFile)
 	gen.SetModuleName(moduleName)
 	gen.SetZincSubpackages(subpackages)
+	if len(importAliases) > 0 && importAliases[0] != nil {
+		gen.SetImportAliases(importAliases[0])
+	}
 	for pkg, exports := range allExports {
 		alias := filepath.Base(pkg)
 		gen.SetSubpackageExports(alias, exports)
@@ -793,11 +799,13 @@ func formatZinc(src string) string {
 
 // zincConfig holds parsed zinc.toml fields.
 type zincConfig struct {
-	Name    string
-	Version string
-	Main    string
-	GoVer   string
-	Deps    []string
+	Name     string
+	Version  string
+	Main     string
+	GoVer    string
+	Deps     []string
+	Imports  map[string]string // import alias → module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
+	Replaces map[string]string // module → local path (for local development)
 }
 
 // findZincToml walks up from dir looking for zinc.toml.
@@ -823,13 +831,21 @@ func loadZincToml(path string) (*zincConfig, error) {
 		return nil, err
 	}
 	cfg := &zincConfig{
-		Version: "0.1.0",
-		Main:    "main.zn",
-		GoVer:   "1.26",
+		Version:  "0.1.0",
+		Main:     "main.zn",
+		GoVer:    "1.26",
+		Imports:  make(map[string]string),
+		Replaces: make(map[string]string),
 	}
+	section := "" // current TOML section
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Track section headers
+		if strings.HasPrefix(line, "[") {
+			section = strings.Trim(line, "[]")
 			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
@@ -839,6 +855,19 @@ func loadZincToml(path string) (*zincConfig, error) {
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, "\"")
+
+		// [imports] section: alias = "module/path"
+		if section == "imports" {
+			cfg.Imports[key] = val
+			continue
+		}
+
+		// [go.replace] section: module = "local/path"
+		if section == "go.replace" {
+			cfg.Replaces[key] = val
+			continue
+		}
+
 		switch key {
 		case "name":
 			cfg.Name = val
@@ -883,6 +912,13 @@ func generateGoMod(cfg *zincConfig, dir string) error {
 		}
 		buf.WriteString(")\n")
 	}
+	if len(cfg.Replaces) > 0 {
+		buf.WriteString("\nreplace (\n")
+		for mod, localPath := range cfg.Replaces {
+			buf.WriteString(fmt.Sprintf("\t%s => %s\n", mod, localPath))
+		}
+		buf.WriteString(")\n")
+	}
 	return os.WriteFile(filepath.Join(dir, "go.mod"), []byte(buf.String()), 0o644)
 }
 
@@ -921,7 +957,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	}
 
 	if len(subdirs) > 0 {
-		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, quiet); err != nil {
+		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, quiet, cfg.Imports); err != nil {
 			return err
 		}
 	} else {
@@ -994,7 +1030,7 @@ func runProject(projectDir string, progArgs []string) error {
 	}
 
 	if len(subdirs) > 0 {
-		if err := compileDirWithSubpackages(srcDir, tmpDir, moduleName, true); err != nil {
+		if err := compileDirWithSubpackages(srcDir, tmpDir, moduleName, true, cfg.Imports); err != nil {
 			return err
 		}
 	} else {
