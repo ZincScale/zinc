@@ -1,0 +1,71 @@
+// Test qualified Go types in function signatures and expressions.
+// Covers: io.Writer, io.Reader, slog.Handler, os.File as param/return types.
+// This was a gap: qualified types in signatures didn't trigger Go imports.
+
+import io
+import os
+import strings as str
+import log.slog
+
+// Return a qualified Go interface type
+fn makeWriter(String target): io.Writer {
+    if target == "stderr" {
+        return os.Stderr
+    }
+    return os.Stdout
+}
+
+// Accept a qualified Go interface type as parameter
+fn writeMessage(io.Writer w, String msg) {
+    var data = msg.toBytes()
+    w.Write(data)
+}
+
+// Return a qualified Go type from another package
+fn makeHandler(io.Writer w): slog.Handler {
+    var opts = slog.HandlerOptions(Level=slog.LevelInfo)
+    return slog.NewTextHandler(w, opts)
+}
+
+// Accept io.Reader as a parameter — tests qualified interface from different package
+fn readAll(io.Reader r): String {
+    var data = io.ReadAll(r) or {
+        return "error"
+    }
+    return string(data)
+}
+
+// Use strings via import-as alias in function signature
+fn transform(String input): String {
+    return str.ToUpper(input)
+}
+
+fn main() {
+    // Test qualified return type
+    var w = makeWriter("stdout")
+    writeMessage(w, "hello from writer\n")
+
+    // Test qualified param and return — just verify it compiles and runs
+    var handler = makeHandler(w)
+    var logger = slog.New(handler)
+    print("handler created: {logger != nil}")
+
+    // Test import-as in function
+    var upper = transform("zinc")
+    print("upper: {upper}")
+
+    // Test io.Reader from strings package
+    var reader = str.NewReader("zinc-flow")
+    var result = readAll(reader)
+    print("read: {result}")
+
+    // Test io.Reader with byte[] buffer — read partial data
+    var reader2 = str.NewReader("hello world")
+    byte[] buf = [0, 0, 0, 0]
+    reader2.Read(buf)
+    print("partial read: {string(buf)}")
+
+    // Test strings via import-as
+    var contains = str.Contains("hello zinc", "zinc")
+    print("contains: {contains}")
+}

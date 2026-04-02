@@ -660,6 +660,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		if strings.Contains(typ.Name, ".") {
 			pkgPrefix := strings.SplitN(typ.Name, ".", 2)[0]
 			typeName := strings.SplitN(typ.Name, ".", 2)[1]
+			_ = typeName // used in subpackage/alias checks below
+			// Ensure the package is imported for any qualified type reference
+			if goPath, ok := g.importMap[pkgPrefix]; ok {
+				g.needImport(goPath)
+			}
 			if g.isZincSubpackage(pkgPrefix) {
 				if goPath, ok := g.importMap[pkgPrefix]; ok {
 					g.needImport(goPath)

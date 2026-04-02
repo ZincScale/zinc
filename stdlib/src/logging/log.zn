@@ -1,20 +1,24 @@
 // logging — structured logging backed by Go's log/slog.
 //
-// Extensible via LogManager class with handler registry.
+// Config-driven with extensible handler support via useHandler().
 //
 // Usage:
 //   var lm = logging.LogManager()
 //   lm.setup(cfg)                    // config-driven
 //   slog.Info("msg", "key", value)   // use slog directly
+//
+// Config properties:
+//   logging.level=INFO          (DEBUG, INFO, WARN, ERROR)
+//   logging.handler=text        (or json)
+//   logging.output=stdout       (stdout, stderr, or file path)
 
 import config
 import log.slog
 import os
+import io
 
-// LogManager holds handler registry and configures slog.
+// LogManager configures slog.
 class LogManager {
-    var textEnabled = true
-    var jsonEnabled = true
     var handlerType = "text"
     var level = "INFO"
     var output = "stdout"
@@ -37,46 +41,52 @@ class LogManager {
         apply()
     }
 
-    // apply creates the slog handler and sets it as default.
-    fn apply() {
-        var slogLevel = parseLevel(level)
-        var opts = slog.HandlerOptions(Level=slogLevel)
-        var writer = os.Stdout
-        if output == "stderr" {
-            writer = os.Stderr
-        } else if output != "stdout" {
-            var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
-                writer = os.Stdout
-            }
-            writer = file
-        }
-
-        if handlerType == "json" {
-            slog.SetDefault(slog.New(slog.NewJSONHandler(writer, opts)))
-        } else {
-            slog.SetDefault(slog.New(slog.NewTextHandler(writer, opts)))
-        }
-    }
-
-    // setHandler allows changing the handler type at runtime.
+    // setHandler changes the handler type at runtime.
     pub fn setHandler(String handler) {
         handlerType = handler
         apply()
     }
 
-    // setLevel allows changing the log level at runtime.
+    // setLevel changes the log level at runtime.
     pub fn setLevel(String lvl) {
         level = lvl
         apply()
     }
 
-    // useHandler sets a custom slog.Handler directly.
-    // Use this for handlers not covered by the built-in text/json:
-    //   var h = myCustomHandler(writer, opts)
-    //   lm.useHandler(h)
+    // useHandler sets a custom slog.Handler directly, bypassing built-in handlers.
     pub fn useHandler(slog.Handler handler) {
         slog.SetDefault(slog.New(handler))
     }
+
+    fn apply() {
+        var slogLevel = parseLevel(level)
+        var opts = slog.HandlerOptions(Level=slogLevel)
+        var writer = resolveWriter(output)
+        var handler = createHandler(handlerType, writer, opts)
+        slog.SetDefault(slog.New(handler))
+    }
+}
+
+// createHandler builds a slog.Handler by name.
+fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts): slog.Handler {
+    if handlerType == "json" {
+        return slog.NewJSONHandler(writer, opts)
+    }
+    return slog.NewTextHandler(writer, opts)
+}
+
+// resolveWriter returns a file for the given output target.
+fn resolveWriter(String output): io.Writer {
+    if output == "stderr" {
+        return os.Stderr
+    }
+    if output != "stdout" {
+        var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
+            return os.Stdout
+        }
+        return file
+    }
+    return os.Stdout
 }
 
 // parseLevel converts a string to slog.Level.
