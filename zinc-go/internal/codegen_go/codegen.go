@@ -75,6 +75,18 @@ type Generator struct {
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
+
+	// Unqualified import resolution: bare name → package + kind
+	// Built from subpkgExports after import processing. Allows writing
+	// Processor instead of lib.Processor when import lib is declared.
+	unqualifiedNames map[string]unqualifiedEntry
+}
+
+// unqualifiedEntry maps a bare zinc name to its source package.
+type unqualifiedEntry struct {
+	pkg  string // Go package alias (e.g. "lib", "router", "core")
+	name string // zinc name (e.g. "Item", "formatItem", "EQ")
+	kind string // "data", "class", "func", "interface", "enum", "enum_variant", "const", "type", "sealed_variant"
 }
 
 // isZincSubpackage checks if an identifier is a zinc subpackage alias.
@@ -210,6 +222,9 @@ func CollectExports(prog *parser.Program) map[string]string {
 			}
 		case *parser.EnumDecl:
 			exports[decl.Name] = "enum"
+			for _, v := range decl.Variants {
+				exports[v] = "enum_variant"
+			}
 		case *parser.ConstDecl:
 			exports[decl.Name] = "const"
 		case *parser.TypeAliasDecl:
@@ -222,6 +237,112 @@ func CollectExports(prog *parser.Program) map[string]string {
 // isSubpackage returns true if generating code for a non-main package.
 func (g *Generator) isSubpackage() bool {
 	return g.packageName != "" && g.packageName != "main"
+}
+
+// buildUnqualifiedNames populates the reverse lookup map from subpackage exports.
+// After this, bare names like Processor resolve to their source package.
+// Names that collide across packages are excluded (require qualified form).
+// Local declarations shadow imported names.
+func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
+	g.unqualifiedNames = make(map[string]unqualifiedEntry)
+	if g.subpkgExports == nil {
+		return
+	}
+
+	// Collect local declaration names to avoid shadowing
+	localNames := make(map[string]bool)
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.FnDecl:
+			localNames[decl.Name] = true
+		case *parser.ClassDecl:
+			localNames[decl.Name] = true
+			if decl.IsSealed {
+				for _, v := range decl.Variants {
+					localNames[v.Name] = true
+				}
+			}
+		case *parser.DataClassDecl:
+			localNames[decl.Name] = true
+		case *parser.InterfaceDecl:
+			localNames[decl.Name] = true
+		case *parser.EnumDecl:
+			localNames[decl.Name] = true
+			for _, v := range decl.Variants {
+				localNames[v] = true
+			}
+		case *parser.ConstDecl:
+			localNames[decl.Name] = true
+		case *parser.TypeAliasDecl:
+			localNames[decl.Name] = true
+		}
+	}
+
+	// Only include exports from packages that are actually imported
+	importedPkgs := make(map[string]bool)
+	for _, imp := range prog.Imports {
+		parts := strings.Split(imp.Path, ".")
+		alias := parts[len(parts)-1]
+		if imp.Alias != "" {
+			alias = imp.Alias
+		}
+		importedPkgs[alias] = true
+	}
+
+	// Track collisions: names exported by multiple packages
+	collisions := make(map[string]bool)
+
+	for pkg, exports := range g.subpkgExports {
+		if !importedPkgs[pkg] {
+			continue // not imported by this file
+		}
+		for name, kind := range exports {
+			if localNames[name] {
+				continue // local declaration shadows import
+			}
+			if _, exists := g.unqualifiedNames[name]; exists {
+				// Same name from two packages — collision, remove it
+				collisions[name] = true
+				delete(g.unqualifiedNames, name)
+				continue
+			}
+			if collisions[name] {
+				continue // already marked as ambiguous
+			}
+			g.unqualifiedNames[name] = unqualifiedEntry{pkg: pkg, name: name, kind: kind}
+		}
+	}
+}
+
+// resolveUnqualifiedType checks if a bare type name is from an imported package.
+// Returns the qualified Go type string and true, or "" and false.
+func (g *Generator) resolveUnqualifiedType(name string) (string, bool) {
+	entry, ok := g.unqualifiedNames[name]
+	if !ok {
+		return "", false
+	}
+	// Add the Go import
+	if goPath, ok := g.importMap[entry.pkg]; ok {
+		g.needImport(goPath)
+	}
+	qualified := entry.pkg + "." + exportName(entry.name)
+	if entry.kind == "class" {
+		return "*" + qualified, true
+	}
+	return qualified, true
+}
+
+// resolveUnqualifiedExpr checks if a bare identifier is from an imported package.
+// Returns the qualified Go expression string and true, or "" and false.
+func (g *Generator) resolveUnqualifiedExpr(name string) (string, bool) {
+	entry, ok := g.unqualifiedNames[name]
+	if !ok {
+		return "", false
+	}
+	if goPath, ok := g.importMap[entry.pkg]; ok {
+		g.needImport(goPath)
+	}
+	return entry.pkg + "." + exportName(entry.name), true
 }
 
 // exportIfSubpackage uppercases the first letter of a name when generating
@@ -536,6 +657,10 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		}
 	}
 
+	// Build unqualified name resolution from subpackage exports.
+	// Allows writing Processor instead of lib.Processor.
+	g.buildUnqualifiedNames(prog)
+
 	// First pass: generate body into a separate buffer to collect imports
 	bodyGen := *g
 	bodyGen.buf.Reset()
@@ -700,6 +825,10 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			}
 			return qualified
 		}
+		// Unqualified import: bare name like Processor → lib.Processor
+		if resolved, ok := g.resolveUnqualifiedType(typ.Name); ok {
+			return resolved
+		}
 		// Zinc subpackage qualified type: core.FlowFile → add import for core
 		// Also handles nested: router.RulesEngine → add import for fabric/router
 		if strings.Contains(typ.Name, ".") {
@@ -777,7 +906,15 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			for _, a := range typ.TypeArgs {
 				args = append(args, g.formatType(a))
 			}
-			return fmt.Sprintf("%s[%s]", typ.Name, strings.Join(args, ", "))
+			baseName := typ.Name
+			// Unqualified import: bare generic like Box<T> → core.Box[T]
+			if entry, ok := g.unqualifiedNames[baseName]; ok {
+				if goPath, ok := g.importMap[entry.pkg]; ok {
+					g.needImport(goPath)
+				}
+				baseName = entry.pkg + "." + exportName(entry.name)
+			}
+			return fmt.Sprintf("%s[%s]", baseName, strings.Join(args, ", "))
 		}
 	case *parser.ArrayType:
 		return "[]" + g.formatType(typ.ElementType)
@@ -864,6 +1001,58 @@ func exportName(name string) string {
 		return name
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// isImportedInterface checks if a parent type name is an interface from an imported package.
+func (g *Generator) isImportedInterface(name string) bool {
+	// Qualified: lib.Processor
+	if strings.Contains(name, ".") {
+		pkg := strings.SplitN(name, ".", 2)[0]
+		typeName := strings.SplitN(name, ".", 2)[1]
+		if exports, ok := g.subpkgExports[pkg]; ok {
+			return exports[typeName] == "interface"
+		}
+	}
+	// Unqualified: Processor → check unqualifiedNames
+	if entry, ok := g.unqualifiedNames[name]; ok {
+		return entry.kind == "interface"
+	}
+	return false
+}
+
+// resolveParentType resolves a parent type name for struct embedding.
+// Handles both qualified (lib.Base) and unqualified (Base) forms.
+func (g *Generator) resolveParentType(name string) string {
+	if strings.Contains(name, ".") {
+		// Already qualified
+		pkg := strings.SplitN(name, ".", 2)[0]
+		if goPath, ok := g.importMap[pkg]; ok {
+			g.needImport(goPath)
+		}
+		return name
+	}
+	// Try unqualified resolution
+	if entry, ok := g.unqualifiedNames[name]; ok {
+		if goPath, ok := g.importMap[entry.pkg]; ok {
+			g.needImport(goPath)
+		}
+		return entry.pkg + "." + exportName(entry.name)
+	}
+	return name
+}
+
+// isLocalVar checks if a name is a local variable, parameter, or field (should not be import-resolved).
+func (g *Generator) isLocalVar(name string) bool {
+	if g.currentParams != nil && g.currentParams[name] {
+		return true
+	}
+	if g.currentFields != nil && g.currentFields[name] {
+		return true
+	}
+	if _, ok := g.varTypes[name]; ok {
+		return true
+	}
+	return false
 }
 
 // isPub checks if a name was declared with pub.

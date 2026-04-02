@@ -409,12 +409,13 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		}
 	}
 
-	// 3. Compile each subpackage first, collect their exports
+	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
 	allExports := make(map[string]map[string]string) // pkg → name → kind
+	allMerged := make(map[string]*parser.Program)     // pkg → merged AST
+	allZnFiles := make(map[string][]string)           // pkg → source file paths
+
 	for _, pkg := range leafPkgs {
 		pkgDir := filepath.Join(srcDir, pkg)
-		pkgOutDir := filepath.Join(outDir, pkg)
-
 		znFiles, err := collectZnFilesFlat(pkgDir)
 		if err != nil {
 			return fmt.Errorf("collect files in %s: %w", pkgDir, err)
@@ -422,8 +423,6 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		if len(znFiles) == 0 {
 			continue
 		}
-
-		// Parse and merge files in this subpackage
 		progs := make([]*parser.Program, 0, len(znFiles))
 		for _, path := range znFiles {
 			prog, err := parseFile(path)
@@ -433,19 +432,23 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 			progs = append(progs, prog)
 		}
 		merged := mergePrograms(progs)
+		allMerged[pkg] = merged
+		allZnFiles[pkg] = znFiles
+		allExports[pkg] = codegen.CollectExports(merged)
+	}
 
-		// Collect exports before generating
-		exports := codegen.CollectExports(merged)
-		allExports[pkg] = exports
-
-		// Generate Go code for this subpackage
+	// 4. Generate Go code for each subpackage (all exports now available)
+	for _, pkg := range leafPkgs {
+		merged, ok := allMerged[pkg]
+		if !ok {
+			continue
+		}
+		pkgOutDir := filepath.Join(outDir, pkg)
 		if err := os.MkdirAll(pkgOutDir, 0o755); err != nil {
 			return err
 		}
 
-		// Go package name is the last segment of the path (e.g. "fabric/router" → "router")
 		goPkgName := filepath.Base(pkg)
-
 		gen := codegen.New()
 		gen.SetSourceFile(merged.SourceFile)
 		gen.SetPackageName(goPkgName)
@@ -455,10 +458,8 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
 		}
-		// Subpackages can import other subpackages
 		for otherPkg, otherExports := range allExports {
 			if otherPkg != pkg {
-				// Register exports under the Go alias (last segment)
 				otherAlias := filepath.Base(otherPkg)
 				gen.SetSubpackageExports(otherAlias, otherExports)
 			}
@@ -467,6 +468,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		className := strings.ToUpper(goPkgName[:1]) + goPkgName[1:]
 		files := gen.GenerateFiles(merged, className)
 
+		znFiles := allZnFiles[pkg]
 		for _, f := range files {
 			outPath := filepath.Join(pkgOutDir, f.Name)
 			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {

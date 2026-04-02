@@ -1,21 +1,22 @@
 // Test: cross-package pub calls, interface with pub fn, sealed class match
+// All references unqualified — import lib brings everything into scope
 
 import lib
 
-// Implements lib.Processor interface (which has pub fn process)
-class Doubler : lib.Processor {
-    pub fn process(lib.Item item): lib.Item {
-        return lib.makeDouble(item)
+// Implements Processor interface (from lib, which has pub fn process)
+class Doubler : Processor {
+    pub fn process(Item item): Item {
+        return makeDouble(item)
     }
 }
 
 sealed class Action {
-    data Transform(lib.Item item)
+    data Transform(Item item)
     data Skip(String reason)
 }
 
 // pub function for cross-package access
-pub fn runProcessor(lib.Processor proc, lib.Item item): lib.Item {
+pub fn runProcessor(Processor proc, Item item): Item {
     return proc.process(item)
 }
 
@@ -23,7 +24,7 @@ pub fn runProcessor(lib.Processor proc, lib.Item item): lib.Item {
 pub fn applyAction(Action action): String {
     match action {
         case Transform(item) {
-            return lib.formatItem(item)
+            return formatItem(item)
         }
         case Skip(reason) {
             return "skipped: " + reason

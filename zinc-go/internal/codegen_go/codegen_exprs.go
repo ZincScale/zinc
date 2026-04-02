@@ -39,6 +39,12 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				return g.exportIfSubpackage(expr.Name)
 			}
 		}
+		// Unqualified import: bare name like EQ → router.EQ, formatItem → lib.FormatItem
+		if !g.isLocalVar(expr.Name) {
+			if resolved, ok := g.resolveUnqualifiedExpr(expr.Name); ok {
+				return resolved
+			}
+		}
 		return expr.Name
 	case *parser.IntLit:
 		return expr.Value
@@ -733,6 +739,19 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			ctorName := "New" + ident.Name + goTypeArgStr
 			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)
+		}
+		// Unqualified import: Item(...) → lib.NewItem(...), formatItem(...) → lib.FormatItem(...)
+		if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+			if goPath, ok := g.importMap[entry.pkg]; ok {
+				g.needImport(goPath)
+			}
+			switch entry.kind {
+			case "data", "class":
+				ctorName := entry.pkg + ".New" + exportName(entry.name) + goTypeArgStr
+				return fmt.Sprintf("%s(%s)", ctorName, args)
+			case "func":
+				return fmt.Sprintf("%s.%s%s(%s)", entry.pkg, exportName(entry.name), goTypeArgStr, args)
+			}
 		}
 	}
 

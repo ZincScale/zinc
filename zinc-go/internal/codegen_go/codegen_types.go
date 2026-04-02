@@ -109,8 +109,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	// Embedded parent (first non-interface parent for inheritance)
 	for _, p := range cls.Parents {
-		if !g.interfaces[p] {
-			g.writeln("%s", p)
+		if !g.interfaces[p] && !g.isImportedInterface(p) {
+			resolved := g.resolveParentType(p)
+			g.writeln("%s", resolved)
 		}
 	}
 
