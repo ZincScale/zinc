@@ -122,17 +122,15 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		if f.Type != nil {
 			typeName = g.formatType(f.Type)
 		} else if f.Default != nil {
-			// Use explicit type from typed literals: var x = List<Item>[] or Map<K,V>{}
 			if listLit, ok := f.Default.(*parser.ListLit); ok && listLit.ExplicitType != nil {
 				typeName = g.formatType(listLit.ExplicitType)
 			} else if mapLit, ok := f.Default.(*parser.MapLit); ok && mapLit.ExplicitType != nil {
 				typeName = g.formatType(mapLit.ExplicitType)
 			} else {
-				// Infer field type from initializer expression
 				typeName = g.inferFieldType(f.Default)
 			}
 		}
-		g.writeln("%s %s", exportName(f.Name), typeName)
+		g.writeln("%s %s", goName(f.Name, f.IsPub || !g.isSubpackage()), typeName)
 	}
 	g.indent--
 	g.writeln("}")
@@ -180,7 +178,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 						val = g.formatType(f.Type) + "{}"
 					}
 				}
-				litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
+				litFields = append(litFields, fmt.Sprintf("%s: %s", goName(f.Name, f.IsPub || !g.isSubpackage()), val))
 			}
 		}
 		nameTA := name + tpArgs
@@ -234,10 +232,12 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls *parser.ClassDecl) {
 	// Set current fields/methods for implicit self resolution
 	g.currentFields = make(map[string]bool)
+	g.currentFieldGoName = make(map[string]string)
 	g.currentMethods = make(map[string]bool)
 	g.currentParams = make(map[string]bool)
 	for _, f := range cls.Fields {
 		g.currentFields[f.Name] = true
+		g.currentFieldGoName[f.Name] = goName(f.Name, f.IsPub || !g.isSubpackage())
 	}
 	for _, method := range cls.Methods {
 		g.currentMethods[method.Name] = true
@@ -245,7 +245,7 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	for _, p := range ctor.Params {
 		g.currentParams[p.Name] = true
 	}
-	defer func() { g.currentFields = nil; g.currentMethods = nil; g.currentParams = nil }()
+	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil }()
 
 	tpDecl := goTypeParams(cls.TypeParams)
 	tpArgs := goTypeArgs(cls.TypeParams)
@@ -277,12 +277,16 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 			if assign, ok := stmt.(*parser.AssignStmt); ok && assign.Op == "=" {
 				// this.field = value → Field: value in literal
 				if sel, ok := assign.Target.(*parser.SelectorExpr); ok {
+					fieldGoName := exportName(sel.Field) // default
+					if gn, ok := g.currentFieldGoName[sel.Field]; ok {
+						fieldGoName = gn
+					}
 					if _, isThis := sel.Object.(*parser.ThisExpr); isThis {
-						litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(sel.Field), g.formatExpr(assign.Value)))
+						litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, g.formatExpr(assign.Value)))
 						continue
 					}
 					if ident, isIdent := sel.Object.(*parser.Ident); isIdent && ident.Name == "this" {
-						litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(sel.Field), g.formatExpr(assign.Value)))
+						litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, g.formatExpr(assign.Value)))
 						continue
 					}
 				}
@@ -316,7 +320,11 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 					val = g.formatType(f.Type) + "{}"
 				}
 			}
-			litFields = append(litFields, fmt.Sprintf("%s: %s", exportName(f.Name), val))
+			fieldGoName := exportName(f.Name)
+			if gn, ok := g.currentFieldGoName[f.Name]; ok {
+				fieldGoName = gn
+			}
+			litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, val))
 		}
 	}
 
@@ -368,10 +376,12 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	// Set current fields/methods for implicit self resolution
 	if cls, ok := g.structs[receiver]; ok {
 		g.currentFields = make(map[string]bool)
+		g.currentFieldGoName = make(map[string]string)
 		g.currentMethods = make(map[string]bool)
 		g.currentParams = make(map[string]bool)
 		for _, f := range cls.Fields {
 			g.currentFields[f.Name] = true
+			g.currentFieldGoName[f.Name] = goName(f.Name, f.IsPub || !g.isSubpackage())
 		}
 		g.collectParentFields(cls, g.currentFields)
 		for _, method := range cls.Methods {
@@ -382,7 +392,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			g.currentParams[p.Name] = true
 		}
 	}
-	defer func() { g.currentFields = nil; g.currentMethods = nil; g.currentParams = nil }()
+	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil }()
 
 	methodKey := receiver + "." + m.Name
 	canError := g.errorFuncs[methodKey]
@@ -432,12 +442,13 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 
 	receiverTA := receiver + goTypeArgs(tps)
+	methodPub := m.IsPub || !g.isSubpackage()
 	if m.IsStatic {
-		name := receiver + exportName(goMethodName)
+		name := receiver + goName(goMethodName, methodPub)
 		params := g.formatParams(m.Params)
 		g.writeln("func %s(%s)%s {", name, params, ret)
 	} else {
-		vis := exportName(goMethodName)
+		vis := goName(goMethodName, methodPub)
 		params := g.formatParams(m.Params)
 		g.writeln("func (s *%s) %s(%s)%s {", receiverTA, vis, params, ret)
 	}
@@ -506,6 +517,7 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 		if f.Type != nil {
 			typeName = g.formatType(f.Type)
 		}
+		// Data class fields are always exported (data = transparent DTO)
 		g.writeln("%s %s", exportName(f.Name), typeName)
 	}
 	g.indent--
@@ -612,7 +624,7 @@ func (g *Generator) emitInterfaceDecl(iface *parser.InterfaceDecl) {
 			ret = " " + g.formatType(m.ReturnType)
 		}
 		params := g.formatParams(m.Params)
-		g.writeln("%s(%s)%s", exportName(m.Name), params, ret)
+		g.writeln("%s(%s)%s", goName(m.Name, m.IsPub || !g.isSubpackage()), params, ret)
 	}
 	g.indent--
 	g.writeln("}")
@@ -654,5 +666,5 @@ func (g *Generator) inferFieldType(expr parser.Expr) string {
 // --- Constants ---------------------------------------------------------------
 
 func (g *Generator) emitConstDecl(c *parser.ConstDecl) {
-	g.writeln("const %s = %s", exportName(c.Name), g.formatExpr(c.Value))
+	g.writeln("const %s = %s", goName(c.Name, c.IsPub || !g.isSubpackage()), g.formatExpr(c.Value))
 }

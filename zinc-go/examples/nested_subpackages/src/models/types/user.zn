@@ -2,6 +2,6 @@
 
 data User(String name, int age)
 
-fn formatUser(User u): String {
+pub fn formatUser(User u): String {
     return "{u.name} (age {u.age})"
 }

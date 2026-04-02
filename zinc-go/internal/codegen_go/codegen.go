@@ -26,7 +26,8 @@ type Generator struct {
 	interfaces     map[string]bool
 	structs        map[string]*parser.ClassDecl
 	sourceFile     string // for //line directives
-	currentFields  map[string]bool // field names of current class (for implicit self)
+	currentFields      map[string]bool   // field names of current class (for implicit self)
+	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
 	currentMethods map[string]bool // method names of current class (for implicit self)
 	currentParams  map[string]bool // parameter names (shadow field names)
 
@@ -62,6 +63,9 @@ type Generator struct {
 	importMap           map[string]string     // import prefix → full Go package path
 	typeImports         map[string]string     // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
 	activeTypeParams    map[string]bool       // currently-in-scope generic type parameter names
+
+	// Visibility tracking
+	pubNames         map[string]bool   // names declared with pub (functions, methods, fields, consts)
 
 	// Subpackage support
 	packageName      string            // Go package name (default: "main")
@@ -132,6 +136,7 @@ func New() *Generator {
 		goResolver:          NewGoTypeResolver(),
 		importMap:           make(map[string]string),
 		typeImports:         make(map[string]string),
+		pubNames:            make(map[string]bool),
 	}
 }
 
@@ -222,7 +227,7 @@ func (g *Generator) isSubpackage() bool {
 // a subpackage (non-main). In Go, only uppercase names are exported.
 func (g *Generator) exportIfSubpackage(name string) string {
 	if g.isSubpackage() {
-		return exportName(name)
+		return goName(name, g.isPub(name))
 	}
 	return name
 }
@@ -235,21 +240,32 @@ func (g *Generator) RegisterInterface(name string) {
 // --- Declaration scanning ----------------------------------------------------
 
 // collectDecls scans declarations to build lookup tables for types,
-// constructors, error functions, and type aliases.
+// constructors, error functions, type aliases, and pub visibility.
 func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 	for _, d := range decls {
 		switch decl := d.(type) {
 		case *parser.InterfaceDecl:
 			g.interfaces[decl.Name] = true
+			// Interface methods — track pub status
+			for _, m := range decl.Methods {
+				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
+			}
 		case *parser.DataClassDecl:
 			g.dataClasses[decl.Name] = true
 			g.funcSigs["New"+decl.Name] = fieldDeclsToParams(decl.Params)
+			// Data class fields — track pub status
+			for _, f := range decl.Params {
+				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
 				for _, v := range decl.Variants {
 					g.dataClasses[v.Name] = true
 					g.funcSigs["New"+v.Name] = fieldDeclsToParams(v.Params)
+					for _, f := range v.Params {
+						g.pubNames[v.Name+"."+f.Name] = f.IsPub
+					}
 				}
 			}
 			if decl.Ctor != nil {
@@ -257,15 +273,23 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			} else if len(decl.Ctors) > 0 {
 				g.funcSigs["New"+decl.Name] = decl.Ctors[0].Params
 			}
+			// Class methods and fields — track pub status
 			for _, m := range decl.Methods {
+				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
 				key := decl.Name + "." + m.Name
 				if canReturnError(m.Body) {
 					g.errorFuncs[key] = true
 				}
 			}
+			for _, f := range decl.Fields {
+				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.TypeAliasDecl:
 			g.typeAliases[decl.Name] = decl.Type
+		case *parser.ConstDecl:
+			g.pubNames[decl.Name] = decl.IsPub
 		case *parser.FnDecl:
+			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
 			if canReturnError(decl.Body) {
 				g.errorFuncs[decl.Name] = true
@@ -429,6 +453,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.varStructTypes = make(map[string]string)
 	g.dataClasses = make(map[string]bool)
 	g.typeImports = make(map[string]string)
+	g.pubNames = make(map[string]bool)
 	g.importGoAliases = make(map[string]string)
 	g.collectDecls(prog.Decls)
 
@@ -829,6 +854,7 @@ func (g *Generator) write(format string, args ...interface{}) {
 // --- Name helpers ------------------------------------------------------------
 
 // exportName capitalizes the first letter to make it exported in Go.
+// Used for identifiers that are always exported (data class fields, constructors, etc.)
 func exportName(name string) string {
 	if name == "" {
 		return ""
@@ -837,6 +863,42 @@ func exportName(name string) string {
 		return name
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// isPub checks if a name was declared with pub.
+// For qualified names like "ClassName.methodName", checks the full key.
+func (g *Generator) isPub(name string) bool {
+	if pub, ok := g.pubNames[name]; ok {
+		return pub
+	}
+	// In main package, everything is accessible (no export needed)
+	return g.packageName == "" || g.packageName == "main"
+}
+
+// isPubField checks if a field/method on a class is pub.
+func (g *Generator) isPubMember(className, memberName string) bool {
+	key := className + "." + memberName
+	if pub, ok := g.pubNames[key]; ok {
+		return pub
+	}
+	// Default: in main package everything is accessible
+	return g.packageName == "" || g.packageName == "main"
+}
+
+// goName returns the Go name for a zinc identifier, respecting pub visibility.
+// pub → exported (capitalized), non-pub → unexported (lowercase).
+func goName(name string, isPub bool) string {
+	if name == "" {
+		return ""
+	}
+	if isPub {
+		return exportName(name)
+	}
+	// Ensure lowercase for unexported
+	if name[0] >= 'A' && name[0] <= 'Z' {
+		return strings.ToLower(name[:1]) + name[1:]
+	}
+	return name
 }
 
 // goBuiltins are Go builtin names that can't be used as variable names.

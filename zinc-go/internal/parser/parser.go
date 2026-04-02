@@ -27,6 +27,13 @@ import (
 	"zinc-go/internal/lexer"
 )
 
+// parseError is a sentinel type used to halt parsing via panic/recover.
+// This ensures the parser stops immediately on the first error rather than
+// continuing with garbled state, which could cause infinite loops.
+type parseError struct {
+	msg string
+}
+
 // Parser converts a token stream into an AST.
 type Parser struct {
 	tokens  []lexer.Token
@@ -80,9 +87,10 @@ func (p *Parser) match(types ...lexer.TokenType) bool {
 func (p *Parser) expect(t lexer.TokenType) lexer.Token {
 	tok := p.peek()
 	if tok.Type != t {
-		p.Errors = append(p.Errors, fmt.Sprintf("%d:%d: expected %s, got %s (%q)",
-			tok.Line, tok.Col, t, tok.Type, tok.Literal))
-		return tok
+		msg := fmt.Sprintf("%d:%d: expected %s, got %s (%q)",
+			tok.Line, tok.Col, t, tok.Type, tok.Literal)
+		p.Errors = append(p.Errors, msg)
+		panic(parseError{msg: msg})
 	}
 	return p.advance()
 }
@@ -97,6 +105,7 @@ func (p *Parser) errorf(format string, args ...any) {
 	tok := p.peek()
 	msg := fmt.Sprintf("%d:%d: ", tok.Line, tok.Col) + fmt.Sprintf(format, args...)
 	p.Errors = append(p.Errors, msg)
+	panic(parseError{msg: msg})
 }
 
 func (p *Parser) finishCallArgsNoLParen(callee Expr) Expr {
@@ -212,8 +221,9 @@ func (p *Parser) parseTypeParams() []string {
 // (e.g. <Config>, <K, V>) followed by '(' — not a comparison operator.
 func (p *Parser) looksLikeTypeArgs() bool {
 	off := 1 // skip '<'
-	for {
-		if p.peekAt(off).Type != lexer.TOKEN_IDENT {
+	for off < 1000 { // safety bound to prevent runaway lookahead
+		tok := p.peekAt(off)
+		if tok.Type == lexer.TOKEN_EOF || tok.Type != lexer.TOKEN_IDENT {
 			return false
 		}
 		off++ // skip ident
@@ -230,6 +240,7 @@ func (p *Parser) looksLikeTypeArgs() bool {
 		}
 		off++ // skip comma
 	}
+	return false
 }
 
 // looksLikeCapacityAt checks if <Type, ...>(capacity) follows — for List<T>(cap) and Map<K,V>(cap).

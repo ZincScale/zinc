@@ -15,20 +15,20 @@ class Box<T> {
         this.value = value
     }
 
-    fn get(): T {
+    pub fn get(): T {
         return value
     }
 
-    fn toString(): String {
+    pub fn toString(): String {
         return "Box({value})"
     }
 }
 
 // Generic function
-fn first<T>(List<T> items): T {
+pub fn first<T>(List<T> items): T {
     return items[0]
 }
 
 interface Describable {
-    fn describe(): String
+    pub fn describe(): String
 }

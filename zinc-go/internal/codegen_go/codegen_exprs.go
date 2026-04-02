@@ -23,6 +23,9 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		// Implicit self: bare field name → s.Field in method/ctor context
 		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] {
+			if goField, ok := g.currentFieldGoName[expr.Name]; ok {
+				return "s." + goField
+			}
 			return "s." + exportName(expr.Name)
 		}
 		if g.renamedVars != nil {
@@ -558,11 +561,19 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// Implicit self method calls
 	if ident, ok := c.Callee.(*parser.Ident); ok && g.currentMethods != nil {
 		if g.currentMethods[ident.Name] {
-			callee = "s." + exportName(ident.Name)
+			// Method calls on self — look up pub status from class
+			methodGoName := exportName(ident.Name) // default
+			if g.packageName != "" && g.packageName != "main" {
+				methodGoName = goName(ident.Name, g.isPubMember(g.className, ident.Name))
+			}
+			callee = "s." + methodGoName
 		}
 		if strings.HasPrefix(ident.Name, "get") && len(ident.Name) > 3 {
 			fieldName := strings.ToLower(ident.Name[3:4]) + ident.Name[4:]
 			if g.currentFields != nil && g.currentFields[fieldName] {
+				if goField, ok := g.currentFieldGoName[fieldName]; ok {
+					return "s." + goField
+				}
 				return "s." + exportName(fieldName)
 			}
 		}

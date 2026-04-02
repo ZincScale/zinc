@@ -18,7 +18,7 @@ class Greeter : core.Describable {
     }
 }
 
-fn discountPrice(core.Product p, double pct): String {
+pub fn discountPrice(core.Product p, double pct): String {
     var discounted = p.price * (1.0 - pct)
     return "{p.name} on sale: ${discounted}"
 }

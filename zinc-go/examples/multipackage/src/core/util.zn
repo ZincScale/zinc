@@ -1,13 +1,13 @@
 // Utility functions in the core package
 
-fn formatUser(User u): String {
+pub fn formatUser(User u): String {
     return "{u.name} (age {u.age})"
 }
 
-fn isAdult(User u): bool {
+pub fn isAdult(User u): bool {
     return u.age >= 18
 }
 
-fn formatPrice(Product p): String {
+pub fn formatPrice(Product p): String {
     return "{p.name}: ${p.price}"
 }

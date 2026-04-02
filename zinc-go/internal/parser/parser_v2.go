@@ -23,8 +23,19 @@ import (
 
 // ParseV2 parses Zinc v2 syntax (end blocks, fn keyword, script mode).
 // Returns a Program where top-level statements are wrapped in FnDecl named "main".
-func (p *Parser) ParseV2() *Program {
-	prog := &Program{}
+func (p *Parser) ParseV2() (prog *Program) {
+	prog = &Program{}
+
+	// Recover from parse errors — stop immediately with a clear error
+	// rather than continuing with garbled state.
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(parseError); !ok {
+				panic(r) // re-panic non-parse errors
+			}
+		}
+	}()
+
 	p.skipSemis()
 
 	var topStmts []Stmt
@@ -56,7 +67,6 @@ func (p *Parser) ParseV2() *Program {
 				prog.Decls = append(prog.Decls, d)
 			} else {
 				p.errorf("expected fn or class after decorator")
-				p.advance()
 			}
 		case lexer.TOKEN_FN:
 			prog.Decls = append(prog.Decls, p.v2ParseFnDecl())
@@ -76,6 +86,29 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseInterfaceDecl())
 		case lexer.TOKEN_ENUM:
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
+		case lexer.TOKEN_PUB:
+			p.advance() // consume "pub"
+			switch p.peek().Type {
+			case lexer.TOKEN_FN:
+				fn := p.v2ParseFnDecl()
+				fn.IsPub = true
+				prog.Decls = append(prog.Decls, fn)
+			case lexer.TOKEN_CONST:
+				c := p.v2ParseConstDecl()
+				c.IsPub = true
+				prog.Decls = append(prog.Decls, c)
+			case lexer.TOKEN_CLASS:
+				cls := p.v2ParseClassDecl()
+				prog.Decls = append(prog.Decls, cls)
+			case lexer.TOKEN_DATA:
+				d := p.v2ParseDataClassDecl()
+				prog.Decls = append(prog.Decls, d)
+			case lexer.TOKEN_INTERFACE:
+				iface := p.v2ParseInterfaceDecl()
+				prog.Decls = append(prog.Decls, iface)
+			default:
+				p.errorf("expected fn, const, class, data, or interface after 'pub'")
+			}
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
 		case lexer.TOKEN_TYPE:
@@ -89,7 +122,6 @@ func (p *Parser) ParseV2() *Program {
 				prog.Decls = append(prog.Decls, cls)
 			} else {
 				p.errorf("expected 'class' after 'abstract'")
-				p.advance()
 			}
 		default:
 			// Check for contextual keyword: sealed class
@@ -1318,6 +1350,10 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 	var methods []*MethodSig
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		// Interface methods are always pub — skip optional pub keyword
+		if p.check(lexer.TOKEN_PUB) {
+			p.advance()
+		}
 		p.expect(lexer.TOKEN_FN)
 		mName := p.expect(lexer.TOKEN_IDENT).Literal
 		params := p.v2ParseParamList()
@@ -1326,7 +1362,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 			p.advance()
 			retType = p.v2ParseType()
 		}
-		methods = append(methods, &MethodSig{Name: mName, Params: params, ReturnType: retType})
+		methods = append(methods, &MethodSig{Name: mName, IsPub: true, Params: params, ReturnType: retType})
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
