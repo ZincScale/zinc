@@ -706,6 +706,15 @@ type NullLit struct{}
 func (n *NullLit) nodeTag() {}
 func (n *NullLit) exprTag() {}
 
+// CapacityExpr: List<T>(capacity) or Map<K,V>(capacity) — collection with initial capacity.
+type CapacityExpr struct {
+	CollectionType *GenericType // List<String>, Map<String, int>, etc.
+	Capacity       Expr         // capacity expression
+}
+
+func (c *CapacityExpr) nodeTag() {}
+func (c *CapacityExpr) exprTag() {}
+
 // SizedArrayExpr: Type[size] — creates a zero-filled array of given size.
 // e.g. byte[4], int[10], String[5]
 type SizedArrayExpr struct {

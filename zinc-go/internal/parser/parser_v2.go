@@ -2029,6 +2029,23 @@ func (p *Parser) v2ParsePrimary() Expr {
 		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			return p.v2ParseLambda()
 		}
+		// Check for collection with capacity: List<T>(cap) or Map<K,V>(cap)
+		if (tok.Literal == "List" || tok.Literal == "Map") && p.peekAt(1).Type == lexer.TOKEN_LT && p.looksLikeCapacityAt(1) {
+			name := p.advance().Literal
+			p.advance() // consume <
+			var typeArgs []TypeExpr
+			typeArgs = append(typeArgs, p.v2ParseType())
+			for p.check(lexer.TOKEN_COMMA) {
+				p.advance()
+				typeArgs = append(typeArgs, p.v2ParseType())
+			}
+			p.expect(lexer.TOKEN_GT)
+			typ := &GenericType{Name: name, TypeArgs: typeArgs}
+			p.advance() // consume (
+			capacity := p.v2ParseExpr()
+			p.expect(lexer.TOKEN_RPAREN)
+			return &CapacityExpr{CollectionType: typ, Capacity: capacity}
+		}
 		// Check for typed literal: List<Type>[] or Map<K,V>{}
 		if p.peekAt(1).Type == lexer.TOKEN_LT && p.looksLikeTypedLiteralAt(1) {
 			name := p.advance().Literal

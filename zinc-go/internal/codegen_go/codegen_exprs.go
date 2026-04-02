@@ -56,6 +56,16 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			goType = mapped
 		}
 		return fmt.Sprintf("make([]%s, %s)", goType, g.formatExpr(expr.Size))
+	case *parser.CapacityExpr:
+		// List<T>(cap) → make([]T, 0, cap), Map<K,V>(cap) → make(map[K]V, cap)
+		goType := g.formatType(expr.CollectionType)
+		cap := g.formatExpr(expr.Capacity)
+		if strings.HasPrefix(goType, "[]") {
+			// List: make([]T, 0, cap) — length 0, capacity cap
+			return fmt.Sprintf("make(%s, 0, %s)", goType, cap)
+		}
+		// Map: make(map[K]V, cap)
+		return fmt.Sprintf("make(%s, %s)", goType, cap)
 	case *parser.BinaryExpr:
 		return g.formatBinaryExpr(expr)
 	case *parser.UnaryExpr:

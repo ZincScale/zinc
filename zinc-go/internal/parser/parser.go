@@ -232,6 +232,28 @@ func (p *Parser) looksLikeTypeArgs() bool {
 	}
 }
 
+// looksLikeCapacityAt checks if <Type, ...>(capacity) follows — for List<T>(cap) and Map<K,V>(cap).
+func (p *Parser) looksLikeCapacityAt(base int) bool {
+	off := base + 1
+	depth := 1
+	for depth > 0 {
+		tok := p.peekAt(off).Type
+		if tok == lexer.TOKEN_EOF {
+			return false
+		}
+		if tok == lexer.TOKEN_LT {
+			depth++
+		} else if tok == lexer.TOKEN_GT {
+			depth--
+			if depth == 0 {
+				return p.peekAt(off+1).Type == lexer.TOKEN_LPAREN
+			}
+		}
+		off++
+	}
+	return false
+}
+
 // looksLikeTypedLiteral checks if we're at < and the pattern is <Type, ...>[] or <Type, ...>{}.
 // This enables: var x = List<int>[]  or  var m = Map<String, int>{}
 func (p *Parser) looksLikeTypedLiteral() bool {
@@ -263,6 +285,8 @@ func (p *Parser) looksLikeTypedLiteralAt(base int) bool {
 				if next == lexer.TOKEN_LBRACE {
 					return true
 				}
+				// >(capacity) — collection with initial capacity (List/Map only)
+				// Don't match here — handled separately in primary expr parser
 				return false
 			}
 		}
