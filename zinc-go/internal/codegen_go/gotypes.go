@@ -214,6 +214,53 @@ func (r *GoTypeResolver) ParamIsBytes(pkgPath, funcName string, paramIndex int) 
 	return ok && basic.Kind() == types.Byte
 }
 
+// ReturnsErrorOnly reports whether pkgPath.funcName returns exactly one value and it's error.
+// e.g. json.Unmarshal returns just error, not (value, error).
+func (r *GoTypeResolver) ReturnsErrorOnly(pkgPath, funcName string) bool {
+	sig := r.lookupFunc(pkgPath, funcName)
+	if sig == nil {
+		return false
+	}
+	results := sig.Results()
+	return results.Len() == 1 && isErrorType(results.At(0).Type())
+}
+
+// implicitPointerParams lists Go stdlib functions where a parameter must be
+// passed by pointer even though the signature uses interface{}.
+// Key: "pkg/path.FuncName", Value: set of 0-based parameter indices that need &.
+// If this table exceeds ~50 entries, revisit with a more general solution.
+var implicitPointerParams = map[string]map[int]bool{
+	// encoding
+	"encoding/json.Unmarshal": {1: true},
+	"encoding/xml.Unmarshal":  {1: true},
+
+	// fmt scanning
+	"fmt.Scan":    {0: true},
+	"fmt.Scanln":  {0: true},
+	"fmt.Scanf":   {1: true},
+	"fmt.Sscan":   {1: true},
+	"fmt.Sscanln": {1: true},
+	"fmt.Sscanf":  {2: true},
+	"fmt.Fscan":   {1: true},
+	"fmt.Fscanln": {1: true},
+	"fmt.Fscanf":  {2: true},
+}
+
+// NeedsPointerArg reports whether the i-th argument of pkg.func needs & inserted.
+// Checks both the Go type signature (explicit *T params) and the implicit pointer table.
+func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex int) bool {
+	// Check explicit pointer params via Go type introspection
+	if r.ParamIsPointer(pkgPath, funcName, paramIndex) {
+		return true
+	}
+	// Check implicit pointer table
+	key := pkgPath + "." + funcName
+	if params, ok := implicitPointerParams[key]; ok {
+		return params[paramIndex]
+	}
+	return false
+}
+
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	if !ok {

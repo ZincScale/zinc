@@ -834,7 +834,12 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 	savedErrVar := g.currentErrVar
 	g.currentErrVar = errVar
 
-	if handler.Body != nil && len(handler.Body.Stmts) == 1 {
+	// Detect void-error functions (like json.Unmarshal) that return only error.
+	// For these, generate single-value assignment: _err := call()
+	// instead of two-value: target, _err := call()
+	errorOnly := g.isErrorOnlyCall(value)
+
+	if !errorOnly && handler.Body != nil && len(handler.Body.Stmts) == 1 {
 		if es, ok := handler.Body.Stmts[0].(*parser.ExprStmt); ok && target != "_" {
 			g.writeln("%s, %s := %s", target, errVar, callExpr)
 			g.writeln("if %s != nil {", errVar)
@@ -847,7 +852,11 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 		}
 	}
 
-	g.writeln("%s, %s := %s", target, errVar, callExpr)
+	if errorOnly {
+		g.writeln("%s := %s", errVar, callExpr)
+	} else {
+		g.writeln("%s, %s := %s", target, errVar, callExpr)
+	}
 	g.writeln("if %s != nil {", errVar)
 	g.indent++
 	if handler.Body != nil {
@@ -856,6 +865,29 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 	g.indent--
 	g.writeln("}")
 	g.currentErrVar = savedErrVar
+}
+
+// isErrorOnlyCall checks if a call expression calls a Go stdlib function
+// that returns only error (no other values), e.g. json.Unmarshal.
+func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
+	call, ok := expr.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Callee.(*parser.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := sel.Object.(*parser.Ident)
+	if !ok {
+		return false
+	}
+	pkgPath, ok := g.importMap[ident.Name]
+	if !ok {
+		return false
+	}
+	// Check if function returns only error (no other values)
+	return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
 }
 
 // emitOrBlock emits a block inside an or-handler, mapping `err` to the current error variable.

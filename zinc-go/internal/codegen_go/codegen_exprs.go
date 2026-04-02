@@ -493,11 +493,15 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// Resolve Go function's expected param types for callback adaptation
+	// Resolve Go function's expected param types for callback adaptation and pointer inference
 	var goExpectedParams [][]string
+	var goPkgPath string
+	var goFuncName string
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok {
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				goPkgPath = pkgPath
+				goFuncName = sel.Field
 				goExpectedParams = make([][]string, len(c.Args))
 				for i := range c.Args {
 					goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
@@ -506,7 +510,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// Rewrite `it` keyword in args + adapt callback signatures
+	// Rewrite `it` keyword in args + adapt callback signatures + auto-insert & for pointer params
 	var argStrs []string
 	for i, arg := range c.Args {
 		if containsIt(arg) {
@@ -514,7 +518,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		} else if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
 			argStrs = append(argStrs, g.adaptCallback(ident.Name, goExpectedParams[i]))
 		} else {
-			argStrs = append(argStrs, g.formatExpr(arg))
+			formatted := g.formatExpr(arg)
+			// Auto-insert & when Go function expects a pointer parameter
+			// (explicit *T in signature or implicit via known table)
+			if goPkgPath != "" && g.goResolver.NeedsPointerArg(goPkgPath, goFuncName, i) {
+				formatted = "&" + formatted
+			}
+			argStrs = append(argStrs, formatted)
 		}
 	}
 	for _, na := range c.NamedArgs {
