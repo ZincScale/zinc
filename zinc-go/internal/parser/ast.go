@@ -291,9 +291,8 @@ type VarStmt struct {
 	ResolvedType string     // filled by typechecker for var + or handler inference
 }
 
-func (v *VarStmt) nodeTag()     {}
-func (v *VarStmt) stmtTag()     {}
-func (v *VarStmt) topLevelTag() {}
+func (v *VarStmt) nodeTag() {}
+func (v *VarStmt) stmtTag() {}
 
 // TupleVarStmt: (a, b) := expr — multi-value unpacking (error auto-propagates)
 type TupleVarStmt struct {

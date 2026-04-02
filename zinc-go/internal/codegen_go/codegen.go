@@ -500,7 +500,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		bodyGen.writeln("")
 	}
 
-	// Script-mode statements
+	// Script-mode statements → func main()
 	hasExplicitMain := false
 	for _, d := range prog.Decls {
 		if fn, ok := d.(*parser.FnDecl); ok && fn.Name == "main" {
@@ -508,30 +508,14 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 			break
 		}
 	}
-	if len(prog.Stmts) > 0 {
-		if g.packageName != "" && g.packageName != "main" {
-			// Subpackage: emit top-level var statements as package-level vars
-			for _, s := range prog.Stmts {
-				if vs, ok := s.(*parser.VarStmt); ok {
-					name := exportName(vs.Name)
-					if vs.Value != nil {
-						bodyGen.writeln("var %s = %s", name, bodyGen.formatExpr(vs.Value))
-					} else if vs.Type != nil {
-						bodyGen.writeln("var %s %s", name, bodyGen.formatType(vs.Type))
-					}
-					bodyGen.writeln("")
-				}
-			}
-		} else if !hasExplicitMain {
-			// Main package script mode: wrap in func main()
-			bodyGen.writeln("func main() {")
-			bodyGen.indent++
-			for _, s := range prog.Stmts {
-				bodyGen.emitStmt(s)
-			}
-			bodyGen.indent--
-			bodyGen.writeln("}")
+	if len(prog.Stmts) > 0 && !hasExplicitMain {
+		bodyGen.writeln("func main() {")
+		bodyGen.indent++
+		for _, s := range prog.Stmts {
+			bodyGen.emitStmt(s)
 		}
+		bodyGen.indent--
+		bodyGen.writeln("}")
 	}
 
 	body := bodyGen.buf.String()
@@ -597,14 +581,6 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitConstDecl(decl)
 	case *parser.TypeAliasDecl:
 		g.writeln("type %s = %s", decl.Name, g.formatType(decl.Type))
-	case *parser.VarStmt:
-		// Package-level var declaration
-		name := exportName(decl.Name)
-		if decl.Value != nil {
-			g.writeln("var %s = %s", name, g.formatExpr(decl.Value))
-		} else if decl.Type != nil {
-			g.writeln("var %s %s", name, g.formatType(decl.Type))
-		}
 	}
 }
 

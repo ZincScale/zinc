@@ -78,7 +78,6 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
-		// TOKEN_VAR falls through to default (script-mode statement handling)
 		case lexer.TOKEN_TYPE:
 			prog.Decls = append(prog.Decls, p.v2ParseTypeAlias())
 		case lexer.TOKEN_ABSTRACT:
