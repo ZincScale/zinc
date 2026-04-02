@@ -147,6 +147,22 @@ func (p *Parser) parseLambdaParam() *ParamDecl {
 		if len(tok.Literal) > 0 && tok.Literal[0] >= 'A' && tok.Literal[0] <= 'Z' {
 			isTyped = true
 		}
+		// Dotted type name: io.Writer, slog.HandlerOptions
+		// Pattern: pkg.Type paramName (,|))
+		if p.peekAt(1).Type == lexer.TOKEN_DOT {
+			// Walk past dotted segments: io.Writer → off lands on last segment
+			off := 2
+			for p.peekAt(off).Type == lexer.TOKEN_IDENT && p.peekAt(off+1).Type == lexer.TOKEN_DOT {
+				off += 2
+			}
+			// off points to last type segment (e.g. Writer)
+			// off+1 should be param name (ident), off+2 should be , or )
+			if p.peekAt(off).Type == lexer.TOKEN_IDENT &&
+				p.peekAt(off+1).Type == lexer.TOKEN_IDENT &&
+				(p.peekAt(off+2).Type == lexer.TOKEN_COMMA || p.peekAt(off+2).Type == lexer.TOKEN_RPAREN) {
+				isTyped = true
+			}
+		}
 		// Lowercase builtin types followed by an ident name
 		next := p.peekAt(1)
 		if next.Type == lexer.TOKEN_IDENT || next.Type == lexer.TOKEN_DOTDOTDOT {
