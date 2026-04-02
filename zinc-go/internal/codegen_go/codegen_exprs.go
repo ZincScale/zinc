@@ -331,24 +331,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				kind = exports[name]
 			}
 
-			// For import aliases (external deps), check Go type info first,
-			// then fall back to naming convention.
+			// For import aliases (external deps), check Go type info.
+			// IsStruct and HasFunc fall back to AST parsing when type
+			// resolution fails (e.g., transitive deps not available).
 			if kind == "" && g.isImportAlias(ident.Name) {
-				resolved := false
 				if goPath, ok := g.importMap[pkg]; ok {
 					if g.goResolver.IsStruct(goPath, name) {
 						kind = "class"
-						resolved = true
 					} else if g.goResolver.HasFunc(goPath, "New"+name) {
 						kind = "class"
-						resolved = true
 					}
-				}
-				// Fallback: if resolver couldn't reach the package,
-				// use naming convention for zinc-compiled packages
-				// PascalCase + no positional args = likely constructor
-				if !resolved && len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' && len(c.Args) == 0 {
-					kind = "class"
 				}
 			}
 

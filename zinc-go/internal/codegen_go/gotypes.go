@@ -1,34 +1,38 @@
 package codegen_go
 
 import (
+	"go/ast"
 	"go/importer"
+	"go/parser"
+	"go/token"
 	"go/types"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"golang.org/x/tools/go/packages"
 )
 
 // GoTypeResolver introspects Go package signatures at transpile time.
-// Uses go/packages for module dependencies and falls back to go/importer for stdlib.
+// Uses go/importer for stdlib, go/packages for modules, AST parsing as fallback.
 type GoTypeResolver struct {
 	imp      types.Importer
 	cache    map[string]*types.Package
-	negative map[string]bool // packages that failed to import
+	astCache map[string]*ast.Package // fallback: parsed AST without type checking
+	negative map[string]bool
 	mu       sync.Mutex
-	dir      string // working directory with go.mod (for module resolution)
+	dir      string // working directory with go.mod
 }
 
-// NewGoTypeResolver creates a resolver backed by the default (gc) importer.
 func NewGoTypeResolver() *GoTypeResolver {
 	return &GoTypeResolver{
 		imp:      importer.Default(),
 		cache:    make(map[string]*types.Package),
+		astCache: make(map[string]*ast.Package),
 		negative: make(map[string]bool),
 	}
 }
 
-// SetDir sets the working directory for module resolution.
-// Must point to a directory with a go.mod file.
 func (r *GoTypeResolver) SetDir(dir string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,13 +48,13 @@ func (r *GoTypeResolver) loadPkg(pkgPath string) *types.Package {
 	if pkg, ok := r.cache[pkgPath]; ok {
 		return pkg
 	}
-	// Try stdlib importer first (fast, no external tools needed)
+	// Try stdlib importer first (fast)
 	pkg, err := r.imp.Import(pkgPath)
 	if err == nil {
 		r.cache[pkgPath] = pkg
 		return pkg
 	}
-	// Fall back to go/packages for module dependencies
+	// Try go/packages for module dependencies
 	if r.dir != "" {
 		pkg = r.loadPkgViaGoPackages(pkgPath)
 		if pkg != nil {
@@ -71,11 +75,132 @@ func (r *GoTypeResolver) loadPkgViaGoPackages(pkgPath string) *types.Package {
 	if err != nil || len(pkgs) == 0 {
 		return nil
 	}
-	if pkgs[0].Types == nil {
+	pkg := pkgs[0]
+	if pkg.Types == nil || pkg.Types.Scope().Len() == 0 {
 		return nil
 	}
-	return pkgs[0].Types
+	return pkg.Types
 }
+
+// loadAST parses Go source files in a directory to find type/function declarations.
+// Used as fallback when full type resolution fails (e.g., transitive deps missing).
+func (r *GoTypeResolver) loadAST(pkgPath string) *ast.Package {
+	if pkg, ok := r.astCache[pkgPath]; ok {
+		return pkg
+	}
+	if r.dir == "" {
+		return nil
+	}
+	// Resolve package directory via go list
+	// For replace directives, go list can find the actual directory
+	dir := r.resolvePackageDir(pkgPath)
+	if dir == "" {
+		return nil
+	}
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !isTestFile(fi.Name())
+	}, 0)
+	if err != nil || len(pkgs) == 0 {
+		return nil
+	}
+	for _, pkg := range pkgs {
+		r.astCache[pkgPath] = pkg
+		return pkg
+	}
+	return nil
+}
+
+func (r *GoTypeResolver) resolvePackageDir(pkgPath string) string {
+	// Check common patterns:
+	// 1. Local subpackage: pkgPath relative to dir
+	local := filepath.Join(r.dir, pkgPath)
+	if isDir(local) {
+		return local
+	}
+	// 2. Module with replace: parse go.mod for replace directives
+	gomod := filepath.Join(r.dir, "go.mod")
+	data, err := os.ReadFile(gomod)
+	if err != nil {
+		return ""
+	}
+	// Simple line-based go.mod parser for replace directives
+	lines := splitLines(string(data))
+	for _, line := range lines {
+		line = trimSpace(line)
+		// Strip "replace" keyword prefix
+		if hasPrefix(line, "replace ") {
+			line = trimSpace(line[8:])
+		}
+		// Look for: modulePath => localPath
+		if idx := indexOf(line, "=>"); idx > 0 {
+			modPath := trimSpace(line[:idx])
+			localPath := trimSpace(line[idx+2:])
+			// Strip version suffix from modPath (e.g., "module v0.0.0" → "module")
+			if spaceIdx := indexOf(modPath, " "); spaceIdx > 0 {
+				modPath = modPath[:spaceIdx]
+			}
+			// Check if pkgPath starts with the replaced module
+			if hasPrefix(pkgPath, modPath) {
+				subPkg := pkgPath[len(modPath):]
+				resolved := filepath.Join(localPath, subPkg)
+				if isDir(resolved) {
+					return resolved
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// hasStructDecl checks if the AST has a struct type declaration with the given name.
+func (r *GoTypeResolver) hasStructDecl(pkgPath, name string) bool {
+	astPkg := r.loadAST(pkgPath)
+	if astPkg == nil {
+		return false
+	}
+	for _, file := range astPkg.Files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if typeSpec.Name.Name == name {
+					_, isStruct := typeSpec.Type.(*ast.StructType)
+					return isStruct
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasFuncDecl checks if the AST has a function declaration with the given name.
+func (r *GoTypeResolver) hasFuncDecl(pkgPath, name string) bool {
+	astPkg := r.loadAST(pkgPath)
+	if astPkg == nil {
+		return false
+	}
+	for _, file := range astPkg.Files {
+		for _, decl := range file.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if funcDecl.Name.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// --- Public API ---
 
 func (r *GoTypeResolver) lookupFunc(pkgPath, funcName string) *types.Signature {
 	pkg := r.loadPkg(pkgPath)
@@ -93,7 +218,6 @@ func (r *GoTypeResolver) lookupFunc(pkgPath, funcName string) *types.Signature {
 	return fn.Type().(*types.Signature)
 }
 
-// FuncReturnType returns the Go type of the first return value of pkgPath.funcName.
 func (r *GoTypeResolver) FuncReturnType(pkgPath, funcName string) types.Type {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -106,7 +230,6 @@ func (r *GoTypeResolver) FuncReturnType(pkgPath, funcName string) types.Type {
 	return results.At(0).Type()
 }
 
-// MethodReturnsErrorOnly reports whether typ.methodName returns exactly one value and it's error.
 func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName string) bool {
 	if typ == nil {
 		return false
@@ -131,7 +254,6 @@ func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName strin
 	return results.Len() == 1 && isErrorType(results.At(0).Type())
 }
 
-// ParamIsPointer reports whether the i-th parameter of pkgPath.funcName is a pointer type.
 func (r *GoTypeResolver) ParamIsPointer(pkgPath, funcName string, paramIndex int) bool {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -145,7 +267,6 @@ func (r *GoTypeResolver) ParamIsPointer(pkgPath, funcName string, paramIndex int
 	return isPtr
 }
 
-// ParamType returns the Go type string for the i-th parameter of pkgPath.funcName.
 func (r *GoTypeResolver) ParamType(pkgPath, funcName string, paramIndex int) string {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -158,7 +279,6 @@ func (r *GoTypeResolver) ParamType(pkgPath, funcName string, paramIndex int) str
 	return params.At(paramIndex).Type().String()
 }
 
-// ReturnsError reports whether pkgPath.funcName returns error as last result.
 func (r *GoTypeResolver) ReturnsError(pkgPath, funcName string) bool {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -171,7 +291,6 @@ func (r *GoTypeResolver) ReturnsError(pkgPath, funcName string) bool {
 	return isErrorType(results.At(results.Len() - 1).Type())
 }
 
-// FieldIsPointer reports whether a struct field is a pointer type.
 func (r *GoTypeResolver) FieldIsPointer(pkgPath, typeName, fieldName string) bool {
 	pkg := r.loadPkg(pkgPath)
 	if pkg == nil {
@@ -195,44 +314,47 @@ func (r *GoTypeResolver) FieldIsPointer(pkgPath, typeName, fieldName string) boo
 	return false
 }
 
-// IsType reports whether name is a type (not a function/variable) in pkgPath.
+// IsType reports whether name is a type in pkgPath.
 func (r *GoTypeResolver) IsType(pkgPath, name string) bool {
 	pkg := r.loadPkg(pkgPath)
-	if pkg == nil {
-		return false
+	if pkg != nil {
+		obj := pkg.Scope().Lookup(name)
+		if obj != nil {
+			_, ok := obj.(*types.TypeName)
+			return ok
+		}
 	}
-	obj := pkg.Scope().Lookup(name)
-	if obj == nil {
-		return false
-	}
-	_, ok := obj.(*types.TypeName)
-	return ok
+	return false
 }
 
-// IsStruct reports whether name in pkgPath is a struct type (not interface/alias).
+// IsStruct reports whether name is a struct type in pkgPath.
+// Falls back to AST parsing when type resolution fails.
 func (r *GoTypeResolver) IsStruct(pkgPath, name string) bool {
 	pkg := r.loadPkg(pkgPath)
-	if pkg == nil {
-		return false
+	if pkg != nil {
+		obj := pkg.Scope().Lookup(name)
+		if obj != nil {
+			tn, ok := obj.(*types.TypeName)
+			if ok {
+				_, isStruct := tn.Type().Underlying().(*types.Struct)
+				return isStruct
+			}
+		}
 	}
-	obj := pkg.Scope().Lookup(name)
-	if obj == nil {
-		return false
-	}
-	tn, ok := obj.(*types.TypeName)
-	if !ok {
-		return false
-	}
-	_, isStruct := tn.Type().Underlying().(*types.Struct)
-	return isStruct
+	// Fallback: parse AST directly (no type checking needed)
+	return r.hasStructDecl(pkgPath, name)
 }
 
 // HasFunc reports whether pkgPath has a function named funcName.
+// Falls back to AST parsing when type resolution fails.
 func (r *GoTypeResolver) HasFunc(pkgPath, funcName string) bool {
-	return r.lookupFunc(pkgPath, funcName) != nil
+	if r.lookupFunc(pkgPath, funcName) != nil {
+		return true
+	}
+	// Fallback: parse AST
+	return r.hasFuncDecl(pkgPath, funcName)
 }
 
-// FuncParamSignature returns the full Go type string for the i-th parameter.
 func (r *GoTypeResolver) FuncParamSignature(pkgPath, funcName string, paramIndex int) string {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -245,8 +367,6 @@ func (r *GoTypeResolver) FuncParamSignature(pkgPath, funcName string, paramIndex
 	return params.At(paramIndex).Type().String()
 }
 
-// FuncParamCallbackSignature checks if the i-th param is a function type.
-// Returns the param types of that callback.
 func (r *GoTypeResolver) FuncParamCallbackSignature(pkgPath, funcName string, paramIndex int) []string {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -269,7 +389,6 @@ func (r *GoTypeResolver) FuncParamCallbackSignature(pkgPath, funcName string, pa
 	return result
 }
 
-// ParamIsBytes reports whether the i-th parameter is []byte.
 func (r *GoTypeResolver) ParamIsBytes(pkgPath, funcName string, paramIndex int) bool {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -287,7 +406,6 @@ func (r *GoTypeResolver) ParamIsBytes(pkgPath, funcName string, paramIndex int) 
 	return ok && basic.Kind() == types.Byte
 }
 
-// FuncReturnsPointer reports whether the first return value is a pointer.
 func (r *GoTypeResolver) FuncReturnsPointer(pkgPath, funcName string) bool {
 	retType := r.FuncReturnType(pkgPath, funcName)
 	if retType == nil {
@@ -297,7 +415,6 @@ func (r *GoTypeResolver) FuncReturnsPointer(pkgPath, funcName string) bool {
 	return isPtr
 }
 
-// ExprReturnsPointer checks if a call returns a pointer (function or method).
 func (r *GoTypeResolver) ExprReturnsPointer(pkgPath, funcName string, receiverType types.Type) bool {
 	if pkgPath != "" {
 		return r.FuncReturnsPointer(pkgPath, funcName)
@@ -325,7 +442,6 @@ func (r *GoTypeResolver) ExprReturnsPointer(pkgPath, funcName string, receiverTy
 	return false
 }
 
-// ReturnsErrorOnly reports whether pkgPath.funcName returns exactly one value and it's error.
 func (r *GoTypeResolver) ReturnsErrorOnly(pkgPath, funcName string) bool {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
@@ -335,8 +451,6 @@ func (r *GoTypeResolver) ReturnsErrorOnly(pkgPath, funcName string) bool {
 	return results.Len() == 1 && isErrorType(results.At(0).Type())
 }
 
-// implicitPointerParams lists Go functions where a parameter must be
-// passed by pointer even though the signature uses interface{}.
 var implicitPointerParams = map[string]map[int]bool{
 	"encoding/json.Unmarshal": {1: true},
 	"encoding/xml.Unmarshal":  {1: true},
@@ -351,7 +465,6 @@ var implicitPointerParams = map[string]map[int]bool{
 	"fmt.Fscanf":              {2: true},
 }
 
-// NeedsPointerArg reports whether the i-th argument needs & inserted.
 func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex int) bool {
 	if r.ParamIsPointer(pkgPath, funcName, paramIndex) {
 		return true
@@ -370,4 +483,54 @@ func isErrorType(t types.Type) bool {
 	}
 	obj := named.Obj()
 	return obj != nil && obj.Pkg() == nil && obj.Name() == "error"
+}
+
+// --- Helpers ---
+
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+func isTestFile(name string) bool {
+	return len(name) > 8 && name[len(name)-8:] == "_test.go"
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+func trimSpace(s string) string {
+	i, j := 0, len(s)
+	for i < j && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	for j > i && (s[j-1] == ' ' || s[j-1] == '\t') {
+		j--
+	}
+	return s[i:j]
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
