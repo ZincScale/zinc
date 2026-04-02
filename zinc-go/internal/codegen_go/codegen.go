@@ -188,12 +188,13 @@ func CollectExports(prog *parser.Program) map[string]string {
 		case *parser.DataClassDecl:
 			exports[decl.Name] = "data"
 		case *parser.ClassDecl:
-			exports[decl.Name] = "class"
-			// Export sealed class variants (they are data classes)
 			if decl.IsSealed {
+				exports[decl.Name] = "interface" // sealed classes are Go interfaces
 				for _, v := range decl.Variants {
 					exports[v.Name] = "data"
 				}
+			} else {
+				exports[decl.Name] = "class"
 			}
 		case *parser.InterfaceDecl:
 			exports[decl.Name] = "interface"
