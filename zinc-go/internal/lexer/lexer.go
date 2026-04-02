@@ -321,6 +321,12 @@ func (l *Lexer) readStringWithQuote(quote rune, line, col int) Token {
 						l.advance()
 						break
 					}
+				} else if ic == '\\' && (l.peekAt(1) == '"' || l.peekAt(1) == '\'') {
+					// Escaped quote inside interpolation: \" → "
+					// Allows: "result: {fn(\"arg\")}" → fmt.Sprintf("result: %v", fn("arg"))
+					l.advance() // consume backslash
+					sb.WriteRune(l.advance()) // consume and write the quote
+					continue
 				} else if ic == '"' || ic == '\'' {
 					// Nested string inside interpolation — consume it whole
 					q := ic

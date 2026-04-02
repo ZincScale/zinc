@@ -1,0 +1,23 @@
+// Test escaped quotes inside string interpolation
+// This was a recurring issue: \" inside {expr} was misinterpreted
+
+fn main() {
+    // Map access with escaped quotes in interpolation
+    var m = Map<String, String>{"greeting": "hello", "name": "zinc"}
+    print("greeting: {m[\"greeting\"]}")
+    print("name: {m[\"name\"]}")
+
+    // Multiple escaped quotes in one string
+    var scores = Map<String, int>{"alice": 95, "bob": 87}
+    print("alice={scores[\"alice\"]} bob={scores[\"bob\"]}")
+
+    // Escaped quotes in function arguments inside interpolation
+    print("upper: {str(42)}")
+
+    // Nested map access
+    var config = Map<String, String>{"server.port": "8080", "server.host": "localhost"}
+    var port = config["server.port"]
+    var host = config["server.host"]
+    print("server: {host}:{port}")
+    print("direct port: {config[\"server.port\"]}")
+}
