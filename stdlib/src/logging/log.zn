@@ -35,7 +35,7 @@ fn configure(String levelStr, String handlerType, String output) {
     if output == "stderr" {
         writer = os.Stderr
     } else if output != "stdout" {
-        var file = os.Create(output) or {
+        var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
             return
         }
         writer = file

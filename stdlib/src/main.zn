@@ -1,4 +1,4 @@
-// stdlib demo — test config + slog logging with HandlerOptions
+// stdlib demo — full test of config + logging
 
 import config
 import logging
@@ -16,17 +16,26 @@ fn main() {
 
     // Test env override
     os.Setenv("SERVER_PORT", "9999")
-    var portEnv = cfg.getString("server.port", "8080")
-    fmt.Println("server.port (env) = {portEnv}")
+    var envPort = cfg.getString("server.port", "8080")
+    fmt.Println("server.port (env) = {envPort}")
 
-    // Setup logging from config (with level via HandlerOptions)
+    // Setup logging from config (DEBUG level, text handler, stdout)
     cfg.set("logging.level", "DEBUG")
     cfg.set("logging.handler", "text")
     cfg.set("logging.output", "stdout")
     logging.setup(cfg)
 
-    // Test structured logging at all levels
-    slog.Info("server started", "port", port, "host", host)
-    slog.Debug("debug info", "workers", 8)
+    slog.Info("server started", "port", 3000)
+    slog.Debug("debug enabled")
     slog.Warn("low disk", "threshold", "10%")
+
+    // Switch to file output with JSON handler
+    cfg.set("logging.handler", "json")
+    cfg.set("logging.output", "/tmp/zinc-stdlib-test.log")
+    logging.setup(cfg)
+
+    slog.Info("logged to file", "format", "json")
+    slog.Debug("file debug", "n", 42)
+
+    fmt.Println("file logging done")
 }
