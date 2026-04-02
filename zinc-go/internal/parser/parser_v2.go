@@ -1906,6 +1906,11 @@ func (p *Parser) v2ParseCallArg(args *[]Expr, namedArgs *[]NamedArg) {
 		return
 	}
 	arg := p.v2ParseExpr()
+	// Check for spread: arg...
+	if p.check(lexer.TOKEN_DOTDOTDOT) {
+		p.advance()
+		arg = &SpreadExpr{Expr: arg}
+	}
 	*args = append(*args, arg)
 }
 

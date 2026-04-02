@@ -1,17 +1,16 @@
-// stdlib demo — Viper config + slog logging
+// stdlib demo — config + logging (no slog import needed)
 
 import config
 import logging
-import log.slog
 import os
 import fmt
 
 fn main() {
-    // Config with defaults + YAML file
+    // Config
     var cfg = config.Config()
     cfg.setDefault("server.port", 8080)
     cfg.setDefault("server.host", "localhost")
-    cfg.setDefault("logging.level", "INFO")
+    cfg.setDefault("logging.level", "DEBUG")
     cfg.setDefault("logging.handler", "text")
     cfg.setDefault("logging.output", "stdout")
     cfg.load("config", "yaml", ".")
@@ -28,19 +27,12 @@ fn main() {
     var lm = logging.LogManager()
     lm.setup(cfg)
 
-    // Default logger
-    slog.Info("server started", "port", port, "host", host)
-    slog.Debug("debug details", "workers", 4)
-
-    // Named loggers
-    var routerLog = lm.named("router")
-    routerLog.Info("rules loaded", "count", 3)
-
-    var deliveryLog = lm.named("delivery")
-    deliveryLog.Info("http adapter ready", "endpoint", "localhost:8081")
-    deliveryLog.Warn("processor slow", "latency_ms", 500)
+    // Use package-level logging functions — no slog import
+    logging.info("server started", "port", port, "host", host)
+    logging.debug("debug details", "workers", 4)
+    logging.warn("low disk", "threshold", "10%")
+    logging.error("test error", "code", 500)
 
     // Config queries
     fmt.Println("has server.port: {cfg.has(\"server.port\")}")
-    fmt.Println("has missing.key: {cfg.has(\"missing.key\")}")
 }

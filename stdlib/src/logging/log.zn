@@ -1,11 +1,16 @@
 // logging — structured logging backed by Go's log/slog.
 //
-// Usage:
+// Package-level functions for all logging. No need to import slog directly.
+//
+// Setup (once, at startup):
 //   var lm = logging.LogManager()
-//   lm.setup(cfg)                       // config-driven
-//   slog.Info("msg", "key", value)      // use default logger
-//   var log = lm.named("router")        // named logger with group
-//   log.Info("msg", "key", value)       // prefixed: router.key=value
+//   lm.setup(cfg)
+//
+// Usage (anywhere):
+//   logging.info("server started", "port", 8080)
+//   logging.debug("request details", "id", reqId)
+//   logging.warn("slow query", "duration_ms", elapsed)
+//   logging.error("failed", "err", errMsg)
 //
 // Config keys:
 //   logging.level    — DEBUG, INFO, WARN, ERROR (default: INFO)
@@ -17,7 +22,28 @@ import log.slog
 import os
 import io
 
-// LogManager configures slog and creates named loggers.
+// --- Package-level logging functions ---
+// Call these from anywhere. LogManager.setup() configures the backend.
+
+fn info(String msg, any... args) {
+    slog.Info(msg, args...)
+}
+
+fn debug(String msg, any... args) {
+    slog.Debug(msg, args...)
+}
+
+fn warn(String msg, any... args) {
+    slog.Warn(msg, args...)
+}
+
+fn error(String msg, any... args) {
+    slog.Error(msg, args...)
+}
+
+// --- LogManager ---
+// Configures the logging backend. Create once at startup.
+
 class LogManager {
     var handlerType = "text"
     var level = "INFO"
@@ -25,7 +51,7 @@ class LogManager {
 
     init() {}
 
-    // setup configures slog from config.
+    // setup configures logging from config.
     pub fn setup(config.Config cfg) {
         var h = cfg.getString("logging.handler")
         var l = cfg.getString("logging.level")
@@ -56,13 +82,6 @@ class LogManager {
         apply()
     }
 
-    // named returns a slog.Logger with a group prefix.
-    // Usage: var log = lm.named("router")
-    //        log.Info("matched", "rules", 3)  → router.rules=3
-    pub fn named(String name): slog.Logger {
-        return slog.Default().WithGroup(name)
-    }
-
     // useHandler sets a custom slog.Handler directly.
     pub fn useHandler(slog.Handler handler) {
         slog.SetDefault(slog.New(handler))
@@ -77,7 +96,8 @@ class LogManager {
     }
 }
 
-// createHandler builds a slog.Handler by name.
+// --- Internal ---
+
 fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts): slog.Handler {
     if handlerType == "json" {
         return slog.NewJSONHandler(writer, opts)
@@ -85,7 +105,6 @@ fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts)
     return slog.NewTextHandler(writer, opts)
 }
 
-// resolveWriter returns an io.Writer for the given output target.
 fn resolveWriter(String output): io.Writer {
     if output == "stderr" {
         return os.Stderr
@@ -99,7 +118,6 @@ fn resolveWriter(String output): io.Writer {
     return os.Stdout
 }
 
-// parseLevel converts a string to slog.Level.
 fn parseLevel(String s): slog.Level {
     if s == "DEBUG" || s == "debug" {
         return slog.LevelDebug
