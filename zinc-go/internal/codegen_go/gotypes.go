@@ -451,6 +451,28 @@ func (r *GoTypeResolver) ReturnsErrorOnly(pkgPath, funcName string) bool {
 	return results.Len() == 1 && isErrorType(results.At(0).Type())
 }
 
+// HasPointerReceiverMethods reports whether typeName in pkgPath has any methods
+// with pointer receivers. If so, the type is designed to be used as *T.
+func (r *GoTypeResolver) HasPointerReceiverMethods(pkgPath, typeName string) bool {
+	pkg := r.loadPkg(pkgPath)
+	if pkg == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil {
+		return false
+	}
+	tn, ok := obj.(*types.TypeName)
+	if !ok {
+		return false
+	}
+	// Check method set of *T — if it has more methods than T,
+	// the extra ones have pointer receivers.
+	valMethods := types.NewMethodSet(tn.Type())
+	ptrMethods := types.NewMethodSet(types.NewPointer(tn.Type()))
+	return ptrMethods.Len() > valMethods.Len()
+}
+
 var implicitPointerParams = map[string]map[int]bool{
 	"encoding/json.Unmarshal": {1: true},
 	"encoding/xml.Unmarshal":  {1: true},

@@ -1,28 +1,27 @@
 // config — configuration backed by Viper.
 //
 // Supports YAML, TOML, JSON, properties files.
-// Environment variables automatically override file values.
-// Defaults can be set programmatically.
+// Environment variables automatically override file values (SERVER_PORT → server.port).
+// Defaults set programmatically. Live config watching supported.
 //
 // Usage:
 //   var cfg = config.Config()
 //   cfg.setDefault("server.port", 8080)
 //   cfg.load("config", "yaml", ".")
 //   var port = cfg.getInt("server.port")
-//
-// Env vars: SERVER_PORT overrides server.port (automatic)
 
 import viper
 import strings
+import time
 
-// Config wraps Viper's global instance for zinc-friendly configuration.
+// Config wraps Viper's global instance.
 class Config {
     init() {
         viper.AutomaticEnv()
         viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
     }
 
-    // load reads a config file. name is without extension.
+    // load reads a config file by name (without extension), type, and search path.
     pub fn load(String name, String fileType, String path) {
         viper.SetConfigName(name)
         viper.SetConfigType(fileType)
@@ -30,15 +29,19 @@ class Config {
         viper.ReadInConfig()
     }
 
-    // loadFile reads a specific config file by path.
+    // loadFile reads a specific config file by full path.
     pub fn loadFile(String filePath) {
         viper.SetConfigFile(filePath)
         viper.ReadInConfig()
     }
 
+    // --- Defaults ---
+
     pub fn setDefault(String key, any value) {
         viper.SetDefault(key, value)
     }
+
+    // --- Getters ---
 
     pub fn getString(String key): String {
         return viper.GetString(key)
@@ -56,21 +59,37 @@ class Config {
         return viper.GetFloat64(key)
     }
 
+    pub fn getDuration(String key): time.Duration {
+        return viper.GetDuration(key)
+    }
+
     pub fn getStringSlice(String key): List<String> {
         return viper.GetStringSlice(key)
     }
+
+    pub fn getStringMap(String key): Map<String, String> {
+        return viper.GetStringMapString(key)
+    }
+
+    // --- Setters ---
 
     pub fn set(String key, any value) {
         viper.Set(key, value)
     }
 
+    // --- Query ---
+
     pub fn has(String key): boolean {
         return viper.IsSet(key)
     }
 
+    // --- Environment ---
+
     pub fn bindEnv(String key, String envVar) {
         viper.BindEnv(key, envVar)
     }
+
+    // --- Watching ---
 
     pub fn watchForChanges() {
         viper.WatchConfig()

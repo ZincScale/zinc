@@ -1,23 +1,23 @@
 // logging — structured logging backed by Go's log/slog.
 //
-// Config-driven with extensible handler support via useHandler().
-//
 // Usage:
 //   var lm = logging.LogManager()
-//   lm.setup(cfg)                    // config-driven
-//   slog.Info("msg", "key", value)   // use slog directly
+//   lm.setup(cfg)                       // config-driven
+//   slog.Info("msg", "key", value)      // use default logger
+//   var log = lm.named("router")        // named logger with group
+//   log.Info("msg", "key", value)       // prefixed: router.key=value
 //
-// Config properties:
-//   logging.level=INFO          (DEBUG, INFO, WARN, ERROR)
-//   logging.handler=text        (or json)
-//   logging.output=stdout       (stdout, stderr, or file path)
+// Config keys:
+//   logging.level    — DEBUG, INFO, WARN, ERROR (default: INFO)
+//   logging.handler  — text or json (default: text)
+//   logging.output   — stdout, stderr, or file path (default: stdout)
 
 import config
 import log.slog
 import os
 import io
 
-// LogManager configures slog.
+// LogManager configures slog and creates named loggers.
 class LogManager {
     var handlerType = "text"
     var level = "INFO"
@@ -25,7 +25,7 @@ class LogManager {
 
     init() {}
 
-    // setup configures slog from config properties.
+    // setup configures slog from config.
     pub fn setup(config.Config cfg) {
         var h = cfg.getString("logging.handler")
         var l = cfg.getString("logging.level")
@@ -56,7 +56,14 @@ class LogManager {
         apply()
     }
 
-    // useHandler sets a custom slog.Handler directly, bypassing built-in handlers.
+    // named returns a slog.Logger with a group prefix.
+    // Usage: var log = lm.named("router")
+    //        log.Info("matched", "rules", 3)  → router.rules=3
+    pub fn named(String name): slog.Logger {
+        return slog.Default().WithGroup(name)
+    }
+
+    // useHandler sets a custom slog.Handler directly.
     pub fn useHandler(slog.Handler handler) {
         slog.SetDefault(slog.New(handler))
     }
@@ -78,7 +85,7 @@ fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts)
     return slog.NewTextHandler(writer, opts)
 }
 
-// resolveWriter returns a file for the given output target.
+// resolveWriter returns an io.Writer for the given output target.
 fn resolveWriter(String output): io.Writer {
     if output == "stderr" {
         return os.Stderr

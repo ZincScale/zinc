@@ -698,14 +698,20 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			if g.isImportAlias(pkgPrefix) {
 				if goPath, ok := g.importMap[pkgPrefix]; ok {
 					g.needImport(goPath)
-					// Use naming convention: PascalCase = likely class → pointer
-					// Check Go type: if it's a struct with a New constructor, it's a class
 					if g.goResolver.IsStruct(goPath, typeName) {
-						// Check if there's a New constructor → class pattern (zinc class convention)
 						if g.goResolver.HasFunc(goPath, "New"+typeName) {
 							return "*" + typ.Name
 						}
 					}
+				}
+			}
+			// Check any Go package — if the type is a struct with pointer-receiver
+			// methods, it's designed to be used as *T.
+			// Non-struct types (type Level int) stay as values.
+			if goPath, ok := g.importMap[pkgPrefix]; ok {
+				if g.goResolver.IsStruct(goPath, typeName) &&
+					g.goResolver.HasPointerReceiverMethods(goPath, typeName) {
+					return "*" + typ.Name
 				}
 			}
 		}

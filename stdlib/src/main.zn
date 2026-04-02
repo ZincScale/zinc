@@ -1,4 +1,4 @@
-// stdlib demo — Viper-based config + slog logging
+// stdlib demo — Viper config + slog logging
 
 import config
 import logging
@@ -7,31 +7,40 @@ import os
 import fmt
 
 fn main() {
-    // Setup config with defaults
+    // Config with defaults + YAML file
     var cfg = config.Config()
     cfg.setDefault("server.port", 8080)
     cfg.setDefault("server.host", "localhost")
     cfg.setDefault("logging.level", "INFO")
     cfg.setDefault("logging.handler", "text")
     cfg.setDefault("logging.output", "stdout")
-
-    // Load config file (overrides defaults)
     cfg.load("config", "yaml", ".")
 
-    // Print config values
-    fmt.Println("server.port = {cfg.getInt(\"server.port\")}")
-    fmt.Println("server.host = {cfg.getString(\"server.host\")}")
-    fmt.Println("logging.level = {cfg.getString(\"logging.level\")}")
+    var port = cfg.getInt("server.port")
+    var host = cfg.getString("server.host")
+    fmt.Println("port={port} host={host}")
 
-    // Env override test
+    // Env override
     os.Setenv("SERVER_PORT", "9999")
-    fmt.Println("server.port (env) = {cfg.getInt(\"server.port\")}")
+    fmt.Println("port (env)={cfg.getInt(\"server.port\")}")
 
     // Setup logging from config
     var lm = logging.LogManager()
     lm.setup(cfg)
 
-    slog.Info("server started", "port", cfg.getInt("server.port"))
-    slog.Debug("debug enabled")
-    slog.Warn("warning test")
+    // Default logger
+    slog.Info("server started", "port", port, "host", host)
+    slog.Debug("debug details", "workers", 4)
+
+    // Named loggers
+    var routerLog = lm.named("router")
+    routerLog.Info("rules loaded", "count", 3)
+
+    var deliveryLog = lm.named("delivery")
+    deliveryLog.Info("http adapter ready", "endpoint", "localhost:8081")
+    deliveryLog.Warn("processor slow", "latency_ms", 500)
+
+    // Config queries
+    fmt.Println("has server.port: {cfg.has(\"server.port\")}")
+    fmt.Println("has missing.key: {cfg.has(\"missing.key\")}")
 }
