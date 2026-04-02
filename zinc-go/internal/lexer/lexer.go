@@ -270,15 +270,15 @@ func (l *Lexer) NextToken() Token {
 			l.advance()
 			return l.makeToken(TOKEN_AMP_AMP, "&&", line, col)
 		}
-		l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unexpected '&'", line, col))
-		return l.makeToken(TOKEN_ILLEGAL, "&", line, col)
+		return l.makeToken(TOKEN_AMP, "&", line, col)
 	case '|':
 		if l.peek() == '|' {
 			l.advance()
 			return l.makeToken(TOKEN_PIPE_PIPE, "||", line, col)
 		}
-		l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unexpected '|'", line, col))
-		return l.makeToken(TOKEN_ILLEGAL, "|", line, col)
+		return l.makeToken(TOKEN_PIPE, "|", line, col)
+	case '^':
+		return l.makeToken(TOKEN_CARET, "^", line, col)
 	}
 
 	l.Errors = append(l.Errors, fmt.Sprintf("%d:%d: unexpected character %q", line, col, ch))

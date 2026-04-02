@@ -98,6 +98,9 @@ const (
 	TOKEN_SLASH     // /
 	TOKEN_PERCENT   // %
 	TOKEN_BANG      // !
+	TOKEN_AMP       // & (bitwise AND)
+	TOKEN_PIPE      // | (bitwise OR)
+	TOKEN_CARET     // ^ (bitwise XOR)
 	TOKEN_AMP_AMP   // &&
 	TOKEN_PIPE_PIPE // ||
 	TOKEN_EQ        // ==

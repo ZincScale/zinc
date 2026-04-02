@@ -69,6 +69,7 @@ type Generator struct {
 	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
+	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
 }
 
 // isZincSubpackage checks if an identifier is a zinc subpackage alias.
@@ -422,6 +423,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.varStructTypes = make(map[string]string)
 	g.dataClasses = make(map[string]bool)
 	g.typeImports = make(map[string]string)
+	g.importGoAliases = make(map[string]string)
 	g.collectDecls(prog.Decls)
 
 	// Register user imports for resolution — but don't add to g.imports yet.
@@ -431,28 +433,41 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		parts := strings.Split(imp.Path, ".")
 		lastSeg := parts[len(parts)-1]
 
-		// Check import aliases: "import stdlib.config" where stdlib → "github.com/ZincScale/zinc-stdlib"
-		// Resolves to Go import "github.com/ZincScale/zinc-stdlib/config", alias "config"
+		// Determine the local alias name for this import
+		// If "import X as Y" was used, alias is Y; otherwise it's the last path segment
+		localName := lastSeg
+		if imp.Alias != "" {
+			localName = imp.Alias
+		}
+
+		// Check import aliases from zinc.toml: "import stdlib.config" where stdlib → "github.com/..."
 		if len(parts) >= 2 && g.importAliases != nil {
 			if modulePath, ok := g.importAliases[parts[0]]; ok {
 				subPath := strings.Join(parts[1:], "/")
 				goPath := modulePath + "/" + subPath
-				g.importMap[lastSeg] = goPath
+				g.importMap[localName] = goPath
+				// Register Go import alias if localName differs from Go package name
+				goPkgName := parts[len(parts)-1]
+				if localName != goPkgName {
+					g.importGoAliases[goPath] = localName
+				}
 				continue
 			}
 		}
 
 		// Check if this is a zinc subpackage import.
-		// Convert dots to slashes and check against subpackages map.
-		// Handles both "import core" and "import fabric.router" → "fabric/router"
 		subpkgPath := strings.ReplaceAll(imp.Path, ".", "/")
 		if g.zincSubpackages[subpkgPath] {
 			goPath := subpkgPath
 			if g.moduleName != "" {
 				goPath = g.moduleName + "/" + subpkgPath
 			}
-			// Use last segment as the Go package alias (e.g. "router" for "fabric/router")
-			g.importMap[lastSeg] = goPath
+			g.importMap[localName] = goPath
+			// Register Go import alias if localName differs from directory name
+			dirName := parts[len(parts)-1]
+			if localName != dirName {
+				g.importGoAliases[goPath] = localName
+			}
 			continue
 		}
 
@@ -467,7 +482,12 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		} else {
 			// Package import: net.http → import "net/http"
 			goPath := strings.ReplaceAll(imp.Path, ".", "/")
-			g.importMap[lastSeg] = goPath
+			g.importMap[localName] = goPath
+			// Register Go import alias if localName differs from last path segment
+			goLastSeg := parts[len(parts)-1]
+			if localName != goLastSeg {
+				g.importGoAliases[goPath] = localName
+			}
 		}
 	}
 
@@ -500,6 +520,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 
 	body := bodyGen.buf.String()
 	g.imports = bodyGen.imports
+	g.importGoAliases = bodyGen.importGoAliases
 
 	// Write final output: package + imports + body
 	pkgName := g.packageName
@@ -513,7 +534,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		g.writeln("import (")
 		g.indent++
 		for pkg := range g.imports {
-			g.writeln("%q", pkg)
+			if alias, ok := g.importGoAliases[pkg]; ok {
+				g.writeln("%s %q", alias, pkg)
+			} else {
+				g.writeln("%q", pkg)
+			}
 		}
 		g.indent--
 		g.writeln(")")

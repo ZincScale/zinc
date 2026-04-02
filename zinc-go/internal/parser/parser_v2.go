@@ -1392,7 +1392,7 @@ func (p *Parser) v2ParsePackageDecl() *PackageDecl {
 	return &PackageDecl{Path: path}
 }
 
-// v2ParseImport: import java.util.List  OR  import java.util.*
+// v2ParseImport: import java.util.List  OR  import java.util.*  OR  import X as Y
 func (p *Parser) v2ParseImport() *ImportDecl {
 	p.expect(lexer.TOKEN_IMPORT)
 	path := p.v2ExpectIdentOrKeyword()
@@ -1406,7 +1406,13 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 		}
 		path += "." + p.v2ExpectIdentOrKeyword()
 	}
-	return &ImportDecl{Path: path}
+	// Check for alias: import X as Y
+	var alias string
+	if p.check(lexer.TOKEN_AS) {
+		p.advance()
+		alias = p.v2ExpectIdentOrKeyword()
+	}
+	return &ImportDecl{Path: path, Alias: alias}
 }
 
 // isIdentLike returns true if the token type can be used as a name segment
@@ -1669,7 +1675,40 @@ func (p *Parser) v2ParseNot() Expr {
 		operand := p.v2ParseNot()
 		return &UnaryExpr{Op: op, Operand: operand}
 	}
-	return p.v2ParseComparison()
+	return p.v2ParseBitwiseOr()
+}
+
+// v2ParseBitwiseOr: expr | expr
+func (p *Parser) v2ParseBitwiseOr() Expr {
+	left := p.v2ParseBitwiseXor()
+	for p.check(lexer.TOKEN_PIPE) {
+		p.advance()
+		right := p.v2ParseBitwiseXor()
+		left = &BinaryExpr{Left: left, Op: "|", Right: right}
+	}
+	return left
+}
+
+// v2ParseBitwiseXor: expr ^ expr
+func (p *Parser) v2ParseBitwiseXor() Expr {
+	left := p.v2ParseBitwiseAnd()
+	for p.check(lexer.TOKEN_CARET) {
+		p.advance()
+		right := p.v2ParseBitwiseAnd()
+		left = &BinaryExpr{Left: left, Op: "^", Right: right}
+	}
+	return left
+}
+
+// v2ParseBitwiseAnd: expr & expr
+func (p *Parser) v2ParseBitwiseAnd() Expr {
+	left := p.v2ParseComparison()
+	for p.check(lexer.TOKEN_AMP) {
+		p.advance()
+		right := p.v2ParseComparison()
+		left = &BinaryExpr{Left: left, Op: "&", Right: right}
+	}
+	return left
 }
 
 // v2ParseComparison: expr (== != < <= > >= is in not_in) expr

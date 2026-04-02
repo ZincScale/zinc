@@ -1,0 +1,43 @@
+// Test bitwise operations: &, |, ^
+
+import fmt
+
+fn main() {
+    // Bitwise OR
+    var flags = 1 | 2 | 4
+    print("1|2|4 = {flags}")
+
+    // Bitwise AND
+    var masked = flags & 3
+    print("7&3 = {masked}")
+
+    // Bitwise XOR
+    var xored = 5 ^ 3
+    print("5^3 = {xored}")
+
+    // Combined with assignment
+    var perms = 0
+    perms = perms | 4   // read
+    perms = perms | 2   // write
+    print("perms = {perms}")
+
+    // Bitwise AND for flag testing
+    if perms & 4 != 0 {
+        print("readable")
+    }
+    if perms & 2 != 0 {
+        print("writable")
+    }
+    if perms & 1 != 0 {
+        print("executable")
+    } else {
+        print("not executable")
+    }
+
+    // OS-style flags
+    var O_CREATE = 64
+    var O_WRONLY = 1
+    var O_APPEND = 1024
+    var openFlags = O_CREATE | O_WRONLY | O_APPEND
+    print("open flags = {openFlags}")
+}
