@@ -303,6 +303,48 @@ func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex in
 	return false
 }
 
+// FuncReturnsPointer reports whether the first return value of pkgPath.funcName is a pointer.
+// Used to avoid double-pointer: if slog.New() returns *Logger, don't add & when passing to SetDefault(*Logger).
+func (r *GoTypeResolver) FuncReturnsPointer(pkgPath, funcName string) bool {
+	retType := r.FuncReturnType(pkgPath, funcName)
+	if retType == nil {
+		return false
+	}
+	_, isPtr := retType.(*types.Pointer)
+	return isPtr
+}
+
+// ExprReturnsPointer checks if a call expression's return type is already a pointer.
+// Handles both package functions (slog.New) and methods (obj.Method).
+func (r *GoTypeResolver) ExprReturnsPointer(pkgPath, funcName string, receiverType types.Type) bool {
+	if pkgPath != "" {
+		// Package function
+		return r.FuncReturnsPointer(pkgPath, funcName)
+	}
+	if receiverType != nil {
+		// Method call — look up method return type
+		mset := types.NewMethodSet(receiverType)
+		sel := mset.Lookup(nil, funcName)
+		if sel == nil {
+			if _, isPtr := receiverType.(*types.Pointer); !isPtr {
+				mset = types.NewMethodSet(types.NewPointer(receiverType))
+				sel = mset.Lookup(nil, funcName)
+			}
+		}
+		if sel != nil {
+			if fn, ok := sel.Obj().(*types.Func); ok {
+				sig := fn.Type().(*types.Signature)
+				results := sig.Results()
+				if results.Len() > 0 {
+					_, isPtr := results.At(0).Type().(*types.Pointer)
+					return isPtr
+				}
+			}
+		}
+	}
+	return false
+}
+
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	if !ok {

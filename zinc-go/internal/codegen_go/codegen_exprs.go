@@ -269,6 +269,32 @@ var streamMethods = map[string]bool{
 
 // --- Call expressions --------------------------------------------------------
 
+// callReturnsPointer checks if a call expression returns a pointer type,
+// using the GoTypeResolver to inspect the function/method signature.
+func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok {
+			// Package function: pkg.Func()
+			if pkgPath, ok := g.importMap[ident.Name]; ok {
+				return g.goResolver.FuncReturnsPointer(pkgPath, sel.Field)
+			}
+			// Method on tracked variable: obj.Method()
+			if goType, ok := g.varGoTypes[ident.Name]; ok {
+				return g.goResolver.ExprReturnsPointer("", sel.Field, goType)
+			}
+		}
+	}
+	// Zinc constructors (NewType) return pointers for classes
+	if ident, ok := c.Callee.(*parser.Ident); ok {
+		if _, isStruct := g.structs[ident.Name]; isStruct {
+			if !g.dataClasses[ident.Name] {
+				return true // zinc class constructors return *Type
+			}
+		}
+	}
+	return false
+}
+
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// Zinc subpackage or import alias qualified calls:
 	//   core.FlowFile(...) → core.NewFlowFile(...)
@@ -532,7 +558,18 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			// Auto-insert & when Go function expects a pointer parameter
 			// (explicit *T in signature or implicit via known table)
 			if goPkgPath != "" && g.goResolver.NeedsPointerArg(goPkgPath, goFuncName, i) {
-				formatted = "&" + formatted
+				// Don't add & if the argument already produces a pointer:
+				// - nil is already a valid nil pointer
+				// - function calls that return pointers (e.g. slog.New() returns *Logger)
+				alreadyPointer := formatted == "nil"
+				if !alreadyPointer {
+					if callArg, ok := arg.(*parser.CallExpr); ok {
+						alreadyPointer = g.callReturnsPointer(callArg)
+					}
+				}
+				if !alreadyPointer {
+					formatted = "&" + formatted
+				}
 			}
 			argStrs = append(argStrs, formatted)
 		}

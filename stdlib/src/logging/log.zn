@@ -1,79 +1,53 @@
-// log — structured logging with configurable levels.
+// logging — structured logging backed by Go's log/slog.
+//
+// Configures the global slog default logger. After calling setup(),
+// use slog.Info(), slog.Debug(), etc. directly.
 //
 // Usage:
-//   var logger = log.Logger("myapp", log.INFO)
-//   logger.info("server started on port {port}")
-//   logger.debug("request details: {req}")  // filtered out at INFO level
+//   logging.setup(cfg)                           // configure from properties
+//   slog.Info("server started", "port", 8080)
+//
+// Config properties:
+//   logging.level=INFO          (DEBUG, INFO, WARN, ERROR)
+//   logging.handler=text        (text or json)
+//   logging.output=stdout       (stdout, stderr, or file path)
 
-import fmt
-import time
+import log.slog
+import os
 
-// Log levels — higher value = more severe.
-const int DEBUG = 0
-const int INFO = 1
-const int WARN = 2
-const int ERROR = 3
+// setup configures the default slog logger.
+// Pass the handler type ("text" or "json") and output ("stdout", "stderr", or file path).
+fn setup(String handlerType, String output) {
 
-// Logger provides leveled logging with a component prefix.
-class Logger {
-    String name
-    int level
-
-    init(String name, int level) {
-        this.name = name
-        this.level = level
-    }
-
-    pub fn debug(String msg) {
-        if level <= DEBUG {
-            emit("DEBUG", name, msg)
+    // Determine output writer
+    var writer = os.Stdout
+    if output == "stderr" {
+        writer = os.Stderr
+    } else if output != "stdout" {
+        var file = os.Create(output) or {
+            return
         }
+        writer = file
     }
 
-    pub fn info(String msg) {
-        if level <= INFO {
-            emit("INFO", name, msg)
-        }
-    }
-
-    pub fn warn(String msg) {
-        if level <= WARN {
-            emit("WARN", name, msg)
-        }
-    }
-
-    pub fn error(String msg) {
-        if level <= ERROR {
-            emit("ERROR", name, msg)
-        }
-    }
-
-    // setLevel changes the log level at runtime.
-    pub fn setLevel(int newLevel) {
-        level = newLevel
+    // Create handler and set as default
+    if handlerType == "json" {
+        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, nil)))
+    } else {
+        slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
     }
 }
 
-// emit formats and prints a log line.
-fn emit(String level, String name, String msg) {
-    var ts = time.Now().Format("2006-01-02 15:04:05")
-    fmt.Println("{ts} [{level}] [{name}] {msg}")
-}
+// setupSimple configures logging with explicit handler type and output.
+fn setupSimple(String handlerType, String output) {
+    var writer = os.Stdout
+    if output == "stderr" {
+        writer = os.Stderr
+    }
 
-// levelFromString converts a string level name to int.
-// Returns INFO as default for unrecognized values.
-fn levelFromString(String s): int {
-    if s == "DEBUG" || s == "debug" {
-        return DEBUG
+    if handlerType == "json" {
+        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, nil)))
+    } else {
+        slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
     }
-    if s == "INFO" || s == "info" {
-        return INFO
-    }
-    if s == "WARN" || s == "warn" {
-        return WARN
-    }
-    if s == "ERROR" || s == "error" {
-        return ERROR
-    }
-    return INFO
 }

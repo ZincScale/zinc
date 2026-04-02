@@ -1,51 +1,30 @@
-// stdlib demo — test config and log packages
+// stdlib demo — test config and slog-based logging
 
 import config
 import logging
+import log.slog
 import os
 import fmt
 
 fn main() {
-    // Test config: load properties file
+    // Test config
     var cfg = config.load("test.properties")
     var port = cfg.getString("server.port", "8080")
     var host = cfg.getString("server.host", "localhost")
-    var debug = cfg.getBool("debug", false)
-    var workers = cfg.getInt("workers", 4)
     fmt.Println("server.port = {port}")
     fmt.Println("server.host = {host}")
-    fmt.Println("debug = {debug}")
-    fmt.Println("workers = {workers}")
 
     // Test config: env override
     os.Setenv("SERVER_PORT", "9999")
     var portEnv = cfg.getString("server.port", "8080")
     fmt.Println("server.port (env) = {portEnv}")
 
-    // Test config: programmatic set
-    cfg.set("custom.key", "custom-value")
-    var custom = cfg.getString("custom.key", "")
-    var hasCustom = cfg.has("custom.key")
-    var hasMissing = cfg.has("missing.key")
-    fmt.Println("custom.key = {custom}")
-    fmt.Println("has custom.key = {hasCustom}")
-    fmt.Println("has missing.key = {hasMissing}")
+    // Setup logging
+    logging.setupSimple("text", "stdout")
 
-    // Test log
-    var logger = logging.Logger("demo", logging.DEBUG)
-    logger.debug("this is a debug message")
-    logger.info("this is an info message")
-    logger.warn("this is a warning")
-    logger.error("this is an error")
-
-    // Test log level filtering
-    var prodLogger = logging.Logger("prod", logging.WARN)
-    prodLogger.debug("should not appear")
-    prodLogger.info("should not appear")
-    prodLogger.warn("should appear")
-    prodLogger.error("should appear")
-
-    // Test levelFromString
-    var lvl = logging.levelFromString("DEBUG")
-    fmt.Println("levelFromString(DEBUG) = {lvl}")
+    // Use slog directly after setup
+    slog.Info("server started", "port", port, "host", host)
+    slog.Debug("debug info", "workers", 8)
+    slog.Warn("low disk", "threshold", "10%")
+    slog.Error("something broke", "code", 500)
 }
