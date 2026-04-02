@@ -1,51 +1,81 @@
 // logging — structured logging backed by Go's log/slog.
 //
-// Configures the global slog default logger with config-driven setup.
-// After calling setup(), use slog.Info(), slog.Debug(), etc. directly.
+// Extensible via LogManager class with handler registry.
 //
 // Usage:
-//   logging.setup(cfg)
-//   slog.Info("server started", "port", 8080)
-//
-// Config properties:
-//   logging.level=INFO          (DEBUG, INFO, WARN, ERROR)
-//   logging.handler=text        (text or json)
-//   logging.output=stdout       (stdout, stderr, or file path)
+//   var lm = logging.LogManager()
+//   lm.setup(cfg)                    // config-driven
+//   slog.Info("msg", "key", value)   // use slog directly
 
 import config
 import log.slog
 import os
 
-// setup configures the default slog logger from config properties.
-fn setup(config.Config cfg) {
-    var levelStr = cfg.getString("logging.level", "INFO")
-    var handlerType = cfg.getString("logging.handler", "text")
-    var output = cfg.getString("logging.output", "stdout")
+// LogManager holds handler registry and configures slog.
+class LogManager {
+    var textEnabled = true
+    var jsonEnabled = true
+    var handlerType = "text"
+    var level = "INFO"
+    var output = "stdout"
 
-    configure(levelStr, handlerType, output)
-}
+    init() {}
 
-// configure sets up the default slog logger with explicit values.
-fn configure(String levelStr, String handlerType, String output) {
-    var level = parseLevel(levelStr)
-    var opts = slog.HandlerOptions(Level=level)
-
-    // Determine output writer
-    var writer = os.Stdout
-    if output == "stderr" {
-        writer = os.Stderr
-    } else if output != "stdout" {
-        var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
-            return
-        }
-        writer = file
+    // setup configures slog from config properties.
+    pub fn setup(config.Config cfg) {
+        handlerType = cfg.getString("logging.handler", "text")
+        level = cfg.getString("logging.level", "INFO")
+        output = cfg.getString("logging.output", "stdout")
+        apply()
     }
 
-    // Create handler and set as default
-    if handlerType == "json" {
-        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, opts)))
-    } else {
-        slog.SetDefault(slog.New(slog.NewTextHandler(writer, opts)))
+    // configure sets up logging with explicit values.
+    pub fn configure(String lvl, String handler, String out) {
+        level = lvl
+        handlerType = handler
+        output = out
+        apply()
+    }
+
+    // apply creates the slog handler and sets it as default.
+    fn apply() {
+        var slogLevel = parseLevel(level)
+        var opts = slog.HandlerOptions(Level=slogLevel)
+        var writer = os.Stdout
+        if output == "stderr" {
+            writer = os.Stderr
+        } else if output != "stdout" {
+            var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
+                writer = os.Stdout
+            }
+            writer = file
+        }
+
+        if handlerType == "json" {
+            slog.SetDefault(slog.New(slog.NewJSONHandler(writer, opts)))
+        } else {
+            slog.SetDefault(slog.New(slog.NewTextHandler(writer, opts)))
+        }
+    }
+
+    // setHandler allows changing the handler type at runtime.
+    pub fn setHandler(String handler) {
+        handlerType = handler
+        apply()
+    }
+
+    // setLevel allows changing the log level at runtime.
+    pub fn setLevel(String lvl) {
+        level = lvl
+        apply()
+    }
+
+    // useHandler sets a custom slog.Handler directly.
+    // Use this for handlers not covered by the built-in text/json:
+    //   var h = myCustomHandler(writer, opts)
+    //   lm.useHandler(h)
+    pub fn useHandler(slog.Handler handler) {
+        slog.SetDefault(slog.New(handler))
     }
 }
 
