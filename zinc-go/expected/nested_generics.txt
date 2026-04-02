@@ -4,4 +4,5 @@ grid[0]: [a b c]
 grid[1]: [d e f]
 deep[outer][x]: [1 2 3]
 keys type works: 2
+values count: 2
 total scores: 437

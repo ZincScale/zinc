@@ -34,6 +34,11 @@ fn main() {
     var keys = names.keys()
     print("keys type works: {len(keys)}")
 
+    // Typed map.values()
+    var ages = Map<String, int>{"alice": 30, "bob": 25}
+    var vals2 = ages.values()
+    print("values count: {len(vals2)}")
+
     // Nested generics in function parameter types
     var total = sumNested(scores)
     print("total scores: {total}")
