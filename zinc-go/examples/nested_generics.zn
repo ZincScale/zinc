@@ -1,0 +1,53 @@
+// Test nested generic types in typed literals and type annotations
+
+fn main() {
+    // Two levels: Map<String, List<int>>
+    var scores = Map<String, List<int>>{}
+    List<int> aliceScores = [95, 87, 92]
+    List<int> bobScores = [78, 85]
+    scores["alice"] = aliceScores
+    scores["bob"] = bobScores
+    var aliceS = scores["alice"]
+    var bobS = scores["bob"]
+    print("alice scores: {aliceS}")
+    print("bob scores: {bobS}")
+
+    // Two levels: List<List<String>>
+    List<String> row1 = ["a", "b", "c"]
+    List<String> row2 = ["d", "e", "f"]
+    var grid = List<List<String>>[row1, row2]
+    print("grid[0]: {grid[0]}")
+    print("grid[1]: {grid[1]}")
+
+    // Three levels: Map<String, Map<String, List<int>>>
+    var deep = Map<String, Map<String, List<int>>>{}
+    var inner = Map<String, List<int>>{}
+    List<int> vals = [1, 2, 3]
+    inner["x"] = vals
+    deep["outer"] = inner
+    var outerMap = deep["outer"]
+    var xVals = outerMap["x"]
+    print("deep[outer][x]: {xVals}")
+
+    // Typed map.keys() — should return List<String> not List<interface{}>
+    var names = Map<String, int>{"alice": 95, "bob": 78}
+    var keys = names.keys()
+    print("keys type works: {len(keys)}")
+
+    // Nested generics in function parameter types
+    var total = sumNested(scores)
+    print("total scores: {total}")
+}
+
+fn sumNested(Map<String, List<int>> m): int {
+    var total = 0
+    // Use typed keys() — returns []string not []interface{}
+    var keys = m.keys()
+    for k in keys {
+        var vals = m[k]
+        for v in vals {
+            total = total + v
+        }
+    }
+    return total
+}

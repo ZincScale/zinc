@@ -223,34 +223,36 @@ func (p *Parser) looksLikeTypedLiteral() bool {
 }
 
 // looksLikeTypedLiteralAt checks from a given offset whether we see <Type, ...>[] or <Type, ...>{}.
+// Supports nested generics: Map<String, List<RoutingRule>>{}
 func (p *Parser) looksLikeTypedLiteralAt(base int) bool {
 	off := base + 1 // skip '<'
-	for {
-		if p.peekAt(off).Type != lexer.TOKEN_IDENT {
+	depth := 1
+	for depth > 0 {
+		tok := p.peekAt(off).Type
+		if tok == lexer.TOKEN_EOF {
 			return false
 		}
-		off++ // skip ident
-		// Support dotted type args: core.FlowFile
-		for p.peekAt(off).Type == lexer.TOKEN_DOT && p.peekAt(off+1).Type == lexer.TOKEN_IDENT {
-			off += 2
-		}
-		if p.peekAt(off).Type == lexer.TOKEN_GT {
-			next := p.peekAt(off + 1).Type
-			// >[] or >[...] — typed list literal (empty or non-empty)
-			if next == lexer.TOKEN_LBRACKET {
-				return true
+		if tok == lexer.TOKEN_LT {
+			depth++
+		} else if tok == lexer.TOKEN_GT {
+			depth--
+			if depth == 0 {
+				// Closing > of the outermost generic — check what follows
+				next := p.peekAt(off + 1).Type
+				// >[] or >[...] — typed list literal (empty or non-empty)
+				if next == lexer.TOKEN_LBRACKET {
+					return true
+				}
+				// >{} or >{...} — typed map literal (empty or non-empty)
+				if next == lexer.TOKEN_LBRACE {
+					return true
+				}
+				return false
 			}
-			// >{} or >{...} — typed map literal (empty or non-empty)
-			if next == lexer.TOKEN_LBRACE {
-				return true
-			}
-			return false
 		}
-		if p.peekAt(off).Type != lexer.TOKEN_COMMA {
-			return false
-		}
-		off++ // skip comma
+		off++
 	}
+	return false
 }
 
 // parseCallTypeArgs parses <Type, Type, ...> at a call site.

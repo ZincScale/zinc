@@ -190,6 +190,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 		// Typed generic: List<int>, Map<K,V>
 		if genType, ok := v.Type.(*parser.GenericType); ok {
+			g.varTypeExprs[v.Name] = genType
 			if listLit, ok := v.Value.(*parser.ListLit); ok {
 				goType := g.formatType(genType)
 				if strings.HasPrefix(goType, "[]") {

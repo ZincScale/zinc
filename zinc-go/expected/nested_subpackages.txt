@@ -1,0 +1,5 @@
+Alice (age 30)
+rules: 3
+match /: home
+match /about: about
+match /missing: no-match

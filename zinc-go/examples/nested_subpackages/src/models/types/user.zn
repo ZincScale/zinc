@@ -1,0 +1,7 @@
+// Deep nested subpackage: models/types
+
+data User(String name, int age)
+
+fn formatUser(User u): String {
+    return "{u.name} (age {u.age})"
+}

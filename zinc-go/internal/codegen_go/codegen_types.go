@@ -64,6 +64,13 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	params := g.formatParams(fn.Params)
 
+	// Register parameter type expressions for type-aware codegen
+	for _, p := range fn.Params {
+		if genType, ok := p.Type.(*parser.GenericType); ok {
+			g.varTypeExprs[p.Name] = genType
+		}
+	}
+
 	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
 	g.indent++
 	g.emitBlock(fn.Body)
@@ -193,6 +200,22 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		g.indent--
 		g.writeln("}")
 		g.writeln("")
+	}
+
+	// Register field type expressions for type-aware codegen (e.g. map.keys())
+	for _, f := range cls.Fields {
+		fieldExpr := "s." + exportName(f.Name)
+		if f.Type != nil {
+			if genType, ok := f.Type.(*parser.GenericType); ok {
+				g.varTypeExprs[fieldExpr] = genType
+			}
+		} else if f.Default != nil {
+			if listLit, ok := f.Default.(*parser.ListLit); ok && listLit.ExplicitType != nil {
+				g.varTypeExprs[fieldExpr] = listLit.ExplicitType
+			} else if mapLit, ok := f.Default.(*parser.MapLit); ok && mapLit.ExplicitType != nil {
+				g.varTypeExprs[fieldExpr] = mapLit.ExplicitType
+			}
+		}
 	}
 
 	// Methods

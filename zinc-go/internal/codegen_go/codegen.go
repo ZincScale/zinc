@@ -48,6 +48,7 @@ type Generator struct {
 
 	// Variable type tracking
 	varTypes            map[string]string     // variable name → element type
+	varTypeExprs        map[string]parser.TypeExpr // variable name → original AST type (for generics)
 	ptrVars             map[string]bool       // variables that are pointers (*T from T? returns)
 	funcReturnsOptional map[string]bool       // functions that return T? (optional)
 	funcReturnTypes     map[string]string     // function name → Go return type string
@@ -67,6 +68,28 @@ type Generator struct {
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
 }
 
+// isZincSubpackage checks if an identifier is a zinc subpackage alias.
+// Handles both direct names ("core") and aliases from nested packages
+// ("router" as alias for "fabric/router" via importMap).
+func (g *Generator) isZincSubpackage(name string) bool {
+	// Direct match (e.g. "core" → subpackages["core"])
+	if g.zincSubpackages[name] {
+		return true
+	}
+	// Alias match: if "router" is in importMap and maps to a subpackage path
+	if goPath, ok := g.importMap[name]; ok {
+		// Strip module prefix to get the subpackage path
+		subPath := goPath
+		if g.moduleName != "" && strings.HasPrefix(goPath, g.moduleName+"/") {
+			subPath = goPath[len(g.moduleName)+1:]
+		}
+		if g.zincSubpackages[subPath] {
+			return true
+		}
+	}
+	return false
+}
+
 // New creates a new Go code generator.
 func New() *Generator {
 	return &Generator{
@@ -76,6 +99,7 @@ func New() *Generator {
 		errorFuncs:          make(map[string]bool),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
+		varTypeExprs:        make(map[string]parser.TypeExpr),
 		ptrVars:             make(map[string]bool),
 		funcReturnsOptional: make(map[string]bool),
 		funcReturnTypes:     make(map[string]string),
@@ -367,6 +391,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.errorFuncs = make(map[string]bool)
 	g.funcSigs = make(map[string][]*parser.ParamDecl)
 	g.varTypes = make(map[string]string)
+	g.varTypeExprs = make(map[string]parser.TypeExpr)
 	g.varStructTypes = make(map[string]string)
 	g.dataClasses = make(map[string]bool)
 	g.typeImports = make(map[string]string)
@@ -379,14 +404,17 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		parts := strings.Split(imp.Path, ".")
 		lastSeg := parts[len(parts)-1]
 
-		// Check if this is a zinc subpackage import (e.g. "import core")
-		if len(parts) == 1 && g.zincSubpackages[imp.Path] {
-			// Zinc subpackage: import core → import "module-name/core"
-			goPath := imp.Path
+		// Check if this is a zinc subpackage import.
+		// Convert dots to slashes and check against subpackages map.
+		// Handles both "import core" and "import fabric.router" → "fabric/router"
+		subpkgPath := strings.ReplaceAll(imp.Path, ".", "/")
+		if g.zincSubpackages[subpkgPath] {
+			goPath := subpkgPath
 			if g.moduleName != "" {
-				goPath = g.moduleName + "/" + imp.Path
+				goPath = g.moduleName + "/" + subpkgPath
 			}
-			g.importMap[imp.Path] = goPath
+			// Use last segment as the Go package alias (e.g. "router" for "fabric/router")
+			g.importMap[lastSeg] = goPath
 			continue
 		}
 
@@ -565,9 +593,10 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			return qualified
 		}
 		// Zinc subpackage qualified type: core.FlowFile → add import for core
+		// Also handles nested: router.RulesEngine → add import for fabric/router
 		if strings.Contains(typ.Name, ".") {
 			pkgPrefix := strings.SplitN(typ.Name, ".", 2)[0]
-			if g.zincSubpackages[pkgPrefix] {
+			if g.isZincSubpackage(pkgPrefix) {
 				if goPath, ok := g.importMap[pkgPrefix]; ok {
 					g.needImport(goPath)
 				}

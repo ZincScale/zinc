@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -365,19 +366,21 @@ func collectZnFilesFlat(dir string) ([]string, error) {
 	return files, nil
 }
 
-// collectSubdirs returns the names of immediate subdirectories in dir.
+// collectSubdirs returns relative paths of all subdirectories (recursive) in dir.
+// e.g. for src/ containing core/, fabric/router/ → ["core", "fabric", "fabric/router"]
 func collectSubdirs(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() {
-			dirs = append(dirs, e.Name())
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
-	return dirs, nil
+		if d.IsDir() && path != dir {
+			rel, _ := filepath.Rel(dir, path)
+			dirs = append(dirs, rel)
+		}
+		return nil
+	})
+	return dirs, err
 }
 
 // compileDirWithSubpackages compiles a project with subpackage support.
@@ -394,9 +397,20 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) er
 		subpackages[d] = true
 	}
 
-	// 2. Compile each subpackage first, collect their exports
-	allExports := make(map[string]map[string]string) // pkg → name → kind
+	// 2. Filter to only leaf packages (those with .zn files) and sort for dependency order
+	// Parent dirs without .zn files are just namespace containers.
+	var leafPkgs []string
 	for _, pkg := range subdirs {
+		pkgDir := filepath.Join(srcDir, pkg)
+		znFiles, _ := collectZnFilesFlat(pkgDir)
+		if len(znFiles) > 0 {
+			leafPkgs = append(leafPkgs, pkg)
+		}
+	}
+
+	// 3. Compile each subpackage first, collect their exports
+	allExports := make(map[string]map[string]string) // pkg → name → kind
+	for _, pkg := range leafPkgs {
 		pkgDir := filepath.Join(srcDir, pkg)
 		pkgOutDir := filepath.Join(outDir, pkg)
 
@@ -428,19 +442,24 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) er
 			return err
 		}
 
+		// Go package name is the last segment of the path (e.g. "fabric/router" → "router")
+		goPkgName := filepath.Base(pkg)
+
 		gen := codegen.New()
 		gen.SetSourceFile(merged.SourceFile)
-		gen.SetPackageName(pkg)
+		gen.SetPackageName(goPkgName)
 		gen.SetModuleName(moduleName)
 		gen.SetZincSubpackages(subpackages)
 		// Subpackages can import other subpackages
 		for otherPkg, otherExports := range allExports {
 			if otherPkg != pkg {
-				gen.SetSubpackageExports(otherPkg, otherExports)
+				// Register exports under the Go alias (last segment)
+				otherAlias := filepath.Base(otherPkg)
+				gen.SetSubpackageExports(otherAlias, otherExports)
 			}
 		}
 
-		className := strings.ToUpper(pkg[:1]) + pkg[1:]
+		className := strings.ToUpper(goPkgName[:1]) + goPkgName[1:]
 		files := gen.GenerateFiles(merged, className)
 
 		for _, f := range files {
@@ -478,7 +497,8 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool) er
 	gen.SetModuleName(moduleName)
 	gen.SetZincSubpackages(subpackages)
 	for pkg, exports := range allExports {
-		gen.SetSubpackageExports(pkg, exports)
+		alias := filepath.Base(pkg)
+		gen.SetSubpackageExports(alias, exports)
 	}
 
 	dirName := filepath.Base(srcDir)

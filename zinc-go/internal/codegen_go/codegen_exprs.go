@@ -271,8 +271,9 @@ var streamMethods = map[string]bool{
 
 func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// Zinc subpackage qualified calls: core.FlowFile(...) → core.NewFlowFile(...)
+	// Also handles nested packages: router.RulesEngine(...) where "router" is an alias for "fabric/router"
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok && g.zincSubpackages[ident.Name] {
+		if ident, ok := sel.Object.(*parser.Ident); ok && g.isZincSubpackage(ident.Name) {
 			pkg := ident.Name
 			name := sel.Field
 			if goPath, ok := g.importMap[pkg]; ok {
@@ -419,9 +420,21 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 			return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 		case "keys":
-			return fmt.Sprintf("func() []interface{} { _keys := make([]interface{}, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", obj, obj)
+			keyType := "interface{}"
+			if te, ok := g.varTypeExprs[obj]; ok {
+				if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" && len(gt.TypeArgs) >= 1 {
+					keyType = g.formatType(gt.TypeArgs[0])
+				}
+			}
+			return fmt.Sprintf("func() []%s { _keys := make([]%s, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", keyType, keyType, obj, obj)
 		case "values":
-			return fmt.Sprintf("func() []interface{} { _vals := make([]interface{}, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", obj, obj)
+			valType := "interface{}"
+			if te, ok := g.varTypeExprs[obj]; ok {
+				if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
+					valType = g.formatType(gt.TypeArgs[1])
+				}
+			}
+			return fmt.Sprintf("func() []%s { _vals := make([]%s, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", valType, valType, obj, obj)
 		case "containsKey":
 			if len(c.Args) == 1 {
 				return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, g.formatExpr(c.Args[0]))
