@@ -503,6 +503,24 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
+	// Go struct literal: pkg.Type(Field=value) → pkg.Type{Field: value}
+	// Detected when callee is pkg.Name, Name starts uppercase, has named args,
+	// and Name is a struct (not a function) in the Go package.
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && len(c.NamedArgs) > 0 {
+		if ident, ok := sel.Object.(*parser.Ident); ok {
+			if goPath, ok := g.importMap[ident.Name]; ok {
+				if g.goResolver.IsStruct(goPath, sel.Field) {
+					g.needImport(goPath)
+					var fields []string
+					for _, na := range c.NamedArgs {
+						fields = append(fields, fmt.Sprintf("%s: %s", exportName(na.Name), g.formatExpr(na.Value)))
+					}
+					return fmt.Sprintf("%s.%s{%s}", ident.Name, sel.Field, strings.Join(fields, ", "))
+				}
+			}
+		}
+	}
+
 	callee := g.formatExpr(c.Callee)
 
 	// Set.of(...)

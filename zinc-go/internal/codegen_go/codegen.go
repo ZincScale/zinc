@@ -659,9 +659,30 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		// Also handles nested: router.RulesEngine → add import for fabric/router
 		if strings.Contains(typ.Name, ".") {
 			pkgPrefix := strings.SplitN(typ.Name, ".", 2)[0]
+			typeName := strings.SplitN(typ.Name, ".", 2)[1]
 			if g.isZincSubpackage(pkgPrefix) {
 				if goPath, ok := g.importMap[pkgPrefix]; ok {
 					g.needImport(goPath)
+				}
+				// Check if it's a class (not data class) from a subpackage → needs pointer
+				if exports, ok := g.subpkgExports[pkgPrefix]; ok {
+					if exports[typeName] == "class" {
+						return "*" + typ.Name
+					}
+				}
+			}
+			// Check import aliases — if it's a class from an external zinc package
+			if g.isImportAlias(pkgPrefix) {
+				if goPath, ok := g.importMap[pkgPrefix]; ok {
+					g.needImport(goPath)
+					// Use naming convention: PascalCase = likely class → pointer
+					// Check Go type: if it's a struct with a New constructor, it's a class
+					if g.goResolver.IsStruct(goPath, typeName) {
+						// Check if there's a New constructor → class pattern (zinc class convention)
+						if g.goResolver.HasFunc(goPath, "New"+typeName) {
+							return "*" + typ.Name
+						}
+					}
 				}
 			}
 		}

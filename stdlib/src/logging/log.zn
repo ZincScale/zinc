@@ -1,10 +1,10 @@
 // logging — structured logging backed by Go's log/slog.
 //
-// Configures the global slog default logger. After calling setup(),
-// use slog.Info(), slog.Debug(), etc. directly.
+// Configures the global slog default logger with config-driven setup.
+// After calling setup(), use slog.Info(), slog.Debug(), etc. directly.
 //
 // Usage:
-//   logging.setup(cfg)                           // configure from properties
+//   logging.setup(cfg)
 //   slog.Info("server started", "port", 8080)
 //
 // Config properties:
@@ -12,12 +12,23 @@
 //   logging.handler=text        (text or json)
 //   logging.output=stdout       (stdout, stderr, or file path)
 
+import config
 import log.slog
 import os
 
-// setup configures the default slog logger.
-// Pass the handler type ("text" or "json") and output ("stdout", "stderr", or file path).
-fn setup(String handlerType, String output) {
+// setup configures the default slog logger from config properties.
+fn setup(config.Config cfg) {
+    var levelStr = cfg.getString("logging.level", "INFO")
+    var handlerType = cfg.getString("logging.handler", "text")
+    var output = cfg.getString("logging.output", "stdout")
+
+    configure(levelStr, handlerType, output)
+}
+
+// configure sets up the default slog logger with explicit values.
+fn configure(String levelStr, String handlerType, String output) {
+    var level = parseLevel(levelStr)
+    var opts = slog.HandlerOptions(Level=level)
 
     // Determine output writer
     var writer = os.Stdout
@@ -32,22 +43,22 @@ fn setup(String handlerType, String output) {
 
     // Create handler and set as default
     if handlerType == "json" {
-        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, nil)))
+        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, opts)))
     } else {
-        slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
+        slog.SetDefault(slog.New(slog.NewTextHandler(writer, opts)))
     }
 }
 
-// setupSimple configures logging with explicit handler type and output.
-fn setupSimple(String handlerType, String output) {
-    var writer = os.Stdout
-    if output == "stderr" {
-        writer = os.Stderr
+// parseLevel converts a string to slog.Level.
+fn parseLevel(String s): slog.Level {
+    if s == "DEBUG" || s == "debug" {
+        return slog.LevelDebug
     }
-
-    if handlerType == "json" {
-        slog.SetDefault(slog.New(slog.NewJSONHandler(writer, nil)))
-    } else {
-        slog.SetDefault(slog.New(slog.NewTextHandler(writer, nil)))
+    if s == "WARN" || s == "warn" {
+        return slog.LevelWarn
     }
+    if s == "ERROR" || s == "error" {
+        return slog.LevelError
+    }
+    return slog.LevelInfo
 }

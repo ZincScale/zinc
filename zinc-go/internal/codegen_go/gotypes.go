@@ -101,6 +101,11 @@ func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName strin
 	return results.Len() == 1 && isErrorType(results.At(0).Type())
 }
 
+// HasFunc reports whether pkgPath has a function named funcName.
+func (r *GoTypeResolver) HasFunc(pkgPath, funcName string) bool {
+	return r.lookupFunc(pkgPath, funcName) != nil
+}
+
 // ParamIsPointer reports whether the i-th parameter of pkgPath.funcName is a pointer type.
 func (r *GoTypeResolver) ParamIsPointer(pkgPath, funcName string, paramIndex int) bool {
 	sig := r.lookupFunc(pkgPath, funcName)

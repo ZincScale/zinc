@@ -1,4 +1,4 @@
-// stdlib demo — test config and slog-based logging
+// stdlib demo — test config + slog logging with HandlerOptions
 
 import config
 import logging
@@ -14,17 +14,19 @@ fn main() {
     fmt.Println("server.port = {port}")
     fmt.Println("server.host = {host}")
 
-    // Test config: env override
+    // Test env override
     os.Setenv("SERVER_PORT", "9999")
     var portEnv = cfg.getString("server.port", "8080")
     fmt.Println("server.port (env) = {portEnv}")
 
-    // Setup logging
-    logging.setupSimple("text", "stdout")
+    // Setup logging from config (with level via HandlerOptions)
+    cfg.set("logging.level", "DEBUG")
+    cfg.set("logging.handler", "text")
+    cfg.set("logging.output", "stdout")
+    logging.setup(cfg)
 
-    // Use slog directly after setup
+    // Test structured logging at all levels
     slog.Info("server started", "port", port, "host", host)
     slog.Debug("debug info", "workers", 8)
     slog.Warn("low disk", "threshold", "10%")
-    slog.Error("something broke", "code", 500)
 }
