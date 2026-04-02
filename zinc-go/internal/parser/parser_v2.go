@@ -78,6 +78,7 @@ func (p *Parser) ParseV2() *Program {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
+		// TOKEN_VAR falls through to default (script-mode statement handling)
 		case lexer.TOKEN_TYPE:
 			prog.Decls = append(prog.Decls, p.v2ParseTypeAlias())
 		case lexer.TOKEN_ABSTRACT:
@@ -2140,7 +2141,8 @@ func (p *Parser) v2ParseParenOrLambda() Expr {
 }
 
 // v2LooksLikeLambdaParams checks if ( starts lambda params.
-// Handles both untyped: (a, b) -> and typed: (int a, String b) ->
+// Handles: untyped (a, b) ->, typed (int a, String b) ->,
+// and qualified typed (io.Writer w, slog.HandlerOptions opts) ->
 func (p *Parser) v2LooksLikeLambdaParams() bool {
 	off := 1
 	for {
@@ -2149,6 +2151,23 @@ func (p *Parser) v2LooksLikeLambdaParams() bool {
 			return false
 		}
 		off++
+		// Skip dotted type name: io.Writer, slog.HandlerOptions
+		for p.peekAt(off).Type == lexer.TOKEN_DOT && p.peekAt(off+1).Type == lexer.TOKEN_IDENT {
+			off += 2
+		}
+		// Skip generic type args: List<String>, Map<K,V>
+		if p.peekAt(off).Type == lexer.TOKEN_LT {
+			depth := 1
+			off++
+			for depth > 0 && p.peekAt(off).Type != lexer.TOKEN_EOF {
+				if p.peekAt(off).Type == lexer.TOKEN_LT {
+					depth++
+				} else if p.peekAt(off).Type == lexer.TOKEN_GT {
+					depth--
+				}
+				off++
+			}
+		}
 		next := p.peekAt(off)
 		// Typed param: Type name — the next token is another ident (the name)
 		if next.Type == lexer.TOKEN_IDENT {
