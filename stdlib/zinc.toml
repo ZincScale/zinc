@@ -5,4 +5,7 @@ main = "main.zn"
 
 [go]
 version = "1.26"
-deps = []
+deps = ["github.com/spf13/viper v1.20.1"]
+
+[imports]
+viper = "github.com/spf13/viper"

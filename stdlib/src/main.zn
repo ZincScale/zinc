@@ -1,4 +1,4 @@
-// stdlib demo — full test of config + logging
+// stdlib demo — Viper-based config + slog logging
 
 import config
 import logging
@@ -7,36 +7,31 @@ import os
 import fmt
 
 fn main() {
-    // Test config
-    var cfg = config.load("test.properties")
-    var port = cfg.getString("server.port", "8080")
-    var host = cfg.getString("server.host", "localhost")
-    fmt.Println("server.port = {port}")
-    fmt.Println("server.host = {host}")
+    // Setup config with defaults
+    var cfg = config.Config()
+    cfg.setDefault("server.port", 8080)
+    cfg.setDefault("server.host", "localhost")
+    cfg.setDefault("logging.level", "INFO")
+    cfg.setDefault("logging.handler", "text")
+    cfg.setDefault("logging.output", "stdout")
 
-    // Test env override
+    // Load config file (overrides defaults)
+    cfg.load("config", "yaml", ".")
+
+    // Print config values
+    fmt.Println("server.port = {cfg.getInt(\"server.port\")}")
+    fmt.Println("server.host = {cfg.getString(\"server.host\")}")
+    fmt.Println("logging.level = {cfg.getString(\"logging.level\")}")
+
+    // Env override test
     os.Setenv("SERVER_PORT", "9999")
-    var envPort = cfg.getString("server.port", "8080")
-    fmt.Println("server.port (env) = {envPort}")
+    fmt.Println("server.port (env) = {cfg.getInt(\"server.port\")}")
 
-    // Setup logging via LogManager
-    cfg.set("logging.level", "DEBUG")
-    cfg.set("logging.handler", "text")
-    cfg.set("logging.output", "stdout")
+    // Setup logging from config
     var lm = logging.LogManager()
     lm.setup(cfg)
 
-    slog.Info("server started", "port", 3000)
+    slog.Info("server started", "port", cfg.getInt("server.port"))
     slog.Debug("debug enabled")
-    slog.Warn("low disk", "threshold", "10%")
-
-    // Switch to file output with JSON handler at runtime
-    cfg.set("logging.handler", "json")
-    cfg.set("logging.output", "/tmp/zinc-stdlib-test.log")
-    lm.setup(cfg)
-
-    slog.Info("logged to file", "format", "json")
-    slog.Debug("file debug", "n", 42)
-
-    fmt.Println("file logging done")
+    slog.Warn("warning test")
 }

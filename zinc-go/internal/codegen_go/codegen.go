@@ -161,6 +161,11 @@ func (g *Generator) SetZincSubpackages(pkgs map[string]bool) {
 	g.zincSubpackages = pkgs
 }
 
+// SetGoModDir sets the directory containing go.mod for module dependency resolution.
+func (g *Generator) SetGoModDir(dir string) {
+	g.goResolver.SetDir(dir)
+}
+
 // SetImportAliases sets the import alias → module path mappings from zinc.toml [imports].
 func (g *Generator) SetImportAliases(aliases map[string]string) {
 	g.importAliases = aliases
@@ -440,18 +445,31 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 			localName = imp.Alias
 		}
 
-		// Check import aliases from zinc.toml: "import stdlib.config" where stdlib → "github.com/..."
-		if len(parts) >= 2 && g.importAliases != nil {
-			if modulePath, ok := g.importAliases[parts[0]]; ok {
-				subPath := strings.Join(parts[1:], "/")
-				goPath := modulePath + "/" + subPath
-				g.importMap[localName] = goPath
-				// Register Go import alias if localName differs from Go package name
-				goPkgName := parts[len(parts)-1]
+		// Check import aliases from zinc.toml [imports] section.
+		// Handles both: "import viper" (direct alias) and "import stdlib.config" (prefix alias)
+		if g.importAliases != nil {
+			// Direct alias: import viper → viper = "github.com/spf13/viper"
+			if modulePath, ok := g.importAliases[imp.Path]; ok {
+				g.importMap[localName] = modulePath
+				// Go package name is last segment of the module path
+				goPkgName := modulePath[strings.LastIndex(modulePath, "/")+1:]
 				if localName != goPkgName {
-					g.importGoAliases[goPath] = localName
+					g.importGoAliases[modulePath] = localName
 				}
 				continue
+			}
+			// Prefix alias: import stdlib.config → stdlib = "github.com/ZincScale/zinc-stdlib"
+			if len(parts) >= 2 {
+				if modulePath, ok := g.importAliases[parts[0]]; ok {
+					subPath := strings.Join(parts[1:], "/")
+					goPath := modulePath + "/" + subPath
+					g.importMap[localName] = goPath
+					goPkgName := parts[len(parts)-1]
+					if localName != goPkgName {
+						g.importGoAliases[goPath] = localName
+					}
+					continue
+				}
 			}
 		}
 

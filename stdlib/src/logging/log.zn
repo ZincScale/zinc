@@ -27,9 +27,12 @@ class LogManager {
 
     // setup configures slog from config properties.
     pub fn setup(config.Config cfg) {
-        handlerType = cfg.getString("logging.handler", "text")
-        level = cfg.getString("logging.level", "INFO")
-        output = cfg.getString("logging.output", "stdout")
+        var h = cfg.getString("logging.handler")
+        var l = cfg.getString("logging.level")
+        var o = cfg.getString("logging.output")
+        if h != "" { handlerType = h }
+        if l != "" { level = l }
+        if o != "" { output = o }
         apply()
     }
 

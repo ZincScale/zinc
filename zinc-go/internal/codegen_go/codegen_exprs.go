@@ -331,11 +331,23 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				kind = exports[name]
 			}
 
-			// For import aliases (external deps), use naming convention:
-			// PascalCase = class constructor (needs New prefix)
-			// camelCase = function (just export the name)
+			// For import aliases (external deps), check Go type info first,
+			// then fall back to naming convention.
 			if kind == "" && g.isImportAlias(ident.Name) {
-				if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+				resolved := false
+				if goPath, ok := g.importMap[pkg]; ok {
+					if g.goResolver.IsStruct(goPath, name) {
+						kind = "class"
+						resolved = true
+					} else if g.goResolver.HasFunc(goPath, "New"+name) {
+						kind = "class"
+						resolved = true
+					}
+				}
+				// Fallback: if resolver couldn't reach the package,
+				// use naming convention for zinc-compiled packages
+				// PascalCase + no positional args = likely constructor
+				if !resolved && len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' && len(c.Args) == 0 {
 					kind = "class"
 				}
 			}

@@ -386,6 +386,7 @@ func collectSubdirs(dir string) ([]string, error) {
 // compileDirWithSubpackages compiles a project with subpackage support.
 // Root .zn files → package main; each subdirectory → its own Go package.
 func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, importAliases ...map[string]string) error {
+	goModDir := outDir // go.mod lives in outDir for module dep resolution
 	// 1. Discover subpackages (subdirectories of src/)
 	subdirs, err := collectSubdirs(srcDir)
 	if err != nil {
@@ -449,6 +450,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		gen.SetSourceFile(merged.SourceFile)
 		gen.SetPackageName(goPkgName)
 		gen.SetModuleName(moduleName)
+		gen.SetGoModDir(goModDir)
 		gen.SetZincSubpackages(subpackages)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
@@ -498,6 +500,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 	gen := codegen.New()
 	gen.SetSourceFile(merged.SourceFile)
 	gen.SetModuleName(moduleName)
+	gen.SetGoModDir(goModDir)
 	gen.SetZincSubpackages(subpackages)
 	if len(importAliases) > 0 && importAliases[0] != nil {
 		gen.SetImportAliases(importAliases[0])
@@ -948,8 +951,25 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		return err
 	}
 
+	// Generate go.mod FIRST so the type resolver can find module dependencies
+	if err := generateGoMod(cfg, outDir); err != nil {
+		return fmt.Errorf("generate go.mod: %w", err)
+	}
+
+	// If there are deps, run go mod tidy before transpilation
+	// so the GoTypeResolver can introspect module types
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = outDir
+		if !quiet {
+			tidy.Stderr = os.Stderr
+		}
+		if err := tidy.Run(); err != nil && !quiet {
+			fmt.Fprintf(os.Stderr, "warning: go mod tidy: %v\n", err)
+		}
+	}
+
 	// Transpile src/ → outDir/
-	// Check if there are subdirectories (subpackages)
 	subdirs, _ := collectSubdirs(srcDir)
 	moduleName := cfg.Name
 	if moduleName == "" {
@@ -966,12 +986,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		}
 	}
 
-	// Generate go.mod from zinc.toml
-	if err := generateGoMod(cfg, outDir); err != nil {
-		return fmt.Errorf("generate go.mod: %w", err)
-	}
-
-	// If there are deps, run go mod tidy
+	// If there are deps, run go mod tidy again after transpilation
 	if len(cfg.Deps) > 0 {
 		tidy := exec.Command("go", "mod", "tidy")
 		tidy.Dir = outDir
@@ -1022,6 +1037,16 @@ func runProject(projectDir string, progArgs []string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Generate go.mod first for module dep resolution
+	if err := generateGoMod(cfg, tmpDir); err != nil {
+		return err
+	}
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = tmpDir
+		tidy.Run() // best effort — may fail before code is generated
+	}
+
 	// Transpile
 	subdirs, _ := collectSubdirs(srcDir)
 	moduleName := cfg.Name
@@ -1039,7 +1064,7 @@ func runProject(projectDir string, progArgs []string) error {
 		}
 	}
 
-	// Generate go.mod
+	// Re-generate go.mod (may have new imports from transpiled code)
 	if err := generateGoMod(cfg, tmpDir); err != nil {
 		return err
 	}
