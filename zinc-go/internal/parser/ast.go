@@ -448,28 +448,6 @@ type DeferStmt struct {
 func (d *DeferStmt) nodeTag() {}
 func (d *DeferStmt) stmtTag() {}
 
-// TryStmt: try { } catch ExType err { }
-type TryStmt struct {
-	Line      int
-	Body      *BlockStmt
-	CatchName string     // error variable name (e.g. "err")
-	CatchType string     // error type (e.g. "ConnectionError"), may be empty
-	CatchBody *BlockStmt
-}
-
-func (t *TryStmt) nodeTag() {}
-func (t *TryStmt) stmtTag() {}
-
-// RaiseStmt: raise expr [from expr]
-type RaiseStmt struct {
-	Line  int
-	Value Expr
-	From  Expr // optional: raise X from Y (exception chaining)
-}
-
-func (r *RaiseStmt) nodeTag() {}
-func (r *RaiseStmt) stmtTag() {}
-
 // ParallelForStmt: parallel [( max: N )] for item in items { body } [or { handler }]
 type ParallelForStmt struct {
 	Line      int
@@ -483,24 +461,6 @@ type ParallelForStmt struct {
 
 func (p *ParallelForStmt) nodeTag() {}
 func (p *ParallelForStmt) stmtTag() {}
-
-// YieldStmt: yield expr  OR  yield (bare)
-type YieldStmt struct {
-	Line  int
-	Value Expr // nil for bare yield
-}
-
-func (y *YieldStmt) nodeTag() {}
-func (y *YieldStmt) stmtTag() {}
-
-// DelStmt: del expr
-type DelStmt struct {
-	Line   int
-	Target Expr
-}
-
-func (d *DelStmt) nodeTag() {}
-func (d *DelStmt) stmtTag() {}
 
 // AssertStmt: assert expr [, "message"]
 type AssertStmt struct {
@@ -830,29 +790,6 @@ type TupleLit struct {
 
 func (*TupleLit) nodeTag() {}
 func (*TupleLit) exprTag() {}
-
-// DictComprehensionExpr: {keyExpr: valExpr for var in iterable [if cond]}
-type DictComprehensionExpr struct {
-	Key  Expr   // key expression
-	Val  Expr   // value expression
-	Var  string // loop variable name
-	Iter Expr   // iterable
-	Cond Expr   // optional filter (nil if no if-clause)
-}
-
-func (*DictComprehensionExpr) nodeTag() {}
-func (*DictComprehensionExpr) exprTag() {}
-
-// ComprehensionExpr: [expr for var in iterable [if cond]]
-type ComprehensionExpr struct {
-	Expr     Expr   // the output expression
-	Var      string // loop variable name
-	Iter     Expr   // iterable expression
-	Cond     Expr   // optional filter condition (nil if no if-clause)
-}
-
-func (*ComprehensionExpr) nodeTag() {}
-func (*ComprehensionExpr) exprTag() {}
 
 // LambdaExpr: (params): ReturnType => expr   OR   (params): ReturnType => { ... }
 type LambdaExpr struct {

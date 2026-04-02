@@ -277,8 +277,6 @@ func (c *V2Checker) stmtReturns(s parser.Stmt) bool {
 	switch s := s.(type) {
 	case *parser.ReturnStmt:
 		return true
-	case *parser.RaiseStmt:
-		return true
 	case *parser.IfStmt:
 		// Both branches must return
 		if s.ElseStmt == nil {
@@ -436,18 +434,6 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		if s.OrHandler != nil && s.OrHandler.Body != nil {
 			c.checkBlock(s.OrHandler.Body)
 		}
-	case *parser.TryStmt:
-		c.checkBlock(s.Body)
-		if s.CatchBody != nil {
-			inner := newV2Scope(c.scope)
-			if s.CatchName != "" {
-				inner.set(s.CatchName, typeAny)
-			}
-			prevScope := c.scope
-			c.scope = inner
-			c.checkBlock(s.CatchBody)
-			c.scope = prevScope
-		}
 	case *parser.MatchStmt:
 		c.inferType(s.Subject)
 		for _, mc := range s.Cases {
@@ -470,16 +456,8 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		if !c.inLoop {
 			c.errorf(0, "'continue' outside of loop")
 		}
-	case *parser.YieldStmt:
-		if s.Value != nil {
-			c.inferType(s.Value)
-		}
 	case *parser.AssertStmt:
 		c.inferType(s.Cond)
-	case *parser.DelStmt:
-		c.inferType(s.Target)
-	case *parser.RaiseStmt:
-		c.inferType(s.Value)
 	case *parser.WithStmt:
 		inner := newV2Scope(c.scope)
 		for _, r := range s.Resources {
@@ -660,10 +638,6 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		thenType := c.inferType(e.Then)
 		c.inferType(e.Else)
 		return thenType
-	case *parser.ComprehensionExpr:
-		return V2Type{Name: "List"}
-	case *parser.DictComprehensionExpr:
-		return V2Type{Name: "Map"}
 	case *parser.TupleLit:
 		for _, el := range e.Elements {
 			c.inferType(el)

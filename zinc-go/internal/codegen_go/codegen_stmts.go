@@ -72,11 +72,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("defer %s", g.formatExpr(stmt.Expr))
 	case *parser.AssertStmt:
 		g.emitAssertStmt(stmt)
-	case *parser.TryStmt:
-		g.writeln("// try/catch not directly supported in Go")
-		g.emitBlock(stmt.Body)
-	case *parser.RaiseStmt:
-		g.writeln("panic(%s)", g.formatExpr(stmt.Value))
 	}
 }
 

@@ -257,12 +257,6 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "assert" {
 			return p.v2ParseAssertStmt()
 		}
-		if tok.Literal == "del" {
-			return p.v2ParseDelStmt()
-		}
-		if tok.Literal == "yield" {
-			return p.v2ParseYieldStmt()
-		}
 		if tok.Literal == "lock" && p.peekAt(1).Type == lexer.TOKEN_IDENT {
 			return p.v2ParseLockStmt()
 		}
@@ -404,8 +398,8 @@ func (p *Parser) v2IsTypedVarDecl() bool {
 		nameToken.Type != lexer.TOKEN_MATCH && nameToken.Type != lexer.TOKEN_PRINT {
 		return false
 	}
-	// Exclude contextual keywords that start special statements (assert, del, yield, lock)
-	if tok.Literal == "assert" || tok.Literal == "del" || tok.Literal == "yield" || tok.Literal == "lock" {
+	// Exclude contextual keywords that start special statements (assert, lock)
+	if tok.Literal == "assert" || tok.Literal == "lock" {
 		return false
 	}
 	i++
@@ -648,67 +642,6 @@ func (p *Parser) v2ParseWithStmt() *WithStmt {
 	return &WithStmt{Line: line, Resources: resources, Body: body}
 }
 
-// v2ParseTryStmt: try { } catch ExType err { }  OR  try { } catch err { }
-func (p *Parser) v2ParseTryStmt() Stmt {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_TRY)
-	tryBody := p.v2ParseBlock()
-
-	if !p.check(lexer.TOKEN_CATCH) {
-		return &ExprStmt{Line: line, Expr: &Ident{Name: "__try__"}}
-	}
-
-	p.advance() // consume catch
-	// Type-first: catch ExType err { }  OR  untyped: catch err { }
-	errName := ""
-	errType := ""
-	if p.check(lexer.TOKEN_IDENT) {
-		first := p.advance().Literal
-		if p.check(lexer.TOKEN_IDENT) {
-			// Two idents: first is type, second is name
-			errType = first
-			errName = p.advance().Literal
-		} else {
-			// One ident: just the name (no type)
-			errName = first
-		}
-	}
-
-	catchBody := p.v2ParseBlock()
-
-	return &TryStmt{
-		Line:      line,
-		Body:      tryBody,
-		CatchName: errName,
-		CatchType: errType,
-		CatchBody: catchBody,
-	}
-}
-
-// v2ParseRaiseStmt: raise expr [from expr]
-func (p *Parser) v2ParseRaiseStmt() *RaiseStmt {
-	line := p.peek().Line
-	p.advance() // consume raise
-	val := p.v2ParseExpr()
-	var from Expr
-	if p.check(lexer.TOKEN_FROM) {
-		p.advance()
-		from = p.v2ParseExpr()
-	}
-	return &RaiseStmt{Line: line, Value: val, From: from}
-}
-
-// v2ParseYieldStmt: yield [expr]
-func (p *Parser) v2ParseYieldStmt() *YieldStmt {
-	line := p.peek().Line
-	p.advance() // consume "yield" ident
-	// Bare yield if next is end/else/rbrace/EOF
-	if p.check(lexer.TOKEN_RBRACE) || p.check(lexer.TOKEN_ELSE) ||
-		p.check(lexer.TOKEN_EOF) || p.check(lexer.TOKEN_RBRACE) {
-		return &YieldStmt{Line: line}
-	}
-	return &YieldStmt{Line: line, Value: p.v2ParseExpr()}
-}
 
 // v2ParseSpawnStmt: spawn { body } or var x = spawn { expr }
 // v2ParseLockStmt: lock mu { body }
@@ -846,13 +779,6 @@ func (p *Parser) v2ParseFnDeclAsStmt() *FnDecl {
 	return p.v2ParseFnDecl()
 }
 
-// v2ParseDelStmt: del expr
-func (p *Parser) v2ParseDelStmt() *DelStmt {
-	line := p.peek().Line
-	p.advance() // consume "del" ident
-	target := p.v2ParseExpr()
-	return &DelStmt{Line: line, Target: target}
-}
 
 // v2ParseAssertStmt: assert expr [, "message"]
 func (p *Parser) v2ParseAssertStmt() *AssertStmt {
@@ -2297,21 +2223,6 @@ func (p *Parser) v2ParseListLit() Expr {
 	// Parse first expression
 	first := p.v2ParseExpr()
 
-	// Check for comprehension: [expr for var in iterable [if cond]]
-	if p.check(lexer.TOKEN_FOR) {
-		p.advance() // consume for
-		varName := p.expect(lexer.TOKEN_IDENT).Literal
-		p.expect(lexer.TOKEN_IN)
-		iter := p.v2ParseExpr()
-		var cond Expr
-		if p.check(lexer.TOKEN_IF) {
-			p.advance()
-			cond = p.v2ParseExpr()
-		}
-		p.expect(lexer.TOKEN_RBRACKET)
-		return &ComprehensionExpr{Expr: first, Var: varName, Iter: iter, Cond: cond}
-	}
-
 	// Regular list literal
 	elems := []Expr{first}
 	for p.check(lexer.TOKEN_COMMA) {
@@ -2337,21 +2248,6 @@ func (p *Parser) v2ParseDictLit() Expr {
 	k := p.v2ParseExpr()
 	p.expect(lexer.TOKEN_COLON)
 	v := p.v2ParseExpr()
-
-	// Check for dict comprehension: {k: v for var in iterable}
-	if p.check(lexer.TOKEN_FOR) {
-		p.advance()
-		varName := p.expect(lexer.TOKEN_IDENT).Literal
-		p.expect(lexer.TOKEN_IN)
-		iter := p.v2ParseExpr()
-		var cond Expr
-		if p.check(lexer.TOKEN_IF) {
-			p.advance()
-			cond = p.v2ParseExpr()
-		}
-		p.expect(lexer.TOKEN_RBRACE)
-		return &DictComprehensionExpr{Key: k, Val: v, Var: varName, Iter: iter, Cond: cond}
-	}
 
 	// Regular dict literal
 	keys := []Expr{k}
