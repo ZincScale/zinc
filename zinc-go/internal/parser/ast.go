@@ -706,6 +706,16 @@ type NullLit struct{}
 func (n *NullLit) nodeTag() {}
 func (n *NullLit) exprTag() {}
 
+// SizedArrayExpr: Type[size] — creates a zero-filled array of given size.
+// e.g. byte[4], int[10], String[5]
+type SizedArrayExpr struct {
+	ElementType string // "byte", "int", "String", etc.
+	Size        Expr   // size expression (usually IntLit)
+}
+
+func (s *SizedArrayExpr) nodeTag() {}
+func (s *SizedArrayExpr) exprTag() {}
+
 // ListLit: [a, b, c]
 type ListLit struct {
 	Elements     []Expr

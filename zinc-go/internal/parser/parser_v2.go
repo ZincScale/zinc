@@ -2017,6 +2017,14 @@ func (p *Parser) v2ParsePrimary() Expr {
 		return p.v2ParseMatchExpr()
 	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:
 		// print and data are regular identifiers in expression context
+		// Check for sized array: Type[size] — e.g. byte[4], int[10], String[5]
+		if p.peekAt(1).Type == lexer.TOKEN_LBRACKET && p.looksLikeSizedArray() {
+			name := p.advance().Literal
+			p.advance() // consume [
+			size := p.v2ParseExpr()
+			p.expect(lexer.TOKEN_RBRACKET)
+			return &SizedArrayExpr{ElementType: name, Size: size}
+		}
 		// Check for lambda: name -> expr
 		if p.peekAt(1).Type == lexer.TOKEN_ARROW {
 			return p.v2ParseLambda()
@@ -2137,6 +2145,20 @@ func (p *Parser) v2ParseParenOrLambda() Expr {
 	// Single expression in parens: (expr)
 	p.expect(lexer.TOKEN_RPAREN)
 	return first
+}
+
+// looksLikeSizedArray checks if current position is Type[size] (sized array creation).
+// Distinguishes from arr[i] (indexing) by checking if the ident is a known type name.
+func (p *Parser) looksLikeSizedArray() bool {
+	name := p.peek().Literal
+	// Known primitive types
+	switch name {
+	case "byte", "int", "long", "float", "double", "boolean", "bool", "String", "string", "char":
+		// Must have [ expr ] where expr is not empty
+		// peekAt(1) is [, peekAt(2) must not be ] (that would be Type[] empty array)
+		return p.peekAt(2).Type != lexer.TOKEN_RBRACKET
+	}
+	return false
 }
 
 // v2LooksLikeLambdaParams checks if ( starts lambda params.

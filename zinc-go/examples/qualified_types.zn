@@ -59,9 +59,9 @@ fn main() {
     var result = readAll(reader)
     print("read: {result}")
 
-    // Test io.Reader with byte[] buffer — read partial data
+    // Test io.Reader with sized byte buffer
     var reader2 = str.NewReader("hello world")
-    byte[] buf = [0, 0, 0, 0]
+    var buf = byte[4]
     reader2.Read(buf)
     print("partial read: {string(buf)}")
 

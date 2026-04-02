@@ -49,6 +49,13 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return "false"
 	case *parser.NullLit:
 		return "nil"
+	case *parser.SizedArrayExpr:
+		// byte[4] → make([]byte, 4), int[10] → make([]int, 10)
+		goType := expr.ElementType
+		if mapped, ok := zincToGoType[goType]; ok {
+			goType = mapped
+		}
+		return fmt.Sprintf("make([]%s, %s)", goType, g.formatExpr(expr.Size))
 	case *parser.BinaryExpr:
 		return g.formatBinaryExpr(expr)
 	case *parser.UnaryExpr:
