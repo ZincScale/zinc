@@ -1,0 +1,31 @@
+// Type match — match on any type, not just sealed variants.
+// Demonstrates: primitive types, class types in type switch.
+
+class Animal {
+    String name
+    init(String name) { this.name = name }
+    pub fn speak(): String { return "${name} speaks" }
+}
+
+fn describe(Object val): String {
+    match val {
+        case String(s) { return "string: ${s}" }
+        case int(n) { return "int: ${n}" }
+        case float64(f) { return "float64: ${f}" }
+        case bool(b) {
+            if b { return "bool: true" }
+            return "bool: false"
+        }
+        case Animal(a) { return "animal: ${a.speak()}" }
+    }
+    return "unknown"
+}
+
+fn main() {
+    print(describe("hello"))
+    print(describe(42))
+    print(describe(3.14))
+    print(describe(true))
+    print(describe(false))
+    print(describe(Animal("Cat")))
+}

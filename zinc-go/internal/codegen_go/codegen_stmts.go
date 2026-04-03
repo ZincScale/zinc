@@ -584,7 +584,8 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 }
 
 // isTypeSwitchMatch checks if a match statement should use a Go type switch.
-// Returns true if any non-wildcard case pattern is a data class constructor call.
+// Returns true if any non-wildcard case pattern is a type name (data class,
+// class, interface, or primitive type) with a binding argument.
 func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 	for _, c := range m.Cases {
 		if c.Pattern == nil {
@@ -592,19 +593,31 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 		}
 		if call, ok := c.Pattern.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
+				// Data classes (sealed variants)
 				if g.dataClasses[ident.Name] {
 					return true
 				}
-				// Check unqualified imports (e.g. Raw from core package)
+				// Cross-package data classes
 				if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "data" {
 					return true
 				}
+				// Any known type: class, interface, primitive
+				if _, ok := g.structs[ident.Name]; ok {
+					return true
+				}
+				if entry, ok := g.unqualifiedNames[ident.Name]; ok && (entry.kind == "class" || entry.kind == "interface") {
+					return true
+				}
+				if _, ok := zincToGoType[ident.Name]; ok {
+					return true
+				}
 			}
-			// Qualified: core.Single(ff)
+			// Qualified: core.Single(ff) or core.MyClass(obj)
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 				if pkg, ok := sel.Object.(*parser.Ident); ok {
 					if exports, ok := g.subpkgExports[pkg.Name]; ok {
-						if exports[sel.Field] == "data" {
+						kind := exports[sel.Field]
+						if kind == "data" || kind == "class" || kind == "interface" {
 							return true
 						}
 					}
@@ -652,12 +665,27 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 
 		// Get the type name (local or qualified)
 		typeName := ""
+		isDataClass := false
 		var dataDecl *parser.DataClassDecl
 		if ident, ok := call.Callee.(*parser.Ident); ok {
 			typeName = ident.Name
-			// Resolve unqualified names to their Go-qualified form (e.g. Raw → core.Raw)
-			if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+			// Primitive types: map Zinc name → Go name
+			if goType, ok := zincToGoType[ident.Name]; ok {
+				typeName = goType
+			} else if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+				// Cross-package: resolve to Go-qualified form
 				typeName = entry.pkg + "." + exportName(ident.Name)
+				if entry.kind == "class" || entry.kind == "interface" {
+					typeName = "*" + typeName
+				}
+				isDataClass = entry.kind == "data"
+			} else if _, ok := g.structs[ident.Name]; ok {
+				// Local class
+				typeName = "*" + exportName(ident.Name)
+			}
+			if g.dataClasses[ident.Name] {
+				isDataClass = true
+				typeName = exportName(ident.Name)
 			}
 			// Look up the data class declaration to get field names
 			for _, d := range g.currentSealedVariants(ident.Name) {
@@ -669,43 +697,55 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		} else if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 			if pkg, ok := sel.Object.(*parser.Ident); ok {
 				typeName = pkg.Name + "." + sel.Field
+				if exports, ok := g.subpkgExports[pkg.Name]; ok {
+					kind := exports[sel.Field]
+					if kind == "class" || kind == "interface" {
+						typeName = "*" + typeName
+					}
+					isDataClass = kind == "data"
+				}
 			}
 		}
 
 		g.writeln("case %s:", typeName)
 		g.indent++
 
-		// Bind destructured variables: case Single(ff) → ff := _v.Ff
-		// Look up field params — local first, then cross-package.
-		var fieldParams []*parser.FieldDecl
-		if dataDecl != nil {
-			fieldParams = dataDecl.Params
-		} else if callerIdent, ok := call.Callee.(*parser.Ident); ok {
-			// Cross-package: look up field info via unqualifiedNames → subpkgDataFields
-			if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
-				if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
-					fieldParams = pkgFields[callerIdent.Name]
-				}
-			}
-		}
-
-		if fieldParams != nil && len(call.Args) > 0 {
-			for i, arg := range call.Args {
-				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
-					if i < len(fieldParams) {
-						fieldName := exportName(fieldParams[i].Name)
-						g.writeln("%s := _v.%s", ident.Name, fieldName)
+		if isDataClass {
+			// Data class: destructure fields — case Single(ff) → ff := _v.Ff
+			var fieldParams []*parser.FieldDecl
+			if dataDecl != nil {
+				fieldParams = dataDecl.Params
+			} else if callerIdent, ok := call.Callee.(*parser.Ident); ok {
+				if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
+					if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
+						fieldParams = pkgFields[callerIdent.Name]
 					}
 				}
 			}
-		} else if len(call.Args) > 0 {
-			// Last resort — capitalize the binding name as a field guess
-			for i, arg := range call.Args {
-				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
-					fieldName := exportName(ident.Name)
-					g.writeln("%s := _v.%s", ident.Name, fieldName)
+			if fieldParams != nil && len(call.Args) > 0 {
+				for i, arg := range call.Args {
+					if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
+						if i < len(fieldParams) {
+							fieldName := exportName(fieldParams[i].Name)
+							g.writeln("%s := _v.%s", ident.Name, fieldName)
+						}
+					}
 				}
-				_ = i
+			} else if len(call.Args) > 0 {
+				for i, arg := range call.Args {
+					if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
+						fieldName := exportName(ident.Name)
+						g.writeln("%s := _v.%s", ident.Name, fieldName)
+					}
+					_ = i
+				}
+			}
+		} else if len(call.Args) > 0 {
+			// Non-data type: bind the whole typed value — case String(s) → s := _v
+			if len(call.Args) == 1 {
+				if ident, ok := call.Args[0].(*parser.Ident); ok && ident.Name != "_" {
+					g.writeln("%s := _v", ident.Name)
+				}
 			}
 		}
 
