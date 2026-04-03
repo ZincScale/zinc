@@ -251,6 +251,17 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			if elemType != "interface{}" {
 				g.varTypes[v.Name] = elemType
 			}
+			// Track explicit generic type from typed literal: var x = List<int>[]
+			if listLit.ExplicitType != nil {
+				g.varTypeExprs[v.Name] = listLit.ExplicitType
+			}
+		}
+
+		// Track explicit generic type from typed map literal: var x = Map<String, String>{}
+		if mapLit, ok := v.Value.(*parser.MapLit); ok && v.Type == nil {
+			if mapLit.ExplicitType != nil {
+				g.varTypeExprs[v.Name] = mapLit.ExplicitType
+			}
 		}
 
 		// Track pointer vars from optional-returning functions
