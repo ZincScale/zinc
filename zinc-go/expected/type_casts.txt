@@ -1,0 +1,6 @@
+int(42) = 42
+float(42) = 42
+long(42) = 42
+long(x) = 255
+double(3) = 3
+double(y) = 100

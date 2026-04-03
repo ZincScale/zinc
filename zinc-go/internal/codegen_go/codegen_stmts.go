@@ -269,7 +269,24 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.renamedVars[varName] = safe
 			varName = safe
 		}
+		// Use explicit type only for interfaces/sealed types where Go
+		// can't infer the interface from a concrete constructor.
+		// For regular classes, let Go infer (avoids *Child vs *Parent issues).
+		useExplicitType := false
 		if v.Type != nil {
+			if st, ok := v.Type.(*parser.SimpleType); ok {
+				if g.interfaces[st.Name] {
+					useExplicitType = true
+				}
+				// Check unqualified names for cross-package interfaces
+				if entry, ok := g.unqualifiedNames[st.Name]; ok {
+					if entry.kind == "interface" {
+						useExplicitType = true
+					}
+				}
+			}
+		}
+		if useExplicitType {
 			typeName := g.formatType(v.Type)
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
 		} else {
