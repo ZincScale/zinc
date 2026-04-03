@@ -19,15 +19,48 @@ type unqualifiedEntry struct {
 	kind string // "data", "class", "func", "interface", "enum", "enum_variant", "const", "type", "sealed_variant"
 }
 
-// buildUnqualifiedNames populates the reverse lookup map from subpackage exports.
-// After this, bare names like Processor resolve to their source package.
-// Names that collide across packages are excluded (require qualified form).
-// Local declarations shadow imported names.
-func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
-	g.unqualifiedNames = make(map[string]unqualifiedEntry)
-	if g.subpkgExports == nil {
+// goBuiltinNames are Go predeclared identifiers that must never be shadowed
+// by unqualified imports.
+var goBuiltinNames = map[string]bool{
+	"error": true, "any": true, "comparable": true,
+	"bool": true, "byte": true, "rune": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"uintptr": true, "float32": true, "float64": true,
+	"complex64": true, "complex128": true, "string": true,
+	"len": true, "cap": true, "make": true, "new": true, "append": true,
+	"copy": true, "delete": true, "close": true, "panic": true, "recover": true,
+	"complex": true, "real": true, "imag": true, "print": true, "println": true,
+	"true": true, "false": true, "nil": true, "iota": true,
+	"min": true, "max": true, "clear": true,
+}
+
+// addUnqualified adds a name to the unqualified map, handling collisions.
+func addUnqualified(names map[string]unqualifiedEntry, collisions map[string]bool,
+	localNames map[string]bool, pkg, name, kind string) {
+	if localNames[name] {
+		return // local declaration shadows import
+	}
+	if goBuiltinNames[name] {
+		return // never shadow Go builtins
+	}
+	if _, exists := names[name]; exists {
+		collisions[name] = true
+		delete(names, name)
 		return
 	}
+	if collisions[name] {
+		return
+	}
+	names[name] = unqualifiedEntry{pkg: pkg, name: name, kind: kind}
+}
+
+// buildUnqualifiedNames populates the reverse lookup map from all imports.
+// Covers zinc subpackages, Go stdlib, and external dependencies.
+// Names that collide across packages are excluded (require qualified form).
+// Local declarations and Go builtins shadow imported names.
+func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
+	g.unqualifiedNames = make(map[string]unqualifiedEntry)
 
 	// Collect local declaration names to avoid shadowing
 	localNames := make(map[string]bool)
@@ -58,7 +91,7 @@ func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
 		}
 	}
 
-	// Only include exports from packages that are actually imported
+	// Determine which packages are actually imported
 	importedPkgs := make(map[string]bool)
 	for _, imp := range prog.Imports {
 		parts := strings.Split(imp.Path, ".")
@@ -69,27 +102,42 @@ func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
 		importedPkgs[alias] = true
 	}
 
-	// Track collisions: names exported by multiple packages
 	collisions := make(map[string]bool)
 
+	// 1. Zinc subpackage exports (already collected by project compilation)
 	for pkg, exports := range g.subpkgExports {
 		if !importedPkgs[pkg] {
-			continue // not imported by this file
+			continue
 		}
 		for name, kind := range exports {
-			if localNames[name] {
-				continue // local declaration shadows import
+			addUnqualified(g.unqualifiedNames, collisions, localNames, pkg, name, kind)
+		}
+	}
+
+	// 2. Go stdlib and external dependency exports (via GoTypeResolver)
+	for alias, goPath := range g.importMap {
+		if !importedPkgs[alias] {
+			continue
+		}
+		// Skip zinc subpackages (already handled above)
+		if g.zincSubpackages != nil && g.zincSubpackages[alias] {
+			continue
+		}
+		// Also skip zinc subpackages resolved via module path
+		isZincPkg := false
+		if g.moduleName != "" && strings.HasPrefix(goPath, g.moduleName+"/") {
+			subPath := goPath[len(g.moduleName)+1:]
+			if g.zincSubpackages[subPath] {
+				isZincPkg = true
 			}
-			if _, exists := g.unqualifiedNames[name]; exists {
-				// Same name from two packages — collision, remove it
-				collisions[name] = true
-				delete(g.unqualifiedNames, name)
-				continue
-			}
-			if collisions[name] {
-				continue // already marked as ambiguous
-			}
-			g.unqualifiedNames[name] = unqualifiedEntry{pkg: pkg, name: name, kind: kind}
+		}
+		if isZincPkg {
+			continue
+		}
+		// Introspect Go package exports
+		exports := g.goResolver.ListExports(goPath)
+		for name, kind := range exports {
+			addUnqualified(g.unqualifiedNames, collisions, localNames, alias, name, kind)
 		}
 	}
 }
@@ -105,7 +153,12 @@ func (g *Generator) resolveUnqualifiedType(name string) (string, bool) {
 	if goPath, ok := g.importMap[entry.pkg]; ok {
 		g.needImport(goPath)
 	}
-	qualified := entry.pkg + "." + exportName(entry.name)
+	// Go types keep their original name (no exportName transform)
+	goName := exportName(entry.name)
+	if entry.kind == "type" || entry.kind == "func" || entry.kind == "var" || entry.kind == "const" {
+		goName = entry.name // Go exports are already correctly cased
+	}
+	qualified := entry.pkg + "." + goName
 	if entry.kind == "class" {
 		return "*" + qualified, true
 	}
@@ -122,7 +175,12 @@ func (g *Generator) resolveUnqualifiedExpr(name string) (string, bool) {
 	if goPath, ok := g.importMap[entry.pkg]; ok {
 		g.needImport(goPath)
 	}
-	return entry.pkg + "." + exportName(entry.name), true
+	// Go exports keep their original casing
+	goName := exportName(entry.name)
+	if entry.kind == "type" || entry.kind == "func" || entry.kind == "var" || entry.kind == "const" {
+		goName = entry.name
+	}
+	return entry.pkg + "." + goName, true
 }
 
 // resolveParentType resolves a parent type name for struct embedding.

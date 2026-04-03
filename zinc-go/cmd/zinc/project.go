@@ -14,6 +14,23 @@ import (
 // Build
 // ---------------------------------------------------------------------------
 
+// cleanOutDir removes stale generated files from a previous build.
+// Preserves go.mod and go.sum so dependencies don't need re-downloading.
+func cleanOutDir(outDir string) {
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return // doesn't exist yet — nothing to clean
+	}
+	for _, e := range entries {
+		name := e.Name()
+		// Keep dependency files
+		if name == "go.mod" || name == "go.sum" {
+			continue
+		}
+		os.RemoveAll(filepath.Join(outDir, name))
+	}
+}
+
 // build transpiles .zn file(s) to .go, writes them to outDir, and then
 // invokes `go build` to produce a native binary.
 func build(input, outDir string, quiet bool) error {
@@ -22,6 +39,7 @@ func build(input, outDir string, quiet bool) error {
 		return err
 	}
 
+	cleanOutDir(outDir)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
@@ -430,6 +448,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		return fmt.Errorf("no src/ directory in project %s", root)
 	}
 
+	cleanOutDir(outDir)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}

@@ -498,6 +498,34 @@ func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex in
 	return false
 }
 
+// ListExports returns all exported names from a Go package with their kind.
+// Kind is "func", "type", "var", or "const".
+func (r *GoTypeResolver) ListExports(pkgPath string) map[string]string {
+	pkg := r.loadPkg(pkgPath)
+	if pkg == nil {
+		return nil
+	}
+	exports := make(map[string]string)
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+			continue // unexported
+		}
+		obj := scope.Lookup(name)
+		switch obj.(type) {
+		case *types.Func:
+			exports[name] = "func"
+		case *types.TypeName:
+			exports[name] = "type"
+		case *types.Var:
+			exports[name] = "var"
+		case *types.Const:
+			exports[name] = "const"
+		}
+	}
+	return exports
+}
+
 func isErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	if !ok {
