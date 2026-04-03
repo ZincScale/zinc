@@ -754,19 +754,19 @@ func (p *Parser) v2ParseDictLit() Expr {
 	return &MapLit{Keys: keys, Values: vals}
 }
 
-// v2ParseInterpString converts "Hello, {name}!" into StringInterpLit.
+// v2ParseInterpString converts "Hello, ${name}!" into StringInterpLit.
 func (p *Parser) v2ParseInterpString(raw string) Expr {
 	var parts []Expr
 	buf := ""
 	i := 0
 	runes := []rune(raw)
 	for i < len(runes) {
-		if runes[i] == '{' {
+		if runes[i] == '$' && i+1 < len(runes) && runes[i+1] == '{' {
 			if buf != "" {
 				parts = append(parts, &StringLit{Value: buf})
 				buf = ""
 			}
-			i++ // skip {
+			i += 2 // skip ${
 			exprStr := ""
 			depth := 1
 			for i < len(runes) && depth > 0 {

@@ -3,11 +3,11 @@
 
 List<String> names = ["Alice", "Bob", "Charlie", "Dave"]
 names.add("Eve")
-print("Count: {names.size()}")
+print("Count: ${names.size()}")
 
 // Iteration
 for name in names {
-    print("Hello, {name}")
+    print("Hello, ${name}")
 }
 
 // Map operations
@@ -15,13 +15,13 @@ Map<String, int> ages = {"Alice": 30, "Bob": 25, "Charlie": 35}
 ages.put("Dave", 28)
 
 for name, age in ages {
-    print("{name} is {age}")
+    print("${name} is ${age}")
 }
 
 // Lambda filtering
 List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 var evens = numbers.filter(x -> x % 2 == 0)
-print("Evens: {evens}")
+print("Evens: ${evens}")
 
 // --- Generic stack (collection pattern) ---
 class Stack<T> {
@@ -54,17 +54,17 @@ var stack = Stack<String>()
 stack.push("first")
 stack.push("second")
 stack.push("third")
-print("stack size: {stack.size()}")
-print("peek: {stack.peek()}")
-print("pop: {stack.pop()}")
-print("pop: {stack.pop()}")
-print("stack size after: {stack.size()}")
+print("stack size: ${stack.size()}")
+print("peek: ${stack.peek()}")
+print("pop: ${stack.pop()}")
+print("pop: ${stack.pop()}")
+print("stack size after: ${stack.size()}")
 
 // --- Generic data class as map entry ---
 data Entry<K, V>(K key, V value)
 
 var e1 = Entry<String, int>("score", 100)
-print("entry: {e1}")
+print("entry: ${e1}")
 
 var e2 = Entry<int, String>(1, "one")
-print("entry: {e2}")
+print("entry: ${e2}")

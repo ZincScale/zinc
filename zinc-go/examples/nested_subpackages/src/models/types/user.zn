@@ -3,5 +3,5 @@
 data User(String name, int age)
 
 pub fn formatUser(User u): String {
-    return "{u.name} (age {u.age})"
+    return "${u.name} (age ${u.age})"
 }

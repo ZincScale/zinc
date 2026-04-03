@@ -1,7 +1,7 @@
 // Test spread operator in function call arguments: args...
 
 fn logMsg(String level, String msg, any... args) {
-    print("[{level}] {msg} {args}")
+    print("[${level}] ${msg} ${args}")
 }
 
 fn wrapper(String msg, any... args) {

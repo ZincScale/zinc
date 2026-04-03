@@ -25,13 +25,13 @@ fn area(Shape s): double {
 fn describe(Shape s): String {
     match s {
         case Circle(r) {
-            return "circle with radius {r}"
+            return "circle with radius ${r}"
         }
         case Rect(w, h) {
-            return "rect {w}x{h}"
+            return "rect ${w}x${h}"
         }
         case Triangle(b, h) {
-            return "triangle base={b} height={h}"
+            return "triangle base=${b} height=${h}"
         }
     }
     return "unknown"
@@ -45,9 +45,9 @@ print(c)
 print(r)
 print(t)
 
-print("area circle: {area(c)}")
-print("area rect: {area(r)}")
-print("area triangle: {area(t)}")
+print("area circle: ${area(c)}")
+print("area rect: ${area(r)}")
+print("area triangle: ${area(t)}")
 
 print(describe(c))
 print(describe(r))
@@ -56,7 +56,7 @@ print(describe(t))
 // Match in a list
 List<Shape> shapes = [Circle(1.0), Rect(2.0, 3.0), Triangle(4.0, 5.0)]
 for s in shapes {
-    print("  {describe(s)} → area={area(s)}")
+    print("  ${describe(s)} → area=${area(s)}")
 }
 
 print("Sealed OK")

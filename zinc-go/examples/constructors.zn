@@ -11,11 +11,11 @@ class Server {
     }
 
     fn address(): String {
-        return "{host}:{port}"
+        return "${host}:${port}"
     }
 
     fn toString(): String {
-        return "Server({address()})"
+        return "Server(${address()})"
     }
 }
 
@@ -28,7 +28,7 @@ class SecureServer : Server {
     }
 
     fn toString(): String {
-        return "SecureServer({address()}, cert={certPath})"
+        return "SecureServer(${address()}, cert=${certPath})"
     }
 }
 

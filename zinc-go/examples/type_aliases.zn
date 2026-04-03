@@ -12,13 +12,13 @@ fn apply(int x, Transformer f): int {
 
 fn wrap(Handler next): Handler {
     return (String s) -> {
-        print("wrapped: {s}")
+        print("wrapped: ${s}")
         return next(s)
     }
 }
 
 fn endpoint(String path): String {
-    return "200 OK: {path}"
+    return "200 OK: ${path}"
 }
 
 fn countIf(List<int> items, Predicate test): int {
@@ -34,7 +34,7 @@ fn countIf(List<int> items, Predicate test): int {
 fn main() {
     // Transformer alias
     var doubled = apply(5, (int x) -> x * 2)
-    print("apply doubled: {doubled}")
+    print("apply doubled: ${doubled}")
 
     // Handler alias with middleware
     var handler = wrap((String p) -> endpoint(p))
@@ -43,7 +43,7 @@ fn main() {
     // Predicate alias
     List<int> nums = [1, 2, 3, 4, 5, 6, 7, 8]
     var evens = countIf(nums, (int x) -> x % 2 == 0)
-    print("evens: {evens}")
+    print("evens: ${evens}")
 
     print("Type Aliases OK")
 }

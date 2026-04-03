@@ -16,10 +16,10 @@ enum Direction {
 
 fn main() {
     var c = Red
-    print("color: {c}")
+    print("color: ${c}")
 
     var d = North
-    print("direction: {d}")
+    print("direction: ${d}")
 
     // Match on enum
     match c {

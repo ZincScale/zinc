@@ -22,7 +22,7 @@ const (
 	TOKEN_INT_LIT      TokenType = iota
 	TOKEN_FLOAT_LIT              // 1.5
 	TOKEN_STRING_LIT             // "hello"
-	TOKEN_INTERP_STRING          // "Hello, {name}!"
+	TOKEN_INTERP_STRING          // "Hello, ${name}!"
 	TOKEN_BOOL_LIT               // true / false
 	TOKEN_NULL                   // null
 	TOKEN_IDENT                  // identifiers

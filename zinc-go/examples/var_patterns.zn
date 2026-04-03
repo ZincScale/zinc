@@ -46,7 +46,7 @@ class Config {
     }
 
     pub fn summary(): String {
-        return "{name} host={host}:{port} retries={retries} debug={debug} tags={len(tags)} meta={len(metadata)} scores={len(scores)} limits={len(limits)}"
+        return "${name} host=${host}:${port} retries=${retries} debug=${debug} tags=${len(tags)} meta=${len(metadata)} scores=${len(scores)} limits=${len(limits)}"
     }
 }
 
@@ -56,45 +56,45 @@ fn main() {
     var s = "hello"
     var b = true
     var f = 3.14
-    print("1. x={x} s={s} b={b} f={f}")
+    print("1. x=${x} s=${s} b=${b} f=${f}")
 
     // 2. Explicit types
     int count = 10
     String greeting = "hi"
     bool flag = false
-    print("2. count={count} greeting={greeting} flag={flag}")
+    print("2. count=${count} greeting=${greeting} flag=${flag}")
 
     // 3. var with typed list — empty
     var names = List<String>[]
     names = append(names, "alice")
-    print("3. names: {names}")
+    print("3. names: ${names}")
 
     // 4. var with typed list — non-empty
     var nums = List<int>[1, 2, 3]
-    print("4. nums: {nums}")
+    print("4. nums: ${nums}")
 
     // 5. Explicit type list — empty
     List<String> items = []
     items = append(items, "sword")
-    print("5. items: {items}")
+    print("5. items: ${items}")
 
     // 6. Explicit type list — non-empty
     List<int> primes = [2, 3, 5, 7]
-    print("6. primes: {primes}")
+    print("6. primes: ${primes}")
 
     // 7. var with typed map — empty
     var ages = Map<String, int>{}
     ages["alice"] = 30
-    print("7. alice: {ages["alice"]}")
+    print("7. alice: ${ages["alice"]}")
 
     // 8. Explicit type map — empty
     Map<String, int> config = {}
     config["port"] = 8080
-    print("8. port: {config["port"]}")
+    print("8. port: ${config["port"]}")
 
     // 9. var with data class
     var p = Point(3, 4)
-    print("9. point: {p}")
+    print("9. point: ${p}")
 
     // 10. Class with all field patterns
     var cfg = Config("myapp")
@@ -103,21 +103,21 @@ fn main() {
     cfg.setMeta("region", "us-east")
     cfg.addScore(95)
     cfg.setLimit("connections", 100)
-    print("10. {cfg.summary()}")
-    print("10. host: {cfg.host}")
-    print("10. debug: {cfg.debug}")
+    print("10. ${cfg.summary()}")
+    print("10. host: ${cfg.host}")
+    print("10. debug: ${cfg.debug}")
 
     // 11. Reassignment of typed collections
     var letters = List<String>["a", "b"]
     letters = append(letters, "c")
-    print("11. letters: {letters}")
+    print("11. letters: ${letters}")
 
     // 12. Map with data class values
     var points = Map<String, Point>{}
     points["origin"] = Point(0, 0)
     points["target"] = Point(10, 20)
-    print("12. origin: {points["origin"]}")
-    print("12. target: {points["target"]}")
+    print("12. origin: ${points["origin"]}")
+    print("12. target: ${points["target"]}")
 
     print("Var patterns OK")
 }

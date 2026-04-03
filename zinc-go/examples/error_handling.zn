@@ -9,11 +9,11 @@ fn divide(int a, int b): int {
 
 // or — fallback value on error
 var result = divide(10, 0) or -1
-print("divide(10, 0) or -1 = {result}")
+print("divide(10, 0) or -1 = ${result}")
 
 // Successful call
 var ok = divide(10, 2) or 0
-print("divide(10, 2) = {ok}")
+print("divide(10, 2) = ${ok}")
 
 // or block — error handler as statement
 divide(10, 0) or {
@@ -28,19 +28,19 @@ fn validate(int x): int {
 }
 
 var v = validate(-5) or -1
-print("validate(-5) or -1 = {v}")
+print("validate(-5) or -1 = ${v}")
 
 var v2 = validate(10) or -1
-print("validate(10) = {v2}")
+print("validate(10) = ${v2}")
 
 // or block with return — early exit from function
 fn loadAndProcess(): String {
     var data = divide(10, 0) or {
         return "fallback result"
     }
-    return "processed: {data}"
+    return "processed: ${data}"
 }
-print("loadAndProcess: {loadAndProcess()}")
+print("loadAndProcess: ${loadAndProcess()}")
 
 // or block with continue — skip items in loop
 List<int> inputs = [2, 0, 5, 0, 3]
@@ -48,7 +48,7 @@ for b in inputs {
     var val = divide(100, b) or {
         continue
     }
-    print("100/{b} = {val}")
+    print("100/${b} = ${val}")
 }
 
 // or block with return Error(err) — propagate error up
@@ -60,9 +60,9 @@ fn safeDivide(int a, int b): int {
 }
 
 var propagated = safeDivide(10, 0) or -99
-print("propagated error: {propagated}")
+print("propagated error: ${propagated}")
 
 var propagatedOk = safeDivide(10, 2) or -99
-print("propagated ok: {propagatedOk}")
+print("propagated ok: ${propagatedOk}")
 
 print("Error Handling OK")

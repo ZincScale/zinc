@@ -1,6 +1,6 @@
 fn logging(Fn<(String), String> next): Fn<(String), String> {
     return (String path) -> {
-        print("  log: {path}")
+        print("  log: ${path}")
         return next(path)
     }
 }
@@ -13,7 +13,7 @@ fn auth(Fn<(String), String> next): Fn<(String), String> {
 }
 
 fn endpoint(String path): String {
-    return "200 OK: {path}"
+    return "200 OK: ${path}"
 }
 
 fn main() {

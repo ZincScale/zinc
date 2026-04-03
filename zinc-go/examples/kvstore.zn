@@ -8,7 +8,7 @@ import sort
 fn mustGet(Map<String, String> data, String key): String {
     var val = data[key]
     if val == "" {
-        return Error("key not found: {key}")
+        return Error("key not found: ${key}")
     }
     return val
 }
@@ -21,17 +21,17 @@ fn main() {
     store["user:3"] = "Charlie"
     store["config:timeout"] = "30"
     store["config:retries"] = "3"
-    print("size: {len(store)}")
+    print("size: ${len(store)}")
 
     // Get
-    print("user:1 = {store["user:1"]}")
+    print("user:1 = ${store["user:1"]}")
 
     // Error handling with or
     var val = mustGet(store, "user:1") or "not found"
-    print("mustGet user:1: {val}")
+    print("mustGet user:1: ${val}")
 
     var missing = mustGet(store, "user:999") or "not found"
-    print("mustGet user:999: {missing}")
+    print("mustGet user:999: ${missing}")
 
     // Collect keys and filter
     var userCount = 0
@@ -44,12 +44,12 @@ fn main() {
             configCount = configCount + 1
         }
     }
-    print("user keys: {userCount}")
-    print("config keys: {configCount}")
+    print("user keys: ${userCount}")
+    print("config keys: ${configCount}")
 
     // Delete
     delete(store, "user:3")
-    print("after delete size: {len(store)}")
+    print("after delete size: ${len(store)}")
 
     // List all users
     List<String> users = []
@@ -59,7 +59,7 @@ fn main() {
         }
     }
     sort.Strings(users)
-    print("users: {users}")
+    print("users: ${users}")
 
     print("KV Store OK")
 }

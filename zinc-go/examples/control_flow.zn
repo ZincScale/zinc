@@ -3,38 +3,38 @@
 
 // Expression if (ternary)
 var mood = if true: "happy" else: "sad"
-print("mood: {mood}")
+print("mood: ${mood}")
 
 var sign = if -5 > 0: "positive" else: "negative"
-print("sign: {sign}")
+print("sign: ${sign}")
 
 // For loop — basic
 var fruits = ["apple", "banana", "cherry"]
 for f in fruits {
-    print("fruit: {f}")
+    print("fruit: ${f}")
 }
 
 // For with key/value (map destructuring)
 Map<String, int> scores = {"alice": 95, "bob": 82, "charlie": 91}
 for name, score in scores {
-    print("{name} scored {score}")
+    print("${name} scored ${score}")
 }
 
 // Range loops
 print("exclusive range 0..3:")
 for i in 0..3 {
-    print("  {i}")
+    print("  ${i}")
 }
 
 print("inclusive range 1..=3:")
 for i in 1..=3 {
-    print("  {i}")
+    print("  ${i}")
 }
 
 // While loop
 var count = 0
 while count < 3 {
-    print("count: {count}")
+    print("count: ${count}")
     count = count + 1
 }
 
@@ -60,7 +60,7 @@ for i in 0..10 {
     if i == 6 {
         break
     }
-    print("i={i}")
+    print("i=${i}")
 }
 
 // Match expression (returns value)
@@ -70,6 +70,6 @@ var label = match status {
     case "err" { "failure" }
     case _ { "unknown" }
 }
-print("match expr: {label}")
+print("match expr: ${label}")
 
 print("Control Flow OK")

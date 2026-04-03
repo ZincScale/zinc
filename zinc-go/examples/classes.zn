@@ -15,7 +15,7 @@ class Animal {
     }
 
     fn speak(): String {
-        return "{name} says {sound}"
+        return "${name} says ${sound}"
     }
 }
 
@@ -28,7 +28,7 @@ class Dog : Animal {
     }
 
     fn toString(): String {
-        return "Dog({name}, {breed})"
+        return "Dog(${name}, ${breed})"
     }
 }
 
@@ -48,7 +48,7 @@ interface Greeter {
 
 class FormalGreeter : Greeter {
     fn greet(String name): String {
-        return "Good day, {name}."
+        return "Good day, ${name}."
     }
 }
 
@@ -61,9 +61,9 @@ print(dog.speak())
 print(dog)
 
 var cfg = Config()
-print("host: {cfg.host}")
-print("port: {cfg.port}")
-print("version: {VERSION}")
+print("host: ${cfg.host}")
+print("port: ${cfg.port}")
+print("version: ${VERSION}")
 
 Greeter g = FormalGreeter()
 print(g.greet("World"))
@@ -81,16 +81,16 @@ class Box<T> {
     }
 
     fn toString(): String {
-        return "Box({value})"
+        return "Box(${value})"
     }
 }
 
 var strBox = Box<String>("hello")
-print("box: {strBox}")
-print("unbox: {strBox.get()}")
+print("box: ${strBox}")
+print("unbox: ${strBox.get()}")
 
 var intBox = Box<int>(42)
-print("int box: {intBox}")
+print("int box: ${intBox}")
 
 // --- Generic interface ---
 interface Mapper<A, B> {
@@ -99,11 +99,11 @@ interface Mapper<A, B> {
 
 class IntToString : Mapper<int, String> {
     fn apply(int input): String {
-        return "val={input}"
+        return "val=${input}"
     }
 }
 
 var mapper = IntToString()
-print("mapped: {mapper.apply(7)}")
+print("mapped: ${mapper.apply(7)}")
 
 print("Classes OK")

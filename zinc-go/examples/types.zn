@@ -10,17 +10,17 @@ fn findUser(String id): String? {
 }
 
 var user = findUser("1")
-print("found: {user}")
+print("found: ${user}")
 
 var missing = findUser("99")
-print("missing: {missing}")
+print("missing: ${missing}")
 
 // Safe navigation
 var len = user?.length()
-print("safe nav: {len}")
+print("safe nav: ${len}")
 
 var missingLen = missing?.length()
-print("safe nav null: {missingLen}")
+print("safe nav null: ${missingLen}")
 
 // Type checks — is
 var val = "hello"
@@ -31,23 +31,23 @@ if val is String {
 // Structural equality vs reference identity
 var a = "hello"
 var b = "hello"
-print("structural eq: {a == b}")
-print("reference eq: {a === b}")
+print("structural eq: ${a == b}")
+print("reference eq: ${a === b}")
 
 // --- Generic type alias-like pattern ---
 data Result<T>(T value, bool ok)
 
 var success = Result<String>("data", true)
-print("result: {success}")
-print("ok? {success.ok}")
+print("result: ${success}")
+print("ok? ${success.ok}")
 
 var failure = Result<int>(0, false)
-print("failure: {failure}")
+print("failure: ${failure}")
 
 // --- Generic with nullable ---
 data Maybe<T>(T value)
 
 var some = Maybe<String>("present")
-print("maybe: {some}")
+print("maybe: ${some}")
 
 print("Types OK")

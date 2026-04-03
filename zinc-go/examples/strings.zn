@@ -3,7 +3,7 @@
 
 // Double-quote with interpolation
 var name = "World"
-print("Hello, {name}!")
+print("Hello, ${name}!")
 
 // Single-quote — no interpolation
 var raw = 'Hello, {name}!'
@@ -18,35 +18,35 @@ print(multi)
 
 // String methods
 var s = "Hello, World!"
-print("upper: {s.upper()}")
-print("lower: {s.lower()}")
-print("contains 'World': {s.contains("World")}")
-print("startsWith 'Hello': {s.startsWith("Hello")}")
-print("endsWith '!': {s.endsWith("!")}")
-print("replace: {s.replace("World", "Zinc")}")
-print("indexOf 'World': {s.indexOf("World")}")
-print("charAt(0): {s.charAt(0)}")
-print("substring(7,12): {s.substring(7, 12)}")
+print("upper: ${s.upper()}")
+print("lower: ${s.lower()}")
+print("contains 'World': ${s.contains("World")}")
+print("startsWith 'Hello': ${s.startsWith("Hello")}")
+print("endsWith '!': ${s.endsWith("!")}")
+print("replace: ${s.replace("World", "Zinc")}")
+print("indexOf 'World': ${s.indexOf("World")}")
+print("charAt(0): ${s.charAt(0)}")
+print("substring(7,12): ${s.substring(7, 12)}")
 
 // Trim methods
 var padded = "  hello  "
-print("trim: [{padded.trim()}]")
-print("trimStart: [{padded.trimStart()}]")
-print("trimEnd: [{padded.trimEnd()}]")
+print("trim: [${padded.trim()}]")
+print("trimStart: [${padded.trimStart()}]")
+print("trimEnd: [${padded.trimEnd()}]")
 
 // Split
 var csv = "a,b,c,d"
 var parts = csv.split(",")
-print("split: {parts}")
+print("split: ${parts}")
 
 // Repeat
-print("repeat: {"-".repeat(10)}")
+print("repeat: ${"-".repeat(10)}")
 
 // isEmpty
-print("empty: {"".isEmpty()}")
-print("not empty: {"hello".isEmpty()}")
+print("empty: ${"".isEmpty()}")
+print("not empty: ${"hello".isEmpty()}")
 
 // Membership
-print("in: {"World" in s}")
+print("in: ${"World" in s}")
 
 print("Strings OK")

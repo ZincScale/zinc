@@ -4,5 +4,5 @@ data User(String name, int age)
 data Product(String name, double price)
 
 fn describeUser(User u): String {
-    return "{u.name} (age {u.age})"
+    return "${u.name} (age ${u.age})"
 }

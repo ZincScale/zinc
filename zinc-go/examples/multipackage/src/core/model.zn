@@ -20,7 +20,7 @@ class Box<T> {
     }
 
     pub fn toString(): String {
-        return "Box({value})"
+        return "Box(${value})"
     }
 }
 

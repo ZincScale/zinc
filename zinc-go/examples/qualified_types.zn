@@ -48,24 +48,24 @@ fn main() {
     // Test qualified param and return — just verify it compiles and runs
     var handler = makeHandler(w)
     var logger = slog.New(handler)
-    print("handler created: {logger != nil}")
+    print("handler created: ${logger != nil}")
 
     // Test import-as in function
     var upper = transform("zinc")
-    print("upper: {upper}")
+    print("upper: ${upper}")
 
     // Test io.Reader from strings package
     var reader = str.NewReader("zinc-flow")
     var result = readAll(reader)
-    print("read: {result}")
+    print("read: ${result}")
 
     // Test io.Reader with sized byte buffer
     var reader2 = str.NewReader("hello world")
     var buf = byte[4]
     reader2.Read(buf)
-    print("partial read: {string(buf)}")
+    print("partial read: ${string(buf)}")
 
     // Test strings via import-as
     var contains = str.Contains("hello zinc", "zinc")
-    print("contains: {contains}")
+    print("contains: ${contains}")
 }

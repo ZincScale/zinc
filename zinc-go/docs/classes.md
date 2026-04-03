@@ -56,7 +56,7 @@ class Animal {
     }
 
     fn speak(): String {
-        return "{name} says {sound}"
+        return "${name} says ${sound}"
     }
 }
 
@@ -69,7 +69,7 @@ class Dog : Animal {
     }
 
     fn toString(): String {
-        return "Dog({name}, {breed})"
+        return "Dog(${name}, ${breed})"
     }
 }
 
@@ -136,7 +136,7 @@ interface Greeter {
 
 class FormalGreeter : Greeter {
     fn greet(String name): String {
-        return "Good day, {name}."
+        return "Good day, ${name}."
     }
 }
 

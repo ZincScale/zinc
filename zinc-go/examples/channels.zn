@@ -5,7 +5,7 @@ fn main() {
         ch.send("hello from channel")
     }
     var msg = ch.recv()
-    print("received: {msg}")
+    print("received: ${msg}")
 
     // Producer/consumer
     var work = Channel(3)
@@ -15,7 +15,7 @@ fn main() {
 
     for i in 0..3 {
         var task = work.recv()
-        print("processing: {task}")
+        print("processing: ${task}")
     }
 
     // Close channel
@@ -25,7 +25,7 @@ fn main() {
     }
     var result = done.recv()
     done.close()
-    print("done: {result}")
+    print("done: ${result}")
 
     print("Channels OK")
 }

@@ -9,8 +9,8 @@ fn main() {
     print(greetUser(bob))
     print(describeUser(alice))
     print(describeUser(bob))
-    print("Alice adult: {isAdult(alice)}")
-    print("Bob adult: {isAdult(bob)}")
+    print("Alice adult: ${isAdult(alice)}")
+    print("Bob adult: ${isAdult(bob)}")
     print(formatPrice(widget))
     print("Multi-file OK")
 }

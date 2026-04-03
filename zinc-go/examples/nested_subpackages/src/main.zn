@@ -14,11 +14,11 @@ fn main() {
     r.addRule(router.Rule("about", "/about"))
     r.addRule(router.Rule("api", "/api/v1"))
 
-    print("rules: {r.count()}")
+    print("rules: ${r.count()}")
     var m1 = r.route("/")
     var m2 = r.route("/about")
     var m3 = r.route("/missing")
-    print("match /: {m1}")
-    print("match /about: {m2}")
-    print("match /missing: {m3}")
+    print("match /: ${m1}")
+    print("match /about: ${m2}")
+    print("match /missing: ${m3}")
 }

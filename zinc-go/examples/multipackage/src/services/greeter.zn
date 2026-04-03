@@ -10,15 +10,15 @@ class Greeter : core.Describable {
     }
 
     pub fn greet(core.User user): String {
-        return "{greeting}, {user.name}!"
+        return "${greeting}, ${user.name}!"
     }
 
     pub fn describe(): String {
-        return "Greeter({greeting})"
+        return "Greeter(${greeting})"
     }
 }
 
 pub fn discountPrice(core.Product p, double pct): String {
     var discounted = p.price * (1.0 - pct)
-    return "{p.name} on sale: ${discounted}"
+    return "${p.name} on sale: $${discounted}"
 }

@@ -4,37 +4,37 @@
 fn main() {
     // byte buffer
     var buf = byte[4]
-    print("byte buf len: {len(buf)}")
+    print("byte buf len: ${len(buf)}")
     buf[0] = 65
     buf[1] = 66
-    print("buf[0]: {buf[0]}")
-    print("buf[1]: {buf[1]}")
+    print("buf[0]: ${buf[0]}")
+    print("buf[1]: ${buf[1]}")
 
     // int array
     var nums = int[5]
-    print("int len: {len(nums)}")
-    print("int[0]: {nums[0]}")
+    print("int len: ${len(nums)}")
+    print("int[0]: ${nums[0]}")
     nums[2] = 42
     nums[4] = 99
-    print("int[2]: {nums[2]}")
-    print("int[4]: {nums[4]}")
+    print("int[2]: ${nums[2]}")
+    print("int[4]: ${nums[4]}")
 
     // String array
     var names = String[3]
-    print("string len: {len(names)}")
+    print("string len: ${len(names)}")
     names[0] = "zinc"
     names[1] = "flow"
-    print("names[0]: {names[0]}")
-    print("names[1]: {names[1]}")
+    print("names[0]: ${names[0]}")
+    print("names[1]: ${names[1]}")
 
     // boolean array
     var flags = boolean[4]
-    print("bool len: {len(flags)}")
+    print("bool len: ${len(flags)}")
     flags[0] = true
-    print("flags[0]: {flags[0]}")
-    print("flags[1]: {flags[1]}")
+    print("flags[0]: ${flags[0]}")
+    print("flags[1]: ${flags[1]}")
 
     // Use sized array with io.Reader
     var data = byte[8]
-    print("data len: {len(data)}")
+    print("data len: ${len(data)}")
 }

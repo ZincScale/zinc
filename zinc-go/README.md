@@ -30,7 +30,7 @@ Go is fast, simple, and compiles everywhere. But its syntax has rough edges — 
 
 - **Classes & inheritance** — familiar OO syntax compiled to Go structs with embedding
 - **Error handling** — `or` expressions replace `if err != nil` boilerplate
-- **String interpolation** — `"Hello, {name}!"` just works
+- **String interpolation** — `"Hello, ${name}!"` just works
 - **Streams** — `list.filter(it > 5).map(it * 2).sum()` with loop fusion
 - **Concurrency** — `spawn {}`, `Channel`, `parallel for`
 - **Nullable types** — `String?` with safe navigation `?.`
@@ -116,12 +116,12 @@ parallel for url in urls {
 class Animal {
     String name
     init(String name) { this.name = name }
-    fn speak(): String { return "{name} speaks" }
+    fn speak(): String { return "${name} speaks" }
 }
 
 class Dog : Animal {
     init(String name) { super(name) }
-    fn speak(): String { return "{name} says Woof" }
+    fn speak(): String { return "${name} says Woof" }
 }
 
 Animal a = Dog("Rex")

@@ -1,7 +1,7 @@
 // Utility functions in the core package
 
 pub fn formatUser(User u): String {
-    return "{u.name} (age {u.age})"
+    return "${u.name} (age ${u.age})"
 }
 
 pub fn isAdult(User u): bool {
@@ -9,5 +9,5 @@ pub fn isAdult(User u): bool {
 }
 
 pub fn formatPrice(Product p): String {
-    return "{p.name}: ${p.price}"
+    return "${p.name}: $${p.price}"
 }

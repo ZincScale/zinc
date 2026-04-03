@@ -3,20 +3,20 @@
 fn main() {
     // Hex
     var mask = 0xFF
-    print("0xFF = {mask}")
+    print("0xFF = ${mask}")
 
     var big = 0xDEAD
-    print("0xDEAD = {big}")
+    print("0xDEAD = ${big}")
 
     // Binary
     var bits = 0b11001010
-    print("0b11001010 = {bits}")
+    print("0b11001010 = ${bits}")
 
     // Octal
     var perm = 0o755
-    print("0o755 = {perm}")
+    print("0o755 = ${perm}")
 
     // Mixed with arithmetic
     var result = 0xFF & 0x0F
-    print("0xFF & 0x0F = {result}")
+    print("0xFF & 0x0F = ${result}")
 }

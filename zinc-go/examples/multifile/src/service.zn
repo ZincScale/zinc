@@ -1,7 +1,7 @@
 // Service — business logic using types from model.zn
 
 fn greetUser(User u): String {
-    return "Hello, {u.name}!"
+    return "Hello, ${u.name}!"
 }
 
 fn isAdult(User u): bool {
@@ -9,5 +9,5 @@ fn isAdult(User u): bool {
 }
 
 fn formatPrice(Product p): String {
-    return "{p.name}: ${p.price}"
+    return "${p.name}: $${p.price}"
 }

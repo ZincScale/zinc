@@ -38,30 +38,30 @@ fn first<T>(List<T> items): T {
 fn main() {
     // 1. Generic data class
     var p1 = Pair<String, int>("hello", 42)
-    print("pair: {p1}")
+    print("pair: ${p1}")
 
     var p2 = Pair<int, int>(1, 2)
-    print("int pair: {p2}")
+    print("int pair: ${p2}")
 
     // 2. Generic class
     var q = SimpleQueue<String>()
     q.push("alpha")
     q.push("beta")
     q.push("gamma")
-    print("size: {q.size()}")
-    print("pop: {q.pop()}")
-    print("pop: {q.pop()}")
-    print("size after: {q.size()}")
+    print("size: ${q.size()}")
+    print("pop: ${q.pop()}")
+    print("pop: ${q.pop()}")
+    print("size after: ${q.size()}")
 
     // 3. Generic with data class
     var intQ = SimpleQueue<int>()
     intQ.push(10)
     intQ.push(20)
-    print("int pop: {intQ.pop()}")
+    print("int pop: ${intQ.pop()}")
 
     // 4. Generic function
     List<String> names = ["alice", "bob", "charlie"]
-    print("first: {first(names)}")
+    print("first: ${first(names)}")
 
     print("Generics OK")
 }

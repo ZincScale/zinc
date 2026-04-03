@@ -12,17 +12,17 @@ fn sum(int[] numbers): int {
 fn main() {
     // Array declarations
     int[] nums = [10, 20, 30, 40, 50]
-    print("first: {nums[0]}")
-    print("length: {nums.length}")
-    print("sum: {sum(nums)}")
+    print("first: ${nums[0]}")
+    print("length: ${nums.length}")
+    print("sum: ${sum(nums)}")
 
     // String arrays
     String[] names = ["Alice", "Bob", "Charlie"]
     for name in names {
-        print("Hello, {name}!")
+        print("Hello, ${name}!")
     }
 
     // Empty array
     int[] empty = []
-    print("empty length: {empty.length}")
+    print("empty length: ${empty.length}")
 }

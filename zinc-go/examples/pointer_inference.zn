@@ -15,7 +15,7 @@ fn main() {
         print("marshal error")
         return
     }
-    print("json: {string(data)}")
+    print("json: ${string(data)}")
 
     // Unmarshal back — zinc should auto-insert & for the pointer param
     var p2 = Person("", 0)
@@ -23,8 +23,8 @@ fn main() {
         print("unmarshal error")
         return
     }
-    print("name: {p2.name}")
-    print("age: {p2.age}")
+    print("name: ${p2.name}")
+    print("age: ${p2.age}")
 
     // Test with a map
     var m = Map<String, String>{"key": "value"}
@@ -32,7 +32,7 @@ fn main() {
         print("marshal error")
         return
     }
-    print("map json: {string(mData)}")
+    print("map json: ${string(mData)}")
 
     var m2 = Map<String, String>{}
     json.Unmarshal(mData, m2) or {
@@ -40,7 +40,7 @@ fn main() {
         return
     }
     var val = m2["key"]
-    print("map key: {val}")
+    print("map key: ${val}")
 
     // Test method-level error-only: exec.Cmd.Start() returns only error
     var proc = exec.Command("echo", "hello")

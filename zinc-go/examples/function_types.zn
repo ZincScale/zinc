@@ -30,28 +30,28 @@ fn countMatching(List<int> items, Fn<(int), boolean> pred): int {
 fn main() {
     // Pass typed lambda
     var result = applyTwice(3, (int x) -> x + 10)
-    print("applyTwice(3, x+10): {result}")
+    print("applyTwice(3, x+10): ${result}")
 
     // Higher-order function
     var triple = multiplier(3)
-    print("triple(5): {triple(5)}")
+    print("triple(5): ${triple(5)}")
 
     var doubler = multiplier(2)
-    print("double(7): {doubler(7)}")
+    print("double(7): ${doubler(7)}")
 
     // Void callback
-    doThen((String msg) -> print("callback: {msg}"))
+    doThen((String msg) -> print("callback: ${msg}"))
 
     // Predicate function
     List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     var evens = countMatching(numbers, (int x) -> x % 2 == 0)
-    print("even count: {evens}")
+    print("even count: ${evens}")
 
     var big = countMatching(numbers, (int x) -> x > 5)
-    print("big count: {big}")
+    print("big count: ${big}")
 
     // Untyped lambdas still work
     var nums = [10, 20, 30]
     var doubled = nums.map(it * 2)
-    print("doubled: {doubled}")
+    print("doubled: ${doubled}")
 }

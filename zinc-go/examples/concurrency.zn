@@ -10,13 +10,13 @@ fn main() {
         result = "done"
     }
     time.Sleep(100 * time.Millisecond)
-    print("spawn: {result}")
+    print("spawn: ${result}")
 
     // parallel for — concurrent iteration
     // Note: sum is not atomic so this races, but demonstrates the pattern
     List<int> items = [10, 20, 30]
     parallel for n in items {
-        print("parallel: {n}")
+        print("parallel: ${n}")
     }
 
     print("Concurrency OK")

@@ -21,7 +21,7 @@ fn add(int a, int b): int {
 
 // Default parameters
 fn greet(String name, String greeting = "Hello"): String {
-    return "{greeting}, {name}!"
+    return "${greeting}, ${name}!"
 }
 
 greet("Alice")          // "Hello, Alice!"
@@ -30,12 +30,13 @@ greet("Bob", "Hey")     // "Hey, Bob!"
 
 ## String interpolation
 
-Any string with `{expr}` is interpolated automatically:
+Any double-quoted string with `${expr}` is interpolated automatically. Single-quoted strings are literal — no interpolation:
 
 ```zinc
 var name = "World"
-print("Hello, {name}!")        // Hello, World!
-print("2 + 2 = {2 + 2}")      // 2 + 2 = 4
+print("Hello, ${name}!")        // Hello, World!
+print("2 + 2 = ${2 + 2}")      // 2 + 2 = 4
+print('No interpolation: ${name}')  // No interpolation: ${name}
 ```
 
 ## Control flow

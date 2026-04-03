@@ -34,10 +34,10 @@ fn main() {
     Result r = Ok("hello")
     match r {
         case Ok(v) {
-            print("typed ok: {v}")
+            print("typed ok: ${v}")
         }
         case Failure(reason) {
-            print("typed fail: {reason}")
+            print("typed fail: ${reason}")
         }
     }
 

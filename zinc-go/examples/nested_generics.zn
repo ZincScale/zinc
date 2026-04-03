@@ -9,15 +9,15 @@ fn main() {
     scores["bob"] = bobScores
     var aliceS = scores["alice"]
     var bobS = scores["bob"]
-    print("alice scores: {aliceS}")
-    print("bob scores: {bobS}")
+    print("alice scores: ${aliceS}")
+    print("bob scores: ${bobS}")
 
     // Two levels: List<List<String>>
     List<String> row1 = ["a", "b", "c"]
     List<String> row2 = ["d", "e", "f"]
     var grid = List<List<String>>[row1, row2]
-    print("grid[0]: {grid[0]}")
-    print("grid[1]: {grid[1]}")
+    print("grid[0]: ${grid[0]}")
+    print("grid[1]: ${grid[1]}")
 
     // Three levels: Map<String, Map<String, List<int>>>
     var deep = Map<String, Map<String, List<int>>>{}
@@ -27,21 +27,21 @@ fn main() {
     deep["outer"] = inner
     var outerMap = deep["outer"]
     var xVals = outerMap["x"]
-    print("deep[outer][x]: {xVals}")
+    print("deep[outer][x]: ${xVals}")
 
     // Typed map.keys() — should return List<String> not List<interface{}>
     var names = Map<String, int>{"alice": 95, "bob": 78}
     var keys = names.keys()
-    print("keys type works: {len(keys)}")
+    print("keys type works: ${len(keys)}")
 
     // Typed map.values()
     var ages = Map<String, int>{"alice": 30, "bob": 25}
     var vals2 = ages.values()
-    print("values count: {len(vals2)}")
+    print("values count: ${len(vals2)}")
 
     // Nested generics in function parameter types
     var total = sumNested(scores)
-    print("total scores: {total}")
+    print("total scores: ${total}")
 }
 
 fn sumNested(Map<String, List<int>> m): int {

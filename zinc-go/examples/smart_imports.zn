@@ -32,14 +32,14 @@ fn main() {
 
     // Package import: strings used fully-qualified
     var upper = strings.ToUpper("hello")
-    print("upper: {upper}")
+    print("upper: ${upper}")
 
     // Class field with type import
     var counter = new SafeCounter()
     counter.increment()
     counter.increment()
     counter.increment()
-    print("count: {counter.getCount()}")
+    print("count: ${counter.getCount()}")
 
     print("Smart imports OK")
 }

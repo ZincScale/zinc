@@ -121,7 +121,7 @@ func (l *Lexer) NextToken() Token {
 		return l.readTripleQuoteString(ch, line, col)
 	}
 
-	// Double-quote string (supports {interpolation})
+	// Double-quote string (supports ${interpolation})
 	if ch == '"' {
 		return l.readStringWithQuote(ch, line, col)
 	}
@@ -304,10 +304,12 @@ func (l *Lexer) readStringWithQuote(quote rune, line, col int) Token {
 			l.advance()
 			break
 		}
-		if ch == '{' {
+		if ch == '$' && l.peekAt(1) == '{' {
 			hasInterp = true
+			sb.WriteRune('$')
 			sb.WriteRune('{')
-			l.advance()
+			l.advance() // consume $
+			l.advance() // consume {
 			// Scan the interpolation expression, tracking nested braces and quotes
 			depth := 1
 			for depth > 0 && l.peek() != 0 {
@@ -451,7 +453,7 @@ func (l *Lexer) readTripleQuoteString(quote rune, line, col int) Token {
 			l.advance()
 			break
 		}
-		if ch == '{' {
+		if ch == '$' && l.peekAt(1) == '{' {
 			hasInterp = true
 		}
 		sb.WriteRune(l.advance())

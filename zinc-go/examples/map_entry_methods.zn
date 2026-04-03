@@ -22,13 +22,13 @@ class KeyValue {
 fn main() {
     // Class with getKey/getValue — should call methods, not map entry access
     var kv = KeyValue("name", "alice")
-    print("kv.getKey = {kv.getKey()}")
-    print("kv.getValue = {kv.getValue()}")
+    print("kv.getKey = ${kv.getKey()}")
+    print("kv.getValue = ${kv.getValue()}")
 
     // Map iteration — standard for loop
     var ages = Map<String, int>{"alice": 30, "bob": 25}
     for name, age in ages {
-        print("{name} = {age}")
+        print("${name} = ${age}")
     }
 
     print("map_entry_methods OK")

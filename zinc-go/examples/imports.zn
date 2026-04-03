@@ -8,25 +8,25 @@ import math
 fn main() {
     // strings package
     var upper = strings.ToUpper("hello")
-    print("upper: {upper}")
+    print("upper: ${upper}")
 
     List<String> parts = ["a", "b", "c"]
     var joined = strings.Join(parts, ", ")
-    print("joined: {joined}")
+    print("joined: ${joined}")
 
     var has = strings.Contains("hello world", "world")
-    print("contains: {has}")
+    print("contains: ${has}")
 
     // strconv package
     var num = strconv.Itoa(42)
-    print("itoa: {num}")
+    print("itoa: ${num}")
 
     // math package
     var pi = math.Pi
-    print("pi: {pi}")
+    print("pi: ${pi}")
 
     var sqrt = math.Sqrt(16.0)
-    print("sqrt(16): {sqrt}")
+    print("sqrt(16): ${sqrt}")
 
     print("Imports OK")
 }

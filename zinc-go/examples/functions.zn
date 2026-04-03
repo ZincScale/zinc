@@ -5,12 +5,12 @@
 fn doubled(int x): int = x * 2
 fn triple(int x): int = x * 3
 
-print("doubled(5) = {doubled(5)}")
-print("triple(5) = {triple(5)}")
+print("doubled(5) = ${doubled(5)}")
+print("triple(5) = ${triple(5)}")
 
 // Default parameters
 fn connect(String host, int port = 8080): String {
-    return "{host}:{port}"
+    return "${host}:${port}"
 }
 
 print(connect("localhost", 3000))
@@ -25,32 +25,32 @@ fn sum(int... numbers): int {
     return total
 }
 
-print("sum(1,2,3) = {sum(1, 2, 3)}")
-print("sum(10,20) = {sum(10, 20)}")
+print("sum(1,2,3) = ${sum(1, 2, 3)}")
+print("sum(10,20) = ${sum(10, 20)}")
 
 // Reduce with lambda
 List<int> numbers = [1, 2, 3]
 var result = numbers.reduce(0, (acc, x) -> acc + x * 10)
-print("reduce: {result}")
+print("reduce: ${result}")
 
 // --- Generic functions ---
 fn identity<T>(T x): T {
     return x
 }
 
-print("identity str: {identity("zinc")}")
-print("identity int: {identity(99)}")
+print("identity str: ${identity("zinc")}")
+print("identity int: ${identity(99)}")
 
 fn swap<A, B>(A a, B b): String {
-    return "{b}, {a}"
+    return "${b}, ${a}"
 }
 
-print("swap: {swap(1, "two")}")
+print("swap: ${swap(1, "two")}")
 
 // Generic single-expression function
 fn second<T>(List<T> items): T = items[1]
 
 List<String> fruits = ["apple", "banana", "cherry"]
-print("second: {second(fruits)}")
+print("second: ${second(fruits)}")
 
 print("Functions OK")
