@@ -137,7 +137,6 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				// Add type assertion only for untyped channels (chan interface{}).
 				// Typed channels (chan Job, chan FlowFile) already return the correct type.
 				if g.currentMethodRetType != "" && g.currentMethodRetType != "interface{}" {
-					// Check if the channel variable has a known element type
 					chanElemType := g.varTypes[obj]
 					if chanElemType == "" || chanElemType == "interface{}" {
 						return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
@@ -227,18 +226,22 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 			return fmt.Sprintf("func() []%s { _vals := make([]%s, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", valType, valType, obj, obj)
 		case "containsKey":
-			if len(c.Args) == 1 {
+			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, g.formatExpr(c.Args[0]))
 			}
-		case "remove":
-			if len(c.Args) == 1 {
+		case "remove", "delete":
+			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("delete(%s, %s)", obj, g.formatExpr(c.Args[0]))
 			}
 		case "sort":
-			g.needImport("sort")
-			return fmt.Sprintf("func() { sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] }) }()", obj, obj, obj)
+			if !g.isStructVar(sel.Object) {
+				g.needImport("sort")
+				return fmt.Sprintf("func() { sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] }) }()", obj, obj, obj)
+			}
 		case "reverse":
-			return fmt.Sprintf("func() { for _i, _j := 0, len(%s)-1; _i < _j; _i, _j = _i+1, _j-1 { %s[_i], %s[_j] = %s[_j], %s[_i] } }()", obj, obj, obj, obj, obj)
+			if !g.isStructVar(sel.Object) {
+				return fmt.Sprintf("func() { for _i, _j := 0, len(%s)-1; _i < _j; _i, _j = _i+1, _j-1 { %s[_i], %s[_j] = %s[_j], %s[_i] } }()", obj, obj, obj, obj, obj)
+			}
 		default:
 			// Getter pattern: obj.getHost() → obj.Host
 			if strings.HasPrefix(sel.Field, "get") && len(sel.Field) > 3 && len(c.Args) == 0 {

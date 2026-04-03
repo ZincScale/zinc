@@ -157,13 +157,22 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if call.IsNew {
-					if _, exists := g.structs[ident.Name]; exists {
+					if g.isClassType(ident.Name) {
 						g.varStructTypes[v.Name] = ident.Name
 					}
 				} else if strings.HasPrefix(ident.Name, "New") {
 					structName := ident.Name[3:]
-					if _, exists := g.structs[structName]; exists {
+					if g.isClassType(structName) {
 						g.varStructTypes[v.Name] = structName
+					}
+				}
+			}
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if pkg, ok := sel.Object.(*parser.Ident); ok {
+					if exports, ok := g.subpkgExports[pkg.Name]; ok {
+						if kind := exports[sel.Field]; kind == "class" || kind == "data" {
+							g.varStructTypes[v.Name] = sel.Field
+						}
 					}
 				}
 			}
@@ -207,20 +216,31 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
-		// Track struct types from constructor calls
+		// Track class types from constructor calls
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if call.IsNew {
-					if _, exists := g.structs[ident.Name]; exists {
+					if g.isClassType(ident.Name) {
 						g.varStructTypes[v.Name] = ident.Name
 					}
 				} else if strings.HasPrefix(ident.Name, "New") {
 					structName := ident.Name[3:]
-					if _, exists := g.structs[structName]; exists {
+					if g.isClassType(structName) {
 						g.varStructTypes[v.Name] = structName
 					}
-				} else if _, exists := g.structs[ident.Name]; exists {
+				} else if g.isClassType(ident.Name) {
 					g.varStructTypes[v.Name] = ident.Name
+				}
+			}
+			// Qualified constructor: core.MemoryContentStore() → SelectorExpr
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if pkg, ok := sel.Object.(*parser.Ident); ok {
+					if exports, ok := g.subpkgExports[pkg.Name]; ok {
+						kind := exports[sel.Field]
+						if kind == "class" || kind == "data" {
+							g.varStructTypes[v.Name] = sel.Field
+						}
+					}
 				}
 			}
 		}
@@ -478,9 +498,14 @@ func (g *Generator) isEntrySetCall(e parser.Expr) bool {
 	return false
 }
 
-// isMapVar checks if the range expression is a variable declared as a Map type.
+// isMapVar checks if the expression is a variable declared as a Map type.
 func (g *Generator) isMapVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
+		if te, ok := g.varTypeExprs[ident.Name]; ok {
+			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" {
+				return true
+			}
+		}
 		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "map[") {
 			return true
 		}
@@ -489,6 +514,41 @@ func (g *Generator) isMapVar(e parser.Expr) bool {
 		}
 	}
 	return false
+}
+
+// isListVar checks if the expression is a variable declared as a List/slice type.
+func (g *Generator) isListVar(e parser.Expr) bool {
+	if ident, ok := e.(*parser.Ident); ok {
+		if te, ok := g.varTypeExprs[ident.Name]; ok {
+			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "List" {
+				return true
+			}
+		}
+		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "[]") {
+			return true
+		}
+	}
+	return false
+}
+
+// isChannelVar checks if the expression is a variable declared as a Channel type.
+func (g *Generator) isChannelVar(e parser.Expr) bool {
+	if ident, ok := e.(*parser.Ident); ok {
+		if te, ok := g.varTypeExprs[ident.Name]; ok {
+			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Channel" {
+				return true
+			}
+		}
+		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "chan ") {
+			return true
+		}
+	}
+	return false
+}
+
+// isCollectionVar checks if the expression is a built-in Go collection type (map, slice, or channel).
+func (g *Generator) isCollectionVar(e parser.Expr) bool {
+	return g.isMapVar(e) || g.isListVar(e) || g.isChannelVar(e)
 }
 
 // stripEntrySet removes .entrySet() from a range expression.
@@ -761,8 +821,20 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 	g.writeln("%s", g.formatExpr(es.Expr))
 }
 
-// isStructVar checks if an expression refers to a known struct instance variable.
-// Used to distinguish channel ops (send/recv/close) from method calls on structs.
+// isClassType returns true if the given name is a known class type,
+// checking both local structs and cross-package unqualified names.
+func (g *Generator) isClassType(name string) bool {
+	if _, exists := g.structs[name]; exists {
+		return true
+	}
+	if entry, ok := g.unqualifiedNames[name]; ok {
+		return entry.kind == "class" || entry.kind == "data"
+	}
+	return false
+}
+
+// isStructVar checks if an expression refers to a known class instance variable.
+// Used to distinguish collection builtins from method calls on class instances.
 func (g *Generator) isStructVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
 		if _, ok := g.varStructTypes[ident.Name]; ok {

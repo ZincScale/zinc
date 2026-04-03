@@ -140,6 +140,14 @@ func (p *Parser) v2ParseComparison() Expr {
 			left = &BinaryExpr{Left: left, Op: "is not", Right: right}
 			continue
 		}
+		// Guard: if two adjacent < or > tokens form a shift operator, don't consume as comparison
+		if (p.check(lexer.TOKEN_GT) || p.check(lexer.TOKEN_LT)) {
+			cur := p.peek()
+			next := p.peekAt(1)
+			if cur.Type == next.Type && cur.Line == next.Line && next.Col == cur.Col+1 {
+				break // let v2ParseShift handle it
+			}
+		}
 		if !p.match(lexer.TOKEN_EQ, lexer.TOKEN_NEQ, lexer.TOKEN_REF_EQ, lexer.TOKEN_REF_NEQ,
 			lexer.TOKEN_LT, lexer.TOKEN_LTE, lexer.TOKEN_GT, lexer.TOKEN_GTE,
 			lexer.TOKEN_IS, lexer.TOKEN_IN) {

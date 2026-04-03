@@ -1,0 +1,13 @@
+true
+2
+false
+2
+true
+false
+beta
+1
+0
+custom-sort
+custom-reverse
+0
+cross-pkg methods OK
