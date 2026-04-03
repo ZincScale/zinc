@@ -95,9 +95,9 @@ func collectZnFiles(dir string) ([]string, error) {
 	return files, err
 }
 
-// compileMultiFile parses all .zn files, merges their ASTs, and runs codegen
-// once on the combined program. This gives the generator cross-file knowledge
-// of types, constructors, and error-returning functions.
+// compileMultiFile parses all .zn files and generates one .go file per .zn file.
+// A first pass collects exports from all files so each file's codegen knows about
+// sibling types. Go handles cross-file visibility natively within a package.
 func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -125,7 +125,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 		return nil
 	}
 
-	// Parse all files
+	// Pass 1: Parse all files and collect exports
 	progs := make([]*parser.Program, 0, len(znFiles))
 	for _, path := range znFiles {
 		prog, err := parseFile(path)
@@ -135,25 +135,28 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 		progs = append(progs, prog)
 	}
 
-	// Merge into one combined program
+	// Collect exports from all files for sibling awareness
 	merged := mergePrograms(progs)
+	allExports := codegen.CollectExports(merged)
 
-	// Determine a className from the directory name
-	dirName := filepath.Base(filepath.Dir(znFiles[0]))
-	className := strings.ToUpper(dirName[:1]) + dirName[1:]
+	// Pass 2: Generate each file individually with sibling context
+	for i, prog := range progs {
+		baseName := strings.TrimSuffix(filepath.Base(znFiles[i]), ".zn")
+		className := strings.ToUpper(baseName[:1]) + baseName[1:]
 
-	// Generate with full cross-file context
-	gen := codegen.New()
-	gen.SetSourceFile(merged.SourceFile)
-	files := gen.GenerateFiles(merged, className)
+		gen := codegen.New()
+		gen.SetSourceFile(prog.SourceFile)
+		gen.SetSiblingExports(allExports)
+		files := gen.GenerateFiles(prog, className)
 
-	for _, f := range files {
-		outPath := filepath.Join(outDir, f.Name)
-		if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
-			return fmt.Errorf("write %s: %w", outPath, wErr)
-		}
-		if !quiet {
-			fmt.Printf("  [%d files] → %s\n", len(znFiles), outPath)
+		for _, f := range files {
+			outPath := filepath.Join(outDir, f.Name)
+			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+				return fmt.Errorf("write %s: %w", outPath, wErr)
+			}
+			if !quiet {
+				fmt.Printf("  %s → %s\n", filepath.Base(znFiles[i]), outPath)
+			}
 		}
 	}
 	return nil
@@ -229,9 +232,10 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 	}
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
-	allExports := make(map[string]map[string]string) // pkg → name → kind
-	allMerged := make(map[string]*parser.Program)     // pkg → merged AST
-	allZnFiles := make(map[string][]string)           // pkg → source file paths
+	allExports := make(map[string]map[string]string)            // pkg → name → kind
+	allDataFields := make(map[string]map[string][]*parser.FieldDecl) // pkg → data class name → fields
+	allMerged := make(map[string]*parser.Program)               // pkg → merged AST
+	allZnFiles := make(map[string][]string)                     // pkg → source file paths
 
 	for _, pkg := range leafPkgs {
 		pkgDir := filepath.Join(srcDir, pkg)
@@ -254,9 +258,10 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		allMerged[pkg] = merged
 		allZnFiles[pkg] = znFiles
 		allExports[pkg] = codegen.CollectExports(merged)
+		allDataFields[pkg] = codegen.CollectDataClassFields(merged)
 	}
 
-	// 4. Generate Go code for each subpackage (all exports now available)
+	// 4. Generate Go code for each subpackage — one .go file per .zn file
 	for _, pkg := range leafPkgs {
 		merged, ok := allMerged[pkg]
 		if !ok {
@@ -268,38 +273,58 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		}
 
 		goPkgName := filepath.Base(pkg)
-		gen := codegen.New()
-		gen.SetSourceFile(merged.SourceFile)
-		gen.SetPackageName(goPkgName)
-		gen.SetModuleName(moduleName)
-		gen.SetGoModDir(goModDir)
-		gen.SetZincSubpackages(subpackages)
-		if len(importAliases) > 0 && importAliases[0] != nil {
-			gen.SetImportAliases(importAliases[0])
-		}
-		for otherPkg, otherExports := range allExports {
-			if otherPkg != pkg {
-				otherAlias := filepath.Base(otherPkg)
-				gen.SetSubpackageExports(otherAlias, otherExports)
-			}
-		}
-
-		className := strings.ToUpper(goPkgName[:1]) + goPkgName[1:]
-		files := gen.GenerateFiles(merged, className)
-
 		znFiles := allZnFiles[pkg]
-		for _, f := range files {
-			outPath := filepath.Join(pkgOutDir, f.Name)
-			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
-				return fmt.Errorf("write %s: %w", outPath, wErr)
+		siblingExports := allExports[pkg] // exports from all files in this package
+
+		// Parse each file individually and generate separately
+		for _, znPath := range znFiles {
+			prog, err := parseFile(znPath)
+			if err != nil {
+				return err
 			}
-			if !quiet {
-				fmt.Printf("  [%s] %d files → %s\n", pkg, len(znFiles), outPath)
+
+			baseName := strings.TrimSuffix(filepath.Base(znPath), ".zn")
+			className := strings.ToUpper(baseName[:1]) + baseName[1:]
+
+			gen := codegen.New()
+			gen.SetSourceFile(prog.SourceFile)
+			gen.SetPackageName(goPkgName)
+			gen.SetModuleName(moduleName)
+			gen.SetGoModDir(goModDir)
+			gen.SetZincSubpackages(subpackages)
+			gen.SetSiblingExports(siblingExports)
+			if len(importAliases) > 0 && importAliases[0] != nil {
+				gen.SetImportAliases(importAliases[0])
+			}
+			for otherPkg, otherExports := range allExports {
+				if otherPkg != pkg {
+					otherAlias := filepath.Base(otherPkg)
+					gen.SetSubpackageExports(otherAlias, otherExports)
+					if fields, ok := allDataFields[otherPkg]; ok {
+						gen.SetSubpackageDataFields(otherAlias, fields)
+					}
+				}
+			}
+
+			// Inject package declaration from merged (individual files may not have it)
+			if prog.Package == nil && merged.Package != nil {
+				prog.Package = merged.Package
+			}
+
+			files := gen.GenerateFiles(prog, className)
+			for _, f := range files {
+				outPath := filepath.Join(pkgOutDir, f.Name)
+				if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+					return fmt.Errorf("write %s: %w", outPath, wErr)
+				}
+				if !quiet {
+					fmt.Printf("  [%s] %s → %s\n", pkg, filepath.Base(znPath), f.Name)
+				}
 			}
 		}
 	}
 
-	// 3. Compile root files (package main) with knowledge of all subpackages
+	// 5. Compile root files (package main) — one .go file per .zn file
 	rootFiles, err := collectZnFilesFlat(srcDir)
 	if err != nil {
 		return err
@@ -308,40 +333,49 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		return nil
 	}
 
-	progs := make([]*parser.Program, 0, len(rootFiles))
+	// Collect root-level exports for sibling awareness
+	rootProgs := make([]*parser.Program, 0, len(rootFiles))
 	for _, path := range rootFiles {
 		prog, err := parseFile(path)
 		if err != nil {
 			return err
 		}
-		progs = append(progs, prog)
+		rootProgs = append(rootProgs, prog)
 	}
-	merged := mergePrograms(progs)
+	rootMerged := mergePrograms(rootProgs)
+	rootExports := codegen.CollectExports(rootMerged)
 
-	gen := codegen.New()
-	gen.SetSourceFile(merged.SourceFile)
-	gen.SetModuleName(moduleName)
-	gen.SetGoModDir(goModDir)
-	gen.SetZincSubpackages(subpackages)
-	if len(importAliases) > 0 && importAliases[0] != nil {
-		gen.SetImportAliases(importAliases[0])
-	}
-	for pkg, exports := range allExports {
-		alias := filepath.Base(pkg)
-		gen.SetSubpackageExports(alias, exports)
-	}
+	// Generate each root file individually
+	for i, prog := range rootProgs {
+		baseName := strings.TrimSuffix(filepath.Base(rootFiles[i]), ".zn")
+		className := strings.ToUpper(baseName[:1]) + baseName[1:]
 
-	dirName := filepath.Base(srcDir)
-	className := strings.ToUpper(dirName[:1]) + dirName[1:]
-	files := gen.GenerateFiles(merged, className)
-
-	for _, f := range files {
-		outPath := filepath.Join(outDir, f.Name)
-		if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
-			return fmt.Errorf("write %s: %w", outPath, wErr)
+		gen := codegen.New()
+		gen.SetSourceFile(prog.SourceFile)
+		gen.SetModuleName(moduleName)
+		gen.SetGoModDir(goModDir)
+		gen.SetZincSubpackages(subpackages)
+		gen.SetSiblingExports(rootExports)
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			gen.SetImportAliases(importAliases[0])
 		}
-		if !quiet {
-			fmt.Printf("  [main] %d files → %s\n", len(rootFiles), outPath)
+		for pkg, exports := range allExports {
+			alias := filepath.Base(pkg)
+			gen.SetSubpackageExports(alias, exports)
+			if fields, ok := allDataFields[pkg]; ok {
+				gen.SetSubpackageDataFields(alias, fields)
+			}
+		}
+
+		files := gen.GenerateFiles(prog, className)
+		for _, f := range files {
+			outPath := filepath.Join(outDir, f.Name)
+			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
+				return fmt.Errorf("write %s: %w", outPath, wErr)
+			}
+			if !quiet {
+				fmt.Printf("  [main] %s → %s\n", filepath.Base(rootFiles[i]), f.Name)
+			}
 		}
 	}
 

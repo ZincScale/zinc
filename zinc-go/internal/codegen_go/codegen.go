@@ -73,6 +73,7 @@ type Generator struct {
 	moduleName       string            // Go module name from zinc.toml (for subpackage import paths)
 	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
+	subpkgDataFields map[string]map[string][]*parser.FieldDecl // pkg → data class name → field params
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
 
@@ -145,6 +146,26 @@ func (g *Generator) SetImportAliases(aliases map[string]string) {
 	g.importAliases = aliases
 }
 
+// SetSiblingExports registers names from sibling files in the same package.
+// These are types, functions, etc. declared in other .zn files in the same directory.
+// Go handles cross-file visibility natively within a package, but the codegen
+// needs this for constructor name resolution and export capitalization decisions.
+func (g *Generator) SetSiblingExports(exports map[string]string) {
+	for name, kind := range exports {
+		switch kind {
+		case "data":
+			g.dataClasses[name] = true
+		case "class":
+			// Mark as known struct with a placeholder ClassDecl (not nil)
+			// so codegen can resolve constructor calls (NewType) and pointer types.
+			g.structs[name] = &parser.ClassDecl{Name: name}
+		case "interface":
+			g.interfaces[name] = true
+		}
+		g.pubNames[name] = true // siblings in same package are always visible
+	}
+}
+
 // SetSubpackageExports registers exported names from a subpackage.
 func (g *Generator) SetSubpackageExports(pkg string, exports map[string]string) {
 	if g.subpkgExports == nil {
@@ -188,6 +209,33 @@ func CollectExports(prog *parser.Program) map[string]string {
 		}
 	}
 	return exports
+}
+
+// CollectDataClassFields returns data class field declarations for cross-package
+// match destructuring. Keys are data class names, values are their ordered params.
+func CollectDataClassFields(prog *parser.Program) map[string][]*parser.FieldDecl {
+	fields := make(map[string][]*parser.FieldDecl)
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.DataClassDecl:
+			fields[decl.Name] = decl.Params
+		case *parser.ClassDecl:
+			if decl.IsSealed {
+				for _, v := range decl.Variants {
+					fields[v.Name] = v.Params
+				}
+			}
+		}
+	}
+	return fields
+}
+
+// SetSubpackageDataFields registers data class field info from a subpackage.
+func (g *Generator) SetSubpackageDataFields(pkg string, fields map[string][]*parser.FieldDecl) {
+	if g.subpkgDataFields == nil {
+		g.subpkgDataFields = make(map[string]map[string][]*parser.FieldDecl)
+	}
+	g.subpkgDataFields[pkg] = fields
 }
 
 // RegisterInterface allows external callers to register interface names.
@@ -377,9 +425,15 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.varTypeExprs = make(map[string]parser.TypeExpr)
 	g.varGoTypes = make(map[string]types.Type)
 	g.varStructTypes = make(map[string]string)
-	g.dataClasses = make(map[string]bool)
+	// Preserve dataClasses, interfaces, structs, and pubNames
+	// pre-populated by SetSiblingExports (sibling file awareness).
+	if g.dataClasses == nil {
+		g.dataClasses = make(map[string]bool)
+	}
 	g.typeImports = make(map[string]string)
-	g.pubNames = make(map[string]bool)
+	if g.pubNames == nil {
+		g.pubNames = make(map[string]bool)
+	}
 	g.importGoAliases = make(map[string]string)
 	g.collectDecls(prog.Decls)
 

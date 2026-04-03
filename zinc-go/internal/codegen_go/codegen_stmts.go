@@ -269,7 +269,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.renamedVars[varName] = safe
 			varName = safe
 		}
-		g.writeln("%s := %s", varName, g.formatExpr(v.Value))
+		if v.Type != nil {
+			typeName := g.formatType(v.Type)
+			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
+		} else {
+			g.writeln("%s := %s", varName, g.formatExpr(v.Value))
+		}
 	} else {
 		typeName := "interface{}"
 		if v.Type != nil {
@@ -513,6 +518,10 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 				if g.dataClasses[ident.Name] {
 					return true
 				}
+				// Check unqualified imports (e.g. Raw from core package)
+				if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "data" {
+					return true
+				}
 			}
 			// Qualified: core.Single(ff)
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
@@ -569,6 +578,10 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		var dataDecl *parser.DataClassDecl
 		if ident, ok := call.Callee.(*parser.Ident); ok {
 			typeName = ident.Name
+			// Resolve unqualified names to their Go-qualified form (e.g. Raw → core.Raw)
+			if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+				typeName = entry.pkg + "." + exportName(ident.Name)
+			}
 			// Look up the data class declaration to get field names
 			for _, d := range g.currentSealedVariants(ident.Name) {
 				if d.Name == ident.Name {
@@ -586,20 +599,32 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		g.indent++
 
 		// Bind destructured variables: case Single(ff) → ff := _v.Ff
-		if dataDecl != nil && len(call.Args) > 0 {
+		// Look up field params — local first, then cross-package.
+		var fieldParams []*parser.FieldDecl
+		if dataDecl != nil {
+			fieldParams = dataDecl.Params
+		} else if callerIdent, ok := call.Callee.(*parser.Ident); ok {
+			// Cross-package: look up field info via unqualifiedNames → subpkgDataFields
+			if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
+				if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
+					fieldParams = pkgFields[callerIdent.Name]
+				}
+			}
+		}
+
+		if fieldParams != nil && len(call.Args) > 0 {
 			for i, arg := range call.Args {
 				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
-					if i < len(dataDecl.Params) {
-						fieldName := exportName(dataDecl.Params[i].Name)
+					if i < len(fieldParams) {
+						fieldName := exportName(fieldParams[i].Name)
 						g.writeln("%s := _v.%s", ident.Name, fieldName)
 					}
 				}
 			}
 		} else if len(call.Args) > 0 {
-			// No data decl found — try positional binding with generic field names
+			// Last resort — capitalize the binding name as a field guess
 			for i, arg := range call.Args {
 				if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
-					// Use the arg name as a field guess (capitalize first letter)
 					fieldName := exportName(ident.Name)
 					g.writeln("%s := _v.%s", ident.Name, fieldName)
 				}
@@ -610,6 +635,24 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		g.emitBlock(c.Body)
 		g.indent--
 	}
+
+	// If no explicit default arm was written, add one with panic("unreachable")
+	// to satisfy Go's exhaustiveness requirement on type switches.
+	hasDefault := false
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		g.writeln("default:")
+		g.indent++
+		g.writeln("_ = _v")
+		g.writeln("panic(\"unreachable\")")
+		g.indent--
+	}
+
 	g.writeln("}")
 }
 

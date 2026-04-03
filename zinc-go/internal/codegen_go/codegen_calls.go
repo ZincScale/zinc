@@ -201,9 +201,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		case "entrySet":
 			return obj
 		case "getKey":
-			return obj + ".Key"
+			if !g.isStructVar(sel.Object) {
+				return obj + ".Key"
+			}
 		case "getValue":
-			return obj + ".Value"
+			if !g.isStructVar(sel.Object) {
+				return obj + ".Value"
+			}
 		case "join":
 			g.needImport("strings")
 			if len(c.Args) == 1 {
