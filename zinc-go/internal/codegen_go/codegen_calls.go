@@ -83,11 +83,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			if len(c.TypeArgs) > 0 {
 				var goTA []string
 				for _, ta := range c.TypeArgs {
-					if mapped, ok := zincToGoType[ta]; ok {
-						goTA = append(goTA, mapped)
-					} else {
-						goTA = append(goTA, ta)
-					}
+					goTA = append(goTA, g.resolveTypeArg(ta))
 				}
 				goTypeArgStr = "[" + strings.Join(goTA, ", ") + "]"
 			}
@@ -434,11 +430,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	if callee == "Channel" || callee == "channel" || callee == "Chan" {
 		chanType := "interface{}"
 		if len(c.TypeArgs) > 0 {
-			if mapped, ok := zincToGoType[c.TypeArgs[0]]; ok {
-				chanType = mapped
-			} else {
-				chanType = c.TypeArgs[0]
-			}
+			chanType = g.resolveTypeArg(c.TypeArgs[0])
 		}
 		if args != "" {
 			return fmt.Sprintf("make(chan %s, %s)", chanType, args)
@@ -451,11 +443,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	if len(c.TypeArgs) > 0 {
 		var goTA []string
 		for _, ta := range c.TypeArgs {
-			if mapped, ok := zincToGoType[ta]; ok {
-				goTA = append(goTA, mapped)
-			} else {
-				goTA = append(goTA, ta)
-			}
+			goTA = append(goTA, g.resolveTypeArg(ta))
 		}
 		goTypeArgStr = "[" + strings.Join(goTA, ", ") + "]"
 	}

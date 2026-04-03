@@ -162,7 +162,27 @@ func (g *Generator) resolveUnqualifiedType(name string) (string, bool) {
 	if entry.kind == "class" {
 		return "*" + qualified, true
 	}
+	// For Go stdlib types: check if it's a struct with pointer-receiver methods
+	// (e.g. http.Request should be *http.Request)
+	if goPath, ok := g.importMap[entry.pkg]; ok {
+		if g.goResolver.IsStruct(goPath, goName) &&
+			g.goResolver.HasPointerReceiverMethods(goPath, goName) {
+			return "*" + qualified, true
+		}
+	}
 	return qualified, true
+}
+
+// resolveTypeArg resolves a raw type argument string (from CallExpr.TypeArgs)
+// to its Go type. Checks zincToGoType first, then unqualified imports.
+func (g *Generator) resolveTypeArg(ta string) string {
+	if mapped, ok := zincToGoType[ta]; ok {
+		return mapped
+	}
+	if resolved, ok := g.resolveUnqualifiedType(ta); ok {
+		return resolved
+	}
+	return ta
 }
 
 // resolveUnqualifiedExpr checks if a bare identifier is from an imported package.

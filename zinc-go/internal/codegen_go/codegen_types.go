@@ -648,11 +648,7 @@ func (g *Generator) inferFieldType(expr parser.Expr) string {
 			case "Channel", "channel", "Chan":
 				chanType := "interface{}"
 				if len(call.TypeArgs) > 0 {
-					if mapped, ok := zincToGoType[call.TypeArgs[0]]; ok {
-						chanType = mapped
-					} else {
-						chanType = call.TypeArgs[0]
-					}
+					chanType = g.resolveTypeArg(call.TypeArgs[0])
 				}
 				return "chan " + chanType
 			}
