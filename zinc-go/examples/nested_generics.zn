@@ -42,6 +42,26 @@ fn main() {
     // Nested generics in function parameter types
     var total = sumNested(scores)
     print("total scores: ${total}")
+
+    // Empty typed map literal — .keys() should still return typed list
+    var emptyMap = Map<String, int>{}
+    emptyMap["x"] = 1
+    emptyMap["y"] = 2
+    var emptyKeys = emptyMap.keys()
+    print("empty map keys count: ${len(emptyKeys)}")
+    // Use key as a proper String (not interface{}) — this would fail without the fix
+    var sum = 0
+    for k in emptyKeys {
+        sum = sum + emptyMap[k]
+    }
+    print("empty map values sum: ${sum}")
+
+    // Empty typed list literal — verify type tracking
+    var emptyList = List<String>[]
+    emptyList = append(emptyList, "hello")
+    emptyList = append(emptyList, "world")
+    print("list size: ${len(emptyList)}")
+    print("list first: ${emptyList[0]}")
 }
 
 fn sumNested(Map<String, List<int>> m): int {

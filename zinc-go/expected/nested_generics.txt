@@ -6,3 +6,7 @@ deep[outer][x]: [1 2 3]
 keys type works: 2
 values count: 2
 total scores: 437
+empty map keys count: 2
+empty map values sum: 3
+list size: 2
+list first: hello
