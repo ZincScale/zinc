@@ -26,6 +26,7 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	typeParams := p.parseTypeParams()
 	params := p.v2ParseParamList()
 
@@ -99,9 +100,11 @@ func (p *Parser) v2ParseParam() *ParamDecl {
 			variadic = true
 		}
 		name = p.v2ExpectIdent()
+		p.v2ValidateDeclName(name)
 	} else {
 		// Untyped param or variadic: x, *args, **kwargs
 		name = p.v2ExpectIdent()
+		p.v2ValidateDeclName(name)
 	}
 
 	var def Expr
@@ -122,6 +125,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_CLASS)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	typeParams := p.parseTypeParams()
 
 	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>, core.Describable
@@ -294,6 +298,7 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
 	p.expect(lexer.TOKEN_FN)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	params := p.v2ParseParamList()
 
 	// Optional return type after colon: fn name(params): Type { }
@@ -411,6 +416,7 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_DATA)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	typeParams := p.parseTypeParams()
 
 	// Parse record-style params: data User(String name, int age = 0)
@@ -478,6 +484,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_INTERFACE)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	typeParams := p.parseTypeParams()
 	p.expect(lexer.TOKEN_LBRACE)
 	var methods []*MethodSig
@@ -489,6 +496,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 		}
 		p.expect(lexer.TOKEN_FN)
 		mName := p.expect(lexer.TOKEN_IDENT).Literal
+		p.v2ValidateDeclName(mName)
 		params := p.v2ParseParamList()
 		var retType TypeExpr
 		if p.check(lexer.TOKEN_COLON) {
@@ -514,6 +522,7 @@ func (p *Parser) v2ParseConstDecl() *ConstDecl {
 	} else {
 		name = p.v2ExpectIdent()
 	}
+	p.v2ValidateDeclName(name)
 	p.expect(lexer.TOKEN_ASSIGN)
 	val := p.v2ParseExpr()
 	return &ConstDecl{Line: line, Name: name, Type: typ, Value: val}
@@ -524,6 +533,7 @@ func (p *Parser) v2ParseTypeAlias() *TypeAliasDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_TYPE)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	p.expect(lexer.TOKEN_ASSIGN)
 	typ := p.v2ParseType()
 	return &TypeAliasDecl{Line: line, Name: name, Type: typ}
@@ -534,11 +544,14 @@ func (p *Parser) v2ParseEnumDecl() *EnumDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_ENUM)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
+	p.v2ValidateDeclName(name)
 	p.expect(lexer.TOKEN_LBRACE)
 	var variants []string
 	p.skipSemis()
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		variants = append(variants, p.expect(lexer.TOKEN_IDENT).Literal)
+		vName := p.expect(lexer.TOKEN_IDENT).Literal
+		p.v2ValidateDeclName(vName)
+		variants = append(variants, vName)
 		if p.check(lexer.TOKEN_COMMA) {
 			p.advance()
 		}

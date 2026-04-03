@@ -170,11 +170,43 @@ func (p *Parser) v2ParseRange() Expr {
 
 // v2ParseAddSub: expr (+|-) expr
 func (p *Parser) v2ParseAddSub() Expr {
-	left := p.v2ParseMulDiv()
+	left := p.v2ParseShift()
 	for p.match(lexer.TOKEN_PLUS, lexer.TOKEN_MINUS) {
 		op := p.advance().Literal
-		right := p.v2ParseMulDiv()
+		right := p.v2ParseShift()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
+	}
+	return left
+}
+
+// v2ParseShift: expr << expr, expr >> expr
+// Two adjacent < or > tokens (no whitespace gap) form a shift operator.
+// This only fires in expression context — generics are parsed in type context
+// (v2ParseType) which never calls this function, so Map<String, List<int>> is safe.
+func (p *Parser) v2ParseShift() Expr {
+	left := p.v2ParseMulDiv()
+	for {
+		cur := p.peek()
+		next := p.peekAt(1)
+		// Right shift: two adjacent > tokens
+		if cur.Type == lexer.TOKEN_GT && next.Type == lexer.TOKEN_GT &&
+			cur.Line == next.Line && next.Col == cur.Col+1 {
+			p.advance() // consume first >
+			p.advance() // consume second >
+			right := p.v2ParseMulDiv()
+			left = &BinaryExpr{Left: left, Op: ">>", Right: right}
+			continue
+		}
+		// Left shift: two adjacent < tokens
+		if cur.Type == lexer.TOKEN_LT && next.Type == lexer.TOKEN_LT &&
+			cur.Line == next.Line && next.Col == cur.Col+1 {
+			p.advance() // consume first <
+			p.advance() // consume second <
+			right := p.v2ParseMulDiv()
+			left = &BinaryExpr{Left: left, Op: "<<", Right: right}
+			continue
+		}
+		break
 	}
 	return left
 }

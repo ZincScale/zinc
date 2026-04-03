@@ -117,10 +117,14 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 	if p.check(lexer.TOKEN_LPAREN) {
 		p.advance()
 		var names []string
-		names = append(names, p.v2ExpectIdent())
+		n := p.v2ExpectIdent()
+		p.v2ValidateDeclName(n)
+		names = append(names, n)
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			names = append(names, p.v2ExpectIdent())
+			n = p.v2ExpectIdent()
+			p.v2ValidateDeclName(n)
+			names = append(names, n)
 		}
 		p.expect(lexer.TOKEN_RPAREN)
 		p.expect(lexer.TOKEN_ASSIGN)
@@ -138,16 +142,20 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 		// Type is present: var int x = 5, var list<int> nums = []
 		typ = p.v2ParseType()
 		name = p.v2ExpectIdent()
+		p.v2ValidateDeclName(name)
 	} else {
 		// No type (inferred): var x = 5
 		name = p.v2ExpectIdent()
+		p.v2ValidateDeclName(name)
 
 		// Tuple unpacking: var a, b = expr
 		if p.check(lexer.TOKEN_COMMA) {
 			names := []string{name}
 			for p.check(lexer.TOKEN_COMMA) {
 				p.advance()
-				names = append(names, p.expect(lexer.TOKEN_IDENT).Literal)
+				tupleName := p.expect(lexer.TOKEN_IDENT).Literal
+				p.v2ValidateDeclName(tupleName)
+				names = append(names, tupleName)
 			}
 			p.expect(lexer.TOKEN_ASSIGN)
 			// Check for concurrent { ... }

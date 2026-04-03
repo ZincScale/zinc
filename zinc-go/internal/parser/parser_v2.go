@@ -146,6 +146,24 @@ func (p *Parser) ParseV2() (prog *Program) {
 	return prog
 }
 
+// reservedTypeNames are builtin type and cast names that cannot be used
+// as variable, function, class, parameter, or other declaration names.
+// These names are reserved because the codegen rewrites calls to them
+// (e.g., long(x) → int64(x), str(x) → fmt.Sprint(x)).
+var reservedTypeNames = map[string]bool{
+	"int": true, "long": true, "float": true, "double": true,
+	"str": true, "bool": true, "byte": true, "char": true,
+	"string": true, "void": true,
+}
+
+// v2ValidateDeclName checks that a declared name does not shadow a reserved
+// builtin type or function. Call this at declaration sites only (not references).
+func (p *Parser) v2ValidateDeclName(name string) {
+	if reservedTypeNames[name] {
+		p.errorf("'%s' is a reserved builtin and cannot be used as a name", name)
+	}
+}
+
 // v2IsIdent returns true if the current token can act as an identifier
 // (includes contextual keywords like data, match, print).
 func (p *Parser) v2IsIdent() bool {

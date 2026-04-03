@@ -465,6 +465,38 @@ func (l *Lexer) readTripleQuoteString(quote rune, line, col int) Token {
 func (l *Lexer) readNumber(line, col int) Token {
 	start := l.pos
 	isFloat := false
+
+	// Hex: 0x or 0X
+	if l.peek() == '0' && (l.peekAt(1) == 'x' || l.peekAt(1) == 'X') {
+		l.advance() // '0'
+		l.advance() // 'x'/'X'
+		for isHexDigit(l.peek()) {
+			l.advance()
+		}
+		return l.makeToken(TOKEN_INT_LIT, string(l.src[start:l.pos]), line, col)
+	}
+
+	// Binary: 0b or 0B
+	if l.peek() == '0' && (l.peekAt(1) == 'b' || l.peekAt(1) == 'B') {
+		l.advance() // '0'
+		l.advance() // 'b'/'B'
+		for l.peek() == '0' || l.peek() == '1' {
+			l.advance()
+		}
+		return l.makeToken(TOKEN_INT_LIT, string(l.src[start:l.pos]), line, col)
+	}
+
+	// Octal: 0o or 0O
+	if l.peek() == '0' && (l.peekAt(1) == 'o' || l.peekAt(1) == 'O') {
+		l.advance() // '0'
+		l.advance() // 'o'/'O'
+		for l.peek() >= '0' && l.peek() <= '7' {
+			l.advance()
+		}
+		return l.makeToken(TOKEN_INT_LIT, string(l.src[start:l.pos]), line, col)
+	}
+
+	// Decimal
 	for isDigit(l.peek()) {
 		l.advance()
 	}
@@ -511,6 +543,10 @@ func (l *Lexer) Tokenize() []Token {
 
 func isDigit(ch rune) bool {
 	return ch >= '0' && ch <= '9'
+}
+
+func isHexDigit(ch rune) bool {
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
 func isLetter(ch rune) bool {

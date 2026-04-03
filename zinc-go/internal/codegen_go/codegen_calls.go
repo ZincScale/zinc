@@ -395,6 +395,24 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 		}
 		return fmt.Sprintf("float64(%s)", args)
+	case "long":
+		if len(c.Args) == 1 {
+			argType := g.inferExprType(c.Args[0], g.varTypes)
+			if argType == "string" {
+				g.needImport("strconv")
+				return fmt.Sprintf("strconv.ParseInt(%s, 10, 64)", args)
+			}
+		}
+		return fmt.Sprintf("int64(%s)", args)
+	case "double":
+		if len(c.Args) == 1 {
+			argType := g.inferExprType(c.Args[0], g.varTypes)
+			if argType == "string" {
+				g.needImport("strconv")
+				return fmt.Sprintf("strconv.ParseFloat(%s, 64)", args)
+			}
+		}
+		return fmt.Sprintf("float64(%s)", args)
 	case "input":
 		g.needImport("fmt")
 		return fmt.Sprintf("func() string { var s string; fmt.Scanln(&s); return s }()")

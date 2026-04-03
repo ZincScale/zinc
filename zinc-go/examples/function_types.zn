@@ -36,8 +36,8 @@ fn main() {
     var triple = multiplier(3)
     print("triple(5): {triple(5)}")
 
-    var double = multiplier(2)
-    print("double(7): {double(7)}")
+    var doubler = multiplier(2)
+    print("double(7): {doubler(7)}")
 
     // Void callback
     doThen((String msg) -> print("callback: {msg}"))
