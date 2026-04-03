@@ -266,6 +266,7 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
+				g.interfaces[decl.Name] = true
 				for _, v := range decl.Variants {
 					g.dataClasses[v.Name] = true
 					g.funcSigs["New"+v.Name] = fieldDeclsToParams(v.Params)

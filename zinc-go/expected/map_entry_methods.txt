@@ -1,0 +1,5 @@
+kv.getKey = name
+kv.getValue = alice
+alice = 30
+bob = 25
+map_entry_methods OK
