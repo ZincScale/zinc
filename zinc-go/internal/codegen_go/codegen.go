@@ -162,6 +162,14 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 			g.structs[name] = &parser.ClassDecl{Name: name}
 		case "interface":
 			g.interfaces[name] = true
+		case "func":
+			// Register sibling functions so cross-file calls get exported names
+			if g.funcSigs == nil {
+				g.funcSigs = make(map[string][]*parser.ParamDecl)
+			}
+			if _, exists := g.funcSigs[name]; !exists {
+				g.funcSigs[name] = nil // mark as known function (no param info)
+			}
 		}
 		g.pubNames[name] = true // siblings in same package are always visible
 	}
@@ -441,7 +449,10 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.className = className
 	g.imports = make(map[string]bool)
 	g.errorFuncs = make(map[string]bool)
-	g.funcSigs = make(map[string][]*parser.ParamDecl)
+	// Preserve funcSigs pre-populated by SetSiblingExports (sibling function awareness).
+	if g.funcSigs == nil {
+		g.funcSigs = make(map[string][]*parser.ParamDecl)
+	}
 	g.varTypes = make(map[string]string)
 	g.varTypeExprs = make(map[string]parser.TypeExpr)
 	g.varGoTypes = make(map[string]types.Type)
