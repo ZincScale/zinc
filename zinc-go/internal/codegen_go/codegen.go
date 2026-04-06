@@ -81,7 +81,8 @@ type Generator struct {
 	// Unqualified import resolution: bare name → package + kind
 	// Built from subpkgExports after import processing. Allows writing
 	// Processor instead of lib.Processor when import lib is declared.
-	unqualifiedNames map[string]unqualifiedEntry
+	unqualifiedNames      map[string]unqualifiedEntry
+	unqualifiedCollisions map[string][]string // name → list of packages that export it
 }
 
 // Name resolution, type formatting, and visibility helpers are in codegen_resolve.go.

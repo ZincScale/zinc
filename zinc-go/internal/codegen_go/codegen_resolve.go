@@ -5,6 +5,7 @@ package codegen_go
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"zinc-go/internal/parser"
@@ -36,7 +37,7 @@ var goBuiltinNames = map[string]bool{
 }
 
 // addUnqualified adds a name to the unqualified map, handling collisions.
-func addUnqualified(names map[string]unqualifiedEntry, collisions map[string]bool,
+func addUnqualified(names map[string]unqualifiedEntry, collisions map[string][]string,
 	localNames map[string]bool, pkg, name, kind string) {
 	if localNames[name] {
 		return // local declaration shadows import
@@ -44,12 +45,15 @@ func addUnqualified(names map[string]unqualifiedEntry, collisions map[string]boo
 	if goBuiltinNames[name] {
 		return // never shadow Go builtins
 	}
-	if _, exists := names[name]; exists {
-		collisions[name] = true
+	if existing, exists := names[name]; exists {
+		// Collision: same name from different packages
+		collisions[name] = []string{existing.pkg, pkg}
 		delete(names, name)
 		return
 	}
-	if collisions[name] {
+	if pkgs, ok := collisions[name]; ok {
+		// Already collided — track additional package
+		collisions[name] = append(pkgs, pkg)
 		return
 	}
 	names[name] = unqualifiedEntry{pkg: pkg, name: name, kind: kind}
@@ -102,7 +106,7 @@ func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
 		importedPkgs[alias] = true
 	}
 
-	collisions := make(map[string]bool)
+	collisions := make(map[string][]string)
 
 	// 1. Zinc subpackage exports (already collected by project compilation)
 	for pkg, exports := range g.subpkgExports {
@@ -140,6 +144,9 @@ func (g *Generator) buildUnqualifiedNames(prog *parser.Program) {
 			addUnqualified(g.unqualifiedNames, collisions, localNames, alias, name, kind)
 		}
 	}
+
+	// Store collisions for error reporting
+	g.unqualifiedCollisions = collisions
 }
 
 // resolveUnqualifiedType checks if a bare type name is from an imported package.
@@ -181,6 +188,11 @@ func (g *Generator) resolveTypeArg(ta string) string {
 	}
 	if resolved, ok := g.resolveUnqualifiedType(ta); ok {
 		return resolved
+	}
+	// Check if unresolved due to collision across imported packages
+	if pkgs, ok := g.unqualifiedCollisions[ta]; ok {
+		fmt.Fprintf(os.Stderr, "error: ambiguous type %q — exported by multiple imports: %s. Use qualified form (e.g. %s.%s)\n",
+			ta, strings.Join(pkgs, ", "), pkgs[0], ta)
 	}
 	return ta
 }

@@ -1280,9 +1280,22 @@ func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
 func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	if len(w.Resources) == 1 && w.Resources[0].Name == "_lock" {
 		lockExpr := g.formatExpr(w.Resources[0].Value)
-		g.writeln("%s.Lock()", lockExpr)
-		g.writeln("defer %s.Unlock()", lockExpr)
-		g.emitBlock(w.Body)
+		if blockContainsReturn(w.Body) {
+			// Body has return statements — use direct defer (returns must reach enclosing function)
+			g.writeln("%s.Lock()", lockExpr)
+			g.writeln("defer %s.Unlock()", lockExpr)
+			g.emitBlock(w.Body)
+		} else {
+			// No returns — wrap in anonymous function so defer is scoped to the block.
+			// Critical for lock blocks inside loops — without this, defer never fires.
+			g.writeln("func() {")
+			g.indent++
+			g.writeln("%s.Lock()", lockExpr)
+			g.writeln("defer %s.Unlock()", lockExpr)
+			g.emitBlock(w.Body)
+			g.indent--
+			g.writeln("}()")
+		}
 		return
 	}
 	for _, r := range w.Resources {
@@ -1290,6 +1303,48 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 		g.writeln("defer %s.Close()", r.Name)
 	}
 	g.emitBlock(w.Body)
+}
+
+// blockContainsReturn checks if a block contains any return statement (recursively).
+func blockContainsReturn(block *parser.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, s := range block.Stmts {
+		switch st := s.(type) {
+		case *parser.ReturnStmt:
+			return true
+		case *parser.IfStmt:
+			if blockContainsReturn(st.Then) {
+				return true
+			}
+			if elseBlock, ok := st.ElseStmt.(*parser.BlockStmt); ok {
+				if blockContainsReturn(elseBlock) {
+					return true
+				}
+			}
+			if elseIf, ok := st.ElseStmt.(*parser.IfStmt); ok {
+				if blockContainsReturn(elseIf.Then) {
+					return true
+				}
+			}
+		case *parser.ForStmt:
+			if blockContainsReturn(st.Body) {
+				return true
+			}
+		case *parser.WhileStmt:
+			if blockContainsReturn(st.Body) {
+				return true
+			}
+		case *parser.MatchStmt:
+			for _, c := range st.Cases {
+				if blockContainsReturn(c.Body) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {

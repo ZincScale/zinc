@@ -71,6 +71,17 @@ class Config {
         return viper.GetStringMapString(key)
     }
 
+    // getSubKeys returns the top-level keys under a config path.
+    // e.g. getSubKeys("flow.processors") → ["tag-env", "sink"] for map-keyed config.
+    pub fn getSubKeys(String key): List<String> {
+        var m = viper.GetStringMap(key)
+        var keys = List<String>[]
+        for k, _ in m {
+            keys = append(keys, k)
+        }
+        return keys
+    }
+
     // --- Setters ---
 
     pub fn set(String key, any value) {

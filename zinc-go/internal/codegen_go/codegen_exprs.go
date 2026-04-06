@@ -219,33 +219,84 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 
 // --- Binary expressions ------------------------------------------------------
 
-func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
-	left := g.formatExpr(b.Left)
-	right := g.formatExpr(b.Right)
+// goPrecedence returns the Go operator precedence for a binary operator.
+// Higher number = binds tighter. Returns 0 for unknown.
+func goPrecedence(op string) int {
+	switch op {
+	case "or", "||":
+		return 1
+	case "and", "&&":
+		return 2
+	case "==", "!=", "<", "<=", ">", ">=", "===", "!==":
+		return 3
+	case "+", "-":
+		return 4
+	case "*", "/", "%":
+		return 5
+	default:
+		return 0
+	}
+}
 
+// wrapIfLowerPrec wraps a child expression in parentheses if it is a BinaryExpr
+// with lower precedence than the parent operator.
+func (g *Generator) wrapIfLowerPrec(child parser.Expr, parentOp string) string {
+	formatted := g.formatExpr(child)
+	if bin, ok := child.(*parser.BinaryExpr); ok {
+		childPrec := goPrecedence(bin.Op)
+		parentPrec := goPrecedence(parentOp)
+		if childPrec > 0 && parentPrec > 0 && childPrec < parentPrec {
+			return "(" + formatted + ")"
+		}
+	}
+	return formatted
+}
+
+func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 	switch b.Op {
 	case "and", "&&":
+		left := g.wrapIfLowerPrec(b.Left, b.Op)
+		right := g.wrapIfLowerPrec(b.Right, b.Op)
 		return fmt.Sprintf("%s && %s", left, right)
 	case "or", "||":
+		left := g.wrapIfLowerPrec(b.Left, b.Op)
+		right := g.wrapIfLowerPrec(b.Right, b.Op)
 		return fmt.Sprintf("%s || %s", left, right)
 	case "not":
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("!%s", right)
 	case "**":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		g.needImport("math")
 		return fmt.Sprintf("math.Pow(float64(%s), float64(%s))", left, right)
 	case "==":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("%s == %s", left, right)
 	case "!=":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("%s != %s", left, right)
 	case "===":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("%s == %s", left, right)
 	case "!==":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("%s != %s", left, right)
 	case "in":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return g.formatInExpr(b.Left, b.Right, left, right)
 	case "not in":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return "!" + g.formatInExpr(b.Left, b.Right, left, right)
 	case "is":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		goType := g.formatType(&parser.SimpleType{Name: right})
 		knownType := g.inferExprType(b.Left, g.varTypes)
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
@@ -254,6 +305,8 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		g.needImport("reflect")
 		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	case "is not":
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		goType := g.formatType(&parser.SimpleType{Name: right})
 		knownType := g.inferExprType(b.Left, g.varTypes)
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
@@ -262,6 +315,8 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		g.needImport("reflect")
 		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
 	default:
+		left := g.formatExpr(b.Left)
+		right := g.formatExpr(b.Right)
 		return fmt.Sprintf("%s %s %s", left, b.Op, right)
 	}
 }
