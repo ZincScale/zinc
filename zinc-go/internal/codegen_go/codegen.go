@@ -73,7 +73,8 @@ type Generator struct {
 	moduleName       string            // Go module name from zinc.toml (for subpackage import paths)
 	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
-	subpkgDataFields map[string]map[string][]*parser.FieldDecl // pkg → data class name → field params
+	subpkgDataFields map[string]map[string][]*parser.FieldDecl   // pkg → data class name → field params
+	subpkgStructs    map[string]map[string]*parser.ClassDecl    // pkg → class name → full class decl (for method lookups)
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
 
@@ -228,6 +229,25 @@ func CollectDataClassFields(prog *parser.Program) map[string][]*parser.FieldDecl
 		}
 	}
 	return fields
+}
+
+// CollectClassDecls returns full class declarations for cross-package method lookups.
+func CollectClassDecls(prog *parser.Program) map[string]*parser.ClassDecl {
+	classes := make(map[string]*parser.ClassDecl)
+	for _, d := range prog.Decls {
+		if decl, ok := d.(*parser.ClassDecl); ok && !decl.IsSealed {
+			classes[decl.Name] = decl
+		}
+	}
+	return classes
+}
+
+// SetSubpackageStructs registers class declarations from a subpackage for method lookups.
+func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
+	if g.subpkgStructs == nil {
+		g.subpkgStructs = make(map[string]map[string]*parser.ClassDecl)
+	}
+	g.subpkgStructs[pkg] = classes
 }
 
 // SetSubpackageDataFields registers data class field info from a subpackage.

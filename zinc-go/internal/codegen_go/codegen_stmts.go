@@ -175,6 +175,11 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 						}
 					}
 				}
+				// Track method call return type
+				retType := g.resolveMethodReturnType(sel)
+				if retType != "" && g.isClassType(retType) {
+					g.varStructTypes[v.Name] = retType
+				}
 			}
 		}
 		g.emitOrAssignment(v.Name, v.Value, v.OrHandler)
@@ -241,6 +246,17 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 							g.varStructTypes[v.Name] = sel.Field
 						}
 					}
+				}
+			}
+		}
+
+		// Track struct type from method call return on known struct instances
+		// e.g., var dlq = fab.getDLQ() where fab:Fabric and getDLQ returns DLQ
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				retType := g.resolveMethodReturnType(sel)
+				if retType != "" && g.isClassType(retType) {
+					g.varStructTypes[v.Name] = retType
 				}
 			}
 		}
@@ -922,6 +938,56 @@ func (g *Generator) isClassType(name string) bool {
 		return entry.kind == "class" || entry.kind == "data"
 	}
 	return false
+}
+
+// resolveMethodReturnType determines the return type of a method call on a known struct.
+// For example, fab.getDLQ() where fab is Fabric and getDLQ() returns DLQ → returns "DLQ".
+func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
+	receiverType := ""
+	if ident, ok := sel.Object.(*parser.Ident); ok {
+		// Check local variables
+		if st, ok := g.varStructTypes[ident.Name]; ok {
+			receiverType = st
+		}
+		// Check class fields
+		if receiverType == "" && g.currentClass != "" && g.currentFields[ident.Name] {
+			if cls, ok := g.structs[g.currentClass]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == ident.Name {
+						if st, ok := f.Type.(*parser.SimpleType); ok {
+							receiverType = st.Name
+						}
+					}
+				}
+			}
+		}
+	}
+	if receiverType == "" {
+		return ""
+	}
+	// Look up the method's return type — check local structs first, then imported
+	if cls, ok := g.structs[receiverType]; ok {
+		for _, m := range cls.Methods {
+			if m.Name == sel.Field && m.ReturnType != nil {
+				if st, ok := m.ReturnType.(*parser.SimpleType); ok {
+					return st.Name
+				}
+			}
+		}
+	}
+	// Check imported class declarations from all subpackages
+	for _, pkgClasses := range g.subpkgStructs {
+		if cls, ok := pkgClasses[receiverType]; ok {
+			for _, m := range cls.Methods {
+				if m.Name == sel.Field && m.ReturnType != nil {
+					if st, ok := m.ReturnType.(*parser.SimpleType); ok {
+						return st.Name
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // isStructVar checks if an expression refers to a known class instance variable.

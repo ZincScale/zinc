@@ -233,7 +233,8 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
 	allExports := make(map[string]map[string]string)            // pkg → name → kind
-	allDataFields := make(map[string]map[string][]*parser.FieldDecl) // pkg → data class name → fields
+	allDataFields := make(map[string]map[string][]*parser.FieldDecl)  // pkg → data class name → fields
+	allClassDecls := make(map[string]map[string]*parser.ClassDecl)   // pkg → class name → full decl
 	allMerged := make(map[string]*parser.Program)               // pkg → merged AST
 	allZnFiles := make(map[string][]string)                     // pkg → source file paths
 
@@ -259,6 +260,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		allZnFiles[pkg] = znFiles
 		allExports[pkg] = codegen.CollectExports(merged)
 		allDataFields[pkg] = codegen.CollectDataClassFields(merged)
+		allClassDecls[pkg] = codegen.CollectClassDecls(merged)
 	}
 
 	// 4. Generate Go code for each subpackage — one .go file per .zn file
@@ -302,6 +304,9 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 					gen.SetSubpackageExports(otherAlias, otherExports)
 					if fields, ok := allDataFields[otherPkg]; ok {
 						gen.SetSubpackageDataFields(otherAlias, fields)
+					}
+					if classes, ok := allClassDecls[otherPkg]; ok {
+						gen.SetSubpackageStructs(otherAlias, classes)
 					}
 				}
 			}
@@ -364,6 +369,9 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 			gen.SetSubpackageExports(alias, exports)
 			if fields, ok := allDataFields[pkg]; ok {
 				gen.SetSubpackageDataFields(alias, fields)
+			}
+			if classes, ok := allClassDecls[pkg]; ok {
+				gen.SetSubpackageStructs(alias, classes)
 			}
 		}
 
