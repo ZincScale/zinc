@@ -180,6 +180,25 @@ def _braces_to_indent(lines: list[str]) -> list[str]:
             else:
                 continue
 
+        # Single-line block: `def foo() -> str { return x }` or `if cond { stmt }`
+        if stripped.endswith("}") and "{" in stripped:
+            brace_pos = stripped.index("{")
+            before = stripped[:brace_pos].rstrip()
+            body = stripped[brace_pos+1:].rstrip()
+            if body.endswith("}"):
+                body = body[:-1].strip()
+            # Check if it's a block statement (first word is a block keyword)
+            if before:
+                first_word = before.lstrip("}").strip().split()[0] if before.lstrip("}").strip() else ""
+                if first_word in _BLOCK_KEYWORDS:
+                    out.append("    " * indent + before + ":")
+                    if body:
+                        out.append("    " * (indent + 1) + body)
+                    continue
+            # Not a block — pass through as regular line
+            out.append("    " * indent + stripped)
+            continue
+
         # Line ends with opening brace
         if stripped.endswith("{"):
             if _is_block_open(stripped):
@@ -236,8 +255,8 @@ def _inject_self(lines: list[str]) -> list[str]:
         if in_class and stripped and current_indent <= class_indent and not stripped.startswith("class "):
             in_class = False
 
-        # Inside a class, transform def statements
-        if in_class and stripped.startswith("def ") and current_indent > class_indent:
+        # Inside a class, transform only direct methods (one indent level deeper), not nested functions
+        if in_class and stripped.startswith("def ") and current_indent == class_indent + 4:
             # Skip @staticmethod and @classmethod decorated methods
             if out and out[-1].strip().startswith("@staticmethod"):
                 out.append(line)
@@ -255,7 +274,8 @@ def _inject_self(lines: list[str]) -> list[str]:
                 after_paren = line[m.end():]
                 # Inject self
                 if after_paren.startswith(")"):
-                    line = f"{ws}def {name}(self):{after_paren[2:]}" if after_paren.startswith("):") else f"{ws}def {name}(self){after_paren}"
+                    # Empty params: ): or ) -> ... — replace ) with self)
+                    line = f"{ws}def {name}(self){after_paren[1:]}"
                 else:
                     line = f"{ws}def {name}(self, {after_paren}"
 

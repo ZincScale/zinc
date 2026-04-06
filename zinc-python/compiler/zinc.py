@@ -75,7 +75,12 @@ def _get_deps(config: dict | None) -> list[str]:
 def _get_python_version(config: dict | None) -> str:
     if not config:
         return ">=3.14"
-    return config.get("python", {}).get("version", ">=3.14")
+    ver = config.get("python", {}).get("version", ">=3.14")
+    # Strip free-threading suffix for PEP 440 compatibility in pyproject.toml
+    ver = ver.rstrip("t")
+    if ver and ver[0].isdigit():
+        ver = ">=" + ver
+    return ver
 
 
 # Default Python for uv — free-threading build
