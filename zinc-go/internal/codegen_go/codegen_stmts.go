@@ -352,7 +352,7 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	if r.Value == nil {
 		if g.currentReturnType != "" {
-			zv := zeroValueFor(g.currentReturnType)
+			zv := g.zeroValueFor(g.currentReturnType)
 			g.writeln("return %s, nil", zv)
 		} else if g.currentReturnType == "" && g.errorFuncs != nil {
 			g.writeln("return")
@@ -365,7 +365,7 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	// return Error(...) → return zero, fmt.Errorf(...)
 	if call, ok := r.Value.(*parser.CallExpr); ok {
 		if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
-			zv := zeroValueFor(g.currentReturnType)
+			zv := g.zeroValueFor(g.currentReturnType)
 			if len(call.Args) == 1 {
 				arg := call.Args[0]
 				if innerCall, ok := arg.(*parser.CallExpr); ok {
@@ -558,8 +558,48 @@ func (g *Generator) isChannelVar(e parser.Expr) bool {
 }
 
 // isCollectionVar checks if the expression is a built-in Go collection type (map, slice, or channel).
+// Also checks class fields for collection types.
 func (g *Generator) isCollectionVar(e parser.Expr) bool {
-	return g.isMapVar(e) || g.isListVar(e) || g.isChannelVar(e)
+	if g.isMapVar(e) || g.isListVar(e) || g.isChannelVar(e) {
+		return true
+	}
+	// Check class fields for collection types
+	if ident, ok := e.(*parser.Ident); ok {
+		if g.currentClass != "" && g.currentFields[ident.Name] {
+			if cls, ok := g.structs[g.currentClass]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == ident.Name {
+						// Check explicit type annotation
+						if f.Type != nil {
+							if gt, ok := f.Type.(*parser.GenericType); ok {
+								switch gt.Name {
+								case "List", "Map", "Channel", "Set":
+									return true
+								}
+							}
+							if _, ok := f.Type.(*parser.ArrayType); ok {
+								return true
+							}
+						}
+						// Check inferred type from default value (var x = Map<K,V>{} or List<T>[])
+						if f.Default != nil {
+							if ml, ok := f.Default.(*parser.MapLit); ok && ml.ExplicitType != nil {
+								if gt, ok := ml.ExplicitType.(*parser.GenericType); ok && gt.Name == "Map" {
+									return true
+								}
+							}
+							if ll, ok := f.Default.(*parser.ListLit); ok && ll.ExplicitType != nil {
+								if gt, ok := ll.ExplicitType.(*parser.GenericType); ok && gt.Name == "List" {
+									return true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // stripEntrySet removes .entrySet() from a range expression.
@@ -886,10 +926,25 @@ func (g *Generator) isClassType(name string) bool {
 
 // isStructVar checks if an expression refers to a known class instance variable.
 // Used to distinguish collection builtins from method calls on class instances.
+// Checks local variables, class fields, and constructor parameters.
 func (g *Generator) isStructVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
-		if _, ok := g.varStructTypes[ident.Name]; ok {
+		name := ident.Name
+		// Check local variables explicitly tracked as struct types
+		if _, ok := g.varStructTypes[name]; ok {
 			return true
+		}
+		// Check if it's a field of the current class with a class/struct type
+		if g.currentClass != "" && g.currentFields[name] {
+			if cls, ok := g.structs[g.currentClass]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == name {
+						if st, ok := f.Type.(*parser.SimpleType); ok {
+							return g.isClassType(st.Name)
+						}
+					}
+				}
+			}
 		}
 	}
 	return false
@@ -1096,7 +1151,7 @@ func (g *Generator) emitOrBlock(block *parser.BlockStmt) {
 				if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
 					if len(call.Args) == 1 {
 						if argId, ok := call.Args[0].(*parser.Ident); ok && argId.Name == "err" {
-							zv := zeroValueFor(g.currentReturnType)
+							zv := g.zeroValueFor(g.currentReturnType)
 							if zv != "" {
 								g.writeln("return %s, %s", zv, g.currentErrVar)
 							} else {

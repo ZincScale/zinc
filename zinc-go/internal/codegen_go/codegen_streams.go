@@ -157,7 +157,7 @@ func (g *Generator) tryLoopFusion(source string, chain []streamOp, elemType stri
 			retType = "int"
 		}
 		sb.WriteString(fmt.Sprintf("func() %s { _acc := %s; for _, %s := range %s {",
-			retType, zeroValueFor(retType), iterVar, source))
+			retType, g.zeroValueFor(retType), iterVar, source))
 		for _, f := range filters {
 			sb.WriteString(fmt.Sprintf(" if !(%s) { continue }", f))
 		}

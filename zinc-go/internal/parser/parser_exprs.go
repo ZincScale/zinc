@@ -157,6 +157,12 @@ func (p *Parser) v2ParseComparison() Expr {
 		right := p.v2ParseAddSub()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}
+	// Handle "as Type" for type casting: expr as TypeName
+	if p.check(lexer.TOKEN_AS) {
+		p.advance() // consume as
+		typeName := p.advance().Literal
+		left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: false}
+	}
 	return left
 }
 

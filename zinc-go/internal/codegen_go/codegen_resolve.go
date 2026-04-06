@@ -608,7 +608,8 @@ func (g *Generator) needImport(pkg string) {
 // --- Zero values -------------------------------------------------------------
 
 // zeroValueFor returns the Go zero value for a given type string.
-func zeroValueFor(goType string) string {
+// Interface types get "nil" since Go interfaces cannot be instantiated with {}.
+func (g *Generator) zeroValueFor(goType string) string {
 	switch goType {
 	case "int", "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64",
@@ -626,6 +627,10 @@ func zeroValueFor(goType string) string {
 		if strings.HasPrefix(goType, "*") || strings.HasPrefix(goType, "[]") ||
 			strings.HasPrefix(goType, "map[") || strings.HasPrefix(goType, "chan ") ||
 			strings.HasPrefix(goType, "func(") || goType == "interface{}" || goType == "error" {
+			return "nil"
+		}
+		// Interface types cannot be instantiated — use nil
+		if g.interfaces[goType] || g.isImportedInterface(goType) {
 			return "nil"
 		}
 		return goType + "{}"

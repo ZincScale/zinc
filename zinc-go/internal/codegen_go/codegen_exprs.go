@@ -624,16 +624,10 @@ func (g *Generator) formatExprIt(e parser.Expr) string {
 				itArgs = append(itArgs, g.formatExprIt(a))
 			}
 			// Check if the object is a known struct variable — if so, call its method
-			isStructVar := false
-			if ident, ok := sel.Object.(*parser.Ident); ok {
-				if st, ok := g.varStructTypes[ident.Name]; ok {
-					_ = st
-					isStructVar = true
-				}
-			}
+			isStruct := g.isStructVar(sel.Object)
 			switch sel.Field {
 			case "length", "size":
-				if isStructVar {
+				if isStruct {
 					return fmt.Sprintf("%s.%s()", obj, exportName(sel.Field))
 				}
 				return fmt.Sprintf("len(%s)", obj)

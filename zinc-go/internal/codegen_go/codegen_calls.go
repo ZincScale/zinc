@@ -116,7 +116,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			return g.formatStreamExpr(sel, c.Args)
 		}
 
-		// Collection methods
+		// Collection methods — apply builtins unless receiver is a known struct/class.
 		obj := g.formatExpr(sel.Object)
 		switch sel.Field {
 		case "add":
