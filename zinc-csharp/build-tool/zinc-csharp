@@ -14,6 +14,44 @@
 
 set -euo pipefail
 
+DOTNET_DIR="$HOME/.dotnet"
+
+# --- Ensure .NET SDK is installed ---
+
+ensure_dotnet() {
+    export PATH="$DOTNET_DIR:$PATH"
+
+    # Check if dotnet 10.x is available
+    if command -v dotnet &>/dev/null; then
+        local ver
+        ver="$(dotnet --version 2>/dev/null || echo "")"
+        if [[ "$ver" == 10.* ]]; then
+            return
+        fi
+    fi
+
+    if [[ -f "$DOTNET_DIR/dotnet" ]]; then
+        local ver
+        ver="$("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "")"
+        if [[ "$ver" == 10.* ]]; then
+            return
+        fi
+    fi
+
+    echo "  .NET 10 SDK not found — installing..."
+    curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+    chmod +x /tmp/dotnet-install.sh
+    /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_DIR" 2>&1 | tail -3
+    rm -f /tmp/dotnet-install.sh
+    export PATH="$DOTNET_DIR:$PATH"
+
+    local ver
+    ver="$("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "unknown")"
+    echo "  .NET SDK $ver installed to $DOTNET_DIR"
+}
+
+ensure_dotnet
+
 # --- Locate project root (walk up until zinc.toml found) ---
 
 find_project_root() {
@@ -186,7 +224,6 @@ cmd_csproj() {
 
 cmd_build() {
     generate_csproj
-    export PATH="$HOME/.dotnet:$PATH"
 
     if [[ "${1:-}" == "--jit" ]]; then
         echo "Building (JIT)..."
@@ -208,7 +245,6 @@ cmd_build() {
 cmd_run() {
     if [[ "${1:-}" == "--jit" ]]; then
         generate_csproj
-        export PATH="$HOME/.dotnet:$PATH"
         echo "Running (JIT)..."
         dotnet run --project "$PROJECT_DIR" -c Release -- "${@:2}"
     else
@@ -251,7 +287,6 @@ cmd_test() {
     CSPROJ="$save_csproj"
 
     # Run tests
-    export PATH="$HOME/.dotnet:$PATH"
     echo "Running tests..."
     dotnet run --project "$t_csproj" -c Release
     return $?
@@ -268,6 +303,39 @@ cmd_clean() {
     echo "Cleaned build artifacts"
 }
 
+cmd_doctor() {
+    echo "zinc-csharp diagnostics"
+    echo ""
+
+    # dotnet
+    if command -v dotnet &>/dev/null; then
+        echo "  dotnet: $(which dotnet) ($(dotnet --version 2>/dev/null || echo "?"))"
+    elif [[ -f "$DOTNET_DIR/dotnet" ]]; then
+        echo "  dotnet: $DOTNET_DIR/dotnet ($("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "?"))"
+    else
+        echo "  dotnet: NOT FOUND — run: zinc-csharp setup"
+    fi
+
+    # zinc.toml
+    if [[ -n "$PROJECT_ROOT" ]]; then
+        echo "  project: $PROJECT_ROOT"
+        echo "  zinc.toml: $ZINC_TOML"
+        echo "  name: $PROJECT_NAME"
+        echo "  source: $SOURCE_DIR/"
+        echo "  csproj: $CSPROJ"
+        echo "  binary: $BINARY"
+        if [[ -f "$BINARY" ]]; then
+            echo "  binary size: $(du -h "$BINARY" | cut -f1)"
+        fi
+    fi
+
+    # tests
+    local test_dir="$PROJECT_ROOT/tests"
+    if [[ -f "$test_dir/zinc.toml" ]]; then
+        echo "  tests: $test_dir/zinc.toml"
+    fi
+}
+
 cmd_help() {
     cat <<HELP
 zinc-csharp — C# build tool for Zinc projects
@@ -281,6 +349,7 @@ Commands:
   test             Run tests (separate from production binary)
   csproj           Regenerate .csproj from zinc.toml
   clean            Remove build artifacts
+  doctor           Check toolchain and project status
   help             Show this help
 
 Config:  zinc.toml → $SOURCE_DIR/$PROJECT_NAME.csproj (generated)
@@ -299,6 +368,7 @@ case "$CMD" in
     test)    cmd_test "$@" ;;
     clean)   cmd_clean "$@" ;;
     csproj)  cmd_csproj "$@" ;;
+    doctor)  cmd_doctor "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
         echo "Unknown command: $CMD" >&2
