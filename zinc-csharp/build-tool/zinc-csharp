@@ -147,22 +147,22 @@ AOT_EOF
         echo "" >> "$CSPROJ"
     fi
 
-    # Exclude test files from production build
-    cat >> "$CSPROJ" <<EXCLUDE_EOF
-  <ItemGroup>
-    <Compile Remove="Tests/**" />
-  </ItemGroup>
-
-EXCLUDE_EOF
+    # Project references
+    local projects
+    projects="$(toml_get "$ZINC_TOML" "csharp.references" "projects" "")"
+    projects="${projects#[}" ; projects="${projects%]}"
+    if [[ -n "$projects" ]]; then
+        echo "  <ItemGroup>" >> "$CSPROJ"
+        IFS=',' read -ra REFS <<< "$projects"
+        for ref in "${REFS[@]}"; do
+            ref="${ref//\"/}" ; ref="${ref// /}"
+            echo "    <ProjectReference Include=\"${ref}\" />" >> "$CSPROJ"
+        done
+        echo "  </ItemGroup>" >> "$CSPROJ"
+        echo "" >> "$CSPROJ"
+    fi
 
     echo "</Project>" >> "$CSPROJ"
-}
-
-generate_test_csproj() {
-    generate_csproj
-    local test_csproj="$PROJECT_DIR/$PROJECT_NAME.Tests.csproj"
-    sed 's|<PublishAot>true</PublishAot>|<PublishAot>false</PublishAot>|' "$CSPROJ" > "$test_csproj"
-    sed -i '/<Compile Remove="Tests\/\*\*"/d' "$test_csproj"
 }
 
 # --- Detect RID ---
@@ -220,17 +220,51 @@ cmd_run() {
 }
 
 cmd_test() {
-    generate_test_csproj
+    # Tests are a separate project in tests/zinc.toml
+    local test_dir="$PROJECT_ROOT/tests"
+    local test_toml="$test_dir/zinc.toml"
+    if [[ ! -f "$test_toml" ]]; then
+        echo "Error: no tests/zinc.toml found" >&2
+        exit 1
+    fi
+
+    # First, generate the main project csproj (tests reference it)
+    generate_csproj
+
+    # Generate the test project csproj
+    local t_name t_source_dir t_project_dir t_csproj
+    t_name="$(toml_get "$test_toml" "project" "name" "Tests")"
+    t_source_dir="$(toml_get "$test_toml" "project" "source_dir" "$t_name")"
+    t_project_dir="$test_dir/$t_source_dir"
+    t_csproj="$t_project_dir/$t_name.csproj"
+
+    # Save and swap globals for csproj generation
+    local save_toml="$ZINC_TOML" save_dir="$PROJECT_DIR" save_csproj="$CSPROJ" save_name="$PROJECT_NAME"
+    ZINC_TOML="$test_toml"
+    PROJECT_NAME="$t_name"
+    PROJECT_DIR="$t_project_dir"
+    CSPROJ="$t_csproj"
+    generate_csproj
+    ZINC_TOML="$save_toml"
+    PROJECT_NAME="$save_name"
+    PROJECT_DIR="$save_dir"
+    CSPROJ="$save_csproj"
+
+    # Run tests
     export PATH="$HOME/.dotnet:$PATH"
     echo "Running tests..."
-    dotnet run --project "$PROJECT_DIR/$PROJECT_NAME.Tests.csproj" -c Release -- --test
-    local exit_code=$?
-    rm -f "$PROJECT_DIR/$PROJECT_NAME.Tests.csproj"
-    return $exit_code
+    dotnet run --project "$t_csproj" -c Release
+    return $?
 }
 
 cmd_clean() {
     rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj" "$BUILD_DIR"
+    # Also clean test project artifacts
+    local test_dir="$PROJECT_ROOT/tests"
+    if [[ -d "$test_dir" ]]; then
+        find "$test_dir" -type d -name bin -exec rm -rf {} + 2>/dev/null
+        find "$test_dir" -type d -name obj -exec rm -rf {} + 2>/dev/null
+    fi
     echo "Cleaned build artifacts"
 }
 
