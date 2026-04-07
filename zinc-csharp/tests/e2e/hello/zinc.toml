@@ -1,0 +1,13 @@
+[project]
+name = "Hello"
+version = "1.0.0"
+main = "Hello/Program.cs"
+source_dir = "Hello"
+
+[csharp]
+framework = "net10.0"
+
+[csharp.aot]
+enabled = true
+strip_symbols = true
+optimization = "Size"

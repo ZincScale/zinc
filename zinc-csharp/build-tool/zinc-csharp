@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# zinc-csharp — C# build tool for Zinc projects
+# Reads zinc.toml, generates .csproj, delegates to dotnet.
+# Produces Native AOT binaries by default.
+#
+# Usage:
+#   zinc-csharp build          Native AOT build (default)
+#   zinc-csharp build --jit    JIT build only (fast iteration)
+#   zinc-csharp run            Build AOT + run
+#   zinc-csharp run --jit      JIT run (faster build, slower runtime)
+#   zinc-csharp test           Run tests (separate from production binary)
+#   zinc-csharp clean          Remove build artifacts
+#   zinc-csharp csproj         Regenerate .csproj from zinc.toml
+
+set -euo pipefail
+
+# --- Locate project root (walk up until zinc.toml found) ---
+
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        [[ -f "$dir/zinc.toml" ]] && echo "$dir" && return
+        dir="$(dirname "$dir")"
+    done
+    echo ""
+}
+
+PROJECT_ROOT="$(find_project_root)"
+if [[ -z "$PROJECT_ROOT" ]]; then
+    echo "Error: zinc.toml not found (searched from $PWD to /)" >&2
+    exit 1
+fi
+
+ZINC_TOML="$PROJECT_ROOT/zinc.toml"
+
+# --- TOML parser (minimal, handles zinc.toml structure) ---
+
+toml_get() {
+    local file="$1" section="$2" key="$3" default="${4:-}"
+    local in_section=false value=""
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -z "$line" ] && continue
+        if [[ "$line" =~ ^\[([a-zA-Z0-9_.]+)\]$ ]]; then
+            [[ "${BASH_REMATCH[1]}" == "$section" ]] && in_section=true || in_section=false
+            continue
+        fi
+        if $in_section && [[ "$line" =~ ^([a-zA-Z_]+)[[:space:]]*=[[:space:]]*(.+)$ ]]; then
+            local k="${BASH_REMATCH[1]}" v="${BASH_REMATCH[2]}"
+            v="${v%\"}" ; v="${v#\"}"
+            v="${v%\'}" ; v="${v#\'}"
+            [[ "$k" == "$key" ]] && value="$v"
+        fi
+    done < "$file"
+    echo "${value:-$default}"
+}
+
+toml_bool() {
+    local val; val="$(toml_get "$@")"
+    [[ "$val" == "true" ]] && echo "true" || echo "false"
+}
+
+# --- Read project name and derive paths ---
+
+PROJECT_NAME="$(toml_get "$ZINC_TOML" "project" "name" "App")"
+# Source dir: zinc.toml can specify source_dir, defaults to project name
+SOURCE_DIR="$(toml_get "$ZINC_TOML" "project" "source_dir" "$PROJECT_NAME")"
+PROJECT_DIR="$PROJECT_ROOT/$SOURCE_DIR"
+CSPROJ="$PROJECT_DIR/$PROJECT_NAME.csproj"
+BUILD_DIR="$PROJECT_ROOT/build"
+BINARY="$BUILD_DIR/$PROJECT_NAME"
+
+# --- .csproj generator ---
+
+generate_csproj() {
+    local framework lang_version nullable implicit_usings unsafe
+    local server_gc aot strip invariant opt stack_traces trim_metadata
+
+    framework="$(toml_get "$ZINC_TOML" "csharp" "framework" "net10.0")"
+    lang_version="$(toml_get "$ZINC_TOML" "csharp" "lang_version" "latest")"
+    nullable="$(toml_bool "$ZINC_TOML" "csharp" "nullable" "true")"
+    implicit_usings="$(toml_bool "$ZINC_TOML" "csharp" "implicit_usings" "true")"
+    unsafe="$(toml_bool "$ZINC_TOML" "csharp" "unsafe" "false")"
+
+    server_gc="$(toml_bool "$ZINC_TOML" "csharp.gc" "server" "true")"
+
+    aot="$(toml_bool "$ZINC_TOML" "csharp.aot" "enabled" "false")"
+    strip="$(toml_bool "$ZINC_TOML" "csharp.aot" "strip_symbols" "true")"
+    invariant="$(toml_bool "$ZINC_TOML" "csharp.aot" "invariant_globalization" "true")"
+    opt="$(toml_get "$ZINC_TOML" "csharp.aot" "optimization" "Size")"
+    stack_traces="$(toml_bool "$ZINC_TOML" "csharp.aot" "stack_traces" "false")"
+    trim_metadata="$(toml_bool "$ZINC_TOML" "csharp.aot" "trim_metadata" "true")"
+
+    local sdk
+    sdk="$(toml_get "$ZINC_TOML" "project" "sdk" "Microsoft.NET.Sdk")"
+
+    mkdir -p "$PROJECT_DIR"
+
+    cat > "$CSPROJ" <<CSPROJ_EOF
+<Project Sdk="${sdk}">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>${framework}</TargetFramework>
+    <LangVersion>${lang_version}</LangVersion>
+    <Nullable>$([ "$nullable" = "true" ] && echo "enable" || echo "disable")</Nullable>
+    <ImplicitUsings>$([ "$implicit_usings" = "true" ] && echo "enable" || echo "disable")</ImplicitUsings>
+    <AllowUnsafeBlocks>${unsafe}</AllowUnsafeBlocks>
+    <ServerGarbageCollection>${server_gc}</ServerGarbageCollection>
+  </PropertyGroup>
+
+CSPROJ_EOF
+
+    if [[ "$aot" == "true" ]]; then
+        cat >> "$CSPROJ" <<AOT_EOF
+  <!-- Native AOT -->
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+    <StripSymbols>${strip}</StripSymbols>
+    <InvariantGlobalization>${invariant}</InvariantGlobalization>
+    <IlcOptimizationPreference>${opt}</IlcOptimizationPreference>
+    <IlcGenerateStackTraceData>${stack_traces}</IlcGenerateStackTraceData>
+    <StackTraceSupport>${stack_traces}</StackTraceSupport>
+    <UseSystemResourceKeys>$([ "$trim_metadata" = "true" ] && echo "true" || echo "false")</UseSystemResourceKeys>
+    <IlcTrimMetadata>${trim_metadata}</IlcTrimMetadata>
+  </PropertyGroup>
+
+AOT_EOF
+    fi
+
+    # NuGet packages
+    local packages
+    packages="$(toml_get "$ZINC_TOML" "csharp.nuget" "packages" "")"
+    packages="${packages#[}" ; packages="${packages%]}"
+    if [[ -n "$packages" ]]; then
+        echo "  <ItemGroup>" >> "$CSPROJ"
+        IFS=',' read -ra PKGS <<< "$packages"
+        for pkg in "${PKGS[@]}"; do
+            pkg="${pkg//\"/}" ; pkg="${pkg// /}"
+            local pkgName="${pkg%%:*}"
+            local pkgVer="${pkg##*:}"
+            echo "    <PackageReference Include=\"${pkgName}\" Version=\"${pkgVer}\" />" >> "$CSPROJ"
+        done
+        echo "  </ItemGroup>" >> "$CSPROJ"
+        echo "" >> "$CSPROJ"
+    fi
+
+    # Exclude test files from production build
+    cat >> "$CSPROJ" <<EXCLUDE_EOF
+  <ItemGroup>
+    <Compile Remove="Tests/**" />
+  </ItemGroup>
+
+EXCLUDE_EOF
+
+    echo "</Project>" >> "$CSPROJ"
+}
+
+generate_test_csproj() {
+    generate_csproj
+    local test_csproj="$PROJECT_DIR/$PROJECT_NAME.Tests.csproj"
+    sed 's|<PublishAot>true</PublishAot>|<PublishAot>false</PublishAot>|' "$CSPROJ" > "$test_csproj"
+    sed -i '/<Compile Remove="Tests\/\*\*"/d' "$test_csproj"
+}
+
+# --- Detect RID ---
+
+detect_rid() {
+    local arch; arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  echo "linux-x64" ;;
+        aarch64) echo "linux-arm64" ;;
+        arm*)    echo "linux-arm" ;;
+        *)       echo "linux-x64" ;;
+    esac
+}
+
+# --- Commands ---
+
+cmd_csproj() {
+    generate_csproj
+    echo "Generated $CSPROJ from zinc.toml"
+}
+
+cmd_build() {
+    generate_csproj
+    export PATH="$HOME/.dotnet:$PATH"
+
+    if [[ "${1:-}" == "--jit" ]]; then
+        echo "Building (JIT)..."
+        dotnet build "$PROJECT_DIR" -c Release
+    else
+        local rid="${1:-$(detect_rid)}"
+        mkdir -p "$BUILD_DIR"
+        echo "Building AOT binary for $rid..."
+        dotnet publish "$PROJECT_DIR" -c Release -r "$rid" -o "$BUILD_DIR" 2>&1
+
+        if [[ -f "$BINARY" ]]; then
+            local size; size=$(du -h "$BINARY" | cut -f1)
+            echo ""
+            echo "Binary: $BINARY ($size)"
+        fi
+    fi
+}
+
+cmd_run() {
+    if [[ "${1:-}" == "--jit" ]]; then
+        generate_csproj
+        export PATH="$HOME/.dotnet:$PATH"
+        echo "Running (JIT)..."
+        dotnet run --project "$PROJECT_DIR" -c Release -- "${@:2}"
+    else
+        if [[ ! -f "$BINARY" ]]; then
+            cmd_build
+        fi
+        "$BINARY" "$@"
+    fi
+}
+
+cmd_test() {
+    generate_test_csproj
+    export PATH="$HOME/.dotnet:$PATH"
+    echo "Running tests..."
+    dotnet run --project "$PROJECT_DIR/$PROJECT_NAME.Tests.csproj" -c Release -- --test
+    local exit_code=$?
+    rm -f "$PROJECT_DIR/$PROJECT_NAME.Tests.csproj"
+    return $exit_code
+}
+
+cmd_clean() {
+    rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj" "$BUILD_DIR"
+    echo "Cleaned build artifacts"
+}
+
+cmd_help() {
+    cat <<HELP
+zinc-csharp — C# build tool for Zinc projects
+
+Commands:
+  build            Native AOT build (default)
+  build --jit      JIT-only build (fast iteration)
+  build <rid>      Cross-compile AOT for target (e.g. linux-arm64)
+  run              Build AOT + run
+  run --jit        JIT run (faster build, slower runtime)
+  test             Run tests (separate from production binary)
+  csproj           Regenerate .csproj from zinc.toml
+  clean            Remove build artifacts
+  help             Show this help
+
+Config:  zinc.toml → $SOURCE_DIR/$PROJECT_NAME.csproj (generated)
+Output:  build/$PROJECT_NAME (AOT binary)
+HELP
+}
+
+# --- Main ---
+
+CMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+    build)   cmd_build "$@" ;;
+    run)     cmd_run "$@" ;;
+    test)    cmd_test "$@" ;;
+    clean)   cmd_clean "$@" ;;
+    csproj)  cmd_csproj "$@" ;;
+    help|-h|--help) cmd_help ;;
+    *)
+        echo "Unknown command: $CMD" >&2
+        cmd_help >&2
+        exit 1
+        ;;
+esac
