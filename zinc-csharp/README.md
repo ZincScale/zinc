@@ -1,36 +1,42 @@
 # zinc-csharp
 
-C# / .NET 10 build backend for Zinc projects. Reads `zinc.toml`, generates `.csproj`, produces Native AOT binaries.
+C# / .NET 10 build backend for Zinc projects. One-stop shop: installs .NET, reads `zinc.toml`, generates `.csproj`, produces Native AOT binaries.
 
 ## Install
 
 ```bash
-# Copy the build tool to your PATH
-cp zinc-csharp/build-tool/zinc-csharp ~/.zinc/bin/
-
-# Or symlink
-ln -s $(pwd)/zinc-csharp/build-tool/zinc-csharp ~/.zinc/bin/zinc-csharp
+# One command — installs .NET 10 SDK + zinc-csharp build tool + sets up PATH
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/install.sh | bash
 ```
 
-Requires .NET 10 SDK: `curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0`
+Or from a local clone:
+
+```bash
+cd zinc/zinc-csharp
+bash install.sh
+```
+
+After install, `zinc-csharp` works from any directory with a `zinc.toml`. If .NET is not found, it auto-installs on first run.
 
 ## Usage
-
-From any directory with a `zinc.toml`:
 
 ```bash
 zinc-csharp build          # Native AOT binary (default)
 zinc-csharp build --jit    # JIT build (fast iteration)
+zinc-csharp build linux-arm64  # Cross-compile AOT
 zinc-csharp run            # Build + run
-zinc-csharp test           # Run tests (excluded from production binary)
+zinc-csharp run --jit      # JIT run (faster build, slower runtime)
+zinc-csharp test           # Run tests (separate from production binary)
+zinc-csharp csproj         # Regenerate .csproj only
 zinc-csharp clean          # Remove build artifacts
+zinc-csharp doctor         # Check toolchain and project status
 ```
 
 ## zinc.toml Schema
 
 ```toml
 [project]
-name = "MyApp"                    # Project name (used for binary name + csproj)
+name = "MyApp"                    # Project name (binary name + csproj)
 version = "1.0.0"
 main = "MyApp/Program.cs"         # Entry point
 source_dir = "MyApp"              # C# source directory (default: project name)
@@ -56,25 +62,51 @@ server = true                     # Server GC (throughput-optimized)
 
 [csharp.nuget]
 packages = ["YamlDotNet:16.3.0"]  # NuGet dependencies (name:version)
+
+[csharp.references]
+projects = ["../OtherProject/Other.csproj"]  # ProjectReference paths
 ```
 
 ## How It Works
 
-1. `zinc-csharp build` reads `zinc.toml`
-2. Generates `<source_dir>/<name>.csproj` with all settings
-3. Runs `dotnet publish -r <rid> -c Release` for AOT
-4. Output: `build/<name>` (static binary)
+1. `zinc-csharp build` checks for .NET 10 (auto-installs if missing)
+2. Reads `zinc.toml` and generates `<source_dir>/<name>.csproj`
+3. Runs `dotnet publish -r <rid> -c Release` for AOT (or `dotnet build` for `--jit`)
+4. Output: `build/<name>` (stripped static binary)
 
-The `.csproj` is generated on every build — never edit it by hand. All configuration lives in `zinc.toml`.
+The `.csproj` is regenerated on every build — never edit it by hand.
 
 ## Test Separation
 
-`zinc-csharp test` generates a separate `.csproj` that includes `Tests/` files and disables AOT. Tests are never compiled into the production binary.
+Tests live in a separate project (`tests/zinc.toml`) with a `ProjectReference` to the main project:
+
+```
+myproject/
+├── zinc.toml                  # Main project
+├── MyApp/
+│   └── Program.cs
+└── tests/
+    ├── zinc.toml              # Test project (sdk = Web, references = ["../../MyApp/MyApp.csproj"])
+    └── Tests/
+        ├── Program.cs         # var failures = TestSuite.Run(); return failures > 0 ? 1 : 0;
+        └── TestSuite.cs
+```
+
+`zinc-csharp test` generates both `.csproj` files and runs the test project. Production binary has zero test code.
+
+## What Gets Installed
+
+| Component | Location | Purpose |
+|---|---|---|
+| .NET 10 SDK | `~/.dotnet/` | Compiler + runtime |
+| zinc-csharp | `~/.zinc/bin/` | Build tool (bash script) |
+| PATH entries | `~/.bashrc` or `~/.zshrc` | Auto-added for both |
 
 ## Reference Implementation
 
-See `zinc-flow/zinc-flow-csharp/` for a complete example:
-- 15 source files, 6,300 LOC
-- ThreadStatic object pools, ArrayPool, zero-alloc hot paths
-- 149 test assertions
-- 2.5M+ flowfiles/sec session throughput (AOT)
+See [zinc-flow-csharp](https://github.com/ZincScale/zinc-flow/tree/master/zinc-flow-csharp):
+- 15 source files, full flow engine
+- ThreadStatic pools, ArrayPool, ref-counted Content, zero-alloc hot paths
+- 149 test assertions (separate project)
+- 2M+ ff/s session throughput (Native AOT)
+- 16MB stripped AOT binary (Web SDK)

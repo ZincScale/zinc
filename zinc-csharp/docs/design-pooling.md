@@ -224,23 +224,60 @@ Execute() call:
 ```
 
 After warmup, the pool reaches steady-state: every `Rent()` hits the pool (no `new`),
-every `Return()` has space. **Zero allocations per Execute() call** in steady state
-(except for the `AttributeMap` overlay node and the queue entry ID string).
+every `Return()` has space. **Zero allocations per Execute() call** in steady state.
+
+---
+
+## Ref-Counted Content
+
+Content (Raw byte buffers) is shared across FlowFiles via `WithAttribute`. A ref count
+tracks how many FlowFiles reference the same Content:
+
+```csharp
+// WithAttribute: shared content → increment ref count
+public static FlowFile WithAttribute(FlowFile ff, string key, string value)
+{
+    ff.Content.AddRef();  // _refCount++
+    return Rent(ff.NumericId, ff.Attributes.With(key, value), ff.Content, ff.Timestamp);
+}
+
+// Return: decrement; when zero → return ArrayPool bytes + pool Raw shell
+public static void Return(FlowFile ff)
+{
+    ff.Content?.Release();  // if (--_refCount == 0) { ArrayPool.Return + Pool.Return }
+    ff.Content = null!;
+    Pool<FlowFile>.Return(ff);
+}
+```
+
+**Why non-atomic?** FlowFiles move through pipeline stages sequentially. When Thread A
+offers a FlowFile to a queue, Thread A is done with it. Thread B claims it later — there
+is no concurrent access to the same Content. `_refCount++` / `_refCount--` is sufficient.
+
+**Lifecycle example** (2-hop pipeline):
+```
+Create(data)        → Raw refCount=1, FF1
+WithAttribute(FF1)  → refCount=2, FF2 shares Raw with FF1
+Return(FF1)         → refCount=1 (FF1 done, FF2 still in next queue)
+WithAttribute(FF2)  → refCount=2, FF3 shares Raw
+Return(FF2)         → refCount=1
+Return(FF3)         → refCount=0 → ArrayPool.Return(bytes) + Pool<Raw>.Return(shell)
+```
+
+All pooled result types: `SingleResult`, `RoutedResult`, `MultipleResult`, `FailureResult`.
+Each has `Rent()` and `Return()` static methods. ProcessSession returns them after consumption.
 
 ---
 
 ## Remaining Allocations (Not Pooled)
 
-Two allocations per Execute() that we chose NOT to pool:
+Everything on the hot path is pooled. The remaining allocations are in setup:
 
-1. **`AttributeMap` overlay node** (~40 bytes) — These form a linked chain that's referenced
-   by the FlowFile's `Attributes`. Pooling them would require tracking chain lifetimes
-   across FlowFiles, which adds complexity for minimal gain (Gen0 collects them cheaply).
+1. **Initial `Dictionary<string,string>`** passed to `FlowFile.Create()` — caller-provided.
+   Use `FlowFile.CreateEmpty()` when attributes are empty to avoid this allocation.
 
-2. **Queue entry ID string** (`"tag-12345"`) — Created with `string.Create(null, stackalloc char[32], ...)`
-   which uses stack allocation for the format buffer. The string itself is a heap allocation
-   but is small and short-lived. Could be replaced with a numeric ID (long) to eliminate
-   this entirely, but string IDs are useful for debugging.
+2. **Dictionary internal resizing** in FlowQueue's invisible map — `Dictionary<long, QueueEntry>`
+   resizes its bucket array as it grows. Pre-sizing at construction helps but doesn't eliminate it.
 
 ---
 
@@ -267,17 +304,14 @@ With `ArrayPool`, the old array is returned and the new one may be a recycled bu
 
 ## GC Impact
 
-Before pooling → After pooling (100K session benchmark, 2 hops):
+Evolution across optimization phases (100K session benchmark, 2 hops, AOT):
 
-| Metric | Before | After | Reduction |
+| Phase | Gen0 | Session rate | Key change |
 |---|---|---|---|
-| Gen0 collections | 21-27 | 15-16 | ~40% |
-| Gen1 collections | 10-13 | 7 | ~40% |
-| Gen2 collections | 5-6 | 4 | ~25% |
-| Session throughput | 265-552K ff/s | 900K-2.08M ff/s | **2-4x faster** |
+| v1 (no pooling) | 21-27 | 265-552K ff/s | baseline |
+| v2 (ThreadStatic pools) | 14-16 | 900K-2.08M ff/s | Pool FF, QueueEntry, SingleResult |
+| v3 (ref-counted + full pool) | **gc0: 0** | **2.0-2.5M ff/s** | Ref-counted Content, pool Raw/all results |
 
-The remaining Gen0 collections come from:
-- `AttributeMap` overlay nodes (1 per processor hop)
-- Queue entry ID strings
-- Dictionary internal resizing (invisible map)
-- Benchmark setup code (pre-loading flowfiles)
+With ref counting, **zero GC collections occur during session execution** (gc0: 0 at all sizes).
+The remaining Gen0 collections happen during benchmark setup (pre-loading FlowFiles with
+`new Dictionary` allocations) — not during the timed execution phase.
