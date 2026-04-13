@@ -8,7 +8,8 @@
 #   zinc-csharp build --jit    JIT build only (fast iteration)
 #   zinc-csharp run            Build AOT + run
 #   zinc-csharp run --jit      JIT run (faster build, slower runtime)
-#   zinc-csharp test           Run tests (separate from production binary)
+#   zinc-csharp test           Run tests (JIT, separate from production binary)
+#   zinc-csharp test --aot     Publish tests as AOT binary, then run
 #   zinc-csharp clean          Remove build artifacts
 #   zinc-csharp csproj         Regenerate .csproj from zinc.toml
 
@@ -287,6 +288,22 @@ cmd_test() {
     CSPROJ="$save_csproj"
 
     # Run tests
+    if [[ "${1:-}" == "--aot" ]]; then
+        local t_build_dir="$test_dir/build"
+        local rid; rid="$(detect_rid)"
+        mkdir -p "$t_build_dir"
+        echo "Publishing tests as AOT binary for $rid..."
+        dotnet publish "$t_project_dir" -c Release -r "$rid" -o "$t_build_dir"
+        local t_binary="$t_build_dir/$t_name"
+        if [[ ! -x "$t_binary" ]]; then
+            echo "Error: AOT test binary not found at $t_binary" >&2
+            exit 1
+        fi
+        echo ""
+        echo "Running AOT test binary: $t_binary ($(du -h "$t_binary" | cut -f1))"
+        "$t_binary"
+        return $?
+    fi
     echo "Running tests..."
     dotnet run --project "$t_csproj" -c Release
     return $?
@@ -346,7 +363,8 @@ Commands:
   build <rid>      Cross-compile AOT for target (e.g. linux-arm64)
   run              Build AOT + run
   run --jit        JIT run (faster build, slower runtime)
-  test             Run tests (separate from production binary)
+  test             Run tests (JIT, separate from production binary)
+  test --aot       Publish tests as AOT binary, then run
   csproj           Regenerate .csproj from zinc.toml
   clean            Remove build artifacts
   doctor           Check toolchain and project status
