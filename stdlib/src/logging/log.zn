@@ -25,19 +25,19 @@ import io
 // --- Package-level logging functions ---
 // Call these from anywhere. LogManager.setup() configures the backend.
 
-fn info(String msg, any... args) {
+pub fn info(String msg, any... args) {
     slog.Info(msg, args...)
 }
 
-fn debug(String msg, any... args) {
+pub fn debug(String msg, any... args) {
     slog.Debug(msg, args...)
 }
 
-fn warn(String msg, any... args) {
+pub fn warn(String msg, any... args) {
     slog.Warn(msg, args...)
 }
 
-fn error(String msg, any... args) {
+pub fn error(String msg, any... args) {
     slog.Error(msg, args...)
 }
 
