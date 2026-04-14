@@ -74,6 +74,7 @@ type Generator struct {
 	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
 	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
 	subpkgDataFields map[string]map[string][]*parser.FieldDecl   // pkg → data class name → field params
+	localDataFields  map[string][]*parser.FieldDecl              // current package data class name → params
 	subpkgStructs    map[string]map[string]*parser.ClassDecl    // pkg → class name → full class decl (for method lookups)
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
@@ -309,6 +310,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.DataClassDecl:
 			g.dataClasses[decl.Name] = true
 			g.funcSigs["New"+decl.Name] = fieldDeclsToParams(decl.Params)
+			if g.localDataFields == nil {
+				g.localDataFields = make(map[string][]*parser.FieldDecl)
+			}
+			g.localDataFields[decl.Name] = decl.Params
 			// Data class fields — track pub status
 			for _, f := range decl.Params {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
@@ -320,6 +325,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				for _, v := range decl.Variants {
 					g.dataClasses[v.Name] = true
 					g.funcSigs["New"+v.Name] = fieldDeclsToParams(v.Params)
+					if g.localDataFields == nil {
+						g.localDataFields = make(map[string][]*parser.FieldDecl)
+					}
+					g.localDataFields[v.Name] = v.Params
 					for _, f := range v.Params {
 						g.pubNames[v.Name+"."+f.Name] = f.IsPub
 					}

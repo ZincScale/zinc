@@ -364,6 +364,55 @@ func (g *Generator) lookupClassDecl(name string) *parser.ClassDecl {
 	return nil
 }
 
+// lookupDataFieldsByName returns the field/param declarations of a data
+// class (`data Foo(...)`) by name. Checks the local package's data
+// decls, the subpackage-registered data field tables, and sealed-class
+// variants — data classes are stored separately from ClassDecl, so
+// lookupClassDecl alone won't find them.
+func (g *Generator) lookupDataFieldsByName(name string) []*parser.FieldDecl {
+	// Local package data decls (populated in collectDecls).
+	if fields, ok := g.localDataFields[name]; ok {
+		return fields
+	}
+	// Subpackage-registered data fields (populated by SetSubpackageDataFields).
+	for _, pkg := range g.subpkgDataFields {
+		if fields, ok := pkg[name]; ok {
+			return fields
+		}
+	}
+	// Sealed variants in the current package.
+	if vs := g.currentSealedVariants(name); len(vs) > 0 {
+		for _, v := range vs {
+			if v.Name == name {
+				return v.Params
+			}
+		}
+	}
+	return nil
+}
+
+// lookupFieldTypeExpr resolves the declared type expression of a field
+// on a class or data class by name. Unified lookup across both stores —
+// callers don't have to know whether `name` is a `class Foo` or a
+// `data Foo(...)`. Returns nil when unknown.
+func (g *Generator) lookupFieldTypeExpr(className, fieldName string) parser.TypeExpr {
+	if cls := g.lookupClassDecl(className); cls != nil {
+		for _, f := range cls.Fields {
+			if f.Name == fieldName {
+				return f.Type
+			}
+		}
+	}
+	if fields := g.lookupDataFieldsByName(className); fields != nil {
+		for _, f := range fields {
+			if f.Name == fieldName {
+				return f.Type
+			}
+		}
+	}
+	return nil
+}
+
 // resolveReceiverClassName returns the class/struct type name that an
 // expression evaluates to, or "" if unknown. Walks:
 //
@@ -397,13 +446,9 @@ func (g *Generator) resolveReceiverClassName(e parser.Expr) string {
 		if outer == "" {
 			return ""
 		}
-		if cls := g.lookupClassDecl(outer); cls != nil {
-			for _, f := range cls.Fields {
-				if f.Name == expr.Field {
-					if st, ok := f.Type.(*parser.SimpleType); ok {
-						return st.Name
-					}
-				}
+		if te := g.lookupFieldTypeExpr(outer, expr.Field); te != nil {
+			if st, ok := te.(*parser.SimpleType); ok {
+				return st.Name
 			}
 		}
 	case *parser.CallExpr:
@@ -503,10 +548,18 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	}
 
 	// Nested field chain: `this.outer.inner.method(...)`. Resolve outer's
-	// class and look up inner's field type.
+	// class and look up inner's field type. Works for both class fields
+	// and `data Foo(...)` params.
 	if sel, ok := e.(*parser.SelectorExpr); ok {
 		outerClass := g.resolveReceiverClassName(sel.Object)
 		if outerClass != "" {
+			if te := g.lookupFieldTypeExpr(outerClass, sel.Field); te != nil {
+				if gt, ok := te.(*parser.GenericType); ok {
+					return gt
+				}
+			}
+			// Fallback: rich defaults (MapLit/ListLit/Channel<T>) only live
+			// on class fields, not data params.
 			if cls := g.lookupClassDecl(outerClass); cls != nil {
 				if gt := g.fieldGenericType(cls, sel.Field); gt != nil {
 					return gt

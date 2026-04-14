@@ -65,9 +65,16 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	params := g.formatParams(fn.Params)
 
 	// Register parameter type expressions for type-aware codegen
+	var paramNameBackup []string
 	for _, p := range fn.Params {
 		if genType, ok := p.Type.(*parser.GenericType); ok {
 			g.varTypeExprs[p.Name] = genType
+			paramNameBackup = append(paramNameBackup, p.Name)
+		}
+		// Class-typed params: track so `param.field.keys()` chains resolve.
+		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
+			g.varStructTypes[p.Name] = simpleType.Name
+			paramNameBackup = append(paramNameBackup, p.Name)
 		}
 	}
 
@@ -76,6 +83,12 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.emitBlock(fn.Body)
 	g.indent--
 	g.writeln("}")
+
+	// Clear param-scoped tracking so it doesn't leak into sibling functions.
+	for _, pn := range paramNameBackup {
+		delete(g.varTypeExprs, pn)
+		delete(g.varStructTypes, pn)
+	}
 
 	g.currentReturnType = prevRetType
 	g.currentReturnOptional = prevRetOpt
@@ -395,7 +408,30 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		}
 	}
 	g.currentClass = receiver
-	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil; g.currentClass = "" }()
+	// Track class/generic-typed method params so `param.field.method()` and
+	// `param.method().keys()` chains resolve. Entries are removed on exit.
+	var methodParamBackup []string
+	for _, p := range m.Params {
+		if genType, ok := p.Type.(*parser.GenericType); ok {
+			g.varTypeExprs[p.Name] = genType
+			methodParamBackup = append(methodParamBackup, p.Name)
+		}
+		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
+			g.varStructTypes[p.Name] = simpleType.Name
+			methodParamBackup = append(methodParamBackup, p.Name)
+		}
+	}
+	defer func() {
+		g.currentFields = nil
+		g.currentFieldGoName = nil
+		g.currentMethods = nil
+		g.currentParams = nil
+		g.currentClass = ""
+		for _, pn := range methodParamBackup {
+			delete(g.varTypeExprs, pn)
+			delete(g.varStructTypes, pn)
+		}
+	}()
 
 	methodKey := receiver + "." + m.Name
 	canError := g.errorFuncs[methodKey]

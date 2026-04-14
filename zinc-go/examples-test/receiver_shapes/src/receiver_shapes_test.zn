@@ -248,3 +248,87 @@ test "shape 8 — user methods named upper/trimEnd/join shadow string builtins" 
         t.Errorf("join() = %q, want %q", tx.join("|"), "|hello|")
     }
 }
+
+// --- Shape 9: store-then-use — `var m = obj.getMap(); m.keys()` must
+// carry the method's generic return type onto `m`, otherwise `m.keys()`
+// emits []interface{}. Covers the gap where receiver-shape handles only
+// direct chains but not a local rebinding step. ---
+
+class Storage {
+    var rows = Map<String, int>{}
+    init() {}
+    pub fn set(String k, int v) { rows[k] = v }
+    pub fn getRows(): Map<String, int> { return rows }
+}
+
+test "shape 9 — store method return in var, then .keys()/.values() typed" {
+    var st = Storage()
+    st.set("one", 1)
+    st.set("two", 2)
+    var rows = st.getRows()
+    var keysum = ""
+    for k in rows.keys() {
+        keysum = keysum + k
+    }
+    if keysum != "onetwo" && keysum != "twoone" {
+        t.Errorf("keysum = %q, want permutation of onetwo", keysum)
+    }
+    var valsum = 0
+    for v in rows.values() {
+        valsum = valsum + v
+    }
+    if valsum != 3 { t.Errorf("valsum = %v, want 3", valsum) }
+}
+
+// --- Shape 10: data class as function param — the param-type tracking
+// must recognize `FlowLike` (a `data` decl) as a class, then resolve
+// `d.attrs` back to Map<String, String> so `.keys()` is typed. ---
+
+data FlowLike(String id, Map<String, String> attrs)
+
+fn attrKeysSum(FlowLike d): String {
+    var out = ""
+    for k in d.attrs.keys() {
+        out = out + k
+    }
+    return out
+}
+
+test "shape 10 — data-class param → field-chain keys() typed" {
+    Map<String, String> m = {"a": "1", "b": "2"}
+    var d = FlowLike("f1", m)
+    var s = attrKeysSum(d)
+    if s != "ab" && s != "ba" {
+        t.Errorf("attrKeysSum = %q, want permutation of ab", s)
+    }
+}
+
+// --- Shape 11: bare self-method call inside a class — `var g = helper()`
+// when `helper` is an instance method returning Map<K,V> must propagate
+// the return type so `g.keys()` is typed. Mirrors a common pattern in
+// the fabric's executor walk (`var g = snapshotGraph()` → `g.keys()`). ---
+
+class Selfer {
+    var inner = Map<String, int>{}
+    init() {
+        inner["x"] = 10
+        inner["y"] = 20
+    }
+    fn grab(): Map<String, int> { return inner }
+    pub fn keySum(): String {
+        var g = grab()
+        var out = ""
+        for k in g.keys() {
+            out = out + k
+        }
+        return out
+    }
+}
+
+test "shape 11 — bare self-call captured in var, .keys() typed" {
+    var s = Selfer()
+    var ks = s.keySum()
+    if ks != "xy" && ks != "yx" {
+        t.Errorf("keySum = %q, want permutation of xy", ks)
+    }
+}

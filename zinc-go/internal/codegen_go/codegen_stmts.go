@@ -235,6 +235,24 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 					}
 				} else if g.isClassType(ident.Name) {
 					g.varStructTypes[v.Name] = ident.Name
+				} else if g.currentClass != "" {
+					// Bare call inside a class method: may be a self-method
+					// call like `var g = snapshotGraph()`. If the current
+					// class declares `snapshotGraph` with a class/generic
+					// return type, propagate it.
+					if cls, ok := g.structs[g.currentClass]; ok {
+						for _, m := range cls.Methods {
+							if m.Name != ident.Name || m.ReturnType == nil {
+								continue
+							}
+							if st, ok := m.ReturnType.(*parser.SimpleType); ok && g.isClassType(st.Name) {
+								g.varStructTypes[v.Name] = st.Name
+							}
+							if gt, ok := m.ReturnType.(*parser.GenericType); ok {
+								g.varTypeExprs[v.Name] = gt
+							}
+						}
+					}
 				}
 			}
 			// Qualified constructor: core.MemoryContentStore() → SelectorExpr
@@ -257,6 +275,28 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				retType := g.resolveMethodReturnType(sel)
 				if retType != "" && g.isClassType(retType) {
 					g.varStructTypes[v.Name] = retType
+				}
+			}
+		}
+
+		// Track generic type from method-call return:
+		// `var conns = fab.getConnections()` where getConnections is declared
+		// to return `Map<String, Map<String, List<String>>>`. Without this,
+		// subsequent `conns.keys()` / `conns[k]` lose their type and fall
+		// back to []interface{} (ZCA-11c — sibling of the receiver-shape fix,
+		// for the store-then-use shape).
+		if call, ok := v.Value.(*parser.CallExpr); ok && v.Type == nil {
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if outerClass := g.resolveReceiverClassName(sel.Object); outerClass != "" {
+					if cls := g.lookupClassDecl(outerClass); cls != nil {
+						for _, m := range cls.Methods {
+							if m.Name == sel.Field && m.ReturnType != nil {
+								if gt, ok := m.ReturnType.(*parser.GenericType); ok {
+									g.varTypeExprs[v.Name] = gt
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -1070,8 +1110,21 @@ func (g *Generator) isClassType(name string) bool {
 	if _, exists := g.structs[name]; exists {
 		return true
 	}
+	// Local data classes — `data FlowLike(...)` in the same file.
+	if g.dataClasses[name] {
+		return true
+	}
 	if entry, ok := g.unqualifiedNames[name]; ok {
 		return entry.kind == "class" || entry.kind == "data"
+	}
+	// Fallback — a `data FlowFile` imported from another package that
+	// wasn't re-exported via unqualifiedNames still needs to be recognized
+	// as a class type (see ZCA-11d: param-type tracking for cross-package
+	// data classes).
+	for _, pkgClasses := range g.subpkgStructs {
+		if _, ok := pkgClasses[name]; ok {
+			return true
+		}
 	}
 	return false
 }
