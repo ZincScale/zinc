@@ -28,6 +28,8 @@ greet("Alice")          // "Hello, Alice!"
 greet("Bob", "Hey")     // "Hey, Bob!"
 ```
 
+Constructors (`init`) always succeed — bare `return` inside an `init` body is a compile error. For failable construction, use a factory returning `T?`. See [classes](classes.md#constructors-always-succeed) and [error handling](error-handling.md#constructors-always-succeed--use-a-factory-for-failable-construction).
+
 ## String interpolation
 
 Any double-quoted string with `${expr}` is interpolated automatically. Single-quoted strings are literal — no interpolation:

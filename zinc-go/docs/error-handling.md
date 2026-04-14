@@ -89,3 +89,45 @@ The `err` variable is automatically available inside `or` blocks.
 | `f() or { continue }` | `val, err := f(); if err != nil { continue }` |
 
 Zinc's error handling is zero-cost — it compiles to the exact same Go error patterns, just without the boilerplate.
+
+## Constructors always succeed — use a factory for failable construction
+
+A constructor (`init`) has no failure channel. The caller always gets a fully-constructed instance, so there is no way for `init` to signal "stop, construction failed." A bare `return` inside an `init` body is rejected at compile time:
+
+```zinc
+class Config {
+    String host
+    int port
+    init(String host, int port) {
+        this.host = host
+        if port < 0 {
+            return   // compile error: bare `return` not allowed in ctor body
+        }
+        this.port = port
+    }
+}
+```
+
+If construction can actually fail, lift the failable check into a factory function that returns `T?` and emits `Error(reason)` on the failure path. The factory constructs via the ctor on success:
+
+```zinc
+fn newConfig(String host, int port): Config? {
+    if port < 0 {
+        return Error("port must be non-negative: ${port}")
+    }
+    return Config(host, port)
+}
+
+// Caller handles failure at the call site — same or { } shape
+// as any other failable call:
+var cfg = newConfig("localhost", -1) or {
+    print("bad config: ${err}")
+    return
+}
+```
+
+This keeps construction failure visible at every call site rather than hidden behind a half-built object. It is the same design rule as functions that return `Error(...)` (see [Functions that can fail](#functions-that-can-fail)), applied to the construction boundary.
+
+### Rationale
+
+Silently early-exiting from a constructor — e.g., `if bad_input { return }` — would hand the caller an object whose fields are only partially initialized, with no way to know. That is the exact shape of errors-as-values leaking into a silent-failure design: errors-as-values says every failure must be *reachable* at the call site through `T?` + `or { }`, and a partially-constructed object isn't. The compile-time rejection keeps the discipline visible. Guard-invert (`if good_input { parse(...) }` with no `return`) remains valid for benign empty-input handling where no error is being signalled.

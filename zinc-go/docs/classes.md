@@ -30,6 +30,10 @@ print(s)              // Server(localhost:3000)
 
 Fields are accessed with `this.` in the constructor. In methods, bare field names work directly.
 
+### Constructors always succeed
+
+`init` has no failure channel — the caller always gets a fully-constructed instance. Bare `return` inside an `init` body is a compile error. If construction can fail, write a factory function returning `T?` that emits `Error(reason)` on the failure path; see [Error handling → Constructors always succeed](error-handling.md#constructors-always-succeed--use-a-factory-for-failable-construction).
+
 ## Data classes
 
 Auto-generated record types with `toString()`:
