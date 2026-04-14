@@ -640,8 +640,12 @@ func (p *Parser) looksLikeSizedArray() bool {
 
 // v2LooksLikeLambdaParams checks if ( starts lambda params.
 // Handles: untyped (a, b) ->, typed (int a, String b) ->,
-// and qualified typed (io.Writer w, slog.HandlerOptions opts) ->
+// zero-param () ->, and qualified typed (io.Writer w, slog.HandlerOptions opts) ->
 func (p *Parser) v2LooksLikeLambdaParams() bool {
+	// Zero-param lambda: () ->
+	if p.peekAt(1).Type == lexer.TOKEN_RPAREN && p.peekAt(2).Type == lexer.TOKEN_ARROW {
+		return true
+	}
 	off := 1
 	for {
 		tok := p.peekAt(off)
@@ -685,13 +689,16 @@ func (p *Parser) v2LooksLikeLambdaParams() bool {
 }
 
 // v2ParseMultiParamLambda: (a, b) -> expr  OR  (a, b) -> { stmts }
+// Also handles zero-param lambdas: () -> expr / () -> { stmts }.
 func (p *Parser) v2ParseMultiParamLambda() Expr {
 	p.advance() // consume (
 	var params []*ParamDecl
-	params = append(params, p.parseLambdaParam())
-	for p.check(lexer.TOKEN_COMMA) {
-		p.advance()
+	if !p.check(lexer.TOKEN_RPAREN) {
 		params = append(params, p.parseLambdaParam())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			params = append(params, p.parseLambdaParam())
+		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_ARROW)
