@@ -716,6 +716,7 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		if c.Pattern == nil {
 			g.writeln("default:")
 			g.indent++
+			g.writeln("_ = _v")
 			g.emitBlock(c.Body)
 			g.indent--
 			continue
@@ -726,6 +727,7 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 			// Plain identifier pattern (e.g. case Drop without args)
 			g.writeln("case %s:", g.formatExpr(c.Pattern))
 			g.indent++
+			g.writeln("_ = _v")
 			g.emitBlock(c.Body)
 			g.indent--
 			continue
@@ -778,6 +780,11 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		g.writeln("case %s:", typeName)
 		g.indent++
 
+		// Track whether this arm actually binds _v so we know whether to
+		// emit `_ = _v` afterwards. Without this, Go rejects the file with
+		// "_v declared and not used" when every case discards (`case _`,
+		// `case Foo(_)`, `case BareType`).
+		bound := false
 		if isDataClass {
 			// Data class: destructure fields — case Single(ff) → ff := _v.Ff
 			var fieldParams []*parser.FieldDecl
@@ -796,16 +803,17 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 						if i < len(fieldParams) {
 							fieldName := exportName(fieldParams[i].Name)
 							g.writeln("%s := _v.%s", ident.Name, fieldName)
+							bound = true
 						}
 					}
 				}
 			} else if len(call.Args) > 0 {
-				for i, arg := range call.Args {
+				for _, arg := range call.Args {
 					if ident, ok := arg.(*parser.Ident); ok && ident.Name != "_" {
 						fieldName := exportName(ident.Name)
 						g.writeln("%s := _v.%s", ident.Name, fieldName)
+						bound = true
 					}
-					_ = i
 				}
 			}
 		} else if len(call.Args) > 0 {
@@ -813,8 +821,12 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 			if len(call.Args) == 1 {
 				if ident, ok := call.Args[0].(*parser.Ident); ok && ident.Name != "_" {
 					g.writeln("%s := _v", ident.Name)
+					bound = true
 				}
 			}
+		}
+		if !bound {
+			g.writeln("_ = _v")
 		}
 
 		g.emitBlock(c.Body)

@@ -1,5 +1,7 @@
-// Regression for ZCA-03: a fully-exhaustive match on a sealed type must
-// still compile cleanly after the typechecker enforces exhaustiveness.
+// Regression for ZCA-03 + ZCA-06:
+//  - fully-exhaustive match on a sealed type must still compile (ZCA-03).
+//  - wildcard + discard-pattern cases must not emit "_v declared and not
+//    used" Go errors (ZCA-06).
 
 sealed class Shape {
     data Circle(double radius)
@@ -22,8 +24,20 @@ fn area(Shape s): double {
     return 0.0
 }
 
+// Exercises both discard (`Circle(_)`) and wildcard (`case _`) — these were
+// the shapes that triggered "_v declared and not used" before the fix.
+fn describe(Shape s): String {
+    match s {
+        case Circle(_) { return "circle" }
+        case _ { return "other" }
+    }
+    return ""
+}
+
 fn main() {
     print("c=${area(Circle(2.0))}")
     print("s=${area(Square(3.0))}")
     print("t=${area(Triangle(3.0, 4.0))}")
+    print("d1=${describe(Circle(1.0))}")
+    print("d2=${describe(Square(1.0))}")
 }
