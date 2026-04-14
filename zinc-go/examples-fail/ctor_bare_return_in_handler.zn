@@ -1,0 +1,30 @@
+// Regression: bare `return` inside an `or { }` handler inside a ctor
+// body still escapes the ctor. Must be caught the same way the direct
+// bare-return case is — otherwise the idiom just moves from the
+// `if bad { return }` shape into the `might_fail() or { return }` shape.
+
+fn parseSize(String s): int? {
+    if s == "zero" {
+        return Error("zero not allowed")
+    }
+    return 42
+}
+
+class Gadget {
+    String name
+    int size
+
+    init(String name, String sizeSpec) {
+        this.name = name
+        var sz = parseSize(sizeSpec) or {
+            // Still escapes the ctor — same category error.
+            return
+        }
+        this.size = sz
+    }
+}
+
+fn main() {
+    var g = Gadget("cog", "zero")
+    print("gadget=${g.name}")
+}

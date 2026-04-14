@@ -1,0 +1,1 @@
+bare `return` not allowed inside constructor body for class "Gadget"

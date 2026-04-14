@@ -290,8 +290,43 @@ func checkCtorStmtNoBareReturn(s parser.Stmt, typeName string, errOut func(line 
 				checkCtorBodyNoBareReturn(mc.Body, typeName, errOut)
 			}
 		}
+	case *parser.ParallelForStmt:
+		if stmt.Body != nil {
+			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
+		}
+		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
+	case *parser.VarStmt:
+		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
+	case *parser.TupleVarStmt:
+		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
+	case *parser.AssignStmt:
+		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
+	case *parser.ExprStmt:
+		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
 	case *parser.BlockStmt:
 		checkCtorBodyNoBareReturn(stmt, typeName, errOut)
+	}
+	// GoStmt (spawn { }) and DeferStmt are deliberately NOT recursed
+	// into: a bare `return` inside a goroutine or deferred closure
+	// returns from that closure, not from the enclosing ctor, so it's
+	// not a design error.
+}
+
+// checkCtorOrHandlerNoBareReturn — an `or { }` handler runs in the
+// enclosing function's scope, so a bare `return` inside it escapes
+// the ctor just like a top-level one. Match handlers (`or match err`)
+// get their case bodies walked too.
+func checkCtorOrHandlerNoBareReturn(h *parser.OrHandler, typeName string, errOut func(line int, format string, args ...any)) {
+	if h == nil {
+		return
+	}
+	if h.Body != nil {
+		checkCtorBodyNoBareReturn(h.Body, typeName, errOut)
+	}
+	for _, mc := range h.MatchCases {
+		if mc != nil && mc.Body != nil {
+			checkCtorBodyNoBareReturn(mc.Body, typeName, errOut)
+		}
 	}
 }
 

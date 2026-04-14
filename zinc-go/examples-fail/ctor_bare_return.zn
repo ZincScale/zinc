@@ -1,8 +1,14 @@
 // Regression: bare `return` inside a constructor body must be a
-// compile error. Zinc ctors have no failure channel — a partial-
-// construction short-circuit can't be expressed. The correct shape is
-// a factory function returning T? that emits Error(...) on the
-// failure path and constructs via the ctor on success.
+// compile error — in every context a bare return can appear and
+// still escape the ctor. Zinc ctors have no failure channel; the
+// correct shape is a factory function returning T? that emits
+// Error(...) on the failure path and constructs via the ctor on
+// success.
+//
+// Covers three escape paths:
+//   1. direct bare return in a top-level or nested block
+//   2. bare return in an `or { }` error handler
+//   3. bare return in a `parallel for` body
 
 class Widget {
     String name
@@ -11,9 +17,7 @@ class Widget {
     init(String name, int size) {
         this.name = name
         if size < 0 {
-            // No failure channel here — this is a design error. zinc
-            // must reject it at compile time rather than papering over
-            // it with a partial-object return.
+            // Direct bare-return on an `if` guard.
             return
         }
         this.size = size
