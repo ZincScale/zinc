@@ -100,9 +100,14 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 					}
 				}
 			}
-			// Auto-import: if the identifier is a known imported package, add the import
-			if goPath, ok := g.importMap[ident.Name]; ok {
-				g.needImport(goPath)
+			// Auto-import: if the identifier is a known imported package, add the import.
+			// Skip when the name is shadowed by a user-scope field/param/local
+			// (ZCA-10) — otherwise we'd emit a spurious import for code that
+			// actually references a field/variable.
+			if !g.isUserScopeShadow(ident.Name) {
+				if goPath, ok := g.importMap[ident.Name]; ok {
+					g.needImport(goPath)
+				}
 			}
 		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))

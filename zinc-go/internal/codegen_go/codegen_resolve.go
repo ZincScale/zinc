@@ -350,6 +350,38 @@ func (g *Generator) isLocalVar(name string) bool {
 
 // --- Package/visibility helpers ----------------------------------------------
 
+// isUserScopeShadow returns true when `name` is shadowed by user scope —
+// a current-class field, a method parameter, or a tracked local variable.
+// Callers that would otherwise interpret `name` as an imported package,
+// zinc subpackage, or import alias must consult this first, otherwise a
+// user who names a field/var/param after a sibling package gets their
+// code misresolved (see ZCA-10 for the original repro).
+//
+// Normal scoping rule: inner scope shadows outer. Zinc's codegen flattens
+// resolution tables across the project, so we need an explicit guard at
+// every place the tables are consulted with a user-typed identifier.
+func (g *Generator) isUserScopeShadow(name string) bool {
+	if g.currentClass != "" && g.currentFields[name] {
+		return true
+	}
+	if g.currentParams != nil && g.currentParams[name] {
+		return true
+	}
+	if _, ok := g.varStructTypes[name]; ok {
+		return true
+	}
+	if _, ok := g.varTypes[name]; ok {
+		return true
+	}
+	if _, ok := g.varGoTypes[name]; ok {
+		return true
+	}
+	if _, ok := g.varTypeExprs[name]; ok {
+		return true
+	}
+	return false
+}
+
 // isZincSubpackage checks if an identifier is a zinc subpackage alias.
 // Handles both direct names ("core") and aliases from nested packages
 // ("router" as alias for "fabric/router" via importMap).

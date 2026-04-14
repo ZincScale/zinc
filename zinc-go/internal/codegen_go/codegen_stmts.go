@@ -292,10 +292,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.ptrVars[v.Name] = true
 		}
 
-		// Track Go types from stdlib function calls (e.g. exec.Command → *exec.Cmd)
+		// Track Go types from stdlib function calls (e.g. exec.Command → *exec.Cmd).
+		// Guard against user-scope shadow: a field/param/local named the same
+		// as an import must not be treated as a package here (ZCA-10).
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if ident, ok := sel.Object.(*parser.Ident); ok {
+				if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
 					if pkgPath, ok := g.importMap[ident.Name]; ok {
 						if retType := g.goResolver.FuncReturnType(pkgPath, sel.Field); retType != nil {
 							g.varGoTypes[v.Name] = retType
@@ -1317,9 +1319,13 @@ func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
 		return false
 	}
 
-	// Case 1: Package-level function — pkg.Func()
-	if pkgPath, ok := g.importMap[ident.Name]; ok {
-		return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
+	// Case 1: Package-level function — pkg.Func().
+	// Guard against user-scope shadow so a field/param/local with the
+	// same name as an imported package isn't treated as one (ZCA-10).
+	if !g.isUserScopeShadow(ident.Name) {
+		if pkgPath, ok := g.importMap[ident.Name]; ok {
+			return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
+		}
 	}
 
 	// Case 2: Method call on a variable — obj.Method()

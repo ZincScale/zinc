@@ -25,9 +25,13 @@ var streamMethods = map[string]bool{
 func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok {
-			// Package function: pkg.Func()
-			if pkgPath, ok := g.importMap[ident.Name]; ok {
-				return g.goResolver.FuncReturnsPointer(pkgPath, sel.Field)
+			// Package function: pkg.Func() — guarded so a user-space
+			// field/param/local with the same name as a package doesn't
+			// fall into the importMap lookup (see ZCA-10).
+			if !g.isUserScopeShadow(ident.Name) {
+				if pkgPath, ok := g.importMap[ident.Name]; ok {
+					return g.goResolver.FuncReturnsPointer(pkgPath, sel.Field)
+				}
 			}
 			// Method on tracked variable: obj.Method()
 			if goType, ok := g.varGoTypes[ident.Name]; ok {
@@ -51,14 +55,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	//   core.FlowFile(...) → core.NewFlowFile(...)
 	//   logging.Logger(...) → logging.NewLogger(...)  (from import alias)
 	//
-	// Guard: a field of the current class shadows any same-named subpackage
-	// or import alias. Without this, `class Fabric { var processors = ...;
-	// fn foo() { processors.containsKey(...) } }` in a project with a
-	// `src/processors/` subpackage would emit `processors.ContainsKey(...)`
-	// as a bogus package call, bypassing the map-containsKey rewrite below.
+	// User scope (field / param / local) shadows same-named packages —
+	// see isUserScopeShadow. Without this, `class Fabric { var processors = ... }`
+	// in a project with a `src/processors/` sibling would misread
+	// `processors.containsKey(...)` as a package call (ZCA-10).
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok &&
-			!(g.currentClass != "" && g.currentFields[ident.Name]) &&
+			!g.isUserScopeShadow(ident.Name) &&
 			(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
 			pkg := ident.Name
 			name := sel.Field
@@ -271,9 +274,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 
 	// Go struct literal: pkg.Type(Field=value) → pkg.Type{Field: value}
 	// Detected when callee is pkg.Name, Name starts uppercase, has named args,
-	// and Name is a struct (not a function) in the Go package.
+	// and Name is a struct (not a function) in the Go package. Guarded so a
+	// user-space shadow of the package name doesn't trip the dispatch (ZCA-10).
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && len(c.NamedArgs) > 0 {
-		if ident, ok := sel.Object.(*parser.Ident); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
 			if goPath, ok := g.importMap[ident.Name]; ok {
 				if g.goResolver.IsStruct(goPath, sel.Field) {
 					g.needImport(goPath)
@@ -326,7 +330,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	var goPkgPath string
 	var goFuncName string
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok {
+		if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
 				goPkgPath = pkgPath
 				goFuncName = sel.Field
