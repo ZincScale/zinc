@@ -221,19 +221,17 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 			return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 		case "keys":
+			// Resolve receiver's GenericType so we can emit []K instead of
+			// []interface{}. Walks local var → class field (ZCA-11).
 			keyType := "interface{}"
-			if te, ok := g.varTypeExprs[obj]; ok {
-				if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" && len(gt.TypeArgs) >= 1 {
-					keyType = g.formatType(gt.TypeArgs[0])
-				}
+			if gt := g.resolveReceiverGenericType(sel.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 1 {
+				keyType = g.formatType(gt.TypeArgs[0])
 			}
 			return fmt.Sprintf("func() []%s { _keys := make([]%s, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", keyType, keyType, obj, obj)
 		case "values":
 			valType := "interface{}"
-			if te, ok := g.varTypeExprs[obj]; ok {
-				if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
-					valType = g.formatType(gt.TypeArgs[1])
-				}
+			if gt := g.resolveReceiverGenericType(sel.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
+				valType = g.formatType(gt.TypeArgs[1])
 			}
 			return fmt.Sprintf("func() []%s { _vals := make([]%s, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", valType, valType, obj, obj)
 		case "containsKey":

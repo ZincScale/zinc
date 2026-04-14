@@ -280,6 +280,18 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
+		// Track type from a map-index expression: `var x = m[k]` where m is
+		// Map<K,V> → x has type V. Without this propagation, `x.keys()` on a
+		// nested-map value (where x itself is a Map<K2,V2>) falls back to
+		// []interface{} (ZCA-11b). Covers both local-var and class-field m.
+		if idx, ok := v.Value.(*parser.IndexExpr); ok && v.Type == nil {
+			if gt := g.resolveReceiverGenericType(idx.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
+				if gt2, ok := gt.TypeArgs[1].(*parser.GenericType); ok {
+					g.varTypeExprs[v.Name] = gt2
+				}
+			}
+		}
+
 		// Track pointer vars from optional-returning functions
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {

@@ -350,6 +350,58 @@ func (g *Generator) isLocalVar(name string) bool {
 
 // --- Package/visibility helpers ----------------------------------------------
 
+// resolveReceiverGenericType returns the GenericType of a receiver
+// expression (e.g., the `foo` in `foo.keys()` or `foo.values()`), or nil
+// if none is known. Handles:
+//
+//   - local variables tracked in varTypeExprs
+//   - current-class fields with an explicit generic type annotation, or
+//     with a MapLit/ListLit default-value that carries ExplicitType
+//
+// Motivation: the map-method rewrites for `.keys()` / `.values()` need
+// the typed K/V to emit `[]K` / `[]V` instead of `[]interface{}`. For
+// receivers that are class fields, varTypeExprs keyed by plain name
+// doesn't hit — we have to walk back to the field's declaration (ZCA-11).
+func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericType {
+	ident, ok := e.(*parser.Ident)
+	if !ok {
+		return nil
+	}
+	// Local variable with a tracked type expression.
+	if te, ok := g.varTypeExprs[ident.Name]; ok {
+		if gt, ok := te.(*parser.GenericType); ok {
+			return gt
+		}
+	}
+	// Current-class field.
+	if g.currentClass != "" && g.currentFields[ident.Name] {
+		if cls, ok := g.structs[g.currentClass]; ok {
+			for _, f := range cls.Fields {
+				if f.Name != ident.Name {
+					continue
+				}
+				if gt, ok := f.Type.(*parser.GenericType); ok {
+					return gt
+				}
+				// `var x = Map<...>{}` — explicit type lives on the MapLit.
+				if f.Default != nil {
+					if mapLit, ok := f.Default.(*parser.MapLit); ok {
+						if gt, ok := mapLit.ExplicitType.(*parser.GenericType); ok {
+							return gt
+						}
+					}
+					if listLit, ok := f.Default.(*parser.ListLit); ok {
+						if gt, ok := listLit.ExplicitType.(*parser.GenericType); ok {
+							return gt
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // isUserScopeShadow returns true when `name` is shadowed by user scope —
 // a current-class field, a method parameter, or a tracked local variable.
 // Callers that would otherwise interpret `name` as an imported package,
