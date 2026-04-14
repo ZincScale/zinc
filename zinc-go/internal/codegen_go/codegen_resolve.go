@@ -357,12 +357,25 @@ func (g *Generator) isLocalVar(name string) bool {
 //   - local variables tracked in varTypeExprs
 //   - current-class fields with an explicit generic type annotation, or
 //     with a MapLit/ListLit default-value that carries ExplicitType
+//   - map-index expressions: given `m[k]` where m is Map<K,V>, returns V
+//     if V is itself a GenericType (the common case for nested containers)
 //
 // Motivation: the map-method rewrites for `.keys()` / `.values()` need
 // the typed K/V to emit `[]K` / `[]V` instead of `[]interface{}`. For
-// receivers that are class fields, varTypeExprs keyed by plain name
-// doesn't hit — we have to walk back to the field's declaration (ZCA-11).
+// receivers that aren't simple locals — class fields, nested index
+// expressions — plain-name varTypeExprs lookup doesn't hit (ZCA-11).
 func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericType {
+	// Map-index expression: `m[k].method(...)`. Walk to the map's V type.
+	if idx, ok := e.(*parser.IndexExpr); ok {
+		if outer := g.resolveReceiverGenericType(idx.Object); outer != nil &&
+			outer.Name == "Map" && len(outer.TypeArgs) >= 2 {
+			if gt, ok := outer.TypeArgs[1].(*parser.GenericType); ok {
+				return gt
+			}
+		}
+		return nil
+	}
+
 	ident, ok := e.(*parser.Ident)
 	if !ok {
 		return nil

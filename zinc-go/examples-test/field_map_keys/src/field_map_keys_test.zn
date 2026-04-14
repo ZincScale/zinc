@@ -104,3 +104,45 @@ test "local var = field[key] inherits Map<K,V> type through index expression" {
         t.Errorf("sumGroup(team-b) = %v, want 100", n.sumGroup("team-b"))
     }
 }
+
+// ZCA-11c: `field[key].keys()` directly, without a local var binding.
+// Exercises resolveReceiverGenericType walking through an IndexExpr AST
+// node to reach the outer Map's V type.
+
+class DirectNested {
+    var groups = Map<String, Map<String, int>>{}
+
+    init() {}
+
+    pub fn set(String g, String k, int v) {
+        if !groups.containsKey(g) {
+            groups[g] = Map<String, int>{}
+        }
+        groups[g][k] = v
+    }
+
+    pub fn sumDirect(String g): int {
+        var total = 0
+        // Receiver is IndexExpr (groups[g]), not a plain local. Without
+        // the IndexExpr case in resolveReceiverGenericType, .keys() below
+        // would return []interface{} and for-loop + indexing would fail.
+        for k in groups[g].keys() {
+            total = total + groups[g][k]
+        }
+        return total
+    }
+}
+
+test "field[key].keys() directly — no local var rebind needed" {
+    var n = DirectNested()
+    n.set("A", "x", 5)
+    n.set("A", "y", 6)
+    n.set("B", "z", 100)
+
+    if n.sumDirect("A") != 11 {
+        t.Errorf("sumDirect(A) = %v, want 11", n.sumDirect("A"))
+    }
+    if n.sumDirect("B") != 100 {
+        t.Errorf("sumDirect(B) = %v, want 100", n.sumDirect("B"))
+    }
+}

@@ -145,13 +145,28 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 		case "recv":
 			if !g.isStructVar(sel.Object) {
-				// Add type assertion only for untyped channels (chan interface{}).
-				// Typed channels (chan Job, chan FlowFile) already return the correct type.
-				if g.currentMethodRetType != "" && g.currentMethodRetType != "interface{}" {
-					chanElemType := g.varTypes[obj]
-					if chanElemType == "" || chanElemType == "interface{}" {
-						return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
+				// Add type assertion only for untyped channels (`chan interface{}`).
+				// Typed `Channel<T>(n)` already yields T on recv, so the cast
+				// would be a compile error. Detect typedness by walking the
+				// receiver AST (ident → local var / class field), not by
+				// looking up `obj` string in varTypes (that misses fields
+				// and nested expressions — ZCA-11 territory).
+				isTypedChannel := false
+				if gt := g.resolveReceiverGenericType(sel.Object); gt != nil &&
+					(gt.Name == "Channel" || gt.Name == "Chan") && len(gt.TypeArgs) >= 1 {
+					isTypedChannel = true
+				}
+				// Fallback: scalar-type tracking for simple local vars.
+				if !isTypedChannel {
+					if ident, ok := sel.Object.(*parser.Ident); ok {
+						elt := g.varTypes[ident.Name]
+						if elt != "" && elt != "interface{}" {
+							isTypedChannel = true
+						}
 					}
+				}
+				if g.currentMethodRetType != "" && g.currentMethodRetType != "interface{}" && !isTypedChannel {
+					return fmt.Sprintf("(<-%s).(%s)", obj, g.currentMethodRetType)
 				}
 				return fmt.Sprintf("<-%s", obj)
 			}
