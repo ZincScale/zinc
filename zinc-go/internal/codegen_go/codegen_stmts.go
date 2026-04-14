@@ -384,6 +384,27 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 			zv := g.zeroValueFor(g.currentReturnType)
 			if len(call.Args) == 1 {
 				arg := call.Args[0]
+				// Error("text ${interp}"): emit fmt.Errorf(fmt, args...) with the
+				// format as a compile-time constant instead of wrapping
+				// fmt.Sprintf(...) — the latter fails `go vet` and blocks
+				// `go test` for any package that uses Error(...) interpolated.
+				if interp, ok := arg.(*parser.StringInterpLit); ok {
+					g.needImport("fmt")
+					fmtStr, args := g.formatPrintf(interp)
+					// formatPrintf appends a trailing "\n" for println use;
+					// strip it here since Errorf doesn't want the newline.
+					fmtStr = strings.TrimSuffix(fmtStr, "\n")
+					errCall := fmt.Sprintf("fmt.Errorf(%q)", fmtStr)
+					if len(args) > 0 {
+						errCall = fmt.Sprintf("fmt.Errorf(%q, %s)", fmtStr, strings.Join(args, ", "))
+					}
+					if zv != "" {
+						g.writeln("return %s, %s", zv, errCall)
+					} else {
+						g.writeln("return %s", errCall)
+					}
+					return
+				}
 				if innerCall, ok := arg.(*parser.CallExpr); ok {
 					if _, ok := innerCall.Callee.(*parser.Ident); ok {
 						g.needImport("fmt")
