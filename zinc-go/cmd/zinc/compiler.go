@@ -39,7 +39,7 @@ func parseFile(path string) (*parser.Program, error) {
 }
 
 // compileFile reads a .zn file, parses it, and generates Go source.
-func compileFile(path string) ([]codegen.OutputFile, error) {
+func compileFile(path string, importAliases ...map[string]string) ([]codegen.OutputFile, error) {
 	prog, err := parseFile(path)
 	if err != nil {
 		return nil, err
@@ -52,6 +52,9 @@ func compileFile(path string) ([]codegen.OutputFile, error) {
 
 	gen := codegen.New()
 	gen.SetSourceFile(prog.SourceFile)
+	if len(importAliases) > 0 && importAliases[0] != nil {
+		gen.SetImportAliases(importAliases[0])
+	}
 	files := gen.GenerateFiles(prog, className)
 	return files, nil
 }
@@ -98,7 +101,7 @@ func collectZnFiles(dir string) ([]string, error) {
 // compileMultiFile parses all .zn files and generates one .go file per .zn file.
 // A first pass collects exports from all files so each file's codegen knows about
 // sibling types. Go handles cross-file visibility natively within a package.
-func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
+func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases ...map[string]string) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
@@ -109,7 +112,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 
 	// If there's only one file, use the single-file path (simpler output naming)
 	if len(znFiles) == 1 {
-		files, err := compileFile(znFiles[0])
+		files, err := compileFile(znFiles[0], importAliases...)
 		if err != nil {
 			return err
 		}
@@ -147,6 +150,9 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 		gen := codegen.New()
 		gen.SetSourceFile(prog.SourceFile)
 		gen.SetSiblingExports(allExports)
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			gen.SetImportAliases(importAliases[0])
+		}
 		files := gen.GenerateFiles(prog, className)
 
 		for _, f := range files {
@@ -165,12 +171,13 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool) error {
 // compileDir compiles all .zn files in a directory using multi-file merging
 // for cross-file type resolution. Writes generated .go files into outDir.
 // If quiet is true, the progress lines are suppressed.
-func compileDir(dir, outDir string, quiet bool) error {
+// importAliases are optional [imports] entries from zinc.toml for package resolution.
+func compileDir(dir, outDir string, quiet bool, importAliases ...map[string]string) error {
 	znFiles, err := collectZnFiles(dir)
 	if err != nil {
 		return err
 	}
-	return compileMultiFile(znFiles, outDir, quiet)
+	return compileMultiFile(znFiles, outDir, quiet, importAliases...)
 }
 
 // collectZnFilesFlat collects .zn files in a directory (non-recursive, single level only).

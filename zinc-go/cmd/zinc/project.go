@@ -483,7 +483,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 			return err
 		}
 	} else {
-		if err := compileDir(srcDir, outDir, quiet); err != nil {
+		if err := compileDir(srcDir, outDir, quiet, cfg.Imports); err != nil {
 			return err
 		}
 	}
@@ -561,7 +561,7 @@ func runProject(projectDir string, progArgs []string) error {
 			return err
 		}
 	} else {
-		if err := compileDir(srcDir, tmpDir, true); err != nil {
+		if err := compileDir(srcDir, tmpDir, true, cfg.Imports); err != nil {
 			return err
 		}
 	}
