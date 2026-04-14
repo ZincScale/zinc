@@ -1043,7 +1043,7 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 				return
 			}
 		}
-		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "put" && len(call.Args) == 2 {
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "put" && len(call.Args) == 2 && !g.isStructVar(sel.Object) {
 			obj := g.formatExpr(sel.Object)
 			g.writeln("%s[%s] = %s", obj, g.formatExpr(call.Args[0]), g.formatExpr(call.Args[1]))
 			return
@@ -1147,6 +1147,20 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 					}
 				}
 			}
+		}
+	}
+	// Nested selector / method-call receivers: `o.inner`, `this.outer.inner`,
+	// `obj.getInner()` — the resolver walks class declarations looking for a
+	// concrete class name. Without this path, a method call on a nested
+	// class field was misread by rewrites like `.put()` as a map-set.
+	if _, ok := e.(*parser.SelectorExpr); ok {
+		if clsName := g.resolveReceiverClassName(e); clsName != "" && g.isClassType(clsName) {
+			return true
+		}
+	}
+	if _, ok := e.(*parser.CallExpr); ok {
+		if clsName := g.resolveReceiverClassName(e); clsName != "" && g.isClassType(clsName) {
+			return true
 		}
 	}
 	return false

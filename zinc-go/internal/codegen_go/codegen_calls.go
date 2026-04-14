@@ -110,9 +110,11 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// String method rewrites
+	// String method rewrites — guarded so a user-defined method on a class
+	// with the same name (e.g., `class Text { fn upper() { ... } }`) doesn't
+	// get redirected to `strings.ToUpper(obj)`.
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if goFunc, ok := stringMethodMapping[sel.Field]; ok {
+		if goFunc, ok := stringMethodMapping[sel.Field]; ok && !g.isStructVar(sel.Object) {
 			g.needImport("strings")
 			obj := g.formatExpr(sel.Object)
 			args := g.formatExprList(c.Args)
@@ -193,34 +195,52 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 			return fmt.Sprintf("len(%s)", obj)
 		case "toBytes":
-			return fmt.Sprintf("[]byte(%s)", obj)
-		case "charAt":
-			return fmt.Sprintf("string(%s[%s])", obj, g.formatExprList(c.Args))
-		case "substring":
-			args := c.Args
-			if len(args) == 2 {
-				return fmt.Sprintf("%s[%s:%s]", obj, g.formatExpr(args[0]), g.formatExpr(args[1]))
+			if !g.isStructVar(sel.Object) {
+				return fmt.Sprintf("[]byte(%s)", obj)
 			}
-			return fmt.Sprintf("%s[%s:]", obj, g.formatExpr(args[0]))
+		case "charAt":
+			if !g.isStructVar(sel.Object) {
+				return fmt.Sprintf("string(%s[%s])", obj, g.formatExprList(c.Args))
+			}
+		case "substring":
+			if !g.isStructVar(sel.Object) {
+				args := c.Args
+				if len(args) == 2 {
+					return fmt.Sprintf("%s[%s:%s]", obj, g.formatExpr(args[0]), g.formatExpr(args[1]))
+				}
+				return fmt.Sprintf("%s[%s:]", obj, g.formatExpr(args[0]))
+			}
 		case "replace":
-			g.needImport("strings")
-			if len(c.Args) == 2 {
-				return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				if len(c.Args) == 2 {
+					return fmt.Sprintf("strings.ReplaceAll(%s, %s, %s)", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
+				}
 			}
 		case "trimStart":
-			g.needImport("strings")
-			return fmt.Sprintf("strings.TrimLeft(%s, \" \\t\\n\\r\")", obj)
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				return fmt.Sprintf("strings.TrimLeft(%s, \" \\t\\n\\r\")", obj)
+			}
 		case "trimEnd":
-			g.needImport("strings")
-			return fmt.Sprintf("strings.TrimRight(%s, \" \\t\\n\\r\")", obj)
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				return fmt.Sprintf("strings.TrimRight(%s, \" \\t\\n\\r\")", obj)
+			}
 		case "upper":
-			g.needImport("strings")
-			return fmt.Sprintf("strings.ToUpper(%s)", obj)
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				return fmt.Sprintf("strings.ToUpper(%s)", obj)
+			}
 		case "lower":
-			g.needImport("strings")
-			return fmt.Sprintf("strings.ToLower(%s)", obj)
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				return fmt.Sprintf("strings.ToLower(%s)", obj)
+			}
 		case "entrySet":
-			return obj
+			if !g.isStructVar(sel.Object) {
+				return obj
+			}
 		case "getKey":
 			if !g.isStructVar(sel.Object) {
 				return obj + ".Key"
@@ -230,11 +250,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return obj + ".Value"
 			}
 		case "join":
-			g.needImport("strings")
-			if len(c.Args) == 1 {
-				return fmt.Sprintf("strings.Join(%s, %s)", obj, g.formatExpr(c.Args[0]))
+			if !g.isStructVar(sel.Object) {
+				g.needImport("strings")
+				if len(c.Args) == 1 {
+					return fmt.Sprintf("strings.Join(%s, %s)", obj, g.formatExpr(c.Args[0]))
+				}
+				return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 			}
-			return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 		case "keys":
 			// Resolve receiver's GenericType so we can emit []K instead of
 			// []interface{}. Walks local var → class field (ZCA-11).

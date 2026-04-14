@@ -350,27 +350,187 @@ func (g *Generator) isLocalVar(name string) bool {
 
 // --- Package/visibility helpers ----------------------------------------------
 
+// lookupClassDecl finds a ClassDecl by name across local structs and
+// all registered subpackage exports. Returns nil on miss.
+func (g *Generator) lookupClassDecl(name string) *parser.ClassDecl {
+	if cls, ok := g.structs[name]; ok {
+		return cls
+	}
+	for _, pkgClasses := range g.subpkgStructs {
+		if cls, ok := pkgClasses[name]; ok {
+			return cls
+		}
+	}
+	return nil
+}
+
+// resolveReceiverClassName returns the class/struct type name that an
+// expression evaluates to, or "" if unknown. Walks:
+//
+//   - Ident             — local var (varStructTypes) or current-class field
+//   - SelectorExpr      — `a.b`: resolve a's class, look up b's declared type
+//   - CallExpr          — `a.method()`: resolve a's class, look up method's
+//                         return type
+//
+// This is the companion to resolveReceiverGenericType for the case where
+// the receiver is a class instance (not a collection) — needed so we can
+// chain through `obj.getMap().keys()` and `this.outer.inner.size()`.
+func (g *Generator) resolveReceiverClassName(e parser.Expr) string {
+	switch expr := e.(type) {
+	case *parser.Ident:
+		if st, ok := g.varStructTypes[expr.Name]; ok {
+			return st
+		}
+		if g.currentClass != "" && g.currentFields[expr.Name] {
+			if cls := g.lookupClassDecl(g.currentClass); cls != nil {
+				for _, f := range cls.Fields {
+					if f.Name == expr.Name {
+						if st, ok := f.Type.(*parser.SimpleType); ok {
+							return st.Name
+						}
+					}
+				}
+			}
+		}
+	case *parser.SelectorExpr:
+		outer := g.resolveReceiverClassName(expr.Object)
+		if outer == "" {
+			return ""
+		}
+		if cls := g.lookupClassDecl(outer); cls != nil {
+			for _, f := range cls.Fields {
+				if f.Name == expr.Field {
+					if st, ok := f.Type.(*parser.SimpleType); ok {
+						return st.Name
+					}
+				}
+			}
+		}
+	case *parser.CallExpr:
+		if sel, ok := expr.Callee.(*parser.SelectorExpr); ok {
+			outer := g.resolveReceiverClassName(sel.Object)
+			if outer == "" {
+				return ""
+			}
+			if cls := g.lookupClassDecl(outer); cls != nil {
+				for _, m := range cls.Methods {
+					if m.Name == sel.Field && m.ReturnType != nil {
+						if st, ok := m.ReturnType.(*parser.SimpleType); ok {
+							return st.Name
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// fieldGenericType reads a GenericType off a field of the given class,
+// from (in order): explicit type annotation, MapLit/ListLit default-value
+// ExplicitType, or a CallExpr default like `Channel<T>(n)` whose callee
+// names a built-in typed constructor. Returns nil when no generic type
+// can be inferred.
+func (g *Generator) fieldGenericType(cls *parser.ClassDecl, fieldName string) *parser.GenericType {
+	for _, f := range cls.Fields {
+		if f.Name != fieldName {
+			continue
+		}
+		if gt, ok := f.Type.(*parser.GenericType); ok {
+			return gt
+		}
+		if f.Default != nil {
+			if mapLit, ok := f.Default.(*parser.MapLit); ok {
+				if gt, ok := mapLit.ExplicitType.(*parser.GenericType); ok {
+					return gt
+				}
+			}
+			if listLit, ok := f.Default.(*parser.ListLit); ok {
+				if gt, ok := listLit.ExplicitType.(*parser.GenericType); ok {
+					return gt
+				}
+			}
+			// `var ch = Channel<Event>(4)` — CallExpr with callee Ident named
+			// "Channel"/"Chan"/"Set" carries the element type in TypeArgs.
+			// Synthesize a GenericType so resolveReceiverGenericType can
+			// recognize the field as a typed channel/set.
+			if call, ok := f.Default.(*parser.CallExpr); ok {
+				if ident, ok := call.Callee.(*parser.Ident); ok {
+					switch ident.Name {
+					case "Channel", "Chan", "Set":
+						if len(call.TypeArgs) >= 1 {
+							typeArgs := make([]parser.TypeExpr, 0, len(call.TypeArgs))
+							for _, s := range call.TypeArgs {
+								typeArgs = append(typeArgs, &parser.SimpleType{Name: s})
+							}
+							return &parser.GenericType{Name: ident.Name, TypeArgs: typeArgs}
+						}
+					}
+				}
+			}
+		}
+		break
+	}
+	return nil
+}
+
 // resolveReceiverGenericType returns the GenericType of a receiver
 // expression (e.g., the `foo` in `foo.keys()` or `foo.values()`), or nil
 // if none is known. Handles:
 //
-//   - local variables tracked in varTypeExprs
-//   - current-class fields with an explicit generic type annotation, or
-//     with a MapLit/ListLit default-value that carries ExplicitType
-//   - map-index expressions: given `m[k]` where m is Map<K,V>, returns V
-//     if V is itself a GenericType (the common case for nested containers)
+//   - Ident          local var (varTypeExprs) or current-class field
+//   - IndexExpr      `m[k]` where m is Map<K,V> → returns V if generic
+//   - SelectorExpr   `obj.field` — walks obj's class, reads field's type
+//   - CallExpr       `obj.method()` — walks obj's class, reads method's
+//                    return type
 //
-// Motivation: the map-method rewrites for `.keys()` / `.values()` need
-// the typed K/V to emit `[]K` / `[]V` instead of `[]interface{}`. For
-// receivers that aren't simple locals — class fields, nested index
-// expressions — plain-name varTypeExprs lookup doesn't hit (ZCA-11).
+// Motivation: the map/list method rewrites (`.keys()`, `.values()`,
+// `.containsKey()`, `.size()`, `.recv()` for typed channels, etc.) need
+// the typed K/V/element to emit properly typed Go. The ZCA-11 family
+// tracks every case where a realistic receiver shape — class fields,
+// nested access, getter chains — lost its type information and
+// degraded to interface{}.
 func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericType {
-	// Map-index expression: `m[k].method(...)`. Walk to the map's V type.
+	// Map-index expression: `m[k].method(...)` — return Map's V type.
 	if idx, ok := e.(*parser.IndexExpr); ok {
 		if outer := g.resolveReceiverGenericType(idx.Object); outer != nil &&
 			outer.Name == "Map" && len(outer.TypeArgs) >= 2 {
 			if gt, ok := outer.TypeArgs[1].(*parser.GenericType); ok {
 				return gt
+			}
+		}
+		return nil
+	}
+
+	// Nested field chain: `this.outer.inner.method(...)`. Resolve outer's
+	// class and look up inner's field type.
+	if sel, ok := e.(*parser.SelectorExpr); ok {
+		outerClass := g.resolveReceiverClassName(sel.Object)
+		if outerClass != "" {
+			if cls := g.lookupClassDecl(outerClass); cls != nil {
+				if gt := g.fieldGenericType(cls, sel.Field); gt != nil {
+					return gt
+				}
+			}
+		}
+		return nil
+	}
+
+	// Method-call receiver: `obj.getMap().keys()` — resolve obj's class
+	// and read the method's declared return type.
+	if call, ok := e.(*parser.CallExpr); ok {
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+			outerClass := g.resolveReceiverClassName(sel.Object)
+			if outerClass != "" {
+				if cls := g.lookupClassDecl(outerClass); cls != nil {
+					for _, m := range cls.Methods {
+						if m.Name == sel.Field && m.ReturnType != nil {
+							if gt, ok := m.ReturnType.(*parser.GenericType); ok {
+								return gt
+							}
+						}
+					}
+				}
 			}
 		}
 		return nil
@@ -388,27 +548,9 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	}
 	// Current-class field.
 	if g.currentClass != "" && g.currentFields[ident.Name] {
-		if cls, ok := g.structs[g.currentClass]; ok {
-			for _, f := range cls.Fields {
-				if f.Name != ident.Name {
-					continue
-				}
-				if gt, ok := f.Type.(*parser.GenericType); ok {
-					return gt
-				}
-				// `var x = Map<...>{}` — explicit type lives on the MapLit.
-				if f.Default != nil {
-					if mapLit, ok := f.Default.(*parser.MapLit); ok {
-						if gt, ok := mapLit.ExplicitType.(*parser.GenericType); ok {
-							return gt
-						}
-					}
-					if listLit, ok := f.Default.(*parser.ListLit); ok {
-						if gt, ok := listLit.ExplicitType.(*parser.GenericType); ok {
-							return gt
-						}
-					}
-				}
+		if cls := g.lookupClassDecl(g.currentClass); cls != nil {
+			if gt := g.fieldGenericType(cls, ident.Name); gt != nil {
+				return gt
 			}
 		}
 	}

@@ -1,0 +1,250 @@
+// Comprehensive regression for collection-method receiver shapes.
+// Every shape that can appear as a `.keys() / .values() / .containsKey() /
+// .size() / etc.` receiver must produce correctly typed Go. No more
+// silent []interface{} fallbacks.
+//
+// Covered shapes:
+//   1. Ident — local var: `var m = Map<K,V>{}; m.keys()`
+//   2. Ident — class field: `field.keys()`
+//   3. IndexExpr — `m[k].keys()`
+//   4. SelectorExpr — `this.inner.keys()`, `outerField.innerField.keys()`
+//   5. CallExpr — `obj.getMap().keys()`
+//   6. Chained — `obj.getInner().inner.keys()`, `m[k1].values()` variants
+//   7. Typed Channel recv — `chanField.recv()` must NOT emit cast
+
+// using t.Errorf directly — keeps the project dep-free.
+
+// --- Shape 1: local var ---
+
+test "shape 1 — local var keys/values" {
+    var m = Map<String, int>{}
+    m["a"] = 1
+    m["b"] = 2
+    var sum = 0
+    for k in m.keys() {
+        sum = sum + m[k]
+    }
+    if sum != 3 { t.Errorf("got %v, want %v", sum, 3) }
+    var vsum = 0
+    for v in m.values() {
+        vsum = vsum + v
+    }
+    if vsum != 3 { t.Errorf("got %v, want %v", vsum, 3) }
+}
+
+// --- Shape 2: class field ---
+
+class FieldHolder {
+    var items = Map<String, int>{}
+    init() {}
+    pub fn add(String k, int v) { items[k] = v }
+    pub fn total(): int {
+        var sum = 0
+        for k in items.keys() {
+            sum = sum + items[k]
+        }
+        return sum
+    }
+}
+
+test "shape 2 — class field keys/values typed" {
+    var h = FieldHolder()
+    h.add("x", 10)
+    h.add("y", 20)
+    if h.total() != 30 { t.Errorf("got %v, want %v", h.total(), 30) }
+}
+
+// --- Shape 3: IndexExpr receiver ---
+
+class IdxHolder {
+    var nested = Map<String, Map<String, int>>{}
+    init() {}
+    pub fn set(String g, String k, int v) {
+        if !nested.containsKey(g) {
+            nested[g] = Map<String, int>{}
+        }
+        nested[g][k] = v
+    }
+
+    // Direct IndexExpr receiver: `nested[g].keys()` — no intermediate var.
+    pub fn groupSum(String g): int {
+        var total = 0
+        for k in nested[g].keys() {
+            total = total + nested[g][k]
+        }
+        return total
+    }
+
+    // `len(nested[g].keys())` — exercises IndexExpr-receiver keys() being
+    // returned as a typed slice (len works on both typed and untyped, but
+    // this confirms the shape compiles).
+    pub fn groupKeys(String g): int {
+        return len(nested[g].keys())
+    }
+}
+
+test "shape 3 — IndexExpr receiver keys/values typed" {
+    var h = IdxHolder()
+    h.set("A", "x", 1)
+    h.set("A", "y", 2)
+    h.set("A", "z", 3)
+    if h.groupSum("A") != 6 { t.Errorf("got %v, want %v", h.groupSum("A"), 6) }
+    if h.groupKeys("A") != 3 { t.Errorf("got %v, want %v", h.groupKeys("A"), 3) }
+}
+
+// --- Shape 4: nested SelectorExpr chain (this.outer.inner.keys()) ---
+
+class Inner {
+    var data = Map<String, int>{}
+    init() {}
+    pub fn put(String k, int v) { data[k] = v }
+}
+
+class OuterWithInner {
+    Inner inner
+    init() { this.inner = Inner() }
+    pub fn get(): Inner { return inner }
+
+    // Exercises `this.inner.data.keys()` via field-chain resolver.
+    pub fn sumData(): int {
+        var total = 0
+        for k in inner.data.keys() {
+            total = total + inner.data[k]
+        }
+        return total
+    }
+}
+
+test "shape 4 — nested selector chain keys typed" {
+    var o = OuterWithInner()
+    o.inner.put("a", 100)
+    o.inner.put("b", 200)
+    if o.sumData() != 300 { t.Errorf("got %v, want %v", o.sumData(), 300) }
+}
+
+// --- Shape 5: method-call receiver (getter chain) ---
+
+class Wrapper {
+    var tags = Map<String, String>{}
+    init() {}
+    pub fn set(String k, String v) { tags[k] = v }
+    pub fn getTags(): Map<String, String> { return tags }
+}
+
+class WrapperUser {
+    Wrapper w
+    init() { this.w = Wrapper() }
+    pub fn add(String k, String v) { w.set(k, v) }
+
+    // Exercises `w.getTags().keys()` — method returns collection, chain on.
+    pub fn joinKeys(): String {
+        var all = ""
+        for k in w.getTags().keys() {
+            if all != "" { all = all + "," }
+            all = all + k
+        }
+        return all
+    }
+}
+
+test "shape 5 — method-call return, chained .keys()" {
+    var u = WrapperUser()
+    u.add("x", "1")
+    u.add("y", "2")
+    var joined = u.joinKeys()
+    // key order is map iteration — accept either permutation
+    if joined != "x,y" && joined != "y,x" {
+        t.Errorf("joinKeys() = %q, want x,y or y,x", joined)
+    }
+}
+
+// --- Shape 6: IndexExpr wrapping a SelectorExpr ---
+
+class Combo {
+    var parent = Map<String, Map<String, int>>{}
+    init() {}
+    pub fn set(String g, String k, int v) {
+        if !parent.containsKey(g) {
+            parent[g] = Map<String, int>{}
+        }
+        parent[g][k] = v
+    }
+
+    // `(parent field) [g] .values()` — composes SelectorExpr(thisField)
+    // + IndexExpr(g) + method call. `this.parent[g].values()` shape.
+    pub fn maxInGroup(String g): int {
+        var best = 0
+        for v in parent[g].values() {
+            if v > best { best = v }
+        }
+        return best
+    }
+}
+
+test "shape 6 — field[key].values() direct" {
+    var c = Combo()
+    c.set("alpha", "a", 5)
+    c.set("alpha", "b", 17)
+    c.set("alpha", "c", 3)
+    if c.maxInGroup("alpha") != 17 { t.Errorf("got %v, want %v", c.maxInGroup("alpha"), 17) }
+}
+
+// --- Shape 7: typed Channel<T> field — recv must NOT emit type assertion ---
+
+data Event(int id, String payload)
+
+class EventHub {
+    var ch = Channel<Event>(4)
+    init() {}
+    pub fn publish(int id, String p) { ch.send(Event(id, p)) }
+    // `ch.recv()` is a typed channel recv — expected Go: `<-s.ch`, NOT
+    // `(<-s.ch).(Event)`. Prior bug: the cast was emitted, Go rejected
+    // because `chan Event` recv is already Event.
+    pub fn next(): Event { return ch.recv() }
+}
+
+test "shape 7 — typed Channel<T> field recv (no cast emitted)" {
+    var hub = EventHub()
+    hub.publish(1, "first")
+    hub.publish(2, "second")
+    var e1 = hub.next()
+    var e2 = hub.next()
+    if e1.id != 1 { t.Errorf("got %v, want %v", e1.id, 1) }
+    if e1.payload != "first" { t.Errorf("got %q, want %q", e1.payload, "first") }
+    if e2.id != 2 { t.Errorf("got %v, want %v", e2.id, 2) }
+    if e2.payload != "second" { t.Errorf("got %q, want %q", e2.payload, "second") }
+}
+
+// --- Shape 8: user-defined methods with names that match string builtins
+// (`upper`, `lower`, `replace`, etc.) must dispatch to the class method,
+// NOT to the strings-package rewrite. ---
+
+class Text {
+    String raw
+    init(String raw) { this.raw = raw }
+
+    // Shadows the string builtin `upper()`. A method call `t.upper()` must
+    // dispatch here, not to `strings.ToUpper(t)`.
+    pub fn upper(): String {
+        return "[U]" + raw + "[/U]"
+    }
+    pub fn trimEnd(): String {
+        return "[T]" + raw + "[/T]"
+    }
+    pub fn join(String sep): String {
+        return sep + raw + sep
+    }
+}
+
+test "shape 8 — user methods named upper/trimEnd/join shadow string builtins" {
+    var tx = Text("hello")
+    if tx.upper() != "[U]hello[/U]" {
+        t.Errorf("upper() = %q, want %q", tx.upper(), "[U]hello[/U]")
+    }
+    if tx.trimEnd() != "[T]hello[/T]" {
+        t.Errorf("trimEnd() = %q, want %q", tx.trimEnd(), "[T]hello[/T]")
+    }
+    if tx.join("|") != "|hello|" {
+        t.Errorf("join() = %q, want %q", tx.join("|"), "|hello|")
+    }
+}
