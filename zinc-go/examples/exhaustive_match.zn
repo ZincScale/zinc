@@ -1,0 +1,29 @@
+// Regression for ZCA-03: a fully-exhaustive match on a sealed type must
+// still compile cleanly after the typechecker enforces exhaustiveness.
+
+sealed class Shape {
+    data Circle(double radius)
+    data Square(double side)
+    data Triangle(double base, double height)
+}
+
+fn area(Shape s): double {
+    match s {
+        case Circle(r) {
+            return 3.14159 * r * r
+        }
+        case Square(side) {
+            return side * side
+        }
+        case Triangle(b, h) {
+            return 0.5 * b * h
+        }
+    }
+    return 0.0
+}
+
+fn main() {
+    print("c=${area(Circle(2.0))}")
+    print("s=${area(Square(3.0))}")
+    print("t=${area(Triangle(3.0, 4.0))}")
+}

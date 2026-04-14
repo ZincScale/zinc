@@ -76,6 +76,46 @@ for projdir in "$ZN_DIR"/*/; do
     fi
 done
 
+# --- Negative tests (must fail to compile) ---
+# examples-fail/<name>.zn + expected/<name>.txt: zinc should exit non-zero,
+# and stderr must contain the expected error text (substring match).
+FAIL_DIR="$DIR/examples-fail"
+if [ -d "$FAIL_DIR" ]; then
+    for zn in "$FAIL_DIR"/*.zn; do
+        [ -f "$zn" ] || continue
+        name=$(basename "$zn" .zn)
+        expected="$EXPECTED_DIR/${name}.txt"
+
+        if [ ! -f "$expected" ]; then
+            echo "SKIP: $name (fail) (no expected output)"
+            SKIP=$((SKIP + 1))
+            continue
+        fi
+
+        actual=$("$ZINC_BIN" build "$zn" 2>&1)
+        rc=$?
+        expected_text=$(cat "$expected")
+
+        if [ $rc -eq 0 ]; then
+            echo "FAIL: $name (fail) — expected compile error but build succeeded"
+            FAIL=$((FAIL + 1))
+            ERRORS="$ERRORS\n  $name (fail)"
+            continue
+        fi
+
+        if echo "$actual" | grep -qF "$expected_text"; then
+            echo "PASS: $name (fail)"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: $name (fail) — error message didn't match expected substring"
+            echo "  Expected to contain: $expected_text"
+            echo "  Actual:              $(echo "$actual" | head -3)"
+            FAIL=$((FAIL + 1))
+            ERRORS="$ERRORS\n  $name (fail)"
+        fi
+    done
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $SKIP skipped"
 if [ -n "$ERRORS" ]; then

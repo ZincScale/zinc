@@ -56,6 +56,12 @@ func compileFile(path string, importAliases ...map[string]string) ([]codegen.Out
 		gen.SetImportAliases(importAliases[0])
 	}
 	files := gen.GenerateFiles(prog, className)
+	if errs := gen.CompileErrors(); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(os.Stderr, e)
+		}
+		return nil, fmt.Errorf("%d compile error(s)", len(errs))
+	}
 	return files, nil
 }
 
@@ -143,6 +149,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 	allExports := codegen.CollectExports(merged)
 
 	// Pass 2: Generate each file individually with sibling context
+	var allCompileErrors []string
 	for i, prog := range progs {
 		baseName := strings.TrimSuffix(filepath.Base(znFiles[i]), ".zn")
 		className := strings.ToUpper(baseName[:1]) + baseName[1:]
@@ -154,6 +161,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 			gen.SetImportAliases(importAliases[0])
 		}
 		files := gen.GenerateFiles(prog, className)
+		allCompileErrors = append(allCompileErrors, gen.CompileErrors()...)
 
 		for _, f := range files {
 			outPath := filepath.Join(outDir, f.Name)
@@ -164,6 +172,12 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 				fmt.Printf("  %s → %s\n", filepath.Base(znFiles[i]), outPath)
 			}
 		}
+	}
+	if len(allCompileErrors) > 0 {
+		for _, e := range allCompileErrors {
+			fmt.Fprintln(os.Stderr, e)
+		}
+		return fmt.Errorf("%d compile error(s)", len(allCompileErrors))
 	}
 	return nil
 }
@@ -216,6 +230,7 @@ func collectSubdirs(dir string) ([]string, error) {
 // Root .zn files → package main; each subdirectory → its own Go package.
 func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, importAliases ...map[string]string) error {
 	goModDir := outDir // go.mod lives in outDir for module dep resolution
+	var subpkgCompileErrors []string
 	// 1. Discover subpackages (subdirectories of src/)
 	subdirs, err := collectSubdirs(srcDir)
 	if err != nil {
@@ -324,6 +339,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 			}
 
 			files := gen.GenerateFiles(prog, className)
+			subpkgCompileErrors = append(subpkgCompileErrors, gen.CompileErrors()...)
 			for _, f := range files {
 				outPath := filepath.Join(pkgOutDir, f.Name)
 				if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
@@ -383,6 +399,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		}
 
 		files := gen.GenerateFiles(prog, className)
+		subpkgCompileErrors = append(subpkgCompileErrors, gen.CompileErrors()...)
 		for _, f := range files {
 			outPath := filepath.Join(outDir, f.Name)
 			if wErr := os.WriteFile(outPath, []byte(f.Content), 0o644); wErr != nil {
@@ -394,5 +411,11 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		}
 	}
 
+	if len(subpkgCompileErrors) > 0 {
+		for _, e := range subpkgCompileErrors {
+			fmt.Fprintln(os.Stderr, e)
+		}
+		return fmt.Errorf("%d compile error(s)", len(subpkgCompileErrors))
+	}
 	return nil
 }

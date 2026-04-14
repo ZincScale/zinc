@@ -710,6 +710,7 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 //     ...
 // }
 func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
+	g.checkMatchExhaustiveness(m)
 	g.writeln("switch _v := %s.(type) {", g.formatExpr(m.Subject))
 	for _, c := range m.Cases {
 		if c.Pattern == nil {
@@ -852,6 +853,94 @@ func (g *Generator) currentSealedVariants(variantName string) []*parser.DataClas
 		}
 	}
 	return nil
+}
+
+// sealedClassOfVariant returns the sealed class whose Variants contain the
+// given data-class name, or nil if the name isn't a sealed variant in the
+// current package or any imported subpackage.
+func (g *Generator) sealedClassOfVariant(variantName string) *parser.ClassDecl {
+	for _, cls := range g.structs {
+		if cls.IsSealed {
+			for _, v := range cls.Variants {
+				if v.Name == variantName {
+					return cls
+				}
+			}
+		}
+	}
+	for _, pkgStructs := range g.subpkgStructs {
+		for _, cls := range pkgStructs {
+			if cls.IsSealed {
+				for _, v := range cls.Variants {
+					if v.Name == variantName {
+						return cls
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// checkMatchExhaustiveness records a compile error when a match on a sealed
+// class omits variants without providing an explicit wildcard/else case.
+// Non-sealed matches (type-switching on Object, enum matches, etc.) are
+// skipped. Errors accumulate on the Generator; compileMultiFile fails the
+// build when any are present.
+func (g *Generator) checkMatchExhaustiveness(m *parser.MatchStmt) {
+	// Identify the sealed class from any CallExpr pattern. Match statements
+	// in Zinc mix case types (e.g. type_match.zn matches String/int/Animal
+	// against Object) — those aren't sealed, so skip when the first variant
+	// lookup fails to find a sealed owner.
+	var sealed *parser.ClassDecl
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			continue
+		}
+		if call, ok := c.Pattern.(*parser.CallExpr); ok {
+			if id, ok := call.Callee.(*parser.Ident); ok {
+				if s := g.sealedClassOfVariant(id.Name); s != nil {
+					sealed = s
+					break
+				}
+			}
+		}
+	}
+	if sealed == nil {
+		return
+	}
+
+	covered := make(map[string]bool)
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			return // wildcard covers everything remaining
+		}
+		if call, ok := c.Pattern.(*parser.CallExpr); ok {
+			if id, ok := call.Callee.(*parser.Ident); ok {
+				covered[id.Name] = true
+				continue
+			}
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				covered[sel.Field] = true
+				continue
+			}
+		}
+		if id, ok := c.Pattern.(*parser.Ident); ok {
+			covered[id.Name] = true
+		}
+	}
+
+	var missing []string
+	for _, v := range sealed.Variants {
+		if !covered[v.Name] {
+			missing = append(missing, v.Name)
+		}
+	}
+	if len(missing) > 0 {
+		g.compileError(m.Line,
+			"non-exhaustive match on sealed type %q: missing variant(s) %s (add case(s) or an else branch)",
+			sealed.Name, strings.Join(missing, ", "))
+	}
 }
 
 // --- Expression statements (spawn, print, collection methods, forEach) -------

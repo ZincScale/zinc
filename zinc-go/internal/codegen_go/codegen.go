@@ -83,6 +83,27 @@ type Generator struct {
 	// Processor instead of lib.Processor when import lib is declared.
 	unqualifiedNames      map[string]unqualifiedEntry
 	unqualifiedCollisions map[string][]string // name → list of packages that export it
+
+	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
+	// Checked by the caller after GenerateFiles returns.
+	compileErrors []string
+}
+
+// CompileErrors returns any compile-time errors the generator detected during
+// code generation. A non-empty result should cause the compile to fail.
+func (g *Generator) CompileErrors() []string {
+	return g.compileErrors
+}
+
+// compileError records a compile-time error with source location. Formatted to
+// match Go compiler's "file:line: message" style so editors highlight correctly.
+func (g *Generator) compileError(line int, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	loc := g.sourceFile
+	if loc == "" {
+		loc = "<input>"
+	}
+	g.compileErrors = append(g.compileErrors, fmt.Sprintf("%s:%d: %s", loc, line, msg))
 }
 
 // Name resolution, type formatting, and visibility helpers are in codegen_resolve.go.
@@ -582,6 +603,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	body := bodyGen.buf.String()
 	g.imports = bodyGen.imports
 	g.importGoAliases = bodyGen.importGoAliases
+	// Propagate any compile errors recorded during body emit back to the
+	// outer Generator so compileFile / compileMultiFile can surface them.
+	// bodyGen is a value copy (see `bodyGen := *g` above); the outer g
+	// wouldn't otherwise see errors appended to the copy's slice.
+	g.compileErrors = append(g.compileErrors, bodyGen.compileErrors...)
 
 	// Write final output: package + imports + body
 	pkgName := g.packageName

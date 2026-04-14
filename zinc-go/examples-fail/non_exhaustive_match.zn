@@ -1,0 +1,25 @@
+// Regression for ZCA-03: non-exhaustive match on a sealed type must be
+// rejected at compile time. Missing the Triangle variant — zinc must error.
+
+sealed class Shape {
+    data Circle(double radius)
+    data Square(double side)
+    data Triangle(double base, double height)
+}
+
+fn area(Shape s): double {
+    match s {
+        case Circle(r) {
+            return 3.14159 * r * r
+        }
+        case Square(side) {
+            return side * side
+        }
+        // Triangle deliberately omitted.
+    }
+}
+
+fn main() {
+    var s = Triangle(3.0, 4.0)
+    print("area = ${area(s)}")
+}
