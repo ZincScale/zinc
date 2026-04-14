@@ -218,27 +218,40 @@ func (p *Parser) parseTypeParams() []string {
 }
 
 // looksLikeTypeArgs peeks ahead to determine if '<' starts type arguments
-// (e.g. <Config>, <K, V>) followed by '(' — not a comparison operator.
+// (e.g. <Config>, <K, V>, <Box<List<int>>>) followed by '(' — not comparison.
+// Uses depth counting so nested generics like Box<List<int>>(...) disambiguate
+// from the shift-operator reading of '>>'.
 func (p *Parser) looksLikeTypeArgs() bool {
-	off := 1 // skip '<'
-	for off < 1000 { // safety bound to prevent runaway lookahead
-		tok := p.peekAt(off)
-		if tok.Type == lexer.TOKEN_EOF || tok.Type != lexer.TOKEN_IDENT {
+	off := 1 // skip outer '<'
+	depth := 1
+	for off < 1000 { // safety bound
+		tok := p.peekAt(off).Type
+		if tok == lexer.TOKEN_EOF {
 			return false
 		}
-		off++ // skip ident
-		// Support dotted type args: core.FlowFile
-		for p.peekAt(off).Type == lexer.TOKEN_DOT && p.peekAt(off+1).Type == lexer.TOKEN_IDENT {
-			off += 2 // skip . and ident
+		if tok == lexer.TOKEN_LT {
+			depth++
+			off++
+			continue
 		}
-		if p.peekAt(off).Type == lexer.TOKEN_GT {
-			// Check that '>' is followed by '(' — confirms call syntax
-			return p.peekAt(off+1).Type == lexer.TOKEN_LPAREN
+		if tok == lexer.TOKEN_GT {
+			depth--
+			off++
+			if depth == 0 {
+				// Closing > of outermost generic — confirm ( follows to rule out comparisons
+				return p.peekAt(off).Type == lexer.TOKEN_LPAREN
+			}
+			continue
 		}
-		if p.peekAt(off).Type != lexer.TOKEN_COMMA {
+		// Anything else is fine inside a type-arg (IDENT, DOT, COMMA, LBRACKET, RBRACKET, QUESTION),
+		// as long as we don't leave the angle-bracket envelope. Terminators that can't appear in
+		// a type-arg list abort the lookahead.
+		switch tok {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN, lexer.TOKEN_LBRACE, lexer.TOKEN_RBRACE,
+			lexer.TOKEN_SEMICOLON:
 			return false
 		}
-		off++ // skip comma
+		off++
 	}
 	return false
 }
@@ -307,24 +320,19 @@ func (p *Parser) looksLikeTypedLiteralAt(base int) bool {
 }
 
 // parseCallTypeArgs parses <Type, Type, ...> at a call site.
-// Supports dotted names: <core.FlowFile, String>
+// Supports:
+//   - dotted names: <core.FlowFile, String>
+//   - nested generics: <List<int>, Map<String, Box<int>>>
+// Delegates each type-arg to v2ParseType so nested generics are handled by the
+// same machinery that powers type-context parsing (typed literals, var decls).
+// The returned []string is the formatted type-expr form expected by CallExpr.TypeArgs.
 func (p *Parser) parseCallTypeArgs() []string {
 	p.expect(lexer.TOKEN_LT)
 	var args []string
-	name := p.expect(lexer.TOKEN_IDENT).Literal
-	for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
-		p.advance()
-		name += "." + p.advance().Literal
-	}
-	args = append(args, name)
+	args = append(args, p.formatTypeExpr(p.v2ParseType()))
 	for p.check(lexer.TOKEN_COMMA) {
 		p.advance()
-		name = p.expect(lexer.TOKEN_IDENT).Literal
-		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
-			p.advance()
-			name += "." + p.advance().Literal
-		}
-		args = append(args, name)
+		args = append(args, p.formatTypeExpr(p.v2ParseType()))
 	}
 	p.expect(lexer.TOKEN_GT)
 	return args

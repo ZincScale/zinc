@@ -182,7 +182,64 @@ func (g *Generator) resolveUnqualifiedType(name string) (string, bool) {
 
 // resolveTypeArg resolves a raw type argument string (from CallExpr.TypeArgs)
 // to its Go type. Checks zincToGoType first, then unqualified imports.
+// Handles generic type args like "List<int>" or "Map<String, Box<int>>" by
+// recursively resolving their nested type parameters.
 func (g *Generator) resolveTypeArg(ta string) string {
+	ta = strings.TrimSpace(ta)
+	// Generic type: Name<args>
+	if ltIdx := strings.Index(ta, "<"); ltIdx > 0 && strings.HasSuffix(ta, ">") {
+		name := ta[:ltIdx]
+		inner := ta[ltIdx+1 : len(ta)-1]
+		argParts := splitTopLevelTypeArgs(inner)
+		goArgs := make([]string, 0, len(argParts))
+		for _, a := range argParts {
+			goArgs = append(goArgs, g.resolveTypeArg(a))
+		}
+		switch name {
+		case "List":
+			if len(goArgs) > 0 {
+				return "[]" + goArgs[0]
+			}
+			return "[]interface{}"
+		case "Map":
+			if len(goArgs) >= 2 {
+				return "map[" + goArgs[0] + "]" + goArgs[1]
+			}
+			return "map[string]interface{}"
+		case "Set":
+			if len(goArgs) > 0 {
+				return "map[" + goArgs[0] + "]struct{}"
+			}
+			return "map[interface{}]struct{}"
+		case "Channel", "Chan":
+			if len(goArgs) > 0 {
+				return "chan " + goArgs[0]
+			}
+			return "chan interface{}"
+		default:
+			// User-defined generic class: *ClassName[goArgs...] when the class
+			// is a non-data non-sealed class (classes are pointer types in Zinc's
+			// Go backend; constructors return *T). Sealed classes + data classes
+			// + interfaces stay as values.
+			goName := name
+			ptrPrefix := ""
+			if resolved, ok := g.resolveUnqualifiedType(name); ok {
+				// resolveUnqualifiedType already applies * for pointer-typed classes
+				if strings.HasPrefix(resolved, "*") {
+					ptrPrefix = "*"
+					goName = strings.TrimPrefix(resolved, "*")
+				} else {
+					goName = resolved
+				}
+			} else if cls, isStruct := g.structs[name]; isStruct {
+				// Same-package class: check if it's a pointer-typed class
+				if !g.dataClasses[name] && cls != nil && !cls.IsSealed {
+					ptrPrefix = "*"
+				}
+			}
+			return ptrPrefix + goName + "[" + strings.Join(goArgs, ", ") + "]"
+		}
+	}
 	if mapped, ok := zincToGoType[ta]; ok {
 		return mapped
 	}
@@ -195,6 +252,30 @@ func (g *Generator) resolveTypeArg(ta string) string {
 			ta, strings.Join(pkgs, ", "), pkgs[0], ta)
 	}
 	return ta
+}
+
+// splitTopLevelTypeArgs splits a type-argument string on top-level commas,
+// respecting nested angle brackets. e.g. "String, Map<K, V>, int" →
+// ["String", "Map<K, V>", "int"].
+func splitTopLevelTypeArgs(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(s[start:]))
+	return out
 }
 
 // resolveUnqualifiedExpr checks if a bare identifier is from an imported package.
@@ -548,7 +629,17 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				}
 				baseName = entry.pkg + "." + exportName(entry.name)
 			}
-			return fmt.Sprintf("%s[%s]", baseName, strings.Join(args, ", "))
+			// Pointer prefix for user-defined classes (non-data, non-sealed).
+			// Mirrors the SimpleType branch above — classes are pointer types
+			// in Zinc's Go backend, so a generic class used as a nested type
+			// arg must be emitted as *ClassName[args] too.
+			ptrPrefix := ""
+			if cls, isStruct := g.structs[typ.Name]; isStruct {
+				if !g.dataClasses[typ.Name] && cls != nil && !cls.IsSealed {
+					ptrPrefix = "*"
+				}
+			}
+			return fmt.Sprintf("%s%s[%s]", ptrPrefix, baseName, strings.Join(args, ", "))
 		}
 	case *parser.ArrayType:
 		return "[]" + g.formatType(typ.ElementType)

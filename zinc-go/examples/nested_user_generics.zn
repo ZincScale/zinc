@@ -1,0 +1,61 @@
+// Regression test for ZCA-04 (parser >> tokenization) and ZCA-05
+// (same-package Map<K, UserClass> pointer codegen).
+//
+// Previously broken cases:
+//   - Box<List<int>>(...)  — parser treated `>>` as right-shift operator
+//   - Box<Pair<...>>       — deep nesting of user generics
+//   - Map<K, UserClass>    — same-package class value type (ptr mismatch)
+//
+// All should now compile and run cleanly.
+
+class Box<T> {
+    T value
+    init(T value) { this.value = value }
+    pub fn get(): T { return value }
+}
+
+class Pair<A, B> {
+    A first
+    B second
+    init(A a, B b) { this.first = a; this.second = b }
+    pub fn getFirst(): A { return first }
+    pub fn getSecond(): B { return second }
+}
+
+class Counter {
+    int value
+    init(int v) { this.value = v }
+    pub fn get(): int { return value }
+    pub fn inc() { value = value + 1 }
+}
+
+fn main() {
+    // Depth 1: user-generic, scalar
+    var b1 = Box<int>(42)
+    print("b1=${b1.get()}")
+
+    // Depth 2: user-generic over built-in generic (was ZCA-04)
+    var b2 = Box<List<int>>(List<int>[10, 20, 30])
+    print("b2=${b2.get()}")
+
+    // Depth 3: user-generic over built-in over user
+    var b3 = Box<List<Box<int>>>(List<Box<int>>[Box<int>(1), Box<int>(2)])
+    print("b3.size=${b3.get().size()}")
+
+    // Depth 3: two type params, nested user generic
+    var p = Pair<String, Box<int>>("hello", Box<int>(99))
+    print("p=${p.getFirst()},${p.getSecond().get()}")
+
+    // Depth 4: Box over Pair over Box over int
+    var b4 = Box<Pair<String, Box<int>>>(Pair<String, Box<int>>("x", Box<int>(7)))
+    print("b4=${b4.get().getSecond().get()}")
+
+    // ZCA-05: Map<K, UserClass> in same package
+    var m = Map<String, Counter>{}
+    m["a"] = Counter(0)
+    m["b"] = Counter(10)
+    m["a"].inc()
+    m["a"].inc()
+    print("m.a=${m["a"].get()}")
+    print("m.b=${m["b"].get()}")
+}
