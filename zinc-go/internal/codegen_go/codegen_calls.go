@@ -50,8 +50,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// Zinc subpackage or import alias qualified calls:
 	//   core.FlowFile(...) → core.NewFlowFile(...)
 	//   logging.Logger(...) → logging.NewLogger(...)  (from import alias)
+	//
+	// Guard: a field of the current class shadows any same-named subpackage
+	// or import alias. Without this, `class Fabric { var processors = ...;
+	// fn foo() { processors.containsKey(...) } }` in a project with a
+	// `src/processors/` subpackage would emit `processors.ContainsKey(...)`
+	// as a bogus package call, bypassing the map-containsKey rewrite below.
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok && (g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
+		if ident, ok := sel.Object.(*parser.Ident); ok &&
+			!(g.currentClass != "" && g.currentFields[ident.Name]) &&
+			(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
 			pkg := ident.Name
 			name := sel.Field
 			if goPath, ok := g.importMap[pkg]; ok {

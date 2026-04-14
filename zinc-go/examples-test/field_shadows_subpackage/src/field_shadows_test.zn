@@ -1,0 +1,48 @@
+// Regression for ZCA-10: a class field whose name matches a sibling
+// subpackage name must still be treated as a field, not as the package.
+//
+// Before the fix, the codegen at codegen_calls.go:54 preferred the
+// subpackage interpretation — so `helpers.containsKey(k)` on a field
+// named `helpers` got emitted as a bogus `helpers.ContainsKey(k)`
+// package call, bypassing the `.containsKey` map rewrite.
+
+class Registry {
+    var helpers = Map<String, int>{}
+
+    init() {}
+
+    pub fn add(String name, int value) {
+        helpers[name] = value
+    }
+
+    pub fn has(String name): bool {
+        return helpers.containsKey(name)
+    }
+
+    pub fn get(String name): int {
+        return helpers[name]
+    }
+
+    pub fn size(): int {
+        return len(helpers)
+    }
+}
+
+test "class field named helpers shadows the sibling subpackage" {
+    var r = Registry()
+    r.add("first", 1)
+    r.add("second", 2)
+
+    if !r.has("first") {
+        t.Errorf("has(first) should be true")
+    }
+    if r.has("missing") {
+        t.Errorf("has(missing) should be false")
+    }
+    if r.get("first") != 1 {
+        t.Errorf("get(first) = %v, want 1", r.get("first"))
+    }
+    if r.size() != 2 {
+        t.Errorf("size() = %v, want 2", r.size())
+    }
+}
