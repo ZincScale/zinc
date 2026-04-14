@@ -110,6 +110,24 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				}
 			}
 		}
+		// `this.field` on the current class: honor the field's declared
+		// visibility (`pub` → exported, private → lowercase inside the
+		// same subpackage). Without this, `this.privateField = x` emitted
+		// `s.PrivateField = x` even though the struct was declared with
+		// the lowercase form. Top-level `this.field = value` in the ctor
+		// body already respected this via currentFieldGoName; the
+		// sub-statement path (inside `if`, `for`, nested blocks) fell
+		// back to exportName and lost the declared casing.
+		if _, isThis := expr.Object.(*parser.ThisExpr); isThis {
+			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
+				return fmt.Sprintf("s.%s", gn)
+			}
+		}
+		if ident, isIdent := expr.Object.(*parser.Ident); isIdent && ident.Name == "this" {
+			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
+				return fmt.Sprintf("s.%s", gn)
+			}
+		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.formatExpr(expr.Object), g.formatExpr(expr.Index))
@@ -476,6 +494,19 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if rt, ok := g.funcReturnTypes[ident.Name]; ok {
 				return rt
+			}
+			// Bare call to a method on the current class — `foo()` where
+			// `foo` is a method of the enclosing class. Lambdas closed
+			// over `this` capture this path: `ff -> helper(ff)` where
+			// `helper` is a class method.
+			if g.currentClass != "" && g.currentMethods[ident.Name] {
+				if cls, ok := g.structs[g.currentClass]; ok {
+					for _, m := range cls.Methods {
+						if m.Name == ident.Name && m.ReturnType != nil {
+							return g.formatType(m.ReturnType)
+						}
+					}
+				}
 			}
 			if t, ok := known[ident.Name]; ok {
 				resolved := t

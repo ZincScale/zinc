@@ -332,3 +332,84 @@ test "shape 11 — bare self-call captured in var, .keys() typed" {
         t.Errorf("keySum = %q, want permutation of xy", ks)
     }
 }
+
+// --- Shape 12: `this.field = value` inside a nested block must respect
+// the field's declared visibility. A private field gets lowercase-Go
+// form in the struct; the assignment must use the same form. Without
+// the fix, `if x > 0 { this.privateField = x }` emitted
+// `s.PrivateField = x` against a struct that declared `privateField`
+// (build error). Top-level ctor-body assignments already worked via
+// the literal-extraction path; this covers the if/for nested case. ---
+
+class NestedAssigner {
+    var lowerCount = 0
+    var UpperCount = 0
+
+    init(int seed) {
+        // Top-level ctor assignments — always worked.
+        this.lowerCount = seed
+        this.UpperCount = seed
+        // Nested-block assignment — was the bug path.
+        if seed > 0 {
+            this.lowerCount = seed + 1
+            this.UpperCount = seed + 1
+        }
+    }
+
+    pub fn bump(int n) {
+        // Method-body nested assignment — same bug class.
+        if n > 0 {
+            this.lowerCount = this.lowerCount + n
+        }
+    }
+
+    pub fn getLower(): int { return lowerCount }
+    pub fn getUpper(): int { return UpperCount }
+}
+
+test "shape 12 — nested-block this.field assignment respects field casing" {
+    var a = NestedAssigner(5)
+    if a.getLower() != 6 { t.Errorf("lowerCount = %v, want 6", a.getLower()) }
+    if a.getUpper() != 6 { t.Errorf("UpperCount = %v, want 6", a.getUpper()) }
+    a.bump(3)
+    if a.getLower() != 9 { t.Errorf("after bump lowerCount = %v, want 9", a.getLower()) }
+}
+
+// --- Shape 13: a class method used as a lambda body must propagate its
+// declared return type through the lambda. Without the inferExprType
+// class-method path, `(T x) -> classMethod(x)` emitted
+// `func(x T) interface{} { return s.ClassMethod(x) }` — fine when the
+// target accepts interface{} but broken when the target signature has
+// a concrete return type (e.g., `bool`). Bug path: Fabric source
+// registration, where `IngestFn = Fn<(FlowFile), bool>` rejected the
+// untyped-return lambda. ---
+
+class Doubler {
+    int base
+    init(int base) { this.base = base }
+    pub fn scale(int n): int { return base * n }
+    // Store-and-apply: the lambda body is a bare self-method call.
+    // The return type propagation must make this lambda itself
+    // inferable as returning int.
+    pub fn scaleAll(List<int> xs): List<int> {
+        var out = List<int>[]
+        for x in xs {
+            out = append(out, applyInt(x, (int n) -> scale(n)))
+        }
+        return out
+    }
+}
+
+fn applyInt(int x, Fn<(int), int> f): int {
+    return f(x)
+}
+
+test "shape 13 — bare self-method call inside lambda → return type propagated" {
+    var d = Doubler(3)
+    var xs = List<int>[1, 2, 4]
+    var out = d.scaleAll(xs)
+    if len(out) != 3 { t.Errorf("want 3 outputs, got %v", len(out)) }
+    if out[0] != 3 || out[1] != 6 || out[2] != 12 {
+        t.Errorf("out = %v, want [3 6 12]", out)
+    }
+}
