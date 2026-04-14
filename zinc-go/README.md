@@ -136,6 +136,7 @@ print(a.speak())    // Rex says Woof
 | `zinc run [file\|dir] [-- args]` | Transpile and run |
 | `zinc build [dir] [-o outdir]` | Build native binary |
 | `zinc build --cross os/arch` | Cross-compile |
+| `zinc test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
 | `zinc fmt <file\|dir>` | Format source code |
 | `zinc add <pkg@version>` | Add a Go dependency |
 | `zinc deps` | List dependencies |

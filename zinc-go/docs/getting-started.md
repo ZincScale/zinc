@@ -74,10 +74,21 @@ main = "main.zn"
 
 [go]
 version = "1.26"
-deps = []
+
+[deps]
+mux = "github.com/gorilla/mux@v1.8.1"
+
+[replace]
+# local path override — optional, used when developing alongside the dep
+# mux = "../gorilla-mux"
 ```
 
-Add dependencies with:
+`[deps]` keys are the local aliases you write in Zinc (`import mux`). The value
+is `module/path@version`; omit `@version` when a `[replace]` points at a local
+directory. Keys in `[replace]` match the same aliases as `[deps]`, so deps and
+replaces can't get out of sync.
+
+Add dependencies from the CLI:
 
 ```bash
 zinc add github.com/gorilla/mux@v1.8.1
@@ -93,6 +104,33 @@ zinc build --cross darwin/arm64
 zinc build --cross windows/amd64
 ```
 
+## Tests
+
+Write `*_test.zn` files with `test "name" { body }` blocks at the top level:
+
+```zinc
+import stdlib.asserts
+
+test "addOne returns x + 1" {
+    asserts.equalInt(t, addOne(41), 42)
+}
+```
+
+Run with:
+
+```bash
+zinc test .
+zinc test . -v                      # verbose (show each test)
+zinc test . -run TestAddOne         # filter by name
+zinc test . -race                   # race detector
+```
+
+`zinc test` transpiles prod + test code, then delegates to `go test ./...`, so
+the full Go test toolchain (coverage, `-count`, `-bench`, IDE integration) is
+available. `t` is an implicit `*testing.T` in scope inside each test block;
+`stdlib.asserts` provides `equalInt`, `equalString`, `isTrue`, `isFalse`,
+`contains`, `fail`, `fatal`.
+
 ## CLI reference
 
 | Command | Description |
@@ -101,6 +139,7 @@ zinc build --cross windows/amd64
 | `zinc run [file\|dir]` | Transpile and run |
 | `zinc build [dir]` | Build native binary |
 | `zinc build --cross os/arch` | Cross-compile |
+| `zinc test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
 | `zinc fmt <file\|dir>` | Format source code |
 | `zinc add <pkg@version>` | Add a Go dependency |
 | `zinc deps` | List dependencies |
