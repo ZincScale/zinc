@@ -413,3 +413,4 @@ test "shape 13 — bare self-method call inside lambda → return type propagate
         t.Errorf("out = %v, want [3 6 12]", out)
     }
 }
+

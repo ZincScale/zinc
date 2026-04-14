@@ -1,0 +1,26 @@
+// Regression: bare `return` inside a constructor body must be a
+// compile error. Zinc ctors have no failure channel — a partial-
+// construction short-circuit can't be expressed. The correct shape is
+// a factory function returning T? that emits Error(...) on the
+// failure path and constructs via the ctor on success.
+
+class Widget {
+    String name
+    int size
+
+    init(String name, int size) {
+        this.name = name
+        if size < 0 {
+            // No failure channel here — this is a design error. zinc
+            // must reject it at compile time rather than papering over
+            // it with a partial-object return.
+            return
+        }
+        this.size = size
+    }
+}
+
+fn main() {
+    var w = Widget("gear", 3)
+    print("widget=${w.name}")
+}

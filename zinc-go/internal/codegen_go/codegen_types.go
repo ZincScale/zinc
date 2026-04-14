@@ -241,9 +241,67 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	}
 }
 
+// checkCtorBodyNoBareReturn walks a ctor body tree looking for bare
+// `return` statements. Constructors in Zinc have no failure channel —
+// the caller always gets a fully-constructed instance — so a bare
+// `return` is a design error (the author wanted to signal "stop and
+// don't finish constructing," but there's nothing to convey it on).
+// The right shape is a factory function returning T? that emits
+// Error(...) on the failure path. Catching this at compile time keeps
+// the constraint visible rather than papering over it with a
+// partial-construction hack in codegen.
+func checkCtorBodyNoBareReturn(body *parser.BlockStmt, typeName string, errOut func(line int, format string, args ...any)) {
+	if body == nil {
+		return
+	}
+	for _, stmt := range body.Stmts {
+		checkCtorStmtNoBareReturn(stmt, typeName, errOut)
+	}
+}
+
+func checkCtorStmtNoBareReturn(s parser.Stmt, typeName string, errOut func(line int, format string, args ...any)) {
+	switch stmt := s.(type) {
+	case *parser.ReturnStmt:
+		if stmt.Value == nil {
+			errOut(stmt.Line, "bare `return` not allowed inside constructor body for class %q: ctors have no failure channel — use a factory function returning %s? with `Error(...)` if construction can fail", typeName, typeName)
+		}
+	case *parser.IfStmt:
+		if stmt.Then != nil {
+			checkCtorBodyNoBareReturn(stmt.Then, typeName, errOut)
+		}
+		if stmt.ElseStmt != nil {
+			if block, ok := stmt.ElseStmt.(*parser.BlockStmt); ok {
+				checkCtorBodyNoBareReturn(block, typeName, errOut)
+			} else if elif, ok := stmt.ElseStmt.(*parser.IfStmt); ok {
+				checkCtorStmtNoBareReturn(elif, typeName, errOut)
+			}
+		}
+	case *parser.ForStmt:
+		if stmt.Body != nil {
+			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
+		}
+	case *parser.WhileStmt:
+		if stmt.Body != nil {
+			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
+		}
+	case *parser.MatchStmt:
+		for _, mc := range stmt.Cases {
+			if mc.Body != nil {
+				checkCtorBodyNoBareReturn(mc.Body, typeName, errOut)
+			}
+		}
+	case *parser.BlockStmt:
+		checkCtorBodyNoBareReturn(stmt, typeName, errOut)
+	}
+}
+
 // emitConstructor generates a NewType() constructor function.
 // Handles super() calls, this.field assignments, and remaining logic.
 func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls *parser.ClassDecl) {
+	// Catch bare-return-in-ctor before emission so the user sees a
+	// Zinc-level error instead of a Go "not enough return values"
+	// pointing at generated code.
+	checkCtorBodyNoBareReturn(ctor.Body, typeName, g.compileError)
 	// Set current fields/methods for implicit self resolution
 	g.currentFields = make(map[string]bool)
 	g.currentFieldGoName = make(map[string]string)
