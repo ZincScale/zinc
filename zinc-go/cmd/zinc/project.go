@@ -329,6 +329,25 @@ func findZincToml(dir string) string {
 }
 
 // loadZincToml parses a zinc.toml file (simple line-based TOML subset).
+//
+// Preferred form (unified):
+//
+//     [deps]
+//     viper  = "github.com/spf13/viper@v1.20.1"
+//     stdlib = "github.com/ZincScale/zinc-stdlib"    # no version if replaced
+//
+//     [replace]
+//     stdlib = "/home/vrjoshi/proj/zinc/stdlib/zinc-out"
+//
+// Keys in [deps] are the local aliases you write in Zinc (`import viper`,
+// `import stdlib.config`). The right-hand side is `module/path@version`
+// with optional `@version` (defaults to v0.0.0 when a [replace] is set).
+// [replace] is keyed by the same alias so deps + replaces can never go
+// out of sync.
+//
+// Legacy form (still parsed for back-compat, but the new form should be
+// preferred): [go] deps = [...] array + [imports] table + [go.replace]
+// keyed by module path.
 func loadZincToml(path string) (*zincConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -341,6 +360,11 @@ func loadZincToml(path string) (*zincConfig, error) {
 		Imports:  make(map[string]string),
 		Replaces: make(map[string]string),
 	}
+	// replaceByAlias holds [replace] entries that key off [deps] aliases —
+	// resolved after the whole file is parsed so [replace] can precede or
+	// follow [deps] without order dependence.
+	replaceByAlias := make(map[string]string)
+
 	section := "" // current TOML section
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -360,13 +384,34 @@ func loadZincToml(path string) (*zincConfig, error) {
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, "\"")
 
-		// [imports] section: alias = "module/path"
+		// [deps] — unified form: alias = "module/path@version"
+		if section == "deps" {
+			modulePath, version := splitModuleVersion(val)
+			cfg.Imports[key] = modulePath
+			// go.mod require lines want "module version"; if no @version
+			// was given, use v0.0.0 as a placeholder (only meaningful when
+			// a [replace] points at a local dir).
+			if version == "" {
+				version = "v0.0.0"
+			}
+			cfg.Deps = append(cfg.Deps, modulePath+" "+version)
+			continue
+		}
+
+		// [replace] — new form keyed by alias. Resolve to module path
+		// after parsing, since [deps] may come after [replace] in the file.
+		if section == "replace" {
+			replaceByAlias[key] = val
+			continue
+		}
+
+		// Legacy [imports] — alias = "module/path"
 		if section == "imports" {
 			cfg.Imports[key] = val
 			continue
 		}
 
-		// [go.replace] section: module = "local/path"
+		// Legacy [go.replace] — module = "local/path" (keyed by module path)
 		if section == "go.replace" {
 			cfg.Replaces[key] = val
 			continue
@@ -384,7 +429,7 @@ func loadZincToml(path string) (*zincConfig, error) {
 		case "main":
 			cfg.Main = val
 		case "deps":
-			// Parse simple TOML array: ["dep1", "dep2"]
+			// Legacy [go] deps = ["dep1 v1.0.0", "dep2 v2.0.0"] array
 			val = strings.Trim(val, "[]")
 			if val != "" {
 				for _, d := range strings.Split(val, ",") {
@@ -397,7 +442,26 @@ func loadZincToml(path string) (*zincConfig, error) {
 			}
 		}
 	}
+
+	// Resolve [replace] aliases to module paths now that [deps] has been parsed.
+	for alias, localPath := range replaceByAlias {
+		modulePath, ok := cfg.Imports[alias]
+		if !ok {
+			return nil, fmt.Errorf("zinc.toml: [replace] %q has no matching [deps] entry", alias)
+		}
+		cfg.Replaces[modulePath] = localPath
+	}
 	return cfg, nil
+}
+
+// splitModuleVersion splits "github.com/foo/bar@v1.2.3" into ("github.com/foo/bar", "v1.2.3").
+// Missing @version yields ("github.com/foo/bar", "").
+func splitModuleVersion(s string) (string, string) {
+	at := strings.LastIndex(s, "@")
+	if at < 0 {
+		return s, ""
+	}
+	return s[:at], s[at+1:]
 }
 
 // generateGoMod creates a go.mod from zinc.toml config.
