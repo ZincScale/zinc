@@ -639,11 +639,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 // GenerateFiles produces separate .go files per type + a main.go for functions/script.
 func (g *Generator) GenerateFiles(prog *parser.Program, className string) []OutputFile {
 	content := g.Generate(prog, className)
-	outName := strings.ToLower(className) + ".go"
-	if strings.HasSuffix(outName, "_test.go") {
-		outName = strings.TrimSuffix(outName, "_test.go") + "_main.go"
-	}
-	return []OutputFile{{Name: outName, Content: content}}
+	// Natural filename mapping. *_test.zn files go to *_test.go (picked up by
+	// `go test`, skipped by `go build`). Non-test files are excluded from the
+	// regular build pipeline upstream via collect*ZnFiles — so if we see an
+	// _test suffix here, the caller intends a test build.
+	return []OutputFile{{Name: strings.ToLower(className) + ".go", Content: content}}
 }
 
 // --- Declaration dispatch ----------------------------------------------------
@@ -668,7 +668,61 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitConstDecl(decl)
 	case *parser.TypeAliasDecl:
 		g.writeln("type %s = %s", decl.Name, g.formatType(decl.Type))
+	case *parser.TestDecl:
+		g.emitTestDecl(decl)
 	}
+}
+
+// emitTestDecl generates a Go test function from a `test "name" { body }` block.
+// Name is munged to a legal Go identifier prefixed with "Test". The body runs
+// with `t *testing.T` in scope so stdlib/testing helpers can signal failures.
+func (g *Generator) emitTestDecl(d *parser.TestDecl) {
+	g.needImport("testing")
+	if g.sourceFile != "" && d.Line > 0 {
+		g.writeln("//line %s:%d", g.sourceFile, d.Line)
+	}
+	goName := testGoName(d.Name)
+	g.writeln("func %s(t *testing.T) {", goName)
+	g.indent++
+	g.emitBlock(d.Body)
+	g.indent--
+	g.writeln("}")
+}
+
+// testGoName converts a free-form test name into a legal Go identifier
+// prefixed with "Test". Keeps alphanumeric characters, title-cases word
+// breaks, drops everything else. Empty name → "TestUnnamed".
+//
+//	"update-attribute rejects missing key" → "TestUpdateAttributeRejectsMissingKey"
+//	"parses valid json"                    → "TestParsesValidJson"
+//	"x == y"                               → "TestXY"
+func testGoName(raw string) string {
+	var out strings.Builder
+	out.WriteString("Test")
+	wantUpper := true
+	for _, r := range raw {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune(r)
+			wantUpper = false
+		case r >= 'a' && r <= 'z':
+			if wantUpper {
+				out.WriteRune(r - ('a' - 'A'))
+				wantUpper = false
+			} else {
+				out.WriteRune(r)
+			}
+		case r >= '0' && r <= '9':
+			out.WriteRune(r)
+			wantUpper = false
+		default:
+			wantUpper = true
+		}
+	}
+	if out.Len() == len("Test") {
+		out.WriteString("Unnamed")
+	}
+	return out.String()
 }
 
 // --- Output helpers ----------------------------------------------------------

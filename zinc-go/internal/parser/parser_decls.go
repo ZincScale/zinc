@@ -561,6 +561,17 @@ func (p *Parser) v2ParseEnumDecl() *EnumDecl {
 	return &EnumDecl{Line: line, Name: name, Variants: variants}
 }
 
+// v2ParseTestDecl: `test "name" { body }` — a test case at top level.
+// The contextual `test` keyword has already been peeked by the caller; we
+// consume it here along with the string literal and block body.
+func (p *Parser) v2ParseTestDecl() *TestDecl {
+	line := p.peek().Line
+	p.advance() // consume "test"
+	name := p.expect(lexer.TOKEN_STRING_LIT).Literal
+	body := p.v2ParseBlock()
+	return &TestDecl{Line: line, Name: name, Body: body}
+}
+
 // --- Imports -----------------------------------------------------------------
 
 // v2ParsePackageDecl: package com.example.myapp

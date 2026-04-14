@@ -133,6 +133,28 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "test":
+		input := "."
+		if len(os.Args) >= 3 && !strings.HasPrefix(os.Args[2], "-") {
+			input = os.Args[2]
+		}
+		// Forward any remaining args (e.g. -run, -race, -v) to `go test`.
+		var goTestArgs []string
+		for i := 2; i < len(os.Args); i++ {
+			if strings.HasPrefix(os.Args[i], "-") {
+				goTestArgs = append(goTestArgs, os.Args[i:]...)
+				break
+			}
+		}
+		if info, err := os.Stat(input); err != nil || !info.IsDir() || !isProjectDir(input) {
+			errs.Error("zinc test requires a project directory (with zinc.toml)")
+			os.Exit(1)
+		}
+		if err := testProject(input, goTestArgs); err != nil {
+			errs.Errorf("%s", err)
+			os.Exit(1)
+		}
+
 	case "version":
 		fmt.Printf("zinc %s\n", version)
 
@@ -172,6 +194,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Printf("  %-45s %s\n", "zinc run <file.zn|dir> [-- args...]", "Transpile and run")
 	fmt.Printf("  %-45s %s\n", "zinc build [dir] [-o outdir] [--cross os/arch]", "Transpile and build")
+	fmt.Printf("  %-45s %s\n", "zinc test [dir] [-- go-test-args]", "Transpile *_test.zn and run go test")
 	fmt.Printf("  %-45s %s\n", "zinc init <name>", "Create a new Zinc project")
 	fmt.Printf("  %-45s %s\n", "zinc fmt <file.zn|dir>", "Format Zinc source code")
 	fmt.Printf("  %-45s %s\n", "zinc add <module@version>", "Add a Go dependency")

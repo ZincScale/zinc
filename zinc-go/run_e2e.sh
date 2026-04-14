@@ -116,6 +116,39 @@ if [ -d "$FAIL_DIR" ]; then
     done
 fi
 
+# --- zinc test regression ---
+# examples-test/<name>/ is a project exercising `zinc test`. We assert
+# go test ran (PASS lines or overall FAIL) matches expected/<name>.txt
+# substring. Exit code: 0 if expected says "pass", 1 if it says "fail".
+TEST_DIR="$DIR/examples-test"
+if [ -d "$TEST_DIR" ]; then
+    for projdir in "$TEST_DIR"/*/; do
+        [ -d "$projdir" ] || continue
+        name=$(basename "$projdir")
+        expected="$EXPECTED_DIR/${name}.txt"
+
+        if [ ! -f "$expected" ]; then
+            echo "SKIP: $name (test) (no expected output)"
+            SKIP=$((SKIP + 1))
+            continue
+        fi
+
+        actual=$("$ZINC_BIN" test "$projdir" 2>&1)
+        expected_text=$(cat "$expected")
+
+        if echo "$actual" | grep -qF "$expected_text"; then
+            echo "PASS: $name (test)"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: $name (test) — output didn't contain expected"
+            echo "  Expected to contain: $(head -1 "$expected")"
+            echo "  Actual (last 5):     $(echo "$actual" | tail -5 | tr '\n' ' ')"
+            FAIL=$((FAIL + 1))
+            ERRORS="$ERRORS\n  $name (test)"
+        fi
+    done
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed, $SKIP skipped"
 if [ -n "$ERRORS" ]; then

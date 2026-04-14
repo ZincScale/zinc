@@ -1,0 +1,15 @@
+// Regression: `test "name" { body }` syntax + assertion via t.Errorf
+// must compile, run, and report to `go test`.
+
+test "addOne returns x plus one" {
+    var got = addOne(41)
+    if got != 42 {
+        t.Errorf("addOne(41) = %v, want 42", got)
+    }
+}
+
+test "addOne negative" {
+    if addOne(-10) != -9 {
+        t.Errorf("addOne(-10) != -9")
+    }
+}

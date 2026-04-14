@@ -133,6 +133,19 @@ func (f *FnDecl) nodeTag()      {}
 func (f *FnDecl) topLevelTag() {}
 func (f *FnDecl) stmtTag()     {} // v2: nested functions are statements
 
+// TestDecl: `test "name" { body }` — a test case.
+// Top-level in *_test.zn files. Compiled to `func TestName(t *testing.T) { ... }`
+// in Go, where `t` is an implicit parameter visible to the body (assertion
+// helpers in stdlib/testing expect it as their first arg).
+type TestDecl struct {
+	Line int
+	Name string // from the string literal
+	Body *BlockStmt
+}
+
+func (t *TestDecl) nodeTag()     {}
+func (t *TestDecl) topLevelTag() {}
+
 // DataClassDecl: data User(pub String name, pub Int age) { optional methods }
 type DataClassDecl struct {
 	Line       int // source line number (1-indexed)

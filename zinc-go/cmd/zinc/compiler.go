@@ -90,6 +90,9 @@ func mergePrograms(progs []*parser.Program) *parser.Program {
 }
 
 // collectZnFiles walks a directory and returns all .zn file paths (sorted).
+// collectZnFiles returns every .zn under dir. *_test.zn files are included —
+// they're transpiled to *_test.go which `go build` ignores and `go test`
+// picks up. One pipeline, no mode flag.
 func collectZnFiles(dir string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -195,6 +198,8 @@ func compileDir(dir, outDir string, quiet bool, importAliases ...map[string]stri
 }
 
 // collectZnFilesFlat collects .zn files in a directory (non-recursive, single level only).
+// collectZnFilesFlat returns .zn files directly in dir (non-recursive).
+// Includes *_test.zn; see collectZnFiles for rationale.
 func collectZnFilesFlat(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

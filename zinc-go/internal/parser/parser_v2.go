@@ -129,6 +129,11 @@ func (p *Parser) ParseV2() (prog *Program) {
 				prog.Decls = append(prog.Decls, cls)
 				break
 			}
+			// Check for contextual keyword: test "name" { body }
+			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "test" && p.peekAt(1).Type == lexer.TOKEN_STRING_LIT {
+				prog.Decls = append(prog.Decls, p.v2ParseTestDecl())
+				break
+			}
 			// Script mode — top-level statements
 			s := p.v2ParseStmt()
 			if s != nil {

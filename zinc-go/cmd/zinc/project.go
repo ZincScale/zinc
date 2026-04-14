@@ -597,6 +597,85 @@ func runProject(projectDir string, progArgs []string) error {
 }
 
 // ---------------------------------------------------------------------------
+// Test
+// ---------------------------------------------------------------------------
+
+// testProject transpiles prod + test .zn files into a temp output and runs
+// `go test ./...`. Because the codegen emits *_test.go naturally (and `go
+// build` ignores those files), the same pipeline that powers buildProject
+// works here — we just hand the output to `go test` instead of `go build`.
+//
+// goTestArgs are forwarded unchanged so callers can pass -run, -race, -v,
+// -count, etc.
+func testProject(projectDir string, goTestArgs []string) error {
+	tomlPath := findZincToml(projectDir)
+	if tomlPath == "" {
+		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
+	}
+	cfg, err := loadZincToml(tomlPath)
+	if err != nil {
+		return fmt.Errorf("read zinc.toml: %w", err)
+	}
+	root := filepath.Dir(tomlPath)
+	srcDir := filepath.Join(root, "src")
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return fmt.Errorf("no src/ directory in project %s", root)
+	}
+
+	// Use zinc-out/ (same as build) so incremental test runs reuse cached
+	// module state. If that's wrong we can switch to a temp dir later.
+	outDir := filepath.Join(root, "zinc-out")
+	cleanOutDir(outDir)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	if err := generateGoMod(cfg, outDir); err != nil {
+		return fmt.Errorf("generate go.mod: %w", err)
+	}
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = outDir
+		tidy.Run() // best-effort before transpile
+	}
+
+	subdirs, _ := collectSubdirs(srcDir)
+	moduleName := cfg.Name
+	if moduleName == "" {
+		moduleName = "zinc_project"
+	}
+	if len(subdirs) > 0 {
+		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, false, cfg.Imports); err != nil {
+			return err
+		}
+	} else {
+		if err := compileDir(srcDir, outDir, false, cfg.Imports); err != nil {
+			return err
+		}
+	}
+
+	if len(cfg.Deps) > 0 {
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = outDir
+		tidy.Stdout = os.Stdout
+		tidy.Stderr = os.Stderr
+		if err := tidy.Run(); err != nil {
+			return fmt.Errorf("go mod tidy: %w", err)
+		}
+	}
+
+	args := append([]string{"test", "./..."}, goTestArgs...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = outDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go test failed: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Dependency management
 // ---------------------------------------------------------------------------
 

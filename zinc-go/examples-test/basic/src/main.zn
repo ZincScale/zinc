@@ -1,0 +1,7 @@
+pub fn addOne(int x): int {
+    return x + 1
+}
+
+fn main() {
+    print("main runs too")
+}
