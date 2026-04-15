@@ -189,6 +189,22 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		}
 	}
 
+	// Exception-inheritance hook: when a class extends a throwable
+	// (has Error() method, directly or inherited), auto-emit an
+	// Unwrap() method pointing at the embedded parent. errors.As
+	// walks the Unwrap chain, so a catch (Parent e) matches a thrown
+	// *Child. Without this, struct embedding alone doesn't satisfy
+	// errors.As — the types are distinct.
+	if parent := g.exceptionParent(cls); parent != "" {
+		tpArgs := goTypeArgs(cls.TypeParams)
+		g.writeln("func (s *%s%s) Unwrap() error {", name, tpArgs)
+		g.indent++
+		g.writeln("return &s.%s", parent)
+		g.indent--
+		g.writeln("}")
+		g.writeln("")
+	}
+
 	// Constructor → NewType() function
 	if cls.Ctor != nil {
 		g.emitConstructor(name, cls.Ctor, cls)
@@ -262,6 +278,78 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	}
 }
 
+// exceptionParent returns the first non-interface parent of cls whose
+// inheritance chain declares an Error() method — i.e. the embedded
+// struct that makes this class a Zinc exception. Used to decide
+// whether to auto-emit Unwrap() so errors.As walks the chain.
+// Returns the parent name (for the embedded field reference) or "".
+func (g *Generator) exceptionParent(cls *parser.ClassDecl) string {
+	for _, p := range cls.Parents {
+		if g.interfaces[p] || g.isImportedInterface(p) {
+			continue
+		}
+		name := p
+		if idx := strings.LastIndex(p, "."); idx >= 0 {
+			name = p[idx+1:]
+		}
+		if g.classIsException(name, map[string]bool{}) {
+			return name
+		}
+	}
+	return ""
+}
+
+// classIsException walks a class and its parents for a declared
+// Error() method. Visited cycle guard.
+func (g *Generator) classIsException(className string, visited map[string]bool) bool {
+	if visited[className] {
+		return false
+	}
+	visited[className] = true
+	check := func(cls *parser.ClassDecl) bool {
+		if cls == nil {
+			return false
+		}
+		for _, m := range cls.Methods {
+			if m.Name == "Error" {
+				return true
+			}
+		}
+		return false
+	}
+	var hit *parser.ClassDecl
+	if cls, ok := g.structs[className]; ok && cls != nil {
+		if check(cls) {
+			return true
+		}
+		hit = cls
+	}
+	if hit == nil {
+		for _, classes := range g.subpkgStructs {
+			if cls, ok := classes[className]; ok && cls != nil {
+				if check(cls) {
+					return true
+				}
+				hit = cls
+				break
+			}
+		}
+	}
+	if hit == nil {
+		return false
+	}
+	for _, p := range hit.Parents {
+		name := p
+		if idx := strings.LastIndex(p, "."); idx >= 0 {
+			name = p[idx+1:]
+		}
+		if g.classIsException(name, visited) {
+			return true
+		}
+	}
+	return false
+}
+
 // emitConstructor generates a NewType() constructor function.
 // Handles super() calls, this.field assignments, and remaining logic.
 func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls *parser.ClassDecl) {
@@ -291,8 +379,30 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	tpDecl := goTypeParams(cls.TypeParams)
 	tpArgs := goTypeArgs(cls.TypeParams)
 	params := g.formatParams(ctor.Params)
-	g.writeln("func New%s%s(%s) *%s%s {", typeName, tpDecl, params, typeName, tpArgs)
+	ctorThrows := g.errorFuncs["New"+typeName]
+	if ctorThrows {
+		g.writeln("func New%s%s(%s) (*%s%s, error) {", typeName, tpDecl, params, typeName, tpArgs)
+	} else {
+		g.writeln("func New%s%s(%s) *%s%s {", typeName, tpDecl, params, typeName, tpArgs)
+	}
 	g.indent++
+
+	// Save/restore thrower state. Inside a throwing ctor body, throw
+	// and auto-error-check emit `return zero, err` to match the
+	// widened signature.
+	prevThrower := g.currentFuncIsThrower
+	prevRetType := g.currentReturnType
+	prevOuterRetType := g.currentOuterReturnType
+	g.currentFuncIsThrower = ctorThrows
+	if ctorThrows {
+		g.currentReturnType = "*" + typeName + tpArgs
+	}
+	g.currentOuterReturnType = "*" + typeName + tpArgs
+	defer func() {
+		g.currentFuncIsThrower = prevThrower
+		g.currentReturnType = prevRetType
+		g.currentOuterReturnType = prevOuterRetType
+	}()
 
 	// Extract field assignments from ctor body: this.field = value → Field: value
 	var litFields []string
@@ -369,12 +479,20 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		}
 	}
 
-	// Emit struct literal
+	// Emit struct literal. Throwing ctors have their return shape
+	// widened to `(*Type, error)` so all returns pair nil error.
 	typeNameTA := typeName + tpArgs
+	retVal := func(v string) {
+		if ctorThrows {
+			g.writeln("return %s, nil", v)
+		} else {
+			g.writeln("return %s", v)
+		}
+	}
 	if len(litFields) > 0 {
 		if len(remainingStmts) == 0 {
 			if len(litFields) <= 3 {
-				g.writeln("return &%s{%s}", typeNameTA, strings.Join(litFields, ", "))
+				retVal(fmt.Sprintf("&%s{%s}", typeNameTA, strings.Join(litFields, ", ")))
 			} else {
 				g.writeln("return &%s{", typeNameTA)
 				g.indent++
@@ -382,23 +500,27 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 					g.writeln("%s,", f)
 				}
 				g.indent--
-				g.writeln("}")
+				if ctorThrows {
+					g.writeln("}, nil")
+				} else {
+					g.writeln("}")
+				}
 			}
 		} else {
 			g.writeln("s := &%s{%s}", typeNameTA, strings.Join(litFields, ", "))
 			for _, stmt := range remainingStmts {
 				g.emitStmt(stmt)
 			}
-			g.writeln("return s")
+			retVal("s")
 		}
 	} else if len(remainingStmts) > 0 {
 		g.writeln("s := &%s{}", typeNameTA)
 		for _, stmt := range remainingStmts {
 			g.emitStmt(stmt)
 		}
-		g.writeln("return s")
+		retVal("s")
 	} else {
-		g.writeln("return &%s{}", typeNameTA)
+		retVal(fmt.Sprintf("&%s{}", typeNameTA))
 	}
 
 	g.indent--

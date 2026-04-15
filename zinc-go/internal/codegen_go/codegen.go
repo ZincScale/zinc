@@ -355,8 +355,14 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			}
 			if decl.Ctor != nil {
 				g.funcSigs["New"+decl.Name] = decl.Ctor.Params
+				if canReturnError(decl.Ctor.Body) {
+					g.errorFuncs["New"+decl.Name] = true
+				}
 			} else if len(decl.Ctors) > 0 {
 				g.funcSigs["New"+decl.Name] = decl.Ctors[0].Params
+				if canReturnError(decl.Ctors[0].Body) {
+					g.errorFuncs["New"+decl.Name] = true
+				}
 			}
 			// Class methods and fields — track pub status
 			for _, m := range decl.Methods {
