@@ -316,7 +316,9 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	return &MethodDecl{Name: name, Params: params, ReturnType: retType, Body: body}
 }
 
-// v2ParseFieldDecl: var type name [= default]  |  const type name = default  |  init type name
+// v2ParseFieldDecl: var name = default  |  const type name = default  |  init type name
+// `var` fields require an initializer (type is inferred). For an uninitialized
+// field, write the bare form `Type name` (handled by v2ParseFieldDeclNoKeyword).
 func (p *Parser) v2ParseFieldDecl() *FieldDecl {
 	isConst := p.peek().Type == lexer.TOKEN_CONST
 	isInit := p.peek().Type == lexer.TOKEN_INIT
@@ -326,6 +328,13 @@ func (p *Parser) v2ParseFieldDecl() *FieldDecl {
 	var typ TypeExpr
 	var name string
 	if p.v2IsTypeAnnotation() {
+		// Reject `var Type name` for fields — `var` means "infer the
+		// type from the initializer." For an uninitialized field with
+		// an explicit type, drop `var` and write `Type name`.
+		// `const Type name` and `init Type name` keep their shapes.
+		if !isConst && !isInit {
+			p.errorf("var keyword with explicit type is not allowed; either drop `var` (e.g. `Mutex mu`) or drop the type (e.g. `var mu = ...`)")
+		}
 		typ = p.v2ParseType()
 		name = p.v2ExpectIdent()
 	} else {

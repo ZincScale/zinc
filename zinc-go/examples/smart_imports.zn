@@ -5,8 +5,8 @@ import sync.Mutex
 import strings
 
 class SafeCounter {
-    var Mutex mu
-    var int count = 0
+    Mutex mu
+    var count = 0
 
     fn increment() {
         this.mu.Lock()
@@ -23,18 +23,13 @@ class SafeCounter {
 }
 
 fn main() {
-    // Type import: Mutex resolves to sync.Mutex
-    var Mutex mu
-    mu.Lock()
-    print("locked")
-    mu.Unlock()
-    print("unlocked")
-
     // Package import: strings used fully-qualified
     var upper = strings.ToUpper("hello")
     print("upper: ${upper}")
 
-    // Class field with type import
+    // Class field with type import — `Mutex` inside SafeCounter
+    // resolves to sync.Mutex via the type import, and the lock/unlock
+    // calls in increment()/getCount() prove it's a real *sync.Mutex.
     var counter = new SafeCounter()
     counter.increment()
     counter.increment()

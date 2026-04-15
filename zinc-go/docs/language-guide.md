@@ -5,10 +5,14 @@ Zinc is a clean-syntax language that transpiles to Go. It removes Go's syntax wa
 ## Variables
 
 ```zinc
-var name = "Alice"              // type inferred
-String greeting = "Hello"       // explicit type
-const PI = 3.14159              // constant
+var name = "Alice"              // inferred type (requires initializer)
+String greeting = "Hello"       // explicit type (no `var` — bare form)
+String host                     // explicit type, no initializer (fields only)
+const PI = 3.14159              // constant, inferred
+const String VERSION = "1.0"    // constant, explicit type
 ```
+
+Rule: `var` means "infer the type from the initializer." If you write the type explicitly, drop `var`. The hybrid `var Type name` is a compile error — write either `var name = expr` (inferred) or `Type name [= expr]` (explicit).
 
 Types: `int`, `double`, `bool`, `String`, `List<T>`, `Map<K,V>`.
 

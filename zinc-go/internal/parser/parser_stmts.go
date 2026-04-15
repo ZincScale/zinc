@@ -139,7 +139,14 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 	}
 
 	if p.v2IsTypeAnnotation() {
-		// Type is present: var int x = 5, var list<int> nums = []
+		// Reject `var Type name [= expr]` — `var` means "infer the type."
+		// If the type is named, drop `var` (write `Type name` instead).
+		// `const Type name = expr` stays valid — const has documented
+		// shape with explicit type.
+		if !isConst {
+			p.errorf("var keyword with explicit type is not allowed; either drop `var` (e.g. `Mutex mu`) or drop the type (e.g. `var mu = ...`)")
+		}
+		// Type is present: const int X = 5, const list<int> nums = []
 		typ = p.v2ParseType()
 		name = p.v2ExpectIdent()
 		p.v2ValidateDeclName(name)

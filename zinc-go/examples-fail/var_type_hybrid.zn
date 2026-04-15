@@ -1,0 +1,26 @@
+// Regression: `var` with an explicit type is not allowed. `var` means
+// "infer the type from the initializer." If the type is named, drop
+// `var`. Covers three rejected shapes in one file: class field,
+// local with no initializer, and local with initializer (redundant
+// var). Const keeps its documented `const Type name = expr` form.
+
+import sync.Mutex
+
+class Widget {
+    // Field: `var Mutex mu` is the hybrid that must be rejected.
+    // Fix is `Mutex mu` (explicit, no init).
+    var Mutex mu
+
+    init() {}
+}
+
+fn main() {
+    // Local with no initializer — same smell.
+    var Mutex local
+
+    // Local with initializer — `var` is redundant when the type
+    // is named explicitly.
+    var Mutex init = new Mutex()
+
+    print("should not compile")
+}
