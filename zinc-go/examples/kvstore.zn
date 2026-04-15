@@ -1,16 +1,31 @@
 // KV Store — a real app combining all features
-// Tests: classes, error handling, function types, imports, maps
+// Tests: classes, exceptions, function types, imports, maps
 
 import strings
 import sort
 
-// Error-returning lookup
+class NotFoundException {
+    pub String message
+    init(String message) { this.message = message }
+    pub String Error() { return message }
+}
+
+// Throwing lookup — caller wraps in try/catch for fallback.
 String mustGet(Map<String, String> data, String key) {
     var val = data[key]
     if (val == "") {
-        return Error("key not found: ${key}")
+        throw NotFoundException("key not found: ${key}")
     }
     return val
+}
+
+String safeGet(Map<String, String> data, String key, String fallback) {
+    try {
+        var result = mustGet(data, key)
+        return result
+    } catch (e) {
+        return fallback
+    }
 }
 
 void main() {
@@ -26,12 +41,9 @@ void main() {
     // Get
     print("user:1 = ${store["user:1"]}")
 
-    // Error handling with or
-    var val = mustGet(store, "user:1") or "not found"
-    print("mustGet user:1: ${val}")
-
-    var missing = mustGet(store, "user:999") or "not found"
-    print("mustGet user:999: ${missing}")
+    // Exception handling — safeGet catches NotFoundException and returns fallback
+    print("mustGet user:1: ${safeGet(store, "user:1", "not found")}")
+    print("mustGet user:999: ${safeGet(store, "user:999", "not found")}")
 
     // Collect keys and filter
     var userCount = 0

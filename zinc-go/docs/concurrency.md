@@ -14,6 +14,24 @@ spawn {
 
 Compiles to `go func() { ... }()`.
 
+### Errors inside spawn
+
+Goroutines cannot return errors to their launcher — Go has no return channel for a `go` statement. Zinc's contract is: **uncaught throws inside `spawn`, `go`, `parallel for`, and `concurrent { }` panic the process** with a stack trace pointing at the spawn site. No silent failures.
+
+If you want to handle the error locally, wrap with try/catch inside the goroutine:
+
+```zinc
+spawn {
+    try {
+        doRiskyWork()
+    } catch (e) {
+        logging.error("worker failed", "err", e.Error())
+    }
+}
+```
+
+If you want the error back on the launcher, use an actor (mailbox-based, errors travel as messages) or an explicit error channel. Raw `spawn` is fire-and-forget by design.
+
 ## Channels
 
 Typed, buffered channels for goroutine communication:

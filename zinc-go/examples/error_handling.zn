@@ -1,68 +1,91 @@
-// Error Handling — Zinc v3
-// Demonstrates: Error return, or default, or block, or with return/continue
+// Error Handling — Zinc v3 (exception model)
+// Demonstrates: throw, try/catch/finally, typed catch, fallback patterns
 
-// Function that can fail — returns Error on bad input
+class DivisionException {
+    pub String message
+    init(String message) { this.message = message }
+    pub String Error() { return message }
+}
+
+// Function that can fail — throws on bad input
 int divide(int a, int b) {
-    if (b == 0) { return Error("division by zero") }
+    if (b == 0) { throw DivisionException("division by zero") }
     return a / b
 }
 
-// or — fallback value on error
-var result = divide(10, 0) or -1
-print("divide(10, 0) or -1 = ${result}")
+// Fallback value on error via try/catch
+int safeDiv(int a, int b, int fallback) {
+    try {
+        var r = divide(a, b)
+        return r
+    } catch (e) {
+        return fallback
+    }
+}
+
+print("divide(10, 0) or -1 = ${safeDiv(10, 0, -1)}")
 
 // Successful call
-var ok = divide(10, 2) or 0
-print("divide(10, 2) = ${ok}")
+print("divide(10, 2) = ${safeDiv(10, 2, 0)}")
 
-// or block — error handler as statement
-divide(10, 0) or {
+// Catch the exception as a statement handler
+try {
+    divide(10, 0)
+} catch (e) {
     print("caught division error")
 }
 print("or block done")
 
-// Validate with simple Error
+// Validate with throw
 int validate(int x) {
-    if (x < 0) { return Error("must be positive") }
+    if (x < 0) { throw DivisionException("must be positive") }
     return x
 }
 
-var v = validate(-5) or -1
-print("validate(-5) or -1 = ${v}")
+int safeValidate(int x, int fallback) {
+    try {
+        var r = validate(x)
+        return r
+    } catch (e) {
+        return fallback
+    }
+}
 
-var v2 = validate(10) or -1
-print("validate(10) = ${v2}")
+print("validate(-5) or -1 = ${safeValidate(-5, -1)}")
+print("validate(10) = ${safeValidate(10, -1)}")
 
-// or block with return — early exit from function
+// Try/catch with early return — fallback path
 String loadAndProcess() {
-    var data = divide(10, 0) or {
+    try {
+        var data = divide(10, 0)
+        return "processed: ${data}"
+    } catch (e) {
         return "fallback result"
     }
-    return "processed: ${data}"
 }
 print("loadAndProcess: ${loadAndProcess()}")
 
-// or block with continue — skip items in loop
+// Catch with continue — skip items in loop
 List<int> inputs = [2, 0, 5, 0, 3]
 for (b in inputs) {
-    var val = divide(100, b) or {
+    try {
+        var val = divide(100, b)
+        print("100/${b} = ${val}")
+    } catch (e) {
         continue
     }
-    print("100/${b} = ${val}")
 }
 
-// or block with return Error(err) — propagate error up
+// Exception propagates through a rethrowing function
 int safeDivide(int a, int b) {
-    var result = divide(a, b) or {
-        return Error(err)
-    }
-    return result
+    // No try/catch here — the throw from divide propagates up.
+    // canReturnError detects the transitive throw and widens this
+    // function's Go signature to (int, error).
+    var r = divide(a, b)
+    return r
 }
 
-var propagated = safeDivide(10, 0) or -99
-print("propagated error: ${propagated}")
-
-var propagatedOk = safeDivide(10, 2) or -99
-print("propagated ok: ${propagatedOk}")
+print("propagated error: ${safeDiv(10, 0, -99)}")
+print("propagated ok: ${safeDiv(10, 2, -99)}")
 
 print("Error Handling OK")

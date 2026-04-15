@@ -1,133 +1,165 @@
-# Error Handling
+# Error handling
 
-Zinc replaces Go's `if err != nil` pattern with `or` expressions. Functions that can fail return `(T, error)` pairs automatically — you handle the error inline.
+Zinc uses **try/catch/throw** for control-flow errors, modeled on C# with unchecked exceptions. Anything that throws extends `Exception` from `stdlib.exceptions` and satisfies Go's `error` interface via an `Error() string` method — so Zinc exceptions compose with Go's `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
 
-## Functions that can fail
+## The model in one paragraph
 
-Return `Error(message)` to signal failure:
+A function that calls `throw` (or calls another thrower and doesn't catch) has its Go signature widened to `(T, error)`. At call sites, the compiler emits `if err != nil { return err }` automatically — no explicit `or { }` handler is needed. Inside a `try { } catch (T e) { }` block, errors flow to the catches via `errors.As`, so typed catches still match even when the error was wrapped with `%w` upstream. Uncaught throws inside `spawn { }` or `go { }` panic the process — goroutines can't return errors to their launcher, and silent failure is never the default.
 
-```zinc
-int divide(int a, int b) {
-    if (b == 0) { return Error("division by zero") }
-    return a / b
-}
-```
-
-This compiles to a Go function returning `(int, error)`.
-
-## or — fallback value
-
-Provide a default when a call fails:
+## Throwing
 
 ```zinc
-var result = divide(10, 0) or -1    // -1
-var ok = divide(10, 2) or -1        // 5
-```
+import stdlib.exceptions
 
-## or block — error handler
-
-Run a block of code on failure:
-
-```zinc
-divide(10, 0) or {
-    print("something went wrong")
-}
-```
-
-## or block with return — early exit
-
-Return from the enclosing function on error:
-
-```zinc
-String loadAndProcess() {
-    var data = divide(10, 0) or {
-        return "fallback result"
+int parseInt(String s) {
+    if (s == "") {
+        throw exceptions.IllegalArgumentException("empty input")
     }
-    return "processed: {data}"
+    // ... normal path
+    return 42
 }
 ```
 
-## or block with continue — skip in loops
-
-Skip failed iterations:
+`throw expr` requires `expr` to satisfy Go's `error` interface. All stdlib exception types do (via the `Error()` method on the base `Exception`). Custom exceptions work the same way:
 
 ```zinc
-List<int> divisors = [2, 0, 5, 0, 3]
-for (d in divisors) {
-    var val = divide(100, d) or {
-        continue
-    }
-    print("100/{d} = {val}")
+class ParseException {
+    pub String message
+    init(String message) { this.message = message }
+    pub String Error() { return message }
 }
-// prints: 100/2 = 50, 100/5 = 20, 100/3 = 33
 ```
 
-## Error propagation
+Keep the class small: one field, one `Error()` method. The rest of the error ergonomics (wrapping, typed matching) comes from Go's `errors` package.
 
-Propagate errors up the call stack with `return Error(err)`:
+## Catching
 
 ```zinc
-int safeDivide(int a, int b) {
-    var result = divide(a, b) or {
-        return Error(err)
-    }
-    return result
+try {
+    var n = parseInt(raw)
+    process(n)
+} catch (exceptions.IllegalArgumentException e) {
+    logging.warn("bad input", "value", raw, "reason", e.message)
+} catch (e) {
+    // Universal catch — binds the raw error.
+    logging.error("unexpected", "err", e.Error())
 }
-
-var x = safeDivide(10, 0) or -99    // -99
 ```
 
-The `err` variable is automatically available inside `or` blocks.
+Rules:
 
-## Comparison with Go
+- **Typed catches** use `errors.As` under the hood, so they match across `fmt.Errorf("%w", inner)` wrapping chains.
+- **Universal catch** (bare `catch { }` or `catch (e) { }`) absorbs anything the body can throw.
+- **Multiple catches** probe in source order — first match wins.
+- **Uncaught** errors propagate up through any function that can throw, stopping at the first surrounding try with a matching catch.
+- **No `throws` clause.** Exceptions are unchecked.
 
-| Zinc | Go |
-|------|-----|
-| `return Error("msg")` | `return 0, errors.New("msg")` |
-| `val = f() or default` | `val, err := f(); if err != nil { val = default }` |
-| `f() or { return Error(err) }` | `val, err := f(); if err != nil { return 0, err }` |
-| `f() or { continue }` | `val, err := f(); if err != nil { continue }` |
+## Finally
 
-Zinc's error handling is zero-cost — it compiles to the exact same Go error patterns, just without the boilerplate.
+```zinc
+try {
+    session.begin()
+    work(session)
+    session.commit()
+} catch (e) {
+    session.rollback()
+    throw e
+} finally {
+    session.close()
+}
+```
 
-## Constructors always succeed — use a factory for failable construction
+`finally` runs on every exit path — after a matching catch, before propagation of an unhandled error, and after a user `return` inside the try.
 
-A constructor (`init`) has no failure channel. The caller always gets a fully-constructed instance, so there is no way for `init` to signal "stop, construction failed." A bare `return` inside an `init` body is rejected at compile time:
+Prefer `using` over `finally` for resource cleanup — it's shorter and harder to misuse:
+
+```zinc
+using (var session = db.open()) {
+    work(session)
+    session.commit()
+}  // session.Close() runs on exit, including via throw
+```
+
+## Constructors can throw
+
+An `init { }` that throws aborts object construction — no partially-initialized object escapes:
 
 ```zinc
 class Config {
-    String host
-    int port
-    init(String host, int port) {
-        this.host = host
-        if (port < 0) {
-            return   // compile error: bare `return` not allowed in ctor body
+    pub String path
+    pub Map<String, String> values
+
+    init(String path) {
+        if (!exists(path)) {
+            throw exceptions.IOException("config not found: ${path}")
         }
-        this.port = port
+        this.path = path
+        this.values = load(path)
     }
 }
 ```
 
-If construction can actually fail, lift the failable check into a factory function that returns `T?` and emits `Error(reason)` on the failure path. The factory constructs via the ctor on success:
+Callers handle this like any other thrower:
 
 ```zinc
-Config? newConfig(String host, int port) {
-    if (port < 0) {
-        return Error("port must be non-negative: ${port}")
-    }
-    return Config(host, port)
-}
-
-// Caller handles failure at the call site — same or { } shape
-// as any other failable call:
-var cfg = newConfig("localhost", -1) or {
-    print("bad config: ${err}")
-    return
+try {
+    var cfg = Config("/etc/app.yml")
+    run(cfg)
+} catch (exceptions.IOException e) {
+    fatal("startup failed: ${e.message}")
 }
 ```
 
-This keeps construction failure visible at every call site rather than hidden behind a half-built object. It is the same design rule as functions that return `Error(...)` (see [Functions that can fail](#functions-that-can-fail)), applied to the construction boundary.
+## Goroutines
 
-### Rationale
+`spawn { }`, `go { }`, `parallel for`, and `concurrent { }` cannot propagate errors back to the launching thread — Go goroutines have no return channel to the caller. The compiler's contract:
 
-Silently early-exiting from a constructor — e.g., `if bad_input { return }` — would hand the caller an object whose fields are only partially initialized, with no way to know. That is the exact shape of errors-as-values leaking into a silent-failure design: errors-as-values says every failure must be *reachable* at the call site through `T?` + `or { }`, and a partially-constructed object isn't. The compile-time rejection keeps the discipline visible. Guard-invert (`if good_input { parse(...) }` with no `return`) remains valid for benign empty-input handling where no error is being signalled.
+- **Caught** inside the goroutine body: the error is handled locally. No panic.
+- **Uncaught**: the process panics with a stack trace pointing at the spawn site. **No silent failures.**
+
+```zinc
+spawn {
+    try {
+        processOne(item)
+    } catch (e) {
+        logging.error("worker failed", "err", e.Error())
+    }
+}
+```
+
+If you want the error back on the launcher, use an actor (mailbox-based, errors travel as messages) or an explicit error channel. Raw `spawn` is fire-and-forget by design.
+
+## What's gone
+
+The pre-2026 errors-as-values machinery — `T?` plus `return Error("msg")` plus `call() or { ... }` — was removed in the exception pivot. Migration is mechanical:
+
+| Old | New |
+|---|---|
+| `return Error("msg")` | `throw exceptions.ConfigException("msg")` |
+| `var x = call() or default` | `try { var x = call(); ... } catch (e) { ... }` |
+| `var x = call() or { return -1 }` | `try { var x = call() } catch (e) { return -1 }` |
+| `call() or { log(err) }` | `try { call() } catch (e) { log(e.Error()) }` |
+
+The parser rejects stray `or` with the migration hint pointing at try/catch.
+
+## The `Exception` hierarchy
+
+`stdlib.exceptions` ships a minimal set:
+
+- `Exception` — base, satisfies Go's `error`
+- `IllegalArgumentException` — bad argument
+- `IllegalStateException` — wrong state for the operation
+- `IOException` — I/O failure
+- `ConfigException` — config or setup error
+
+Define your own domain exceptions by extending `Exception`:
+
+```zinc
+import stdlib.exceptions
+
+class AuthException : exceptions.Exception {
+    init(String message) { super(message) }
+}
+```
+
+Subclasses inherit `Error()` via struct embedding — no boilerplate.

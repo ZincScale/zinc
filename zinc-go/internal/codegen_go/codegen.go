@@ -35,6 +35,7 @@ type Generator struct {
 	// Error handling
 	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values in error returns)
+	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
 	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
 	currentMethodRetType  string            // Go return type of current method (for channel recv type assertions)
@@ -48,6 +49,24 @@ type Generator struct {
 	// Scope tracking
 	errVarCount   int    // counter for unique _err variables in same scope
 	currentErrVar string // current error variable name (for or-blocks)
+
+	// Try-block context: when true, `throw` and error-returning call
+	// sites propagate via `return err` to the enclosing IIFE instead of
+	// `return zero, err` to the outer function.
+	inTryBlock bool
+
+	// inTryBlockTuple is true when the try IIFE returns a 3-tuple
+	// `(retVal, returning bool, err error)` because the body contains a
+	// `return` that must escape to the outer function. emitReturnStmt
+	// and emitThrowStmt emit the 3-value shape when this is set; simple
+	// `return err` otherwise.
+	inTryBlockTuple bool
+
+	// currentFuncIsThrower is true while emitting a function whose
+	// signature has a trailing `error` return. Drives emitErrReturn:
+	// throwers propagate via `return zero, err`; non-throwers panic
+	// (unchecked-exception semantics — e.g. main() with uncaught).
+	currentFuncIsThrower bool
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
@@ -385,7 +404,13 @@ func fieldDeclsToParams(fields []*parser.FieldDecl) []*parser.ParamDecl {
 
 // --- Error detection ---------------------------------------------------------
 
-// canReturnError walks a function body looking for return Error(...) statements.
+// canReturnError walks a function body looking for constructs that make
+// the function an "error returner" — i.e. its Go signature should gain a
+// trailing `error` result. Triggers:
+//   - return Error(...)           (legacy errors-as-values; to be removed)
+//   - throw expr                  (exception pivot — any uncaught throw propagates)
+//   - try { ... } with no universal catch and a body that throws/errors
+//   - or { ... } handler that itself returns Error (legacy)
 func canReturnError(body *parser.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -401,11 +426,25 @@ func canReturnError(body *parser.BlockStmt) bool {
 func stmtCanReturnError(s parser.Stmt) bool {
 	switch stmt := s.(type) {
 	case *parser.ReturnStmt:
-		if stmt.Value == nil {
-			return false
+		_ = stmt
+		return false
+	case *parser.ThrowStmt:
+		return true
+	case *parser.TryStmt:
+		// A try statement propagates if its body can throw/error AND no
+		// universal catch (bare catch, `catch (e)`, or `catch (Exception e)`)
+		// is present to absorb everything. Typed catches only catch their
+		// specific type, so anything else escapes.
+		if !tryBlockFullyCaught(stmt) {
+			if blockCanReturnError(stmt.Body) {
+				return true
+			}
 		}
-		if call, ok := stmt.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok && ident.Name == "Error" {
+		if stmt.Finally != nil && blockCanReturnError(stmt.Finally) {
+			return true
+		}
+		for _, c := range stmt.Catches {
+			if blockCanReturnError(c.Body) {
 				return true
 			}
 		}
@@ -454,9 +493,23 @@ func stmtCanReturnError(s parser.Stmt) bool {
 			}
 		}
 		return false
+	case *parser.WithStmt:
+		return blockCanReturnError(stmt.Body)
 	default:
 		return false
 	}
+}
+
+// tryBlockFullyCaught reports whether the try has a catch clause that
+// matches anything (bare catch or `catch (e)` with no type). A universal
+// catch absorbs the error so the enclosing function does not propagate.
+func tryBlockFullyCaught(t *parser.TryStmt) bool {
+	for _, c := range t.Catches {
+		if c.ExceptionType == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func blockCanReturnError(block *parser.BlockStmt) bool {

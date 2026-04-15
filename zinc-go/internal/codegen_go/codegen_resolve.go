@@ -1028,6 +1028,17 @@ func (g *Generator) zeroValueFor(goType string) string {
 		if g.interfaces[goType] || g.isImportedInterface(goType) {
 			return "nil"
 		}
+		// Qualified external type (pkg.Name) — ask goResolver.
+		// Go stdlib interfaces (io.Writer, io.Reader, etc.) land here.
+		if strings.Contains(goType, ".") {
+			parts := strings.SplitN(goType, ".", 2)
+			pkg, name := parts[0], parts[1]
+			if pkgPath, ok := g.importMap[pkg]; ok {
+				if g.goResolver.IsInterface(pkgPath, name) {
+					return "nil"
+				}
+			}
+		}
 		return goType + "{}"
 	}
 }

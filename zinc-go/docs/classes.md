@@ -30,9 +30,34 @@ print(s)              // Server(localhost:3000)
 
 Fields are accessed with `this.` in the constructor. In methods, bare field names work directly.
 
-### Constructors always succeed
+### Constructors can throw
 
-`init` has no failure channel — the caller always gets a fully-constructed instance. Bare `return` inside an `init` body is a compile error. If construction can fail, write a factory function returning `T?` that emits `Error(reason)` on the failure path; see [Error handling → Constructors always succeed](error-handling.md#constructors-always-succeed--use-a-factory-for-failable-construction).
+An `init` that validates inputs can `throw` to abort construction — no partially-initialized object escapes. Callers handle it with the normal try/catch pattern:
+
+```zinc
+import stdlib.exceptions
+
+class Server {
+    String host
+    int port
+
+    init(String host, int port) {
+        if (port < 1 || port > 65535) {
+            throw exceptions.IllegalArgumentException("invalid port: ${port}")
+        }
+        this.host = host
+        this.port = port
+    }
+}
+
+try {
+    var s = Server("localhost", 99999)
+} catch (exceptions.IllegalArgumentException e) {
+    fatal("bad config: ${e.message}")
+}
+```
+
+Bare `return` inside an `init` body is still a compile error — there's nothing meaningful to return. To abort construction, `throw`.
 
 ## Data classes
 

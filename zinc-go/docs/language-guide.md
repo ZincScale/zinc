@@ -32,7 +32,7 @@ greet("Alice")          // "Hello, Alice!"
 greet("Bob", "Hey")     // "Hey, Bob!"
 ```
 
-Constructors (`init`) always succeed — bare `return` inside an `init` body is a compile error. For failable construction, use a factory returning `T?`. See [classes](classes.md#constructors-always-succeed) and [error handling](error-handling.md#constructors-always-succeed--use-a-factory-for-failable-construction).
+Constructors (`init`) can `throw` to abort construction — no partially-initialized object escapes. Bare `return` inside an `init` body is still a compile error (nothing meaningful to return). See [classes](classes.md#constructors-can-throw).
 
 ## String interpolation
 
@@ -77,9 +77,27 @@ for (item in list) {
 while (condition) {
     doWork()
 }
+
+// Try / catch / finally — errors flow through throw, caught by type.
+try {
+    var n = parseInt(input)
+    use(n)
+} catch (exceptions.IllegalArgumentException e) {
+    logging.warn("bad input", "reason", e.message)
+} catch (e) {
+    logging.error("unexpected", "err", e.Error())
+} finally {
+    cleanup()
+}
+
+// Using — RAII-style resource management. Close() runs on exit,
+// including when the body throws. Preferred over finally for cleanup.
+using (var conn = pool.acquire()) {
+    conn.execute(query)
+}
 ```
 
-## Collections
+See [error handling](error-handling.md) for the full model — typed catches via `errors.As`, uncaught-in-spawn panics the process, `Exception` base class from `stdlib.exceptions`.
 
 ```zinc
 // Lists

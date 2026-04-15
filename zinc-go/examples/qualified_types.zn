@@ -29,10 +29,12 @@ slog.Handler makeHandler(io.Writer w) {
 
 // Accept io.Reader as a parameter — tests qualified interface from different package
 String readAll(io.Reader r) {
-    var data = io.ReadAll(r) or {
+    try {
+        var data = io.ReadAll(r)
+        return string(data)
+    } catch (e) {
         return "error"
     }
-    return string(data)
 }
 
 // Use strings via import-as alias in function signature

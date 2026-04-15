@@ -41,8 +41,12 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	// Save/restore state for function scope
 	prevRetType := g.currentReturnType
+	prevOuterRetType := g.currentOuterReturnType
 	prevRetOpt := g.currentReturnOptional
 	prevErrCount := g.errVarCount
+	prevIsThrower := g.currentFuncIsThrower
+	g.currentFuncIsThrower = canError
+	g.currentOuterReturnType = goRetType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -81,6 +85,21 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
 	g.indent++
 	g.emitBlock(fn.Body)
+	// Ensure all paths return. Go requires an explicit return when the
+	// last statement isn't a return — especially after a try/catch
+	// where each branch returns but the compiler can't see it. Tail
+	// shape depends on thrower + return-type combination.
+	if !blockEndsInReturn(fn.Body) {
+		if canError {
+			if goRetType == "" {
+				g.writeln("return nil")
+			} else {
+				g.writeln("return %s, nil", g.zeroValueFor(goRetType))
+			}
+		} else if goRetType != "" {
+			g.writeln("return %s", g.zeroValueFor(goRetType))
+		}
+	}
 	g.indent--
 	g.writeln("}")
 
@@ -91,8 +110,10 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	}
 
 	g.currentReturnType = prevRetType
+	g.currentOuterReturnType = prevOuterRetType
 	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
+	g.currentFuncIsThrower = prevIsThrower
 	if len(fn.TypeParams) > 0 {
 		g.activeTypeParams = nil
 	}
@@ -468,7 +489,11 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 
 	prevRetType := g.currentReturnType
+	prevOuterRetType := g.currentOuterReturnType
 	prevMethodRetType := g.currentMethodRetType
+	prevIsThrower := g.currentFuncIsThrower
+	g.currentFuncIsThrower = canError
+	g.currentOuterReturnType = goRetType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -498,11 +523,25 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 	g.indent++
 	g.emitBlock(m.Body)
+	if !blockEndsInReturn(m.Body) {
+		if canError {
+			if goRetType == "" {
+				g.writeln("return nil")
+			} else {
+				g.writeln("return %s, nil", g.zeroValueFor(goRetType))
+			}
+		} else if goRetType != "" && !strings.HasPrefix(ret, " *") {
+			// Non-thrower T-returning method: emit zero fallback.
+			g.writeln("return %s", g.zeroValueFor(goRetType))
+		}
+	}
 	g.indent--
 	g.writeln("}")
 
 	g.currentReturnType = prevRetType
+	g.currentOuterReturnType = prevOuterRetType
 	g.currentMethodRetType = prevMethodRetType
+	g.currentFuncIsThrower = prevIsThrower
 }
 
 // collectParentFields walks the inheritance chain and adds parent fields to the map.

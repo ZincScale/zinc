@@ -345,6 +345,26 @@ func (r *GoTypeResolver) IsStruct(pkgPath, name string) bool {
 	return r.hasStructDecl(pkgPath, name)
 }
 
+// IsInterface reports whether name is an interface type in pkgPath.
+// Used by zero-value selection — interface types are zero-valued as
+// `nil`, not `Type{}` which the Go compiler rejects.
+func (r *GoTypeResolver) IsInterface(pkgPath, name string) bool {
+	pkg := r.loadPkg(pkgPath)
+	if pkg == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(name)
+	if obj == nil {
+		return false
+	}
+	tn, ok := obj.(*types.TypeName)
+	if !ok {
+		return false
+	}
+	_, isIface := tn.Type().Underlying().(*types.Interface)
+	return isIface
+}
+
 // HasFunc reports whether pkgPath has a function named funcName.
 // Falls back to AST parsing when type resolution fails.
 func (r *GoTypeResolver) HasFunc(pkgPath, funcName string) bool {

@@ -251,32 +251,34 @@ func (p *Parser) v2ParseTypedVarStmt() *VarStmt {
 	return &VarStmt{Line: line, Name: name, Type: typ, Value: val, OrHandler: handler}
 }
 
-// v2ParseOrHandler checks for `or` after a failable call.
-// Three forms:
-//   var x = call() or 0                              — single-expression default
-//   var x = call() or { ... }                        — multi-statement handler block
-//   var x = call() or match err { case Type -> ... }  — typed error matching
-// Returns nil if no or follows.
+// v2ParseErrHandler previously accepted `or <default>` / `or { handler }` /
+// `or match err { ... }` on fallible expressions. The 2026-04-15
+// exception pivot removed this syntax: errors now flow through
+// try/catch/throw with auto-propagation at call sites. We still look
+// for a stray `or` so the compiler surfaces a clear migration error
+// instead of the cascade of parse failures a bare `or` would produce.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
 	if !p.check(lexer.TOKEN_OR) {
 		return nil
 	}
+	tok := p.peek()
+	p.errorf("`or { }` / `or <default>` is removed — wrap the call in `try { } catch { }` or let the error auto-propagate (line %d)", tok.Line)
 	p.advance() // consume "or"
-
-	// or match err { case Type -> ... }
+	// Consume the handler so the rest of the file parses cleanly.
 	if p.check(lexer.TOKEN_MATCH) {
-		return p.v2ParseOrMatch()
+		p.advance()
+		if p.check(lexer.TOKEN_IDENT) {
+			p.advance()
+		}
+		if p.check(lexer.TOKEN_LBRACE) {
+			p.v2ParseBlock()
+		}
+	} else if p.check(lexer.TOKEN_LBRACE) {
+		p.v2ParseBlock()
+	} else {
+		p.v2ParseExpr()
 	}
-
-	// Brace block: or { handler }
-	if p.check(lexer.TOKEN_LBRACE) {
-		body := p.v2ParseBlock()
-		return &OrHandler{Body: body}
-	}
-
-	// Single-expression default: or 0
-	expr := p.v2ParseExpr()
-	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
+	return nil
 }
 
 // v2ParseOrMatch: or match err { case Type -> body ... case _ -> body }
