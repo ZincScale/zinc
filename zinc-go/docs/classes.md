@@ -15,11 +15,11 @@ class Server {
     }
 
     String address() {
-        return "{host}:{port}"
+        return "${host}:${port}"
     }
 
     String toString() {
-        return "Server({address()})"
+        return "Server(${address()})"
     }
 }
 

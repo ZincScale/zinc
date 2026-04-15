@@ -99,12 +99,14 @@ using (var conn = pool.acquire()) {
 
 See [error handling](error-handling.md) for the full model — typed catches via `errors.As`, uncaught-in-spawn panics the process, `Exception` base class from `stdlib.exceptions`.
 
+## Collections
+
 ```zinc
 // Lists
 List<int> numbers = [1, 2, 3, 4, 5]
 var first = numbers[0]
 numbers.add(6)
-print("size: {numbers.size()}")
+print("size: ${numbers.size()}")
 
 // Maps
 Map<String, int> ages = {"Alice": 30, "Bob": 25}
@@ -113,7 +115,7 @@ var age = ages.get("Alice")
 
 // Iteration
 for (key, value in ages) {
-    print("{key} is {value}")
+    print("${key} is ${value}")
 }
 ```
 

@@ -54,6 +54,49 @@ Rules:
 - **Uncaught** errors propagate up through any function that can throw, stopping at the first surrounding try with a matching catch.
 - **No `throws` clause.** Exceptions are unchecked.
 
+### Catching by a superclass
+
+A subclass throw matches a superclass `catch` — the compiler auto-emits `Unwrap() error` on any class that extends a throwable (i.e. a class with `Error()` in its parent chain), so `errors.As` walks from the child to the embedded parent:
+
+```zinc
+class AppError {
+    pub String message
+    init(String m) { this.message = m }
+    pub String Error() { return message }
+}
+
+class NetworkError : AppError {
+    init(String m) { super(m) }
+}
+
+try {
+    throw NetworkError("conn refused")
+} catch (AppError e) {
+    // Matches. Subclass bubbled up via auto-Unwrap.
+    print("caught: ${e.message}")
+}
+```
+
+### Typed-only catches widen the enclosing function
+
+If a try has only typed catches (no universal `catch (e)` fallback), the compiler assumes anything not covered by a catch can escape. The enclosing function's signature gets widened to `(T, error)` so the uncaught path has somewhere to go. This is usually invisible — you write try/catch and it just works — but if you see a function picking up an error return, that's why.
+
+If you know the body only throws types your catches cover, add a final `catch (e) { }` universal catch to keep the enclosing function's signature narrow:
+
+```zinc
+String classify(int code) {
+    try {
+        if (code == 1) { throw NetworkError("down") }
+        throw AppError("generic")
+    } catch (AppError e) {
+        return e.message
+    } catch (e) {
+        // Unreachable in practice, but keeps classify from widening.
+        return "unknown"
+    }
+}
+```
+
 ## Finally
 
 ```zinc

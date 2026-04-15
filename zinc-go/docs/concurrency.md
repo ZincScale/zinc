@@ -61,7 +61,7 @@ work.send("task3")
 
 for (i in 0..3) {
     var task = work.recv()
-    print("processing: {task}")
+    print("processing: ${task}")
 }
 ```
 
@@ -80,7 +80,7 @@ for (w in 0..3) {
         while (true) {
             var job = jobs.recv()
             if (job == "STOP") { return }
-            results.send("worker {id}: {job}")
+            results.send("worker ${id}: ${job}")
         }
     }
 }
@@ -109,7 +109,7 @@ Concurrent iteration with automatic WaitGroup management:
 ```zinc
 List<String> urls = ["url1", "url2", "url3"]
 parallel for (url in urls) {
-    print("fetching: {url}")
+    print("fetching: ${url}")
 }
 // All iterations complete before continuing
 ```
@@ -125,4 +125,4 @@ Compiles to a `sync.WaitGroup` with one goroutine per iteration.
 | `ch.send(val)` | `ch <- val` |
 | `ch.recv()` | `<-ch` |
 | `ch.close()` | `close(ch)` |
-| `parallel for x in xs { ... }` | `var wg sync.WaitGroup` + goroutine loop |
+| `parallel for (x in xs) { ... }` | `var wg sync.WaitGroup` + goroutine loop |

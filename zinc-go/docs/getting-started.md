@@ -106,7 +106,17 @@ zinc build --cross windows/amd64
 
 ## Tests
 
-Write `*_test.zn` files with `test "name" { body }` blocks at the top level:
+Put tests in a sibling `tests/` directory alongside `src/`:
+
+```
+myapp/
+  src/
+    main.zn
+  tests/
+    main_test.zn
+```
+
+Write `test "name" { body }` blocks at the top level of any `*_test.zn` file:
 
 ```zinc
 import stdlib.asserts
@@ -119,10 +129,10 @@ test "addOne returns x + 1" {
 Run with:
 
 ```bash
-zinc test .
-zinc test . -v                      # verbose (show each test)
-zinc test . -run TestAddOne         # filter by name
-zinc test . -race                   # race detector
+zinc test tests
+zinc test tests -v                      # verbose (show each test)
+zinc test tests -run TestAddOne         # filter by name
+zinc test tests -race                   # race detector
 ```
 
 `zinc test` transpiles prod + test code, then delegates to `go test ./...`, so
@@ -147,6 +157,6 @@ available. `t` is an implicit `*testing.T` in scope inside each test block;
 ## Next steps
 
 - [Language Guide](language-guide.md) — full syntax reference
-- [Error Handling](error-handling.md) — `or` expressions and error propagation
+- [Error Handling](error-handling.md) — try/catch/throw, unchecked exceptions, `using` for cleanup
 - [Concurrency](concurrency.md) — spawn, channels, parallel for
 - [Classes & Inheritance](classes.md) — OO features
