@@ -6,22 +6,22 @@ type Transformer = Fn<(int), int>
 type Predicate = Fn<(int), boolean>
 
 // Use alias as parameter and return type
-fn apply(int x, Transformer f): int {
+int apply(int x, Transformer f) {
     return f(x)
 }
 
-fn wrap(Handler next): Handler {
+Handler wrap(Handler next) {
     return (String s) -> {
         print("wrapped: ${s}")
         return next(s)
     }
 }
 
-fn endpoint(String path): String {
+String endpoint(String path) {
     return "200 OK: ${path}"
 }
 
-fn countIf(List<int> items, Predicate test): int {
+int countIf(List<int> items, Predicate test) {
     var count = 0
     for (item in items) {
         if (test(item)) {
@@ -31,7 +31,7 @@ fn countIf(List<int> items, Predicate test): int {
     return count
 }
 
-fn main() {
+void main() {
     // Transformer alias
     var doubled = apply(5, (int x) -> x * 2)
     print("apply doubled: ${doubled}")

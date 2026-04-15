@@ -3,7 +3,7 @@
 
 import shapes
 
-fn main() {
+void main() {
     // Create shapes from subpackage — type as Shape (sealed interface)
     Shape c = Circle(5.0)
     Shape r = Rect(3.0, 4.0)

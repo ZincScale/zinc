@@ -6,15 +6,15 @@ import fmt
 import time
 
 // Unqualified types: ResponseWriter and Request resolve to http.ResponseWriter and *http.Request
-fn helloHandler(ResponseWriter w, Request r) {
+void helloHandler(ResponseWriter w, Request r) {
     fmt.Fprintf(w, "Hello from Zinc!")
 }
 
-fn healthHandler(ResponseWriter w, Request r) {
+void healthHandler(ResponseWriter w, Request r) {
     fmt.Fprintf(w, "OK")
 }
 
-fn main() {
+void main() {
     HandleFunc("/", helloHandler)
     HandleFunc("/health", healthHandler)
 

@@ -1,7 +1,7 @@
 // Arrays — Zinc v3
 // Demonstrates: array declarations, access, length, fn main with args
 
-fn sum(int[] numbers): int {
+int sum(int[] numbers) {
     int total = 0
     for (n in numbers) {
         total = total + n
@@ -9,7 +9,7 @@ fn sum(int[] numbers): int {
     return total
 }
 
-fn main() {
+void main() {
     // Array declarations
     int[] nums = [10, 20, 30, 40, 50]
     print("first: ${nums[0]}")

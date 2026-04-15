@@ -4,11 +4,11 @@
 
 import time
 
-fn runLater(Fn<()> cb) {
+void runLater(Fn<()> cb) {
     cb()
 }
 
-fn main() {
+void main() {
     // Block-body zero-param lambda
     runLater(() -> {
         print("ran block")

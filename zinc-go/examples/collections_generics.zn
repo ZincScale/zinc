@@ -7,16 +7,16 @@ class Cart {
     var items = List<Item>[]
     var totals = Map<String, int>{}
 
-    pub fn add(Item item) {
+    pub void add(Item item) {
         items = append(items, item)
         totals[item.name] = item.price
     }
 
-    pub fn count(): int {
+    pub int count() {
         return len(items)
     }
 
-    pub fn total(): int {
+    pub int total() {
         var sum = 0
         for (item in items) {
             sum = sum + item.price
@@ -24,7 +24,7 @@ class Cart {
         return sum
     }
 
-    pub fn lookup(String name): int {
+    pub int lookup(String name) {
         return totals[name]
     }
 }
@@ -33,25 +33,25 @@ class Registry<T> {
     var entries = List<T>[]
     var index = Map<String, T>{}
 
-    pub fn register(String name, T entry) {
+    pub void register(String name, T entry) {
         entries = append(entries, entry)
         index[name] = entry
     }
 
-    pub fn get(String name): T {
+    pub T get(String name) {
         return index[name]
     }
 
-    pub fn count(): int {
+    pub int count() {
         return len(entries)
     }
 
-    pub fn all(): List<T> {
+    pub List<T> all() {
         return entries
     }
 }
 
-fn main() {
+void main() {
     // 1. var with typed empty list
     var names = List<String>[]
     names = append(names, "alice")

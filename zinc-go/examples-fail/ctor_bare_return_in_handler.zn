@@ -3,7 +3,7 @@
 // bare-return case is — otherwise the idiom just moves from the
 // `if bad { return }` shape into the `might_fail() or { return }` shape.
 
-fn parseSize(String s): int? {
+int? parseSize(String s) {
     if (s == "zero") {
         return Error("zero not allowed")
     }
@@ -24,7 +24,7 @@ class Gadget {
     }
 }
 
-fn main() {
+void main() {
     var g = Gadget("cog", "zero")
     print("gadget=${g.name}")
 }

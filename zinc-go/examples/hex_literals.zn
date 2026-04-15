@@ -1,6 +1,6 @@
 // Hex, binary, and octal literal examples
 
-fn main() {
+void main() {
     // Hex
     var mask = 0xFF
     print("0xFF = ${mask}")

@@ -1,7 +1,7 @@
 // Test escaped quotes inside string interpolation
 // This was a recurring issue: \" inside {expr} was misinterpreted
 
-fn main() {
+void main() {
     // Map access with escaped quotes in interpolation
     var m = Map<String, String>{"greeting": "hello", "name": "zinc"}
     print("greeting: ${m[\"greeting\"]}")

@@ -1,11 +1,11 @@
 // Hello World — Zinc v3
 // Demonstrates: fn main(), functions, string interpolation
 
-fn greet(String name): String {
+String greet(String name) {
     return "Hello, ${name}!"
 }
 
-fn main() {
+void main() {
     print(greet("World"))
     print(greet("Zinc"))
     int x = 42

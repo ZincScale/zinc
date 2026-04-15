@@ -27,25 +27,25 @@ print("Evens: ${evens}")
 class Stack<T> {
     List<T> items = []
 
-    pub fn push(T item) {
+    pub void push(T item) {
         items = append(items, item)
     }
 
-    pub fn pop(): T {
+    pub T pop() {
         var item = items[len(items) - 1]
         items = items[:len(items) - 1]
         return item
     }
 
-    pub fn peek(): T {
+    pub T peek() {
         return items[len(items) - 1]
     }
 
-    pub fn size(): int {
+    pub int size() {
         return len(items)
     }
 
-    pub fn isEmpty(): bool {
+    pub bool isEmpty() {
         return len(items) == 0
     }
 }

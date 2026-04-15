@@ -10,12 +10,12 @@ class Registry {
     init() {}
 
     // pub method
-    pub fn register(String name, ItemFactory factory) {
+    pub void register(String name, ItemFactory factory) {
         factories[name] = factory
     }
 
     // pub method calling non-pub method
-    pub fn createAll() {
+    pub void createAll() {
         var names = factories.keys()
         for (name in names) {
             createItem(name)
@@ -23,7 +23,7 @@ class Registry {
     }
 
     // non-pub method calling pub method (tests currentClass tracking)
-    fn createItem(String name) {
+    void createItem(String name) {
         var factory = factories[name]
         var item = factory(name)
         items[name] = item
@@ -31,32 +31,32 @@ class Registry {
     }
 
     // pub method called from non-pub method
-    pub fn trackCreation(String name) {
+    pub void trackCreation(String name) {
         // no-op, just tests that pub method call from non-pub works
     }
 
     // pub method using .keys() on a class field
-    pub fn listNames(): List<String> {
+    pub List<String> listNames() {
         return items.keys()
     }
 
-    pub fn getItem(String name): Item {
+    pub Item getItem(String name) {
         return items[name]
     }
 }
 
 // Non-pub factory function — used as value within same package
-fn defaultFactory(String name): Item {
+Item defaultFactory(String name) {
     return Item(name, 10)
 }
 
 // Non-pub factory function
-fn premiumFactory(String name): Item {
+Item premiumFactory(String name) {
     return Item(name, 100)
 }
 
 // pub function that registers factories using function references as values
-pub fn registerDefaults(Registry reg) {
+pub void registerDefaults(Registry reg) {
     reg.register("basic", defaultFactory)
     reg.register("premium", premiumFactory)
 }

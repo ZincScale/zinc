@@ -13,19 +13,19 @@ class Registry {
 
     init() {}
 
-    pub fn add(String name, int value) {
+    pub void add(String name, int value) {
         helpers[name] = value
     }
 
-    pub fn has(String name): bool {
+    pub bool has(String name) {
         return helpers.containsKey(name)
     }
 
-    pub fn get(String name): int {
+    pub int get(String name) {
         return helpers[name]
     }
 
-    pub fn size(): int {
+    pub int size() {
         return len(helpers)
     }
 }

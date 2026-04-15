@@ -4,7 +4,7 @@ import log.slog
 import os
 import io
 
-fn main() {
+void main() {
     // slog.HandlerOptions struct literal with Level field
     var opts = slog.HandlerOptions(Level=slog.LevelDebug)
 

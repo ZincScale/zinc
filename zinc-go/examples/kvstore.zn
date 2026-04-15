@@ -5,7 +5,7 @@ import strings
 import sort
 
 // Error-returning lookup
-fn mustGet(Map<String, String> data, String key): String {
+String mustGet(Map<String, String> data, String key) {
     var val = data[key]
     if (val == "") {
         return Error("key not found: ${key}")
@@ -13,7 +13,7 @@ fn mustGet(Map<String, String> data, String key): String {
     return val
 }
 
-fn main() {
+void main() {
     // Build a store
     Map<String, String> store = {}
     store["user:1"] = "Alice"

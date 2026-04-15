@@ -2,7 +2,7 @@
 // All collections declared via var = Type<...>{} or Type<...>[] must
 // preserve element types through .keys(), .values(), iteration, indexing.
 
-fn main() {
+void main() {
     // --- Map: typed empty literal ---
     var m = Map<String, int>{}
     m["a"] = 10

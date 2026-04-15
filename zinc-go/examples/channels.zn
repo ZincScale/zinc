@@ -1,4 +1,4 @@
-fn main() {
+void main() {
     // Basic send/receive
     var ch = Channel(1)
     spawn {

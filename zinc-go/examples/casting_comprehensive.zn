@@ -1,6 +1,6 @@
 // E2E test: comprehensive type casting — int, long, float, double, str, byte
 
-fn main() {
+void main() {
     // --- int() ---
     var i1 = int(42)
     print("int(42) = ${i1}")

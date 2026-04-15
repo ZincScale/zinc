@@ -1,6 +1,6 @@
 // Test nested generic types in typed literals and type annotations
 
-fn main() {
+void main() {
     // Two levels: Map<String, List<int>>
     var scores = Map<String, List<int>>{}
     List<int> aliceScores = [95, 87, 92]
@@ -64,7 +64,7 @@ fn main() {
     print("list first: ${emptyList[0]}")
 }
 
-fn sumNested(Map<String, List<int>> m): int {
+int sumNested(Map<String, List<int>> m) {
     var total = 0
     // Use typed keys() — returns []string not []interface{}
     var keys = m.keys()

@@ -7,7 +7,7 @@ Zinc replaces Go's `if err != nil` pattern with `or` expressions. Functions that
 Return `Error(message)` to signal failure:
 
 ```zinc
-fn divide(int a, int b): int {
+int divide(int a, int b) {
     if (b == 0) { return Error("division by zero") }
     return a / b
 }
@@ -39,7 +39,7 @@ divide(10, 0) or {
 Return from the enclosing function on error:
 
 ```zinc
-fn loadAndProcess(): String {
+String loadAndProcess() {
     var data = divide(10, 0) or {
         return "fallback result"
     }
@@ -67,7 +67,7 @@ for (d in divisors) {
 Propagate errors up the call stack with `return Error(err)`:
 
 ```zinc
-fn safeDivide(int a, int b): int {
+int safeDivide(int a, int b) {
     var result = divide(a, b) or {
         return Error(err)
     }
@@ -111,7 +111,7 @@ class Config {
 If construction can actually fail, lift the failable check into a factory function that returns `T?` and emits `Error(reason)` on the failure path. The factory constructs via the ctor on success:
 
 ```zinc
-fn newConfig(String host, int port): Config? {
+Config? newConfig(String host, int port) {
     if (port < 0) {
         return Error("port must be non-negative: ${port}")
     }

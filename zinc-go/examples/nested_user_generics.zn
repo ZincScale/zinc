@@ -11,25 +11,25 @@
 class Box<T> {
     T value
     init(T value) { this.value = value }
-    pub fn get(): T { return value }
+    pub T get() { return value }
 }
 
 class Pair<A, B> {
     A first
     B second
     init(A a, B b) { this.first = a; this.second = b }
-    pub fn getFirst(): A { return first }
-    pub fn getSecond(): B { return second }
+    pub A getFirst() { return first }
+    pub B getSecond() { return second }
 }
 
 class Counter {
     int value
     init(int v) { this.value = v }
-    pub fn get(): int { return value }
-    pub fn inc() { value = value + 1 }
+    pub int get() { return value }
+    pub void inc() { value = value + 1 }
 }
 
-fn main() {
+void main() {
     // Depth 1: user-generic, scalar
     var b1 = Box<int>(42)
     print("b1=${b1.get()}")

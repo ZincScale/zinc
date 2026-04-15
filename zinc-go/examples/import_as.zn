@@ -3,7 +3,7 @@
 import fmt
 import strings as str
 
-fn main() {
+void main() {
     // Use aliased import
     var upper = str.ToUpper("hello zinc")
     print("upper: ${upper}")

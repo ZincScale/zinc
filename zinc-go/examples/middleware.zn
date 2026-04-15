@@ -1,22 +1,22 @@
-fn logging(Fn<(String), String> next): Fn<(String), String> {
+Fn<(String), String> logging(Fn<(String), String> next) {
     return (String path) -> {
         print("  log: ${path}")
         return next(path)
     }
 }
 
-fn auth(Fn<(String), String> next): Fn<(String), String> {
+Fn<(String), String> auth(Fn<(String), String> next) {
     return (String path) -> {
         print("  auth: ok")
         return next(path)
     }
 }
 
-fn endpoint(String path): String {
+String endpoint(String path) {
     return "200 OK: ${path}"
 }
 
-fn main() {
+void main() {
     var handler = logging(auth((String p) -> endpoint(p)))
     var response = handler("/api/users")
     print(response)

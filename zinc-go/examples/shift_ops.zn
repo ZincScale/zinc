@@ -1,6 +1,6 @@
 // Shift operator examples — verify << >> work alongside generics
 
-fn main() {
+void main() {
     // Left shift
     var a = 1 << 8
     print("1 << 8 = ${a}")

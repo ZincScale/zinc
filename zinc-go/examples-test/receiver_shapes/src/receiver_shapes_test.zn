@@ -37,8 +37,8 @@ test "shape 1 — local var keys/values" {
 class FieldHolder {
     var items = Map<String, int>{}
     init() {}
-    pub fn add(String k, int v) { items[k] = v }
-    pub fn total(): int {
+    pub void add(String k, int v) { items[k] = v }
+    pub int total() {
         var sum = 0
         for (k in items.keys()) {
             sum = sum + items[k]
@@ -59,7 +59,7 @@ test "shape 2 — class field keys/values typed" {
 class IdxHolder {
     var nested = Map<String, Map<String, int>>{}
     init() {}
-    pub fn set(String g, String k, int v) {
+    pub void set(String g, String k, int v) {
         if (!nested.containsKey(g)) {
             nested[g] = Map<String, int>{}
         }
@@ -67,7 +67,7 @@ class IdxHolder {
     }
 
     // Direct IndexExpr receiver: `nested[g].keys()` — no intermediate var.
-    pub fn groupSum(String g): int {
+    pub int groupSum(String g) {
         var total = 0
         for (k in nested[g].keys()) {
             total = total + nested[g][k]
@@ -78,7 +78,7 @@ class IdxHolder {
     // `len(nested[g].keys())` — exercises IndexExpr-receiver keys() being
     // returned as a typed slice (len works on both typed and untyped, but
     // this confirms the shape compiles).
-    pub fn groupKeys(String g): int {
+    pub int groupKeys(String g) {
         return len(nested[g].keys())
     }
 }
@@ -97,16 +97,16 @@ test "shape 3 — IndexExpr receiver keys/values typed" {
 class Inner {
     var data = Map<String, int>{}
     init() {}
-    pub fn put(String k, int v) { data[k] = v }
+    pub void put(String k, int v) { data[k] = v }
 }
 
 class OuterWithInner {
     Inner inner
     init() { this.inner = Inner() }
-    pub fn get(): Inner { return inner }
+    pub Inner get() { return inner }
 
     // Exercises `this.inner.data.keys()` via field-chain resolver.
-    pub fn sumData(): int {
+    pub int sumData() {
         var total = 0
         for (k in inner.data.keys()) {
             total = total + inner.data[k]
@@ -127,17 +127,17 @@ test "shape 4 — nested selector chain keys typed" {
 class Wrapper {
     var tags = Map<String, String>{}
     init() {}
-    pub fn set(String k, String v) { tags[k] = v }
-    pub fn getTags(): Map<String, String> { return tags }
+    pub void set(String k, String v) { tags[k] = v }
+    pub Map<String, String> getTags() { return tags }
 }
 
 class WrapperUser {
     Wrapper w
     init() { this.w = Wrapper() }
-    pub fn add(String k, String v) { w.set(k, v) }
+    pub void add(String k, String v) { w.set(k, v) }
 
     // Exercises `w.getTags().keys()` — method returns collection, chain on.
-    pub fn joinKeys(): String {
+    pub String joinKeys() {
         var all = ""
         for (k in w.getTags().keys()) {
             if (all != "") { all = all + "," }
@@ -163,7 +163,7 @@ test "shape 5 — method-call return, chained .keys()" {
 class Combo {
     var parent = Map<String, Map<String, int>>{}
     init() {}
-    pub fn set(String g, String k, int v) {
+    pub void set(String g, String k, int v) {
         if (!parent.containsKey(g)) {
             parent[g] = Map<String, int>{}
         }
@@ -172,7 +172,7 @@ class Combo {
 
     // `(parent field) [g] .values()` — composes SelectorExpr(thisField)
     // + IndexExpr(g) + method call. `this.parent[g].values()` shape.
-    pub fn maxInGroup(String g): int {
+    pub int maxInGroup(String g) {
         var best = 0
         for (v in parent[g].values()) {
             if (v > best) { best = v }
@@ -196,11 +196,11 @@ data Event(int id, String payload)
 class EventHub {
     var ch = Channel<Event>(4)
     init() {}
-    pub fn publish(int id, String p) { ch.send(Event(id, p)) }
+    pub void publish(int id, String p) { ch.send(Event(id, p)) }
     // `ch.recv()` is a typed channel recv — expected Go: `<-s.ch`, NOT
     // `(<-s.ch).(Event)`. Prior bug: the cast was emitted, Go rejected
     // because `chan Event` recv is already Event.
-    pub fn next(): Event { return ch.recv() }
+    pub Event next() { return ch.recv() }
 }
 
 test "shape 7 — typed Channel<T> field recv (no cast emitted)" {
@@ -225,13 +225,13 @@ class Text {
 
     // Shadows the string builtin `upper()`. A method call `t.upper()` must
     // dispatch here, not to `strings.ToUpper(t)`.
-    pub fn upper(): String {
+    pub String upper() {
         return "[U]" + raw + "[/U]"
     }
-    pub fn trimEnd(): String {
+    pub String trimEnd() {
         return "[T]" + raw + "[/T]"
     }
-    pub fn join(String sep): String {
+    pub String join(String sep) {
         return sep + raw + sep
     }
 }
@@ -257,8 +257,8 @@ test "shape 8 — user methods named upper/trimEnd/join shadow string builtins" 
 class Storage {
     var rows = Map<String, int>{}
     init() {}
-    pub fn set(String k, int v) { rows[k] = v }
-    pub fn getRows(): Map<String, int> { return rows }
+    pub void set(String k, int v) { rows[k] = v }
+    pub Map<String, int> getRows() { return rows }
 }
 
 test "shape 9 — store method return in var, then .keys()/.values() typed" {
@@ -286,7 +286,7 @@ test "shape 9 — store method return in var, then .keys()/.values() typed" {
 
 data FlowLike(String id, Map<String, String> attrs)
 
-fn attrKeysSum(FlowLike d): String {
+String attrKeysSum(FlowLike d) {
     var out = ""
     for (k in d.attrs.keys()) {
         out = out + k
@@ -314,8 +314,8 @@ class Selfer {
         inner["x"] = 10
         inner["y"] = 20
     }
-    fn grab(): Map<String, int> { return inner }
-    pub fn keySum(): String {
+    Map<String, int> grab() { return inner }
+    pub String keySum() {
         var g = grab()
         var out = ""
         for (k in g.keys()) {
@@ -356,15 +356,15 @@ class NestedAssigner {
         }
     }
 
-    pub fn bump(int n) {
+    pub void bump(int n) {
         // Method-body nested assignment — same bug class.
         if (n > 0) {
             this.lowerCount = this.lowerCount + n
         }
     }
 
-    pub fn getLower(): int { return lowerCount }
-    pub fn getUpper(): int { return UpperCount }
+    pub int getLower() { return lowerCount }
+    pub int getUpper() { return UpperCount }
 }
 
 test "shape 12 — nested-block this.field assignment respects field casing" {
@@ -387,11 +387,11 @@ test "shape 12 — nested-block this.field assignment respects field casing" {
 class Doubler {
     int base
     init(int base) { this.base = base }
-    pub fn scale(int n): int { return base * n }
+    pub int scale(int n) { return base * n }
     // Store-and-apply: the lambda body is a bare self-method call.
     // The return type propagation must make this lambda itself
     // inferable as returning int.
-    pub fn scaleAll(List<int> xs): List<int> {
+    pub List<int> scaleAll(List<int> xs) {
         var out = List<int>[]
         for (x in xs) {
             out = append(out, applyInt(x, (int n) -> scale(n)))
@@ -400,7 +400,7 @@ class Doubler {
     }
 }
 
-fn applyInt(int x, Fn<(int), int> f): int {
+int applyInt(int x, Fn<(int), int> f) {
     return f(x)
 }
 

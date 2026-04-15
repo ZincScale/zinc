@@ -6,7 +6,7 @@ sealed class Shape {
     data Triangle(double base, double height)
 }
 
-pub fn area(Shape s): double {
+pub double area(Shape s) {
     match (s) {
         case Circle(r) {
             return 3.14159 * r * r

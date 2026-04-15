@@ -50,7 +50,7 @@ func (p *Parser) ParseV2() (prog *Program) {
 			prog.Imports = append(prog.Imports, p.v2ParseImport())
 		case lexer.TOKEN_AT:
 			annots := p.v2ParseAnnotations()
-			if p.check(lexer.TOKEN_FN) {
+			if p.v2IsFnDeclTypeFirst() {
 				fn := p.v2ParseFnDecl()
 				fn.Annotations = annots
 				prog.Decls = append(prog.Decls, fn)
@@ -63,10 +63,8 @@ func (p *Parser) ParseV2() (prog *Program) {
 				d := p.v2ParseDataClassDecl()
 				prog.Decls = append(prog.Decls, d)
 			} else {
-				p.errorf("expected fn or class after decorator")
+				p.errorf("expected function or class after decorator")
 			}
-		case lexer.TOKEN_FN:
-			prog.Decls = append(prog.Decls, p.v2ParseFnDecl())
 		case lexer.TOKEN_CLASS:
 			prog.Decls = append(prog.Decls, p.v2ParseClassDecl())
 		case lexer.TOKEN_DATA:
@@ -85,11 +83,13 @@ func (p *Parser) ParseV2() (prog *Program) {
 			prog.Decls = append(prog.Decls, p.v2ParseEnumDecl())
 		case lexer.TOKEN_PUB:
 			p.advance() // consume "pub"
-			switch p.peek().Type {
-			case lexer.TOKEN_FN:
+			if p.v2IsFnDeclTypeFirst() {
 				fn := p.v2ParseFnDecl()
 				fn.IsPub = true
 				prog.Decls = append(prog.Decls, fn)
+				continue
+			}
+			switch p.peek().Type {
 			case lexer.TOKEN_CONST:
 				c := p.v2ParseConstDecl()
 				c.IsPub = true
@@ -104,7 +104,7 @@ func (p *Parser) ParseV2() (prog *Program) {
 				iface := p.v2ParseInterfaceDecl()
 				prog.Decls = append(prog.Decls, iface)
 			default:
-				p.errorf("expected fn, const, class, data, or interface after 'pub'")
+				p.errorf("expected function, const, class, data, or interface after 'pub'")
 			}
 		case lexer.TOKEN_CONST:
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
@@ -132,6 +132,13 @@ func (p *Parser) ParseV2() (prog *Program) {
 			// Check for contextual keyword: test "name" { body }
 			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "test" && p.peekAt(1).Type == lexer.TOKEN_STRING_LIT {
 				prog.Decls = append(prog.Decls, p.v2ParseTestDecl())
+				break
+			}
+			// Type-first function declaration: `ReturnType name(...)` /
+			// `void name(...)`. Detection lookahead avoids confusing
+			// these with top-level statements.
+			if p.v2IsFnDeclTypeFirst() {
+				prog.Decls = append(prog.Decls, p.v2ParseFnDecl())
 				break
 			}
 			// Script mode — top-level statements

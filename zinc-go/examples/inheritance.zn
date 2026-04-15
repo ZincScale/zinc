@@ -11,11 +11,11 @@ class Vehicle {
         this.year = year
     }
 
-    fn describe(): String {
+    String describe() {
         return "${make} (${year})"
     }
 
-    fn category(): String {
+    String category() {
         return "vehicle"
     }
 }
@@ -29,7 +29,7 @@ class Car : Vehicle {
         this.doors = doors
     }
 
-    fn describe(): String {
+    String describe() {
         return "${make} (${year}), ${doors}-door"
     }
 }
@@ -43,14 +43,14 @@ class ElectricCar : Car {
         this.maxRange = maxRange
     }
 
-    fn describe(): String {
+    String describe() {
         return "${make} (${year}), ${doors}-door, ${maxRange}mi range"
     }
 }
 
 // --- Interface + class inheritance together ---
 interface Printable {
-    fn display(): String
+    String display()
 }
 
 class Truck : Vehicle, Printable {
@@ -61,7 +61,7 @@ class Truck : Vehicle, Printable {
         this.payload = payload
     }
 
-    fn display(): String {
+    String display() {
         return "Truck: ${make}, payload=${payload}t"
     }
 }
@@ -113,8 +113,8 @@ print("   category=${v2.category()}")
 
 // --- Generic interface + class inheritance ---
 interface Container<T> {
-    fn get(): T
-    fn set(T value)
+    T get()
+    void set(T value)
 }
 
 class NamedContainer<T> : Container<T> {
@@ -126,15 +126,15 @@ class NamedContainer<T> : Container<T> {
         this.stored = stored
     }
 
-    fn get(): T {
+    T get() {
         return stored
     }
 
-    fn set(T value) {
+    void set(T value) {
         stored = value
     }
 
-    fn describe(): String {
+    String describe() {
         return "${label}: ${stored}"
     }
 }

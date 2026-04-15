@@ -3,6 +3,6 @@
 
 import helpers
 
-fn main() {
+void main() {
     print(helpers.greet("world"))
 }

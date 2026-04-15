@@ -6,14 +6,14 @@ sealed class Result {
     data Failure(String reason)
 }
 
-fn divide(int a, int b): Result {
+Result divide(int a, int b) {
     if (b == 0) {
         return Failure("division by zero")
     }
     return Ok(str(a / b))
 }
 
-fn describe(Result r): String {
+String describe(Result r) {
     match (r) {
         case Ok(value) {
             return "ok: " + value
@@ -24,7 +24,7 @@ fn describe(Result r): String {
     }
 }
 
-fn main() {
+void main() {
     print(describe(divide(10, 2)))
     print(describe(divide(10, 0)))
     print(describe(divide(100, 4)))

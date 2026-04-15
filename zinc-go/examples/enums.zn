@@ -14,7 +14,7 @@ enum Direction {
     West
 }
 
-fn main() {
+void main() {
     var c = Red
     print("color: ${c}")
 

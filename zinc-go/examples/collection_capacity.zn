@@ -1,7 +1,7 @@
 // Test collections with initial capacity
 // List<T>(cap) and Map<K,V>(cap) pre-allocate without filling
 
-fn main() {
+void main() {
     // List with initial capacity — starts empty but pre-allocated
     var names = List<String>(10)
     print("list len: ${len(names)}")

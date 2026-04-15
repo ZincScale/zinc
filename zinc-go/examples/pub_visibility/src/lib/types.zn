@@ -3,21 +3,21 @@
 data Item(String name, int value)
 
 // pub function — accessible from other packages
-pub fn formatItem(Item item): String {
+pub String formatItem(Item item) {
     return item.name + "=" + str(item.value)
 }
 
 // non-pub function — only accessible within lib package
-fn doubleValue(Item item): Item {
+Item doubleValue(Item item) {
     return Item(item.name, item.value * 2)
 }
 
 // pub function that calls non-pub function internally
-pub fn makeDouble(Item item): Item {
+pub Item makeDouble(Item item) {
     return doubleValue(item)
 }
 
 // Interface with pub fn
 interface Processor {
-    pub fn process(Item item): Item
+    pub Item process(Item item)
 }

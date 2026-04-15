@@ -14,11 +14,11 @@ class Server {
         this.port = port
     }
 
-    fn address(): String {
+    String address() {
         return "{host}:{port}"
     }
 
-    fn toString(): String {
+    String toString() {
         return "Server({address()})"
     }
 }
@@ -59,7 +59,7 @@ class Animal {
         this.sound = sound
     }
 
-    fn speak(): String {
+    String speak() {
         return "${name} says ${sound}"
     }
 }
@@ -72,7 +72,7 @@ class Dog : Animal {
         this.breed = breed
     }
 
-    fn toString(): String {
+    String toString() {
         return "Dog(${name}, ${breed})"
     }
 }
@@ -100,7 +100,7 @@ class Vehicle {
         this.year = year
     }
 
-    fn category(): String {
+    String category() {
         return "vehicle"
     }
 }
@@ -135,11 +135,11 @@ print(v.category())    // "vehicle"
 
 ```zinc
 interface Greeter {
-    fn greet(String name): String
+    String greet(String name)
 }
 
 class FormalGreeter : Greeter {
-    fn greet(String name): String {
+    String greet(String name) {
         return "Good day, ${name}."
     }
 }

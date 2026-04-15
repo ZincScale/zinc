@@ -6,7 +6,7 @@
 import lib
 import engine
 
-fn main() {
+void main() {
     // 1. Unqualified data class constructor + pub function
     var item = Item("widget", 42)
     print(formatItem(item))

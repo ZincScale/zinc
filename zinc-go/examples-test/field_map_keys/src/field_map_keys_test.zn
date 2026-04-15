@@ -10,14 +10,14 @@ class Registry {
 
     init() {}
 
-    pub fn add(String name, int value) {
+    pub void add(String name, int value) {
         items[name] = value
     }
 
     // Exercises field.keys() — prior to ZCA-11 fix this would have
     // compiled to `func() []interface{} { ... }()`, making `for k in keys`
     // yield `k` as interface{} and breaking `m[k]` map-index below.
-    pub fn total(): int {
+    pub int total() {
         var sum = 0
         var keys = items.keys()
         for (k in keys) {
@@ -27,7 +27,7 @@ class Registry {
     }
 
     // Exercises field.values() — same issue, but for values.
-    pub fn maxValue(): int {
+    pub int maxValue() {
         var best = 0
         var vals = items.values()
         for (v in vals) {
@@ -74,14 +74,14 @@ class Nested {
 
     init() {}
 
-    pub fn set(String g, String k, int v) {
+    pub void set(String g, String k, int v) {
         if (!groups.containsKey(g)) {
             groups[g] = Map<String, int>{}
         }
         groups[g][k] = v
     }
 
-    pub fn sumGroup(String g): int {
+    pub int sumGroup(String g) {
         var sub = groups[g]
         var total = 0
         for (k in sub.keys()) {
@@ -114,14 +114,14 @@ class DirectNested {
 
     init() {}
 
-    pub fn set(String g, String k, int v) {
+    pub void set(String g, String k, int v) {
         if (!groups.containsKey(g)) {
             groups[g] = Map<String, int>{}
         }
         groups[g][k] = v
     }
 
-    pub fn sumDirect(String g): int {
+    pub int sumDirect(String g) {
         var total = 0
         // Receiver is IndexExpr (groups[g]), not a plain local. Without
         // the IndexExpr case in resolveReceiverGenericType, .keys() below

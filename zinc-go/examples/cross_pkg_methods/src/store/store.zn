@@ -7,49 +7,49 @@ pub class Store {
 
     init() {}
 
-    pub fn delete(String key) {
+    pub void delete(String key) {
         items.delete(key)
         count = count - 1
     }
 
-    pub fn remove(String key): String {
+    pub String remove(String key) {
         var val = items[key]
         items.delete(key)
         count = count - 1
         return val
     }
 
-    pub fn containsKey(String key): bool {
+    pub bool containsKey(String key) {
         return items.containsKey(key)
     }
 
-    pub fn size(): int {
+    pub int size() {
         return count
     }
 
-    pub fn isEmpty(): bool {
+    pub bool isEmpty() {
         return count == 0
     }
 
-    pub fn close() {
+    pub void close() {
         items = Map<String, String>{}
         count = 0
     }
 
-    pub fn add(String key, String value) {
+    pub void add(String key, String value) {
         items[key] = value
         count = count + 1
     }
 
-    pub fn sort(): String {
+    pub String sort() {
         return "custom-sort"
     }
 
-    pub fn reverse(): String {
+    pub String reverse() {
         return "custom-reverse"
     }
 
-    pub fn length(): int {
+    pub int length() {
         return count
     }
 }

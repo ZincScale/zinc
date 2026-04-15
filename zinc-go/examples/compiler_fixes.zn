@@ -3,7 +3,7 @@
 // Fix 1: Typed channels
 data Msg(String text, int priority)
 
-fn testTypedChannels() {
+void testTypedChannels() {
     var ch = Channel<Msg>(5)
     spawn {
         ch.send(Msg("urgent", 1))
@@ -16,7 +16,7 @@ fn testTypedChannels() {
 }
 
 // Fix 2: int() cast on numeric types
-fn testIntCast() {
+void testIntCast() {
     var big = 9876543210
     var asInt = int(big)
     print("int cast: ${asInt}")
@@ -34,18 +34,18 @@ class Point {
         this.x = x
         this.y = y
     }
-    pub fn moved(int dx, int dy): Point {
+    pub Point moved(int dx, int dy) {
         return Point(x + dx, y + dy)
     }
-    pub fn scaled(int factor): Point {
+    pub Point scaled(int factor) {
         return Point(x * factor, y * factor)
     }
-    fn toString(): String {
+    String toString() {
         return "(${x}, ${y})"
     }
 }
 
-fn testPointerValue() {
+void testPointerValue() {
     var p = Point(1, 2)
     var p2 = p.moved(3, 4)
     var p3 = p2.scaled(2)
@@ -55,7 +55,7 @@ fn testPointerValue() {
 }
 
 // Fix 4: .toBytes()
-fn testToBytes() {
+void testToBytes() {
     var s = "hello"
     var b = s.toBytes()
     print("toBytes len: ${len(b)}")
@@ -64,22 +64,22 @@ fn testToBytes() {
 // --- Fix 5: Channel as class field ---
 class MsgQueue {
     var inbox = Channel(10)
-    pub fn send(String msg) {
+    pub void send(String msg) {
         inbox.send(msg)
     }
-    pub fn recv(): String {
+    pub String recv() {
         return inbox.recv()
     }
 }
 
-fn testChannelField() {
+void testChannelField() {
     var q = MsgQueue()
     q.send("test message")
     var msg = q.recv()
     print("chan field: ${msg}")
 }
 
-fn main() {
+void main() {
     testTypedChannels()
     testIntCast()
     testPointerValue()

@@ -3,7 +3,7 @@
 
 import time
 
-fn main() {
+void main() {
     // spawn — fire a goroutine
     var result = "pending"
     spawn {

@@ -3,9 +3,9 @@
 
 // --- Generic interface ---
 interface Queue<T> {
-    fn push(T item)
-    fn pop(): T
-    fn size(): int
+    void push(T item)
+    T pop()
+    int size()
 }
 
 // --- Generic data class ---
@@ -15,27 +15,27 @@ data Pair<A, B>(A first, B second)
 class SimpleQueue<T> : Queue<T> {
     List<T> items = []
 
-    pub fn push(T item) {
+    pub void push(T item) {
         items = append(items, item)
     }
 
-    pub fn pop(): T {
+    pub T pop() {
         var item = items[0]
         items = items[1:]
         return item
     }
 
-    pub fn size(): int {
+    pub int size() {
         return len(items)
     }
 }
 
 // --- Generic function ---
-fn first<T>(List<T> items): T {
+T first<T>(List<T> items) {
     return items[0]
 }
 
-fn main() {
+void main() {
     // 1. Generic data class
     var p1 = Pair<String, int>("hello", 42)
     print("pair: ${p1}")

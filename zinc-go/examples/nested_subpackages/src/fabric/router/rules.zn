@@ -7,11 +7,11 @@ class Router {
 
     init() {}
 
-    pub fn addRule(Rule rule) {
+    pub void addRule(Rule rule) {
         rules = append(rules, rule)
     }
 
-    pub fn route(String input): String {
+    pub String route(String input) {
         for (r in rules) {
             if (input == r.pattern) {
                 return r.name
@@ -20,7 +20,7 @@ class Router {
         return "no-match"
     }
 
-    pub fn count(): int {
+    pub int count() {
         return len(rules)
     }
 }

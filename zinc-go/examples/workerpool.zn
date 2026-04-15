@@ -1,6 +1,6 @@
 // Worker Pool — fan-out/fan-in with channels
 
-fn main() {
+void main() {
     var jobs = Channel(10)
     var results = Channel(10)
 

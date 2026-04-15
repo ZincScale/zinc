@@ -1,7 +1,7 @@
 // Test sized array creation: Type[size]
 // Creates zero-filled arrays of a given size
 
-fn main() {
+void main() {
     // byte buffer
     var buf = byte[4]
     print("byte buf len: ${len(buf)}")

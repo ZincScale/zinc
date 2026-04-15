@@ -3,7 +3,7 @@
 
 data Pair<A, B>(A first, B second)
 
-fn main() {
+void main() {
     // --- Shift operators ---
 
     // Basic shifts

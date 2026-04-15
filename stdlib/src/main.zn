@@ -5,7 +5,7 @@ import logging
 import os
 import fmt
 
-fn main() {
+void main() {
     // Config
     var cfg = config.Config()
     cfg.setDefault("server.port", 8080)

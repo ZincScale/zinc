@@ -19,12 +19,12 @@ Types: `int`, `double`, `bool`, `String`, `List<T>`, `Map<K,V>`.
 ## Functions
 
 ```zinc
-fn add(int a, int b): int {
+int add(int a, int b) {
     return a + b
 }
 
 // Default parameters
-fn greet(String name, String greeting = "Hello"): String {
+String greet(String name, String greeting = "Hello") {
     return "${greeting}, ${name}!"
 }
 
@@ -102,7 +102,7 @@ for (key, value in ages) {
 ## Nullable types
 
 ```zinc
-fn find(String id): String? {
+String? find(String id) {
     if (id == "1") { return "Alice" }
     return null
 }
@@ -192,7 +192,7 @@ print(s)    // Circle(radius=5)
 // Function types
 type Transform = Fn<(int), int>
 
-fn applyTwice(int x, Transform f): int {
+int applyTwice(int x, Transform f) {
     return f(f(x))
 }
 

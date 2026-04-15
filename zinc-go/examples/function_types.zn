@@ -2,22 +2,22 @@
 // Demonstrates: Fn<> types, typed lambdas, higher-order functions, callbacks
 
 // Function type as parameter
-fn applyTwice(int x, Fn<(int), int> f): int {
+int applyTwice(int x, Fn<(int), int> f) {
     return f(f(x))
 }
 
 // Higher-order: return a function
-fn multiplier(int factor): Fn<(int), int> {
+Fn<(int), int> multiplier(int factor) {
     return (int x) -> x * factor
 }
 
 // Void callback
-fn doThen(Fn<(String)> callback) {
+void doThen(Fn<(String)> callback) {
     callback("done")
 }
 
 // Function that takes a predicate
-fn countMatching(List<int> items, Fn<(int), boolean> pred): int {
+int countMatching(List<int> items, Fn<(int), boolean> pred) {
     var count = 0
     for (item in items) {
         if (pred(item)) {
@@ -27,7 +27,7 @@ fn countMatching(List<int> items, Fn<(int), boolean> pred): int {
     return count
 }
 
-fn main() {
+void main() {
     // Pass typed lambda
     var result = applyTwice(3, (int x) -> x + 10)
     print("applyTwice(3, x+10): ${result}")

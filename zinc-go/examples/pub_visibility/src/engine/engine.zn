@@ -5,7 +5,7 @@ import lib
 
 // Implements Processor interface (from lib, which has pub fn process)
 class Doubler : Processor {
-    pub fn process(Item item): Item {
+    pub Item process(Item item) {
         return makeDouble(item)
     }
 }
@@ -16,12 +16,12 @@ sealed class Action {
 }
 
 // pub function for cross-package access
-pub fn runProcessor(Processor proc, Item item): Item {
+pub Item runProcessor(Processor proc, Item item) {
     return proc.process(item)
 }
 
 // pub function that uses sealed class match
-pub fn applyAction(Action action): String {
+pub String applyAction(Action action) {
     match (action) {
         case Transform(item) {
             return formatItem(item)

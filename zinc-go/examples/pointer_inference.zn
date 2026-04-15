@@ -8,7 +8,7 @@ data Person(String name, int age)
 
 import os.exec
 
-fn main() {
+void main() {
     // Marshal a struct to JSON
     var p = Person("Alice", 30)
     var data = json.Marshal(p) or {

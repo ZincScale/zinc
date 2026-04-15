@@ -4,10 +4,10 @@
 class Animal {
     String name
     init(String name) { this.name = name }
-    pub fn speak(): String { return "${name} speaks" }
+    pub String speak() { return "${name} speaks" }
 }
 
-fn describe(Object val): String {
+String describe(Object val) {
     match (val) {
         case String(s) { return "string: ${s}" }
         case int(n) { return "int: ${n}" }
@@ -21,7 +21,7 @@ fn describe(Object val): String {
     return "unknown"
 }
 
-fn main() {
+void main() {
     print(describe("hello"))
     print(describe(42))
     print(describe(3.14))

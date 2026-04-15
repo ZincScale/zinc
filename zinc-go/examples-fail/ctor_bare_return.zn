@@ -24,7 +24,7 @@ class Widget {
     }
 }
 
-fn main() {
+void main() {
     var w = Widget("gear", 3)
     print("widget=${w.name}")
 }

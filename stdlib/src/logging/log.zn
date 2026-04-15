@@ -25,19 +25,19 @@ import io
 // --- Package-level logging functions ---
 // Call these from anywhere. LogManager.setup() configures the backend.
 
-pub fn info(String msg, any... args) {
+pub void info(String msg, any... args) {
     slog.Info(msg, args...)
 }
 
-pub fn debug(String msg, any... args) {
+pub void debug(String msg, any... args) {
     slog.Debug(msg, args...)
 }
 
-pub fn warn(String msg, any... args) {
+pub void warn(String msg, any... args) {
     slog.Warn(msg, args...)
 }
 
-pub fn error(String msg, any... args) {
+pub void error(String msg, any... args) {
     slog.Error(msg, args...)
 }
 
@@ -52,7 +52,7 @@ class LogManager {
     init() {}
 
     // setup configures logging from config.
-    pub fn setup(config.Config cfg) {
+    pub void setup(config.Config cfg) {
         var h = cfg.getString("logging.handler")
         var l = cfg.getString("logging.level")
         var o = cfg.getString("logging.output")
@@ -63,7 +63,7 @@ class LogManager {
     }
 
     // configure sets up logging with explicit values.
-    pub fn configure(String lvl, String handler, String out) {
+    pub void configure(String lvl, String handler, String out) {
         level = lvl
         handlerType = handler
         output = out
@@ -71,23 +71,23 @@ class LogManager {
     }
 
     // setHandler changes the handler type at runtime.
-    pub fn setHandler(String handler) {
+    pub void setHandler(String handler) {
         handlerType = handler
         apply()
     }
 
     // setLevel changes the log level at runtime.
-    pub fn setLevel(String lvl) {
+    pub void setLevel(String lvl) {
         level = lvl
         apply()
     }
 
     // useHandler sets a custom slog.Handler directly.
-    pub fn useHandler(slog.Handler handler) {
+    pub void useHandler(slog.Handler handler) {
         slog.SetDefault(slog.New(handler))
     }
 
-    fn apply() {
+    void apply() {
         var slogLevel = parseLevel(level)
         var opts = slog.HandlerOptions(Level=slogLevel)
         var writer = resolveWriter(output)
@@ -98,14 +98,14 @@ class LogManager {
 
 // --- Internal ---
 
-fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts): slog.Handler {
+slog.Handler createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts) {
     if (handlerType == "json") {
         return slog.NewJSONHandler(writer, opts)
     }
     return slog.NewTextHandler(writer, opts)
 }
 
-fn resolveWriter(String output): io.Writer {
+io.Writer resolveWriter(String output) {
     if (output == "stderr") {
         return os.Stderr
     }
@@ -118,7 +118,7 @@ fn resolveWriter(String output): io.Writer {
     return os.Stdout
 }
 
-fn parseLevel(String s): slog.Level {
+slog.Level parseLevel(String s) {
     if (s == "DEBUG" || s == "debug") {
         return slog.LevelDebug
     }

@@ -29,28 +29,28 @@ class Config {
         this.name = name
     }
 
-    pub fn addTag(String tag) {
+    pub void addTag(String tag) {
         tags = append(tags, tag)
     }
 
-    pub fn setMeta(String key, String value) {
+    pub void setMeta(String key, String value) {
         metadata[key] = value
     }
 
-    pub fn addScore(int score) {
+    pub void addScore(int score) {
         scores = append(scores, score)
     }
 
-    pub fn setLimit(String key, int val) {
+    pub void setLimit(String key, int val) {
         limits[key] = val
     }
 
-    pub fn summary(): String {
+    pub String summary() {
         return "${name} host=${host}:${port} retries=${retries} debug=${debug} tags=${len(tags)} meta=${len(metadata)} scores=${len(scores)} limits=${len(limits)}"
     }
 }
 
-fn main() {
+void main() {
     // 1. var with inferred types
     var x = 42
     var s = "hello"

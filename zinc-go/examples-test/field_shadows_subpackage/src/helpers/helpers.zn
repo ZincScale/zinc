@@ -2,6 +2,6 @@
 // context for the shadowing-regression test. Exported so the test code
 // can detect that the subpackage really exists.
 
-pub fn greet(String who): String {
+pub String greet(String who) {
     return "hello, ${who}"
 }

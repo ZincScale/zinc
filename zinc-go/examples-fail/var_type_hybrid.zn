@@ -14,7 +14,7 @@ class Widget {
     init() {}
 }
 
-fn main() {
+void main() {
     // Local with no initializer — same smell.
     var Mutex local
 

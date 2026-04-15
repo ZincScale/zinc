@@ -3,7 +3,7 @@
 import core
 import services
 
-fn main() {
+void main() {
     // Create types from core subpackage
     var alice = core.User("Alice", 30)
     var bob = core.User("Bob", 15)

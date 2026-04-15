@@ -20,24 +20,22 @@ import (
 
 // --- Declarations ------------------------------------------------------------
 
-// v2ParseFnDecl: fn name(params)[: ReturnType] { body }
-//                fn name(params)[: ReturnType] = expr  (single-expression)
+// v2ParseFnDecl: ReturnType name(params) { body }
+//                void name(params) { body }
+//                ReturnType name(params) = expr  (single-expression)
+//
+// Type-first declaration matches Java/C#/Dart shape. The literal `void`
+// stands in for "no return type" — `init` constructors keep their own
+// keyword shape.
 func (p *Parser) v2ParseFnDecl() *FnDecl {
 	line := p.peek().Line
-	p.expect(lexer.TOKEN_FN)
+	retType := p.v2ParseFnReturnType()
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
 	typeParams := p.parseTypeParams()
 	params := p.v2ParseParamList()
 
-	// Optional return type after colon: fn name(params): Type { }
-	var retType TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance() // consume ':'
-		retType = p.v2ParseType()
-	}
-
-	// Single-expression form: fn name(params) Type = expr
+	// Single-expression form: ReturnType name(params) = expr
 	if p.check(lexer.TOKEN_ASSIGN) {
 		p.advance()
 		expr := p.v2ParseExpr()
@@ -47,6 +45,17 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 
 	body := p.v2ParseBlock()
 	return &FnDecl{Line: line, Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+}
+
+// v2ParseFnReturnType parses either `void` (returns nil) or any type
+// expression. Used by both top-level fn decls and class method decls.
+func (p *Parser) v2ParseFnReturnType() TypeExpr {
+	tok := p.peek()
+	if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "void" {
+		p.advance()
+		return nil
+	}
+	return p.v2ParseType()
 }
 
 // v2ParseParamList: (type name, type name = default, ...)
@@ -211,7 +220,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			m.IsStatic = m.IsStatic || isStatic
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_OVERRIDE {
-			// override fn name(...) { ... }
+			// override ReturnType name(...) { ... }
 			p.advance() // consume override
 			m := p.v2ParseMethodDecl()
 			m.IsPub = true // override methods are always public
@@ -219,14 +228,8 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_PUB {
 			next := p.peekAt(1)
-			if next.Type == lexer.TOKEN_FN {
-				// pub fn name(...) { ... }
-				p.advance() // consume pub
-				m := p.v2ParseMethodDecl()
-				m.IsPub = true
-				methods = append(methods, m)
-			} else if next.Type == lexer.TOKEN_OVERRIDE {
-				// pub override fn name(...) { ... }
+			if next.Type == lexer.TOKEN_OVERRIDE {
+				// pub override ReturnType name(...) { ... }
 				p.advance() // consume pub
 				p.advance() // consume override
 				m := p.v2ParseMethodDecl()
@@ -234,11 +237,19 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				m.Annotations = append(m.Annotations, &Annotation{Name: "Override"})
 				methods = append(methods, m)
 			} else {
-				// pub Type name — public field (no var keyword needed)
+				// Could be `pub ReturnType name(...)` (method) or
+				// `pub Type name [= default]` (field). Lookahead past
+				// `pub` and use the type-first detector to choose.
 				p.advance() // consume pub
-				f := p.v2ParseFieldDeclNoKeyword()
-				f.IsPub = true
-				fields = append(fields, f)
+				if p.v2IsFnDeclTypeFirst() {
+					m := p.v2ParseMethodDecl()
+					m.IsPub = true
+					methods = append(methods, m)
+				} else {
+					f := p.v2ParseFieldDeclNoKeyword()
+					f.IsPub = true
+					fields = append(fields, f)
+				}
 			}
 		} else if tok.Type == lexer.TOKEN_READONLY {
 			// read Type name — read-only field (no var keyword needed)
@@ -246,10 +257,6 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			f := p.v2ParseFieldDeclNoKeyword()
 			f.IsReadonly = true
 			fields = append(fields, f)
-		} else if tok.Type == lexer.TOKEN_FN {
-			m := p.v2ParseMethodDecl()
-			m.IsPub = false // private by default
-			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_INIT && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
 			// init(params) { body } — constructor (supports overloading)
 			p.advance() // consume init
@@ -274,6 +281,11 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)
+		} else if p.v2IsFnDeclTypeFirst() {
+			// Private method: `ReturnType name(...) { ... }`
+			m := p.v2ParseMethodDecl()
+			m.IsPub = false
+			methods = append(methods, m)
 		} else if tok.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
 			// Type name = default — private field without var keyword
 			f := p.v2ParseFieldDeclNoKeyword()
@@ -293,20 +305,14 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Ctors: ctors, Methods: methods, Variants: variants}
 }
 
-// v2ParseMethodDecl: [abstract] fn name(params)[: ReturnType] [{ body }]
+// v2ParseMethodDecl: [abstract] ReturnType name(params) [{ body }]
+//                    [abstract] void name(params) [{ body }]
 func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
-	p.expect(lexer.TOKEN_FN)
+	retType := p.v2ParseFnReturnType()
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
 	params := p.v2ParseParamList()
-
-	// Optional return type after colon: fn name(params): Type { }
-	var retType TypeExpr
-	if p.check(lexer.TOKEN_COLON) {
-		p.advance() // consume ':'
-		retType = p.v2ParseType()
-	}
 
 	// Body is optional for abstract methods
 	var body *BlockStmt
@@ -367,14 +373,13 @@ func (p *Parser) v2ParseFieldDeclNoKeyword() *FieldDecl {
 	return &FieldDecl{Name: name, Type: typ, Default: def}
 }
 
-// v2IsClassFieldDecl checks if the current IDENT in a class body starts a field
-// declaration (Type name [= default]) rather than a method or expression.
-func (p *Parser) v2IsClassFieldDecl() bool {
-	if !p.v2IsTypeAnnotation() {
-		return false
-	}
-	// Scan past the type to find the name
-	i := 1
+// v2SkipTypeAnnotation walks past a type annotation starting at offset
+// `start` (relative to the current token) and returns the offset of the
+// token after the type. Mirrors the logic v2IsClassFieldDecl used to
+// embed inline. Use the result to peek at what follows the type — e.g.
+// IDENT for a name, LPAREN for a function signature.
+func (p *Parser) v2SkipTypeAnnotation(start int) int {
+	i := start + 1
 	// Dotted type: sync.Mutex, http.ResponseWriter, etc.
 	for p.peekAt(i).Type == lexer.TOKEN_DOT && isIdentLike(p.peekAt(i+1).Type) {
 		i += 2
@@ -400,6 +405,62 @@ func (p *Parser) v2IsClassFieldDecl() bool {
 	if p.peekAt(i).Type == lexer.TOKEN_QUESTION {
 		i++
 	}
+	return i
+}
+
+// v2IsFnDeclTypeFirst returns true if the current position starts a
+// type-first function/method declaration: `ReturnType name[<...>](` or
+// `void name[<...>](`. Used by both top-level and class-body dispatchers.
+// Generic functions like `T identity<T>(T x)` carry type params between
+// the name and the `(`, so the lookahead skips them.
+func (p *Parser) v2IsFnDeclTypeFirst() bool {
+	// `void name [<...>] (`
+	if p.peek().Type == lexer.TOKEN_IDENT && p.peek().Literal == "void" {
+		if !isIdentLike(p.peekAt(1).Type) {
+			return false
+		}
+		j := p.v2SkipFnNameTypeParams(2)
+		return p.peekAt(j).Type == lexer.TOKEN_LPAREN
+	}
+	if !p.v2IsTypeAnnotation() {
+		return false
+	}
+	i := p.v2SkipTypeAnnotation(0)
+	if !isIdentLike(p.peekAt(i).Type) {
+		return false
+	}
+	j := p.v2SkipFnNameTypeParams(i + 1)
+	return p.peekAt(j).Type == lexer.TOKEN_LPAREN
+}
+
+// v2SkipFnNameTypeParams skips a `<T, U, ...>` block right after a
+// function name, returning the index of the token after `>`. If no `<`
+// is present, returns `start` unchanged. Caller still needs to check
+// that the result is `(` to confirm a function decl.
+func (p *Parser) v2SkipFnNameTypeParams(start int) int {
+	if p.peekAt(start).Type != lexer.TOKEN_LT {
+		return start
+	}
+	depth := 1
+	i := start + 1
+	for depth > 0 && p.peekAt(i).Type != lexer.TOKEN_EOF {
+		if p.peekAt(i).Type == lexer.TOKEN_LT {
+			depth++
+		} else if p.peekAt(i).Type == lexer.TOKEN_GT {
+			depth--
+		}
+		i++
+	}
+	return i
+}
+
+// v2IsClassFieldDecl checks if the current IDENT in a class body starts a field
+// declaration (Type name [= default]) rather than a method or expression.
+func (p *Parser) v2IsClassFieldDecl() bool {
+	if !p.v2IsTypeAnnotation() {
+		return false
+	}
+	i := p.v2SkipTypeAnnotation(0)
 	// Next should be the field name (ident)
 	nameToken := p.peekAt(i)
 	if nameToken.Type != lexer.TOKEN_IDENT && nameToken.Type != lexer.TOKEN_DATA &&
@@ -414,7 +475,7 @@ func (p *Parser) v2IsClassFieldDecl() bool {
 		next.Type == lexer.TOKEN_EOF || next.Type == lexer.TOKEN_SEMICOLON ||
 		next.Type == lexer.TOKEN_IDENT || // next field or method
 		next.Type == lexer.TOKEN_PUB || next.Type == lexer.TOKEN_READONLY ||
-		next.Type == lexer.TOKEN_FN || next.Type == lexer.TOKEN_INIT ||
+		next.Type == lexer.TOKEN_INIT ||
 		next.Type == lexer.TOKEN_CONST || next.Type == lexer.TOKEN_VAR ||
 		next.Type == lexer.TOKEN_OVERRIDE || next.Type == lexer.TOKEN_STATIC ||
 		next.Type == lexer.TOKEN_AT // annotation
@@ -488,7 +549,7 @@ func (p *Parser) v2ParseDataClassParam() *FieldDecl {
 	return &FieldDecl{Name: name, IsPub: true, Type: typ, Default: def}
 }
 
-// v2ParseInterfaceDecl: interface Name { fn method(params): ReturnType ... }
+// v2ParseInterfaceDecl: interface Name { ReturnType method(params) ... }
 func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_INTERFACE)
@@ -503,15 +564,10 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 		if p.check(lexer.TOKEN_PUB) {
 			p.advance()
 		}
-		p.expect(lexer.TOKEN_FN)
+		retType := p.v2ParseFnReturnType()
 		mName := p.expect(lexer.TOKEN_IDENT).Literal
 		p.v2ValidateDeclName(mName)
 		params := p.v2ParseParamList()
-		var retType TypeExpr
-		if p.check(lexer.TOKEN_COLON) {
-			p.advance()
-			retType = p.v2ParseType()
-		}
 		methods = append(methods, &MethodSig{Name: mName, IsPub: true, Params: params, ReturnType: retType})
 		p.skipSemis()
 	}

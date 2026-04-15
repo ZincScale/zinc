@@ -10,16 +10,16 @@ class KeyValue {
         this.v = v
     }
 
-    pub fn getKey(): String {
+    pub String getKey() {
         return k
     }
 
-    pub fn getValue(): String {
+    pub String getValue() {
         return v
     }
 }
 
-fn main() {
+void main() {
     // Class with getKey/getValue — should call methods, not map entry access
     var kv = KeyValue("name", "alice")
     print("kv.getKey = ${kv.getKey()}")

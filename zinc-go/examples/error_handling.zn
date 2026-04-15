@@ -2,7 +2,7 @@
 // Demonstrates: Error return, or default, or block, or with return/continue
 
 // Function that can fail — returns Error on bad input
-fn divide(int a, int b): int {
+int divide(int a, int b) {
     if (b == 0) { return Error("division by zero") }
     return a / b
 }
@@ -22,7 +22,7 @@ divide(10, 0) or {
 print("or block done")
 
 // Validate with simple Error
-fn validate(int x): int {
+int validate(int x) {
     if (x < 0) { return Error("must be positive") }
     return x
 }
@@ -34,7 +34,7 @@ var v2 = validate(10) or -1
 print("validate(10) = ${v2}")
 
 // or block with return — early exit from function
-fn loadAndProcess(): String {
+String loadAndProcess() {
     var data = divide(10, 0) or {
         return "fallback result"
     }
@@ -52,7 +52,7 @@ for (b in inputs) {
 }
 
 // or block with return Error(err) — propagate error up
-fn safeDivide(int a, int b): int {
+int safeDivide(int a, int b) {
     var result = divide(a, b) or {
         return Error(err)
     }

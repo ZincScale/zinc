@@ -2,7 +2,7 @@
 // Demonstrates: nullable, safe navigation, type checks, equality
 
 // Nullable types
-fn findUser(String id): String? {
+String? findUser(String id) {
     if (id == "1") {
         return "Alice"
     }

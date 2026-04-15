@@ -1,6 +1,6 @@
 // Type cast examples — long(), double(), int(), float()
 
-fn main() {
+void main() {
     // int casts
     var a = int(42)
     print("int(42) = ${a}")

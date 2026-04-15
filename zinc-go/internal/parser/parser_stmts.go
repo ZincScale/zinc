@@ -68,8 +68,6 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseConcurrentStmt()
 	case lexer.TOKEN_TIMEOUT:
 		return p.v2ParseTimeoutStmt()
-	case lexer.TOKEN_FN:
-		return p.v2ParseFnDeclAsStmt()
 	case lexer.TOKEN_IDENT:
 		if tok.Literal == "assert" {
 			return p.v2ParseAssertStmt()

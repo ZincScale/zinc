@@ -2,14 +2,14 @@
 // Demonstrates: single-expr, defaults, variadic, reduce
 
 // Single-expression function
-fn doubled(int x): int = x * 2
-fn triple(int x): int = x * 3
+int doubled(int x) = x * 2
+int triple(int x) = x * 3
 
 print("doubled(5) = ${doubled(5)}")
 print("triple(5) = ${triple(5)}")
 
 // Default parameters
-fn connect(String host, int port = 8080): String {
+String connect(String host, int port = 8080) {
     return "${host}:${port}"
 }
 
@@ -17,7 +17,7 @@ print(connect("localhost", 3000))
 print(connect("localhost"))
 
 // Variadic parameters
-fn sum(int... numbers): int {
+int sum(int... numbers) {
     var total = 0
     for (n in numbers) {
         total = total + n
@@ -34,21 +34,21 @@ var result = numbers.reduce(0, (acc, x) -> acc + x * 10)
 print("reduce: ${result}")
 
 // --- Generic functions ---
-fn identity<T>(T x): T {
+T identity<T>(T x) {
     return x
 }
 
 print("identity str: ${identity("zinc")}")
 print("identity int: ${identity(99)}")
 
-fn swap<A, B>(A a, B b): String {
+String swap<A, B>(A a, B b) {
     return "${b}, ${a}"
 }
 
 print("swap: ${swap(1, "two")}")
 
 // Generic single-expression function
-fn second<T>(List<T> items): T = items[1]
+T second<T>(List<T> items) = items[1]
 
 List<String> fruits = ["apple", "banana", "cherry"]
 print("second: ${second(fruits)}")

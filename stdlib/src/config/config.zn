@@ -22,7 +22,7 @@ class Config {
     }
 
     // load reads a config file by name (without extension), type, and search path.
-    pub fn load(String name, String fileType, String path) {
+    pub void load(String name, String fileType, String path) {
         viper.SetConfigName(name)
         viper.SetConfigType(fileType)
         viper.AddConfigPath(path)
@@ -30,50 +30,50 @@ class Config {
     }
 
     // loadFile reads a specific config file by full path.
-    pub fn loadFile(String filePath) {
+    pub void loadFile(String filePath) {
         viper.SetConfigFile(filePath)
         viper.ReadInConfig()
     }
 
     // --- Defaults ---
 
-    pub fn setDefault(String key, any value) {
+    pub void setDefault(String key, any value) {
         viper.SetDefault(key, value)
     }
 
     // --- Getters ---
 
-    pub fn getString(String key): String {
+    pub String getString(String key) {
         return viper.GetString(key)
     }
 
-    pub fn getInt(String key): int {
+    pub int getInt(String key) {
         return viper.GetInt(key)
     }
 
-    pub fn getBool(String key): boolean {
+    pub boolean getBool(String key) {
         return viper.GetBool(key)
     }
 
-    pub fn getFloat(String key): double {
+    pub double getFloat(String key) {
         return viper.GetFloat64(key)
     }
 
-    pub fn getDuration(String key): time.Duration {
+    pub time.Duration getDuration(String key) {
         return viper.GetDuration(key)
     }
 
-    pub fn getStringSlice(String key): List<String> {
+    pub List<String> getStringSlice(String key) {
         return viper.GetStringSlice(key)
     }
 
-    pub fn getStringMap(String key): Map<String, String> {
+    pub Map<String, String> getStringMap(String key) {
         return viper.GetStringMapString(key)
     }
 
     // getSubKeys returns the top-level keys under a config path.
     // e.g. getSubKeys("flow.processors") → ["tag-env", "sink"] for map-keyed config.
-    pub fn getSubKeys(String key): List<String> {
+    pub List<String> getSubKeys(String key) {
         var m = viper.GetStringMap(key)
         var keys = List<String>[]
         for (k, _ in m) {
@@ -84,25 +84,25 @@ class Config {
 
     // --- Setters ---
 
-    pub fn set(String key, any value) {
+    pub void set(String key, any value) {
         viper.Set(key, value)
     }
 
     // --- Query ---
 
-    pub fn has(String key): boolean {
+    pub boolean has(String key) {
         return viper.IsSet(key)
     }
 
     // --- Environment ---
 
-    pub fn bindEnv(String key, String envVar) {
+    pub void bindEnv(String key, String envVar) {
         viper.BindEnv(key, envVar)
     }
 
     // --- Watching ---
 
-    pub fn watchForChanges() {
+    pub void watchForChanges() {
         viper.WatchConfig()
     }
 }

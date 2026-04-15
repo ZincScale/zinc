@@ -3,7 +3,7 @@
 
 import store
 
-fn main() {
+void main() {
     var s = Store()
 
     // add, size, isEmpty, length

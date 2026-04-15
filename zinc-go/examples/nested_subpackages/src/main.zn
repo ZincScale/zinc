@@ -3,7 +3,7 @@
 import fabric.router
 import models.types
 
-fn main() {
+void main() {
     // Use deeply nested subpackage: models/types
     var alice = types.User("Alice", 30)
     print(types.formatUser(alice))
