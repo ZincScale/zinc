@@ -69,7 +69,9 @@ const (
 	TOKEN_END      // end (block closer)
 	TOKEN_TRY      // try
 	TOKEN_CATCH    // catch
-	TOKEN_RAISE    // raise (throw)
+	TOKEN_FINALLY  // finally
+	TOKEN_THROW    // throw
+	TOKEN_USING    // using (resource acquisition, defer .Close())
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
 	TOKEN_FROM  // from (import support)
@@ -182,7 +184,9 @@ var tokenNames = map[TokenType]string{
 	TOKEN_END:       "end",
 	TOKEN_TRY:       "try",
 	TOKEN_CATCH:     "catch",
-	TOKEN_RAISE:     "raise",
+	TOKEN_FINALLY:   "finally",
+	TOKEN_THROW:     "throw",
+	TOKEN_USING:     "using",
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
 	TOKEN_FROM:      "from",
@@ -300,7 +304,9 @@ var keywords = map[string]TokenType{
 	"end":       TOKEN_END,
 	"try":       TOKEN_TRY,
 	"catch":     TOKEN_CATCH,
-	"raise":     TOKEN_RAISE,
+	"finally":   TOKEN_FINALLY,
+	"throw":     TOKEN_THROW,
+	"using":     TOKEN_USING,
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,
 	"from":      TOKEN_FROM,

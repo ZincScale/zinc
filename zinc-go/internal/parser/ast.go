@@ -494,7 +494,9 @@ type WithResource struct {
 }
 
 // WithStmt: with (var name = expr [, var name = expr ...]) { body }
-// Each resource has .Close() deferred automatically.
+// Each resource has .Close() deferred automatically. Also used as the
+// AST node for `lock (mu) { ... }` (Resources[0].Name == "_lock") and
+// `using (var r = init) { ... }` (regular resource, .Close() deferred).
 type WithStmt struct {
 	Line      int // source line number (1-indexed)
 	Resources []*WithResource
@@ -503,6 +505,42 @@ type WithStmt struct {
 
 func (w *WithStmt) nodeTag() {}
 func (w *WithStmt) stmtTag() {}
+
+// CatchClause is a single `catch (Type e) { body }` arm of a try
+// statement. ExceptionType is nil for an untyped catch (`catch (e)`).
+// VarName may be empty if the user wrote `catch { }` with neither a
+// type nor a name.
+type CatchClause struct {
+	ExceptionType TypeExpr // nil = untyped catch (matches any thrown value)
+	VarName       string   // "" when the catch binds no variable
+	Body          *BlockStmt
+}
+
+// TryStmt: try { body } catch (Type e) { handler } [catch ...] [finally { cleanup }]
+// Codegen wraps the body in an IIFE with `defer recover()` so thrown
+// values translate to Go panics, recovered and matched against the
+// catch clauses by type assertion. `finally` runs on every exit path
+// via an additional `defer` placed before the recover handler.
+type TryStmt struct {
+	Line    int
+	Body    *BlockStmt
+	Catches []*CatchClause
+	Finally *BlockStmt // nil if no finally clause
+}
+
+func (t *TryStmt) nodeTag() {}
+func (t *TryStmt) stmtTag() {}
+
+// ThrowStmt: throw expr — emits `panic(expr)` in generated Go. The
+// expression is typically a constructor call for an exception class,
+// but Zinc doesn't enforce a base type — any value can be thrown.
+type ThrowStmt struct {
+	Line  int
+	Value Expr
+}
+
+func (t *ThrowStmt) nodeTag() {}
+func (t *ThrowStmt) stmtTag() {}
 
 // ConcurrentStmt: concurrent { task1; task2; task3 }
 // With tuple assignment: var (a, b, c) = concurrent { ... }

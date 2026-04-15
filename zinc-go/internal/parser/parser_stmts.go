@@ -53,13 +53,11 @@ func (p *Parser) v2ParseStmt() Stmt {
 	case lexer.TOKEN_WITH:
 		return p.v2ParseWithStmt()
 	case lexer.TOKEN_TRY:
-		p.errorf("try/catch is not supported in Zinc — use 'or { }' or 'or match' instead")
-		p.advance()
-		return nil
-	case lexer.TOKEN_RAISE:
-		p.errorf("raise/throw is not supported in Zinc — use 'return Error(...)' instead")
-		p.advance()
-		return nil
+		return p.v2ParseTryStmt()
+	case lexer.TOKEN_THROW:
+		return p.v2ParseThrowStmt()
+	case lexer.TOKEN_USING:
+		return p.v2ParseUsingStmt()
 	case lexer.TOKEN_SPAWN:
 		return p.v2ParseSpawnStmt()
 	case lexer.TOKEN_PARALLEL:
@@ -496,6 +494,94 @@ func (p *Parser) v2ParseLockStmt() Stmt {
 		Resources: []*WithResource{{Name: "_lock", Value: &Ident{Name: lockName}}},
 		Body:      body,
 	}
+}
+
+// v2ParseUsingStmt: using (var name = expr [, var name = expr]) { body }
+// C#-style resource acquisition. Each named resource has .Close()
+// deferred. Reuses WithStmt under the hood.
+func (p *Parser) v2ParseUsingStmt() Stmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_USING)
+	p.expect(lexer.TOKEN_LPAREN)
+	var resources []*WithResource
+	for {
+		// Optional `var` keyword inside the using clause — same shape
+		// as csharp `using (var f = ...)`. We don't require it.
+		if p.check(lexer.TOKEN_VAR) {
+			p.advance()
+		}
+		name := p.v2ExpectIdent()
+		p.expect(lexer.TOKEN_ASSIGN)
+		val := p.v2ParseExpr()
+		resources = append(resources, &WithResource{Name: name, Value: val})
+		if !p.check(lexer.TOKEN_COMMA) {
+			break
+		}
+		p.advance() // consume ,
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	body := p.v2ParseBlock()
+	return &WithStmt{Line: line, Resources: resources, Body: body}
+}
+
+// v2ParseTryStmt: try { body } catch (Type e) { handler } [catch ...] [finally { cleanup }]
+// At least one catch OR finally clause is required. Multiple catches are
+// matched in source order against the thrown value's runtime type.
+// Untyped `catch (e) { }` or `catch { }` matches anything.
+func (p *Parser) v2ParseTryStmt() Stmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_TRY)
+	body := p.v2ParseBlock()
+
+	var catches []*CatchClause
+	for p.check(lexer.TOKEN_CATCH) {
+		p.advance() // consume 'catch'
+		var excType TypeExpr
+		var varName string
+		if p.check(lexer.TOKEN_LPAREN) {
+			p.advance() // consume (
+			// Two shapes inside the parens:
+			//   catch (Type e) — typed, named
+			//   catch (e)      — untyped, named
+			// Use type-annotation lookahead — same trick as field decls.
+			if p.v2IsTypeAnnotation() {
+				excType = p.v2ParseType()
+				varName = p.v2ExpectIdent()
+			} else {
+				varName = p.v2ExpectIdent()
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		// Bare `catch { }` — untyped, no var
+		catchBody := p.v2ParseBlock()
+		catches = append(catches, &CatchClause{
+			ExceptionType: excType,
+			VarName:       varName,
+			Body:          catchBody,
+		})
+	}
+
+	var finallyBody *BlockStmt
+	if p.check(lexer.TOKEN_FINALLY) {
+		p.advance()
+		finallyBody = p.v2ParseBlock()
+	}
+
+	if len(catches) == 0 && finallyBody == nil {
+		p.errorf("try block requires at least one catch or finally clause")
+	}
+
+	return &TryStmt{Line: line, Body: body, Catches: catches, Finally: finallyBody}
+}
+
+// v2ParseThrowStmt: throw expr
+// Compiles to `panic(expr)`. The expression is typically a constructor
+// call for an exception class but Zinc doesn't enforce a base type.
+func (p *Parser) v2ParseThrowStmt() Stmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_THROW)
+	val := p.v2ParseExpr()
+	return &ThrowStmt{Line: line, Value: val}
 }
 
 func (p *Parser) v2ParseSpawnStmt() Stmt {

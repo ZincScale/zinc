@@ -68,6 +68,10 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitConcurrentStmt(stmt)
 	case *parser.WithStmt:
 		g.emitWithStmt(stmt)
+	case *parser.TryStmt:
+		g.emitTryStmt(stmt)
+	case *parser.ThrowStmt:
+		g.emitThrowStmt(stmt)
 	case *parser.DeferStmt:
 		g.writeln("defer %s", g.formatExpr(stmt.Expr))
 	case *parser.AssertStmt:
@@ -1510,6 +1514,96 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 		g.writeln("defer %s.Close()", r.Name)
 	}
 	g.emitBlock(w.Body)
+}
+
+// emitThrowStmt: `throw expr` → `panic(expr)`. The thrown value is
+// passed to Go's panic mechanism and surfaces in any enclosing
+// recover() call. Catches in a surrounding try { } match the value's
+// runtime type via type assertion.
+func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
+	g.writeln("panic(%s)", g.formatExpr(t.Value))
+}
+
+// emitTryStmt: try / catch / finally → IIFE with defer recover().
+//
+//	try { body } catch (T e) { handler } finally { cleanup }
+//
+// becomes:
+//
+//	func() {
+//	    defer func() {
+//	        if r := recover(); r != nil {
+//	            // try each catch in source order
+//	            if e, ok := r.(*T); ok { handler-body }
+//	            else { panic(r) /* re-raise */ }
+//	        }
+//	        cleanup-body  // finally always runs
+//	    }()
+//	    body
+//	}()
+//
+// Notes:
+//   - Untyped catch (`catch (e)` or `catch { }`) matches anything.
+//   - Multiple catches probe in source order; first match wins.
+//   - finally runs on every exit path including unrecovered panics
+//     (the recover handler is responsible — Go semantics).
+func (g *Generator) emitTryStmt(t *parser.TryStmt) {
+	g.writeln("func() {")
+	g.indent++
+	g.writeln("defer func() {")
+	g.indent++
+	hasCatches := len(t.Catches) > 0
+	if hasCatches {
+		g.writeln("if r := recover(); r != nil {")
+		g.indent++
+		matched := false
+		for i, c := range t.Catches {
+			if c.ExceptionType == nil {
+				// Untyped catch — always matches. Bind r to the named
+				// var (if any) and run the handler.
+				if c.VarName != "" {
+					g.writeln("%s := r", c.VarName)
+					g.writeln("_ = %s", c.VarName)
+				}
+				g.emitBlock(c.Body)
+				matched = true
+				break
+			}
+			// formatType already emits the pointer prefix for class
+			// types (`*ConfigException`); for primitive/value types it
+			// emits a bare name. Use the formatted result directly.
+			typeName := g.formatType(c.ExceptionType)
+			varName := c.VarName
+			if varName == "" {
+				varName = fmt.Sprintf("_catch%d", i)
+			}
+			g.writeln("if %s, ok := r.(%s); ok {", varName, typeName)
+			g.indent++
+			g.writeln("_ = %s", varName)
+			g.emitBlock(c.Body)
+			g.indent--
+			g.write("} else ")
+		}
+		if !matched {
+			// No untyped catch caught it — re-raise so outer scope sees
+			// the panic.
+			g.writeln("{")
+			g.indent++
+			g.writeln("panic(r)")
+			g.indent--
+			g.writeln("}")
+		}
+		g.indent--
+		g.writeln("}")
+	}
+	if t.Finally != nil {
+		g.emitBlock(t.Finally)
+	}
+	g.indent--
+	g.writeln("}()")
+	g.emitBlock(t.Body)
+	g.indent--
+	g.writeln("}()")
 }
 
 // blockContainsReturn checks if a block contains any return statement (recursively).

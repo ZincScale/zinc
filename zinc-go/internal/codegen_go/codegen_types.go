@@ -241,102 +241,14 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	}
 }
 
-// checkCtorBodyNoBareReturn walks a ctor body tree looking for bare
-// `return` statements. Constructors in Zinc have no failure channel —
-// the caller always gets a fully-constructed instance — so a bare
-// `return` is a design error (the author wanted to signal "stop and
-// don't finish constructing," but there's nothing to convey it on).
-// The right shape is a factory function returning T? that emits
-// Error(...) on the failure path. Catching this at compile time keeps
-// the constraint visible rather than papering over it with a
-// partial-construction hack in codegen.
-func checkCtorBodyNoBareReturn(body *parser.BlockStmt, typeName string, errOut func(line int, format string, args ...any)) {
-	if body == nil {
-		return
-	}
-	for _, stmt := range body.Stmts {
-		checkCtorStmtNoBareReturn(stmt, typeName, errOut)
-	}
-}
-
-func checkCtorStmtNoBareReturn(s parser.Stmt, typeName string, errOut func(line int, format string, args ...any)) {
-	switch stmt := s.(type) {
-	case *parser.ReturnStmt:
-		if stmt.Value == nil {
-			errOut(stmt.Line, "bare `return` not allowed inside constructor body for class %q: ctors have no failure channel — use a factory function returning %s? with `Error(...)` if construction can fail", typeName, typeName)
-		}
-	case *parser.IfStmt:
-		if stmt.Then != nil {
-			checkCtorBodyNoBareReturn(stmt.Then, typeName, errOut)
-		}
-		if stmt.ElseStmt != nil {
-			if block, ok := stmt.ElseStmt.(*parser.BlockStmt); ok {
-				checkCtorBodyNoBareReturn(block, typeName, errOut)
-			} else if elif, ok := stmt.ElseStmt.(*parser.IfStmt); ok {
-				checkCtorStmtNoBareReturn(elif, typeName, errOut)
-			}
-		}
-	case *parser.ForStmt:
-		if stmt.Body != nil {
-			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
-		}
-	case *parser.WhileStmt:
-		if stmt.Body != nil {
-			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
-		}
-	case *parser.MatchStmt:
-		for _, mc := range stmt.Cases {
-			if mc.Body != nil {
-				checkCtorBodyNoBareReturn(mc.Body, typeName, errOut)
-			}
-		}
-	case *parser.ParallelForStmt:
-		if stmt.Body != nil {
-			checkCtorBodyNoBareReturn(stmt.Body, typeName, errOut)
-		}
-		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
-	case *parser.VarStmt:
-		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
-	case *parser.TupleVarStmt:
-		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
-	case *parser.AssignStmt:
-		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
-	case *parser.ExprStmt:
-		checkCtorOrHandlerNoBareReturn(stmt.OrHandler, typeName, errOut)
-	case *parser.BlockStmt:
-		checkCtorBodyNoBareReturn(stmt, typeName, errOut)
-	}
-	// GoStmt (spawn { }) and DeferStmt are deliberately NOT recursed
-	// into: a bare `return` inside a goroutine or deferred closure
-	// returns from that closure, not from the enclosing ctor, so it's
-	// not a design error.
-}
-
-// checkCtorOrHandlerNoBareReturn — an `or { }` handler runs in the
-// enclosing function's scope, so a bare `return` inside it escapes
-// the ctor just like a top-level one. Match handlers (`or match err`)
-// get their case bodies walked too.
-func checkCtorOrHandlerNoBareReturn(h *parser.OrHandler, typeName string, errOut func(line int, format string, args ...any)) {
-	if h == nil {
-		return
-	}
-	if h.Body != nil {
-		checkCtorBodyNoBareReturn(h.Body, typeName, errOut)
-	}
-	for _, mc := range h.MatchCases {
-		if mc != nil && mc.Body != nil {
-			checkCtorBodyNoBareReturn(mc.Body, typeName, errOut)
-		}
-	}
-}
-
 // emitConstructor generates a NewType() constructor function.
 // Handles super() calls, this.field assignments, and remaining logic.
 func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls *parser.ClassDecl) {
-	// Catch bare-return-in-ctor before emission so the user sees a
-	// Zinc-level error instead of a Go "not enough return values"
-	// pointing at generated code.
-	checkCtorBodyNoBareReturn(ctor.Body, typeName, g.compileError)
+	// Constructors can throw — bare return + early exit are now valid
+	// because failable construction uses `throw ConfigException(...)`
+	// instead of returning a partial object. The bare-return-in-ctor
+	// rejection from commits 26b21cd + 70ec27b was unwound when Zinc
+	// switched to C#-style exceptions.
 	// Set current fields/methods for implicit self resolution
 	g.currentFields = make(map[string]bool)
 	g.currentFieldGoName = make(map[string]string)
