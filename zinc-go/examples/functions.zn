@@ -19,7 +19,7 @@ print(connect("localhost"))
 // Variadic parameters
 fn sum(int... numbers): int {
     var total = 0
-    for n in numbers {
+    for (n in numbers) {
         total = total + n
     }
     return total

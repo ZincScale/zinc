@@ -49,7 +49,7 @@ fn main() {
     print("0b1010 | 0b0101 = ${bits}")
 
     // Hex in conditions
-    if 0xFF > 200 {
+    if (0xFF > 200) {
         print("0xFF > 200: true")
     }
 

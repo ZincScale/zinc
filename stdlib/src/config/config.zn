@@ -76,7 +76,7 @@ class Config {
     pub fn getSubKeys(String key): List<String> {
         var m = viper.GetStringMap(key)
         var keys = List<String>[]
-        for k, _ in m {
+        for (k, _ in m) {
             keys = append(keys, k)
         }
         return keys

@@ -8,7 +8,7 @@ sealed class Shape {
 }
 
 fn area(Shape s): double {
-    match s {
+    match (s) {
         case Circle(r) {
             return 3.14159 * r * r
         }
@@ -23,7 +23,7 @@ fn area(Shape s): double {
 }
 
 fn describe(Shape s): String {
-    match s {
+    match (s) {
         case Circle(r) {
             return "circle with radius ${r}"
         }
@@ -55,7 +55,7 @@ print(describe(t))
 
 // Match in a list
 List<Shape> shapes = [Circle(1.0), Rect(2.0, 3.0), Triangle(4.0, 5.0)]
-for s in shapes {
+for (s in shapes) {
     print("  ${describe(s)} → area=${area(s)}")
 }
 

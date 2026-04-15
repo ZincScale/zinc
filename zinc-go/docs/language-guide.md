@@ -49,32 +49,32 @@ print('No interpolation: ${name}')  // No interpolation: ${name}
 
 ```zinc
 // If/else
-if x > 0 {
+if (x > 0) {
     print("positive")
-} else if x == 0 {
+} else if (x == 0) {
     print("zero")
 } else {
     print("negative")
 }
 
 // Match (exhaustive pattern matching)
-match direction {
+match (direction) {
     case North { print("going north") }
     case South { print("going south") }
     case _ { print("other") }
 }
 
 // For loops
-for i in 0..10 {
+for (i in 0..10) {
     print(i)
 }
 
-for item in list {
+for (item in list) {
     print(item)
 }
 
 // While
-while condition {
+while (condition) {
     doWork()
 }
 ```
@@ -94,7 +94,7 @@ ages.put("Carol", 28)
 var age = ages.get("Alice")
 
 // Iteration
-for key, value in ages {
+for (key, value in ages) {
     print("{key} is {value}")
 }
 ```
@@ -103,7 +103,7 @@ for key, value in ages {
 
 ```zinc
 fn find(String id): String? {
-    if id == "1" { return "Alice" }
+    if (id == "1") { return "Alice" }
     return null
 }
 
@@ -113,7 +113,7 @@ var user = find("1")
 var len = user?.length()
 
 // Type checks
-if user is String {
+if (user is String) {
     print("found")
 }
 ```
@@ -165,7 +165,7 @@ enum Color {
 
 var c = Red
 
-match c {
+match (c) {
     case Red { print("red!") }
     case Green { print("green!") }
     case _ { print("other") }

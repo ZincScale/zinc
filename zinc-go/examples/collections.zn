@@ -6,7 +6,7 @@ names.add("Eve")
 print("Count: ${names.size()}")
 
 // Iteration
-for name in names {
+for (name in names) {
     print("Hello, ${name}")
 }
 
@@ -14,7 +14,7 @@ for name in names {
 Map<String, int> ages = {"Alice": 30, "Bob": 25, "Charlie": 35}
 ages.put("Dave", 28)
 
-for name, age in ages {
+for (name, age in ages) {
     print("${name} is ${age}")
 }
 

@@ -56,9 +56,9 @@ class LogManager {
         var h = cfg.getString("logging.handler")
         var l = cfg.getString("logging.level")
         var o = cfg.getString("logging.output")
-        if h != "" { handlerType = h }
-        if l != "" { level = l }
-        if o != "" { output = o }
+        if (h != "") { handlerType = h }
+        if (l != "") { level = l }
+        if (o != "") { output = o }
         apply()
     }
 
@@ -99,17 +99,17 @@ class LogManager {
 // --- Internal ---
 
 fn createHandler(String handlerType, io.Writer writer, slog.HandlerOptions opts): slog.Handler {
-    if handlerType == "json" {
+    if (handlerType == "json") {
         return slog.NewJSONHandler(writer, opts)
     }
     return slog.NewTextHandler(writer, opts)
 }
 
 fn resolveWriter(String output): io.Writer {
-    if output == "stderr" {
+    if (output == "stderr") {
         return os.Stderr
     }
-    if output != "stdout" {
+    if (output != "stdout") {
         var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or {
             return os.Stdout
         }
@@ -119,13 +119,13 @@ fn resolveWriter(String output): io.Writer {
 }
 
 fn parseLevel(String s): slog.Level {
-    if s == "DEBUG" || s == "debug" {
+    if (s == "DEBUG" || s == "debug") {
         return slog.LevelDebug
     }
-    if s == "WARN" || s == "warn" {
+    if (s == "WARN" || s == "warn") {
         return slog.LevelWarn
     }
-    if s == "ERROR" || s == "error" {
+    if (s == "ERROR" || s == "error") {
         return slog.LevelError
     }
     return slog.LevelInfo

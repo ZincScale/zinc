@@ -15,7 +15,7 @@ fn main() {
     // parallel for — concurrent iteration
     // Note: sum is not atomic so this races, but demonstrates the pattern
     List<int> items = [10, 20, 30]
-    parallel for n in items {
+    parallel for (n in items) {
         print("parallel: ${n}")
     }
 

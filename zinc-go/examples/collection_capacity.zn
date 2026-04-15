@@ -22,7 +22,7 @@ fn main() {
     // List<int> with capacity
     var nums = List<int>(100)
     print("nums len: ${len(nums)}")
-    for i in 0..5 {
+    for (i in 0..5) {
         nums = append(nums, i * 10)
     }
     print("after loop: ${len(nums)}")

@@ -27,7 +27,7 @@ fn main() {
 
     // Map iteration — standard for loop
     var ages = Map<String, int>{"alice": 30, "bob": 25}
-    for name, age in ages {
+    for (name, age in ages) {
         print("${name} = ${age}")
     }
 

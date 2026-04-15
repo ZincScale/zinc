@@ -9,7 +9,7 @@ import log.slog
 
 // Return a qualified Go interface type
 fn makeWriter(String target): io.Writer {
-    if target == "stderr" {
+    if (target == "stderr") {
         return os.Stderr
     }
     return os.Stdout

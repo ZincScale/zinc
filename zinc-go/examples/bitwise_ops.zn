@@ -22,13 +22,13 @@ fn main() {
     print("perms = ${perms}")
 
     // Bitwise AND for flag testing
-    if perms & 4 != 0 {
+    if (perms & 4 != 0) {
         print("readable")
     }
-    if perms & 2 != 0 {
+    if (perms & 2 != 0) {
         print("writable")
     }
-    if perms & 1 != 0 {
+    if (perms & 1 != 0) {
         print("executable")
     } else {
         print("not executable")

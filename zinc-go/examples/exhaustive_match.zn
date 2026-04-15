@@ -10,7 +10,7 @@ sealed class Shape {
 }
 
 fn area(Shape s): double {
-    match s {
+    match (s) {
         case Circle(r) {
             return 3.14159 * r * r
         }
@@ -27,7 +27,7 @@ fn area(Shape s): double {
 // Exercises both discard (`Circle(_)`) and wildcard (`case _`) — these were
 // the shapes that triggered "_v declared and not used" before the fix.
 fn describe(Shape s): String {
-    match s {
+    match (s) {
         case Circle(_) { return "circle" }
         case _ { return "other" }
     }

@@ -51,7 +51,7 @@ fn main() {
     print("empty map keys count: ${len(emptyKeys)}")
     // Use key as a proper String (not interface{}) — this would fail without the fix
     var sum = 0
-    for k in emptyKeys {
+    for (k in emptyKeys) {
         sum = sum + emptyMap[k]
     }
     print("empty map values sum: ${sum}")
@@ -68,9 +68,9 @@ fn sumNested(Map<String, List<int>> m): int {
     var total = 0
     // Use typed keys() — returns []string not []interface{}
     var keys = m.keys()
-    for k in keys {
+    for (k in keys) {
         var vals = m[k]
-        for v in vals {
+        for (v in vals) {
             total = total + v
         }
     }

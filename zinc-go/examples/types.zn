@@ -3,7 +3,7 @@
 
 // Nullable types
 fn findUser(String id): String? {
-    if id == "1" {
+    if (id == "1") {
         return "Alice"
     }
     return null
@@ -24,7 +24,7 @@ print("safe nav null: ${missingLen}")
 
 // Type checks — is
 var val = "hello"
-if val is String {
+if (val is String) {
     print("is String: true")
 }
 

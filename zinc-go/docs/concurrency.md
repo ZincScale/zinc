@@ -41,7 +41,7 @@ work.send("task1")
 work.send("task2")
 work.send("task3")
 
-for i in 0..3 {
+for (i in 0..3) {
     var task = work.recv()
     print("processing: {task}")
 }
@@ -56,12 +56,12 @@ var jobs = Channel(10)
 var results = Channel(10)
 
 // Spawn 3 workers
-for w in 0..3 {
+for (w in 0..3) {
     var id = w
     spawn {
-        while true {
+        while (true) {
             var job = jobs.recv()
-            if job == "STOP" { return }
+            if (job == "STOP") { return }
             results.send("worker {id}: {job}")
         }
     }
@@ -69,17 +69,17 @@ for w in 0..3 {
 
 // Send work
 List<String> tasks = ["fetch", "parse", "transform"]
-for task in tasks {
+for (task in tasks) {
     jobs.send(task)
 }
 
 // Send stop signals
-for i in 0..3 {
+for (i in 0..3) {
     jobs.send("STOP")
 }
 
 // Collect results
-for i in 0..3 {
+for (i in 0..3) {
     print(results.recv())
 }
 ```
@@ -90,7 +90,7 @@ Concurrent iteration with automatic WaitGroup management:
 
 ```zinc
 List<String> urls = ["url1", "url2", "url3"]
-parallel for url in urls {
+parallel for (url in urls) {
     print("fetching: {url}")
 }
 // All iterations complete before continuing

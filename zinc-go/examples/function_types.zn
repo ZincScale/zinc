@@ -19,8 +19,8 @@ fn doThen(Fn<(String)> callback) {
 // Function that takes a predicate
 fn countMatching(List<int> items, Fn<(int), boolean> pred): int {
     var count = 0
-    for item in items {
-        if pred(item) {
+    for (item in items) {
+        if (pred(item)) {
             count = count + 1
         }
     }

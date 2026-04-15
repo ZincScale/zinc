@@ -26,35 +26,35 @@ import strings
 
 // equalInt fails the test if got != want.
 pub fn equalInt(testing.T t, int got, int want) {
-    if got != want {
+    if (got != want) {
         t.Errorf("got %d, want %d", got, want)
     }
 }
 
 // equalString fails the test if got != want.
 pub fn equalString(testing.T t, String got, String want) {
-    if got != want {
+    if (got != want) {
         t.Errorf("got %q, want %q", got, want)
     }
 }
 
 // isTrue fails the test if cond is false. msg is shown in the failure.
 pub fn isTrue(testing.T t, bool cond, String msg) {
-    if !cond {
+    if (!cond) {
         t.Errorf("assertion failed: %s", msg)
     }
 }
 
 // isFalse fails the test if cond is true.
 pub fn isFalse(testing.T t, bool cond, String msg) {
-    if cond {
+    if (cond) {
         t.Errorf("assertion failed (expected false): %s", msg)
     }
 }
 
 // contains fails the test if haystack does not contain needle.
 pub fn contains(testing.T t, String haystack, String needle) {
-    if !strings.Contains(haystack, needle) {
+    if (!strings.Contains(haystack, needle)) {
         t.Errorf("expected %q to contain %q", haystack, needle)
     }
 }

@@ -15,7 +15,7 @@ fn main() {
     print("triangle area: ${area(t)}")
 
     // Match on sealed type from another package (cross-package match)
-    match c {
+    match (c) {
         case Circle(radius) {
             print("circle with radius ${radius}")
         }
@@ -28,7 +28,7 @@ fn main() {
     }
 
     // Match on Rect
-    match r {
+    match (r) {
         case Circle(_) {
             print("unexpected circle")
         }

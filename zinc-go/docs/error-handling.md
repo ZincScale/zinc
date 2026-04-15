@@ -8,7 +8,7 @@ Return `Error(message)` to signal failure:
 
 ```zinc
 fn divide(int a, int b): int {
-    if b == 0 { return Error("division by zero") }
+    if (b == 0) { return Error("division by zero") }
     return a / b
 }
 ```
@@ -53,7 +53,7 @@ Skip failed iterations:
 
 ```zinc
 List<int> divisors = [2, 0, 5, 0, 3]
-for d in divisors {
+for (d in divisors) {
     var val = divide(100, d) or {
         continue
     }
@@ -100,7 +100,7 @@ class Config {
     int port
     init(String host, int port) {
         this.host = host
-        if port < 0 {
+        if (port < 0) {
             return   // compile error: bare `return` not allowed in ctor body
         }
         this.port = port
@@ -112,7 +112,7 @@ If construction can actually fail, lift the failable check into a factory functi
 
 ```zinc
 fn newConfig(String host, int port): Config? {
-    if port < 0 {
+    if (port < 0) {
         return Error("port must be non-negative: ${port}")
     }
     return Config(host, port)

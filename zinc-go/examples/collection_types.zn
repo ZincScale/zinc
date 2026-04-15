@@ -17,14 +17,14 @@ fn main() {
     // .values() should return List<int>
     var vals = m.values()
     var sum = 0
-    for v in vals {
+    for (v in vals) {
         sum = sum + v
     }
     print("map values sum: ${sum}")
 
     // Iterate keys and use as typed map index (no str() cast needed)
     var total = 0
-    for k in m.keys() {
+    for (k in m.keys()) {
         total = total + m[k]
     }
     print("map iterate sum: ${total}")
@@ -66,10 +66,10 @@ fn main() {
     nested["odds"] = List<int>[1, 3, 5]
     var nestedKeys = nested.keys()
     nestedKeys.sort()
-    for nk in nestedKeys {
+    for (nk in nestedKeys) {
         var items = nested[nk]
         var nsum = 0
-        for item in items {
+        for (item in items) {
             nsum = nsum + item
         }
         print("${nk} sum: ${nsum}")

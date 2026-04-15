@@ -18,7 +18,7 @@ class Cart {
 
     pub fn total(): int {
         var sum = 0
-        for item in items {
+        for (item in items) {
             sum = sum + item.price
         }
         return sum

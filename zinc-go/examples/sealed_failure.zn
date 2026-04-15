@@ -7,14 +7,14 @@ sealed class Result {
 }
 
 fn divide(int a, int b): Result {
-    if b == 0 {
+    if (b == 0) {
         return Failure("division by zero")
     }
     return Ok(str(a / b))
 }
 
 fn describe(Result r): String {
-    match r {
+    match (r) {
         case Ok(value) {
             return "ok: " + value
         }
@@ -32,7 +32,7 @@ fn main() {
 
     // Type annotation with sealed interface
     Result r = Ok("hello")
-    match r {
+    match (r) {
         case Ok(v) {
             print("typed ok: ${v}")
         }

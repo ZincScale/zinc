@@ -4,7 +4,7 @@
 // `if bad { return }` shape into the `might_fail() or { return }` shape.
 
 fn parseSize(String s): int? {
-    if s == "zero" {
+    if (s == "zero") {
         return Error("zero not allowed")
     }
     return 42

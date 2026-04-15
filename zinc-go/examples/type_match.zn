@@ -8,12 +8,12 @@ class Animal {
 }
 
 fn describe(Object val): String {
-    match val {
+    match (val) {
         case String(s) { return "string: ${s}" }
         case int(n) { return "int: ${n}" }
         case float64(f) { return "float64: ${f}" }
         case bool(b) {
-            if b { return "bool: true" }
+            if (b) { return "bool: true" }
             return "bool: false"
         }
         case Animal(a) { return "animal: ${a.speak()}" }

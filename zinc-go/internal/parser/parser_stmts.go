@@ -74,7 +74,7 @@ func (p *Parser) v2ParseStmt() Stmt {
 		if tok.Literal == "assert" {
 			return p.v2ParseAssertStmt()
 		}
-		if tok.Literal == "lock" && p.peekAt(1).Type == lexer.TOKEN_IDENT {
+		if tok.Literal == "lock" && p.peekAt(1).Type == lexer.TOKEN_LPAREN {
 			return p.v2ParseLockStmt()
 		}
 		// Type name = expr → typed variable declaration without var keyword
@@ -352,7 +352,9 @@ func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
 func (p *Parser) v2ParseIfStmt() *IfStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_IF)
+	p.expect(lexer.TOKEN_LPAREN)
 	cond := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
 	then := p.v2ParseBlock()
 
 	var elseStmt Stmt
@@ -367,21 +369,23 @@ func (p *Parser) v2ParseIfStmt() *IfStmt {
 	return &IfStmt{Line: line, Cond: cond, Then: then, ElseStmt: elseStmt}
 }
 
-// v2ParseForStmt: for item in expr ... end  OR  for i, item in expr ... end
+// v2ParseForStmt: for (item in expr) ... end  OR  for (i, item in expr) ... end
 func (p *Parser) v2ParseForStmt() Stmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_FOR)
+	p.expect(lexer.TOKEN_LPAREN)
 
-	// for item in expr
+	// for (item in expr)
 	if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_IN {
 		item := p.advance().Literal
 		p.advance() // consume "in"
 		rangeExpr := p.v2ParseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
 		body := p.v2ParseBlock()
 		return &ForStmt{Line: line, IsRange: true, Item: item, Range: rangeExpr, Body: body}
 	}
 
-	// for i, item in expr
+	// for (i, item in expr)
 	if p.v2IsIdent() &&
 		p.peekAt(1).Type == lexer.TOKEN_COMMA &&
 		(p.peekAt(2).Type == lexer.TOKEN_IDENT || p.peekAt(2).Type == lexer.TOKEN_DATA) &&
@@ -391,30 +395,36 @@ func (p *Parser) v2ParseForStmt() Stmt {
 		item := p.advance().Literal
 		p.advance() // in
 		rangeExpr := p.v2ParseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
 		body := p.v2ParseBlock()
 		return &ForStmt{Line: line, IsRange: true, IndexVar: indexVar, Item: item, Range: rangeExpr, Body: body}
 	}
 
 	// while-style for (bare condition) — shouldn't happen in v2, but handle gracefully
 	cond := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
 	body := p.v2ParseBlock()
 	return &WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
-// v2ParseWhileStmt: while cond ... end
+// v2ParseWhileStmt: while (cond) ... end
 func (p *Parser) v2ParseWhileStmt() *WhileStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_WHILE)
+	p.expect(lexer.TOKEN_LPAREN)
 	cond := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
 	body := p.v2ParseBlock()
 	return &WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
-// v2ParseMatchStmt: match expr { case pat -> expr ... }
+// v2ParseMatchStmt: match (expr) { case pat -> expr ... }
 func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 	line := p.peek().Line
 	p.expect(lexer.TOKEN_MATCH)
+	p.expect(lexer.TOKEN_LPAREN)
 	subject := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_LBRACE)
 	var cases []*MatchCase
 	p.skipSemis()
@@ -474,11 +484,13 @@ func (p *Parser) v2ParseWithStmt() *WithStmt {
 	return &WithStmt{Line: line, Resources: resources, Body: body}
 }
 
-// v2ParseLockStmt: lock mu { body }
+// v2ParseLockStmt: lock (mu) { body }
 func (p *Parser) v2ParseLockStmt() Stmt {
 	line := p.peek().Line
 	p.advance() // consume "lock"
+	p.expect(lexer.TOKEN_LPAREN)
 	lockName := p.expect(lexer.TOKEN_IDENT).Literal
+	p.expect(lexer.TOKEN_RPAREN)
 	body := p.v2ParseBlock()
 	// Reuse WithStmt — single resource with the lock name
 	return &WithStmt{
@@ -532,6 +544,7 @@ func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	}
 
 	p.expect(lexer.TOKEN_FOR)
+	p.expect(lexer.TOKEN_LPAREN)
 
 	var item, indexVar string
 	if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_COMMA {
@@ -543,6 +556,7 @@ func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	}
 	p.expect(lexer.TOKEN_IN)
 	rangeExpr := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
 	body := p.v2ParseBlock()
 	handler := p.v2ParseErrHandler()
 	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body, OrHandler: handler, Max: maxConcurrency}

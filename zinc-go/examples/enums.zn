@@ -22,7 +22,7 @@ fn main() {
     print("direction: ${d}")
 
     // Match on enum
-    match c {
+    match (c) {
         case Red {
             print("red!")
         }

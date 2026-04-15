@@ -23,8 +23,8 @@ fn endpoint(String path): String {
 
 fn countIf(List<int> items, Predicate test): int {
     var count = 0
-    for item in items {
-        if test(item) {
+    for (item in items) {
+        if (test(item)) {
             count = count + 1
         }
     }

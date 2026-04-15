@@ -20,7 +20,7 @@ class Registry {
     pub fn total(): int {
         var sum = 0
         var keys = items.keys()
-        for k in keys {
+        for (k in keys) {
             sum = sum + items[k]
         }
         return sum
@@ -30,8 +30,8 @@ class Registry {
     pub fn maxValue(): int {
         var best = 0
         var vals = items.values()
-        for v in vals {
-            if v > best {
+        for (v in vals) {
+            if (v > best) {
                 best = v
             }
         }
@@ -46,7 +46,7 @@ test "Map<K,V>.keys() on a class field is typed []K, not []interface{}" {
     r.add("c", 3)
 
     var tot = r.total()
-    if tot != 6 {
+    if (tot != 6) {
         t.Errorf("total() = %v, want 6", tot)
     }
 }
@@ -58,7 +58,7 @@ test "Map<K,V>.values() on a class field is typed []V, not []interface{}" {
     r.add("z", 7)
 
     var m = r.maxValue()
-    if m != 42 {
+    if (m != 42) {
         t.Errorf("maxValue() = %v, want 42", m)
     }
 }
@@ -75,7 +75,7 @@ class Nested {
     init() {}
 
     pub fn set(String g, String k, int v) {
-        if !groups.containsKey(g) {
+        if (!groups.containsKey(g)) {
             groups[g] = Map<String, int>{}
         }
         groups[g][k] = v
@@ -84,7 +84,7 @@ class Nested {
     pub fn sumGroup(String g): int {
         var sub = groups[g]
         var total = 0
-        for k in sub.keys() {
+        for (k in sub.keys()) {
             total = total + sub[k]
         }
         return total
@@ -97,10 +97,10 @@ test "local var = field[key] inherits Map<K,V> type through index expression" {
     n.set("team-a", "bob", 20)
     n.set("team-b", "x", 100)
 
-    if n.sumGroup("team-a") != 30 {
+    if (n.sumGroup("team-a") != 30) {
         t.Errorf("sumGroup(team-a) = %v, want 30", n.sumGroup("team-a"))
     }
-    if n.sumGroup("team-b") != 100 {
+    if (n.sumGroup("team-b") != 100) {
         t.Errorf("sumGroup(team-b) = %v, want 100", n.sumGroup("team-b"))
     }
 }
@@ -115,7 +115,7 @@ class DirectNested {
     init() {}
 
     pub fn set(String g, String k, int v) {
-        if !groups.containsKey(g) {
+        if (!groups.containsKey(g)) {
             groups[g] = Map<String, int>{}
         }
         groups[g][k] = v
@@ -126,7 +126,7 @@ class DirectNested {
         // Receiver is IndexExpr (groups[g]), not a plain local. Without
         // the IndexExpr case in resolveReceiverGenericType, .keys() below
         // would return []interface{} and for-loop + indexing would fail.
-        for k in groups[g].keys() {
+        for (k in groups[g].keys()) {
             total = total + groups[g][k]
         }
         return total
@@ -139,10 +139,10 @@ test "field[key].keys() directly — no local var rebind needed" {
     n.set("A", "y", 6)
     n.set("B", "z", 100)
 
-    if n.sumDirect("A") != 11 {
+    if (n.sumDirect("A") != 11) {
         t.Errorf("sumDirect(A) = %v, want 11", n.sumDirect("A"))
     }
-    if n.sumDirect("B") != 100 {
+    if (n.sumDirect("B") != 100) {
         t.Errorf("sumDirect(B) = %v, want 100", n.sumDirect("B"))
     }
 }

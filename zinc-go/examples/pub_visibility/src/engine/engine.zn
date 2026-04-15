@@ -22,7 +22,7 @@ pub fn runProcessor(Processor proc, Item item): Item {
 
 // pub function that uses sealed class match
 pub fn applyAction(Action action): String {
-    match action {
+    match (action) {
         case Transform(item) {
             return formatItem(item)
         }

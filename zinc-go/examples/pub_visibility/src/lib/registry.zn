@@ -17,7 +17,7 @@ class Registry {
     // pub method calling non-pub method
     pub fn createAll() {
         var names = factories.keys()
-        for name in names {
+        for (name in names) {
             createItem(name)
         }
     }
