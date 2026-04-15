@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	codegen "zinc-go/internal/codegen_go"
@@ -234,6 +235,16 @@ func collectSubdirs(dir string) ([]string, error) {
 // compileDirWithSubpackages compiles a project with subpackage support.
 // Root .zn files → package main; each subdirectory → its own Go package.
 func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, importAliases ...map[string]string) error {
+	return compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName, quiet, nil, importAliases...)
+}
+
+// compileDirWithSubpackagesAndExtras is compileDirWithSubpackages plus an
+// optional `extraPkgs` map (subpackage name → absolute fs path) that the
+// caller wants compiled alongside the discovered src/ subpackages. Used
+// to bring in a sibling `tests/` directory during `zinc test` so test
+// files live separately from production source but still resolve project
+// imports (`import core`, etc.). Pass nil to behave like the wrapper.
+func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet bool, extraPkgs map[string]string, importAliases ...map[string]string) error {
 	goModDir := outDir // go.mod lives in outDir for module dep resolution
 	var subpkgCompileErrors []string
 	// 1. Discover subpackages (subdirectories of src/)
@@ -242,21 +253,30 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 		return err
 	}
 
+	// pkgFsDir maps subpackage name → fs directory. For src/ subpackages
+	// it's srcDir/<name>. extraPkgs entries override (or add) so callers
+	// can mount a sibling directory like `tests/` as a virtual subpackage.
+	pkgFsDir := make(map[string]string, len(subdirs)+len(extraPkgs))
 	subpackages := make(map[string]bool)
 	for _, d := range subdirs {
 		subpackages[d] = true
+		pkgFsDir[d] = filepath.Join(srcDir, d)
+	}
+	for name, dir := range extraPkgs {
+		subpackages[name] = true
+		pkgFsDir[name] = dir
 	}
 
 	// 2. Filter to only leaf packages (those with .zn files) and sort for dependency order
 	// Parent dirs without .zn files are just namespace containers.
 	var leafPkgs []string
-	for _, pkg := range subdirs {
-		pkgDir := filepath.Join(srcDir, pkg)
-		znFiles, _ := collectZnFilesFlat(pkgDir)
+	for pkg := range subpackages {
+		znFiles, _ := collectZnFilesFlat(pkgFsDir[pkg])
 		if len(znFiles) > 0 {
 			leafPkgs = append(leafPkgs, pkg)
 		}
 	}
+	sort.Strings(leafPkgs)
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
 	allExports := make(map[string]map[string]string)            // pkg → name → kind
@@ -266,7 +286,7 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 	allZnFiles := make(map[string][]string)                     // pkg → source file paths
 
 	for _, pkg := range leafPkgs {
-		pkgDir := filepath.Join(srcDir, pkg)
+		pkgDir := pkgFsDir[pkg]
 		znFiles, err := collectZnFilesFlat(pkgDir)
 		if err != nil {
 			return fmt.Errorf("collect files in %s: %w", pkgDir, err)

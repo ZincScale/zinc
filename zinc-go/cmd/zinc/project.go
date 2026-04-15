@@ -707,8 +707,20 @@ func testProject(projectDir string, goTestArgs []string) error {
 	if moduleName == "" {
 		moduleName = "zinc_project"
 	}
-	if len(subdirs) > 0 {
-		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, false, cfg.Imports); err != nil {
+
+	// Optional sibling `tests/` directory — convention for projects that
+	// keep test files separate from production source. The compiler
+	// treats it as if it were `src/tests/` so test files can import any
+	// of the project's subpackages by name. Production `zinc build` does
+	// not pass the extra dir, so the binary stays test-free.
+	var extraPkgs map[string]string
+	testsDir := filepath.Join(root, "tests")
+	if info, err := os.Stat(testsDir); err == nil && info.IsDir() {
+		extraPkgs = map[string]string{"tests": testsDir}
+	}
+
+	if len(subdirs) > 0 || len(extraPkgs) > 0 {
+		if err := compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName, false, extraPkgs, cfg.Imports); err != nil {
 			return err
 		}
 	} else {
