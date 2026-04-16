@@ -206,6 +206,45 @@ var s = Circle(5.0)
 print(s)    // Circle(radius=5)
 ```
 
+## Generics
+
+Both functions and classes can be generic:
+
+```zinc
+// Generic function
+T identity<T>(T x) {
+    return x
+}
+
+var n = identity<int>(42)
+var s = identity<String>("hi")
+
+// Generic class
+class Box<T> {
+    pub T value
+    init(T v) { this.value = v }
+    pub T get() { return value }
+}
+
+var b = Box<int>(7)
+print(b.get())      // 7
+
+// Multi-parameter generics
+class Pair<A, B> {
+    pub A first
+    pub B second
+    init(A a, B b) {
+        this.first = a
+        this.second = b
+    }
+}
+
+var p = Pair<String, int>("age", 30)
+print("${p.first}=${p.second}")    // age=30
+```
+
+Type parameters map directly to Go type parameters (`func identity[T any](x T) T`), so generic zinc code compiles to idiomatic generic Go.
+
 ## Function types & type aliases
 
 ```zinc
