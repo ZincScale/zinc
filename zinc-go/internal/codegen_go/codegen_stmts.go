@@ -1747,10 +1747,62 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 	}
 	g.writeln("if %s != nil {", errVar)
 	g.indent++
-	if handler.Body != nil {
+	if len(handler.MatchCases) > 0 {
+		g.emitOrMatch(errVar, handler)
+	} else if handler.Body != nil {
 		g.emitOrBlock(handler.Body)
 	}
 	g.indent--
+	g.writeln("}")
+	g.currentErrVar = savedErrVar
+}
+
+// emitOrMatch lowers `or match err { case T -> body ... }` to a Go
+// type switch. The zinc match variable (`handler.MatchVar`, default
+// `err`) is bound to the typed error inside each case, matching how a
+// Go dev would write `switch err := _err.(type) { case *T: ... }`.
+// An explicit wildcard (`case _`) becomes `default:`. If no wildcard
+// is present and no case re-throws, unmatched errors propagate via
+// `return zero, _err`; this forces the enclosing function to be a
+// thrower (handled by inference so the signature picks up (T, error)).
+func (g *Generator) emitOrMatch(errVar string, handler *parser.OrHandler) {
+	matchVar := handler.MatchVar
+	if matchVar == "" {
+		matchVar = "err"
+	}
+	savedErrVar := g.currentErrVar
+	g.currentErrVar = matchVar
+
+	hasWildcard := false
+	for _, c := range handler.MatchCases {
+		if c.Type == "" {
+			hasWildcard = true
+			break
+		}
+	}
+
+	g.writeln("switch %s := %s.(type) {", matchVar, errVar)
+	for _, c := range handler.MatchCases {
+		if c.Type == "" {
+			g.writeln("default:")
+		} else {
+			g.writeln("case *%s:", c.Type)
+		}
+		g.indent++
+		g.writeln("_ = %s", matchVar)
+		if c.Body != nil {
+			for _, s := range c.Body.Stmts {
+				g.emitStmt(s)
+			}
+		}
+		g.indent--
+	}
+	if !hasWildcard {
+		g.writeln("default:")
+		g.indent++
+		g.emitErrReturn(errVar)
+		g.indent--
+	}
 	g.writeln("}")
 	g.currentErrVar = savedErrVar
 }

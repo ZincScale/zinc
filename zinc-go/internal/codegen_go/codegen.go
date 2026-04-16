@@ -461,30 +461,24 @@ func stmtCanReturnError(s parser.Stmt) bool {
 		if exprContainsPropagate(stmt.Value) {
 			return true
 		}
-		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
-			if blockCanReturnError(stmt.OrHandler.Body) {
-				return true
-			}
+		if orHandlerCanReturnError(stmt.OrHandler) {
+			return true
 		}
 		return false
 	case *parser.ExprStmt:
 		if exprContainsPropagate(stmt.Expr) {
 			return true
 		}
-		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
-			if blockCanReturnError(stmt.OrHandler.Body) {
-				return true
-			}
+		if orHandlerCanReturnError(stmt.OrHandler) {
+			return true
 		}
 		return false
 	case *parser.AssignStmt:
 		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
 			return true
 		}
-		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
-			if blockCanReturnError(stmt.OrHandler.Body) {
-				return true
-			}
+		if orHandlerCanReturnError(stmt.OrHandler) {
+			return true
 		}
 		return false
 	case *parser.IfStmt:
@@ -535,6 +529,36 @@ func blockCanReturnError(block *parser.BlockStmt) bool {
 	}
 	for _, s := range block.Stmts {
 		if stmtCanReturnError(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// orHandlerCanReturnError reports whether an `or { }` / `or match { }`
+// handler causes the enclosing function to be a thrower. Two triggers:
+//
+//   - Any case/block body that itself throws (a `throw` or unhandled `?`).
+//   - An `or match` with no wildcard (`case _`) case — unmatched errors
+//     propagate via `return zero, err` in the generated type switch.
+func orHandlerCanReturnError(h *parser.OrHandler) bool {
+	if h == nil {
+		return false
+	}
+	if h.Body != nil && blockCanReturnError(h.Body) {
+		return true
+	}
+	if len(h.MatchCases) > 0 {
+		hasWildcard := false
+		for _, c := range h.MatchCases {
+			if c.Type == "" {
+				hasWildcard = true
+			}
+			if c.Body != nil && blockCanReturnError(c.Body) {
+				return true
+			}
+		}
+		if !hasWildcard {
 			return true
 		}
 	}

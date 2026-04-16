@@ -252,33 +252,33 @@ func (p *Parser) v2ParseTypedVarStmt() *VarStmt {
 }
 
 // v2ParseErrHandler previously accepted `or <default>` / `or { handler }` /
-// `or match err { ... }` on fallible expressions. The 2026-04-15
-// exception pivot removed this syntax: errors now flow through
-// try/catch/throw with auto-propagation at call sites. We still look
-// for a stray `or` so the compiler surfaces a clear migration error
-// instead of the cascade of parse failures a bare `or` would produce.
+// v2ParseErrHandler parses an optional trailing error handler on a
+// statement with a fallible RHS:
+//
+//	var x = call() or fallback            // short default expression
+//	var x = call() or { ... }             // block handler; `err` in scope
+//	var x = call() or match err { ... }   // typed-error dispatch
+//
+// Returns nil if no `or` follows. The block form can return/throw to
+// propagate, or compute a fallback value — the codegen lowers both to
+// `x, err := call(); if err != nil { <handler> }`.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
 	if !p.check(lexer.TOKEN_OR) {
 		return nil
 	}
-	tok := p.peek()
-	p.errorf("`or { }` / `or <default>` is removed — wrap the call in `try { } catch { }` or let the error auto-propagate (line %d)", tok.Line)
 	p.advance() // consume "or"
-	// Consume the handler so the rest of the file parses cleanly.
 	if p.check(lexer.TOKEN_MATCH) {
-		p.advance()
-		if p.check(lexer.TOKEN_IDENT) {
-			p.advance()
-		}
-		if p.check(lexer.TOKEN_LBRACE) {
-			p.v2ParseBlock()
-		}
-	} else if p.check(lexer.TOKEN_LBRACE) {
-		p.v2ParseBlock()
-	} else {
-		p.v2ParseExpr()
+		return p.v2ParseOrMatch()
 	}
-	return nil
+	if p.check(lexer.TOKEN_LBRACE) {
+		body := p.v2ParseBlock()
+		return &OrHandler{Body: body}
+	}
+	// Short form: `or <expr>` — fallback value if the call errors.
+	// Wrap as a single-statement block so codegen's short-default fast
+	// path in emitOrAssignment can recognise it.
+	expr := p.v2ParseExpr()
+	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
 }
 
 // v2ParseOrMatch: or match err { case Type -> body ... case _ -> body }
@@ -309,10 +309,15 @@ func (p *Parser) v2ParseOrMatch() *OrHandler {
 
 		p.expect(lexer.TOKEN_ARROW) // ->
 
-		// Parse body: either a single expression or a block
+		// Parse body: a brace-block, a bare control-flow statement
+		// (return / throw / break / continue), or a single expression.
 		var body *BlockStmt
 		if p.check(lexer.TOKEN_LBRACE) {
 			body = p.v2ParseBlock()
+		} else if p.check(lexer.TOKEN_RETURN) || p.check(lexer.TOKEN_THROW) ||
+			p.check(lexer.TOKEN_BREAK) || p.check(lexer.TOKEN_CONTINUE) {
+			stmt := p.v2ParseStmt()
+			body = &BlockStmt{Stmts: []Stmt{stmt}}
 		} else {
 			expr := p.v2ParseExpr()
 			body = &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}
