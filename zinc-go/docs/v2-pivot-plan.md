@@ -129,10 +129,25 @@ That's what a Go dev would write. Line-for-line.
 
 ### Language surface
 
-- **`throws` in function signature** (or similar marker): function returns
-  `(T, error)`. No marker → function returns `T` and cannot propagate.
-- **`?` postfix operator**: on a call expression inside a `throws` function,
-  unwraps the value or `return ..., err`s early. Composes naturally:
+- **No `throws` marker on concrete functions.** A function throws iff its
+  body contains a `throw` statement *or* a `?` postfix that isn't captured
+  by an enclosing `or { }`. The compiler infers this and emits the
+  appropriate Go signature (`(T, error)` vs `T`). No ceremony on the
+  signature — the body is the source of truth.
+- **`throws` survives only on bodyless declarations** — interface methods
+  and abstract methods. There's no body to infer from, so the author
+  declares the contract explicitly:
+  ```zinc
+  interface Parser {
+      int parse(String s) throws
+  }
+  ```
+  This is Java-flavoured but used as a bare marker only; we do *not* adopt
+  Java's typed `throws IOException, ParseException` contract. Listing
+  specific exception types is the checked-exceptions wart we're avoiding.
+- **`?` postfix operator**: on any call expression, unwraps the value or
+  `return ..., err`s early. Presence of `?` (outside an `or { }` handler)
+  promotes the enclosing function to throwing. Composes naturally:
   `var x = foo()?.bar()?` — two early returns, one line.
 - **`or { ... }` block**: already exists for error-only functions; generalise
   to value-returning functions. The block runs with `err` in scope and must
@@ -334,15 +349,20 @@ One construct, idiomatic output, no `defer` in the user's head.
 var x = 5
 String name = "Alice"
 
-// Functions
-int divide(int a, int b) throws {
+// Functions — no `throws` marker; inferred from body
+int divide(int a, int b) {
     if (b == 0) { throw DivisionException("div by zero") }
     return a / b
 }
 
-// Error propagation — `?`
-int doubled(int a, int b) throws {
+// Error propagation — `?`. Inferred as throwing because `?` is present.
+int doubled(int a, int b) {
     return divide(a, b)? * 2
+}
+
+// Bodyless declaration — `throws` is required here (nothing to infer).
+interface Parser {
+    int parse(String s) throws
 }
 
 // Error handling — `or { }` with err in scope
@@ -371,7 +391,10 @@ for (x in numbers) {
 ## Phasing
 
 **Phase A — Error pivot (breaking)**
-1. Add `throws` marker to function signatures; typecheck.
+1. Implement throwing-ness *inference* for concrete functions: scan body
+   for `throw` or a `?` not captured by `or { }`; emit `(T, error)` shape
+   accordingly. Require `throws` marker only on bodyless declarations
+   (interfaces, abstract methods).
 2. Implement `?` postfix; codegen to `if err != nil { return ..., err }`.
 3. Generalise `or { }` to value-returning calls; expose `err` in block scope.
 4. Add typed error matching (`or { err is T => ... }` or `match(err)`).
@@ -409,7 +432,8 @@ for (x in numbers) {
 
 ## Re-entry checklist
 
-- [ ] Design locked on `throws` keyword vs alternative (e.g. `!` suffix).
+- [ ] Throwing-ness inferred on concrete functions; `throws` required only
+      on bodyless declarations (interfaces, abstract methods).
 - [ ] Design locked on `or { }` expression vs statement form.
 - [ ] Design locked on typed-error matching surface.
 - [ ] `?` works on chained calls (`a()?.b()?`).
