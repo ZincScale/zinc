@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# zinc-java installer. End-to-end: a developer runs this script and
+# everything they need lands in $ZINC_PREFIX (default $HOME/.local):
+#
+#   $PREFIX/share/zinc/jdk/        — Temurin JDK 25 (if system JDK <25)
+#   $PREFIX/lib/zinc-java.jar      — the CLI dispatcher
+#   $PREFIX/lib/sbt-launch.jar     — sbt's bootstrap launcher
+#   $PREFIX/bin/zinc               — shell wrapper
+#
+# sbt itself is downloaded on first `zinc build`, automatically, by the
+# launcher — cached under ~/.sbt so subsequent builds are fast.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+PREFIX="${ZINC_PREFIX:-$HOME/.local}"
+LIB="$PREFIX/lib"
+BIN="$PREFIX/bin"
+SHARE="$PREFIX/share/zinc"
+JDK_DIR="$SHARE/jdk"
+
+# Pinned sbt-launch version. The launcher is version-agnostic — it reads
+# each project's project/build.properties to pick the sbt version to
+# fetch at build time. Bumping this number only matters for launcher
+# bugfixes.
+SBT_LAUNCH_VERSION="1.10.5"
+SBT_LAUNCH_URL="https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/${SBT_LAUNCH_VERSION}/sbt-launch-${SBT_LAUNCH_VERSION}.jar"
+
+JDK_FEATURE="25"
+# Oracle's official OpenJDK GA build. The SHA + build number are
+# stable per patch release; bump these three together when Oracle
+# publishes a new 25.0.x. Available builds are enumerated at
+# https://jdk.java.net/archive/.
+JDK_VERSION="25.0.2"
+JDK_SHA="b1e0dfa218384cb9959bdcb897162d4e"
+JDK_BUILD="10"
+
+mkdir -p "$LIB" "$BIN" "$SHARE"
+
+# --- JDK install (always Temurin, never Graal) --------------------------------
+
+# We explicitly don't trust the system JDK — on many boxes it's GraalVM
+# or an older release. zinc always runs under its own Temurin install so
+# behavior is identical regardless of what the user has on PATH.
+
+if [[ -x "$JDK_DIR/bin/java" ]]; then
+    echo "Oracle OpenJDK already installed at $JDK_DIR — skipping download."
+else
+    echo "Installing Oracle OpenJDK $JDK_VERSION (GPL build) into $JDK_DIR …"
+
+    # OS/arch → path segments in Oracle's GA URL pattern.
+    case "$(uname -s)" in
+        Linux)  os_path="linux" ;;
+        Darwin) os_path="macos" ;;
+        *) echo "error: unsupported OS $(uname -s); install JDK $JDK_FEATURE manually and re-run." >&2; exit 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64)  arch_path="x64" ;;
+        aarch64|arm64) arch_path="aarch64" ;;
+        *) echo "error: unsupported arch $(uname -m); install JDK $JDK_FEATURE manually and re-run." >&2; exit 1 ;;
+    esac
+
+    jdk_url="https://download.java.net/java/GA/jdk${JDK_VERSION}/${JDK_SHA}/${JDK_BUILD}/GPL/openjdk-${JDK_VERSION}_${os_path}-${arch_path}_bin.tar.gz"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL --progress-bar -o "$tmp/jdk.tar.gz" "$jdk_url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --show-progress -O "$tmp/jdk.tar.gz" "$jdk_url"
+    else
+        echo "error: neither curl nor wget found; cannot download JDK." >&2
+        exit 1
+    fi
+
+    rm -rf "$JDK_DIR"
+    mkdir -p "$JDK_DIR"
+    # Oracle OpenJDK tarballs contain a single top-level dir like jdk-25.0.2
+    tar -xzf "$tmp/jdk.tar.gz" -C "$JDK_DIR" --strip-components=1
+    # On macOS the tarball nests the JDK inside Contents/Home — flatten.
+    if [[ -d "$JDK_DIR/Contents/Home" ]]; then
+        mv "$JDK_DIR/Contents/Home"/* "$JDK_DIR/"
+        rm -rf "$JDK_DIR/Contents"
+    fi
+
+    echo "Installed Oracle OpenJDK $JDK_VERSION at $JDK_DIR"
+fi
+
+JAVA_BIN="$JDK_DIR/bin/java"
+JAVAC_BIN="$JDK_DIR/bin/javac"
+JAR_BIN="$JDK_DIR/bin/jar"
+JAVA_HOME_VAL="$JDK_DIR"
+
+# --- Build zinc-java.jar ------------------------------------------------------
+
+# Build zinc-java.jar with the resolved javac/jar (managed or system).
+echo "Building zinc-java.jar …"
+rm -rf out
+mkdir -p out/classes
+"$JAVAC_BIN" --release "$JDK_FEATURE" -d out/classes $(find src/main/java -name '*.java')
+( cd out/classes && "$JAR_BIN" --create --file ../zinc-java.jar --main-class zinc.Zinc . )
+
+cp out/zinc-java.jar "$LIB/zinc-java.jar"
+
+# --- Fetch sbt-launch.jar -----------------------------------------------------
+
+if [[ ! -f "$LIB/sbt-launch.jar" ]]; then
+    echo "Fetching sbt-launch-${SBT_LAUNCH_VERSION}.jar …"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL --progress-bar -o "$LIB/sbt-launch.jar" "$SBT_LAUNCH_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --show-progress -O "$LIB/sbt-launch.jar" "$SBT_LAUNCH_URL"
+    else
+        echo "error: neither curl nor wget found; cannot fetch sbt-launch.jar" >&2
+        exit 1
+    fi
+else
+    echo "sbt-launch.jar already present — skipping fetch."
+fi
+
+# --- Install zinc wrapper -----------------------------------------------------
+
+# Generate the launcher with the resolved JAVA_HOME baked in, so zinc
+# uses the managed JDK even if the user's PATH changes later.
+cat > "$BIN/zinc" <<EOF
+#!/usr/bin/env bash
+# zinc launcher — auto-generated by install.sh.
+set -euo pipefail
+
+ZINC_JAR="\${ZINC_JAR:-$LIB/zinc-java.jar}"
+ZINC_SBT_LAUNCH="\${ZINC_SBT_LAUNCH:-$LIB/sbt-launch.jar}"
+EOF
+
+if [[ -n "$JAVA_HOME_VAL" ]]; then
+    cat >> "$BIN/zinc" <<EOF
+ZINC_JAVA_HOME="\${ZINC_JAVA_HOME:-$JAVA_HOME_VAL}"
+export JAVA_HOME="\$ZINC_JAVA_HOME"
+export PATH="\$ZINC_JAVA_HOME/bin:\$PATH"
+EOF
+fi
+
+cat >> "$BIN/zinc" <<'EOF'
+if [[ ! -f "$ZINC_JAR" ]]; then
+    echo "zinc: jar not found at $ZINC_JAR — re-run install.sh" >&2
+    exit 1
+fi
+exec java -Dzinc.sbtLaunch="$ZINC_SBT_LAUNCH" -jar "$ZINC_JAR" "$@"
+EOF
+
+chmod +x "$BIN/zinc"
+
+# --- Summary ------------------------------------------------------------------
+
+echo
+echo "Installed:"
+echo "  $JDK_DIR           (Oracle OpenJDK $JDK_VERSION)"
+echo "  $LIB/zinc-java.jar"
+echo "  $LIB/sbt-launch.jar"
+echo "  $BIN/zinc"
+echo
+if ! command -v zinc >/dev/null 2>&1; then
+    echo "Add $BIN to your PATH to use \`zinc\` directly:"
+    echo "  export PATH=\"$BIN:\$PATH\""
+fi
+echo
+echo "Try it:"
+echo "  zinc init hello && cd hello && zinc build && zinc run"
