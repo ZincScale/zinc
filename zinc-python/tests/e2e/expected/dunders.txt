@@ -1,6 +1,0 @@
-Point(1, 2)
-True
-False
-1
-2
-origin
