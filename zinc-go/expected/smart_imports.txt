@@ -1,3 +1,0 @@
-upper: HELLO
-count: 3
-Smart imports OK

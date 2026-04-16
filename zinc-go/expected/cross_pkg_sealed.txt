@@ -1,8 +1,0 @@
-circle area: 78.53975
-rect area: 12
-triangle area: 9
-circle with radius 5
-rect 3x4
-0xFF << 4 = 4080
-long(bits) = 4080
-cross_pkg_sealed OK

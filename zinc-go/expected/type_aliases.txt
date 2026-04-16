@@ -1,5 +1,0 @@
-apply doubled: 10
-wrapped: /api
-200 OK: /api
-evens: 4
-Type Aliases OK

@@ -1,6 +1,0 @@
-greeting: hello
-name: zinc
-alice=95 bob=87
-upper: 42
-server: localhost:8080
-direct port: 8080

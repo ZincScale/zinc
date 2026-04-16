@@ -1,8 +1,0 @@
-[project]
-name = "pub_visibility"
-version = "0.1.0"
-main = "main.zn"
-
-[go]
-version = "1.26"
-deps = []

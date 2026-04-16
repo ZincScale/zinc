@@ -1,8 +1,0 @@
-// Placeholder main so `zinc build` / `zinc test` have an entry point.
-// The real interest is in field_shadows_test.zn sibling.
-
-import helpers
-
-void main() {
-    print(helpers.greet("world"))
-}

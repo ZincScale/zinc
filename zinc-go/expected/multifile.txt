@@ -1,8 +1,0 @@
-Hello, Alice!
-Hello, Bob!
-Alice (age 30)
-Bob (age 15)
-Alice adult: true
-Bob adult: false
-Widget: $9.99
-Multi-file OK
