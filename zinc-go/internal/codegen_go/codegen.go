@@ -432,7 +432,9 @@ func canReturnError(body *parser.BlockStmt) bool {
 func stmtCanReturnError(s parser.Stmt) bool {
 	switch stmt := s.(type) {
 	case *parser.ReturnStmt:
-		_ = stmt
+		if exprContainsPropagate(stmt.Value) {
+			return true
+		}
 		return false
 	case *parser.ThrowStmt:
 		return true
@@ -456,6 +458,9 @@ func stmtCanReturnError(s parser.Stmt) bool {
 		}
 		return false
 	case *parser.VarStmt:
+		if exprContainsPropagate(stmt.Value) {
+			return true
+		}
 		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
 			if blockCanReturnError(stmt.OrHandler.Body) {
 				return true
@@ -463,6 +468,9 @@ func stmtCanReturnError(s parser.Stmt) bool {
 		}
 		return false
 	case *parser.ExprStmt:
+		if exprContainsPropagate(stmt.Expr) {
+			return true
+		}
 		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
 			if blockCanReturnError(stmt.OrHandler.Body) {
 				return true
@@ -470,6 +478,9 @@ func stmtCanReturnError(s parser.Stmt) bool {
 		}
 		return false
 	case *parser.AssignStmt:
+		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
+			return true
+		}
 		if stmt.OrHandler != nil && stmt.OrHandler.Body != nil {
 			if blockCanReturnError(stmt.OrHandler.Body) {
 				return true
@@ -528,6 +539,81 @@ func blockCanReturnError(block *parser.BlockStmt) bool {
 		}
 	}
 	return false
+}
+
+// exprContainsPropagate reports whether an expression tree contains a
+// PropagateExpr (postfix `?`). Used by inference — any `?` in a function
+// body promotes that function to a thrower. Lambdas are a separate scope,
+// so we do *not* descend into LambdaExpr bodies.
+func exprContainsPropagate(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch expr := e.(type) {
+	case *parser.PropagateExpr:
+		return true
+	case *parser.CallExpr:
+		if exprContainsPropagate(expr.Callee) {
+			return true
+		}
+		for _, a := range expr.Args {
+			if exprContainsPropagate(a) {
+				return true
+			}
+		}
+		for _, na := range expr.NamedArgs {
+			if exprContainsPropagate(na.Value) {
+				return true
+			}
+		}
+		return false
+	case *parser.BinaryExpr:
+		return exprContainsPropagate(expr.Left) || exprContainsPropagate(expr.Right)
+	case *parser.UnaryExpr:
+		return exprContainsPropagate(expr.Operand)
+	case *parser.SelectorExpr:
+		return exprContainsPropagate(expr.Object)
+	case *parser.SafeNavExpr:
+		if exprContainsPropagate(expr.Object) {
+			return true
+		}
+		if expr.Call != nil {
+			for _, a := range expr.Call.Args {
+				if exprContainsPropagate(a) {
+					return true
+				}
+			}
+		}
+		return false
+	case *parser.IndexExpr:
+		return exprContainsPropagate(expr.Object) || exprContainsPropagate(expr.Index)
+	case *parser.SliceExpr:
+		return exprContainsPropagate(expr.Object) || exprContainsPropagate(expr.Low) || exprContainsPropagate(expr.High)
+	case *parser.TypeAssertExpr:
+		return exprContainsPropagate(expr.Object)
+	case *parser.SpreadExpr:
+		return exprContainsPropagate(expr.Expr)
+	case *parser.RangeExpr:
+		return exprContainsPropagate(expr.Start) || exprContainsPropagate(expr.End)
+	case *parser.IfExpr:
+		return exprContainsPropagate(expr.Cond) || exprContainsPropagate(expr.Then) || exprContainsPropagate(expr.Else)
+	case *parser.MatchExpr:
+		if exprContainsPropagate(expr.Subject) {
+			return true
+		}
+		for _, c := range expr.Cases {
+			if exprContainsPropagate(c.Value) {
+				return true
+			}
+		}
+		return false
+	case *parser.LambdaExpr:
+		// Separate scope — `?` inside a lambda makes *the lambda* a
+		// thrower, not the enclosing function. Don't descend.
+		return false
+	default:
+		return false
+	}
 }
 
 // --- Code generation entry points --------------------------------------------

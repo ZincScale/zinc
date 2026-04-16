@@ -156,6 +156,24 @@ func (g *Generator) inferSliceElemType(expr parser.Expr) string {
 // --- Variable declarations ---------------------------------------------------
 
 func (g *Generator) emitVarStmt(v *parser.VarStmt) {
+	// Explicit error propagation: `var x = call()?`.
+	// Strip the PropagateExpr wrapper and fall through to the same
+	// propagation codegen the implicit path uses.
+	if prop, ok := v.Value.(*parser.PropagateExpr); ok {
+		stripped := *v
+		stripped.Value = prop.Inner
+		g.emitErrorPropagatingVar(&stripped)
+		return
+	}
+	// Nested propagation: `var x = foo(bar()?) + 1`. Hoist each `?` to a
+	// temp above this statement, then emit the var with the rewritten RHS.
+	if v.Value != nil && exprContainsPropagate(v.Value) {
+		rewritten := *v
+		rewritten.Value = g.hoistPropagates(v.Value)
+		g.emitVarStmt(&rewritten)
+		return
+	}
+
 	// Exception pivot: `var x = call(...)` where call() is a Zinc function
 	// that throws (or transitively calls a thrower) auto-propagates the
 	// error. Inside a try body this returns from the IIFE; otherwise it
@@ -429,6 +447,19 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		g.emitOrAssignment(targetStr, a.Value, a.OrHandler)
 		return
 	}
+	// Explicit error propagation: `x = call()?`.
+	// Strip the wrapper and fall through to the existing propagation path.
+	if prop, ok := a.Value.(*parser.PropagateExpr); ok && a.Op == "=" {
+		stripped := &parser.AssignStmt{Line: a.Line, Target: a.Target, Op: a.Op, Value: prop.Inner}
+		g.emitAssignStmt(stripped)
+		return
+	}
+	// Nested propagation on RHS: `x = foo(bar()?) + 1`. Hoist, then emit.
+	if a.Value != nil && exprContainsPropagate(a.Value) {
+		rewritten := &parser.AssignStmt{Line: a.Line, Target: a.Target, Op: a.Op, Value: g.hoistPropagates(a.Value)}
+		g.emitAssignStmt(rewritten)
+		return
+	}
 	// Auto-propagate error from `x = call()` where call() throws. Only
 	// simple `=` assignment with a (T, error)-returning call; compound
 	// ops (`+=` etc.) don't apply to thrower calls in practice. Use a
@@ -451,6 +482,17 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
+	// Explicit error propagation: any `?` in the returned expression.
+	// hoistPropagates emits `_pN, errM := inner; if errM != nil { return zero, errM }`
+	// for each `?`, then returns a rewritten value expression that
+	// references the temps. Top-level `return call()?` and nested
+	// `return call()? * 3` both go through this path.
+	if r.Value != nil && exprContainsPropagate(r.Value) {
+		rewritten := &parser.ReturnStmt{Line: r.Line, Value: g.hoistPropagates(r.Value)}
+		g.emitReturnStmt(rewritten)
+		return
+	}
+
 	// Inside a try IIFE that uses the 3-tuple shape: user `return X`
 	// must escape the IIFE with the return flag set, so the outer
 	// function returns X afterwards. Bare `return` sets the flag with
@@ -1012,6 +1054,20 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		g.emitOrAssignment("_", es.Expr, es.OrHandler)
 		return
 	}
+	// Explicit error propagation: `call()?` as a bare statement.
+	// Strip the wrapper and reuse the existing propagation path.
+	if prop, ok := es.Expr.(*parser.PropagateExpr); ok {
+		stripped := &parser.ExprStmt{Line: es.Line, Expr: prop.Inner}
+		g.emitExprStmt(stripped)
+		return
+	}
+	// Nested `?` inside an expression statement: e.g. `foo(bar()?)` as a
+	// bare statement. Hoist the `?`s, then emit the rewritten statement.
+	if exprContainsPropagate(es.Expr) {
+		rewritten := &parser.ExprStmt{Line: es.Line, Expr: g.hoistPropagates(es.Expr)}
+		g.emitExprStmt(rewritten)
+		return
+	}
 	// Auto-propagate error from a bare `call()` statement where call()
 	// throws. Shape depends on return arity: void thrower → `err := call()`,
 	// (T, error) thrower → `_, err := call()`.
@@ -1531,6 +1587,89 @@ func (g *Generator) nextErrName() string {
 	g.errVarCount++
 	return name
 }
+
+// hoistPropagates walks an expression tree, emits the hoist for every
+// PropagateExpr it contains (`_pN, errM := inner; if errM != nil { ... }`),
+// and returns a rewritten expression with PropagateExprs replaced by
+// Idents pointing at the temps. Used by statement emitters so that
+// nested `?` usage (e.g. `foo(bar()?) + 1` or `return call()? * 3`)
+// lowers to idiomatic Go. LambdaExpr is a separate scope and is not
+// descended into — a `?` inside a lambda is the lambda's own concern.
+func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
+	if e == nil {
+		return nil
+	}
+	switch expr := e.(type) {
+	case *parser.PropagateExpr:
+		inner := g.hoistPropagates(expr.Inner)
+		tmpName := fmt.Sprintf("_p%d", g.errVarCount)
+		errName := g.nextErrName()
+		g.writeln("%s, %s := %s", tmpName, errName, g.formatExpr(inner))
+		g.writeln("if %s != nil {", errName)
+		g.indent++
+		g.emitErrReturn(errName)
+		g.indent--
+		g.writeln("}")
+		return &parser.Ident{Name: tmpName}
+	case *parser.BinaryExpr:
+		return &parser.BinaryExpr{
+			Op:    expr.Op,
+			Left:  g.hoistPropagates(expr.Left),
+			Right: g.hoistPropagates(expr.Right),
+		}
+	case *parser.UnaryExpr:
+		return &parser.UnaryExpr{Op: expr.Op, Operand: g.hoistPropagates(expr.Operand)}
+	case *parser.CallExpr:
+		newCall := *expr
+		newCall.Callee = g.hoistPropagates(expr.Callee)
+		if len(expr.Args) > 0 {
+			newArgs := make([]parser.Expr, len(expr.Args))
+			for i, a := range expr.Args {
+				newArgs[i] = g.hoistPropagates(a)
+			}
+			newCall.Args = newArgs
+		}
+		if len(expr.NamedArgs) > 0 {
+			newNamed := make([]parser.NamedArg, len(expr.NamedArgs))
+			for i, na := range expr.NamedArgs {
+				newNamed[i] = parser.NamedArg{Name: na.Name, Value: g.hoistPropagates(na.Value)}
+			}
+			newCall.NamedArgs = newNamed
+		}
+		return &newCall
+	case *parser.SelectorExpr:
+		return &parser.SelectorExpr{Object: g.hoistPropagates(expr.Object), Field: expr.Field}
+	case *parser.IndexExpr:
+		return &parser.IndexExpr{Object: g.hoistPropagates(expr.Object), Index: g.hoistPropagates(expr.Index)}
+	case *parser.SafeNavExpr:
+		out := &parser.SafeNavExpr{Object: g.hoistPropagates(expr.Object), Field: expr.Field}
+		if expr.Call != nil {
+			call := *expr.Call
+			if len(expr.Call.Args) > 0 {
+				newArgs := make([]parser.Expr, len(expr.Call.Args))
+				for i, a := range expr.Call.Args {
+					newArgs[i] = g.hoistPropagates(a)
+				}
+				call.Args = newArgs
+			}
+			out.Call = &call
+		}
+		return out
+	case *parser.TypeAssertExpr:
+		return &parser.TypeAssertExpr{Object: g.hoistPropagates(expr.Object), TypeName: expr.TypeName, IsCheck: expr.IsCheck}
+	case *parser.SpreadExpr:
+		return &parser.SpreadExpr{Expr: g.hoistPropagates(expr.Expr)}
+	case *parser.RangeExpr:
+		return &parser.RangeExpr{Start: g.hoistPropagates(expr.Start), End: g.hoistPropagates(expr.End), Inclusive: expr.Inclusive}
+	case *parser.LambdaExpr:
+		// Separate scope — don't descend. Any `?` inside the lambda body
+		// is the lambda's own codegen concern.
+		return expr
+	default:
+		return e
+	}
+}
+
 
 // emitErrorPropagatingVar emits `var x = call()` where call() throws:
 //
