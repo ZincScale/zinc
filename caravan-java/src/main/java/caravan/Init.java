@@ -1,10 +1,10 @@
-package zinc;
+package caravan;
 
 import java.io.IOException;
 import java.nio.file.*;
 
-/// `zinc init [name]` — scaffolds a minimal Java project that builds and
-/// runs with `zinc build` / `zinc run` out of the box. The generated
+/// `caravan init [name]` — scaffolds a minimal Java project that builds and
+/// runs with `caravan build` / `caravan run` out of the box. The generated
 /// project targets JDK 25, uses sbt 2.0, and has JUnit 5 wired up. Other
 /// libraries (Javalin, Jackson, etc.) are additive — users paste
 /// libraryDependencies lines into build.sbt as they need them.
@@ -62,9 +62,9 @@ final class Init {
         if (!dir.equals(Path.of(".").toAbsolutePath().normalize())) {
             System.out.println("  cd " + args[0]);
         }
-        System.out.println("  zinc build   # compile + assemble");
-        System.out.println("  zinc run     # execute");
-        System.out.println("  zinc test    # run tests");
+        System.out.println("  caravan build   # compile + assemble");
+        System.out.println("  caravan run     # execute");
+        System.out.println("  caravan test    # run tests");
         return 0;
     }
 
@@ -115,7 +115,7 @@ final class Init {
 
     private static String pluginsSbt() {
         return ("""
-                // sbt-assembly produces a fat jar on `zinc build` (sbt assembly).
+                // sbt-assembly produces a fat jar on `caravan build` (sbt assembly).
                 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "__ASM__")
 
                 // sbt-jupiter-interface provides `JupiterKeys.jupiterVersion.value`
@@ -141,11 +141,11 @@ final class Init {
 
     private static String readme(String name) {
         return "# " + name + "\n\n"
-                + "Built with [zinc-java](https://github.com/ZincScale/zinc/tree/master/zinc-java).\n\n"
+                + "Built with [caravan-java](https://github.com/CaravanScale/caravan/tree/master/caravan-java).\n\n"
                 + "```bash\n"
-                + "zinc build   # compile + assemble\n"
-                + "zinc run     # execute\n"
-                + "zinc test    # run tests\n"
+                + "caravan build   # compile + assemble\n"
+                + "caravan run     # execute\n"
+                + "caravan test    # run tests\n"
                 + "```\n";
     }
 
@@ -153,7 +153,7 @@ final class Init {
         return "package " + pkg + ";\n\n"
                 + "public final class Main {\n"
                 + "    public static void main(String[] args) {\n"
-                + "        System.out.println(\"Hello from zinc-java on JDK \" + Runtime.version() + \"!\");\n"
+                + "        System.out.println(\"Hello from caravan-java on JDK \" + Runtime.version() + \"!\");\n"
                 + "    }\n"
                 + "}\n";
     }

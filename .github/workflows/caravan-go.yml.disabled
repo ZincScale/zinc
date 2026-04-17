@@ -1,16 +1,16 @@
-name: zinc-go
+name: caravan-go
 
 on:
   push:
     paths:
-      - 'zinc-go/**'
+      - 'caravan-go/**'
   pull_request:
     paths:
-      - 'zinc-go/**'
+      - 'caravan-go/**'
 
 defaults:
   run:
-    working-directory: zinc-go
+    working-directory: caravan-go
 
 jobs:
   test:
@@ -23,18 +23,18 @@ jobs:
           go-version: '1.26'
 
       - name: Build compiler
-        run: go build ./cmd/zinc/
+        run: go build ./cmd/caravan/
 
       - name: Run e2e tests
         run: bash run_e2e.sh
 
       - name: Test project lifecycle
         run: |
-          go build -o /tmp/zinc ./cmd/zinc/
-          /tmp/zinc init /tmp/testproject
+          go build -o /tmp/caravan ./cmd/caravan/
+          /tmp/caravan init /tmp/testproject
           cd /tmp/testproject
-          /tmp/zinc build
-          ./zinc-out/testproject | grep -q "Hello from testproject"
+          /tmp/caravan build
+          ./caravan-out/testproject | grep -q "Hello from testproject"
           echo "Project lifecycle OK"
 
   release:
@@ -56,6 +56,6 @@ jobs:
         with:
           version: latest
           args: release --clean
-          workdir: zinc-go
+          workdir: caravan-go
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

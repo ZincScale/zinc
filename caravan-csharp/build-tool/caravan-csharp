@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# zinc-csharp — C# build tool for Zinc projects
-# Reads zinc.toml, generates .csproj, delegates to dotnet.
+# caravan-csharp — C# build tool for Caravan projects
+# Reads caravan.toml, generates .csproj, delegates to dotnet.
 # Produces Native AOT binaries by default.
 #
 # Usage:
-#   zinc-csharp build          Native AOT build (default)
-#   zinc-csharp build --jit    JIT build only (fast iteration)
-#   zinc-csharp run            Build AOT + run
-#   zinc-csharp run --jit      JIT run (faster build, slower runtime)
-#   zinc-csharp test           Run tests (JIT, separate from production binary)
-#   zinc-csharp test --aot     Publish tests as AOT binary, then run
-#   zinc-csharp clean          Remove build artifacts
-#   zinc-csharp csproj         Regenerate .csproj from zinc.toml
+#   caravan-csharp build          Native AOT build (default)
+#   caravan-csharp build --jit    JIT build only (fast iteration)
+#   caravan-csharp run            Build AOT + run
+#   caravan-csharp run --jit      JIT run (faster build, slower runtime)
+#   caravan-csharp test           Run tests (JIT, separate from production binary)
+#   caravan-csharp test --aot     Publish tests as AOT binary, then run
+#   caravan-csharp clean          Remove build artifacts
+#   caravan-csharp csproj         Regenerate .csproj from caravan.toml
 
 set -euo pipefail
 
@@ -53,12 +53,12 @@ ensure_dotnet() {
 
 ensure_dotnet
 
-# --- Locate project root (walk up until zinc.toml found) ---
+# --- Locate project root (walk up until caravan.toml found) ---
 
 find_project_root() {
     local dir="$PWD"
     while [[ "$dir" != "/" ]]; do
-        [[ -f "$dir/zinc.toml" ]] && echo "$dir" && return
+        [[ -f "$dir/caravan.toml" ]] && echo "$dir" && return
         dir="$(dirname "$dir")"
     done
     echo ""
@@ -66,13 +66,13 @@ find_project_root() {
 
 PROJECT_ROOT="$(find_project_root)"
 if [[ -z "$PROJECT_ROOT" ]]; then
-    echo "Error: zinc.toml not found (searched from $PWD to /)" >&2
+    echo "Error: caravan.toml not found (searched from $PWD to /)" >&2
     exit 1
 fi
 
-ZINC_TOML="$PROJECT_ROOT/zinc.toml"
+CARAVAN_TOML="$PROJECT_ROOT/caravan.toml"
 
-# --- TOML parser (minimal, handles zinc.toml structure) ---
+# --- TOML parser (minimal, handles caravan.toml structure) ---
 
 toml_get() {
     local file="$1" section="$2" key="$3" default="${4:-}"
@@ -103,9 +103,9 @@ toml_bool() {
 
 # --- Read project name and derive paths ---
 
-PROJECT_NAME="$(toml_get "$ZINC_TOML" "project" "name" "App")"
-# Source dir: zinc.toml can specify source_dir, defaults to project name
-SOURCE_DIR="$(toml_get "$ZINC_TOML" "project" "source_dir" "$PROJECT_NAME")"
+PROJECT_NAME="$(toml_get "$CARAVAN_TOML" "project" "name" "App")"
+# Source dir: caravan.toml can specify source_dir, defaults to project name
+SOURCE_DIR="$(toml_get "$CARAVAN_TOML" "project" "source_dir" "$PROJECT_NAME")"
 PROJECT_DIR="$PROJECT_ROOT/$SOURCE_DIR"
 CSPROJ="$PROJECT_DIR/$PROJECT_NAME.csproj"
 BUILD_DIR="$PROJECT_ROOT/build"
@@ -117,23 +117,23 @@ generate_csproj() {
     local framework lang_version nullable implicit_usings unsafe
     local server_gc aot strip invariant opt stack_traces trim_metadata
 
-    framework="$(toml_get "$ZINC_TOML" "csharp" "framework" "net10.0")"
-    lang_version="$(toml_get "$ZINC_TOML" "csharp" "lang_version" "latest")"
-    nullable="$(toml_bool "$ZINC_TOML" "csharp" "nullable" "true")"
-    implicit_usings="$(toml_bool "$ZINC_TOML" "csharp" "implicit_usings" "true")"
-    unsafe="$(toml_bool "$ZINC_TOML" "csharp" "unsafe" "false")"
+    framework="$(toml_get "$CARAVAN_TOML" "csharp" "framework" "net10.0")"
+    lang_version="$(toml_get "$CARAVAN_TOML" "csharp" "lang_version" "latest")"
+    nullable="$(toml_bool "$CARAVAN_TOML" "csharp" "nullable" "true")"
+    implicit_usings="$(toml_bool "$CARAVAN_TOML" "csharp" "implicit_usings" "true")"
+    unsafe="$(toml_bool "$CARAVAN_TOML" "csharp" "unsafe" "false")"
 
-    server_gc="$(toml_bool "$ZINC_TOML" "csharp.gc" "server" "true")"
+    server_gc="$(toml_bool "$CARAVAN_TOML" "csharp.gc" "server" "true")"
 
-    aot="$(toml_bool "$ZINC_TOML" "csharp.aot" "enabled" "false")"
-    strip="$(toml_bool "$ZINC_TOML" "csharp.aot" "strip_symbols" "true")"
-    invariant="$(toml_bool "$ZINC_TOML" "csharp.aot" "invariant_globalization" "true")"
-    opt="$(toml_get "$ZINC_TOML" "csharp.aot" "optimization" "Size")"
-    stack_traces="$(toml_bool "$ZINC_TOML" "csharp.aot" "stack_traces" "false")"
-    trim_metadata="$(toml_bool "$ZINC_TOML" "csharp.aot" "trim_metadata" "true")"
+    aot="$(toml_bool "$CARAVAN_TOML" "csharp.aot" "enabled" "false")"
+    strip="$(toml_bool "$CARAVAN_TOML" "csharp.aot" "strip_symbols" "true")"
+    invariant="$(toml_bool "$CARAVAN_TOML" "csharp.aot" "invariant_globalization" "true")"
+    opt="$(toml_get "$CARAVAN_TOML" "csharp.aot" "optimization" "Size")"
+    stack_traces="$(toml_bool "$CARAVAN_TOML" "csharp.aot" "stack_traces" "false")"
+    trim_metadata="$(toml_bool "$CARAVAN_TOML" "csharp.aot" "trim_metadata" "true")"
 
     local sdk
-    sdk="$(toml_get "$ZINC_TOML" "project" "sdk" "Microsoft.NET.Sdk")"
+    sdk="$(toml_get "$CARAVAN_TOML" "project" "sdk" "Microsoft.NET.Sdk")"
 
     mkdir -p "$PROJECT_DIR"
 
@@ -171,7 +171,7 @@ AOT_EOF
 
     # NuGet packages
     local packages
-    packages="$(toml_get "$ZINC_TOML" "csharp.nuget" "packages" "")"
+    packages="$(toml_get "$CARAVAN_TOML" "csharp.nuget" "packages" "")"
     packages="${packages#[}" ; packages="${packages%]}"
     if [[ -n "$packages" ]]; then
         echo "  <ItemGroup>" >> "$CSPROJ"
@@ -188,7 +188,7 @@ AOT_EOF
 
     # Project references
     local projects
-    projects="$(toml_get "$ZINC_TOML" "csharp.references" "projects" "")"
+    projects="$(toml_get "$CARAVAN_TOML" "csharp.references" "projects" "")"
     projects="${projects#[}" ; projects="${projects%]}"
     if [[ -n "$projects" ]]; then
         echo "  <ItemGroup>" >> "$CSPROJ"
@@ -220,7 +220,7 @@ detect_rid() {
 
 cmd_csproj() {
     generate_csproj
-    echo "Generated $CSPROJ from zinc.toml"
+    echo "Generated $CSPROJ from caravan.toml"
 }
 
 cmd_build() {
@@ -257,11 +257,11 @@ cmd_run() {
 }
 
 cmd_test() {
-    # Tests are a separate project in tests/zinc.toml
+    # Tests are a separate project in tests/caravan.toml
     local test_dir="$PROJECT_ROOT/tests"
-    local test_toml="$test_dir/zinc.toml"
+    local test_toml="$test_dir/caravan.toml"
     if [[ ! -f "$test_toml" ]]; then
-        echo "Error: no tests/zinc.toml found" >&2
+        echo "Error: no tests/caravan.toml found" >&2
         exit 1
     fi
 
@@ -276,13 +276,13 @@ cmd_test() {
     t_csproj="$t_project_dir/$t_name.csproj"
 
     # Save and swap globals for csproj generation
-    local save_toml="$ZINC_TOML" save_dir="$PROJECT_DIR" save_csproj="$CSPROJ" save_name="$PROJECT_NAME"
-    ZINC_TOML="$test_toml"
+    local save_toml="$CARAVAN_TOML" save_dir="$PROJECT_DIR" save_csproj="$CSPROJ" save_name="$PROJECT_NAME"
+    CARAVAN_TOML="$test_toml"
     PROJECT_NAME="$t_name"
     PROJECT_DIR="$t_project_dir"
     CSPROJ="$t_csproj"
     generate_csproj
-    ZINC_TOML="$save_toml"
+    CARAVAN_TOML="$save_toml"
     PROJECT_NAME="$save_name"
     PROJECT_DIR="$save_dir"
     CSPROJ="$save_csproj"
@@ -321,7 +321,7 @@ cmd_clean() {
 }
 
 cmd_doctor() {
-    echo "zinc-csharp diagnostics"
+    echo "caravan-csharp diagnostics"
     echo ""
 
     # dotnet
@@ -330,13 +330,13 @@ cmd_doctor() {
     elif [[ -f "$DOTNET_DIR/dotnet" ]]; then
         echo "  dotnet: $DOTNET_DIR/dotnet ($("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "?"))"
     else
-        echo "  dotnet: NOT FOUND — run: zinc-csharp setup"
+        echo "  dotnet: NOT FOUND — run: caravan-csharp setup"
     fi
 
-    # zinc.toml
+    # caravan.toml
     if [[ -n "$PROJECT_ROOT" ]]; then
         echo "  project: $PROJECT_ROOT"
-        echo "  zinc.toml: $ZINC_TOML"
+        echo "  caravan.toml: $CARAVAN_TOML"
         echo "  name: $PROJECT_NAME"
         echo "  source: $SOURCE_DIR/"
         echo "  csproj: $CSPROJ"
@@ -348,14 +348,14 @@ cmd_doctor() {
 
     # tests
     local test_dir="$PROJECT_ROOT/tests"
-    if [[ -f "$test_dir/zinc.toml" ]]; then
-        echo "  tests: $test_dir/zinc.toml"
+    if [[ -f "$test_dir/caravan.toml" ]]; then
+        echo "  tests: $test_dir/caravan.toml"
     fi
 }
 
 cmd_help() {
     cat <<HELP
-zinc-csharp — C# build tool for Zinc projects
+caravan-csharp — C# build tool for Caravan projects
 
 Commands:
   build            Native AOT build (default)
@@ -365,12 +365,12 @@ Commands:
   run --jit        JIT run (faster build, slower runtime)
   test             Run tests (JIT, separate from production binary)
   test --aot       Publish tests as AOT binary, then run
-  csproj           Regenerate .csproj from zinc.toml
+  csproj           Regenerate .csproj from caravan.toml
   clean            Remove build artifacts
   doctor           Check toolchain and project status
   help             Show this help
 
-Config:  zinc.toml → $SOURCE_DIR/$PROJECT_NAME.csproj (generated)
+Config:  caravan.toml → $SOURCE_DIR/$PROJECT_NAME.csproj (generated)
 Output:  build/$PROJECT_NAME (AOT binary)
 HELP
 }

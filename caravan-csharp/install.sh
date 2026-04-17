@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2026 ZincScale
+# Copyright 2026 CaravanScale
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -7,25 +7,25 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# zinc-csharp installer — one-stop shop for C# Zinc development
+# caravan-csharp installer — one-stop shop for C# Caravan development
 #
 # Usage:
-#   curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/install.sh | bash
+#   curl -LsSf https://raw.githubusercontent.com/CaravanScale/caravan/master/caravan-csharp/install.sh | bash
 #
 # Installs:
 #   1. .NET 10 SDK (if not present)
-#   2. zinc-csharp build tool to ~/.zinc/bin/
-#   3. Adds ~/.zinc/bin and ~/.dotnet to PATH (shell rc)
+#   2. caravan-csharp build tool to ~/.caravan/bin/
+#   3. Adds ~/.caravan/bin and ~/.dotnet to PATH (shell rc)
 #
-# After install: zinc-csharp build, run, test — everything just works.
+# After install: caravan-csharp build, run, test — everything just works.
 
 set -e
 
-ZINC_HOME="$HOME/.zinc"
-ZINC_BIN="$ZINC_HOME/bin"
+CARAVAN_HOME="$HOME/.caravan"
+CARAVAN_BIN="$CARAVAN_HOME/bin"
 DOTNET_DIR="$HOME/.dotnet"
 
-echo "=== zinc-csharp installer ==="
+echo "=== caravan-csharp installer ==="
 echo ""
 
 # --- Step 1: Install .NET 10 SDK ---
@@ -62,22 +62,22 @@ install_dotnet() {
 
 install_dotnet
 
-# --- Step 2: Install zinc-csharp build tool ---
+# --- Step 2: Install caravan-csharp build tool ---
 
-echo "[2/3] Installing zinc-csharp build tool..."
-mkdir -p "$ZINC_HOME" "$ZINC_BIN"
+echo "[2/3] Installing caravan-csharp build tool..."
+mkdir -p "$CARAVAN_HOME" "$CARAVAN_BIN"
 
 # Use local copy if running from clone, otherwise download from GitHub
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-if [[ -f "$SCRIPT_DIR/build-tool/zinc-csharp" ]]; then
-    cp "$SCRIPT_DIR/build-tool/zinc-csharp" "$ZINC_BIN/zinc-csharp"
+if [[ -f "$SCRIPT_DIR/build-tool/caravan-csharp" ]]; then
+    cp "$SCRIPT_DIR/build-tool/caravan-csharp" "$CARAVAN_BIN/caravan-csharp"
     echo "       copied from local clone"
 else
-    curl -sSL "https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/build-tool/zinc-csharp" \
-        -o "$ZINC_BIN/zinc-csharp"
+    curl -sSL "https://raw.githubusercontent.com/CaravanScale/caravan/master/caravan-csharp/build-tool/caravan-csharp" \
+        -o "$CARAVAN_BIN/caravan-csharp"
     echo "       downloaded from GitHub"
 fi
-chmod +x "$ZINC_BIN/zinc-csharp"
+chmod +x "$CARAVAN_BIN/caravan-csharp"
 
 # --- Step 3: PATH setup ---
 
@@ -106,7 +106,7 @@ setup_path() {
     export PATH="$dir:$PATH"
 }
 
-setup_path "$ZINC_BIN" "zinc tools"
+setup_path "$CARAVAN_BIN" "caravan tools"
 setup_path "$DOTNET_DIR" "dotnet SDK"
 echo "[3/3] PATH configured"
 
@@ -114,10 +114,10 @@ echo "[3/3] PATH configured"
 
 echo ""
 echo "Verifying installation..."
-if command -v zinc-csharp &>/dev/null; then
-    echo "  zinc-csharp: $(which zinc-csharp)"
+if command -v caravan-csharp &>/dev/null; then
+    echo "  caravan-csharp: $(which caravan-csharp)"
 else
-    echo "  zinc-csharp: $ZINC_BIN/zinc-csharp"
+    echo "  caravan-csharp: $CARAVAN_BIN/caravan-csharp"
 fi
 
 DOTNET_CMD=""
@@ -131,10 +131,10 @@ if [[ -n "$DOTNET_CMD" ]]; then
 fi
 
 echo ""
-echo "Done! In a project with zinc.toml:"
-echo "  zinc-csharp build    # Native AOT binary"
-echo "  zinc-csharp run      # Build + run"
-echo "  zinc-csharp test     # Run tests"
+echo "Done! In a project with caravan.toml:"
+echo "  caravan-csharp build    # Native AOT binary"
+echo "  caravan-csharp run      # Build + run"
+echo "  caravan-csharp test     # Run tests"
 echo ""
 echo "Note: restart your shell or run:"
-echo "  export PATH=\"\$HOME/.zinc/bin:\$HOME/.dotnet:\$PATH\""
+echo "  export PATH=\"\$HOME/.caravan/bin:\$HOME/.dotnet:\$PATH\""
