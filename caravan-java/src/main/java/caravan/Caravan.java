@@ -36,6 +36,7 @@ public final class Caravan {
             case "test" -> rest.length == 0 ? sbt("test") : sbt("testOnly " + String.join(" ", rest));
             case "clean" -> sbt("clean");
             case "shell" -> sbt(); // interactive sbt for power users
+            case "doctor" -> { printDoctor(); yield 0; }
             case "version", "--version", "-v" -> { printVersion(); yield 0; }
             case "help", "--help", "-h" -> { usage(); yield 0; }
             default -> {
@@ -107,6 +108,73 @@ public final class Caravan {
         return sb.toString();
     }
 
+    /// First-run diagnostic. Walks the toolchain resolution chain and
+    /// surfaces what caravan actually sees: JDK path + version, sbt
+    /// launcher location, whether we're inside a caravan project right
+    /// now, and what sbt version the project pins (if any).
+    ///
+    /// Mirrors caravan-csharp's {@code doctor} command — intended as
+    /// the first thing a user runs when something looks wrong.
+    private static void printDoctor() {
+        System.out.println("caravan-java diagnostics");
+        System.out.println();
+
+        // JDK
+        String javaHome = System.getProperty("java.home");
+        String javaVer = System.getProperty("java.version");
+        String vmName = System.getProperty("java.vm.name");
+        System.out.println("  java: " + javaVer + " (" + vmName + ")");
+        System.out.println("        " + javaHome);
+
+        // caravan-java.jar location
+        try {
+            Path self = Path.of(Caravan.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            System.out.println("  caravan-java.jar: " + self);
+        } catch (Exception ex) {
+            System.out.println("  caravan-java.jar: (unresolved — " + ex.getClass().getSimpleName() + ")");
+        }
+
+        // sbt launcher
+        Path launchJar = resolveSbtLaunchJar();
+        if (launchJar == null) {
+            System.out.println("  sbt-launch.jar: NOT FOUND — install.sh needed");
+        } else {
+            System.out.println("  sbt-launch.jar: " + launchJar);
+        }
+
+        // Project context (are we inside a caravan-scaffolded repo?)
+        Path buildSbt = Path.of(System.getProperty("user.dir"), "build.sbt");
+        Path buildProps = Path.of(System.getProperty("user.dir"), "project", "build.properties");
+        if (Files.isRegularFile(buildSbt)) {
+            System.out.println("  project: " + buildSbt.getParent());
+            System.out.println("  build.sbt: " + buildSbt);
+            if (Files.isRegularFile(buildProps)) {
+                try {
+                    String pinned = Files.readString(buildProps).lines()
+                            .map(String::trim)
+                            .filter(l -> l.startsWith("sbt.version="))
+                            .findFirst().orElse("sbt.version=?");
+                    System.out.println("  " + pinned + " (from project/build.properties)");
+                } catch (IOException ex) {
+                    System.out.println("  project/build.properties: read failed — " + ex.getMessage());
+                }
+            } else {
+                System.out.println("  project/build.properties: missing");
+            }
+        } else {
+            System.out.println("  project: (not in a caravan project — run 'caravan init <name>' to scaffold)");
+        }
+
+        // sbt + ivy caches — useful when builds act weird
+        String home = System.getProperty("user.home");
+        if (home != null) {
+            Path sbtCache = Path.of(home, ".sbt");
+            Path ivyCache = Path.of(home, ".ivy2");
+            System.out.println("  ~/.sbt:  " + (Files.isDirectory(sbtCache) ? "present" : "(not yet populated)"));
+            System.out.println("  ~/.ivy2: " + (Files.isDirectory(ivyCache) ? "present" : "(not yet populated)"));
+        }
+    }
+
     private static void printVersion() {
         System.out.println("caravan-java " + VERSION);
         Path launchJar = resolveSbtLaunchJar();
@@ -131,6 +199,7 @@ public final class Caravan {
                   test [pattern] Run tests (optional JUnit filter pattern)
                   clean          Remove build outputs
                   shell          Drop into interactive sbt (for power users)
+                  doctor         Check toolchain and project status
                   version        Print caravan + sbt launcher paths
                   help           Show this message
 

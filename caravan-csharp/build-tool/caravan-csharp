@@ -18,31 +18,30 @@ set -euo pipefail
 DOTNET_DIR="$HOME/.dotnet"
 
 # --- Ensure .NET SDK is installed ---
+#
+# We don't pin to a specific .NET major version — whichever SDK the
+# developer already has installed gets used. When no SDK is present,
+# we fetch the current stable channel, so the tool auto-adopts the
+# latest release as major versions ship (.NET 10 today, .NET 11 when
+# it lands, etc.). Users who want a specific version can install it
+# themselves; we'll pick it up from PATH without complaint.
 
 ensure_dotnet() {
     export PATH="$DOTNET_DIR:$PATH"
 
-    # Check if dotnet 10.x is available
+    # Any installed dotnet is acceptable — let users pin versions
+    # through their own OS package manager if they need to.
     if command -v dotnet &>/dev/null; then
-        local ver
-        ver="$(dotnet --version 2>/dev/null || echo "")"
-        if [[ "$ver" == 10.* ]]; then
-            return
-        fi
+        return
     fi
-
     if [[ -f "$DOTNET_DIR/dotnet" ]]; then
-        local ver
-        ver="$("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "")"
-        if [[ "$ver" == 10.* ]]; then
-            return
-        fi
+        return
     fi
 
-    echo "  .NET 10 SDK not found — installing..."
+    echo "  .NET SDK not found — installing Current channel..."
     curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
     chmod +x /tmp/dotnet-install.sh
-    /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_DIR" 2>&1 | tail -3
+    /tmp/dotnet-install.sh --channel Current --install-dir "$DOTNET_DIR" 2>&1 | tail -3
     rm -f /tmp/dotnet-install.sh
     export PATH="$DOTNET_DIR:$PATH"
 
@@ -65,17 +64,34 @@ find_project_root() {
 }
 
 PROJECT_ROOT="$(find_project_root)"
-if [[ -z "$PROJECT_ROOT" ]]; then
-    echo "Error: caravan.toml not found (searched from $PWD to /)" >&2
-    exit 1
+# A missing caravan.toml is fatal for commands that need one (build,
+# run, test, clean, csproj, doctor). `init` creates it; `version` and
+# `help` don't need it. Defer the hard error to per-command checks
+# via require_project() below.
+CARAVAN_TOML=""
+if [[ -n "$PROJECT_ROOT" ]]; then
+    CARAVAN_TOML="$PROJECT_ROOT/caravan.toml"
 fi
 
-CARAVAN_TOML="$PROJECT_ROOT/caravan.toml"
+require_project() {
+    if [[ -z "$PROJECT_ROOT" ]]; then
+        echo "Error: caravan.toml not found (searched from $PWD to /)" >&2
+        echo "       run 'caravan-csharp init [name]' to scaffold a project" >&2
+        exit 1
+    fi
+}
 
 # --- TOML parser (minimal, handles caravan.toml structure) ---
 
 toml_get() {
     local file="$1" section="$2" key="$3" default="${4:-}"
+    # No project context → no file to read; return the default. Lets
+    # pre-project commands (init, version, help) run without triggering
+    # a redirection error on an empty CARAVAN_TOML path.
+    if [[ -z "$file" || ! -f "$file" ]]; then
+        echo "$default"
+        return
+    fi
     local in_section=false value=""
     while IFS= read -r line; do
         line="${line%%#*}"
@@ -219,11 +235,13 @@ detect_rid() {
 # --- Commands ---
 
 cmd_csproj() {
+    require_project
     generate_csproj
     echo "Generated $CSPROJ from caravan.toml"
 }
 
 cmd_build() {
+    require_project
     generate_csproj
 
     if [[ "${1:-}" == "--jit" ]]; then
@@ -244,6 +262,7 @@ cmd_build() {
 }
 
 cmd_run() {
+    require_project
     if [[ "${1:-}" == "--jit" ]]; then
         generate_csproj
         echo "Running (JIT)..."
@@ -257,6 +276,7 @@ cmd_run() {
 }
 
 cmd_test() {
+    require_project
     # Tests are a separate project in tests/caravan.toml
     local test_dir="$PROJECT_ROOT/tests"
     local test_toml="$test_dir/caravan.toml"
@@ -287,8 +307,13 @@ cmd_test() {
     PROJECT_DIR="$save_dir"
     CSPROJ="$save_csproj"
 
-    # Run tests
+    # Run tests. Any trailing positional args are forwarded to the test
+    # binary — for Microsoft.Testing.Platform-based tests this means
+    # `caravan test --filter "FooTests"` or `caravan test MyClass.MyMethod`
+    # works verbatim; the pattern-forwarding convention mirrors
+    # caravan-java's `caravan test <pattern>` → `sbt testOnly <pattern>`.
     if [[ "${1:-}" == "--aot" ]]; then
+        shift
         local t_build_dir="$test_dir/build"
         local rid; rid="$(detect_rid)"
         mkdir -p "$t_build_dir"
@@ -301,15 +326,16 @@ cmd_test() {
         fi
         echo ""
         echo "Running AOT test binary: $t_binary ($(du -h "$t_binary" | cut -f1))"
-        "$t_binary"
+        "$t_binary" "$@"
         return $?
     fi
     echo "Running tests..."
-    dotnet run --project "$t_csproj" -c Release
+    dotnet run --project "$t_csproj" -c Release -- "$@"
     return $?
 }
 
 cmd_clean() {
+    require_project
     rm -rf "$PROJECT_DIR/bin" "$PROJECT_DIR/obj" "$BUILD_DIR"
     # Also clean test project artifacts
     local test_dir="$PROJECT_ROOT/tests"
@@ -330,7 +356,7 @@ cmd_doctor() {
     elif [[ -f "$DOTNET_DIR/dotnet" ]]; then
         echo "  dotnet: $DOTNET_DIR/dotnet ($("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "?"))"
     else
-        echo "  dotnet: NOT FOUND — run: caravan-csharp setup"
+        echo "  dotnet: NOT FOUND — the next caravan invocation will install it"
     fi
 
     # caravan.toml
@@ -344,13 +370,131 @@ cmd_doctor() {
         if [[ -f "$BINARY" ]]; then
             echo "  binary size: $(du -h "$BINARY" | cut -f1)"
         fi
+
+        # tests
+        local test_dir="$PROJECT_ROOT/tests"
+        if [[ -f "$test_dir/caravan.toml" ]]; then
+            echo "  tests: $test_dir/caravan.toml"
+        fi
+    else
+        echo "  project: (not in a caravan-csharp project — run 'caravan-csharp init' to scaffold one)"
+    fi
+}
+
+CARAVAN_CSHARP_VERSION="0.1.0"
+
+cmd_version() {
+    echo "caravan-csharp $CARAVAN_CSHARP_VERSION"
+    if command -v dotnet &>/dev/null; then
+        echo "dotnet $(dotnet --version 2>/dev/null || echo "?") ($(which dotnet))"
+    elif [[ -f "$DOTNET_DIR/dotnet" ]]; then
+        echo "dotnet $("$DOTNET_DIR/dotnet" --version 2>/dev/null || echo "?") ($DOTNET_DIR/dotnet)"
+    else
+        echo "dotnet: not installed"
+    fi
+}
+
+# Scaffold a new caravan-csharp project. Writes caravan.toml + a
+# minimal Program.cs in the target directory, plus a tests/ subproject
+# with the same shape. Mirrors caravan-java's init: the generated
+# caravan.toml is not rewritten on subsequent commands — users edit it
+# directly.
+cmd_init() {
+    local name="${1:-}"
+    local target_dir
+    if [[ -z "$name" ]]; then
+        target_dir="$PWD"
+        name="$(basename "$target_dir")"
+    else
+        target_dir="$PWD/$name"
+        if [[ -e "$target_dir" && ! -z "$(ls -A "$target_dir" 2>/dev/null)" ]]; then
+            echo "Error: '$target_dir' already exists and is not empty" >&2
+            exit 1
+        fi
+        mkdir -p "$target_dir"
     fi
 
-    # tests
-    local test_dir="$PROJECT_ROOT/tests"
-    if [[ -f "$test_dir/caravan.toml" ]]; then
-        echo "  tests: $test_dir/caravan.toml"
+    if [[ -f "$target_dir/caravan.toml" ]]; then
+        echo "Error: $target_dir/caravan.toml already exists" >&2
+        exit 1
     fi
+
+    # Normalize the project identifier — C# types can't contain dashes,
+    # and the Program.cs namespace uses this name too. Users with a
+    # dash-named directory get a CamelCased identifier.
+    local ident
+    ident="$(echo "$name" | awk -F- '{ for (i=1; i<=NF; i++) printf "%s%s", toupper(substr($i,1,1)), substr($i,2); print "" }')"
+    [[ -z "$ident" ]] && ident="App"
+
+    mkdir -p "$target_dir/$ident"
+    mkdir -p "$target_dir/tests/Tests"
+
+    cat > "$target_dir/caravan.toml" <<EOF
+[project]
+name = "$ident"
+version = "0.1.0"
+source_dir = "$ident"
+
+[csharp]
+framework = "net10.0"
+
+[csharp.aot]
+enabled = true
+strip_symbols = true
+optimization = "Size"
+EOF
+
+    cat > "$target_dir/$ident/Program.cs" <<EOF
+Console.WriteLine("Hello from $ident!");
+Console.WriteLine(\$"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+Console.WriteLine(\$"AOT: {!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported}");
+EOF
+
+    cat > "$target_dir/tests/caravan.toml" <<EOF
+[project]
+name = "Tests"
+version = "0.1.0"
+source_dir = "Tests"
+
+[csharp]
+framework = "net10.0"
+
+[csharp.references]
+projects = ["../../$ident/$ident.csproj"]
+EOF
+
+    cat > "$target_dir/tests/Tests/Program.cs" <<EOF
+// Minimal test runner — replace with your framework of choice
+// (Microsoft.Testing.Platform + xUnit, NUnit, etc.). This placeholder
+// exits 0 on success, 1 on failure so CI can wire it up as-is.
+int failures = 0;
+try
+{
+    // sanity
+    if (1 + 1 != 2) { Console.Error.WriteLine("FAIL: arithmetic"); failures++; }
+    else Console.WriteLine("PASS: arithmetic");
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine(\$"FAIL: unhandled — {ex.Message}");
+    failures++;
+}
+return failures;
+EOF
+
+    cat > "$target_dir/.gitignore" <<'EOF'
+bin/
+obj/
+build/
+EOF
+
+    echo "Initialized caravan-csharp project '$ident' in $target_dir"
+    echo ""
+    echo "Next:"
+    echo "  cd $target_dir"
+    echo "  caravan-csharp build"
+    echo "  caravan-csharp run"
+    echo "  caravan-csharp test"
 }
 
 cmd_help() {
@@ -358,20 +502,26 @@ cmd_help() {
 caravan-csharp — C# build tool for Caravan projects
 
 Commands:
+  init [name]      Scaffold a new project (in ./<name> or current dir if omitted)
   build            Native AOT build (default)
   build --jit      JIT-only build (fast iteration)
   build <rid>      Cross-compile AOT for target (e.g. linux-arm64)
   run              Build AOT + run
   run --jit        JIT run (faster build, slower runtime)
-  test             Run tests (JIT, separate from production binary)
-  test --aot       Publish tests as AOT binary, then run
+  test [pattern]   Run tests (JIT); pattern forwards to the test binary
+  test --aot [pat] Publish tests as AOT binary, then run with optional pattern
   csproj           Regenerate .csproj from caravan.toml
   clean            Remove build artifacts
   doctor           Check toolchain and project status
+  version          Print caravan-csharp + dotnet versions
   help             Show this help
 
-Config:  caravan.toml → $SOURCE_DIR/$PROJECT_NAME.csproj (generated)
-Output:  build/$PROJECT_NAME (AOT binary)
+Config:  caravan.toml → <source_dir>/<name>.csproj (generated)
+Output:  build/<name> (AOT binary)
+
+.NET SDK: whichever version is on PATH is used. If none is installed,
+the Current channel is fetched to ~/.dotnet on first run — so the tool
+auto-adopts new major versions as they ship.
 HELP
 }
 
@@ -381,12 +531,14 @@ CMD="${1:-help}"
 shift 2>/dev/null || true
 
 case "$CMD" in
+    init)    cmd_init "$@" ;;
     build)   cmd_build "$@" ;;
     run)     cmd_run "$@" ;;
     test)    cmd_test "$@" ;;
     clean)   cmd_clean "$@" ;;
     csproj)  cmd_csproj "$@" ;;
     doctor)  cmd_doctor "$@" ;;
+    version|-v|--version) cmd_version ;;
     help|-h|--help) cmd_help ;;
     *)
         echo "Unknown command: $CMD" >&2
