@@ -75,7 +75,12 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
         case ast.ArrayType(element_type=elem):
             return f"[]{_go_type(elem, emitter)}"
         case ast.OptionalType(inner=inner):
-            return f"*{_go_type(inner, emitter)}"
+            # Classes and imported structs are already pointer types — the
+            # `?` adds nothing. For primitives (string/int/etc), we DROP
+            # the optional wrapping: Go's zero value ("" / 0 / false) acts
+            # as null. This avoids the `*string = "literal"` conversion
+            # problem and keeps nullable types ergonomic.
+            return _go_type(inner, emitter)
         case ast.FuncTypeExpr(params=ps, return_type=r):
             plist = ", ".join(_go_type(p, emitter) for p in ps)
             rstr = _go_type(r, emitter)
@@ -219,6 +224,10 @@ class Emitter:
     # Map from local-var/param name → its declared TypeExpr. Lets
     # `_infer_type(Ident)` figure out that `x` (a typed param) is int.
     current_local_types: dict[str, ast.TypeExpr] = field(default_factory=dict)
+    # Name → underlying TypeExpr for user-declared type aliases
+    # (`type Handler = Fn<(String), String>`). Lets lambda inference
+    # resolve aliased function types.
+    type_aliases: dict[str, ast.TypeExpr] = field(default_factory=dict)
     _out: list[str] = field(default_factory=list)
     _indent: int = 0
 
@@ -294,6 +303,8 @@ class Emitter:
         so `CallExpr(Ident(ClassName))` can be recognised later. Also records
         fn param lists for call-site default-padding."""
         for d in decls:
+            if isinstance(d, ast.TypeAliasDecl):
+                self.type_aliases[d.name] = d.type
             if isinstance(d, ast.FnDecl):
                 self.fn_params[d.name] = d.params
                 if d.return_type is not None:
@@ -537,11 +548,14 @@ class Emitter:
             self._writeln(f"func New{c.name}{tp_decl}({ps}) *{c.name}{tp_ref} {{")
             self._indent += 1
             self._writeln(f"this := &{c.name}{tp_ref}{{}}")
-            # Initialize container fields (maps especially — Go's zero map
-            # is nil and panics on write). Fields with an explicit default
-            # keep that; fields with no default get an empty container.
+            # Initialize ALL fields that have either (a) an explicit
+            # default or (b) a container type that needs `make()`. Maps
+            # in particular: Go's zero value is nil, which panics on
+            # write. A struct literal `&Config{}` doesn't run defaults.
             for f in c.fields:
-                if f.default is None and f.type is not None:
+                if f.default is not None:
+                    self._writeln(f"this.{_go_field_name(f.name)} = {self._fmt_expr(f.default, ctx_type=f.type)}")
+                elif f.type is not None:
                     init = _default_initializer(f.type, self)
                     if init:
                         self._writeln(f"this.{_go_field_name(f.name)} = {init}")
@@ -756,6 +770,24 @@ class Emitter:
     def _emit_var(self, v: ast.VarStmt) -> None:
         if v.type is not None:
             self.current_local_types[v.name] = v.type
+        elif v.value is not None:
+            # Track inferred type for later Ident resolution. Covers
+            # `var s = "hello"` (StringLit → SimpleType("String")),
+            # `var q = MsgQueue()` (user class), `var n = 42` (IntLit),
+            # etc. — so downstream `s.contains(...)` and `in` dispatch
+            # know the receiver type.
+            if isinstance(v.value, ast.CallExpr) and isinstance(v.value.callee, ast.Ident):
+                callee_name = v.value.callee.name
+                if callee_name in self.user_classes:
+                    self.current_local_types[v.name] = ast.SimpleType(name=callee_name)
+            elif isinstance(v.value, (ast.StringLit, ast.StringInterpLit, ast.RawStringLit)):
+                self.current_local_types[v.name] = ast.SimpleType(name="String")
+            elif isinstance(v.value, ast.IntLit):
+                self.current_local_types[v.name] = ast.SimpleType(name="int")
+            elif isinstance(v.value, ast.FloatLit):
+                self.current_local_types[v.name] = ast.SimpleType(name="double")
+            elif isinstance(v.value, ast.BoolLit):
+                self.current_local_types[v.name] = ast.SimpleType(name="bool")
         if v.value is None:
             self._writeln(f"var {v.name} {_go_type(v.type, self)}")
             self.current_locals.add(v.name)
@@ -916,11 +948,14 @@ class Emitter:
                     variant_fields = self._variant_field_names(type_name)
                     is_variant = bool(variant_fields)
                     if type_name in _TYPE_MAP or not is_variant:
-                        if binders:
+                        if binders and binders[0] != "_":
                             self._writeln(f"{binders[0]} := _v")
                             self.current_locals.add(binders[0])
                     else:
                         for i, name in enumerate(binders):
+                            # `_` is Zinc's discard binder — skip emission.
+                            if name == "_":
+                                continue
                             field_name = variant_fields[i] if i < len(variant_fields) else name
                             self._writeln(f"{name} := _v.{_go_field_name(field_name)}")
                             self.current_locals.add(name)
@@ -1027,6 +1062,22 @@ class Emitter:
             case ast.BoolLit(value=v):
                 return "true" if v else "false"
             case ast.NullLit():
+                # Under the simplified optional-type rule (OptionalType drops
+                # the `*`), `null` on a primitive returns its zero value.
+                # Context-type would let us be precise; fallback to "nil"
+                # for class/interface returns.
+                if self.current_fn_ret_type is not None:
+                    t = self.current_fn_ret_type
+                    if isinstance(t, ast.OptionalType):
+                        t = t.inner
+                    if isinstance(t, ast.SimpleType) and t.name in _TYPE_MAP:
+                        go = _TYPE_MAP[t.name]
+                        if go == "string":
+                            return '""'
+                        if go in ("int", "int64", "float32", "float64", "byte", "rune"):
+                            return "0"
+                        if go == "bool":
+                            return "false"
                 return "nil"
             case ast.Ident(name=n):
                 # Locals/params shadow fields and methods.
@@ -1040,9 +1091,12 @@ class Emitter:
             case ast.ThisExpr():
                 return "this"
             case ast.BinaryExpr(left=l, op="in", right=r):
-                # `x in collection` → `slices.Contains(collection, x)`.
-                # The type-agnostic form works for slices; for maps the
-                # user can write `map.containsKey(x)` explicitly.
+                # `x in collection`. For strings, use strings.Contains
+                # (substring check); for slices, slices.Contains.
+                r_type = _infer_type(r, self)
+                if r_type == "string" or isinstance(r, (ast.StringLit, ast.StringInterpLit)):
+                    self._need("strings")
+                    return f"strings.Contains({self._fmt_expr(r)}, {self._fmt_expr(l)})"
                 self._need("slices")
                 return f"slices.Contains({self._fmt_expr(r)}, {self._fmt_expr(l)})"
             case ast.BinaryExpr(left=l, op="is", right=r):
@@ -1066,11 +1120,25 @@ class Emitter:
             case ast.CallExpr():
                 return self._fmt_call(e)
             case ast.SelectorExpr(object=o, field=f):
+                # Same user-method precedence as _fmt_call for SelectorExpr
+                # read position (e.g. `obj.size` not called yet). If the
+                # receiver's type is a user class with this method, don't
+                # apply the builtin rewrite — leave as normal field access.
                 if (not isinstance(o, ast.ThisExpr)
                         and f in ("length", "size", "capacity", "isEmpty", "nonEmpty")):
-                    rewrite = _try_builtin(f, self._fmt_expr(o), [], self)
-                    if rewrite is not None:
-                        return rewrite
+                    recv_is_user = False
+                    if isinstance(o, ast.Ident):
+                        t = self.current_local_types.get(o.name)
+                        if t is not None:
+                            base = t.name if isinstance(t, (ast.SimpleType, ast.GenericType)) else None
+                            if base and base in self.user_classes:
+                                info = self.user_classes[base]
+                                if f in info.get("methods", []):
+                                    recv_is_user = True
+                    if not recv_is_user:
+                        rewrite = _try_builtin(f, self._fmt_expr(o), [], self)
+                        if rewrite is not None:
+                            return rewrite
                 return f"{self._fmt_expr(o)}.{_go_field_name(f)}"
             case ast.IndexExpr(object=o, index=i):
                 if isinstance(o, ast.Ident) and o.name in _TYPE_MAP:
@@ -1196,6 +1264,20 @@ class Emitter:
             self._need("fmt")
             return f"fmt.Sprint({', '.join(self._fmt_expr(a) for a in c.args)})"
 
+        # `print(x)` in expression position (e.g. inside a lambda body)
+        # — emit as fmt.Println so it produces the same output as Zinc's
+        # print statement. Go's builtin `print` writes to stderr without
+        # newline, which diverges from expected behavior.
+        if isinstance(c.callee, ast.Ident) and c.callee.name == "print":
+            self._need("fmt")
+            args = c.args
+            if len(args) == 1 and isinstance(args[0], ast.StringInterpLit):
+                fmt_str, fmt_args = _build_format(args[0], self)
+                if fmt_args:
+                    return f'fmt.Printf("{fmt_str}\\n", {", ".join(fmt_args)})'
+                return f'fmt.Println("{fmt_str}")'
+            return f"fmt.Println({', '.join(self._fmt_expr(a) for a in args)})"
+
         # 3b. Type-casts: `long(x)` → `int64(x)`, `String(x)` → `string(x)` etc.
         if isinstance(c.callee, ast.Ident) and c.callee.name in _CAST_NAMES:
             target = _TYPE_MAP[c.callee.name] or "interface{}"
@@ -1270,13 +1352,19 @@ class Emitter:
 
     def _fmt_list_lit(self, elements, explicit_type, ctx_type) -> str:
         inner = ", ".join(self._fmt_expr(x) for x in elements)
-        # Priority: explicit literal type > context type > interface{} fallback.
         if explicit_type is not None:
             return f"{_go_type(explicit_type, self)}{{{inner}}}"
         if ctx_type is not None:
             t = _go_type(ctx_type, self)
             if t:
                 return f"{t}{{{inner}}}"
+        # No explicit or context type — infer element type from the first
+        # element so `var xs = [1, 2, 3]` becomes `[]int{1, 2, 3}`, not
+        # `[]interface{}` (which propagates to every downstream use).
+        if elements:
+            t = _infer_type(elements[0], self)
+            if t != "interface{}":
+                return f"[]{t}{{{inner}}}"
         return f"[]interface{{}}{{{inner}}}"
 
     def _fmt_map_lit(self, keys, values, explicit_type, ctx_type) -> str:
@@ -1304,7 +1392,15 @@ class Emitter:
     def _fmt_lambda(self, lam: ast.LambdaExpr) -> str:
         params = ", ".join(_fmt_param(p, self) for p in lam.params)
         ret = _go_type(lam.return_type, self)
-        if lam.expr is not None and not ret:
+        # If caller context (arg or outer fn return) declares void, force ret
+        # to empty and skip inference — lambda is a void callback.
+        expected_void = (
+            isinstance(self.current_arg_expected_type, ast.FuncTypeExpr)
+            and self.current_arg_expected_type.return_type is None
+        )
+        if expected_void:
+            ret = ""
+        if not expected_void and lam.expr is not None and not ret:
             ret = _infer_type(lam.expr, self)
         if lam.body is not None and not ret:
             # Block-body lambdas: scan for `return expr` + infer from first.
@@ -1315,15 +1411,19 @@ class Emitter:
                         ret = t
                         break
         # If the lambda is passed as an argument to a call where the
-        # matching param is `Fn<(...), R>`, inherit R.
+        # matching param is `Fn<(...), R>`, inherit R. Resolve type aliases
+        # so `Handler` (alias for `Fn<(String), String>`) works.
+        def _resolve_alias(t):
+            if isinstance(t, ast.SimpleType) and t.name in self.type_aliases:
+                return self.type_aliases[t.name]
+            return t
         if not ret and self.current_arg_expected_type is not None:
-            exp = self.current_arg_expected_type
+            exp = _resolve_alias(self.current_arg_expected_type)
             if isinstance(exp, ast.FuncTypeExpr) and exp.return_type is not None:
                 ret = _go_type(exp.return_type, self)
-        # Otherwise, if the enclosing function declares `Fn<(...), R>` as
-        # its OWN return type, inherit R.
+        # Otherwise inherit from enclosing fn's return type (also alias-aware).
         if not ret and self.current_fn_ret_type is not None:
-            outer = self.current_fn_ret_type
+            outer = _resolve_alias(self.current_fn_ret_type)
             if isinstance(outer, ast.FuncTypeExpr) and outer.return_type is not None:
                 ret = _go_type(outer.return_type, self)
         head = f"func({params})" + (f" {ret}" if ret else "")
@@ -1335,7 +1435,10 @@ class Emitter:
             body = "".join(sub._out)
             return f"{head} {{\n{body}{chr(9) * self._indent}}}"
         if lam.expr is not None:
-            return f"{head} {{ return {self._fmt_expr(lam.expr)} }}"
+            expr_str = self._fmt_expr(lam.expr)
+            if expected_void:
+                return f"{head} {{ {expr_str} }}"
+            return f"{head} {{ return {expr_str} }}"
         return f"{head} {{}}"
 
 
@@ -1407,16 +1510,22 @@ def _infer_type(default, emitter=None) -> str:
                                   return "bool"
         case ast.UnaryExpr(operand=o):
                                   return _infer_type(o, emitter)
-        case ast.CallExpr(callee=ast.Ident(name=n), type_args=ta) if ta:
+        case ast.CallExpr(callee=ast.Ident(name=n)):
             if n in ("Chan", "Channel"):
-                return f"chan {_format_ta(ta[0])}"
+                ta = default.type_args
+                return f"chan {_format_ta(ta[0])}" if ta else "chan interface{}"
             if n == "List":
-                return f"[]{_format_ta(ta[0])}"
-            if n == "Map" and len(ta) >= 2:
-                return f"map[{_format_ta(ta[0])}]{_format_ta(ta[1])}"
-        case ast.CallExpr(callee=ast.Ident(name=n)) if emitter is not None:
-            if n in emitter.fn_returns:
+                ta = default.type_args
+                return f"[]{_format_ta(ta[0])}" if ta else "[]interface{}"
+            if n == "Map":
+                ta = default.type_args
+                if ta and len(ta) >= 2:
+                    return f"map[{_format_ta(ta[0])}]{_format_ta(ta[1])}"
+                return "map[string]interface{}"
+            if emitter is not None and n in emitter.fn_returns:
                 return _go_type(emitter.fn_returns[n], emitter)
+            if emitter is not None and n in emitter.user_classes:
+                return _go_type(ast.SimpleType(name=n), emitter)
         case ast.Ident(name=n) if emitter is not None:
             # Typed param or local — look up its declared type.
             if n in emitter.current_local_types:

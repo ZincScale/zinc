@@ -425,7 +425,10 @@ FLOAT: /[0-9]+\.[0-9]+/
 // - '...' is literal (no interpolation).
 // - `...` is raw (no escapes).
 // - """...""" and '''...''' are triple-quoted multiline.
-STRING: /"(?:\\.|[^"\\\n])*"/
+// STRING includes `${…}` interpolation bodies that may contain nested
+// double-quoted strings (e.g. `"${"-".repeat(10)}"`). The alt for `\$\{`
+// scans chars that don't end the interpolation AND allows `"…"` inside.
+STRING: /"(?:[^"\\\n\$]|\\.|\$(?!\{)|\$\{(?:[^"}]|"(?:[^"\\]|\\.)*")*\})*"/
       | /'(?:\\.|[^'\\\n])*'/
       | /"""(?:[^"]|"[^"]|""[^"])*"""/s
       | /'''(?:[^']|'[^']|''[^'])*'''/s
