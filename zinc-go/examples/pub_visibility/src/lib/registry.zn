@@ -1,0 +1,62 @@
+// Test: function references as values, .keys() on class fields,
+// implicit self calling pub from non-pub methods
+
+type ItemFactory = Fn<(String), Item>
+
+class Registry {
+    var factories = Map<String, ItemFactory>{}
+    var items = Map<String, Item>{}
+
+    init() {}
+
+    // pub method
+    pub void register(String name, ItemFactory factory) {
+        factories[name] = factory
+    }
+
+    // pub method calling non-pub method
+    pub void createAll() {
+        var names = factories.keys()
+        for (name in names) {
+            createItem(name)
+        }
+    }
+
+    // non-pub method calling pub method (tests currentClass tracking)
+    void createItem(String name) {
+        var factory = factories[name]
+        var item = factory(name)
+        items[name] = item
+        trackCreation(name)
+    }
+
+    // pub method called from non-pub method
+    pub void trackCreation(String name) {
+        // no-op, just tests that pub method call from non-pub works
+    }
+
+    // pub method using .keys() on a class field
+    pub List<String> listNames() {
+        return items.keys()
+    }
+
+    pub Item getItem(String name) {
+        return items[name]
+    }
+}
+
+// Non-pub factory function — used as value within same package
+Item defaultFactory(String name) {
+    return Item(name, 10)
+}
+
+// Non-pub factory function
+Item premiumFactory(String name) {
+    return Item(name, 100)
+}
+
+// pub function that registers factories using function references as values
+pub void registerDefaults(Registry reg) {
+    reg.register("basic", defaultFactory)
+    reg.register("premium", premiumFactory)
+}

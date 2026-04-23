@@ -1,0 +1,77 @@
+// KV Store — a real app combining all features
+// Tests: classes, exceptions, function types, imports, maps
+
+import strings
+import sort
+
+class NotFoundException {
+    pub String message
+    init(String message) { this.message = message }
+    pub String Error() { return message }
+}
+
+// Throwing lookup — caller wraps in try/catch for fallback.
+String mustGet(Map<String, String> data, String key) {
+    var val = data[key]
+    if (val == "") {
+        throw NotFoundException("key not found: ${key}")
+    }
+    return val
+}
+
+String safeGet(Map<String, String> data, String key, String fallback) {
+    try {
+        var result = mustGet(data, key)
+        return result
+    } catch (e) {
+        return fallback
+    }
+}
+
+void main() {
+    // Build a store
+    Map<String, String> store = {}
+    store["user:1"] = "Alice"
+    store["user:2"] = "Bob"
+    store["user:3"] = "Charlie"
+    store["config:timeout"] = "30"
+    store["config:retries"] = "3"
+    print("size: ${len(store)}")
+
+    // Get
+    print("user:1 = ${store["user:1"]}")
+
+    // Exception handling — safeGet catches NotFoundException and returns fallback
+    print("mustGet user:1: ${safeGet(store, "user:1", "not found")}")
+    print("mustGet user:999: ${safeGet(store, "user:999", "not found")}")
+
+    // Collect keys and filter
+    var userCount = 0
+    var configCount = 0
+    for (k in store) {
+        if (strings.HasPrefix(k, "user:")) {
+            userCount = userCount + 1
+        }
+        if (strings.HasPrefix(k, "config:")) {
+            configCount = configCount + 1
+        }
+    }
+    print("user keys: ${userCount}")
+    print("config keys: ${configCount}")
+
+    // Delete
+    delete(store, "user:3")
+    print("after delete size: ${len(store)}")
+
+    // List all users
+    List<String> users = []
+    for (k, v in store) {
+        if (strings.HasPrefix(k, "user:")) {
+            users = append(users, v)
+        }
+    }
+    sort.Strings(users)
+    print("users: ${users}")
+
+    print("KV Store OK")
+}

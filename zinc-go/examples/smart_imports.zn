@@ -1,0 +1,40 @@
+// Smart imports — type-level and package-level import resolution
+// Tests: import sync.Mutex (type import), import strings (package import)
+
+import sync.Mutex
+import strings
+
+class SafeCounter {
+    Mutex mu
+    var count = 0
+
+    void increment() {
+        this.mu.Lock()
+        this.count = this.count + 1
+        this.mu.Unlock()
+    }
+
+    int getCount() {
+        this.mu.Lock()
+        var c = this.count
+        this.mu.Unlock()
+        return c
+    }
+}
+
+void main() {
+    // Package import: strings used fully-qualified
+    var upper = strings.ToUpper("hello")
+    print("upper: ${upper}")
+
+    // Class field with type import — `Mutex` inside SafeCounter
+    // resolves to sync.Mutex via the type import, and the lock/unlock
+    // calls in increment()/getCount() prove it's a real *sync.Mutex.
+    var counter = new SafeCounter()
+    counter.increment()
+    counter.increment()
+    counter.increment()
+    print("count: ${counter.getCount()}")
+
+    print("Smart imports OK")
+}

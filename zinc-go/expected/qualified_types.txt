@@ -1,0 +1,6 @@
+hello from writer
+handler created: true
+upper: ZINC
+read: zinc-flow
+partial read: hell
+contains: true

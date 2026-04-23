@@ -1,0 +1,6 @@
+json: {"Name":"Alice","Age":30}
+name: Alice
+age: 30
+map json: {"key":"value"}
+map key: value
+exec done

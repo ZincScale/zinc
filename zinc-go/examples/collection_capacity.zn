@@ -1,0 +1,37 @@
+// Test collections with initial capacity
+// List<T>(cap) and Map<K,V>(cap) pre-allocate without filling
+
+void main() {
+    // List with initial capacity — starts empty but pre-allocated
+    var names = List<String>(10)
+    print("list len: ${len(names)}")
+    names = append(names, "alice")
+    names = append(names, "bob")
+    names = append(names, "charlie")
+    print("after append: ${len(names)}")
+    print("names: ${names}")
+
+    // Map with initial capacity — starts empty but pre-allocated
+    var scores = Map<String, int>(16)
+    print("map len: ${len(scores)}")
+    scores["alice"] = 95
+    scores["bob"] = 87
+    print("after put: ${len(scores)}")
+    print("alice: ${scores[\"alice\"]}")
+
+    // List<int> with capacity
+    var nums = List<int>(100)
+    print("nums len: ${len(nums)}")
+    for (i in 0..5) {
+        nums = append(nums, i * 10)
+    }
+    print("after loop: ${len(nums)}")
+    print("nums: ${nums}")
+
+    // Combined: sized array vs capacity list
+    var fixed = int[5]
+    var dynamic = List<int>(5)
+    print("fixed len: ${len(fixed)}")
+    print("dynamic len: ${len(dynamic)}")
+    // fixed has 5 zero elements, dynamic has 0 elements with capacity 5
+}

@@ -1,0 +1,9 @@
+size: 5
+user:1 = Alice
+mustGet user:1: Alice
+mustGet user:999: not found
+user keys: 3
+config keys: 2
+after delete size: 4
+users: [Alice Bob]
+KV Store OK

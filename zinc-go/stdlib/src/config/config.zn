@@ -1,0 +1,108 @@
+// config — configuration backed by Viper.
+//
+// Supports YAML, TOML, JSON, properties files.
+// Environment variables automatically override file values (SERVER_PORT → server.port).
+// Defaults set programmatically. Live config watching supported.
+//
+// Usage:
+//   var cfg = config.Config()
+//   cfg.setDefault("server.port", 8080)
+//   cfg.load("config", "yaml", ".")
+//   var port = cfg.getInt("server.port")
+
+import viper
+import strings
+import time
+
+// Config wraps Viper's global instance.
+class Config {
+    init() {
+        viper.AutomaticEnv()
+        viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+    }
+
+    // load reads a config file by name (without extension), type, and search path.
+    pub void load(String name, String fileType, String path) {
+        viper.SetConfigName(name)
+        viper.SetConfigType(fileType)
+        viper.AddConfigPath(path)
+        viper.ReadInConfig()
+    }
+
+    // loadFile reads a specific config file by full path.
+    pub void loadFile(String filePath) {
+        viper.SetConfigFile(filePath)
+        viper.ReadInConfig()
+    }
+
+    // --- Defaults ---
+
+    pub void setDefault(String key, any value) {
+        viper.SetDefault(key, value)
+    }
+
+    // --- Getters ---
+
+    pub String getString(String key) {
+        return viper.GetString(key)
+    }
+
+    pub int getInt(String key) {
+        return viper.GetInt(key)
+    }
+
+    pub boolean getBool(String key) {
+        return viper.GetBool(key)
+    }
+
+    pub double getFloat(String key) {
+        return viper.GetFloat64(key)
+    }
+
+    pub time.Duration getDuration(String key) {
+        return viper.GetDuration(key)
+    }
+
+    pub List<String> getStringSlice(String key) {
+        return viper.GetStringSlice(key)
+    }
+
+    pub Map<String, String> getStringMap(String key) {
+        return viper.GetStringMapString(key)
+    }
+
+    // getSubKeys returns the top-level keys under a config path.
+    // e.g. getSubKeys("flow.processors") → ["tag-env", "sink"] for map-keyed config.
+    pub List<String> getSubKeys(String key) {
+        var m = viper.GetStringMap(key)
+        var keys = List<String>[]
+        for (k, _ in m) {
+            keys = append(keys, k)
+        }
+        return keys
+    }
+
+    // --- Setters ---
+
+    pub void set(String key, any value) {
+        viper.Set(key, value)
+    }
+
+    // --- Query ---
+
+    pub boolean has(String key) {
+        return viper.IsSet(key)
+    }
+
+    // --- Environment ---
+
+    pub void bindEnv(String key, String envVar) {
+        viper.BindEnv(key, envVar)
+    }
+
+    // --- Watching ---
+
+    pub void watchForChanges() {
+        viper.WatchConfig()
+    }
+}

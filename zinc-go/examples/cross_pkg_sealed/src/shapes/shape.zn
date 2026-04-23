@@ -1,0 +1,21 @@
+// Sealed class in a subpackage — tests cross-package sealed type matching.
+
+sealed class Shape {
+    data Circle(double radius)
+    data Rect(double width, double height)
+    data Triangle(double base, double height)
+}
+
+pub double area(Shape s) {
+    match (s) {
+        case Circle(r) {
+            return 3.14159 * r * r
+        }
+        case Rect(w, h) {
+            return w * h
+        }
+        case Triangle(b, h) {
+            return b * h / 2.0
+        }
+    }
+}

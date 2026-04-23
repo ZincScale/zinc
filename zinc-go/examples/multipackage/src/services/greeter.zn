@@ -1,0 +1,24 @@
+// Service layer — uses types from core package
+
+import core
+
+class Greeter : core.Describable {
+    String greeting
+
+    init(String greeting) {
+        this.greeting = greeting
+    }
+
+    pub String greet(core.User user) {
+        return "${greeting}, ${user.name}!"
+    }
+
+    pub String describe() {
+        return "Greeter(${greeting})"
+    }
+}
+
+pub String discountPrice(core.Product p, double pct) {
+    var discounted = p.price * (1.0 - pct)
+    return "${p.name} on sale: $${discounted}"
+}

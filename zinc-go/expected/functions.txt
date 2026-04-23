@@ -1,0 +1,12 @@
+doubled(5) = 10
+triple(5) = 15
+localhost:3000
+localhost:8080
+sum(1,2,3) = 6
+sum(10,20) = 30
+reduce: 60
+identity str: zinc
+identity int: 99
+swap: two, 1
+second: banana
+Functions OK

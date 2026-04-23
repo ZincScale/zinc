@@ -1,0 +1,18 @@
+1. Toyota (2024), 4-door
+   make=Toyota, year=2024, doors=4
+2. category=vehicle
+3. Tesla (2025), 4-door, 300mi range
+   make=Tesla, doors=4, range=300
+   category=vehicle
+4. Ford (2023)
+   display=Truck: Ford, payload=5t
+   via interface: Truck: Ford, payload=5t
+5. Honda (2022)
+   category=vehicle
+6. as Vehicle: Toyota (2024), 4-door
+7. bike as Vehicle: Honda (2022)
+   category=vehicle
+8. counter: 0
+   after set: counter: 42
+   get: 42
+Inheritance OK

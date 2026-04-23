@@ -1,0 +1,42 @@
+// Test automatic pointer inference for Go functions that expect pointers.
+// json.Unmarshal([]byte, interface{}) expects &target for the second param.
+
+import encoding.json
+import fmt
+
+data Person(String name, int age)
+
+import os.exec
+
+void main() {
+    try {
+        // Marshal a struct to JSON
+        var p = Person("Alice", 30)
+        var data = json.Marshal(p)
+        print("json: ${string(data)}")
+
+        // Unmarshal back — zinc should auto-insert & for the pointer param
+        var p2 = Person("", 0)
+        json.Unmarshal(data, p2)
+        print("name: ${p2.name}")
+        print("age: ${p2.age}")
+
+        // Test with a map
+        var m = Map<String, String>{"key": "value"}
+        var mData = json.Marshal(m)
+        print("map json: ${string(mData)}")
+
+        var m2 = Map<String, String>{}
+        json.Unmarshal(mData, m2)
+        var val = m2["key"]
+        print("map key: ${val}")
+
+        // Test method-level error-only: exec.Cmd.Start() returns only error
+        var proc = exec.Command("echo", "hello")
+        proc.Start()
+        proc.Wait()
+        print("exec done")
+    } catch (e) {
+        print("error: ${e.Error()}")
+    }
+}

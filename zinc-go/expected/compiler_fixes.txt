@@ -1,0 +1,10 @@
+typed chan 1: Msg(text=urgent, priority=1)
+typed chan 2: Msg(text=normal, priority=5)
+int cast: 9876543210
+float to int: 3
+original: (1, 2)
+moved: (4, 6)
+scaled: (8, 12)
+toBytes len: 5
+chan field: test message
+All fixes OK

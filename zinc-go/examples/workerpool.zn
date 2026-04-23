@@ -1,0 +1,38 @@
+// Worker Pool — fan-out/fan-in with channels
+
+void main() {
+    var jobs = Channel(10)
+    var results = Channel(10)
+
+    // Send jobs first (buffered channel)
+    List<String> tasks = ["fetch", "parse", "transform", "validate", "store"]
+    for (task in tasks) {
+        jobs.send(task)
+    }
+
+    // 3 workers each take jobs
+    for (w in 0..3) {
+        spawn {
+            while (true) {
+                var job = jobs.recv()
+                if (job == "STOP") {
+                    return
+                }
+                results.send("done: ${job}")
+            }
+        }
+    }
+
+    // Send stop signals
+    for (i in 0..3) {
+        jobs.send("STOP")
+    }
+
+    // Collect all results
+    for (i in 0..5) {
+        var r = results.recv()
+        print(r)
+    }
+
+    print("Worker Pool OK")
+}

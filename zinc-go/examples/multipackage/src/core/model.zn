@@ -1,0 +1,34 @@
+// Core data types, generics, and interfaces
+
+data User(String name, int age)
+
+data Product(String name, double price)
+
+// Generic data class — usable from other packages with type args
+data Pair<A, B>(A first, B second)
+
+// Generic container class
+class Box<T> {
+    T value
+
+    init(T value) {
+        this.value = value
+    }
+
+    pub T get() {
+        return value
+    }
+
+    pub String toString() {
+        return "Box(${value})"
+    }
+}
+
+// Generic function
+pub T first<T>(List<T> items) {
+    return items[0]
+}
+
+interface Describable {
+    pub String describe()
+}

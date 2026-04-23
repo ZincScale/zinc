@@ -1,0 +1,148 @@
+// Inheritance — Zinc v3
+// Demonstrates: field access, method override, super calls, polymorphism, multi-level
+
+// --- Base class ---
+class Vehicle {
+    String make
+    int year
+
+    init(String make, int year) {
+        this.make = make
+        this.year = year
+    }
+
+    String describe() {
+        return "${make} (${year})"
+    }
+
+    String category() {
+        return "vehicle"
+    }
+}
+
+// --- Single inheritance: child accesses parent fields + overrides method ---
+class Car : Vehicle {
+    int doors
+
+    init(String make, int year, int doors) {
+        super(make, year)
+        this.doors = doors
+    }
+
+    String describe() {
+        return "${make} (${year}), ${doors}-door"
+    }
+}
+
+// --- Multi-level: grandchild ---
+class ElectricCar : Car {
+    int maxRange
+
+    init(String make, int year, int doors, int maxRange) {
+        super(make, year, doors)
+        this.maxRange = maxRange
+    }
+
+    String describe() {
+        return "${make} (${year}), ${doors}-door, ${maxRange}mi range"
+    }
+}
+
+// --- Interface + class inheritance together ---
+interface Printable {
+    String display()
+}
+
+class Truck : Vehicle, Printable {
+    double payload
+
+    init(String make, int year, double payload) {
+        super(make, year)
+        this.payload = payload
+    }
+
+    String display() {
+        return "Truck: ${make}, payload=${payload}t"
+    }
+}
+
+// --- Child calling inherited method it did NOT override ---
+class Bike : Vehicle {
+    init(String make, int year) {
+        super(make, year)
+    }
+    // does NOT override describe() or category() — should inherit both
+}
+
+// ============ Tests ============
+
+// 1. Basic inheritance: parent fields accessible in child
+var car = Car("Toyota", 2024, 4)
+print("1. ${car.describe()}")
+print("   make=${car.make}, year=${car.year}, doors=${car.doors}")
+
+// 2. Inherited method not overridden
+print("2. category=${car.category()}")
+
+// 3. Multi-level inheritance
+var ev = ElectricCar("Tesla", 2025, 4, 300)
+print("3. ${ev.describe()}")
+print("   make=${ev.make}, doors=${ev.doors}, range=${ev.maxRange}")
+print("   category=${ev.category()}")
+
+// 4. Interface + class inheritance
+var truck = Truck("Ford", 2023, 5.0)
+print("4. ${truck.describe()}")
+print("   display=${truck.display()}")
+Printable p = truck
+print("   via interface: ${p.display()}")
+
+// 5. No override — pure inheritance
+var bike = Bike("Honda", 2022)
+print("5. ${bike.describe()}")
+print("   category=${bike.category()}")
+
+// 6. Polymorphism: child assigned to parent type
+Vehicle v = car
+print("6. as Vehicle: ${v.describe()}")
+
+// 7. Polymorphism with non-overridden method
+Vehicle v2 = bike
+print("7. bike as Vehicle: ${v2.describe()}")
+print("   category=${v2.category()}")
+
+// --- Generic interface + class inheritance ---
+interface Container<T> {
+    T get()
+    void set(T value)
+}
+
+class NamedContainer<T> : Container<T> {
+    String label
+    T stored
+
+    init(String label, T stored) {
+        this.label = label
+        this.stored = stored
+    }
+
+    T get() {
+        return stored
+    }
+
+    void set(T value) {
+        stored = value
+    }
+
+    String describe() {
+        return "${label}: ${stored}"
+    }
+}
+
+var nc = NamedContainer<int>("counter", 0)
+print("8. ${nc.describe()}")
+nc.set(42)
+print("   after set: ${nc.describe()}")
+print("   get: ${nc.get()}")
+
+print("Inheritance OK")

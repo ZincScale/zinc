@@ -1,0 +1,17 @@
+// Regression: the errors-as-values `or { }` handler has been removed
+// in favor of try/catch/throw. Fallible calls either auto-propagate
+// their error (in a thrower function) or must be wrapped in a try.
+//
+// Old form:  var n = parseInt(s) or { return 0 }
+// New form:  try { var n = parseInt(s); ... } catch (e) { ... }
+//
+// The parser reports the migration path when it sees a stray `or`.
+
+int bogus(String s) {
+    var n = parseInt(s) or { return 0 }
+    return n
+}
+
+void main() {
+    print("should not compile")
+}
