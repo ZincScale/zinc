@@ -1,0 +1,13 @@
+Circle(radius=5)
+Rect(width=3, height=4)
+Triangle(base=6, height=3)
+area circle: 78.53975
+area rect: 12
+area triangle: 9
+circle with radius 5
+rect 3x4
+triangle base=6 height=3
+  circle with radius 1 → area=3.14159
+  rect 2x3 → area=6
+  triangle base=4 height=5 → area=10
+Sealed OK

@@ -1,0 +1,3 @@
+  log: /api/users
+  auth: ok
+200 OK: /api/users

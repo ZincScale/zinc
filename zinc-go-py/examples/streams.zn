@@ -1,0 +1,103 @@
+// Streams — Zinc v3
+// Demonstrates: all collection stream operations, it keyword, chains
+
+List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Filter with lambda
+var evens = numbers.filter(x -> x % 2 == 0)
+print("Evens: ${evens}")
+
+// Filter with it keyword
+var big = numbers.filter(it > 5)
+print("Big: ${big}")
+
+// Map with it
+var doubled = numbers.map(it * 2)
+print("Doubled: ${doubled}")
+
+// Chained operations
+var total = numbers.filter(it > 5).map(it * 10).sum()
+print("Sum of >5 * 10: ${total}")
+
+// Terminal operations
+var hasNine = numbers.anyMatch(it > 8)
+print("Has >8: ${hasNine}")
+
+var allPositive = numbers.allMatch(it > 0)
+print("All positive: ${allPositive}")
+
+var noneNegative = numbers.noneMatch(it < 0)
+print("None negative: ${noneNegative}")
+
+var first = numbers.findFirst(it > 7)
+print("First >7: ${first}")
+
+// Skip and limit
+var skipped = numbers.skip(7)
+print("Skip 7: ${skipped}")
+
+var limited = numbers.limit(3)
+print("Limit 3: ${limited}")
+
+// Distinct
+List<int> dupes = [1, 2, 2, 3, 3, 3]
+var unique = dupes.distinct()
+print("Distinct: ${unique}")
+
+// SortBy
+List<String> words = ["banana", "apple", "cherry"]
+var sorted = words.sortBy(it.length())
+print("Sorted by length: ${sorted}")
+
+// Reduce
+var sum = numbers.reduce(0, (acc, x) -> acc + x)
+print("Reduce sum: ${sum}")
+
+// ForEach
+print("ForEach:")
+numbers.filter(it > 8).forEach(x -> print("  ${x}"))
+
+// GroupBy
+List<String> items = ["cat", "car", "dog", "cup"]
+var grouped = items.groupBy(it.charAt(0))
+print("Grouped by first char: ${grouped}")
+
+// --- Streams on generic data classes ---
+data Score<T>(T name, int value)
+
+List<Score<String>> scores = [
+    Score<String>("alice", 85),
+    Score<String>("bob", 92),
+    Score<String>("charlie", 78),
+    Score<String>("dave", 95),
+    Score<String>("eve", 88)
+]
+
+// Filter high scores
+var high = scores.filter(x -> x.value >= 90)
+print("High scores: ${len(high)}")
+
+// Map to extract names
+var topNames = scores.filter(x -> x.value >= 90).map(x -> x.name)
+print("Top names: ${topNames}")
+
+// Reduce: sum all scores
+var totalScore = scores.reduce(0, (acc, x) -> acc + x.value)
+print("Total score: ${totalScore}")
+
+// FindFirst
+var first90 = scores.findFirst(x -> x.value >= 90)
+print("First >=90: ${first90}")
+
+// AnyMatch / AllMatch
+var anyPerfect = scores.anyMatch(x -> x.value == 100)
+print("Any perfect: ${anyPerfect}")
+
+var allPassing = scores.allMatch(x -> x.value >= 70)
+print("All passing: ${allPassing}")
+
+// ForEach on filtered generic list
+print("90+ scores:")
+scores.filter(x -> x.value >= 90).forEach(x -> print("  ${x}"))
+
+print("Streams OK")

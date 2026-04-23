@@ -1,0 +1,7 @@
+upper: HELLO
+joined: a, b, c
+contains: true
+itoa: 42
+pi: 3.141592653589793
+sqrt(16): 4
+Imports OK

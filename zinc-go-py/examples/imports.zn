@@ -1,0 +1,32 @@
+// Imports — Zinc for Go
+// Demonstrates: importing Go standard library packages
+
+import strings
+import strconv
+import math
+
+void main() {
+    // strings package
+    var upper = strings.ToUpper("hello")
+    print("upper: ${upper}")
+
+    List<String> parts = ["a", "b", "c"]
+    var joined = strings.Join(parts, ", ")
+    print("joined: ${joined}")
+
+    var has = strings.Contains("hello world", "world")
+    print("contains: ${has}")
+
+    // strconv package
+    var num = strconv.Itoa(42)
+    print("itoa: ${num}")
+
+    // math package
+    var pi = math.Pi
+    print("pi: ${pi}")
+
+    var sqrt = math.Sqrt(16.0)
+    print("sqrt(16): ${sqrt}")
+
+    print("Imports OK")
+}

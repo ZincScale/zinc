@@ -1,0 +1,12 @@
+found: Alice
+missing: null
+safe nav: 5
+safe nav null: null
+is String: true
+structural eq: true
+reference eq: true
+result: Result(value=data, ok=true)
+ok? true
+failure: Result(value=0, ok=false)
+maybe: Maybe(value=present)
+Types OK

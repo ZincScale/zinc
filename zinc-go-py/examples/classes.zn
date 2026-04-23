@@ -1,0 +1,109 @@
+// Classes — Zinc v3
+// Demonstrates: data records, classes, constructors, inheritance, interfaces
+
+// Data class — auto-generates struct with String() method
+data User(String name, String email, int age = 0)
+
+// Class with constructor and methods
+class Animal {
+    String name
+    String sound
+
+    init(String name, String sound) {
+        this.name = name
+        this.sound = sound
+    }
+
+    String speak() {
+        return "${name} says ${sound}"
+    }
+}
+
+class Dog : Animal {
+    String breed
+
+    init(String name, String breed) {
+        super(name, "Woof")
+        this.breed = breed
+    }
+
+    String toString() {
+        return "Dog(${name}, ${breed})"
+    }
+}
+
+// Class with field defaults
+class Config {
+    pub String host = "localhost"
+    pub int port = 8080
+    pub int maxRetries = 3
+}
+
+const String VERSION = "1.0"
+
+// Interface + implementation
+interface Greeter {
+    String greet(String name)
+}
+
+class FormalGreeter : Greeter {
+    String greet(String name) {
+        return "Good day, ${name}."
+    }
+}
+
+// Test all features
+var u = User("Alice", "alice@example.com", 30)
+print(u)
+
+var dog = Dog("Rex", "Lab")
+print(dog.speak())
+print(dog)
+
+var cfg = Config()
+print("host: ${cfg.host}")
+print("port: ${cfg.port}")
+print("version: ${VERSION}")
+
+Greeter g = FormalGreeter()
+print(g.greet("World"))
+
+// --- Generic class: typed container ---
+class Box<T> {
+    T value
+
+    init(T value) {
+        this.value = value
+    }
+
+    T get() {
+        return value
+    }
+
+    String toString() {
+        return "Box(${value})"
+    }
+}
+
+var strBox = Box<String>("hello")
+print("box: ${strBox}")
+print("unbox: ${strBox.get()}")
+
+var intBox = Box<int>(42)
+print("int box: ${intBox}")
+
+// --- Generic interface ---
+interface Mapper<A, B> {
+    B apply(A input)
+}
+
+class IntToString : Mapper<int, String> {
+    String apply(int input) {
+        return "val=${input}"
+    }
+}
+
+var mapper = IntToString()
+print("mapped: ${mapper.apply(7)}")
+
+print("Classes OK")

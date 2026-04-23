@@ -1,0 +1,39 @@
+// Nested try — inner try handles one exception, outer catches what
+// inner rethrows or misses. Validates that inner IIFEs don't leak
+// through to outer try state.
+
+class Layer1 {
+    pub String message
+    init(String m) { this.message = m }
+    pub String Error() { return message }
+}
+
+class Layer2 {
+    pub String message
+    init(String m) { this.message = m }
+    pub String Error() { return message }
+}
+
+void innerOp(String kind) {
+    if (kind == "l1") { throw Layer1("layer1 boom") }
+    if (kind == "l2") { throw Layer2("layer2 boom") }
+}
+
+String outerOp(String kind) {
+    try {
+        try {
+            innerOp(kind)
+            return "inner-ok"
+        } catch (Layer1 e) {
+            return "inner caught L1: ${e.message}"
+        }
+    } catch (Layer2 e) {
+        return "outer caught L2: ${e.message}"
+    }
+}
+
+void main() {
+    print(outerOp("ok"))
+    print(outerOp("l1"))
+    print(outerOp("l2"))
+}

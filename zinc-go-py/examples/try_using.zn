@@ -1,0 +1,52 @@
+// using — RAII-style cleanup. Close() runs on exit, even when the
+// body throws. Preferred over finally for resources.
+
+class WorkSession {
+    pub String name
+
+    init(String name) {
+        this.name = name
+        print("open: ${name}")
+    }
+
+    pub void Close() {
+        print("close: ${name}")
+    }
+
+    pub void doWork(String tag) {
+        print("work ${tag} on ${name}")
+    }
+}
+
+class WorkFailed {
+    pub String message
+    init(String m) { this.message = m }
+    pub String Error() { return message }
+}
+
+// Happy path — body completes, Close() runs.
+void happy() {
+    using (var s = WorkSession("alpha")) {
+        s.doWork("one")
+        s.doWork("two")
+    }
+    print("after happy")
+}
+
+// Throw path — throw escapes via try/catch below; Close() runs first.
+void failing() {
+    try {
+        using (var s = WorkSession("beta")) {
+            s.doWork("one")
+            throw WorkFailed("mid-work boom")
+        }
+    } catch (WorkFailed e) {
+        print("caught: ${e.message}")
+    }
+    print("after failing")
+}
+
+void main() {
+    happy()
+    failing()
+}

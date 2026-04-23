@@ -1,0 +1,79 @@
+// Test type inference for collection operations on typed literals.
+// All collections declared via var = Type<...>{} or Type<...>[] must
+// preserve element types through .keys(), .values(), iteration, indexing.
+
+void main() {
+    // --- Map: typed empty literal ---
+    var m = Map<String, int>{}
+    m["a"] = 10
+    m["b"] = 20
+    m["c"] = 30
+
+    // .keys() should return List<String>
+    var keys = m.keys()
+    keys.sort()
+    print("map keys: ${keys}")
+
+    // .values() should return List<int>
+    var vals = m.values()
+    var sum = 0
+    for (v in vals) {
+        sum = sum + v
+    }
+    print("map values sum: ${sum}")
+
+    // Iterate keys and use as typed map index (no str() cast needed)
+    var total = 0
+    for (k in m.keys()) {
+        total = total + m[k]
+    }
+    print("map iterate sum: ${total}")
+
+    // .containsKey() with typed key
+    print("has a: ${m.containsKey("a")}")
+    print("has z: ${m.containsKey("z")}")
+
+    // --- Map: typed literal with initial values ---
+    var m2 = Map<String, String>{"greeting": "hello", "name": "zinc"}
+    var k2 = m2.keys()
+    k2.sort()
+    print("m2 keys: ${k2}")
+    var v2 = m2.values()
+    v2.sort()
+    print("m2 values: ${v2}")
+
+    // --- List: typed empty literal ---
+    var nums = List<int>[]
+    nums = append(nums, 5)
+    nums = append(nums, 3)
+    nums = append(nums, 8)
+    nums.sort()
+    print("sorted nums: ${nums}")
+    print("nums size: ${nums.size()}")
+
+    // Index access preserves type
+    var first = nums[0]
+    print("first num: ${first}")
+
+    // --- List: typed literal with values ---
+    var words = List<String>["banana", "apple", "cherry"]
+    words.sort()
+    print("sorted words: ${words}")
+
+    // --- Map<String, List<int>>: nested typed iteration ---
+    var nested = Map<String, List<int>>{}
+    nested["evens"] = List<int>[2, 4, 6]
+    nested["odds"] = List<int>[1, 3, 5]
+    var nestedKeys = nested.keys()
+    nestedKeys.sort()
+    for (nk in nestedKeys) {
+        var items = nested[nk]
+        var nsum = 0
+        for (item in items) {
+            nsum = nsum + item
+        }
+        print("${nk} sum: ${nsum}")
+    }
+
+    print("collection types OK")
+}

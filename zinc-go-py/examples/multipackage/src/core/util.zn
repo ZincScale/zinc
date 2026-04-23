@@ -1,0 +1,13 @@
+// Utility functions in the core package
+
+pub String formatUser(User u) {
+    return "${u.name} (age ${u.age})"
+}
+
+pub bool isAdult(User u) {
+    return u.age >= 18
+}
+
+pub String formatPrice(Product p) {
+    return "${p.name}: $${p.price}"
+}

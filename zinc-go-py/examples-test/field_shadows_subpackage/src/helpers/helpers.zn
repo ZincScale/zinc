@@ -1,0 +1,7 @@
+// Sibling subpackage named `helpers` — used below as the cross-package
+// context for the shadowing-regression test. Exported so the test code
+// can detect that the subpackage really exists.
+
+pub String greet(String who) {
+    return "hello, ${who}"
+}

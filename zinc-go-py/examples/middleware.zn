@@ -1,0 +1,23 @@
+Fn<(String), String> logging(Fn<(String), String> next) {
+    return (String path) -> {
+        print("  log: ${path}")
+        return next(path)
+    }
+}
+
+Fn<(String), String> auth(Fn<(String), String> next) {
+    return (String path) -> {
+        print("  auth: ok")
+        return next(path)
+    }
+}
+
+String endpoint(String path) {
+    return "200 OK: ${path}"
+}
+
+void main() {
+    var handler = logging(auth((String p) -> endpoint(p)))
+    var response = handler("/api/users")
+    print(response)
+}

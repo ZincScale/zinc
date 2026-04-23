@@ -1,0 +1,3 @@
+caught: network down
+caught: disk full
+caught: generic boom

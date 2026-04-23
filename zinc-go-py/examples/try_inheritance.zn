@@ -1,0 +1,39 @@
+// Exception inheritance — a subclass thrown matches a superclass
+// catch via errors.As + Go struct embedding. The *Subclass has an
+// embedded Superclass, so errors.As targeting *Superclass unwraps it.
+
+class AppError {
+    pub String message
+    init(String m) { this.message = m }
+    pub String Error() { return message }
+}
+
+class NetworkError : AppError {
+    init(String m) { super(m) }
+}
+
+class DiskError : AppError {
+    init(String m) { super(m) }
+}
+
+String classify(int code) {
+    try {
+        if (code == 1) { throw NetworkError("network down") }
+        if (code == 2) { throw DiskError("disk full") }
+        throw AppError("generic boom")
+    } catch (AppError e) {
+        // All three throws land here — subclasses bubble up to the
+        // superclass catch via struct embedding + Unwrap + errors.As.
+        return "caught: ${e.message}"
+    } catch (e) {
+        // Universal catch keeps the enclosing function non-throwing;
+        // the AppError branch handles every throw in practice.
+        return "unexpected: ${e.Error()}"
+    }
+}
+
+void main() {
+    print(classify(1))
+    print(classify(2))
+    print(classify(3))
+}

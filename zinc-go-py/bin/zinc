@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Dev-mode launcher. Prefers the local .venv (see README) so you don't have
+# to activate it manually; falls back to system python3 otherwise.
+set -e
+HERE="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+ROOT="$( dirname "$HERE" )"
+
+if [ -x "$ROOT/.venv/bin/python3" ]; then
+    exec "$ROOT/.venv/bin/python3" -m zinc "$@"
+fi
+
+# Fallback — works only if `lark` is importable in the system python.
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m zinc "$@"

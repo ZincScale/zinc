@@ -1,0 +1,10 @@
+success:
+  body
+  finally
+caught:
+  body-before-throw
+  catch: bad state
+  finally
+  body
+  finally-on-return
+early-return: done

@@ -1,0 +1,23 @@
+// Test import aliasing with 'as' keyword
+
+import fmt
+import strings as str
+
+void main() {
+    // Use aliased import
+    var upper = str.ToUpper("hello zinc")
+    print("upper: ${upper}")
+
+    var parts = str.Split("a,b,c", ",")
+    print("parts: ${parts}")
+
+    var joined = str.Join(parts, " - ")
+    print("joined: ${joined}")
+
+    var has = str.Contains("hello world", "world")
+    print("contains: ${has}")
+
+    // Non-aliased import still works
+    var msg = fmt.Sprintf("formatted: %d", 42)
+    print(msg)
+}

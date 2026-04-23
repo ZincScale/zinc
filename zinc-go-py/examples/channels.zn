@@ -1,0 +1,31 @@
+void main() {
+    // Basic send/receive
+    var ch = Channel(1)
+    spawn {
+        ch.send("hello from channel")
+    }
+    var msg = ch.recv()
+    print("received: ${msg}")
+
+    // Producer/consumer
+    var work = Channel(3)
+    work.send("task1")
+    work.send("task2")
+    work.send("task3")
+
+    for (i in 0..3) {
+        var task = work.recv()
+        print("processing: ${task}")
+    }
+
+    // Close channel
+    var done = Channel(1)
+    spawn {
+        done.send("finished")
+    }
+    var result = done.recv()
+    done.close()
+    print("done: ${result}")
+
+    print("Channels OK")
+}

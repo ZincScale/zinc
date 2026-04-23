@@ -1,0 +1,55 @@
+// A class with methods whose names collide with Go collection builtins.
+// All of these must generate method calls, not builtin rewrites.
+
+pub class Store {
+    var items = Map<String, String>{}
+    var count = 0
+
+    init() {}
+
+    pub void delete(String key) {
+        items.delete(key)
+        count = count - 1
+    }
+
+    pub String remove(String key) {
+        var val = items[key]
+        items.delete(key)
+        count = count - 1
+        return val
+    }
+
+    pub bool containsKey(String key) {
+        return items.containsKey(key)
+    }
+
+    pub int size() {
+        return count
+    }
+
+    pub bool isEmpty() {
+        return count == 0
+    }
+
+    pub void close() {
+        items = Map<String, String>{}
+        count = 0
+    }
+
+    pub void add(String key, String value) {
+        items[key] = value
+        count = count + 1
+    }
+
+    pub String sort() {
+        return "custom-sort"
+    }
+
+    pub String reverse() {
+        return "custom-reverse"
+    }
+
+    pub int length() {
+        return count
+    }
+}

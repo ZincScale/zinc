@@ -1,0 +1,18 @@
+Count: 5
+Hello, Alice
+Hello, Bob
+Hello, Charlie
+Hello, Dave
+Hello, Eve
+Charlie is 35
+Dave is 28
+Alice is 30
+Bob is 25
+Evens: [2 4 6 8 10]
+stack size: 3
+peek: third
+pop: third
+pop: second
+stack size after: 1
+entry: Entry(key=score, value=100)
+entry: Entry(key=1, value=one)

@@ -1,0 +1,16 @@
+1. x=42 s=hello b=true f=3.14
+2. count=10 greeting=hi flag=false
+3. names: [alice]
+4. nums: [1 2 3]
+5. items: [sword]
+6. primes: [2 3 5 7]
+7. alice: 30
+8. port: 8080
+9. point: Point(x=3, y=4)
+10. myapp host=localhost:8080 retries=3 debug=false tags=2 meta=1 scores=1 limits=1
+10. host: localhost
+10. debug: false
+11. letters: [a b c]
+12. origin: Point(x=0, y=0)
+12. target: Point(x=10, y=20)
+Var patterns OK

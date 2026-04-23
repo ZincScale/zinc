@@ -1,0 +1,3 @@
+inner-ok
+inner caught L1: layer1 boom
+outer caught L2: layer2 boom

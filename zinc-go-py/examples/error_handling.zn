@@ -1,0 +1,91 @@
+// Error Handling — Zinc v3 (exception model)
+// Demonstrates: throw, try/catch/finally, typed catch, fallback patterns
+
+class DivisionException {
+    pub String message
+    init(String message) { this.message = message }
+    pub String Error() { return message }
+}
+
+// Function that can fail — throws on bad input
+int divide(int a, int b) {
+    if (b == 0) { throw DivisionException("division by zero") }
+    return a / b
+}
+
+// Fallback value on error via try/catch
+int safeDiv(int a, int b, int fallback) {
+    try {
+        var r = divide(a, b)
+        return r
+    } catch (e) {
+        return fallback
+    }
+}
+
+print("divide(10, 0) or -1 = ${safeDiv(10, 0, -1)}")
+
+// Successful call
+print("divide(10, 2) = ${safeDiv(10, 2, 0)}")
+
+// Catch the exception as a statement handler
+try {
+    divide(10, 0)
+} catch (e) {
+    print("caught division error")
+}
+print("or block done")
+
+// Validate with throw
+int validate(int x) {
+    if (x < 0) { throw DivisionException("must be positive") }
+    return x
+}
+
+int safeValidate(int x, int fallback) {
+    try {
+        var r = validate(x)
+        return r
+    } catch (e) {
+        return fallback
+    }
+}
+
+print("validate(-5) or -1 = ${safeValidate(-5, -1)}")
+print("validate(10) = ${safeValidate(10, -1)}")
+
+// Try/catch with early return — fallback path
+String loadAndProcess() {
+    try {
+        var data = divide(10, 0)
+        return "processed: ${data}"
+    } catch (e) {
+        return "fallback result"
+    }
+}
+print("loadAndProcess: ${loadAndProcess()}")
+
+// Catch with continue — skip items in loop
+List<int> inputs = [2, 0, 5, 0, 3]
+for (b in inputs) {
+    try {
+        var val = divide(100, b)
+        print("100/${b} = ${val}")
+    } catch (e) {
+        continue
+    }
+}
+
+// Exception propagates through a rethrowing function
+int safeDivide(int a, int b) {
+    // No try/catch here — the throw from divide propagates up.
+    // canReturnError detects the transitive throw and widens this
+    // function's Go signature to (int, error).
+    var r = divide(a, b)
+    return r
+}
+
+print("propagated error: ${safeDiv(10, 0, -99)}")
+print("propagated ok: ${safeDiv(10, 2, -99)}")
+
+print("Error Handling OK")

@@ -1,0 +1,7 @@
+pub int addOne(int x) {
+    return x + 1
+}
+
+void main() {
+    print("main runs too")
+}

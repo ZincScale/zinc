@@ -1,0 +1,26 @@
+// Nested subpackage: fabric/router
+
+data Rule(String name, String pattern)
+
+class Router {
+    var rules = List<Rule>[]
+
+    init() {}
+
+    pub void addRule(Rule rule) {
+        rules = append(rules, rule)
+    }
+
+    pub String route(String input) {
+        for (r in rules) {
+            if (input == r.pattern) {
+                return r.name
+            }
+        }
+        return "no-match"
+    }
+
+    pub int count() {
+        return len(rules)
+    }
+}
