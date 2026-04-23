@@ -75,12 +75,12 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
         case ast.ArrayType(element_type=elem):
             return f"[]{_go_type(elem, emitter)}"
         case ast.OptionalType(inner=inner):
-            # Classes and imported structs are already pointer types — the
-            # `?` adds nothing. For primitives (string/int/etc), we DROP
-            # the optional wrapping: Go's zero value ("" / 0 / false) acts
-            # as null. This avoids the `*string = "literal"` conversion
-            # problem and keeps nullable types ergonomic.
-            return _go_type(inner, emitter)
+            # Class/imported-struct already pointer — `?` no-op.
+            inner_t = _go_type(inner, emitter)
+            if inner_t.startswith("*"):
+                return inner_t
+            # Primitives become pointer so `null` is representable.
+            return f"*{inner_t}"
         case ast.FuncTypeExpr(params=ps, return_type=r):
             plist = ", ".join(_go_type(p, emitter) for p in ps)
             rstr = _go_type(r, emitter)
@@ -141,6 +141,8 @@ _BUILTIN_METHODS: dict[str, tuple[int | None, object]] = {
     "get":         (1, lambda e, r, a: f"{r}[{a[0]}]"),
     "containsKey": (1, lambda e, r, a: f"(func() bool {{ _, ok := {r}[{a[0]}]; return ok }}())"),
     "keys":        (0, lambda e, r, a: f"(func() []string {{ ks := make([]string, 0, len({r})); for k := range {r} {{ ks = append(ks, k) }}; return ks }}())"),
+    # Receiver-type-agnostic fallback; see _values_for_typed_map override
+    # in _fmt_call for the typed case.
     "values":      (0, lambda e, r, a: f"(func() []interface{{}} {{ vs := make([]interface{{}}, 0, len({r})); for _, v := range {r} {{ vs = append(vs, v) }}; return vs }}())"),
     "remove":      (1, lambda e, r, a: f"delete({r}, {a[0]})"),
 
@@ -673,7 +675,26 @@ class Emitter:
             case ast.VarStmt():
                 self._emit_var(s)
             case ast.ReturnStmt(value=v):
-                self._writeln("return" + (f" {self._fmt_expr(v)}" if v is not None else ""))
+                if v is None:
+                    self._writeln("return")
+                else:
+                    val_str = self._fmt_expr(v)
+                    # If function returns a pointer-to-primitive and the
+                    # value is a string/int/bool literal, wrap in an
+                    # inline helper that takes the address.
+                    ret_t = _go_type(self.current_fn_ret_type, self) if self.current_fn_ret_type else ""
+                    if (ret_t.startswith("*") and isinstance(v, (
+                            ast.StringLit, ast.IntLit, ast.FloatLit, ast.BoolLit))):
+                        inner_t = ret_t[1:]
+                        self._writeln(f"{{ _r := {val_str}; return &_r }}" if False
+                                      else f"return func() {ret_t} {{ _r := {val_str}; return &_r }}()")
+                    elif (ret_t in ("string", "int", "int64", "float32", "float64", "bool", "byte")
+                          and (val_str.startswith("(<-") or
+                               _infer_type(v, self) == "interface{}")):
+                        # interface{} (including chan recv) → primitive: assert.
+                        self._writeln(f"return {val_str}.({ret_t})")
+                    else:
+                        self._writeln(f"return {val_str}")
             case ast.PrintStmt(value=v):
                 self._emit_print(v)
             case ast.ExprStmt(expr=e):
@@ -768,6 +789,7 @@ class Emitter:
                 raise NotImplementedError(f"stmt: {type(s).__name__}")
 
     def _emit_var(self, v: ast.VarStmt) -> None:
+        # Track under Zinc name (_fmt_expr on an Ident will _safe_name it).
         if v.type is not None:
             self.current_local_types[v.name] = v.type
         elif v.value is not None:
@@ -779,7 +801,12 @@ class Emitter:
             if isinstance(v.value, ast.CallExpr) and isinstance(v.value.callee, ast.Ident):
                 callee_name = v.value.callee.name
                 if callee_name in self.user_classes:
-                    self.current_local_types[v.name] = ast.SimpleType(name=callee_name)
+                    # Sealed-variant ctor: track as the sealed parent type so
+                    # `match r` type-switches correctly (variant structs
+                    # aren't interfaces; the sealed parent is).
+                    parent = self.sealed_by_variant.get(callee_name)
+                    self.current_local_types[v.name] = ast.SimpleType(
+                        name=parent or callee_name)
             elif isinstance(v.value, (ast.StringLit, ast.StringInterpLit, ast.RawStringLit)):
                 self.current_local_types[v.name] = ast.SimpleType(name="String")
             elif isinstance(v.value, ast.IntLit):
@@ -789,7 +816,7 @@ class Emitter:
             elif isinstance(v.value, ast.BoolLit):
                 self.current_local_types[v.name] = ast.SimpleType(name="bool")
         if v.value is None:
-            self._writeln(f"var {v.name} {_go_type(v.type, self)}")
+            self._writeln(f"var {_safe_name(v.name)} {_go_type(v.type, self)}")
             self.current_locals.add(v.name)
             return
         value_str = self._fmt_expr(v.value, ctx_type=v.type)
@@ -802,14 +829,17 @@ class Emitter:
         if (v.type is not None and isinstance(v.type, ast.SimpleType)
                 and v.type.name in self.user_classes):
             info = self.user_classes[v.type.name]
-            if not info.get("is_data") and not info.get("is_interface"):
+            # Drop annotation for concrete classes only — sealed parents
+            # and interfaces need the annotation to upcast variants.
+            if (not info.get("is_data") and not info.get("is_interface")
+                    and not info.get("is_sealed")):
                 self._writeln(f"{v.name} := {value_str}")
                 self.current_locals.add(v.name)
                 return
         if v.type is None:
-            self._writeln(f"{v.name} := {value_str}")
+            self._writeln(f"{_safe_name(v.name)} := {value_str}")
         else:
-            self._writeln(f"var {v.name} {_go_type(v.type, self)} = {value_str}")
+            self._writeln(f"var {_safe_name(v.name)} {_go_type(v.type, self)} = {value_str}")
         self.current_locals.add(v.name)
 
     def _emit_assign(self, s: ast.AssignStmt) -> None:
@@ -898,9 +928,18 @@ class Emitter:
         )
 
         if is_type_switch:
-            # Dereference pointer-to-sealed types — sealed class values are
-            # pointers but type-switch wants the underlying interface.
+            # If the subject is a bare Ident whose tracked type is a sealed
+            # variant (not yet assigned to the interface), box it first
+            # so Go's type-switch has an interface to work with.
             subj_str = self._fmt_expr(s.subject)
+            if isinstance(s.subject, ast.Ident):
+                t = self.current_local_types.get(s.subject.name)
+                if t is not None and isinstance(t, ast.SimpleType):
+                    info = self.user_classes.get(t.name, {})
+                    if info.get("is_data") and t.name in self.sealed_by_variant:
+                        parent = self.sealed_by_variant[t.name]
+                        self._writeln(f"var _subj {parent} = {subj_str}")
+                        subj_str = "_subj"
             self._writeln(f"switch _v := {subj_str}.(type) {{")
             for c in s.cases:
                 # Wildcard arm: `case _ { body }` or bare wildcard.
@@ -1062,31 +1101,19 @@ class Emitter:
             case ast.BoolLit(value=v):
                 return "true" if v else "false"
             case ast.NullLit():
-                # Under the simplified optional-type rule (OptionalType drops
-                # the `*`), `null` on a primitive returns its zero value.
-                # Context-type would let us be precise; fallback to "nil"
-                # for class/interface returns.
-                if self.current_fn_ret_type is not None:
-                    t = self.current_fn_ret_type
-                    if isinstance(t, ast.OptionalType):
-                        t = t.inner
-                    if isinstance(t, ast.SimpleType) and t.name in _TYPE_MAP:
-                        go = _TYPE_MAP[t.name]
-                        if go == "string":
-                            return '""'
-                        if go in ("int", "int64", "float32", "float64", "byte", "rune"):
-                            return "0"
-                        if go == "bool":
-                            return "false"
                 return "nil"
             case ast.Ident(name=n):
-                # Locals/params shadow fields and methods.
+                # Locals/params shadow fields/methods AND require rename
+                # when the user-declared name collides with a Go builtin.
                 if n in self.current_locals:
-                    return n
+                    return _safe_name(n)
                 if n in self.current_self_fields:
                     return f"this.{_go_field_name(n)}"
                 if n in self.current_self_methods:
                     return f"this.{n}"
+                # Non-local reference — leave as-is. Calls to Go builtins
+                # like `append`/`len` flow through here and must NOT be
+                # rewritten (they're Go's real builtins, not user refs).
                 return n
             case ast.ThisExpr():
                 return "this"
@@ -1170,8 +1197,24 @@ class Emitter:
                 hi = self._fmt_expr(h) if h is not None else ""
                 return f"{self._fmt_expr(o)}[{lo}:{hi}]"
             case ast.SafeNavExpr(object=o, field=f):
+                # Safe nav on `*primitive`: check nil first, else operate.
+                # `user?.length()` with user=*string → if user == nil { return 0 } else len(*user).
+                if isinstance(o, ast.Ident):
+                    t = self.current_local_types.get(o.name)
+                    # Unwrap OptionalType
+                    if isinstance(t, ast.OptionalType):
+                        t = t.inner
+                    if isinstance(t, ast.SimpleType):
+                        inner_name = t.name
+                        if inner_name in _TYPE_MAP:
+                            obj_str = self._fmt_expr(o)
+                            if f in ("length", "size"):
+                                return (f"(func() int {{ if {obj_str} == nil {{ return 0 }}; "
+                                        f"return len(*{obj_str}) }}())")
+                            return f"{obj_str}.{_go_field_name(f)}"
                 inner = self._fmt_expr(o)
-                return f"(func() interface{{}} {{ if {inner} == nil {{ return nil }}; return {inner}.{_go_field_name(f)} }}())"
+                return (f"(func() interface{{}} {{ if {inner} == nil {{ return nil }}; "
+                        f"return {inner}.{_go_field_name(f)} }}())")
             case ast.PropagateExpr(inner=i):
                 return self._fmt_expr(i)     # unused in the v2 model (implicit propagate)
             case ast.TypeAssertExpr(object=o, type_name=tn, is_check=chk):
@@ -1223,6 +1266,38 @@ class Emitter:
                 and self.current_parent):
             args = ", ".join(self._fmt_expr(a) for a in c.args)
             return f"this.{self.current_parent} = New{self.current_parent}({args})"
+
+        # 0.5. CallExpr on SafeNavExpr: `x?.method(args)`. Treat as a
+        # method call with null-guard. If the receiver is a primitive
+        # (no null possible), emit as plain builtin dispatch.
+        if isinstance(c.callee, ast.SafeNavExpr):
+            sn = c.callee
+            # Synthesize an equivalent SelectorExpr-based call so builtin
+            # dispatch works (for .length etc.); skip the null check when
+            # the receiver is a known primitive (can't be nil under our rules).
+            sel = ast.SelectorExpr(object=sn.object, field=sn.field)
+            inner_call = ast.CallExpr(callee=sel, args=c.args)
+            return self._fmt_call(inner_call)
+
+        # 1a. Typed-map .values()/.keys() override — if the receiver is
+        # tracked as `Map<K, V>`, emit the builtin with the element types
+        # baked in instead of `interface{}`. Fixes `for v in m.values()`
+        # where v would otherwise be interface{} even for a typed map.
+        if (isinstance(c.callee, ast.SelectorExpr)
+                and isinstance(c.callee.object, ast.Ident)
+                and c.callee.field in ("values", "keys")
+                and not c.args):
+            t = self.current_local_types.get(c.callee.object.name)
+            if isinstance(t, ast.GenericType) and t.name == "Map" and len(t.type_args) >= 2:
+                recv = self._fmt_expr(c.callee.object)
+                k_t = _go_type(t.type_args[0], self)
+                v_t = _go_type(t.type_args[1], self)
+                if c.callee.field == "keys":
+                    return (f"(func() []{k_t} {{ ks := make([]{k_t}, 0, len({recv})); "
+                            f"for k := range {recv} {{ ks = append(ks, k) }}; return ks }}())")
+                else:
+                    return (f"(func() []{v_t} {{ vs := make([]{v_t}, 0, len({recv})); "
+                            f"for _, v := range {recv} {{ vs = append(vs, v) }}; return vs }}())")
 
         # 1. Built-in method dispatch. Suppressed when:
         #   - the receiver is `this` (that's a real user method),
@@ -1552,9 +1627,10 @@ def _type_param_list(tp: list[str]) -> str:
 
 def _fmt_param(p, emitter=None) -> str:
     typ = _go_type(p.type, emitter) if p.type is not None else "interface{}"
+    name = _safe_name(p.name)
     if getattr(p, "variadic", False):
-        return f"{p.name} ...{typ}"
-    return f"{p.name} {typ}" if typ else p.name
+        return f"{name} ...{typ}"
+    return f"{name} {typ}" if typ else name
 
 
 def _go_string(s: str) -> str:
@@ -1562,10 +1638,24 @@ def _go_string(s: str) -> str:
 
 
 def _go_field_name(name: str) -> str:
-    """Zinc public fields are lowercase by convention; Go requires capitalization
-    for cross-package access. Here we keep the Zinc name as-is — users can
-    write `pub` which we don't currently translate to capitalisation, but
-    within a single Go package lowercase works. Left as a hook for later."""
+    return name
+
+
+# Identifiers that would shadow Go builtins or collide with keywords when
+# used as Zinc variable/param names. Rewritten to `_<name>`.
+_GO_RESERVED = frozenset({
+    "len", "cap", "make", "new", "append", "copy", "delete", "close",
+    "print", "println", "panic", "recover", "type", "func", "map",
+    "chan", "select", "go", "defer", "range", "interface",
+})
+
+
+def _safe_name(name: str) -> str:
+    """Rename Zinc-side identifiers that shadow Go builtins (e.g. `len`,
+    `map`, `print`). Keeps the output compilable without requiring users
+    to avoid common Zinc names."""
+    if name in _GO_RESERVED:
+        return f"_{name}"
     return name
 
 
