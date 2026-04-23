@@ -49,7 +49,13 @@ class_body: class_member*
              | ctor_decl
              | method_decl
 
+// Field declarations come in two shapes:
+//   typed — `pub String host = "x"` — modifier* + type + name + optional init
+//   var  — `var items = [1,2,3]`    — infer type from initializer
+// Keeping them as distinct alternatives avoids the ambiguity where
+// `pub String getKey()` could be mistaken for a field with three names.
 field_decl.10: annotation* field_modifier* type_ref NAME ("=" expr)?
+             | annotation* field_modifier* "var" NAME "=" expr     -> var_field_decl
 !field_modifier: "pub" | "readonly" | "const" | "init" | "static"
 
 ctor_decl.10: "init" "(" params? ")" block
@@ -151,7 +157,10 @@ return_stmt: return_with_value | return_void
 return_with_value.20: "return" expr
 return_void.1:        "return"
 
-if_stmt: "if" "(" expr ")" block ( "else" (if_stmt | block) )?
+// Priority on all statement keywords so `if(x)`, `while(x)`, `for(x)`, etc.
+// win over the generic `stmt_expr` fallback — otherwise they'd parse as
+// calls to functions named `if`/`while`/`for`.
+if_stmt.10: "if" "(" expr ")" block ( "else" (if_stmt | block) )?
 
 // For loops — four surface forms:
 //   for (init; cond; post) block          — C-style
@@ -162,42 +171,48 @@ for_stmt.5: "for" "(" for_header ")" block
           | "for" NAME "in" expr block
           | "for" "(" NAME "in" expr ")" block
           | "for" "(" NAME "," NAME ")" "in" expr block
+          | "for" "(" NAME "," NAME "in" expr ")" block   // alt: indices inside parens
 
 for_header: (var_stmt | assign_or_expr_stmt)? ";" expr? ";" (assign_or_expr_stmt)?
 
-while_stmt: "while" "(" expr ")" block
+while_stmt.10: "while" "(" expr ")" block
 
-match_stmt: "match" expr "{" match_case+ "}"
+match_stmt.10: "match" expr "{" match_case+ "}"
+             | "match" "(" expr ")" "{" match_case+ "}"
+// Two match-case shapes: `case pat -> block` and `case pat { body }`.
 match_case: "case" match_pattern "->" block
           | "_" "->" block
+          | "case" match_pattern block
+          | "_" block
 match_pattern: expr
 
 break_stmt: "break"
 continue_stmt: "continue"
 
-throw_stmt: "throw" expr
+throw_stmt.10: "throw" expr
 
-try_stmt: "try" block catch_clause* finally_clause?
+try_stmt.10: "try" block catch_clause* finally_clause?
 catch_clause: "catch" "(" type_ref? NAME? ")" block
 finally_clause: "finally" block
 
-with_stmt: ("with" | "using" | "lock") "(" with_resource ("," with_resource)* ")" block
+with_stmt.10: ("with" | "using" | "lock") "(" with_resource ("," with_resource)* ")" block
 with_resource: "var" NAME "=" expr or_handler?
              | expr
 
-defer_stmt: "defer" expr
+defer_stmt.10: "defer" expr
 
-print_stmt: "print" "(" expr ")"
+print_stmt.10: "print" "(" expr ")"
 
-assert_stmt: "assert" expr ("," expr)?
+assert_stmt.10: "assert" expr ("," expr)?
 
-parallel_for_stmt: "parallel" ("(" "max" ":" expr ")")? "for" NAME "in" expr block or_handler?
+parallel_for_stmt.10: "parallel" ("(" "max" ":" expr ")")? "for" NAME "in" expr block or_handler?
+                    | "parallel" ("(" "max" ":" expr ")")? "for" "(" NAME "in" expr ")" block or_handler?
 
-concurrent_stmt: "concurrent" ("(" "first" ":" expr ")")? "{" expr* "}" or_handler?
+concurrent_stmt.10: "concurrent" ("(" "first" ":" expr ")")? "{" expr* "}" or_handler?
 
-timeout_stmt: "timeout" "(" expr ")" block or_handler?
+timeout_stmt.10: "timeout" "(" expr ")" block or_handler?
 
-spawn_stmt: "spawn" block or_handler?
+spawn_stmt.10: "spawn" block or_handler?
 
 or_handler: "or" block
           | "or" expr                             // short-form default value
@@ -216,8 +231,12 @@ stmt_expr: stmt_primary stmt_postfix*
              | type_args "(" call_args? ")" -> stmt_call_typed
              | "[" expr "]"               -> stmt_index
              | "?"                        -> stmt_propagate
+// A statement-starting expression can begin with an identifier, `this`, or
+// `super` (inside constructor bodies). Anything else is a keyword statement
+// which has its own rule.
 ?stmt_primary: NAME                       -> stmt_ident
              | "this"                     -> stmt_this
+             | "super"                    -> stmt_super
 !assign_op: "=" | "+=" | "-=" | "*=" | "/="
 
 block: "{" stmt* "}"
@@ -243,35 +262,34 @@ if_expr: "if" expr "{" expr "}" "else" "{" expr "}"
 ?and_expr: and_expr ("&&" | "and") not_expr  -> bin_and
          | not_expr
 
+// Precedence ladder — Go/Java convention (loose → tight):
+//   not > comparison > bitor > bitxor > range > addsub > shift > bitand > muldiv
+// Bitwise ops bind tighter than comparison, so `a & 4 != 0` parses as
+// `(a & 4) != 0` (what Go/Java programmers expect).
 ?not_expr: "not" not_expr              -> not_
-         | bitor_expr
+         | comp_expr
+
+?comp_expr: comp_expr comp_op bitor_expr    -> bin_cmp
+          | bitor_expr
+!comp_op: "==" | "!=" | "<" | "<=" | ">" | ">=" | "===" | "!==" | "is" | "in"
 
 ?bitor_expr: bitor_expr "|" bitxor_expr    -> bit_or
            | bitxor_expr
 
-?bitxor_expr: bitxor_expr "^" bitand_expr  -> bit_xor
-            | bitand_expr
+?bitxor_expr: bitxor_expr "^" range_expr   -> bit_xor
+            | range_expr
 
-?bitand_expr: bitand_expr "&" comp_expr    -> bit_and
-            | comp_expr
-
-?comp_expr: comp_expr comp_op range_expr    -> bin_cmp
-          | range_expr
-// `!` prefix keeps anonymous string tokens as tree children — needed so the
-// transformer can see which operator was matched. Applies anywhere a rule's
-// only content is a set of literal alternatives.
-!comp_op: "==" | "!=" | "<" | "<=" | ">" | ">=" | "===" | "!==" | "is" | "in"
-
-// Binary-op rules use `!` on the inline alternatives (via stored tokens) so
-// the operator string survives into the parse tree for the AST transformer.
 ?range_expr: addsub_expr RANGE_OP addsub_expr -> range_
            | addsub_expr
 
 ?addsub_expr: addsub_expr ADDSUB_OP shift_expr -> bin_addsub
             | shift_expr
 
-?shift_expr: shift_expr SHIFT_OP muldiv_expr -> bin_shift
-           | muldiv_expr
+?shift_expr: shift_expr SHIFT_OP bitand_expr -> bin_shift
+           | bitand_expr
+
+?bitand_expr: bitand_expr "&" muldiv_expr  -> bit_and
+            | muldiv_expr
 
 ?muldiv_expr: muldiv_expr MULDIV_OP unary_expr -> bin_muldiv
             | unary_expr
@@ -289,19 +307,22 @@ MULDIV_OP: "*" | "/" | "%"
            | postfix_expr
 
 // Postfix chains: selector / method call / index / slice / call / typed call.
-// The three "typed-prefix" forms (typed_call, typed_list_lit, typed_map_lit)
-// share the same `type_args` gate and are recognised as distinct semantic
-// patterns in the AST transformer — the grammar just parses them uniformly.
+// The three `type_args` postfix forms (call_typed, typed_list_lit,
+// typed_map_lit) must be higher priority than the bare comparison chain
+// `x < T > y` so `List<String>(10)` parses as a generic call rather than
+// `(List < String) > 10`.
 ?postfix_expr: postfix_expr "." NAME                              -> selector
              | postfix_expr "?." NAME                             -> safe_nav
              | postfix_expr "(" call_args? ")"                    -> call
-             | postfix_expr type_args "(" call_args? ")"          -> call_typed
-             | postfix_expr type_args "[" (expr ("," expr)*)? "]" -> typed_list_lit
-             | postfix_expr type_args "{" (map_entry ("," map_entry)*)? "}" -> typed_map_lit
+             | typed_postfix_expr
              | postfix_expr "[" expr "]"                          -> index
              | postfix_expr "[" expr? ":" expr? "]"               -> slice
              | postfix_expr "?"                                   -> propagate
              | primary
+
+?typed_postfix_expr.10: postfix_expr type_args "(" call_args? ")"          -> call_typed
+                      | postfix_expr type_args "[" (expr ("," expr)*)? "]" -> typed_list_lit
+                      | postfix_expr type_args "{" (map_entry ("," map_entry)*)? "}" -> typed_map_lit
 
 call_args: call_arg ("," call_arg)*
 // Three call-arg forms:
@@ -352,14 +373,22 @@ lambda_params: lambda_param ("," lambda_param)*
 lambda_param: type_ref? NAME ("=" expr)?
 
 match_expr: "match" expr "{" match_expr_case+ "}"
+// Two forms: `case pat -> value,?` and `case pat { value }`.
 match_expr_case: "case" match_pattern "->" expr ","?
                | "_" "->" expr ","?
+               | "case" match_pattern "{" expr "}"
+               | "_" "{" expr "}"
 
 spawn_expr: "spawn" block or_handler?
 
 // --- Terminals ---------------------------------------------------------------
 
-NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+// NAME excludes only the hard control-flow keywords so NAME can't be
+// mistaken for them in expression contexts. Soft keywords (`data`, `var`,
+// `in`, `is`, `as`, `pub`, `type`, etc.) are valid identifiers AND may
+// act as keywords in specific rule positions — Lark's lexer gives the
+// string-literal token priority over NAME at those sites.
+NAME: /(?!(?:if|else|while|for|return|break|continue|class|interface|enum|match|case|import|package|try|catch|finally|throw|defer|spawn|parallel|concurrent|timeout|assert|test|this|super|new|null|true|false|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 
 INT:   /0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|[0-9]+/
 FLOAT: /[0-9]+\.[0-9]+/

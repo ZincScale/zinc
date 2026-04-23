@@ -178,6 +178,30 @@ class ZincTransformer(Transformer):
     def field_modifier(self, kw):
         return _Modifier(str(kw))
 
+    def var_field_decl(self, *items):
+        annots = []
+        modifiers = []
+        name = None
+        value = None
+        for it in items:
+            if isinstance(it, ast.Annotation):
+                annots.append(it)
+            elif isinstance(it, _Modifier):
+                modifiers.append(str(it))
+            elif isinstance(it, Token) and it.type == "NAME" and name is None:
+                name = str(it)
+            else:
+                value = it
+        return ast.FieldDecl(
+            name=name, type=None, default=value,
+            is_pub="pub" in modifiers,
+            is_readonly="readonly" in modifiers,
+            is_const="const" in modifiers,
+            is_init="init" in modifiers,
+            is_static="static" in modifiers,
+            annotations=annots,
+        )
+
     def ctor_decl(self, *items):
         params = []
         body = None
@@ -744,6 +768,9 @@ class ZincTransformer(Transformer):
 
     def stmt_this(self):
         return ast.ThisExpr()
+
+    def stmt_super(self):
+        return ast.Ident(name="super")
 
     def stmt_selector(self, name):
         return lambda obj: ast.SelectorExpr(object=obj, field=str(name))
