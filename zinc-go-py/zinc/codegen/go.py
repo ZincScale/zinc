@@ -1100,12 +1100,13 @@ class Emitter:
                 self._need("slices")
                 return f"slices.Contains({self._fmt_expr(r)}, {self._fmt_expr(l)})"
             case ast.BinaryExpr(left=l, op="is", right=r):
-                # `x is Type` — Go type assertion that returns bool.
+                # `x is Type`. If x's static type isn't an interface,
+                # wrap in `any` so the type assertion is legal.
                 type_name = r.name if isinstance(r, ast.Ident) else _go_type(
                     ast.SimpleType(name=r.name) if hasattr(r, "name") else None)
                 go_t = _TYPE_MAP.get(type_name, type_name) if type_name else "interface{}"
-                return (f"(func() bool {{ _, ok := {self._fmt_expr(l)}.({go_t}); "
-                        f"return ok }}())")
+                return (f"(func() bool {{ var __v any = {self._fmt_expr(l)}; "
+                        f"_, ok := __v.({go_t}); return ok }}())")
             case ast.BinaryExpr(left=l, op=op, right=r):
                 # `===`/`!==` are Zinc's reference-equality operators —
                 # Go's plain `==`/`!=` on pointer/interface types is
