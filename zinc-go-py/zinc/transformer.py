@@ -86,12 +86,13 @@ class ZincTransformer(Transformer):
         return ast.PackageDecl(path=dotted)
 
     def import_decl(self, path, alias=None):
-        return ast.ImportDecl(path=path, alias=alias or "")
-
-    def import_path(self, x):
-        if isinstance(x, Token) and x.type == "STRING":
-            return _string_value(x.value)
-        return x
+        path_str = path
+        if isinstance(path, Token):
+            if path.type == "STRING":
+                path_str = _string_value(str(path))
+            else:
+                path_str = str(path)
+        return ast.ImportDecl(path=path_str, alias=str(alias) if alias else "")
 
     def dotted_ident(self, *parts):
         return ".".join(str(p) for p in parts)
@@ -128,12 +129,14 @@ class ZincTransformer(Transformer):
         fields = [m for m in members if isinstance(m, ast.FieldDecl)]
         ctors = [m for m in members if isinstance(m, ast.CtorDecl)]
         methods = [m for m in members if isinstance(m, ast.MethodDecl)]
+        variants = [m for m in members if isinstance(m, ast.DataClassDecl)]
         return ast.ClassDecl(
             name=name, fields=fields, ctor=ctors[0] if ctors else None,
             ctors=ctors, methods=methods, parents=parents,
             type_params=type_params,
             is_abstract="abstract" in modifiers,
-            is_sealed="sealed" in modifiers,
+            is_sealed="sealed" in modifiers or bool(variants),
+            variants=variants,
             annotations=annots,
         )
 
@@ -436,7 +439,7 @@ class ZincTransformer(Transformer):
         for it in items:
             if isinstance(it, _Modifier) and str(it) == "const":
                 is_const = True
-            elif isinstance(it, Token) and it.value == "...":
+            elif isinstance(it, Token) and it.type == "VARIADIC_MARK":
                 variadic = True
             elif isinstance(it, (ast.SimpleType, ast.GenericType, ast.ArrayType,
                                   ast.OptionalType, ast.FuncTypeExpr)) and name is None:

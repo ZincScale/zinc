@@ -34,9 +34,16 @@ program: top_item*
 
 package_decl: "package" dotted_ident
 
-import_decl: "import" import_path ("as" NAME)?
+// Imports use Go-style slash paths. Members of an imported package are
+// accessed via `pkg.Member` — the package alias is the last slash segment
+// (or the explicit `as` alias). See README for rationale.
+import_decl: "import" IMPORT_PATH ("as" NAME)?
+           | "import" STRING ("as" NAME)?
 
-import_path: STRING | dotted_ident
+// Slash path with optional dotted hostname for Go module paths:
+// `net/http`, `log/slog`, `github.com/foo/bar`. Dots only allowed inside
+// path segments (i.e. the host), never as a member separator.
+IMPORT_PATH: /[a-zA-Z_][a-zA-Z0-9_\-\.]*(?:\/[a-zA-Z_][a-zA-Z0-9_\-\.]*)+|[a-zA-Z_][a-zA-Z0-9_\-]*/
 
 dotted_ident: NAME ("." NAME)*
 
@@ -48,6 +55,7 @@ class_body: class_member*
 ?class_member: field_decl
              | ctor_decl
              | method_decl
+             | data_class_decl         // nested variants in a sealed class
 
 // Field declarations come in two shapes:
 //   typed — `pub String host = "x"` — modifier* + type + name + optional init
@@ -65,7 +73,9 @@ method_decl.10: annotation* method_modifier* ret_type NAME "(" params? ")" metho
 method_body: block
            |                       // abstract methods have no body
 
-data_class_decl.10: annotation* "data" NAME type_params? "(" field_params? ")" parents? data_body?
+// Priority .20 so `data Circle(double r)` inside a sealed-class body wins
+// over a method_decl that would otherwise swallow `data` as a return type.
+data_class_decl.20: annotation* "data" NAME type_params? "(" field_params? ")" parents? data_body?
 data_body: "{" method_decl* "}"
 field_params: field_param ("," field_param)*
 field_param: field_modifier* type_ref NAME ("=" expr)?
@@ -90,7 +100,13 @@ annotation: "@" NAME ( "(" annotation_args? ")" )?
 annotation_args: STRING ("," STRING)*
 
 params: param ("," param)*
-param: "const"? type_ref? "..."? NAME ("=" expr)?
+// Variadic marker: `int... args` has type_ref followed by "...". The `!` on
+// the alternatives preserves the `...` token so the transformer can set
+// variadic=True on the ParamDecl.
+param: "const"? type_ref VARIADIC_MARK? NAME ("=" expr)?
+     | "const"? VARIADIC_MARK NAME ("=" expr)?
+     | "const"? NAME ("=" expr)?
+VARIADIC_MARK: "..."
 
 type_params: "<" NAME ("," NAME)* ">"
 
@@ -388,7 +404,7 @@ spawn_expr: "spawn" block or_handler?
 // `in`, `is`, `as`, `pub`, `type`, etc.) are valid identifiers AND may
 // act as keywords in specific rule positions — Lark's lexer gives the
 // string-literal token priority over NAME at those sites.
-NAME: /(?!(?:if|else|while|for|return|break|continue|class|interface|enum|match|case|import|package|try|catch|finally|throw|defer|spawn|parallel|concurrent|timeout|assert|test|this|super|new|null|true|false|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+NAME: /(?!(?:if|else|while|for|return|break|continue|class|interface|enum|match|case|import|package|try|catch|finally|throw|defer|spawn|parallel|concurrent|timeout|assert|test|this|super|new|null|true|false|and|or|not|as)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 
 INT:   /0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|[0-9]+/
 FLOAT: /[0-9]+\.[0-9]+/

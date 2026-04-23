@@ -1,30 +1,27 @@
 // HTTP Server — Zinc for Go
-// Tests: net/http import, handler functions, unqualified types, pointer inference, server lifecycle
+// Tests: slash-path imports + qualified Go stdlib access.
 
-import net.http
+import net/http
 import fmt
 import time
 
-// Unqualified types: ResponseWriter and Request resolve to http.ResponseWriter and *http.Request
-void helloHandler(ResponseWriter w, Request r) {
+void helloHandler(http.ResponseWriter w, http.Request r) {
     fmt.Fprintf(w, "Hello from Zinc!")
 }
 
-void healthHandler(ResponseWriter w, Request r) {
+void healthHandler(http.ResponseWriter w, http.Request r) {
     fmt.Fprintf(w, "OK")
 }
 
 void main() {
-    HandleFunc("/", helloHandler)
-    HandleFunc("/health", healthHandler)
+    http.HandleFunc("/", helloHandler)
+    http.HandleFunc("/health", healthHandler)
 
-    // Start server in background, then shut down after a test request
     spawn {
-        ListenAndServe(":0", nil)
+        http.ListenAndServe(":0", nil)
     }
     time.Sleep(10 * time.Millisecond)
 
-    // We can't easily test the server without a client, so just verify setup
     print("HTTP handlers registered")
     print("/ → helloHandler")
     print("/health → healthHandler")

@@ -27,33 +27,35 @@ _TYPE_MAP = {
     "string": "string",
     "String": "string",
     "void": "",
+    "Object": "interface{}",
+    "Any": "interface{}",
 }
 
 # Type names that, when used as a call, are casts: `long(x)` → `int64(x)`.
 _CAST_NAMES = set(_TYPE_MAP.keys())
 
 
-def _go_type(t: ast.TypeExpr | None) -> str:
+def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
     if t is None:
         return ""
     match t:
         case ast.SimpleType(name=n):
             return _TYPE_MAP.get(n, n)
         case ast.GenericType(name="List", type_args=[elem]):
-            return f"[]{_go_type(elem)}"
+            return f"[]{_go_type(elem, emitter)}"
         case ast.GenericType(name="Map", type_args=[k, v]):
-            return f"map[{_go_type(k)}]{_go_type(v)}"
+            return f"map[{_go_type(k, emitter)}]{_go_type(v, emitter)}"
         case ast.GenericType(name="Chan" | "Channel", type_args=[e]):
-            return f"chan {_go_type(e)}"
+            return f"chan {_go_type(e, emitter)}"
         case ast.GenericType(name=n, type_args=args):
-            return f"{n}[{', '.join(_go_type(a) for a in args)}]"
+            return f"{n}[{', '.join(_go_type(a, emitter) for a in args)}]"
         case ast.ArrayType(element_type=elem):
-            return f"[]{_go_type(elem)}"
+            return f"[]{_go_type(elem, emitter)}"
         case ast.OptionalType(inner=inner):
-            return f"*{_go_type(inner)}"
+            return f"*{_go_type(inner, emitter)}"
         case ast.FuncTypeExpr(params=ps, return_type=r):
-            plist = ", ".join(_go_type(p) for p in ps)
-            rstr = _go_type(r)
+            plist = ", ".join(_go_type(p, emitter) for p in ps)
+            rstr = _go_type(r, emitter)
             return f"func({plist})" + (f" {rstr}" if rstr else "")
     return ""
 
@@ -141,12 +143,25 @@ def _try_builtin(name: str, recv: str, args: list[str], emit: "Emitter") -> str 
 class Emitter:
     """Walks a Program and emits Go source."""
     imports: set[str] = field(default_factory=set)
+    import_specs: list[tuple[str, str]] = field(default_factory=list)  # (path, alias)
     imported_modules: set[str] = field(default_factory=set)   # tracked from `import` decls
     failable_fns: set[str] = field(default_factory=set)       # user fns that can propagate errors
+    # Registry of user-declared classes and data classes. Looked up when a
+    # CallExpr's callee is an Ident matching one of these — the emitted form
+    # becomes `NewX(args)` or `NewX[TArgs](args)` instead of treating it as a
+    # Go type conversion (`X(args)`, which the compiler rejects for structs).
+    user_classes: dict[str, dict] = field(default_factory=dict)  # name → {"type_params": [...], "is_data": bool}
+    _variant_fields_by_name: dict[str, list[str]] = field(default_factory=dict)
+    sealed_by_variant: dict[str, str] = field(default_factory=dict)  # variant → sealed parent
+    # Method names the user defined on any class; when an `obj.method()` call
+    # matches one of these AND matches a builtin pseudo-method, prefer the
+    # user method so we don't hijack (e.g.) a user's `Stack.size()` as
+    # `len(stack)`.
+    user_method_names: set[str] = field(default_factory=set)
     current_fn: Optional[str] = None
-    current_self_fields: set[str] = field(default_factory=set)  # fields accessible via `this.X`
-    current_self_methods: set[str] = field(default_factory=set) # methods callable via `this.X()`
-    current_parent: Optional[str] = None                        # for super(...) rewrite
+    current_self_fields: set[str] = field(default_factory=set)
+    current_self_methods: set[str] = field(default_factory=set)
+    current_parent: Optional[str] = None
     _out: list[str] = field(default_factory=list)
     _indent: int = 0
 
@@ -165,10 +180,9 @@ class Emitter:
     # -- top level ---------------------------------------------------------
 
     def emit_program(self, prog: ast.Program) -> str:
-        # Record declared imports so generic identifiers `io`, `os`, etc. are
-        # recognised as Go package references.
         for imp in prog.imports:
             self._register_import(imp)
+        self._register_decls(prog.decls)
 
         body: list[str] = []
         # Is there already an explicit `main` fn in decls?
@@ -192,20 +206,57 @@ class Emitter:
 
         header: list[str] = []
         header.append("package main\n\n")
-        if self.imports:
+        # Merge explicit user imports with auto-added ones (fmt, strings,
+        # slices, etc. added by builtin-method dispatch).
+        user_paths = {p for p, _ in self.import_specs}
+        auto_paths = self.imports - user_paths
+        lines = []
+        for path, alias in self.import_specs:
+            if alias:
+                lines.append(f'\t{alias} "{path}"')
+            else:
+                lines.append(f'\t"{path}"')
+        for path in sorted(auto_paths):
+            lines.append(f'\t"{path}"')
+        if lines:
             header.append("import (\n")
-            for pkg in sorted(self.imports):
-                header.append(f'\t"{pkg}"\n')
+            header.extend(l + "\n" for l in lines)
             header.append(")\n\n")
         return "".join(header) + "".join(body)
 
     def _register_import(self, imp: ast.ImportDecl) -> None:
-        # Simple mapping: Zinc dotted `import log.slog` → Go `"log/slog"`.
-        go_path = imp.path.replace(".", "/")
-        self.imports.add(go_path)
-        # Short name for name resolution — last segment, or explicit alias.
-        name = imp.alias or imp.path.split(".")[-1]
-        self.imported_modules.add(name)
+        """Zinc imports pass through verbatim to Go."""
+        # Store as (path, alias) tuple so emit_program can render either
+        # `"path"` or `alias "path"`.
+        self.import_specs.append((imp.path, imp.alias))
+        alias = imp.alias or imp.path.split("/")[-1]
+        self.imported_modules.add(alias)
+
+    def _register_decls(self, decls: list) -> None:
+        """First pass: collect user-defined type names + their type-param counts
+        so `CallExpr(Ident(ClassName))` can be recognised later."""
+        for d in decls:
+            if isinstance(d, ast.ClassDecl):
+                self.user_classes[d.name] = {
+                    "type_params": d.type_params, "is_data": False,
+                }
+                for m in d.methods:
+                    self.user_method_names.add(m.name)
+                for v in d.variants:
+                    self.user_classes[v.name] = {
+                        "type_params": v.type_params, "is_data": True,
+                    }
+                    self._variant_fields_by_name[v.name] = [p.name for p in v.params]
+                    self.sealed_by_variant[v.name] = d.name
+                    for m in v.methods:
+                        self.user_method_names.add(m.name)
+            elif isinstance(d, ast.DataClassDecl):
+                self.user_classes[d.name] = {
+                    "type_params": d.type_params, "is_data": True,
+                }
+                self._variant_fields_by_name[d.name] = [p.name for p in d.params]
+                for m in d.methods:
+                    self.user_method_names.add(m.name)
 
     # -- decl dispatch -----------------------------------------------------
 
@@ -224,7 +275,7 @@ class Emitter:
             case ast.EnumDecl():
                 self._emit_enum(d)
             case ast.TypeAliasDecl():
-                self._writeln(f"type {d.name} = {_go_type(d.type)}")
+                self._writeln(f"type {d.name} = {_go_type(d.type, self)}")
             case ast.TestDecl():
                 self._emit_test(d)
             case _:
@@ -233,8 +284,8 @@ class Emitter:
     def _emit_fn(self, fn: ast.FnDecl) -> None:
         saved_fn = self.current_fn
         self.current_fn = fn.name
-        params = ", ".join(_fmt_param(p) for p in fn.params)
-        ret = _go_type(fn.return_type)
+        params = ", ".join(_fmt_param(p, self) for p in fn.params)
+        ret = _go_type(fn.return_type, self)
         type_param_str = ""
         if fn.type_params:
             type_param_str = "[" + ", ".join(f"{t} any" for t in fn.type_params) + "]"
@@ -267,7 +318,7 @@ class Emitter:
         self._writeln("}")
 
     def _emit_const(self, c: ast.ConstDecl) -> None:
-        typ = _go_type(c.type)
+        typ = _go_type(c.type, self)
         val = self._fmt_expr(c.value)
         if typ:
             self._writeln(f"const {c.name} {typ} = {val}")
@@ -279,12 +330,32 @@ class Emitter:
         method_names = {m.name for m in c.methods}
         parent = c.parents[0] if c.parents else None
         tp = _type_param_list(c.type_params)
+
+        # Sealed classes lower to a marker interface + each nested `data`
+        # variant as a top-level struct. This matches how Java/C#/Kotlin
+        # sealed ADTs compile internally (interface + implementing records).
+        if c.is_sealed and c.variants:
+            self._writeln(f"type {c.name}{tp} interface {{")
+            self._indent += 1
+            self._writeln(f"is{c.name}()")
+            self._indent -= 1
+            self._writeln("}")
+            self._writeln()
+            for v in c.variants:
+                self._emit_data_class(v)
+                # Mark each variant as implementing the sealed interface.
+                self._writeln(f"func ({v.name}) is{c.name}() {{}}")
+                self._writeln()
+            for m in c.methods:
+                self._emit_method(c.name, m)
+            return
+
         self._writeln(f"type {c.name}{tp} struct {{")
         self._indent += 1
         for p in c.parents:
             self._writeln(f"*{p}")
         for f in c.fields:
-            self._writeln(f"{_go_field_name(f.name)} {_go_type(f.type)}")
+            self._writeln(f"{_go_field_name(f.name)} {_go_type(f.type, self)}")
         self._indent -= 1
         self._writeln("}")
         self._writeln()
@@ -302,12 +373,30 @@ class Emitter:
                 self.current_self_methods = saved_m
                 self.current_parent = saved_p
 
+        tp_decl = _type_param_list(c.type_params)
+        tp_ref = "[" + ", ".join(c.type_params) + "]" if c.type_params else ""
+
+        # If no explicit ctor but the class has fields, emit a zero-value ctor
+        # so `Config()` callers can construct the struct via `NewConfig()`.
         if c.ctor is not None:
-            ps = ", ".join(_fmt_param(p) for p in c.ctor.params)
-            self._writeln(f"func New{c.name}({ps}) *{c.name} {{")
+            ps = ", ".join(_fmt_param(p, self) for p in c.ctor.params)
+            self._writeln(f"func New{c.name}{tp_decl}({ps}) *{c.name}{tp_ref} {{")
             self._indent += 1
-            self._writeln(f"this := &{c.name}{{}}")
+            self._writeln(f"this := &{c.name}{tp_ref}{{}}")
             _with_class_ctx(lambda: [self._emit_stmt(s) for s in c.ctor.body.stmts])
+            self._writeln("return this")
+            self._indent -= 1
+            self._writeln("}")
+            self._writeln()
+        else:
+            # Synthesise a zero-arg ctor that initialises field defaults.
+            self._writeln(f"func New{c.name}{tp_decl}() *{c.name}{tp_ref} {{")
+            self._indent += 1
+            self._writeln(f"this := &{c.name}{tp_ref}{{}}")
+            _with_class_ctx(lambda: [
+                self._writeln(f"this.{_go_field_name(f.name)} = {self._fmt_expr(f.default)}")
+                for f in c.fields if f.default is not None
+            ])
             self._writeln("return this")
             self._indent -= 1
             self._writeln("}")
@@ -316,9 +405,17 @@ class Emitter:
             _with_class_ctx(lambda m=m: self._emit_method(c.name, m))
 
     def _emit_method(self, class_name: str, m: ast.MethodDecl) -> None:
-        params = ", ".join(_fmt_param(p) for p in m.params)
-        ret = _go_type(m.return_type)
-        sig = f"func (this *{class_name}) {m.name}({params})" + (f" {ret}" if ret else "")
+        # If the class is generic, the receiver type and any method-local
+        # references to it must include the type-parameter list: `*Stack[T]`.
+        cls_info = self.user_classes.get(class_name, {})
+        cls_tparams: list[str] = cls_info.get("type_params", [])
+        tp_ref = "[" + ", ".join(cls_tparams) + "]" if cls_tparams else ""
+        tp_decl = _type_param_list(cls_tparams)
+        params = ", ".join(_fmt_param(p, self) for p in m.params)
+        ret = _go_type(m.return_type, self)
+        sig = (f"func (this *{class_name}{tp_ref}) {m.name}"
+               f"{tp_decl if not cls_tparams else ''}({params})"
+               + (f" {ret}" if ret else ""))
         if m.body is not None:
             self._writeln(f"{sig} {{")
             self._indent += 1
@@ -329,27 +426,29 @@ class Emitter:
         self._writeln()
 
     def _emit_data_class(self, d: ast.DataClassDecl) -> None:
-        tp = _type_param_list(d.type_params)
-        self._writeln(f"type {d.name}{tp} struct {{")
+        # Type-parameter list for the declaration header — `[T any, U any]` —
+        # and a reference form for use as a type — `[T, U]`.
+        tp_decl = _type_param_list(d.type_params)
+        tp_ref = "[" + ", ".join(d.type_params) + "]" if d.type_params else ""
+        self._writeln(f"type {d.name}{tp_decl} struct {{")
         self._indent += 1
         for p in d.params:
-            self._writeln(f"{_go_field_name(p.name)} {_go_type(p.type)}")
+            self._writeln(f"{_go_field_name(p.name)} {_go_type(p.type, self)}")
         self._indent -= 1
         self._writeln("}")
         self._writeln()
-        ps = ", ".join(_fmt_param(p) for p in d.params)
+        ps = ", ".join(_fmt_param(p, self) for p in d.params)
         assigns = ", ".join(f"{_go_field_name(p.name)}: {p.name}" for p in d.params)
-        self._writeln(f"func New{d.name}({ps}) {d.name} {{")
+        self._writeln(f"func New{d.name}{tp_decl}({ps}) {d.name}{tp_ref} {{")
         self._indent += 1
-        self._writeln(f"return {d.name}{{{assigns}}}")
+        self._writeln(f"return {d.name}{tp_ref}{{{assigns}}}")
         self._indent -= 1
         self._writeln("}")
         self._writeln()
-        # String() method for data classes
         self._need("fmt")
-        self._writeln(f"func (d {d.name}) String() string {{")
+        self._writeln(f"func (d {d.name}{tp_ref}) String() string {{")
         self._indent += 1
-        field_fmt = " ".join(f"{p.name}=%v" for p in d.params)
+        field_fmt = ", ".join(f"{p.name}=%v" for p in d.params)
         field_args = ", ".join(f"d.{_go_field_name(p.name)}" for p in d.params)
         self._writeln(f'return fmt.Sprintf("{d.name}({field_fmt})", {field_args})')
         self._indent -= 1
@@ -363,8 +462,8 @@ class Emitter:
         self._writeln(f"type {i.name}{tp} interface {{")
         self._indent += 1
         for m in i.methods:
-            params = ", ".join(_fmt_param(p) for p in m.params)
-            ret = _go_type(m.return_type)
+            params = ", ".join(_fmt_param(p, self) for p in m.params)
+            ret = _go_type(m.return_type, self)
             self._writeln(f"{m.name}({params})" + (f" {ret}" if ret else ""))
         self._indent -= 1
         self._writeln("}")
@@ -484,13 +583,13 @@ class Emitter:
 
     def _emit_var(self, v: ast.VarStmt) -> None:
         if v.value is None:
-            self._writeln(f"var {v.name} {_go_type(v.type)}")
+            self._writeln(f"var {v.name} {_go_type(v.type, self)}")
             return
         value_str = self._fmt_expr(v.value, ctx_type=v.type)
         if v.type is None:
             self._writeln(f"{v.name} := {value_str}")
         else:
-            self._writeln(f"var {v.name} {_go_type(v.type)} = {value_str}")
+            self._writeln(f"var {v.name} {_go_type(v.type, self)} = {value_str}")
 
     def _emit_assign(self, s: ast.AssignStmt) -> None:
         # Bare field names on the LHS inside a method → this.<field>.
@@ -569,9 +668,75 @@ class Emitter:
             self._writeln("}")
 
     def _emit_match(self, s: ast.MatchStmt) -> None:
+        # If ANY case is a destructure pattern `case TypeName(binders)`, emit a
+        # Go type-switch. Otherwise fall back to a value switch.
+        is_type_switch = any(
+            isinstance(c.pattern, ast.CallExpr) and isinstance(c.pattern.callee, ast.Ident)
+            and all(isinstance(a, ast.Ident) for a in c.pattern.args)
+            for c in s.cases if c.pattern is not None
+        )
+
+        if is_type_switch:
+            self._writeln(f"switch _v := {self._fmt_expr(s.subject)}.(type) {{")
+            for c in s.cases:
+                # Wildcard arm: `case _ { body }` or bare wildcard.
+                is_wild = c.pattern is None or (
+                    isinstance(c.pattern, ast.Ident) and c.pattern.name == "_")
+                if is_wild:
+                    self._writeln("default:")
+                    self._indent += 1
+                    self._writeln("_ = _v")
+                    for bs in c.body.stmts:
+                        self._emit_stmt(bs)
+                    self._indent -= 1
+                    continue
+                if isinstance(c.pattern, ast.CallExpr) and isinstance(c.pattern.callee, ast.Ident):
+                    type_name = c.pattern.callee.name
+                    binders = [a.name for a in c.pattern.args if isinstance(a, ast.Ident)]
+                    self._writeln(f"case {type_name}:")
+                    self._indent += 1
+                    # Positional destructure — bind each name to the nth field.
+                    # Fields of the variant type can be looked up via registry.
+                    cls_info = self.user_classes.get(type_name, {})
+                    # We don't track field order directly, so emit generic
+                    # `<binder> := _v.<Binder>` — relying on the binder
+                    # matching a field name works for data classes where
+                    # we rename on emission. For positional binding we use
+                    # the *declared parameter order* of the variant.
+                    variant_fields = self._variant_field_names(type_name)
+                    for i, name in enumerate(binders):
+                        field_name = variant_fields[i] if i < len(variant_fields) else name
+                        self._writeln(f"{name} := _v.{_go_field_name(field_name)}")
+                    for bs in c.body.stmts:
+                        self._emit_stmt(bs)
+                    # Avoid "declared and not used" for _v when the arm
+                    # doesn't reference it directly.
+                    self._writeln("_ = _v")
+                    self._indent -= 1
+                elif isinstance(c.pattern, ast.Ident):
+                    # Bare type name — `case Circle { ... }` with no binders.
+                    self._writeln(f"case {c.pattern.name}:")
+                    self._indent += 1
+                    for bs in c.body.stmts:
+                        self._emit_stmt(bs)
+                    self._writeln("_ = _v")
+                    self._indent -= 1
+                else:
+                    # Value pattern mixed into a type-switch — emit as default.
+                    self._writeln("default:")
+                    self._indent += 1
+                    for bs in c.body.stmts:
+                        self._emit_stmt(bs)
+                    self._indent -= 1
+            self._writeln("}")
+            return
+
         self._writeln(f"switch {self._fmt_expr(s.subject)} {{")
         for c in s.cases:
-            if c.pattern is None:
+            # Wildcard: Zinc `case _ { body }` → Go `default:`.
+            is_wild = c.pattern is None or (
+                isinstance(c.pattern, ast.Ident) and c.pattern.name == "_")
+            if is_wild:
                 self._writeln("default:")
             else:
                 self._writeln(f"case {self._fmt_expr(c.pattern)}:")
@@ -580,6 +745,15 @@ class Emitter:
                 self._emit_stmt(bs)
             self._indent -= 1
         self._writeln("}")
+
+    def _variant_field_names(self, type_name: str) -> list[str]:
+        """Look up the declared field names of a data-class variant so
+        positional destructure binders (`case Circle(r)`) can be mapped to
+        `_v.radius` — the first declared field, etc."""
+        # Walk our user_classes registry + current program. The data_class
+        # params aren't stored there directly; we keep a separate side-channel
+        # populated during decl emission.
+        return self._variant_fields_by_name.get(type_name, [])
 
     def _emit_assert(self, s: ast.AssertStmt) -> None:
         self._need("fmt")
@@ -608,7 +782,7 @@ class Emitter:
             case ast.VarStmt(name=n, value=v, type=None):
                 return f"{n} := {self._fmt_expr(v)}"
             case ast.VarStmt(name=n, value=v, type=t):
-                return f"var {n} {_go_type(t)} = {self._fmt_expr(v)}"
+                return f"var {n} {_go_type(t, self)} = {self._fmt_expr(v)}"
             case ast.AssignStmt(target=t, op=op, value=v):
                 return f"{self._fmt_expr(t)} {op} {self._fmt_expr(v)}"
             case ast.ExprStmt(expr=e):
@@ -639,8 +813,6 @@ class Emitter:
             case ast.NullLit():
                 return "nil"
             case ast.Ident(name=n):
-                # Bare names inside a class method resolve against `this`
-                # when they match a field or method on the class.
                 if n in self.current_self_fields:
                     return f"this.{_go_field_name(n)}"
                 if n in self.current_self_methods:
@@ -648,6 +820,19 @@ class Emitter:
                 return n
             case ast.ThisExpr():
                 return "this"
+            case ast.BinaryExpr(left=l, op="in", right=r):
+                # `x in collection` → `slices.Contains(collection, x)`.
+                # The type-agnostic form works for slices; for maps the
+                # user can write `map.containsKey(x)` explicitly.
+                self._need("slices")
+                return f"slices.Contains({self._fmt_expr(r)}, {self._fmt_expr(l)})"
+            case ast.BinaryExpr(left=l, op="is", right=r):
+                # `x is Type` — Go type assertion that returns bool.
+                type_name = r.name if isinstance(r, ast.Ident) else _go_type(
+                    ast.SimpleType(name=r.name) if hasattr(r, "name") else None)
+                go_t = _TYPE_MAP.get(type_name, type_name) if type_name else "interface{}"
+                return (f"(func() bool {{ _, ok := {self._fmt_expr(l)}.({go_t}); "
+                        f"return ok }}())")
             case ast.BinaryExpr(left=l, op=op, right=r):
                 return f"({self._fmt_expr(l)} {op} {self._fmt_expr(r)})"
             case ast.UnaryExpr(op=op, operand=o):
@@ -655,10 +840,9 @@ class Emitter:
             case ast.CallExpr():
                 return self._fmt_call(e)
             case ast.SelectorExpr(object=o, field=f):
-                # Pseudo-properties that are really no-arg method calls
-                # (`nums.length`, `map.size`). Only apply on non-`this` receivers.
                 if (not isinstance(o, ast.ThisExpr)
-                        and f in ("length", "size", "capacity", "isEmpty", "nonEmpty")):
+                        and f in ("length", "size", "capacity", "isEmpty", "nonEmpty")
+                        and f not in self.user_method_names):
                     rewrite = _try_builtin(f, self._fmt_expr(o), [], self)
                     if rewrite is not None:
                         return rewrite
@@ -699,8 +883,23 @@ class Emitter:
             case ast.IfExpr(cond=c, then=t, else_=el):
                 return (f"(func() interface{{}} {{ if {self._fmt_expr(c)} {{ "
                         f"return {self._fmt_expr(t)} }}; return {self._fmt_expr(el)} }}())")
+            case ast.MatchExpr(subject=subj, cases=cs):
+                # Expression-position match — IIFE wrapping a switch. The
+                # return type is `interface{}` because we don't infer a
+                # narrower common type across arms.
+                lines = [f"if _m := {self._fmt_expr(subj)}; true {{"]
+                for mc in cs:
+                    if mc.pattern is None:
+                        lines.append(f"_ = _m; return {self._fmt_expr(mc.value)}")
+                    else:
+                        lines.append(f"if _m == {self._fmt_expr(mc.pattern)} "
+                                     f"{{ return {self._fmt_expr(mc.value)} }}")
+                lines.append("}")
+                lines.append('panic("unreachable match")')
+                body = "; ".join(lines)
+                return f"(func() interface{{}} {{ {body} }}())"
             case ast.CapacityExpr(collection_type=ct, capacity=cap):
-                return f"make({_go_type(ct)}, 0, {self._fmt_expr(cap)})"
+                return f"make({_go_type(ct, self)}, 0, {self._fmt_expr(cap)})"
             case ast.SizedArrayExpr(element_type=et, size=sz):
                 go_t = _TYPE_MAP.get(et, et)
                 return f"make([]{go_t}, {self._fmt_expr(sz)})"
@@ -717,9 +916,11 @@ class Emitter:
 
         # 1. Built-in method dispatch: foo.bar(args) where bar is a known pseudo-method.
         if isinstance(c.callee, ast.SelectorExpr):
-            # Don't rewrite user-defined methods on `this` — those are real
-            # methods on the current class, not builtin container ops.
-            if not isinstance(c.callee.object, ast.ThisExpr):
+            # Skip builtin rewrite when:
+            #   - receiver is `this` (intra-method call, user's own method)
+            #   - a user class has a method with this name (may override)
+            if (not isinstance(c.callee.object, ast.ThisExpr)
+                    and c.callee.field not in self.user_method_names):
                 recv = self._fmt_expr(c.callee.object)
                 args = [self._fmt_expr(a) for a in c.args]
                 rewrite = _try_builtin(c.callee.field, recv, args, self)
@@ -742,11 +943,23 @@ class Emitter:
             target = _TYPE_MAP[c.callee.name] or "interface{}"
             return f"{target}({', '.join(self._fmt_expr(a) for a in c.args)})"
 
+        # 3c. User-defined class / data-class constructor invocation.
+        #     `User("a", "b")` → `NewUser("a", "b")`.
+        #     `Stack<int>()`   → `NewStack[int]()`.
+        if isinstance(c.callee, ast.Ident) and c.callee.name in self.user_classes:
+            cls_info = self.user_classes[c.callee.name]
+            name = c.callee.name
+            args_fmt = [self._fmt_expr(a) for a in c.args]
+            tparams = ""
+            if c.type_args:
+                tparams = "[" + ", ".join(_go_type(t, self) for t in c.type_args) + "]"
+            return f"New{name}{tparams}({', '.join(args_fmt)})"
+
         # 4. List<T>(cap) / Map<K,V>(cap) / Chan<T>(cap) — capacity construction.
         if isinstance(c.callee, ast.Ident) and c.callee.name in ("List", "Map", "Chan", "Channel"):
             if c.type_args:
                 gt = ast.GenericType(name=c.callee.name, type_args=c.type_args)
-                go_t = _go_type(gt)
+                go_t = _go_type(gt, self)
             else:
                 # Bare Channel(n) / List(n) — element type unknown; fall back.
                 elem = "interface{}"
@@ -762,7 +975,7 @@ class Emitter:
         # 5. Generic-typed call: foo<T>(args). Go generics use [T].
         callee = self._fmt_expr(c.callee)
         if c.type_args:
-            callee = f"{callee}[{', '.join(_go_type(t) for t in c.type_args)}]"
+            callee = f"{callee}[{', '.join(_go_type(t, self) for t in c.type_args)}]"
 
         args_fmt = [self._fmt_expr(a) for a in c.args]
         named_fmt = [f"{n.name}: {self._fmt_expr(n.value)}" for n in c.named_args]
@@ -772,9 +985,9 @@ class Emitter:
         inner = ", ".join(self._fmt_expr(x) for x in elements)
         # Priority: explicit literal type > context type > interface{} fallback.
         if explicit_type is not None:
-            return f"{_go_type(explicit_type)}{{{inner}}}"
+            return f"{_go_type(explicit_type, self)}{{{inner}}}"
         if ctx_type is not None:
-            t = _go_type(ctx_type)
+            t = _go_type(ctx_type, self)
             if t:
                 return f"{t}{{{inner}}}"
         return f"[]interface{{}}{{{inner}}}"
@@ -783,16 +996,16 @@ class Emitter:
         entries = ", ".join(f"{self._fmt_expr(k)}: {self._fmt_expr(v)}"
                             for k, v in zip(keys, values))
         if explicit_type is not None:
-            return f"{_go_type(explicit_type)}{{{entries}}}"
+            return f"{_go_type(explicit_type, self)}{{{entries}}}"
         if ctx_type is not None:
-            t = _go_type(ctx_type)
+            t = _go_type(ctx_type, self)
             if t:
                 return f"{t}{{{entries}}}"
         return f"map[string]interface{{}}{{{entries}}}"
 
     def _fmt_fn_lit(self, fn: ast.FnDecl) -> str:
-        params = ", ".join(_fmt_param(p) for p in fn.params)
-        ret = _go_type(fn.return_type)
+        params = ", ".join(_fmt_param(p, self) for p in fn.params)
+        ret = _go_type(fn.return_type, self)
         head = f"func({params})" + (f" {ret}" if ret else "")
         lines = [f"{head} {{"]
         if fn.body:
@@ -802,8 +1015,8 @@ class Emitter:
         return "\n".join(lines)
 
     def _fmt_lambda(self, lam: ast.LambdaExpr) -> str:
-        params = ", ".join(_fmt_param(p) for p in lam.params)
-        ret = _go_type(lam.return_type)
+        params = ", ".join(_fmt_param(p, self) for p in lam.params)
+        ret = _go_type(lam.return_type, self)
         head = f"func({params})" + (f" {ret}" if ret else "")
         if lam.body is not None:
             sub = Emitter(imports=self.imports, _indent=self._indent + 1,
@@ -840,10 +1053,10 @@ def _type_param_list(tp: list[str]) -> str:
     return "[" + ", ".join(f"{t} any" for t in tp) + "]"
 
 
-def _fmt_param(p) -> str:
-    typ = _go_type(p.type) if p.type is not None else "interface{}"
+def _fmt_param(p, emitter=None) -> str:
+    typ = _go_type(p.type, emitter) if p.type is not None else "interface{}"
     if getattr(p, "variadic", False):
-        typ = f"...{typ}" if not typ.startswith("...") else typ
+        return f"{p.name} ...{typ}"
     return f"{p.name} {typ}" if typ else p.name
 
 
