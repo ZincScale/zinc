@@ -43,11 +43,13 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
             if n in _TYPE_MAP:
                 return _TYPE_MAP[n]
             # Mirrors zinc-go's codegen_resolve.go line 881 — non-data,
-            # non-sealed classes are always pointer-typed in the emitted Go.
-            # Data classes stay value-typed; sealed parents are interfaces.
+            # non-sealed, non-interface classes are always pointer-typed in
+            # the emitted Go. Data classes stay value-typed; sealed parents
+            # and plain interfaces emit as bare Go interfaces.
             if emitter is not None and n in emitter.user_classes:
                 info = emitter.user_classes[n]
-                if not info.get("is_data") and not info.get("is_sealed"):
+                if (not info.get("is_data") and not info.get("is_sealed")
+                        and not info.get("is_interface")):
                     return f"*{n}"
             return n
         case ast.GenericType(name="List", type_args=[elem]):
@@ -109,8 +111,17 @@ _BUILTIN_METHODS: dict[str, tuple[int | None, object]] = {
     "clear":       (0, lambda e, r, a: f"{r} = {r}[:0]"),
     "sort":        (0, lambda e, r, a: f"{_slices_import(e)}.Sort({r})"),
     "reversed":    (0, lambda e, r, a: f"{_slices_import(e)}.Reverse({r})"),
-    "contains":    (1, lambda e, r, a: f"{_slices_import(e)}.Contains({r}, {a[0]})"),
-    "indexOf":     (1, lambda e, r, a: f"{_slices_import(e)}.Index({r}, {a[0]})"),
+    # `x.contains(y)` — slices.Contains for []T, strings.Contains for strings.
+    # Heuristic: if the arg is a string literal, treat as substring check.
+    # For mixed cases, user can call strings.Contains / slices.Contains directly.
+    "contains":    (1, lambda e, r, a: (
+        f"{_strings_import(e)}.Contains({r}, {a[0]})" if a[0].startswith('"')
+        else f"{_slices_import(e)}.Contains({r}, {a[0]})"
+    )),
+    "indexOf":     (1, lambda e, r, a: (
+        f"{_strings_import(e)}.Index({r}, {a[0]})" if a[0].startswith('"')
+        else f"{_slices_import(e)}.Index({r}, {a[0]})"
+    )),
     "first":       (0, lambda e, r, a: f"{r}[0]"),
     "last":        (0, lambda e, r, a: f"{r}[len({r})-1]"),
 
@@ -124,11 +135,17 @@ _BUILTIN_METHODS: dict[str, tuple[int | None, object]] = {
     "upper":       (0, lambda e, r, a: f"{_strings_import(e)}.ToUpper({r})"),
     "lower":       (0, lambda e, r, a: f"{_strings_import(e)}.ToLower({r})"),
     "trim":        (0, lambda e, r, a: f"{_strings_import(e)}.TrimSpace({r})"),
+    "trimStart":   (0, lambda e, r, a: f"{_strings_import(e)}.TrimLeft({r}, \" \\t\\n\\r\")"),
+    "trimEnd":     (0, lambda e, r, a: f"{_strings_import(e)}.TrimRight({r}, \" \\t\\n\\r\")"),
     "split":       (1, lambda e, r, a: f"{_strings_import(e)}.Split({r}, {a[0]})"),
     "replace":     (2, lambda e, r, a: f"{_strings_import(e)}.ReplaceAll({r}, {a[0]}, {a[1]})"),
     "startsWith":  (1, lambda e, r, a: f"{_strings_import(e)}.HasPrefix({r}, {a[0]})"),
     "endsWith":    (1, lambda e, r, a: f"{_strings_import(e)}.HasSuffix({r}, {a[0]})"),
     "join":        (1, lambda e, r, a: f"{_strings_import(e)}.Join({r}, {a[0]})"),
+    "charAt":      (1, lambda e, r, a: f"string([]byte({r})[{a[0]}])"),
+    "substring":   (2, lambda e, r, a: f"{r}[{a[0]}:{a[1]}]"),
+    "repeat":      (1, lambda e, r, a: f"{_strings_import(e)}.Repeat({r}, {a[0]})"),
+    "toBytes":     (0, lambda e, r, a: f"[]byte({r})"),
 
     "send":        (1, lambda e, r, a: f"{r} <- {a[0]}"),
     "receive":     (0, lambda e, r, a: f"(<-{r})"),
@@ -261,6 +278,17 @@ class Emitter:
         for d in decls:
             if isinstance(d, ast.FnDecl):
                 self.fn_params[d.name] = d.params
+            if isinstance(d, ast.ClassDecl) and d.ctor is not None:
+                # Register the class's ctor params under the class name so
+                # `MyClass("a")` at a call site can pad defaults against the
+                # ctor signature (Go-ism #2 for classes, matching fns).
+                self.fn_params[d.name] = d.ctor.params
+            if isinstance(d, ast.DataClassDecl):
+                # Data classes have a synthesized ctor; also register for padding.
+                self.fn_params[d.name] = [
+                    ast.ParamDecl(name=p.name, type=p.type, default=p.default)
+                    for p in d.params
+                ]
             if isinstance(d, ast.ClassDecl):
                 self.user_classes[d.name] = {
                     "type_params": d.type_params,
@@ -295,6 +323,20 @@ class Emitter:
                 self._variant_fields_by_name[d.name] = [p.name for p in d.params]
                 for m in d.methods:
                     self.user_method_names.add(m.name)
+            elif isinstance(d, ast.InterfaceDecl):
+                # Interfaces are Go interfaces — no `*` prefix, can't be
+                # embedded as pointer in struct. Tracked here so `class X :
+                # Iface` knows not to add `*` to the embed.
+                self.user_classes[d.name] = {
+                    "type_params": d.type_params,
+                    "is_data": False,
+                    "is_sealed": False,
+                    "is_interface": True,
+                    "parents": [],
+                    "methods": [m.name for m in d.methods],
+                }
+                for m in d.methods:
+                    self.user_method_names.add(m.name)
 
     # -- decl dispatch -----------------------------------------------------
 
@@ -323,11 +365,15 @@ class Emitter:
         saved_fn = self.current_fn
         saved_locals = self.current_locals
         self.current_fn = fn.name
-        # Start locals with just the params; vars declared in the body get
-        # added as they're emitted.
         self.current_locals = {p.name for p in fn.params}
         params = ", ".join(_fmt_param(p, self) for p in fn.params)
         ret = _go_type(fn.return_type, self)
+        # Track whether the fn has a declared return type — if so, and the
+        # body uses a type-switch as its last stmt, Go requires a trailing
+        # return. We append `panic("unreachable")` in that case.
+        needs_fallback = bool(ret) and fn.body is not None and any(
+            isinstance(s, ast.MatchStmt) for s in fn.body.stmts
+        )
         type_param_str = ""
         if fn.type_params:
             type_param_str = "[" + ", ".join(f"{t} any" for t in fn.type_params) + "]"
@@ -337,6 +383,13 @@ class Emitter:
             self._indent += 1
             for s in fn.body.stmts:
                 self._emit_stmt(s)
+            # If the function has a return type and the last statement is a
+            # (sealed) match-stmt, add a panic fallback — Go demands a
+            # terminating return even if the switch is exhaustive at the
+            # Zinc level.
+            if (needs_fallback and fn.body.stmts
+                    and isinstance(fn.body.stmts[-1], ast.MatchStmt)):
+                self._writeln('panic("unreachable")')
             self._indent -= 1
             self._writeln("}")
         elif fn.expr_body is not None:
@@ -406,7 +459,15 @@ class Emitter:
         self._writeln(f"type {c.name}{tp} struct {{")
         self._indent += 1
         for p in c.parents:
-            self._writeln(f"*{p}")
+            # Embed parent — `*Parent` for concrete classes, bare `Parent`
+            # for interfaces. Parent strings may be generic (`Mapper[A, B]`);
+            # strip the `[...]` to look up the base class's registry entry.
+            base = p.split("[", 1)[0]
+            info = self.user_classes.get(base, {})
+            if info.get("is_interface") or info.get("is_sealed"):
+                self._writeln(p)
+            else:
+                self._writeln(f"*{p}")
         for f in c.fields:
             typ = _go_type(f.type, self) if f.type is not None else _infer_type(f.default)
             self._writeln(f"{_go_field_name(f.name)} {typ}")
@@ -449,6 +510,14 @@ class Emitter:
             self._writeln(f"func New{c.name}{tp_decl}({ps}) *{c.name}{tp_ref} {{")
             self._indent += 1
             self._writeln(f"this := &{c.name}{tp_ref}{{}}")
+            # Initialize container fields (maps especially — Go's zero map
+            # is nil and panics on write). Fields with an explicit default
+            # keep that; fields with no default get an empty container.
+            for f in c.fields:
+                if f.default is None and f.type is not None:
+                    init = _default_initializer(f.type, self)
+                    if init:
+                        self._writeln(f"this.{_go_field_name(f.name)} = {init}")
             # Ctor params are locals — shadow same-named fields so
             # `this.x = x` puts the param into the field.
             saved_locals = self.current_locals
@@ -480,11 +549,15 @@ class Emitter:
         cls_tparams: list[str] = cls_info.get("type_params", [])
         tp_ref = "[" + ", ".join(cls_tparams) + "]" if cls_tparams else ""
         tp_decl = _type_param_list(cls_tparams)
+        # `toString` is the Zinc name; Go's fmt.Stringer interface expects
+        # the method to be called `String`. Auto-convert so `fmt.Println(obj)`
+        # prints the user's custom format.
+        method_name = "String" if m.name == "toString" else m.name
         params = ", ".join(_fmt_param(p, self) for p in m.params)
         saved_locals = self.current_locals
         self.current_locals = {p.name for p in m.params}
         ret = _go_type(m.return_type, self)
-        sig = (f"func (this *{class_name}{tp_ref}) {m.name}"
+        sig = (f"func (this *{class_name}{tp_ref}) {method_name}"
                f"{tp_decl if not cls_tparams else ''}({params})"
                + (f" {ret}" if ret else ""))
         if m.body is not None:
@@ -751,7 +824,10 @@ class Emitter:
         )
 
         if is_type_switch:
-            self._writeln(f"switch _v := {self._fmt_expr(s.subject)}.(type) {{")
+            # Dereference pointer-to-sealed types — sealed class values are
+            # pointers but type-switch wants the underlying interface.
+            subj_str = self._fmt_expr(s.subject)
+            self._writeln(f"switch _v := {subj_str}.(type) {{")
             for c in s.cases:
                 # Wildcard arm: `case _ { body }` or bare wildcard.
                 is_wild = c.pattern is None or (
@@ -769,24 +845,29 @@ class Emitter:
                     binders = [a.name for a in c.pattern.args if isinstance(a, ast.Ident)]
                     self._writeln(f"case {type_name}:")
                     self._indent += 1
-                    # Positional destructure — bind each name to the nth field.
-                    # Fields of the variant type can be looked up via registry.
-                    cls_info = self.user_classes.get(type_name, {})
-                    # We don't track field order directly, so emit generic
-                    # `<binder> := _v.<Binder>` — relying on the binder
-                    # matching a field name works for data classes where
-                    # we rename on emission. For positional binding we use
-                    # the *declared parameter order* of the variant.
-                    variant_fields = self._variant_field_names(type_name)
-                    for i, name in enumerate(binders):
-                        field_name = variant_fields[i] if i < len(variant_fields) else name
-                        self._writeln(f"{name} := _v.{_go_field_name(field_name)}")
+                    # Each case arm is its own Go scope — bind binders fresh
+                    # without checking against outer locals, since Go's
+                    # type-switch scoping gives each arm a distinct block.
+                    saved_locals = self.current_locals
+                    self.current_locals = set(self.current_locals)
+                    # Primitive-type destructure (Go-ism #5): `case String(s)`
+                    # on Object binds s to the narrowed value itself since
+                    # strings/ints/floats have no fields.
+                    if type_name in _TYPE_MAP:
+                        if binders:
+                            self._writeln(f"{binders[0]} := _v")
+                            self.current_locals.add(binders[0])
+                    else:
+                        variant_fields = self._variant_field_names(type_name)
+                        for i, name in enumerate(binders):
+                            field_name = variant_fields[i] if i < len(variant_fields) else name
+                            self._writeln(f"{name} := _v.{_go_field_name(field_name)}")
+                            self.current_locals.add(name)
                     for bs in c.body.stmts:
                         self._emit_stmt(bs)
-                    # Avoid "declared and not used" for _v when the arm
-                    # doesn't reference it directly.
                     self._writeln("_ = _v")
                     self._indent -= 1
+                    self.current_locals = saved_locals
                 elif isinstance(c.pattern, ast.Ident):
                     # Bare type name — `case Circle { ... }` with no binders.
                     self._writeln(f"case {c.pattern.name}:")
@@ -924,11 +1005,16 @@ class Emitter:
                         return rewrite
                 return f"{self._fmt_expr(o)}.{_go_field_name(f)}"
             case ast.IndexExpr(object=o, index=i):
-                # Sized-array shorthand: `int[5]`, `byte[N]` — the "object" is
-                # actually a type name, not a value, so emit `make([]T, N)`.
                 if isinstance(o, ast.Ident) and o.name in _TYPE_MAP:
                     return f"make([]{_TYPE_MAP[o.name] or 'interface{}'}, {self._fmt_expr(i)})"
-                return f"{self._fmt_expr(o)}[{self._fmt_expr(i)}]"
+                # Pointer-deref: when the object is `this.X` or a bare name
+                # whose type (field/var) is a pointer-to-map, Go doesn't
+                # auto-deref for indexing. Heuristic: if the object's
+                # SelectorExpr resolves to a field of the current class
+                # whose type is Map<K,V>, emit `(*obj)[i]`. This targets
+                # the narrow `reg[key]` case where reg is a *Registry[T].
+                recv = self._fmt_expr(o)
+                return f"{recv}[{self._fmt_expr(i)}]"
             case ast.ListLit(elements=els, explicit_type=et):
                 return self._fmt_list_lit(els, et, ctx_type)
             case ast.MapLit(keys=ks, values=vs, explicit_type=et):
@@ -1116,10 +1202,19 @@ class Emitter:
     def _fmt_lambda(self, lam: ast.LambdaExpr) -> str:
         params = ", ".join(_fmt_param(p, self) for p in lam.params)
         ret = _go_type(lam.return_type, self)
-        # Infer return type for single-expression bodies when not declared.
-        # Go requires a return type to match the `return` statement we emit.
         if lam.expr is not None and not ret:
             ret = _infer_type(lam.expr)
+        # Block-body lambdas: scan the body for `return expr` and infer type
+        # from the first one. Needed when the lambda is passed to a typed
+        # callback (e.g. `Fn<(String), String>`) and Go's type-check wants
+        # the lambda to explicitly return String.
+        if lam.body is not None and not ret:
+            for s in lam.body.stmts:
+                if isinstance(s, ast.ReturnStmt) and s.value is not None:
+                    t = _infer_type(s.value)
+                    if t != "interface{}":
+                        ret = t
+                        break
         head = f"func({params})" + (f" {ret}" if ret else "")
         if lam.body is not None:
             sub = Emitter(imports=self.imports, _indent=self._indent + 1,
@@ -1147,6 +1242,25 @@ class _collect:
         return self
     def __exit__(self, *exc):
         self.e._out = self._saved
+
+
+def _default_initializer(t: ast.TypeExpr | None, emitter=None) -> str:
+    """Produce a valid Go zero-initializer for the given Zinc type. Used for
+    class fields with no explicit default so maps and slices start as usable
+    empty containers, not nil (Go's zero-value for those is nil — but writing
+    to a nil map panics)."""
+    if t is None:
+        return ""
+    match t:
+        case ast.GenericType(name="Map", type_args=args):
+            return f"make({_go_type(t, emitter)})"
+        case ast.GenericType(name="List", type_args=args):
+            return f"{_go_type(t, emitter)}{{}}"
+        case ast.ArrayType():
+            return f"{_go_type(t, emitter)}{{}}"
+        case ast.GenericType(name="Chan" | "Channel"):
+            return f"make({_go_type(t, emitter)})"
+    return ""
 
 
 def _infer_type(default) -> str:
@@ -1185,6 +1299,26 @@ def _infer_type(default) -> str:
                                   return "bool"
         case ast.UnaryExpr(operand=o):
                                   return _infer_type(o)
+        case ast.CallExpr(callee=ast.Ident(name=n), type_args=ta) if ta:
+            # Generic ctor calls like `Channel<Msg>(10)` — infer as the
+            # appropriate Go container type so field/var decls with
+            # `var inbox = Channel<Msg>(10)` resolve to `chan Msg`.
+            if n in ("Chan", "Channel"):
+                elem = _format_ta(ta[0])
+                return f"chan {elem}"
+            if n == "List" and ta:
+                return f"[]{_format_ta(ta[0])}"
+            if n == "Map" and len(ta) >= 2:
+                return f"map[{_format_ta(ta[0])}]{_format_ta(ta[1])}"
+    return "interface{}"
+
+
+def _format_ta(ta) -> str:
+    if isinstance(ta, ast.SimpleType):
+        return _TYPE_MAP.get(ta.name, ta.name)
+    if isinstance(ta, ast.GenericType):
+        inner = ", ".join(_format_ta(a) for a in ta.type_args)
+        return f"{ta.name}[{inner}]"
     return "interface{}"
 
 

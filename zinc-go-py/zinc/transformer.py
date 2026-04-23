@@ -144,7 +144,10 @@ class ZincTransformer(Transformer):
         return _Modifier(str(kw))
 
     def parents(self, *types):
-        return _Parents([_type_as_name(t) for t in types])
+        # Keep full type info as formatted strings so generic parents
+        # (`Mapper<int, String>`) emit as `Mapper[int, string]` in Go
+        # rather than losing the type args to just `Mapper`.
+        return _Parents([_format_type_for_parent(t) for t in types])
 
     @v_args(inline=False)
     def class_body(self, items):
@@ -1069,6 +1072,26 @@ def _type_as_name(t) -> str:
     if isinstance(t, ast.GenericType):
         return t.name
     return ""
+
+
+_TYPE_MAP = {
+    "int": "int", "long": "int64", "float": "float32", "double": "float64",
+    "bool": "bool", "boolean": "bool", "byte": "byte", "char": "rune",
+    "string": "string", "String": "string", "void": "",
+}
+
+
+def _format_type_for_parent(t) -> str:
+    """Render a parent type_ref to a Go-friendly type string, preserving
+    generic args: `Mapper<int, String>` → `Mapper[int, string]`."""
+    if isinstance(t, ast.SimpleType):
+        return _TYPE_MAP.get(t.name, t.name)
+    if isinstance(t, ast.GenericType):
+        args = ", ".join(_format_type_for_parent(a) for a in t.type_args)
+        return f"{t.name}[{args}]"
+    if isinstance(t, ast.ArrayType):
+        return f"[]{_format_type_for_parent(t.element_type)}"
+    return "interface{}"
 
 
 def _expr_as_name(e) -> str:
