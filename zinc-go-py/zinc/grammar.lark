@@ -293,7 +293,12 @@ AND_OP: "&&" | "and"
 
 ?comp_expr: comp_expr comp_op bitor_expr    -> bin_cmp
           | bitor_expr
-!comp_op: "==" | "!=" | "<" | "<=" | ">" | ">=" | "===" | "!==" | "is" | "in"
+// `is` and `in` must be word-boundary-matched so `intQ` doesn't get
+// split into `in` + `tQ` (Lark's lexer would otherwise happily emit the
+// 2-char anonymous `in` token mid-identifier).
+!comp_op: "==" | "!=" | "<" | "<=" | ">" | ">=" | "===" | "!==" | IS_KW | IN_KW
+IS_KW: /is\b/
+IN_KW: /in\b/
 
 ?bitor_expr: bitor_expr "|" bitxor_expr    -> bit_or
            | bitxor_expr

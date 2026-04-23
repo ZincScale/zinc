@@ -212,6 +212,13 @@ class Emitter:
     # Return type of the currently-emitting function — used by _fmt_lambda
     # to inherit `Fn<(...), R>.R` into a bodyless lambda's return type.
     current_fn_ret_type: ast.TypeExpr | None = None
+    # When emitting a CallExpr's args, this is the param-type expected for
+    # the arg currently being emitted. Lambdas passed as arguments to a
+    # `Fn<(...), R>` param inherit R from this slot.
+    current_arg_expected_type: ast.TypeExpr | None = None
+    # Map from local-var/param name → its declared TypeExpr. Lets
+    # `_infer_type(Ident)` figure out that `x` (a typed param) is int.
+    current_local_types: dict[str, ast.TypeExpr] = field(default_factory=dict)
     _out: list[str] = field(default_factory=list)
     _indent: int = 0
 
@@ -378,9 +385,12 @@ class Emitter:
         saved_fn = self.current_fn
         saved_locals = self.current_locals
         saved_ret = self.current_fn_ret_type
+        saved_types = self.current_local_types
         self.current_fn = fn.name
         self.current_locals = {p.name for p in fn.params}
         self.current_fn_ret_type = fn.return_type
+        self.current_local_types = {p.name: p.type for p in fn.params
+                                     if p.type is not None}
         params = ", ".join(_fmt_param(p, self) for p in fn.params)
         ret = _go_type(fn.return_type, self)
         # Track whether the fn has a declared return type — if so, and the
@@ -417,6 +427,7 @@ class Emitter:
         self.current_fn = saved_fn
         self.current_locals = saved_locals
         self.current_fn_ret_type = saved_ret
+        self.current_local_types = saved_types
 
     def _emit_test(self, t: ast.TestDecl) -> None:
         # `test "foo bar" { ... }` → `func Test_foo_bar(t *testing.T) { ... }`.
@@ -743,6 +754,8 @@ class Emitter:
                 raise NotImplementedError(f"stmt: {type(s).__name__}")
 
     def _emit_var(self, v: ast.VarStmt) -> None:
+        if v.type is not None:
+            self.current_local_types[v.name] = v.type
         if v.value is None:
             self._writeln(f"var {v.name} {_go_type(v.type, self)}")
             self.current_locals.add(v.name)
@@ -895,12 +908,18 @@ class Emitter:
                     # Primitive-type destructure (Go-ism #5): `case String(s)`
                     # on Object binds s to the narrowed value itself since
                     # strings/ints/floats have no fields.
-                    if type_name in _TYPE_MAP:
+                    # Binder semantics depend on what the pattern's type is:
+                    # - primitives (`case int(n)`) — bind n to the narrowed _v.
+                    # - user classes that are NOT data-class variants
+                    #   (regular classes, interfaces) — same: bind to _v.
+                    # - data-class / sealed variants — positional field bind.
+                    variant_fields = self._variant_field_names(type_name)
+                    is_variant = bool(variant_fields)
+                    if type_name in _TYPE_MAP or not is_variant:
                         if binders:
                             self._writeln(f"{binders[0]} := _v")
                             self.current_locals.add(binders[0])
                     else:
-                        variant_fields = self._variant_field_names(type_name)
                         for i, name in enumerate(binders):
                             field_name = variant_fields[i] if i < len(variant_fields) else name
                             self._writeln(f"{name} := _v.{_go_field_name(field_name)}")
@@ -1136,16 +1155,31 @@ class Emitter:
             args = ", ".join(self._fmt_expr(a) for a in c.args)
             return f"this.{self.current_parent} = New{self.current_parent}({args})"
 
-        # 1. Built-in method dispatch: foo.bar(args) where bar is a known
-        # pseudo-method. Go-ism #1: builtin names are RESERVED. User classes
-        # can't define methods with these names; if they do, the builtin
-        # dispatch wins. Only exception is `this.method()` — that's a call
-        # to the user's own method, not a container op.
+        # 1. Built-in method dispatch. Suppressed when:
+        #   - the receiver is `this` (that's a real user method),
+        #   - the receiver is a bare Ident whose tracked type is a user
+        #     class with this method defined (user method wins),
+        #   - ANY user method name clashes (conservative global guard).
         if isinstance(c.callee, ast.SelectorExpr):
-            if not isinstance(c.callee.object, ast.ThisExpr):
-                recv = self._fmt_expr(c.callee.object)
+            field = c.callee.field
+            recv_obj = c.callee.object
+            is_this = isinstance(recv_obj, ast.ThisExpr)
+            # User-class-instance method takes precedence over builtin.
+            user_has = field in self.user_method_names
+            recv_is_user = False
+            if isinstance(recv_obj, ast.Ident):
+                t = self.current_local_types.get(recv_obj.name)
+                if t is not None:
+                    base = t.name if isinstance(t, ast.SimpleType) else (
+                        t.name if isinstance(t, ast.GenericType) else None)
+                    if base and base in self.user_classes:
+                        info = self.user_classes[base]
+                        if field in info.get("methods", []):
+                            recv_is_user = True
+            if not is_this and not recv_is_user:
+                recv = self._fmt_expr(recv_obj)
                 args = [self._fmt_expr(a) for a in c.args]
-                rewrite = _try_builtin(c.callee.field, recv, args, self)
+                rewrite = _try_builtin(field, recv, args, self)
                 if rewrite is not None:
                     return rewrite
 
@@ -1208,7 +1242,19 @@ class Emitter:
         if c.type_args:
             callee = f"{callee}[{', '.join(_go_type(t, self) for t in c.type_args)}]"
 
-        args_fmt = [self._fmt_expr(a) for a in c.args]
+        # Emit args with the declared callee param types in scope so a
+        # LambdaExpr argument can inherit its return type from the
+        # corresponding `Fn<(...), R>` param (fixes middleware/type_aliases/
+        # function_types).
+        declared_params = (self.fn_params.get(c.callee.name, [])
+                            if isinstance(c.callee, ast.Ident) else [])
+        args_fmt = []
+        for i, a in enumerate(c.args):
+            saved = self.current_arg_expected_type
+            if i < len(declared_params):
+                self.current_arg_expected_type = declared_params[i].type
+            args_fmt.append(self._fmt_expr(a))
+            self.current_arg_expected_type = saved
         # Call-site default-padding (Go-ism #2): if the callee is a known fn
         # and the caller supplied fewer positional args than the declaration
         # has params, pad the tail with each param's declared default.
@@ -1259,7 +1305,7 @@ class Emitter:
         params = ", ".join(_fmt_param(p, self) for p in lam.params)
         ret = _go_type(lam.return_type, self)
         if lam.expr is not None and not ret:
-            ret = _infer_type(lam.expr)
+            ret = _infer_type(lam.expr, self)
         if lam.body is not None and not ret:
             # Block-body lambdas: scan for `return expr` + infer from first.
             for s in lam.body.stmts:
@@ -1268,10 +1314,14 @@ class Emitter:
                     if t != "interface{}":
                         ret = t
                         break
-        # If still unknown and the lambda is inside a function that declares
-        # its own return type as `Fn<(...), R>`, inherit R as our return type.
-        # This fixes middleware-style code where the outer fn's signature
-        # tells us what the lambda must return.
+        # If the lambda is passed as an argument to a call where the
+        # matching param is `Fn<(...), R>`, inherit R.
+        if not ret and self.current_arg_expected_type is not None:
+            exp = self.current_arg_expected_type
+            if isinstance(exp, ast.FuncTypeExpr) and exp.return_type is not None:
+                ret = _go_type(exp.return_type, self)
+        # Otherwise, if the enclosing function declares `Fn<(...), R>` as
+        # its OWN return type, inherit R.
         if not ret and self.current_fn_ret_type is not None:
             outer = self.current_fn_ret_type
             if isinstance(outer, ast.FuncTypeExpr) and outer.return_type is not None:
@@ -1340,7 +1390,7 @@ def _infer_type(default, emitter=None) -> str:
         case ast.ListLit(explicit_type=et) if et is not None:
                                   return _go_type(et)
         case ast.ListLit(elements=els) if els:
-                                  return f"[]{_infer_type(els[0])}"
+                                  return f"[]{_infer_type(els[0], emitter)}"
         case ast.MapLit(explicit_type=et) if et is not None:
                                   return _go_type(et)
         case ast.MapLit():        return "map[string]interface{}"
@@ -1349,17 +1399,14 @@ def _infer_type(default, emitter=None) -> str:
                                                       "and", "or", "in"):
                                   return "bool"
         case ast.BinaryExpr(left=l, right=r):
-            # If either operand's type is concretely inferrable, use it; fall
-            # through to the left side otherwise. Fixes lambda bodies like
-            # `(int n) -> n + 1` where `n` (an Ident) is opaque but `1` is int.
-            lt = _infer_type(l)
+            lt = _infer_type(l, emitter)
             if lt != "interface{}":
                 return lt
-            return _infer_type(r)
+            return _infer_type(r, emitter)
         case ast.UnaryExpr(op="!"):
                                   return "bool"
         case ast.UnaryExpr(operand=o):
-                                  return _infer_type(o)
+                                  return _infer_type(o, emitter)
         case ast.CallExpr(callee=ast.Ident(name=n), type_args=ta) if ta:
             if n in ("Chan", "Channel"):
                 return f"chan {_format_ta(ta[0])}"
@@ -1368,9 +1415,12 @@ def _infer_type(default, emitter=None) -> str:
             if n == "Map" and len(ta) >= 2:
                 return f"map[{_format_ta(ta[0])}]{_format_ta(ta[1])}"
         case ast.CallExpr(callee=ast.Ident(name=n)) if emitter is not None:
-            # User fn call — look up the declared return type.
             if n in emitter.fn_returns:
                 return _go_type(emitter.fn_returns[n], emitter)
+        case ast.Ident(name=n) if emitter is not None:
+            # Typed param or local — look up its declared type.
+            if n in emitter.current_local_types:
+                return _go_type(emitter.current_local_types[n], emitter)
     return "interface{}"
 
 
