@@ -1,0 +1,2 @@
+import strings as s
+print(s.ToUpper("hello"))

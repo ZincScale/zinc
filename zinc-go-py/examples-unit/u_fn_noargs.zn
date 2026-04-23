@@ -1,0 +1,2 @@
+void say() { print("hi") }
+say()

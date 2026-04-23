@@ -1,0 +1,2 @@
+Map<String, int> m = {"a": 1}
+print(m["a"])

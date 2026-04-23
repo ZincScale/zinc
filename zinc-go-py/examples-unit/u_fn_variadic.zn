@@ -1,0 +1,6 @@
+int sum(int... ns) {
+    var total = 0
+    for (n in ns) { total = total + n }
+    return total
+}
+print(sum(1, 2, 3))

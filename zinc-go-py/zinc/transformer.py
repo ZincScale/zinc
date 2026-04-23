@@ -811,12 +811,12 @@ class ZincTransformer(Transformer):
     def if_expr(self, cond, then, else_):
         return ast.IfExpr(cond=cond, then=then, else_=else_)
 
-    def bin_or(self, left, right):
+    def bin_or(self, left, op_tok, right):
+        # Zinc accepts both `||` and `or` — both emit Go's `||`.
         return ast.BinaryExpr(left=left, op="||", right=right)
 
     def bin_and(self, left, op_tok, right):
-        op = str(op_tok) if op_tok != "and" else "&&"
-        return ast.BinaryExpr(left=left, op=op, right=right)
+        return ast.BinaryExpr(left=left, op="&&", right=right)
 
     def not_(self, operand):
         return ast.UnaryExpr(op="!", operand=operand)

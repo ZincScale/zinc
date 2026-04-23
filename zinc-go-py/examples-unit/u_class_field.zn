@@ -1,0 +1,4 @@
+class C { int x }
+var c = C()
+c.x = 5
+print(c.x)

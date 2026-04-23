@@ -259,7 +259,10 @@ block: "{" stmt* "}"
 
 // --- Expressions (precedence ladder matches parser_exprs.go) -----------------
 
-?expr: ternary_expr
+// Lambdas sit ABOVE the precedence ladder so `(x) -> x * 2` binds the
+// whole `x * 2` as the body rather than parsing as `((x) -> x) * 2`.
+?expr: lambda_expr
+     | ternary_expr
 
 ?ternary_expr: if_expr
              | or_expr
@@ -272,11 +275,14 @@ if_expr: "if" expr "{" expr "}" "else" "{" expr "}"
        | "if" expr ":" expr "else" ":" expr
        | "if" "(" expr ")" expr "else" expr
 
-?or_expr: or_expr "||" and_expr        -> bin_or
+?or_expr: or_expr OR_OP and_expr        -> bin_or
         | and_expr
 
-?and_expr: and_expr ("&&" | "and") not_expr  -> bin_and
+?and_expr: and_expr AND_OP not_expr     -> bin_and
          | not_expr
+
+OR_OP: "||" | "or"
+AND_OP: "&&" | "and"
 
 // Precedence ladder — Go/Java convention (loose → tight):
 //   not > comparison > bitor > bitxor > range > addsub > shift > bitand > muldiv
@@ -363,7 +369,6 @@ call_arg: NAME ":" expr               -> named_arg
         | list_lit
         | map_lit
         | tuple_or_paren
-        | lambda_expr
         | match_expr
         | spawn_expr
         | NAME                        -> ident
@@ -404,7 +409,7 @@ spawn_expr: "spawn" block or_handler?
 // `in`, `is`, `as`, `pub`, `type`, etc.) are valid identifiers AND may
 // act as keywords in specific rule positions — Lark's lexer gives the
 // string-literal token priority over NAME at those sites.
-NAME: /(?!(?:if|else|while|for|return|break|continue|class|interface|enum|match|case|import|package|try|catch|finally|throw|defer|spawn|parallel|concurrent|timeout|assert|test|this|super|new|null|true|false|and|or|not|as)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+NAME: /(?!(?:if|else|while|for|return|break|continue|class|interface|enum|match|case|import|package|try|catch|finally|throw|defer|spawn|parallel|concurrent|timeout|assert|test|this|super|new|null|true|false|and|or|not|as|var|const)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 
 INT:   /0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|[0-9]+/
 FLOAT: /[0-9]+\.[0-9]+/

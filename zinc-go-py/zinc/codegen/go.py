@@ -158,10 +158,18 @@ class Emitter:
     # user method so we don't hijack (e.g.) a user's `Stack.size()` as
     # `len(stack)`.
     user_method_names: set[str] = field(default_factory=set)
+    # Function name → list of ParamDecl. Enables call-site padding of missing
+    # positional args with declared defaults (Go-ism #2 — Go has no defaults).
+    fn_params: dict[str, list] = field(default_factory=dict)
     current_fn: Optional[str] = None
     current_self_fields: set[str] = field(default_factory=set)
     current_self_methods: set[str] = field(default_factory=set)
     current_parent: Optional[str] = None
+    # Names that are LOCAL to the current function/method body — parameters,
+    # plus any vars declared earlier in the block. Bare-name resolution checks
+    # these BEFORE `this.X` so `this.x = x` correctly assigns the param `x`
+    # into `this.x` rather than becoming `this.x = this.x`.
+    current_locals: set[str] = field(default_factory=set)
     _out: list[str] = field(default_factory=list)
     _indent: int = 0
 
@@ -234,8 +242,11 @@ class Emitter:
 
     def _register_decls(self, decls: list) -> None:
         """First pass: collect user-defined type names + their type-param counts
-        so `CallExpr(Ident(ClassName))` can be recognised later."""
+        so `CallExpr(Ident(ClassName))` can be recognised later. Also records
+        fn param lists for call-site default-padding."""
         for d in decls:
+            if isinstance(d, ast.FnDecl):
+                self.fn_params[d.name] = d.params
             if isinstance(d, ast.ClassDecl):
                 self.user_classes[d.name] = {
                     "type_params": d.type_params, "is_data": False,
@@ -283,7 +294,11 @@ class Emitter:
 
     def _emit_fn(self, fn: ast.FnDecl) -> None:
         saved_fn = self.current_fn
+        saved_locals = self.current_locals
         self.current_fn = fn.name
+        # Start locals with just the params; vars declared in the body get
+        # added as they're emitted.
+        self.current_locals = {p.name for p in fn.params}
         params = ", ".join(_fmt_param(p, self) for p in fn.params)
         ret = _go_type(fn.return_type, self)
         type_param_str = ""
@@ -305,6 +320,7 @@ class Emitter:
             self._indent -= 1
             self._writeln("}")
         self.current_fn = saved_fn
+        self.current_locals = saved_locals
 
     def _emit_test(self, t: ast.TestDecl) -> None:
         # `test "foo bar" { ... }` → `func Test_foo_bar(t *testing.T) { ... }`.
@@ -355,7 +371,8 @@ class Emitter:
         for p in c.parents:
             self._writeln(f"*{p}")
         for f in c.fields:
-            self._writeln(f"{_go_field_name(f.name)} {_go_type(f.type, self)}")
+            typ = _go_type(f.type, self) if f.type is not None else _infer_type(f.default)
+            self._writeln(f"{_go_field_name(f.name)} {typ}")
         self._indent -= 1
         self._writeln("}")
         self._writeln()
@@ -383,7 +400,12 @@ class Emitter:
             self._writeln(f"func New{c.name}{tp_decl}({ps}) *{c.name}{tp_ref} {{")
             self._indent += 1
             self._writeln(f"this := &{c.name}{tp_ref}{{}}")
+            # Ctor params are locals — shadow same-named fields so
+            # `this.x = x` puts the param into the field.
+            saved_locals = self.current_locals
+            self.current_locals = {p.name for p in c.ctor.params}
             _with_class_ctx(lambda: [self._emit_stmt(s) for s in c.ctor.body.stmts])
+            self.current_locals = saved_locals
             self._writeln("return this")
             self._indent -= 1
             self._writeln("}")
@@ -405,13 +427,13 @@ class Emitter:
             _with_class_ctx(lambda m=m: self._emit_method(c.name, m))
 
     def _emit_method(self, class_name: str, m: ast.MethodDecl) -> None:
-        # If the class is generic, the receiver type and any method-local
-        # references to it must include the type-parameter list: `*Stack[T]`.
         cls_info = self.user_classes.get(class_name, {})
         cls_tparams: list[str] = cls_info.get("type_params", [])
         tp_ref = "[" + ", ".join(cls_tparams) + "]" if cls_tparams else ""
         tp_decl = _type_param_list(cls_tparams)
         params = ", ".join(_fmt_param(p, self) for p in m.params)
+        saved_locals = self.current_locals
+        self.current_locals = {p.name for p in m.params}
         ret = _go_type(m.return_type, self)
         sig = (f"func (this *{class_name}{tp_ref}) {m.name}"
                f"{tp_decl if not cls_tparams else ''}({params})"
@@ -423,6 +445,7 @@ class Emitter:
                 self._emit_stmt(s)
             self._indent -= 1
             self._writeln("}")
+        self.current_locals = saved_locals
         self._writeln()
 
     def _emit_data_class(self, d: ast.DataClassDecl) -> None:
@@ -584,12 +607,14 @@ class Emitter:
     def _emit_var(self, v: ast.VarStmt) -> None:
         if v.value is None:
             self._writeln(f"var {v.name} {_go_type(v.type, self)}")
+            self.current_locals.add(v.name)
             return
         value_str = self._fmt_expr(v.value, ctx_type=v.type)
         if v.type is None:
             self._writeln(f"{v.name} := {value_str}")
         else:
             self._writeln(f"var {v.name} {_go_type(v.type, self)} = {value_str}")
+        self.current_locals.add(v.name)
 
     def _emit_assign(self, s: ast.AssignStmt) -> None:
         # Bare field names on the LHS inside a method → this.<field>.
@@ -778,11 +803,11 @@ class Emitter:
             self._emit_stmt(bs)
 
     def _fmt_stmt_inline(self, s) -> str:
+        # Inline-statement form — used in C-style for-headers where Go does
+        # NOT accept `var x int = 0`; only `x := 0` is legal in the init slot.
         match s:
-            case ast.VarStmt(name=n, value=v, type=None):
+            case ast.VarStmt(name=n, value=v):
                 return f"{n} := {self._fmt_expr(v)}"
-            case ast.VarStmt(name=n, value=v, type=t):
-                return f"var {n} {_go_type(t, self)} = {self._fmt_expr(v)}"
             case ast.AssignStmt(target=t, op=op, value=v):
                 return f"{self._fmt_expr(t)} {op} {self._fmt_expr(v)}"
             case ast.ExprStmt(expr=e):
@@ -813,6 +838,9 @@ class Emitter:
             case ast.NullLit():
                 return "nil"
             case ast.Ident(name=n):
+                # Locals/params shadow fields and methods.
+                if n in self.current_locals:
+                    return n
                 if n in self.current_self_fields:
                     return f"this.{_go_field_name(n)}"
                 if n in self.current_self_methods:
@@ -978,6 +1006,16 @@ class Emitter:
             callee = f"{callee}[{', '.join(_go_type(t, self) for t in c.type_args)}]"
 
         args_fmt = [self._fmt_expr(a) for a in c.args]
+        # Call-site default-padding (Go-ism #2): if the callee is a known fn
+        # and the caller supplied fewer positional args than the declaration
+        # has params, pad the tail with each param's declared default.
+        if isinstance(c.callee, ast.Ident) and c.callee.name in self.fn_params:
+            declared = self.fn_params[c.callee.name]
+            missing = len(declared) - len(c.args)
+            for i in range(missing):
+                default = declared[len(c.args) + i].default
+                if default is not None:
+                    args_fmt.append(self._fmt_expr(default))
         named_fmt = [f"{n.name}: {self._fmt_expr(n.value)}" for n in c.named_args]
         return f"{callee}({', '.join(args_fmt + named_fmt)})"
 
@@ -1017,6 +1055,10 @@ class Emitter:
     def _fmt_lambda(self, lam: ast.LambdaExpr) -> str:
         params = ", ".join(_fmt_param(p, self) for p in lam.params)
         ret = _go_type(lam.return_type, self)
+        # Infer return type for single-expression bodies when not declared.
+        # Go requires a return type to match the `return` statement we emit.
+        if lam.expr is not None and not ret:
+            ret = _infer_type(lam.expr)
         head = f"func({params})" + (f" {ret}" if ret else "")
         if lam.body is not None:
             sub = Emitter(imports=self.imports, _indent=self._indent + 1,
@@ -1044,6 +1086,39 @@ class _collect:
         return self
     def __exit__(self, *exc):
         self.e._out = self._saved
+
+
+def _infer_type(default) -> str:
+    """Best-effort Go type inference from an expression. Used for:
+    - `var`-declared fields where the declaration omits the type;
+    - single-expression lambda bodies where the return type is implicit.
+    Covers literals, common binary/unary operations, and generic containers.
+    Falls back to `interface{}` for anything we can't statically determine."""
+    match default:
+        case ast.IntLit():        return "int"
+        case ast.FloatLit():      return "float64"
+        case ast.StringLit() | ast.StringInterpLit() | ast.RawStringLit():
+                                  return "string"
+        case ast.BoolLit():       return "bool"
+        case ast.NullLit():       return "interface{}"
+        case ast.ListLit(explicit_type=et) if et is not None:
+                                  return _go_type(et)
+        case ast.ListLit(elements=els) if els:
+                                  return f"[]{_infer_type(els[0])}"
+        case ast.MapLit(explicit_type=et) if et is not None:
+                                  return _go_type(et)
+        case ast.MapLit():        return "map[string]interface{}"
+        case ast.BinaryExpr(op=op, left=l) if op in ("==", "!=", "<", "<=",
+                                                      ">", ">=", "&&", "||",
+                                                      "and", "or", "in"):
+                                  return "bool"
+        case ast.BinaryExpr(left=l):
+                                  return _infer_type(l)
+        case ast.UnaryExpr(op="!"):
+                                  return "bool"
+        case ast.UnaryExpr(operand=o):
+                                  return _infer_type(o)
+    return "interface{}"
 
 
 def _type_param_list(tp: list[str]) -> str:

@@ -1,0 +1,2 @@
+print("hello".upper())
+print("HELLO".lower())
