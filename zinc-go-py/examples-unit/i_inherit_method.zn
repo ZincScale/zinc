@@ -1,0 +1,10 @@
+class Animal {
+    String name
+    init(String name) { this.name = name }
+    pub String describe() { return "animal ${name}" }
+}
+class Dog : Animal {
+    init(String name) { super(name) }
+    pub String bark() { return describe() + " barks" }
+}
+print(Dog("Rex").bark())

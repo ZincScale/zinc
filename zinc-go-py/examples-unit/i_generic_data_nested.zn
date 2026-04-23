@@ -1,0 +1,5 @@
+data Box<T>(T value)
+data Pair<A, B>(A first, B second)
+var p = Pair<String, Box<int>>("answer", Box<int>(42))
+print(p.first)
+print(p.second.value)

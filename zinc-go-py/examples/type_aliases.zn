@@ -21,10 +21,10 @@ String endpoint(String path) {
     return "200 OK: ${path}"
 }
 
-int countIf(List<int> items, Predicate test) {
+int countIf(List<int> items, Predicate pred) {
     var count = 0
     for (item in items) {
-        if (test(item)) {
+        if (pred(item)) {
             count = count + 1
         }
     }

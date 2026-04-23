@@ -1,0 +1,13 @@
+sealed class Shape {
+    data Circle(double r)
+    data Rect(double w, double h)
+}
+double area(Shape s) {
+    match (s) {
+        case Circle(r) { return 3.14 * r * r }
+        case Rect(w, h) { return w * h }
+    }
+    return 0.0
+}
+print(area(Circle(2.0)))
+print(area(Rect(3.0, 4.0)))

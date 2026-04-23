@@ -1,0 +1,3 @@
+data Pair<A, B>(A first, B second)
+A firstOf<A, B>(Pair<A, B> p) { return p.first }
+print(firstOf<String, int>(Pair<String, int>("hi", 42)))

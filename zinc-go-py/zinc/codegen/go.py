@@ -40,7 +40,16 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
         return ""
     match t:
         case ast.SimpleType(name=n):
-            return _TYPE_MAP.get(n, n)
+            if n in _TYPE_MAP:
+                return _TYPE_MAP[n]
+            # Mirrors zinc-go's codegen_resolve.go line 881 — non-data,
+            # non-sealed classes are always pointer-typed in the emitted Go.
+            # Data classes stay value-typed; sealed parents are interfaces.
+            if emitter is not None and n in emitter.user_classes:
+                info = emitter.user_classes[n]
+                if not info.get("is_data") and not info.get("is_sealed"):
+                    return f"*{n}"
+            return n
         case ast.GenericType(name="List", type_args=[elem]):
             return f"[]{_go_type(elem, emitter)}"
         case ast.GenericType(name="Map", type_args=[k, v]):
@@ -48,7 +57,12 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
         case ast.GenericType(name="Chan" | "Channel", type_args=[e]):
             return f"chan {_go_type(e, emitter)}"
         case ast.GenericType(name=n, type_args=args):
-            return f"{n}[{', '.join(_go_type(a, emitter) for a in args)}]"
+            ptr = ""
+            if emitter is not None and n in emitter.user_classes:
+                info = emitter.user_classes[n]
+                if not info.get("is_data") and not info.get("is_sealed"):
+                    ptr = "*"
+            return f"{ptr}{n}[{', '.join(_go_type(a, emitter) for a in args)}]"
         case ast.ArrayType(element_type=elem):
             return f"[]{_go_type(elem, emitter)}"
         case ast.OptionalType(inner=inner):
@@ -249,13 +263,22 @@ class Emitter:
                 self.fn_params[d.name] = d.params
             if isinstance(d, ast.ClassDecl):
                 self.user_classes[d.name] = {
-                    "type_params": d.type_params, "is_data": False,
+                    "type_params": d.type_params,
+                    "is_data": False,
+                    "is_sealed": d.is_sealed,
+                    "parents": d.parents,
+                    "methods": [m.name for m in d.methods],
+                    "fields": [f.name for f in d.fields],
                 }
                 for m in d.methods:
                     self.user_method_names.add(m.name)
                 for v in d.variants:
                     self.user_classes[v.name] = {
-                        "type_params": v.type_params, "is_data": True,
+                        "type_params": v.type_params,
+                        "is_data": True,
+                        "is_sealed": False,
+                        "parents": [],
+                        "methods": [m.name for m in v.methods],
                     }
                     self._variant_fields_by_name[v.name] = [p.name for p in v.params]
                     self.sealed_by_variant[v.name] = d.name
@@ -263,7 +286,11 @@ class Emitter:
                         self.user_method_names.add(m.name)
             elif isinstance(d, ast.DataClassDecl):
                 self.user_classes[d.name] = {
-                    "type_params": d.type_params, "is_data": True,
+                    "type_params": d.type_params,
+                    "is_data": True,
+                    "is_sealed": False,
+                    "parents": [],
+                    "methods": [m.name for m in d.methods],
                 }
                 self._variant_fields_by_name[d.name] = [p.name for p in d.params]
                 for m in d.methods:
@@ -345,6 +372,16 @@ class Emitter:
         field_names = {f.name for f in c.fields}
         method_names = {m.name for m in c.methods}
         parent = c.parents[0] if c.parents else None
+        # Walk parent chain to include inherited fields too — a subclass
+        # method that says `x` must resolve to `this.x` (Go's embedded
+        # *Parent promotion handles it). Done in the _with_class_ctx setup
+        # below; here we just collect all ancestors' field names.
+        cur = parent
+        while cur and cur in self.user_classes:
+            info = self.user_classes[cur]
+            field_names.update(info.get("fields", []))
+            par = info.get("parents", [])
+            cur = par[0] if par else None
         tp = _type_param_list(c.type_params)
 
         # Sealed classes lower to a marker interface + each nested `data`
@@ -377,12 +414,24 @@ class Emitter:
         self._writeln("}")
         self._writeln()
 
+        # Inherited methods: walk the parent chain via user_classes so bare
+        # calls like `address()` in a `Dog` method that's inherited from
+        # `Animal` resolve to `this.address()` (Go's embedded promotion
+        # then finds Animal.address via the embedded *Animal field).
+        all_methods = set(method_names)
+        cur = parent
+        while cur and cur in self.user_classes:
+            info = self.user_classes[cur]
+            all_methods.update(info.get("methods", []))
+            par = info.get("parents", [])
+            cur = par[0] if par else None
+
         def _with_class_ctx(fn):
             saved_f, saved_m, saved_p = (self.current_self_fields,
                                           self.current_self_methods,
                                           self.current_parent)
             self.current_self_fields = field_names
-            self.current_self_methods = method_names
+            self.current_self_methods = all_methods
             self.current_parent = parent
             try: fn()
             finally:
@@ -416,7 +465,7 @@ class Emitter:
             self._indent += 1
             self._writeln(f"this := &{c.name}{tp_ref}{{}}")
             _with_class_ctx(lambda: [
-                self._writeln(f"this.{_go_field_name(f.name)} = {self._fmt_expr(f.default)}")
+                self._writeln(f"this.{_go_field_name(f.name)} = {self._fmt_expr(f.default, ctx_type=f.type)}")
                 for f in c.fields if f.default is not None
             ])
             self._writeln("return this")
@@ -869,8 +918,7 @@ class Emitter:
                 return self._fmt_call(e)
             case ast.SelectorExpr(object=o, field=f):
                 if (not isinstance(o, ast.ThisExpr)
-                        and f in ("length", "size", "capacity", "isEmpty", "nonEmpty")
-                        and f not in self.user_method_names):
+                        and f in ("length", "size", "capacity", "isEmpty", "nonEmpty")):
                     rewrite = _try_builtin(f, self._fmt_expr(o), [], self)
                     if rewrite is not None:
                         return rewrite
@@ -912,20 +960,31 @@ class Emitter:
                 return (f"(func() interface{{}} {{ if {self._fmt_expr(c)} {{ "
                         f"return {self._fmt_expr(t)} }}; return {self._fmt_expr(el)} }}())")
             case ast.MatchExpr(subject=subj, cases=cs):
-                # Expression-position match — IIFE wrapping a switch. The
-                # return type is `interface{}` because we don't infer a
-                # narrower common type across arms.
-                lines = [f"if _m := {self._fmt_expr(subj)}; true {{"]
+                # Expression-position match — IIFE wrapping if/else chain.
+                # Infer return type from first concrete case arm; wildcard
+                # `case _` becomes the default return (no compare).
+                ret_type = "interface{}"
                 for mc in cs:
-                    if mc.pattern is None:
-                        lines.append(f"_ = _m; return {self._fmt_expr(mc.value)}")
+                    t = _infer_type(mc.value)
+                    if t != "interface{}":
+                        ret_type = t
+                        break
+                lines = [f"_m := {self._fmt_expr(subj)}"]
+                for mc in cs:
+                    is_wild = mc.pattern is None or (
+                        isinstance(mc.pattern, ast.Ident) and mc.pattern.name == "_")
+                    if is_wild:
+                        lines.append(f"return {self._fmt_expr(mc.value)}")
                     else:
                         lines.append(f"if _m == {self._fmt_expr(mc.pattern)} "
                                      f"{{ return {self._fmt_expr(mc.value)} }}")
-                lines.append("}")
-                lines.append('panic("unreachable match")')
+                # Fallback panic if no wildcard matched — also satisfies Go's
+                # "function must return" check.
+                if not any(mc.pattern is None or (isinstance(mc.pattern, ast.Ident)
+                           and mc.pattern.name == "_") for mc in cs):
+                    lines.append('panic("unreachable match")')
                 body = "; ".join(lines)
-                return f"(func() interface{{}} {{ {body} }}())"
+                return f"(func() {ret_type} {{ {body} }}())"
             case ast.CapacityExpr(collection_type=ct, capacity=cap):
                 return f"make({_go_type(ct, self)}, 0, {self._fmt_expr(cap)})"
             case ast.SizedArrayExpr(element_type=et, size=sz):
@@ -942,24 +1001,26 @@ class Emitter:
             args = ", ".join(self._fmt_expr(a) for a in c.args)
             return f"this.{self.current_parent} = New{self.current_parent}({args})"
 
-        # 1. Built-in method dispatch: foo.bar(args) where bar is a known pseudo-method.
+        # 1. Built-in method dispatch: foo.bar(args) where bar is a known
+        # pseudo-method. Go-ism #1: builtin names are RESERVED. User classes
+        # can't define methods with these names; if they do, the builtin
+        # dispatch wins. Only exception is `this.method()` — that's a call
+        # to the user's own method, not a container op.
         if isinstance(c.callee, ast.SelectorExpr):
-            # Skip builtin rewrite when:
-            #   - receiver is `this` (intra-method call, user's own method)
-            #   - a user class has a method with this name (may override)
-            if (not isinstance(c.callee.object, ast.ThisExpr)
-                    and c.callee.field not in self.user_method_names):
+            if not isinstance(c.callee.object, ast.ThisExpr):
                 recv = self._fmt_expr(c.callee.object)
                 args = [self._fmt_expr(a) for a in c.args]
                 rewrite = _try_builtin(c.callee.field, recv, args, self)
                 if rewrite is not None:
                     return rewrite
 
-        # 2. Struct-field args → Go struct literal `T{Field: value, ...}`.
+        # 2. Struct-field args → Go struct literal. Go-ism #9: emit `&T{...}`
+        # (pointer-to-struct) always, since Zinc users write no `&` or `*`
+        # and Go APIs consuming struct literals typically expect pointers.
         if c.struct_field_args:
             callee = self._fmt_expr(c.callee)
             fields = ", ".join(f"{s.name}: {self._fmt_expr(s.value)}" for s in c.struct_field_args)
-            return f"{callee}{{{fields}}}"
+            return f"&{callee}{{{fields}}}"
 
         # 3a. Special cast: `str(x)` → `fmt.Sprint(x)` (any-to-string).
         if isinstance(c.callee, ast.Ident) and c.callee.name == "str":
@@ -1112,8 +1173,14 @@ def _infer_type(default) -> str:
                                                       ">", ">=", "&&", "||",
                                                       "and", "or", "in"):
                                   return "bool"
-        case ast.BinaryExpr(left=l):
-                                  return _infer_type(l)
+        case ast.BinaryExpr(left=l, right=r):
+            # If either operand's type is concretely inferrable, use it; fall
+            # through to the left side otherwise. Fixes lambda bodies like
+            # `(int n) -> n + 1` where `n` (an Ident) is opaque but `1` is int.
+            lt = _infer_type(l)
+            if lt != "interface{}":
+                return lt
+            return _infer_type(r)
         case ast.UnaryExpr(op="!"):
                                   return "bool"
         case ast.UnaryExpr(operand=o):

@@ -1,0 +1,5 @@
+import fmt
+data Config(String host, int port)
+var c = Config(host="localhost", port=8080)
+fmt.Println(c.host)
+fmt.Println(c.port)

@@ -1,0 +1,3 @@
+Map<String, int> m = {"a": 1, "b": 2}
+m.put("c", 3)
+print(m["a"] + m["b"] + m["c"])

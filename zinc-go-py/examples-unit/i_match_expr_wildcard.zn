@@ -1,0 +1,7 @@
+int x = 5
+String s = match x {
+    case 1 -> "one"
+    case 5 -> "five"
+    case _ -> "other"
+}
+print(s)
