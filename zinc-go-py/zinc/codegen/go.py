@@ -189,9 +189,10 @@ class Emitter:
     # user method so we don't hijack (e.g.) a user's `Stack.size()` as
     # `len(stack)`.
     user_method_names: set[str] = field(default_factory=set)
-    # Function name → list of ParamDecl. Enables call-site padding of missing
-    # positional args with declared defaults (Go-ism #2 — Go has no defaults).
     fn_params: dict[str, list] = field(default_factory=dict)
+    # Function name → return TypeExpr. Used by _infer_type to resolve the
+    # return type of a user-function call at the callsite.
+    fn_returns: dict[str, ast.TypeExpr] = field(default_factory=dict)
     current_fn: Optional[str] = None
     current_self_fields: set[str] = field(default_factory=set)
     current_self_methods: set[str] = field(default_factory=set)
@@ -201,6 +202,9 @@ class Emitter:
     # these BEFORE `this.X` so `this.x = x` correctly assigns the param `x`
     # into `this.x` rather than becoming `this.x = this.x`.
     current_locals: set[str] = field(default_factory=set)
+    # Return type of the currently-emitting function — used by _fmt_lambda
+    # to inherit `Fn<(...), R>.R` into a bodyless lambda's return type.
+    current_fn_ret_type: ast.TypeExpr | None = None
     _out: list[str] = field(default_factory=list)
     _indent: int = 0
 
@@ -278,6 +282,8 @@ class Emitter:
         for d in decls:
             if isinstance(d, ast.FnDecl):
                 self.fn_params[d.name] = d.params
+                if d.return_type is not None:
+                    self.fn_returns[d.name] = d.return_type
             if isinstance(d, ast.ClassDecl) and d.ctor is not None:
                 # Register the class's ctor params under the class name so
                 # `MyClass("a")` at a call site can pad defaults against the
@@ -364,8 +370,10 @@ class Emitter:
     def _emit_fn(self, fn: ast.FnDecl) -> None:
         saved_fn = self.current_fn
         saved_locals = self.current_locals
+        saved_ret = self.current_fn_ret_type
         self.current_fn = fn.name
         self.current_locals = {p.name for p in fn.params}
+        self.current_fn_ret_type = fn.return_type
         params = ", ".join(_fmt_param(p, self) for p in fn.params)
         ret = _go_type(fn.return_type, self)
         # Track whether the fn has a declared return type — if so, and the
@@ -401,6 +409,7 @@ class Emitter:
             self._writeln("}")
         self.current_fn = saved_fn
         self.current_locals = saved_locals
+        self.current_fn_ret_type = saved_ret
 
     def _emit_test(self, t: ast.TestDecl) -> None:
         # `test "foo bar" { ... }` → `func Test_foo_bar(t *testing.T) { ... }`.
@@ -732,6 +741,19 @@ class Emitter:
             self.current_locals.add(v.name)
             return
         value_str = self._fmt_expr(v.value, ctx_type=v.type)
+        # Subtype-assignment simplification (matches zinc-go's approach):
+        # when the declared type is a concrete user class, drop the annotation
+        # and let Go infer from the value. `Vehicle v = car` becomes
+        # `v := car` in Go — Go's method promotion makes `v.describe()` work
+        # on the inferred `*Car`. Keeps explicit annotation for primitives,
+        # data classes (value types), and interfaces where it matters.
+        if (v.type is not None and isinstance(v.type, ast.SimpleType)
+                and v.type.name in self.user_classes):
+            info = self.user_classes[v.type.name]
+            if not info.get("is_data") and not info.get("is_interface"):
+                self._writeln(f"{v.name} := {value_str}")
+                self.current_locals.add(v.name)
+                return
         if v.type is None:
             self._writeln(f"{v.name} := {value_str}")
         else:
@@ -992,6 +1014,13 @@ class Emitter:
                 return (f"(func() bool {{ _, ok := {self._fmt_expr(l)}.({go_t}); "
                         f"return ok }}())")
             case ast.BinaryExpr(left=l, op=op, right=r):
+                # `===`/`!==` are Zinc's reference-equality operators —
+                # Go's plain `==`/`!=` on pointer/interface types is
+                # reference-compare, so emit the same.
+                if op == "===":
+                    op = "=="
+                elif op == "!==":
+                    op = "!="
                 return f"({self._fmt_expr(l)} {op} {self._fmt_expr(r)})"
             case ast.UnaryExpr(op=op, operand=o):
                 return f"{op}{self._fmt_expr(o)}"
@@ -1122,9 +1151,16 @@ class Emitter:
         #     `User("a", "b")` → `NewUser("a", "b")`.
         #     `Stack<int>()`   → `NewStack[int]()`.
         if isinstance(c.callee, ast.Ident) and c.callee.name in self.user_classes:
-            cls_info = self.user_classes[c.callee.name]
             name = c.callee.name
             args_fmt = [self._fmt_expr(a) for a in c.args]
+            # Call-site default padding — ctor params registered under the
+            # class name. Matches FnDecl default handling (Go-ism #2).
+            if name in self.fn_params:
+                declared = self.fn_params[name]
+                for i in range(len(declared) - len(c.args)):
+                    default = declared[len(c.args) + i].default
+                    if default is not None:
+                        args_fmt.append(self._fmt_expr(default))
             tparams = ""
             if c.type_args:
                 tparams = "[" + ", ".join(_go_type(t, self) for t in c.type_args) + "]"
@@ -1204,17 +1240,22 @@ class Emitter:
         ret = _go_type(lam.return_type, self)
         if lam.expr is not None and not ret:
             ret = _infer_type(lam.expr)
-        # Block-body lambdas: scan the body for `return expr` and infer type
-        # from the first one. Needed when the lambda is passed to a typed
-        # callback (e.g. `Fn<(String), String>`) and Go's type-check wants
-        # the lambda to explicitly return String.
         if lam.body is not None and not ret:
+            # Block-body lambdas: scan for `return expr` + infer from first.
             for s in lam.body.stmts:
                 if isinstance(s, ast.ReturnStmt) and s.value is not None:
-                    t = _infer_type(s.value)
+                    t = _infer_type(s.value, self)
                     if t != "interface{}":
                         ret = t
                         break
+        # If still unknown and the lambda is inside a function that declares
+        # its own return type as `Fn<(...), R>`, inherit R as our return type.
+        # This fixes middleware-style code where the outer fn's signature
+        # tells us what the lambda must return.
+        if not ret and self.current_fn_ret_type is not None:
+            outer = self.current_fn_ret_type
+            if isinstance(outer, ast.FuncTypeExpr) and outer.return_type is not None:
+                ret = _go_type(outer.return_type, self)
         head = f"func({params})" + (f" {ret}" if ret else "")
         if lam.body is not None:
             sub = Emitter(imports=self.imports, _indent=self._indent + 1,
@@ -1263,7 +1304,7 @@ def _default_initializer(t: ast.TypeExpr | None, emitter=None) -> str:
     return ""
 
 
-def _infer_type(default) -> str:
+def _infer_type(default, emitter=None) -> str:
     """Best-effort Go type inference from an expression. Used for:
     - `var`-declared fields where the declaration omits the type;
     - single-expression lambda bodies where the return type is implicit.
@@ -1300,16 +1341,16 @@ def _infer_type(default) -> str:
         case ast.UnaryExpr(operand=o):
                                   return _infer_type(o)
         case ast.CallExpr(callee=ast.Ident(name=n), type_args=ta) if ta:
-            # Generic ctor calls like `Channel<Msg>(10)` — infer as the
-            # appropriate Go container type so field/var decls with
-            # `var inbox = Channel<Msg>(10)` resolve to `chan Msg`.
             if n in ("Chan", "Channel"):
-                elem = _format_ta(ta[0])
-                return f"chan {elem}"
-            if n == "List" and ta:
+                return f"chan {_format_ta(ta[0])}"
+            if n == "List":
                 return f"[]{_format_ta(ta[0])}"
             if n == "Map" and len(ta) >= 2:
                 return f"map[{_format_ta(ta[0])}]{_format_ta(ta[1])}"
+        case ast.CallExpr(callee=ast.Ident(name=n)) if emitter is not None:
+            # User fn call — look up the declared return type.
+            if n in emitter.fn_returns:
+                return _go_type(emitter.fn_returns[n], emitter)
     return "interface{}"
 
 

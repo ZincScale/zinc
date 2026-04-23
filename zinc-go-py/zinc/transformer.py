@@ -814,6 +814,11 @@ class ZincTransformer(Transformer):
     def if_expr(self, cond, then, else_):
         return ast.IfExpr(cond=cond, then=then, else_=else_)
 
+    def type_cast(self, obj, type_ref):
+        # `x as T` — Zinc's type-cast/narrowing operator.
+        type_name = _type_as_name(type_ref) or "Object"
+        return ast.TypeAssertExpr(object=obj, type_name=type_name, is_check=False)
+
     def bin_or(self, left, op_tok, right):
         # Zinc accepts both `||` and `or` — both emit Go's `||`.
         return ast.BinaryExpr(left=left, op="||", right=right)

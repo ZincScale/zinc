@@ -28,9 +28,12 @@ int sum(int... numbers) {
 print("sum(1,2,3) = ${sum(1, 2, 3)}")
 print("sum(10,20) = ${sum(10, 20)}")
 
-// Reduce with lambda
+// Reduce via explicit loop (streams removed)
 List<int> numbers = [1, 2, 3]
-var result = numbers.reduce(0, (acc, x) -> acc + x * 10)
+var result = 0
+for (x in numbers) {
+    result = result + x * 10
+}
 print("reduce: ${result}")
 
 // --- Generic functions ---
