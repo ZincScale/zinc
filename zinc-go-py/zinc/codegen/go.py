@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from zinc import ast
+from zinc import go_resolver
 
 
 # ============================================================================
@@ -42,10 +43,16 @@ def _go_type(t: ast.TypeExpr | None, emitter=None) -> str:
         case ast.SimpleType(name=n):
             if n in _TYPE_MAP:
                 return _TYPE_MAP[n]
+            # Qualified import type like `http.Request` — ask the resolver
+            # whether Go wants a pointer here. Caches per (pkg, type).
+            if "." in n:
+                pkg, type_name = n.rsplit(".", 1)
+                if go_resolver.needs_pointer(pkg, type_name):
+                    return f"*{n}"
+                return n
             # Mirrors zinc-go's codegen_resolve.go line 881 — non-data,
             # non-sealed, non-interface classes are always pointer-typed in
-            # the emitted Go. Data classes stay value-typed; sealed parents
-            # and plain interfaces emit as bare Go interfaces.
+            # the emitted Go.
             if emitter is not None and n in emitter.user_classes:
                 info = emitter.user_classes[n]
                 if (not info.get("is_data") and not info.get("is_sealed")
@@ -865,7 +872,20 @@ class Emitter:
                 if isinstance(c.pattern, ast.CallExpr) and isinstance(c.pattern.callee, ast.Ident):
                     type_name = c.pattern.callee.name
                     binders = [a.name for a in c.pattern.args if isinstance(a, ast.Ident)]
-                    self._writeln(f"case {type_name}:")
+                    # Resolve the Go-side case-label type:
+                    #   - primitives: `String` → `string`, `int` → `int`, ...
+                    #   - classes (non-data, non-sealed, non-interface): `*Class`
+                    #   - else: bare name (data classes, sealed variants).
+                    if type_name in _TYPE_MAP:
+                        go_case = _TYPE_MAP[type_name]
+                    elif (type_name in self.user_classes
+                            and not self.user_classes[type_name].get("is_data")
+                            and not self.user_classes[type_name].get("is_sealed")
+                            and not self.user_classes[type_name].get("is_interface")):
+                        go_case = f"*{type_name}"
+                    else:
+                        go_case = type_name
+                    self._writeln(f"case {go_case}:")
                     self._indent += 1
                     # Each case arm is its own Go scope — bind binders fresh
                     # without checking against outer locals, since Go's

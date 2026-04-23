@@ -50,8 +50,9 @@ void main() {
     var big = countMatching(numbers, (int x) -> x > 5)
     print("big count: ${big}")
 
-    // Untyped lambdas still work
+    // Explicit loop (streams removed)
     var nums = [10, 20, 30]
-    var doubled = nums.map(it * 2)
+    int[] doubled = []
+    for (n in nums) { doubled.add(n * 2) }
     print("doubled: ${doubled}")
 }

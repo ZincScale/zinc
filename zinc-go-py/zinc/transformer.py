@@ -1136,37 +1136,70 @@ def _string_value(raw: str) -> str:
     return "".join(out)
 
 
-_INTERP_RE = re.compile(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+def _find_interp_ranges(s: str) -> list[tuple[int, int, str]]:
+    """Return [(start, end, inner_expr_text), ...] for each ${…} in `s`.
+    Hand-rolled scanner (replaces the previous regex) that:
+      - tracks brace depth so nested `{}` inside the expression works
+        (e.g. `${foo({a: 1})}`);
+      - respects nested `"..."` and `'...'` and backtick strings so a
+        `"-"` inside `${...}` doesn't prematurely close the outer.
+    """
+    out: list[tuple[int, int, str]] = []
+    i, n = 0, len(s)
+    while i < n:
+        if s[i] == "$" and i + 1 < n and s[i + 1] == "{":
+            start = i
+            j = i + 2
+            depth = 1
+            while j < n and depth > 0:
+                ch = s[j]
+                if ch in ('"', "'", "`"):
+                    # Skip past the nested string literal so its contents
+                    # don't affect our brace counting.
+                    quote = ch
+                    j += 1
+                    while j < n and s[j] != quote:
+                        if s[j] == "\\" and j + 1 < n:
+                            j += 2
+                            continue
+                        j += 1
+                    if j < n:
+                        j += 1
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        out.append((start, j + 1, s[start + 2:j]))
+                        j += 1
+                        break
+                j += 1
+            i = j
+        else:
+            i += 1
+    return out
 
 
 def _parse_interpolation(s: str) -> ast.StringInterpLit:
     """Split a string with ${...} placeholders into alternating StringLit
-    and (parsed) expression parts. The expressions inside ${} are re-parsed
-    via the expression grammar at AST-build time — but for now we just
-    capture them as raw Ident fallback; codegen handles the interpolation
-    shape directly by reading .parts."""
-    # Delayed import to avoid cycle at module load.
+    and (parsed) expression parts."""
     from zinc.parser import _get_parser
 
     parts: list[ast.Expr] = []
     i = 0
-    for m in _INTERP_RE.finditer(s):
-        pre = s[i:m.start()]
+    for start, end, inner in _find_interp_ranges(s):
+        pre = s[i:start]
         if pre:
             parts.append(ast.StringLit(value=pre))
-        inner = m.group(1)
-        # Parse inner expression. If parsing fails, fall back to Ident.
         try:
-            # Wrap in a throwaway assignment so the grammar accepts it as expr
             tree = _get_parser().parse(f"var _interp = {inner}")
-            # Walk tree to find the expression beneath var_stmt
             expr_ast = ZincTransformer().transform(tree)
-            # expr_ast is a Program; var stmt is its first top-level stmt
             var_stmt = expr_ast.stmts[0] if expr_ast.stmts else expr_ast.decls[0]
             parts.append(var_stmt.value)
         except Exception:
             parts.append(ast.Ident(name=inner.strip()))
-        i = m.end()
+        i = end
     tail = s[i:]
     if tail:
         parts.append(ast.StringLit(value=tail))
