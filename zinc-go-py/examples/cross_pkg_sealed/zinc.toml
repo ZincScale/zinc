@@ -1,4 +1,0 @@
-[project]
-name = "cross_pkg_sealed"
-version = "0.1.0"
-main = "main.zn"

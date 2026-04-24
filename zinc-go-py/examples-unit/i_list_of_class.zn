@@ -1,6 +1,0 @@
-class Item {
-    String name
-    init(String name) { this.name = name }
-}
-Item[] items = [Item("a"), Item("b")]
-for (item in items) { print(item.name) }

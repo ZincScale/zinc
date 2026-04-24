@@ -1,6 +1,0 @@
-received: hello from channel
-processing: task1
-processing: task2
-processing: task3
-done: finished
-Channels OK

@@ -1,6 +1,0 @@
-ok: 5
-fail: division by zero
-ok: 25
-fail: division by zero
-typed ok: hello
-sealed_failure OK

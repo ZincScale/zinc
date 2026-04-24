@@ -1,6 +1,0 @@
-class Greeter {
-    String name
-    init(String name) { this.name = name }
-    pub String greet() { return "hi ${name}" }
-}
-print(Greeter("zinc").greet())

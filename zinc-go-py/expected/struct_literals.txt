@@ -1,2 +1,0 @@
-struct literal: HandlerOptions created
-level: DEBUG

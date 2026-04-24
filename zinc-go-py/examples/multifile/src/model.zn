@@ -1,8 +1,0 @@
-// Model — defines data types used across files
-
-data User(String name, int age)
-data Product(String name, double price)
-
-String describeUser(User u) {
-    return "${u.name} (age ${u.age})"
-}

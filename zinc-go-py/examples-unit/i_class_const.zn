@@ -1,5 +1,0 @@
-const String APP = "zinc"
-class Env {
-    pub String describe() { return "app=${APP}" }
-}
-print(Env().describe())

@@ -1,5 +1,0 @@
-upper: HELLO ZINC
-parts: [a b c]
-joined: a - b - c
-contains: true
-formatted: 42

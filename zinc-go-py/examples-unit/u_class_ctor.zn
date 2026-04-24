@@ -1,6 +1,0 @@
-class C {
-    int x
-    init(int x) { this.x = x }
-}
-var c = C(42)
-print(c.x)

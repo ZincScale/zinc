@@ -1,3 +1,0 @@
-Hello, World!
-Hello, Zinc!
-The answer is 42

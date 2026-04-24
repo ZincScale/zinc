@@ -1,7 +1,0 @@
-applyTwice(3, x+10): 23
-triple(5): 15
-double(7): 14
-callback: done
-even count: 5
-big count: 5
-doubled: [20 40 60]

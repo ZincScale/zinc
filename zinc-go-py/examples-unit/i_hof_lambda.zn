@@ -1,2 +1,0 @@
-int twice(int x, Fn<(int), int> f) { return f(f(x)) }
-print(twice(5, (int n) -> n + 1))

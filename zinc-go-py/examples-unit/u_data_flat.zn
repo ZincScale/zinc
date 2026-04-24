@@ -1,3 +1,0 @@
-data Point(int x, int y)
-var p = Point(3, 4)
-print(p)

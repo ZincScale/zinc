@@ -1,8 +1,0 @@
-1|2|4 = 7
-7&3 = 3
-5^3 = 6
-perms = 6
-readable
-writable
-not executable
-open flags = 1089

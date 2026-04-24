@@ -1,3 +1,0 @@
-[DEBUG] direct [key value]
-[INFO] wrapped [a 1 b 2]
-[INFO] double [x 42]

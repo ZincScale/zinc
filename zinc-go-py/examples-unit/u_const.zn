@@ -1,2 +1,0 @@
-const int N = 10
-print(N)

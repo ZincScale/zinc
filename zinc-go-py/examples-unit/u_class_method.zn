@@ -1,9 +1,0 @@
-class Counter {
-    int n = 0
-    pub void inc() { this.n = this.n + 1 }
-    pub int value() { return this.n }
-}
-var c = Counter()
-c.inc()
-c.inc()
-print(c.value())

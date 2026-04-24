@@ -1,6 +1,0 @@
-string: hello
-int: 42
-float64: 3.14
-bool: true
-bool: false
-animal: Cat speaks

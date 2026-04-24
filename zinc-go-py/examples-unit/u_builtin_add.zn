@@ -1,4 +1,0 @@
-var xs = [1]
-xs.add(2)
-xs.add(3)
-print(xs)

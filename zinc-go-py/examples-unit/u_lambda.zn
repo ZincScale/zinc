@@ -1,2 +1,0 @@
-var d = (int x) -> x * 2
-print(d(5))

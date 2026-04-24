@@ -1,7 +1,0 @@
-// Deep nested subpackage: models/types
-
-data User(String name, int age)
-
-pub String formatUser(User u) {
-    return "${u.name} (age ${u.age})"
-}

@@ -1,9 +1,0 @@
-pair: Pair(first=hello, second=42)
-int pair: Pair(first=1, second=2)
-size: 3
-pop: alpha
-pop: beta
-size after: 1
-int pop: 10
-first: alice
-Generics OK

@@ -1,4 +1,0 @@
-color: 0
-direction: 0
-red!
-Enums OK
