@@ -1,3 +1,5 @@
 upper: HELLO
-count: 3
+sorted: [alice bob charlie]
+trimmed: [zinc transpiler]
+contains 'zinc': true
 Smart imports OK

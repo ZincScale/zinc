@@ -5,7 +5,7 @@
 import io
 import os
 import strings as str
-import log.slog
+import log/slog
 
 // Return a qualified Go interface type
 io.Writer makeWriter(String target) {
@@ -29,12 +29,8 @@ slog.Handler makeHandler(io.Writer w) {
 
 // Accept io.Reader as a parameter — tests qualified interface from different package
 String readAll(io.Reader r) {
-    try {
-        var data = io.ReadAll(r)
-        return string(data)
-    } catch (e) {
-        return "error"
-    }
+    var data = io.ReadAll(r) or { return "error" }
+    return string(data)
 }
 
 // Use strings via import-as alias in function signature

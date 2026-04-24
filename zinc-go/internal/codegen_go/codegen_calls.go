@@ -11,15 +11,6 @@ import (
 	"zinc-go/internal/parser"
 )
 
-// streamMethods is the set of methods that trigger stream/inline-loop codegen.
-var streamMethods = map[string]bool{
-	"filter": true, "map": true, "sum": true,
-	"anyMatch": true, "allMatch": true, "noneMatch": true,
-	"findFirst": true, "skip": true, "limit": true,
-	"distinct": true, "reduce": true, "forEach": true,
-	"sortBy": true, "groupBy": true,
-}
-
 // callReturnsPointer checks if a call expression returns a pointer type,
 // using the GoTypeResolver to inspect the function/method signature.
 func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
@@ -122,11 +113,6 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("%s(%s, %s)", goFunc, obj, args)
 			}
 			return fmt.Sprintf("%s(%s)", goFunc, obj)
-		}
-
-		// Stream operations
-		if streamMethods[sel.Field] {
-			return g.formatStreamExpr(sel, c.Args)
 		}
 
 		// Collection methods — apply builtins unless receiver is a known struct/class.
@@ -258,19 +244,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 			}
 		case "keys":
-			// Resolve receiver's GenericType so we can emit []K instead of
-			// []interface{}. Walks local var → class field (ZCA-11).
-			keyType := "interface{}"
-			if gt := g.resolveReceiverGenericType(sel.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 1 {
-				keyType = g.formatType(gt.TypeArgs[0])
-			}
-			return fmt.Sprintf("func() []%s { _keys := make([]%s, 0, len(%s)); for _k := range %s { _keys = append(_keys, _k) }; return _keys }()", keyType, keyType, obj, obj)
+			g.needImport("maps")
+			g.needImport("slices")
+			return fmt.Sprintf("slices.Collect(maps.Keys(%s))", obj)
 		case "values":
-			valType := "interface{}"
-			if gt := g.resolveReceiverGenericType(sel.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
-				valType = g.formatType(gt.TypeArgs[1])
-			}
-			return fmt.Sprintf("func() []%s { _vals := make([]%s, 0, len(%s)); for _, _v := range %s { _vals = append(_vals, _v) }; return _vals }()", valType, valType, obj, obj)
+			g.needImport("maps")
+			g.needImport("slices")
+			return fmt.Sprintf("slices.Collect(maps.Values(%s))", obj)
 		case "containsKey":
 			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, g.formatExpr(c.Args[0]))
@@ -281,12 +261,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 		case "sort":
 			if !g.isStructVar(sel.Object) {
-				g.needImport("sort")
-				return fmt.Sprintf("func() { sort.Slice(%s, func(i, j int) bool { return %s[i] < %s[j] }) }()", obj, obj, obj)
+				g.needImport("slices")
+				return fmt.Sprintf("slices.Sort(%s)", obj)
 			}
 		case "reverse":
 			if !g.isStructVar(sel.Object) {
-				return fmt.Sprintf("func() { for _i, _j := 0, len(%s)-1; _i < _j; _i, _j = _i+1, _j-1 { %s[_i], %s[_j] = %s[_j], %s[_i] } }()", obj, obj, obj, obj, obj)
+				g.needImport("slices")
+				return fmt.Sprintf("slices.Reverse(%s)", obj)
 			}
 		default:
 			// Getter pattern: obj.getHost() → obj.Host

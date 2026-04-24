@@ -650,18 +650,15 @@ func (p *Parser) v2ParsePackageDecl() *PackageDecl {
 	return &PackageDecl{Path: path}
 }
 
-// v2ParseImport: import java.util.List  OR  import java.util.*  OR  import X as Y
+// v2ParseImport: Go-style `import pkg`, `import pkg/sub`, `import pkg as alias`.
+// Multi-segment paths are slash-separated (`net/http`, `encoding/json`,
+// `log/slog`). The parser stores the path with dots internally; codegen
+// converts back to slashes for the emitted Go import path.
 func (p *Parser) v2ParseImport() *ImportDecl {
 	p.expect(lexer.TOKEN_IMPORT)
 	path := p.v2ExpectIdentOrKeyword()
-	for p.check(lexer.TOKEN_DOT) {
+	for p.check(lexer.TOKEN_SLASH) {
 		p.advance()
-		if p.check(lexer.TOKEN_STAR) {
-			// import java.util.*
-			p.advance()
-			path += ".*"
-			break
-		}
 		path += "." + p.v2ExpectIdentOrKeyword()
 	}
 	// Check for alias: import X as Y

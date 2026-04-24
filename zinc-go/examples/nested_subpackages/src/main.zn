@@ -1,7 +1,7 @@
-// Test nested subpackages: fabric.router and models.types
+// Test nested subpackages: fabric/router and models/types
 
-import fabric.router
-import models.types
+import fabric/router
+import models/types
 
 void main() {
     // Use deeply nested subpackage: models/types

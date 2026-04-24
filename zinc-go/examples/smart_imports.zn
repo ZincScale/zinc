@@ -1,40 +1,23 @@
-// Smart imports — type-level and package-level import resolution
-// Tests: import sync.Mutex (type import), import strings (package import)
+// Smart imports — qualified package-level import resolution
 
-import sync.Mutex
 import strings
-
-class SafeCounter {
-    Mutex mu
-    var count = 0
-
-    void increment() {
-        this.mu.Lock()
-        this.count = this.count + 1
-        this.mu.Unlock()
-    }
-
-    int getCount() {
-        this.mu.Lock()
-        var c = this.count
-        this.mu.Unlock()
-        return c
-    }
-}
+import sort
 
 void main() {
-    // Package import: strings used fully-qualified
+    // strings package — standard usage
     var upper = strings.ToUpper("hello")
     print("upper: ${upper}")
 
-    // Class field with type import — `Mutex` inside SafeCounter
-    // resolves to sync.Mutex via the type import, and the lock/unlock
-    // calls in increment()/getCount() prove it's a real *sync.Mutex.
-    var counter = new SafeCounter()
-    counter.increment()
-    counter.increment()
-    counter.increment()
-    print("count: ${counter.getCount()}")
+    // sort package — qualified calls on a local slice
+    List<String> names = ["charlie", "alice", "bob"]
+    sort.Strings(names)
+    print("sorted: ${names}")
+
+    // Multiple strings functions on one line
+    var line = "   zinc transpiler   "
+    var trimmed = strings.TrimSpace(line)
+    print("trimmed: [${trimmed}]")
+    print("contains 'zinc': ${strings.Contains(trimmed, "zinc")}")
 
     print("Smart imports OK")
 }

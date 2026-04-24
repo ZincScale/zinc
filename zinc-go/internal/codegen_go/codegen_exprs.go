@@ -358,7 +358,8 @@ func (g *Generator) formatInExpr(leftExpr, rightExpr parser.Expr, left, right st
 		g.needImport("strings")
 		return fmt.Sprintf("strings.Contains(%s, %s)", right, left)
 	}
-	return fmt.Sprintf("func() bool { for _, _v := range %s { if _v == %s { return true } }; return false }()", right, left)
+	g.needImport("slices")
+	return fmt.Sprintf("slices.Contains(%s, %s)", right, left)
 }
 
 // --- String method and stream method tables ----------------------------------

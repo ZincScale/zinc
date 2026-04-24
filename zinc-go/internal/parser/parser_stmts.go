@@ -52,10 +52,6 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return &ContinueStmt{}
 	case lexer.TOKEN_WITH:
 		return p.v2ParseWithStmt()
-	case lexer.TOKEN_TRY:
-		return p.v2ParseTryStmt()
-	case lexer.TOKEN_THROW:
-		return p.v2ParseThrowStmt()
 	case lexer.TOKEN_USING:
 		return p.v2ParseUsingStmt()
 	case lexer.TOKEN_SPAWN:
@@ -310,11 +306,11 @@ func (p *Parser) v2ParseOrMatch() *OrHandler {
 		p.expect(lexer.TOKEN_ARROW) // ->
 
 		// Parse body: a brace-block, a bare control-flow statement
-		// (return / throw / break / continue), or a single expression.
+		// (return / break / continue), or a single expression.
 		var body *BlockStmt
 		if p.check(lexer.TOKEN_LBRACE) {
 			body = p.v2ParseBlock()
-		} else if p.check(lexer.TOKEN_RETURN) || p.check(lexer.TOKEN_THROW) ||
+		} else if p.check(lexer.TOKEN_RETURN) ||
 			p.check(lexer.TOKEN_BREAK) || p.check(lexer.TOKEN_CONTINUE) {
 			stmt := p.v2ParseStmt()
 			body = &BlockStmt{Stmts: []Stmt{stmt}}
@@ -529,66 +525,6 @@ func (p *Parser) v2ParseUsingStmt() Stmt {
 	p.expect(lexer.TOKEN_RPAREN)
 	body := p.v2ParseBlock()
 	return &WithStmt{Line: line, Resources: resources, Body: body}
-}
-
-// v2ParseTryStmt: try { body } catch (Type e) { handler } [catch ...] [finally { cleanup }]
-// At least one catch OR finally clause is required. Multiple catches are
-// matched in source order against the thrown value's runtime type.
-// Untyped `catch (e) { }` or `catch { }` matches anything.
-func (p *Parser) v2ParseTryStmt() Stmt {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_TRY)
-	body := p.v2ParseBlock()
-
-	var catches []*CatchClause
-	for p.check(lexer.TOKEN_CATCH) {
-		p.advance() // consume 'catch'
-		var excType TypeExpr
-		var varName string
-		if p.check(lexer.TOKEN_LPAREN) {
-			p.advance() // consume (
-			// Two shapes inside the parens:
-			//   catch (Type e) — typed, named
-			//   catch (e)      — untyped, named
-			// Use type-annotation lookahead — same trick as field decls.
-			if p.v2IsTypeAnnotation() {
-				excType = p.v2ParseType()
-				varName = p.v2ExpectIdent()
-			} else {
-				varName = p.v2ExpectIdent()
-			}
-			p.expect(lexer.TOKEN_RPAREN)
-		}
-		// Bare `catch { }` — untyped, no var
-		catchBody := p.v2ParseBlock()
-		catches = append(catches, &CatchClause{
-			ExceptionType: excType,
-			VarName:       varName,
-			Body:          catchBody,
-		})
-	}
-
-	var finallyBody *BlockStmt
-	if p.check(lexer.TOKEN_FINALLY) {
-		p.advance()
-		finallyBody = p.v2ParseBlock()
-	}
-
-	if len(catches) == 0 && finallyBody == nil {
-		p.errorf("try block requires at least one catch or finally clause")
-	}
-
-	return &TryStmt{Line: line, Body: body, Catches: catches, Finally: finallyBody}
-}
-
-// v2ParseThrowStmt: throw expr
-// Compiles to `panic(expr)`. The expression is typically a constructor
-// call for an exception class but Zinc doesn't enforce a base type.
-func (p *Parser) v2ParseThrowStmt() Stmt {
-	line := p.peek().Line
-	p.expect(lexer.TOKEN_THROW)
-	val := p.v2ParseExpr()
-	return &ThrowStmt{Line: line, Value: val}
 }
 
 func (p *Parser) v2ParseSpawnStmt() Stmt {

@@ -67,10 +67,6 @@ const (
 	TOKEN_READONLY // read (read-only field)
 	TOKEN_OVERRIDE // override (method override)
 	TOKEN_END      // end (block closer)
-	TOKEN_TRY      // try
-	TOKEN_CATCH    // catch
-	TOKEN_FINALLY  // finally
-	TOKEN_THROW    // throw
 	TOKEN_USING    // using (resource acquisition, defer .Close())
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
@@ -182,10 +178,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_READONLY:  "readonly",
 	TOKEN_OVERRIDE:  "override",
 	TOKEN_END:       "end",
-	TOKEN_TRY:       "try",
-	TOKEN_CATCH:     "catch",
-	TOKEN_FINALLY:   "finally",
-	TOKEN_THROW:     "throw",
 	TOKEN_USING:     "using",
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
@@ -302,10 +294,6 @@ var keywords = map[string]TokenType{
 	"readonly":  TOKEN_READONLY,
 	"override":  TOKEN_OVERRIDE,
 	"end":       TOKEN_END,
-	"try":       TOKEN_TRY,
-	"catch":     TOKEN_CATCH,
-	"finally":   TOKEN_FINALLY,
-	"throw":     TOKEN_THROW,
 	"using":     TOKEN_USING,
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,

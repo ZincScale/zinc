@@ -50,18 +50,6 @@ type Generator struct {
 	errVarCount   int    // counter for unique _err variables in same scope
 	currentErrVar string // current error variable name (for or-blocks)
 
-	// Try-block context: when true, `throw` and error-returning call
-	// sites propagate via `return err` to the enclosing IIFE instead of
-	// `return zero, err` to the outer function.
-	inTryBlock bool
-
-	// inTryBlockTuple is true when the try IIFE returns a 3-tuple
-	// `(retVal, returning bool, err error)` because the body contains a
-	// `return` that must escape to the outer function. emitReturnStmt
-	// and emitThrowStmt emit the 3-value shape when this is set; simple
-	// `return err` otherwise.
-	inTryBlockTuple bool
-
 	// currentFuncIsThrower is true while emitting a function whose
 	// signature has a trailing `error` return. Drives emitErrReturn:
 	// throwers propagate via `return zero, err`; non-throwers panic
@@ -355,12 +343,12 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			}
 			if decl.Ctor != nil {
 				g.funcSigs["New"+decl.Name] = decl.Ctor.Params
-				if canReturnError(decl.Ctor.Body) {
+				if g.blockCanReturnError(decl.Ctor.Body) {
 					g.errorFuncs["New"+decl.Name] = true
 				}
 			} else if len(decl.Ctors) > 0 {
 				g.funcSigs["New"+decl.Name] = decl.Ctors[0].Params
-				if canReturnError(decl.Ctors[0].Body) {
+				if g.blockCanReturnError(decl.Ctors[0].Body) {
 					g.errorFuncs["New"+decl.Name] = true
 				}
 			}
@@ -368,7 +356,7 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			for _, m := range decl.Methods {
 				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
 				key := decl.Name + "." + m.Name
-				if canReturnError(m.Body) {
+				if g.blockCanReturnError(m.Body) {
 					g.errorFuncs[key] = true
 				}
 			}
@@ -382,7 +370,7 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			if canReturnError(decl.Body) {
+			if g.blockCanReturnError(decl.Body) {
 				g.errorFuncs[decl.Name] = true
 			}
 			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
@@ -409,160 +397,54 @@ func fieldDeclsToParams(fields []*parser.FieldDecl) []*parser.ParamDecl {
 }
 
 // --- Error detection ---------------------------------------------------------
-
-// canReturnError walks a function body looking for constructs that make
-// the function an "error returner" — i.e. its Go signature should gain a
-// trailing `error` result. Triggers:
-//   - return Error(...)           (legacy errors-as-values; to be removed)
-//   - throw expr                  (exception pivot — any uncaught throw propagates)
-//   - try { ... } with no universal catch and a body that throws/errors
-//   - or { ... } handler that itself returns Error (legacy)
-func canReturnError(body *parser.BlockStmt) bool {
-	if body == nil {
-		return false
-	}
-	for _, s := range body.Stmts {
-		if stmtCanReturnError(s) {
-			return true
-		}
-	}
-	return false
-}
-
-func stmtCanReturnError(s parser.Stmt) bool {
-	switch stmt := s.(type) {
-	case *parser.ReturnStmt:
-		if exprContainsPropagate(stmt.Value) {
-			return true
-		}
-		return false
-	case *parser.ThrowStmt:
-		return true
-	case *parser.TryStmt:
-		// A try statement propagates if its body can throw/error AND no
-		// universal catch (bare catch, `catch (e)`, or `catch (Exception e)`)
-		// is present to absorb everything. Typed catches only catch their
-		// specific type, so anything else escapes.
-		if !tryBlockFullyCaught(stmt) {
-			if blockCanReturnError(stmt.Body) {
-				return true
-			}
-		}
-		if stmt.Finally != nil && blockCanReturnError(stmt.Finally) {
-			return true
-		}
-		for _, c := range stmt.Catches {
-			if blockCanReturnError(c.Body) {
-				return true
-			}
-		}
-		return false
-	case *parser.VarStmt:
-		if exprContainsPropagate(stmt.Value) {
-			return true
-		}
-		if orHandlerCanReturnError(stmt.OrHandler) {
-			return true
-		}
-		return false
-	case *parser.ExprStmt:
-		if exprContainsPropagate(stmt.Expr) {
-			return true
-		}
-		if orHandlerCanReturnError(stmt.OrHandler) {
-			return true
-		}
-		return false
-	case *parser.AssignStmt:
-		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
-			return true
-		}
-		if orHandlerCanReturnError(stmt.OrHandler) {
-			return true
-		}
-		return false
-	case *parser.IfStmt:
-		if blockCanReturnError(stmt.Then) {
-			return true
-		}
-		if stmt.ElseStmt != nil {
-			if stmtCanReturnError(stmt.ElseStmt) {
-				return true
-			}
-		}
-		return false
-	case *parser.BlockStmt:
-		return blockCanReturnError(stmt)
-	case *parser.ForStmt:
-		return blockCanReturnError(stmt.Body)
-	case *parser.WhileStmt:
-		return blockCanReturnError(stmt.Body)
-	case *parser.MatchStmt:
-		for _, c := range stmt.Cases {
-			if blockCanReturnError(c.Body) {
-				return true
-			}
-		}
-		return false
-	case *parser.WithStmt:
-		return blockCanReturnError(stmt.Body)
-	default:
-		return false
-	}
-}
-
-// tryBlockFullyCaught reports whether the try has a catch clause that
-// matches anything (bare catch or `catch (e)` with no type). A universal
-// catch absorbs the error so the enclosing function does not propagate.
-func tryBlockFullyCaught(t *parser.TryStmt) bool {
-	for _, c := range t.Catches {
-		if c.ExceptionType == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func blockCanReturnError(block *parser.BlockStmt) bool {
-	if block == nil {
-		return false
-	}
-	for _, s := range block.Stmts {
-		if stmtCanReturnError(s) {
-			return true
-		}
-	}
-	return false
-}
-
-// orHandlerCanReturnError reports whether an `or { }` / `or match { }`
-// handler causes the enclosing function to be a thrower. Two triggers:
 //
-//   - Any case/block body that itself throws (a `throw` or unhandled `?`).
-//   - An `or match` with no wildcard (`case _`) case — unmatched errors
-//     propagate via `return zero, err` in the generated type switch.
-func orHandlerCanReturnError(h *parser.OrHandler) bool {
-	if h == nil {
-		return false
-	}
-	if h.Body != nil && blockCanReturnError(h.Body) {
-		return true
-	}
-	if len(h.MatchCases) > 0 {
-		hasWildcard := false
-		for _, c := range h.MatchCases {
-			if c.Type == "" {
-				hasWildcard = true
-			}
-			if c.Body != nil && blockCanReturnError(c.Body) {
-				return true
+// The primary thrower-detection check is g.blockCanReturnError in
+// codegen_stmts.go — it covers `?` / `or { }` triggers plus calls to
+// known throwers. errorFuncs is populated by a fixed-point pass in
+// collectDecls: each iteration re-scans every fn/method/ctor body, and
+// we repeat until no new entries are added. This closes the call-graph
+// so `fn X() { thrower() }` correctly marks X as a thrower too.
+
+// propagateThrowerFixedPoint iteratively extends g.errorFuncs with any
+// function whose body calls an already-known thrower. Seeds from the
+// direct triggers populated during the first walk of collectDecls.
+func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
+	for {
+		changed := false
+		for _, d := range prog.Decls {
+			switch decl := d.(type) {
+			case *parser.FnDecl:
+				if !g.errorFuncs[decl.Name] && g.blockCanReturnError(decl.Body) {
+					g.errorFuncs[decl.Name] = true
+					changed = true
+				}
+			case *parser.ClassDecl:
+				if decl.Ctor != nil {
+					key := "New" + decl.Name
+					if !g.errorFuncs[key] && g.blockCanReturnError(decl.Ctor.Body) {
+						g.errorFuncs[key] = true
+						changed = true
+					}
+				} else if len(decl.Ctors) > 0 {
+					key := "New" + decl.Name
+					if !g.errorFuncs[key] && g.blockCanReturnError(decl.Ctors[0].Body) {
+						g.errorFuncs[key] = true
+						changed = true
+					}
+				}
+				for _, m := range decl.Methods {
+					key := decl.Name + "." + m.Name
+					if !g.errorFuncs[key] && g.blockCanReturnError(m.Body) {
+						g.errorFuncs[key] = true
+						changed = true
+					}
+				}
 			}
 		}
-		if !hasWildcard {
-			return true
+		if !changed {
+			return
 		}
 	}
-	return false
 }
 
 // exprContainsPropagate reports whether an expression tree contains a
@@ -668,6 +550,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	}
 	g.importGoAliases = make(map[string]string)
 	g.collectDecls(prog.Decls)
+	// Close the call graph: a function that only calls throwers is
+	// itself a thrower. The initial collectDecls walk seeds errorFuncs
+	// from direct triggers (`?`, `or { }`); this fixed-point extends it
+	// transitively.
+	g.propagateThrowerFixedPoint(prog)
 
 	// Register user imports for resolution — but don't add to g.imports yet.
 	// The codegen will call needImport() when it actually references a package,
@@ -772,6 +659,12 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		bodyGen.writeln("func main() {")
 		bodyGen.indent++
 		for _, s := range prog.Stmts {
+			if line := stmtLine(s); bodyGen.sourceFile != "" && line > 0 {
+				// Go's //line directive must start at column 0 —
+				// leading whitespace disables it. Write raw to skip
+				// writeln's indent tabs.
+				fmt.Fprintf(&bodyGen.buf, "//line %s:%d\n", bodyGen.sourceFile, line)
+			}
 			bodyGen.emitStmt(s)
 		}
 		bodyGen.indent--

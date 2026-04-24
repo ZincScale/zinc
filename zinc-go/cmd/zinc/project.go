@@ -180,7 +180,6 @@ main = "main.zn"
 
 [go]
 version = "1.26"
-deps = []
 `, baseName)
 	if err := os.WriteFile(filepath.Join(name, "zinc.toml"), []byte(zincToml), 0o644); err != nil {
 		return fmt.Errorf("write zinc.toml: %w", err)
@@ -330,24 +329,24 @@ func findZincToml(dir string) string {
 
 // loadZincToml parses a zinc.toml file (simple line-based TOML subset).
 //
-// Preferred form (unified):
+//     [project]
+//     name    = "myapp"
+//     version = "0.1.0"
+//     main    = "main.zn"
+//
+//     [go]
+//     version = "1.26"
 //
 //     [deps]
-//     viper  = "github.com/spf13/viper@v1.20.1"
-//     stdlib = "github.com/ZincScale/zinc-stdlib"    # no version if replaced
+//     viper = "github.com/spf13/viper@v1.20.1"
 //
 //     [replace]
-//     stdlib = "/home/vrjoshi/proj/zinc/stdlib/zinc-out"
+//     viper = "/home/local/fork-of-viper"
 //
-// Keys in [deps] are the local aliases you write in Zinc (`import viper`,
-// `import stdlib.config`). The right-hand side is `module/path@version`
-// with optional `@version` (defaults to v0.0.0 when a [replace] is set).
-// [replace] is keyed by the same alias so deps + replaces can never go
-// out of sync.
-//
-// Legacy form (still parsed for back-compat, but the new form should be
-// preferred): [go] deps = [...] array + [imports] table + [go.replace]
-// keyed by module path.
+// [deps] keys are the local aliases you write in Zinc (`import viper`).
+// The right-hand side is `module/path@version`; `@version` is optional
+// (defaults to v0.0.0 when a [replace] override is set). [replace] keys
+// off the same alias so deps + replaces can never drift apart.
 func loadZincToml(path string) (*zincConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -398,22 +397,10 @@ func loadZincToml(path string) (*zincConfig, error) {
 			continue
 		}
 
-		// [replace] — new form keyed by alias. Resolve to module path
-		// after parsing, since [deps] may come after [replace] in the file.
+		// [replace] — keyed by alias. Resolved to module path after
+		// parsing, since [deps] may come after [replace] in the file.
 		if section == "replace" {
 			replaceByAlias[key] = val
-			continue
-		}
-
-		// Legacy [imports] — alias = "module/path"
-		if section == "imports" {
-			cfg.Imports[key] = val
-			continue
-		}
-
-		// Legacy [go.replace] — module = "local/path" (keyed by module path)
-		if section == "go.replace" {
-			cfg.Replaces[key] = val
 			continue
 		}
 
@@ -428,18 +415,6 @@ func loadZincToml(path string) (*zincConfig, error) {
 			}
 		case "main":
 			cfg.Main = val
-		case "deps":
-			// Legacy [go] deps = ["dep1 v1.0.0", "dep2 v2.0.0"] array
-			val = strings.Trim(val, "[]")
-			if val != "" {
-				for _, d := range strings.Split(val, ",") {
-					d = strings.TrimSpace(d)
-					d = strings.Trim(d, "\"")
-					if d != "" {
-						cfg.Deps = append(cfg.Deps, d)
-					}
-				}
-			}
 		}
 	}
 
@@ -769,29 +744,33 @@ func addDep(dep string) error {
 
 	content := string(data)
 
-	// Parse module@version → "module version"
-	depEntry := strings.Replace(dep, "@", " ", 1)
-
-	// Check for duplicate
-	if strings.Contains(content, depEntry) || strings.Contains(content, dep) {
-		return fmt.Errorf("dependency %s already exists", dep)
+	// dep is "module/path@version". Derive a short alias from the
+	// last path segment so the user can `import <alias>` in Zinc.
+	modulePath, _ := splitModuleVersion(dep)
+	alias := modulePath
+	if i := strings.LastIndex(modulePath, "/"); i >= 0 {
+		alias = modulePath[i+1:]
 	}
 
-	// Find deps = [...] and add to it
-	if strings.Contains(content, "deps = []") {
-		content = strings.Replace(content, "deps = []",
-			fmt.Sprintf("deps = [\"%s\"]", depEntry), 1)
-	} else if strings.Contains(content, "deps = [") {
-		// Append to existing array — find the closing ]
-		idx := strings.Index(content, "deps = [")
-		closeBracket := strings.Index(content[idx:], "]")
-		if closeBracket > 0 {
-			insertAt := idx + closeBracket
-			content = content[:insertAt] + fmt.Sprintf(", \"%s\"", depEntry) + content[insertAt:]
+	if strings.Contains(content, modulePath) {
+		return fmt.Errorf("dependency %s already exists", modulePath)
+	}
+
+	entry := fmt.Sprintf("%s = \"%s\"\n", alias, dep)
+	if idx := strings.Index(content, "[deps]"); idx >= 0 {
+		// Insert on the line after the [deps] header.
+		newline := strings.Index(content[idx:], "\n")
+		if newline < 0 {
+			content += "\n" + entry
+		} else {
+			insertAt := idx + newline + 1
+			content = content[:insertAt] + entry + content[insertAt:]
 		}
 	} else {
-		// No deps line — add under [go] section
-		content += fmt.Sprintf("deps = [\"%s\"]\n", depEntry)
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += "\n[deps]\n" + entry
 	}
 
 	if err := os.WriteFile(tomlPath, []byte(content), 0o644); err != nil {

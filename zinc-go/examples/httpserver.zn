@@ -1,7 +1,7 @@
 // HTTP Server — Zinc for Go
 // Tests: net/http import, handler functions, unqualified types, pointer inference, server lifecycle
 
-import net.http
+import net/http
 import fmt
 import time
 

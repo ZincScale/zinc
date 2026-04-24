@@ -10,6 +10,47 @@ import (
 	"zinc-go/internal/parser"
 )
 
+// stmtLine returns the source line of a statement, or 0 if unknown.
+// Used to emit `//line file.zn:N` directives so Go compiler errors
+// report positions in the .zn source rather than the generated .go.
+func stmtLine(s parser.Stmt) int {
+	switch stmt := s.(type) {
+	case *parser.VarStmt:
+		return stmt.Line
+	case *parser.AssignStmt:
+		return stmt.Line
+	case *parser.ReturnStmt:
+		return stmt.Line
+	case *parser.IfStmt:
+		return stmt.Line
+	case *parser.ForStmt:
+		return stmt.Line
+	case *parser.WhileStmt:
+		return stmt.Line
+	case *parser.MatchStmt:
+		return stmt.Line
+	case *parser.ExprStmt:
+		return stmt.Line
+	case *parser.PrintStmt:
+		return stmt.Line
+	case *parser.FnDecl:
+		return stmt.Line
+	case *parser.TupleVarStmt:
+		return stmt.Line
+	case *parser.GoStmt:
+		return stmt.Line
+	case *parser.ParallelForStmt:
+		return stmt.Line
+	case *parser.ConcurrentStmt:
+		return stmt.Line
+	case *parser.WithStmt:
+		return stmt.Line
+	case *parser.AssertStmt:
+		return stmt.Line
+	}
+	return 0
+}
+
 // emitStmt dispatches a statement to the appropriate emitter.
 func (g *Generator) emitStmt(s parser.Stmt) {
 	switch stmt := s.(type) {
@@ -68,10 +109,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitConcurrentStmt(stmt)
 	case *parser.WithStmt:
 		g.emitWithStmt(stmt)
-	case *parser.TryStmt:
-		g.emitTryStmt(stmt)
-	case *parser.ThrowStmt:
-		g.emitThrowStmt(stmt)
 	case *parser.DeferStmt:
 		g.writeln("defer %s", g.formatExpr(stmt.Expr))
 	case *parser.AssertStmt:
@@ -490,23 +527,6 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	if r.Value != nil && exprContainsPropagate(r.Value) {
 		rewritten := &parser.ReturnStmt{Line: r.Line, Value: g.hoistPropagates(r.Value)}
 		g.emitReturnStmt(rewritten)
-		return
-	}
-
-	// Inside a try IIFE that uses the 3-tuple shape: user `return X`
-	// must escape the IIFE with the return flag set, so the outer
-	// function returns X afterwards. Bare `return` sets the flag with
-	// no value (outer fn is void).
-	if g.inTryBlockTuple {
-		if r.Value == nil {
-			if g.currentOuterReturnType != "" {
-				g.writeln("return %s, true, nil", g.zeroValueFor(g.currentOuterReturnType))
-			} else {
-				g.writeln("return true, nil")
-			}
-			return
-		}
-		g.writeln("return %s, true, nil", g.formatExpr(r.Value))
 		return
 	}
 
@@ -1137,18 +1157,6 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 			g.writeln("%s[%s] = %s", obj, g.formatExpr(call.Args[0]), g.formatExpr(call.Args[1]))
 			return
 		}
-		// .forEach() as statement — try loop fusion for chains
-		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "forEach" && len(call.Args) == 1 {
-			if innerCall, ok := sel.Object.(*parser.CallExpr); ok {
-				if innerSel, ok := innerCall.Callee.(*parser.SelectorExpr); ok && streamMethods[innerSel.Field] {
-					g.emitFusedForEachChain(sel.Object, call.Args[0])
-					return
-				}
-			}
-			obj := g.formatExpr(sel.Object)
-			g.emitForEachStmt(obj, call.Args[0])
-			return
-		}
 	}
 	g.writeln("%s", g.formatExpr(es.Expr))
 }
@@ -1268,122 +1276,6 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 	return false
 }
 
-// emitForEachStmt emits a for-range loop for .forEach().
-func (g *Generator) emitForEachStmt(obj string, fn parser.Expr) {
-	if lambda, ok := fn.(*parser.LambdaExpr); ok {
-		if len(lambda.Params) == 1 {
-			paramName := lambda.Params[0].Name
-			g.writeln("for _, %s := range %s {", paramName, obj)
-			g.indent++
-			if lambda.Expr != nil {
-				g.writeln("%s", g.formatExpr(lambda.Expr))
-			} else if lambda.Body != nil {
-				g.emitBlock(lambda.Body)
-			}
-			g.indent--
-			g.writeln("}")
-			return
-		}
-	}
-	if containsIt(fn) {
-		g.writeln("for _, _it := range %s {", obj)
-		g.indent++
-		g.writeln("%s", g.formatExprIt(fn))
-		g.indent--
-		g.writeln("}")
-		return
-	}
-	fnStr := g.formatExpr(fn)
-	g.writeln("for _, _v := range %s {", obj)
-	g.indent++
-	g.writeln("%s(_v)", fnStr)
-	g.indent--
-	g.writeln("}")
-}
-
-// emitFusedForEachChain fuses a stream chain ending in forEach into a single loop.
-func (g *Generator) emitFusedForEachChain(chainExpr parser.Expr, forEachFn parser.Expr) {
-	type chainOp struct {
-		method string
-		args   []parser.Expr
-	}
-	var chain []chainOp
-	obj := chainExpr
-	for {
-		if call, ok := obj.(*parser.CallExpr); ok {
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok && streamMethods[sel.Field] {
-				chain = append(chain, chainOp{method: sel.Field, args: call.Args})
-				obj = sel.Object
-				continue
-			}
-		}
-		break
-	}
-	// Reverse so chain goes from source to terminal
-	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
-		chain[i], chain[j] = chain[j], chain[i]
-	}
-
-	// Only fuse filter/map chains
-	fusible := true
-	for _, op := range chain {
-		if op.method != "filter" && op.method != "map" {
-			fusible = false
-			break
-		}
-	}
-	if !fusible {
-		source := g.formatExpr(chainExpr)
-		g.emitForEachStmt(source, forEachFn)
-		return
-	}
-
-	source := g.formatExpr(obj)
-
-	// Build forEach body
-	var forEachBody func(iterVar string)
-	if lambda, ok := forEachFn.(*parser.LambdaExpr); ok && len(lambda.Params) == 1 {
-		paramName := lambda.Params[0].Name
-		forEachBody = func(iterVar string) {
-			if paramName != iterVar {
-				g.writeln("%s := %s", paramName, iterVar)
-			}
-			if lambda.Expr != nil {
-				g.writeln("%s", g.formatExpr(lambda.Expr))
-			} else if lambda.Body != nil {
-				g.emitBlock(lambda.Body)
-			}
-		}
-	} else if containsIt(forEachFn) {
-		forEachBody = func(_ string) {
-			g.writeln("%s", g.formatExprIt(forEachFn))
-		}
-	} else {
-		fnStr := g.formatExpr(forEachFn)
-		forEachBody = func(iterVar string) {
-			g.writeln("%s(%s)", fnStr, iterVar)
-		}
-	}
-
-	// Emit fused loop
-	g.writeln("for _, _it := range %s {", source)
-	g.indent++
-	iterVar := "_it"
-	for _, op := range chain {
-		switch op.method {
-		case "filter":
-			pred := g.streamLambdaBody(op.args)
-			g.writeln("if !(%s) { continue }", pred)
-		case "map":
-			transform := g.streamLambdaBody(op.args)
-			g.writeln("_it = %s", transform)
-		}
-	}
-	forEachBody(iterVar)
-	g.indent--
-	g.writeln("}")
-}
-
 // --- Error handling (exception pivot) ----------------------------------------
 
 // callReturnsError reports whether an expression is a call to a function
@@ -1468,7 +1360,7 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 		}
 		for _, m := range cls.Methods {
 			if m.Name == methodName {
-				return canReturnError(m.Body)
+				return g.blockCanReturnError(m.Body)
 			}
 		}
 		return false
@@ -1516,19 +1408,6 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 //     top-level uncaught error (e.g. main() with a typed-only catch).
 // The caller is responsible for guarding with `if err != nil { ... }`.
 func (g *Generator) emitErrReturn(errVar string) {
-	if g.inTryBlock {
-		if g.inTryBlockTuple {
-			zv := g.zeroValueFor(g.currentOuterReturnType)
-			if zv != "" {
-				g.writeln("return %s, false, %s", zv, errVar)
-			} else {
-				g.writeln("return false, %s", errVar)
-			}
-		} else {
-			g.writeln("return %s", errVar)
-		}
-		return
-	}
 	if !g.currentFuncIsThrower {
 		g.writeln("panic(%s)", errVar)
 		return
@@ -1886,7 +1765,7 @@ func (g *Generator) emitOrBlock(block *parser.BlockStmt) {
 // wrapper. Detection is conservative: treats any throw, Error-return,
 // or call to an errorFunc as a propagation source.
 func (g *Generator) emitGoroutineBody(body *parser.BlockStmt) {
-	if !g.blockMayPropagateError(body) {
+	if !g.blockCanReturnError(body) {
 		g.emitBlock(body)
 		return
 	}
@@ -1895,98 +1774,111 @@ func (g *Generator) emitGoroutineBody(body *parser.BlockStmt) {
 		errVar = fmt.Sprintf("_gerr%d", g.errVarCount)
 	}
 	g.errVarCount++
-	prev := g.inTryBlock
-	prevTuple := g.inTryBlockTuple
-	g.inTryBlock = true
-	// Reset tuple mode — a nested try inside the goroutine gets its
-	// own shape via emitTryStmt. We don't want the spawn's simple IIFE
-	// to inherit tuple semantics from an outer try.
-	g.inTryBlockTuple = false
 	g.writeln("%s := func() error {", errVar)
 	g.indent++
 	g.emitBlock(body)
 	g.writeln("return nil")
 	g.indent--
 	g.writeln("}()")
-	g.inTryBlock = prev
-	g.inTryBlockTuple = prevTuple
 	g.writeln("if %s != nil { panic(%s) }", errVar, errVar)
 }
 
-// blockMayPropagateError reports whether a block contains any statement
-// that could yield a `return err` when emitted with inTryBlock=true.
-// Used to decide whether a goroutine body needs the panic-on-uncaught
-// wrapper. Extends canReturnError by also following direct calls to
-// errorFuncs (Zinc throwers) — those auto-propagate at their call site.
-func (g *Generator) blockMayPropagateError(block *parser.BlockStmt) bool {
+// blockCanReturnError reports whether a block contains any construct that
+// causes the enclosing function to be a thrower — direct error triggers
+// (`?`, `or { }`) OR a call to a known thrower recorded in g.errorFuncs.
+// This is THE canonical "is this body a thrower" check, used both by the
+// collectDecls fixed-point pass and by concurrency emitters that need to
+// know whether a goroutine body can panic on an uncaught error.
+func (g *Generator) blockCanReturnError(block *parser.BlockStmt) bool {
 	if block == nil {
 		return false
 	}
 	for _, s := range block.Stmts {
-		if g.stmtMayPropagateError(s) {
+		if g.stmtCanReturnError(s) {
 			return true
 		}
 	}
 	return false
 }
 
-func (g *Generator) stmtMayPropagateError(s parser.Stmt) bool {
-	if stmtCanReturnError(s) {
-		return true
-	}
+func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 	switch stmt := s.(type) {
+	case *parser.ReturnStmt:
+		return exprContainsPropagate(stmt.Value)
 	case *parser.VarStmt:
-		if g.callReturnsError(stmt.Value) {
+		if exprContainsPropagate(stmt.Value) {
 			return true
 		}
+		if g.orHandlerCanReturnError(stmt.OrHandler) {
+			return true
+		}
+		return g.callReturnsError(stmt.Value)
 	case *parser.AssignStmt:
-		if g.callReturnsError(stmt.Value) {
+		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
 			return true
 		}
+		if g.orHandlerCanReturnError(stmt.OrHandler) {
+			return true
+		}
+		return g.callReturnsError(stmt.Value)
 	case *parser.ExprStmt:
-		if g.callReturnsError(stmt.Expr) {
+		if exprContainsPropagate(stmt.Expr) {
 			return true
 		}
+		if g.orHandlerCanReturnError(stmt.OrHandler) {
+			return true
+		}
+		return g.callReturnsError(stmt.Expr)
 	case *parser.TupleVarStmt:
-		if g.callReturnsError(stmt.Value) {
-			return true
-		}
+		return g.callReturnsError(stmt.Value)
 	case *parser.IfStmt:
-		if g.blockMayPropagateError(stmt.Then) {
+		if g.blockCanReturnError(stmt.Then) {
 			return true
 		}
-		if b, ok := stmt.ElseStmt.(*parser.BlockStmt); ok && g.blockMayPropagateError(b) {
-			return true
-		}
-		if e, ok := stmt.ElseStmt.(*parser.IfStmt); ok && g.stmtMayPropagateError(e) {
-			return true
-		}
-	case *parser.ForStmt:
-		return g.blockMayPropagateError(stmt.Body)
-	case *parser.WhileStmt:
-		return g.blockMayPropagateError(stmt.Body)
-	case *parser.MatchStmt:
-		for _, c := range stmt.Cases {
-			if g.blockMayPropagateError(c.Body) {
-				return true
-			}
+		if stmt.ElseStmt != nil {
+			return g.stmtCanReturnError(stmt.ElseStmt)
 		}
 	case *parser.BlockStmt:
-		return g.blockMayPropagateError(stmt)
-	case *parser.WithStmt:
-		return g.blockMayPropagateError(stmt.Body)
-	case *parser.TryStmt:
-		// A try with a universal catch absorbs its body's throws, but
-		// the catches and finally can still throw. Check all of them.
-		if !tryBlockFullyCaught(stmt) && g.blockMayPropagateError(stmt.Body) {
-			return true
-		}
-		for _, c := range stmt.Catches {
-			if g.blockMayPropagateError(c.Body) {
+		return g.blockCanReturnError(stmt)
+	case *parser.ForStmt:
+		return g.blockCanReturnError(stmt.Body)
+	case *parser.WhileStmt:
+		return g.blockCanReturnError(stmt.Body)
+	case *parser.MatchStmt:
+		for _, c := range stmt.Cases {
+			if g.blockCanReturnError(c.Body) {
 				return true
 			}
 		}
-		if stmt.Finally != nil && g.blockMayPropagateError(stmt.Finally) {
+	case *parser.WithStmt:
+		return g.blockCanReturnError(stmt.Body)
+	}
+	return false
+}
+
+// orHandlerCanReturnError reports whether an `or { }` / `or match { }`
+// handler makes the enclosing function a thrower.
+//   - Any case/block body that itself throws (a `throw` or unhandled `?`).
+//   - An `or match` with no wildcard (`case _`) case — unmatched errors
+//     propagate via `return zero, err` in the generated type switch.
+func (g *Generator) orHandlerCanReturnError(h *parser.OrHandler) bool {
+	if h == nil {
+		return false
+	}
+	if h.Body != nil && g.blockCanReturnError(h.Body) {
+		return true
+	}
+	if len(h.MatchCases) > 0 {
+		hasWildcard := false
+		for _, c := range h.MatchCases {
+			if c.Type == "" {
+				hasWildcard = true
+			}
+			if c.Body != nil && g.blockCanReturnError(c.Body) {
+				return true
+			}
+		}
+		if !hasWildcard {
 			return true
 		}
 	}
@@ -2074,17 +1966,13 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	// and propagates outward via emitErrReturn. With user returns,
 	// fall back to function-scoped defer.
 	if !blockContainsReturn(w.Body) {
-		canThrow := g.blockMayPropagateError(w.Body)
+		canThrow := g.blockCanReturnError(w.Body)
 		if canThrow {
 			errVar := "_uerr"
 			if g.errVarCount > 0 {
 				errVar = fmt.Sprintf("_uerr%d", g.errVarCount)
 			}
 			g.errVarCount++
-			prev := g.inTryBlock
-			prevTuple := g.inTryBlockTuple
-			g.inTryBlock = true
-			g.inTryBlockTuple = false
 			g.writeln("%s := func() error {", errVar)
 			g.indent++
 			for _, r := range w.Resources {
@@ -2095,8 +1983,6 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 			g.writeln("return nil")
 			g.indent--
 			g.writeln("}()")
-			g.inTryBlock = prev
-			g.inTryBlockTuple = prevTuple
 			g.writeln("if %s != nil {", errVar)
 			g.indent++
 			g.emitErrReturn(errVar)
@@ -2122,355 +2008,16 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	g.emitBlock(w.Body)
 }
 
-// emitThrowStmt: `throw expr` → error-return.
-//
-// Inside a try body (IIFE returning error): `return expr`.
-// Inside a thrower function: `return zero, expr` or `return expr` (void).
-// Inside a non-thrower (reached only if canReturnError missed the throw —
-// defensive): `panic(expr)`.
-//
-// The expression must satisfy Go's `error` interface — i.e. either an
-// Exception subclass with `Error() string` or a raw Go error.
-func (g *Generator) emitThrowStmt(t *parser.ThrowStmt) {
-	expr := g.formatExpr(t.Value)
-	if g.inTryBlock {
-		if g.inTryBlockTuple {
-			zv := g.zeroValueFor(g.currentOuterReturnType)
-			if zv != "" {
-				g.writeln("return %s, false, %s", zv, expr)
-			} else {
-				g.writeln("return false, %s", expr)
-			}
-		} else {
-			g.writeln("return %s", expr)
-		}
-		return
-	}
-	if !g.currentFuncIsThrower {
-		g.writeln("panic(%s)", expr)
-		return
-	}
-	zv := g.zeroValueFor(g.currentReturnType)
-	if zv != "" {
-		g.writeln("return %s, %s", zv, expr)
-	} else {
-		g.writeln("return %s", expr)
-	}
-}
-
-// emitTryStmt: try / catch / finally → IIFE returning error + errors.As dispatch.
-//
-//	try { body } catch (T e) { handler } [catch (e) { fallback }] finally { cleanup }
-//
-// becomes:
-//
-//	_tryerr := func() error {
-//	    body   // throws inside become `return expr`
-//	    return nil
-//	}()
-//	_handled := (no universal catch)
-//	if _tryerr != nil {
-//	    var e *T
-//	    if errors.As(_tryerr, &e) { handler; _handled = true } else {
-//	        e2 := _tryerr
-//	        fallback; _handled = true
-//	    }
-//	}
-//	// finally always runs
-//	{ cleanup }
-//	// unhandled errors propagate
-//	if _tryerr != nil && !_handled {
-//	    return zero, _tryerr        // or: return _tryerr (if inside another try)
-//	}
-//
-// Notes:
-//   - Typed catches dispatch via errors.As — composes with Go's wrapped errors.
-//   - Universal catch (bare `catch` or `catch (e)`) sets _handled = true unconditionally.
-//   - finally runs before re-raise, matching C# semantics.
-//   - No catches + finally: finally runs, then err propagates.
-func (g *Generator) emitTryStmt(t *parser.TryStmt) {
-	errVar := g.nextTryErrVar()
-	handledVar := errVar + "_handled"
-	hasUniversal := false
-	for _, c := range t.Catches {
-		if c.ExceptionType == nil {
-			hasUniversal = true
-			break
-		}
-	}
-
-	// If the body contains a `return`, the IIFE must pass the return
-	// value back to the outer function. Use a 3-tuple so we can
-	// distinguish "returned from outer fn" vs "threw" vs "fell through".
-	needsReturnTuple := blockContainsReturnRecursive(t.Body)
-	retType := g.currentOuterReturnType
-
-	prev := g.inTryBlock
-	prevTuple := g.inTryBlockTuple
-	g.inTryBlock = true
-	g.inTryBlockTuple = needsReturnTuple
-
-	valVar := errVar + "_val"
-	retVar := errVar + "_ret"
-	if needsReturnTuple {
-		// IIFE signature depends on whether the outer fn returns a value.
-		//   T fn: (T, bool, error)  — (val, returning, err)
-		//   void fn: (bool, error)  — (returning, err)
-		if retType != "" {
-			g.writeln("%s, %s, %s := func() (%s, bool, error) {", valVar, retVar, errVar, retType)
-		} else {
-			g.writeln("%s, %s := func() (bool, error) {", retVar, errVar)
-		}
-		g.indent++
-		g.emitBlock(t.Body)
-		if retType != "" {
-			g.writeln("return %s, false, nil", g.zeroValueFor(retType))
-		} else {
-			g.writeln("return false, nil")
-		}
-		g.indent--
-		g.writeln("}()")
-	} else {
-		g.writeln("%s := func() error {", errVar)
-		g.indent++
-		g.emitBlock(t.Body)
-		g.writeln("return nil")
-		g.indent--
-		g.writeln("}()")
-	}
-	// Restore enclosing state before emitting the dispatch and finally —
-	// they live in the parent scope (not the IIFE body), so any return
-	// inside them should use the parent's tuple/thrower shape, not
-	// this try's.
-	g.inTryBlock = prev
-	g.inTryBlockTuple = prevTuple
-
-	// Dispatch to catches. Sequential if-blocks gated on _handled so
-	// the first matching catch wins. _handled declaration is skipped
-	// only when there's a single universal catch — in that case no
-	// gating and no re-raise is needed, and an unused var would fail
-	// the Go compile.
-	needsHandled := len(t.Catches) > 1 || !hasUniversal
-	if len(t.Catches) > 0 {
-		if needsHandled {
-			g.writeln("%s := false", handledVar)
-		}
-		// Gate the catch dispatch on "no early return from user code",
-		// so `return X` inside try doesn't also run the matching catch.
-		// Catches still fire when the IIFE returned via throw.
-		if needsReturnTuple {
-			g.writeln("if !%s && %s != nil {", retVar, errVar)
-		} else {
-			g.writeln("if %s != nil {", errVar)
-		}
-		g.indent++
-		g.emitCatchChain(errVar, handledVar, hasUniversal, t.Catches)
-		g.indent--
-		g.writeln("}")
-	}
-
-	// Finally runs on every exit path — always, before the
-	// early-return fire-point and before propagation. C# semantics.
-	if t.Finally != nil {
-		g.emitBlock(t.Finally)
-	}
-
-	// User early-return fires after finally.
-	if needsReturnTuple {
-		g.writeln("if %s {", retVar)
-		g.indent++
-		g.emitEarlyReturnForVal(valVar, retType)
-		g.indent--
-		g.writeln("}")
-	}
-
-	// Propagate unhandled error after finally.
-	if len(t.Catches) == 0 || !hasUniversal {
-		g.writeln("if %s != nil {", errVar)
-		g.indent++
-		if len(t.Catches) > 0 {
-			g.writeln("if !%s {", handledVar)
-			g.indent++
-		}
-		g.emitErrReturn(errVar)
-		if len(t.Catches) > 0 {
-			g.indent--
-			g.writeln("}")
-		}
-		g.indent--
-		g.writeln("}")
-	}
-}
-
-// emitEarlyReturnForVal emits the outward return of a captured value
-// from a nested try's `if _ret { ... }` propagation. The shape depends
-// on the enclosing scope: a parent tuple IIFE wants (val, true, nil);
-// a plain thrower wants (val, nil); a plain function wants val.
-func (g *Generator) emitEarlyReturnForVal(valVar, retType string) {
-	if g.inTryBlockTuple {
-		if retType != "" {
-			g.writeln("return %s, true, nil", valVar)
-		} else {
-			g.writeln("return true, nil")
-		}
-		return
-	}
-	if g.currentFuncIsThrower {
-		if retType != "" {
-			g.writeln("return %s, nil", valVar)
-		} else {
-			g.writeln("return nil")
-		}
-		return
-	}
-	if retType != "" {
-		g.writeln("return %s", valVar)
-	} else {
-		g.writeln("return")
-	}
-}
-
-// blockContainsReturnRecursive walks a block looking for any return
-// statement, including those nested inside if/for/while/match/blocks/
-// try. Used by emitTryStmt to decide whether the IIFE needs the
-// 3-tuple shape that propagates the outer-function return value.
-func blockContainsReturnRecursive(block *parser.BlockStmt) bool {
-	if block == nil {
-		return false
-	}
-	for _, s := range block.Stmts {
-		if stmtContainsReturnRecursive(s) {
-			return true
-		}
-	}
-	return false
-}
-
-func stmtContainsReturnRecursive(s parser.Stmt) bool {
-	switch stmt := s.(type) {
-	case *parser.ReturnStmt:
-		return true
-	case *parser.IfStmt:
-		if blockContainsReturnRecursive(stmt.Then) {
-			return true
-		}
-		if e, ok := stmt.ElseStmt.(*parser.BlockStmt); ok {
-			if blockContainsReturnRecursive(e) {
-				return true
-			}
-		}
-		if e, ok := stmt.ElseStmt.(*parser.IfStmt); ok {
-			if stmtContainsReturnRecursive(e) {
-				return true
-			}
-		}
-	case *parser.ForStmt:
-		return blockContainsReturnRecursive(stmt.Body)
-	case *parser.WhileStmt:
-		return blockContainsReturnRecursive(stmt.Body)
-	case *parser.MatchStmt:
-		for _, c := range stmt.Cases {
-			if blockContainsReturnRecursive(c.Body) {
-				return true
-			}
-		}
-	case *parser.BlockStmt:
-		return blockContainsReturnRecursive(stmt)
-	case *parser.WithStmt:
-		return blockContainsReturnRecursive(stmt.Body)
-	case *parser.TryStmt:
-		if blockContainsReturnRecursive(stmt.Body) {
-			return true
-		}
-		for _, c := range stmt.Catches {
-			if blockContainsReturnRecursive(c.Body) {
-				return true
-			}
-		}
-		if stmt.Finally != nil && blockContainsReturnRecursive(stmt.Finally) {
-			return true
-		}
-	}
-	return false
-}
-
-// nextTryErrVar returns a unique error variable name per try statement in
-// the same scope, so nested and sibling try blocks don't collide.
-func (g *Generator) nextTryErrVar() string {
-	name := "_tryerr"
-	if g.errVarCount > 0 {
-		name = fmt.Sprintf("_tryerr%d", g.errVarCount)
-	}
-	g.errVarCount++
-	return name
-}
-
-// emitCatchChain emits catches as a sequence of if-blocks gated on a
-// `_handled` flag. Typed catches use errors.As so wrapped errors
-// (fmt.Errorf("%w", ...)) still match. Universal catch (ExceptionType
-// == nil) binds the raw error and always matches — it must be last.
-// The sequential-if shape (instead of if/else chains) avoids Go's
-// "else must be followed by if or block" restriction when each arm
-// opens a new `var e *T` declaration.
-func (g *Generator) emitCatchChain(errVar, handledVar string, hasUniversal bool, catches []*parser.CatchClause) {
-	for i, c := range catches {
-		gated := i > 0
-		if gated {
-			g.writeln("if !%s {", handledVar)
-			g.indent++
-		}
-		if c.ExceptionType == nil {
-			// Universal catch — always matches. Bind err to the named
-			// var (if any) and run the handler body. Last catch, so
-			// no handled flag bump — all subsequent checks are skipped.
-			if c.VarName != "" {
-				g.writeln("%s := %s", c.VarName, errVar)
-				g.writeln("_ = %s", c.VarName)
-			}
-			g.emitBlock(c.Body)
-			if gated {
-				g.indent--
-				g.writeln("}")
-			}
-			return
-		}
-
-		g.needImport("errors")
-		typeName := g.formatType(c.ExceptionType)
-		varName := c.VarName
-		if varName == "" {
-			varName = fmt.Sprintf("_catch%d", i)
-		}
-		g.writeln("var %s %s", varName, typeName)
-		g.writeln("if errors.As(%s, &%s) {", errVar, varName)
-		g.indent++
-		g.writeln("_ = %s", varName)
-		g.emitBlock(c.Body)
-		if !hasUniversal {
-			g.writeln("%s = true", handledVar)
-		}
-		g.indent--
-		g.writeln("}")
-		if gated {
-			g.indent--
-			g.writeln("}")
-		}
-	}
-}
-
 // blockEndsInReturn reports whether the final statement of a block is
-// a return or throw (both translate to `return` in Go). Used to decide
-// whether a thrower function needs a synthetic trailing `return nil`.
-// Shallow check — doesn't recurse into if/else branches, so control
-// flow that always returns via a split if-else still needs the
-// synthetic tail. That's harmless; Go ignores the unreachable line.
+// a return. Used to decide whether a thrower function needs a synthetic
+// trailing `return nil`. Shallow check — doesn't recurse into if/else.
 func blockEndsInReturn(block *parser.BlockStmt) bool {
 	if block == nil || len(block.Stmts) == 0 {
 		return false
 	}
 	last := block.Stmts[len(block.Stmts)-1]
 	switch last.(type) {
-	case *parser.ReturnStmt, *parser.ThrowStmt:
+	case *parser.ReturnStmt:
 		return true
 	}
 	return false

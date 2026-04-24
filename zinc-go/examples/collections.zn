@@ -18,9 +18,14 @@ for (name, age in ages) {
     print("${name} is ${age}")
 }
 
-// Lambda filtering
+// Explicit filtering loop
 List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-var evens = numbers.filter(x -> x % 2 == 0)
+List<int> evens = []
+for (x in numbers) {
+    if (x % 2 == 0) {
+        evens = append(evens, x)
+    }
+}
 print("Evens: ${evens}")
 
 // --- Generic stack (collection pattern) ---

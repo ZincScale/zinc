@@ -4,23 +4,23 @@
 // local with no initializer, and local with initializer (redundant
 // var). Const keeps its documented `const Type name = expr` form.
 
-import sync.Mutex
+class Widget2 {}
 
 class Widget {
-    // Field: `var Mutex mu` is the hybrid that must be rejected.
-    // Fix is `Mutex mu` (explicit, no init).
-    var Mutex mu
+    // Field: `var Widget2 mu` is the hybrid that must be rejected.
+    // Fix is `Widget2 mu` (explicit, no init).
+    var Widget2 mu
 
     init() {}
 }
 
 void main() {
     // Local with no initializer — same smell.
-    var Mutex local
+    var Widget2 local
 
     // Local with initializer — `var` is redundant when the type
     // is named explicitly.
-    var Mutex init = new Mutex()
+    var Widget2 init = new Widget2()
 
     print("should not compile")
 }

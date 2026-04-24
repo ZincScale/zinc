@@ -1,6 +1,6 @@
 // Test struct literal syntax: pkg.Type(Field=value) → Go struct literal
 
-import log.slog
+import log/slog
 import os
 import io
 

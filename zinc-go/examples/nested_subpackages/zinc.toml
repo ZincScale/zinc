@@ -5,4 +5,3 @@ main = "main.zn"
 
 [go]
 version = "1.26"
-deps = []

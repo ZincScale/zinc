@@ -50,8 +50,12 @@ void main() {
     var big = countMatching(numbers, (int x) -> x > 5)
     print("big count: ${big}")
 
-    // Untyped lambdas still work
+    // Function-as-value: apply a unary transform in a loop
     var nums = [10, 20, 30]
-    var doubled = nums.map(it * 2)
+    Fn<(int), int> doubler2 = (int x) -> x * 2
+    List<int> doubled = []
+    for (n in nums) {
+        doubled = append(doubled, doubler2(n))
+    }
     print("doubled: ${doubled}")
 }
