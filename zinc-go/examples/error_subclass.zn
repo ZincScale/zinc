@@ -1,0 +1,31 @@
+// Test: a class extending another class that extends Err is transitively
+// an error. Compiler walks the full parent chain.
+
+class Err {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class AppError : Err {
+    init(String msg) { super(msg) }
+}
+
+// Two levels deep — still an error.
+class NetworkError : AppError {
+    init(String msg) { super(msg) }
+}
+
+String fetch(String url) {
+    if (url == "") {
+        return NetworkError("empty url")
+    }
+    return "response for ${url}"
+}
+
+void main() {
+    var body = fetch("api.com") or { print("fetch fail: ${err}"); return }
+    print("body: ${body}")
+    var bad = fetch("") or { print("caught: ${err}"); return }
+    print("should not reach: ${bad}")
+}

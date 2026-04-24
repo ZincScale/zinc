@@ -18,7 +18,7 @@
 //   logging.output   — stdout, stderr, or file path (default: stdout)
 
 import config
-import log.slog
+import log/slog
 import os
 import io
 
@@ -110,12 +110,8 @@ io.Writer resolveWriter(String output) {
         return os.Stderr
     }
     if (output != "stdout") {
-        try {
-            var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644)
-            return file
-        } catch (e) {
-            return os.Stdout
-        }
+        var file = os.OpenFile(output, os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0644) or { return os.Stdout }
+        return file
     }
     return os.Stdout
 }

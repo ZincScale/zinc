@@ -292,16 +292,19 @@ func (g *Generator) exceptionParent(cls *parser.ClassDecl) string {
 		if idx := strings.LastIndex(p, "."); idx >= 0 {
 			name = p[idx+1:]
 		}
-		if g.classIsException(name, map[string]bool{}) {
+		if g.classExtendsError(name, map[string]bool{}) {
 			return name
 		}
 	}
 	return ""
 }
 
-// classIsException walks a class and its parents for a declared
-// Error() method. Visited cycle guard.
-func (g *Generator) classIsException(className string, visited map[string]bool) bool {
+// classExtendsError reports whether className is Error itself or a
+// descendant — the nominal "is an error" check for widening. Walks the
+// class's own methods + parent chain; the base Error class has an
+// Error() string method, which is what all descendants inherit and
+// what satisfies Go's error interface. Visited cycle guard.
+func (g *Generator) classExtendsError(className string, visited map[string]bool) bool {
 	if visited[className] {
 		return false
 	}
@@ -343,7 +346,7 @@ func (g *Generator) classIsException(className string, visited map[string]bool) 
 		if idx := strings.LastIndex(p, "."); idx >= 0 {
 			name = p[idx+1:]
 		}
-		if g.classIsException(name, visited) {
+		if g.classExtendsError(name, visited) {
 			return true
 		}
 	}

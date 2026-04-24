@@ -7,11 +7,11 @@ import time
 
 // Unqualified types: ResponseWriter and Request resolve to http.ResponseWriter and *http.Request
 void helloHandler(ResponseWriter w, Request r) {
-    fmt.Fprintf(w, "Hello from Zinc!")
+    fmt.Fprintf(w, "Hello from Zinc!") or { print("write failed: ${err}") }
 }
 
 void healthHandler(ResponseWriter w, Request r) {
-    fmt.Fprintf(w, "OK")
+    fmt.Fprintf(w, "OK") or { print("write failed: ${err}") }
 }
 
 void main() {

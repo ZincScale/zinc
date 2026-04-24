@@ -1,0 +1,33 @@
+// Test: calling an error-returning function without `or { }` auto-widens
+// the caller. The error propagates up until it's handled.
+
+class Err {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class ParseError : Err {
+    init(String msg) { super(msg) }
+}
+
+int parseNum(String s) {
+    if (s == "") {
+        return ParseError("empty input")
+    }
+    return 42
+}
+
+// No `or { }` — parseNum returns error, so this function auto-widens
+// to (int, error) and propagates the error up.
+int doubleIt(String s) {
+    var n = parseNum(s)
+    return n * 2
+}
+
+void main() {
+    var x = doubleIt("hello") or { print("unexpected: ${err}"); return }
+    print("x: ${x}")
+    var y = doubleIt("") or { print("caught: ${err}"); return }
+    print("should not reach: ${y}")
+}

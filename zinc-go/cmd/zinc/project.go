@@ -8,6 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	codegen "zinc-go/internal/codegen_go"
+	"zinc-go/internal/parser"
 )
 
 // ---------------------------------------------------------------------------
@@ -470,6 +473,54 @@ func isProjectDir(dir string) bool {
 	return findZincToml(dir) != ""
 }
 
+// loadDepClassDecls loads class declarations from external deps that
+// have a [replace] pointing at a local directory. The replace path
+// points at the dep's built `zinc-out/`; the Zinc sources live at the
+// sibling `src/` directory. Each subdirectory of `src/` is a
+// subpackage; its class decls are registered under the subpackage's
+// directory name so the codegen can type-check cross-package returns
+// (e.g. `return errors.ConfigError(...)` knows ConfigError extends Err).
+func loadDepClassDecls(cfg *zincConfig) map[string]map[string]*parser.ClassDecl {
+	out := make(map[string]map[string]*parser.ClassDecl)
+	for _, modulePath := range cfg.Imports {
+		localPath, ok := cfg.Replaces[modulePath]
+		if !ok {
+			continue
+		}
+		// <replace-path>/../src
+		srcDir := filepath.Join(filepath.Dir(localPath), "src")
+		info, err := os.Stat(srcDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		subdirs, err := collectSubdirs(srcDir)
+		if err != nil {
+			continue
+		}
+		for _, sub := range subdirs {
+			subPath := filepath.Join(srcDir, sub)
+			znFiles, _ := collectZnFilesFlat(subPath)
+			if len(znFiles) == 0 {
+				continue
+			}
+			progs := make([]*parser.Program, 0, len(znFiles))
+			for _, path := range znFiles {
+				prog, err := parseFile(path)
+				if err != nil {
+					continue
+				}
+				progs = append(progs, prog)
+			}
+			if len(progs) == 0 {
+				continue
+			}
+			merged := mergePrograms(progs)
+			out[sub] = codegen.CollectClassDecls(merged)
+		}
+	}
+	return out
+}
+
 // buildProject transpiles a zinc.toml project: src/*.zn → zinc-out/ → go build.
 func buildProject(projectDir, outDir string, quiet bool) error {
 	tomlPath := findZincToml(projectDir)
@@ -516,6 +567,10 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	if moduleName == "" {
 		moduleName = "zinc_project"
 	}
+
+	// Load dep class decls (stdlib etc.) so cross-package type checks work.
+	externalClassDecls = loadDepClassDecls(cfg)
+	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 {
 		if err := compileDirWithSubpackages(srcDir, outDir, moduleName, quiet, cfg.Imports); err != nil {
@@ -594,6 +649,9 @@ func runProject(projectDir string, progArgs []string) error {
 	if moduleName == "" {
 		moduleName = "zinc_project"
 	}
+
+	externalClassDecls = loadDepClassDecls(cfg)
+	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 {
 		if err := compileDirWithSubpackages(srcDir, tmpDir, moduleName, true, cfg.Imports); err != nil {
@@ -693,6 +751,9 @@ func testProject(projectDir string, goTestArgs []string) error {
 	if info, err := os.Stat(testsDir); err == nil && info.IsDir() {
 		extraPkgs = map[string]string{"tests": testsDir}
 	}
+
+	externalClassDecls = loadDepClassDecls(cfg)
+	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 || len(extraPkgs) > 0 {
 		if err := compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName, false, extraPkgs, cfg.Imports); err != nil {

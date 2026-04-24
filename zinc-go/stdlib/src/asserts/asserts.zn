@@ -11,7 +11,7 @@
 //
 // Usage in *_test.zn:
 //
-//     import stdlib.asserts
+//     import stdlib/asserts
 //
 //     test "addOne increments" {
 //         asserts.equalInt(t, addOne(41), 42)
@@ -21,7 +21,7 @@
 //         asserts.isTrue(t, !isValid(""), "empty input")
 //     }
 
-import testing.T
+import testing
 import strings
 
 // equalInt fails the test if got != want.

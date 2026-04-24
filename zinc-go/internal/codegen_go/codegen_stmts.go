@@ -555,7 +555,20 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 
 	// Normal return in error-returning function → return val, nil
 	if g.currentReturnType != "" {
+		// Returning an error-class value: emit the error slot, not
+		// the value slot. `return zeroVal, errVal`.
+		if g.currentFuncIsThrower && g.exprIsErrorCtor(r.Value) {
+			zv := g.zeroValueFor(g.currentReturnType)
+			g.writeln("return %s, %s", zv, g.formatExpr(r.Value))
+			return
+		}
 		g.writeln("return %s, nil", g.formatExpr(r.Value))
+		return
+	}
+
+	// Void widened function returning an error-class value.
+	if g.currentFuncIsThrower && g.exprIsErrorCtor(r.Value) {
+		g.writeln("return %s", g.formatExpr(r.Value))
 		return
 	}
 
@@ -1804,7 +1817,13 @@ func (g *Generator) blockCanReturnError(block *parser.BlockStmt) bool {
 func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 	switch stmt := s.(type) {
 	case *parser.ReturnStmt:
-		return exprContainsPropagate(stmt.Value)
+		if exprContainsPropagate(stmt.Value) {
+			return true
+		}
+		// `return SomeError(...)` where SomeError is Error itself or
+		// any descendant — the compiler widens the function signature
+		// to (T, error).
+		return g.exprIsErrorCtor(stmt.Value)
 	case *parser.VarStmt:
 		if exprContainsPropagate(stmt.Value) {
 			return true
@@ -1852,6 +1871,37 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		}
 	case *parser.WithStmt:
 		return g.blockCanReturnError(stmt.Body)
+	}
+	return false
+}
+
+// exprIsErrorCtor reports whether expr is a constructor call for a
+// class that extends Error (nominal check through the class hierarchy).
+// Handles:
+//   - bare `Foo(...)` — local class, looked up in g.structs
+//   - `pkg.Foo(...)` — class in a sibling subpackage (g.subpkgStructs)
+// External Go deps are not yet supported — those would need the
+// dependency's class decls to be loaded.
+func (g *Generator) exprIsErrorCtor(e parser.Expr) bool {
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return false
+	}
+	switch callee := call.Callee.(type) {
+	case *parser.Ident:
+		if _, ok := g.structs[callee.Name]; ok {
+			return g.classExtendsError(callee.Name, map[string]bool{})
+		}
+	case *parser.SelectorExpr:
+		pkg, ok := callee.Object.(*parser.Ident)
+		if !ok {
+			return false
+		}
+		if classes, ok := g.subpkgStructs[pkg.Name]; ok {
+			if _, ok := classes[callee.Field]; ok {
+				return g.classExtendsError(callee.Field, map[string]bool{})
+			}
+		}
 	}
 	return false
 }

@@ -238,6 +238,13 @@ func compileDirWithSubpackages(srcDir, outDir, moduleName string, quiet bool, im
 	return compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName, quiet, nil, importAliases...)
 }
 
+// externalClassDecls is per-compile-session state: class decls loaded
+// from external deps (via [replace] zinc.toml entries). Keyed by
+// subpackage alias (e.g. "errors"). Populated by buildProject /
+// runProject / testProject before calling the compile function, read
+// inside and passed through to each generator's SetSubpackageStructs.
+var externalClassDecls map[string]map[string]*parser.ClassDecl
+
 // compileDirWithSubpackagesAndExtras is compileDirWithSubpackages plus an
 // optional `extraPkgs` map (subpackage name → absolute fs path) that the
 // caller wants compiled alongside the discovered src/ subpackages. Used
@@ -357,6 +364,11 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 					}
 				}
 			}
+			// External deps (stdlib etc.) — register their class decls
+			// so cross-package error-type checks work.
+			for alias, classes := range externalClassDecls {
+				gen.SetSubpackageStructs(alias, classes)
+			}
 
 			// Inject package declaration from merged (individual files may not have it)
 			if prog.Package == nil && merged.Package != nil {
@@ -421,6 +433,9 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			if classes, ok := allClassDecls[pkg]; ok {
 				gen.SetSubpackageStructs(alias, classes)
 			}
+		}
+		for alias, classes := range externalClassDecls {
+			gen.SetSubpackageStructs(alias, classes)
 		}
 
 		files := gen.GenerateFiles(prog, className)

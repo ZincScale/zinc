@@ -1,0 +1,25 @@
+// Test: returning a class extending Err widens the calling function.
+
+class Err {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class ParseError : Err {
+    init(String msg) { super(msg) }
+}
+
+int parseNum(String s) {
+    if (s == "") {
+        return ParseError("empty input")
+    }
+    return 42
+}
+
+void main() {
+    var ok = parseNum("hello") or { print("shouldn't happen: ${err}"); return }
+    print("ok: ${ok}")
+    var fail = parseNum("") or { print("caught: ${err}"); return }
+    print("should not reach: ${fail}")
+}
