@@ -230,6 +230,15 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 					}
 				}
 				litFields = append(litFields, fmt.Sprintf("%s: %s", goName(f.Name, f.IsPub || !g.isSubpackage()), val))
+				continue
+			}
+			// Auto-init Go-stdlib pointer-receiver fields (sync.Mutex etc.) so the
+			// pointer isn't left nil — first method call would otherwise segfault.
+			if f.Type != nil {
+				if goType, ok := g.isAutoPointerizedGoStructField(f.Type); ok {
+					litFields = append(litFields, fmt.Sprintf("%s: &%s{}",
+						goName(f.Name, f.IsPub || !g.isSubpackage()), goType))
+				}
 			}
 		}
 		nameTA := name + tpArgs
@@ -464,7 +473,14 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		}
 	}
 	for _, f := range cls.Fields {
-		if f.Default != nil && !assignedFields[exportName(f.Name)] {
+		fieldGoName := exportName(f.Name)
+		if gn, ok := g.currentFieldGoName[f.Name]; ok {
+			fieldGoName = gn
+		}
+		if assignedFields[fieldGoName] || assignedFields[exportName(f.Name)] {
+			continue
+		}
+		if f.Default != nil {
 			val := g.formatExpr(f.Default)
 			if f.Type != nil {
 				if _, isListLit := f.Default.(*parser.ListLit); isListLit {
@@ -474,11 +490,15 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 					val = g.formatType(f.Type) + "{}"
 				}
 			}
-			fieldGoName := exportName(f.Name)
-			if gn, ok := g.currentFieldGoName[f.Name]; ok {
-				fieldGoName = gn
-			}
 			litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, val))
+			continue
+		}
+		// Auto-init Go-stdlib pointer-receiver fields (sync.Mutex etc.) so the
+		// pointer isn't left nil — first method call would otherwise segfault.
+		if f.Type != nil {
+			if goType, ok := g.isAutoPointerizedGoStructField(f.Type); ok {
+				litFields = append(litFields, fmt.Sprintf("%s: &%s{}", fieldGoName, goType))
+			}
 		}
 	}
 

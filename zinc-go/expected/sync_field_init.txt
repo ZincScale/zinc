@@ -1,0 +1,4 @@
+counter: 300
+initial: v0
+after write: v1
+sync field init OK

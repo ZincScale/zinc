@@ -1044,3 +1044,38 @@ func (g *Generator) zeroValueFor(goType string) string {
 }
 
 // List/map literal type inference helpers are in codegen_stmts.go.
+
+// isAutoPointerizedGoStructField reports whether `typ` refers to a Go stdlib
+// struct that gets auto-pointerized in formatType (because the type has
+// pointer-receiver methods, e.g. sync.Mutex, sync.WaitGroup, sync.RWMutex,
+// bytes.Buffer, strings.Builder). Such fields land in the generated struct as
+// `*pkg.Type` and would otherwise be left nil — first method call segfaults.
+//
+// On match, returns the qualified Go type name (e.g. "sync.Mutex") so the
+// constructor emitter can produce `&sync.Mutex{}` directly.
+//
+// Mirrors the auto-pointerize rule at codegen_resolve.go:874-877. Kept as a
+// separate predicate so the constructor emitters in codegen_types.go can ask
+// the same question without re-implementing the lookup.
+func (g *Generator) isAutoPointerizedGoStructField(t parser.TypeExpr) (string, bool) {
+	st, ok := t.(*parser.SimpleType)
+	if !ok {
+		return "", false
+	}
+	if !strings.Contains(st.Name, ".") {
+		return "", false
+	}
+	parts := strings.SplitN(st.Name, ".", 2)
+	pkgPrefix, typeName := parts[0], parts[1]
+	goPath, ok := g.importMap[pkgPrefix]
+	if !ok {
+		return "", false
+	}
+	if !g.goResolver.IsStruct(goPath, typeName) {
+		return "", false
+	}
+	if !g.goResolver.HasPointerReceiverMethods(goPath, typeName) {
+		return "", false
+	}
+	return st.Name, true
+}

@@ -1,0 +1,83 @@
+// Regression: sync.Mutex / sync.RWMutex / sync.WaitGroup as class fields
+// auto-pointerize to *sync.X in the generated Go struct. Before the fix,
+// the constructor left these pointers nil and any method call segfaulted.
+// After the fix, the constructor emits `Mu: &sync.Mutex{}` etc. so the
+// fields are usable from the moment the object is constructed.
+
+import sync
+import fmt
+
+class Counter {
+    sync.Mutex mu
+    int n
+
+    init() {
+        this.n = 0
+    }
+
+    pub void inc() {
+        lock (mu) {
+            n = n + 1
+        }
+    }
+
+    pub int get() {
+        lock (mu) {
+            return n
+        }
+    }
+}
+
+class Versioned {
+    sync.RWMutex rw
+    String tag
+
+    init() {
+        this.tag = "v0"
+    }
+
+    pub String read() {
+        rw.RLock()
+        var t = tag
+        rw.RUnlock()
+        return t
+    }
+
+    pub void write(String t) {
+        rw.Lock()
+        tag = t
+        rw.Unlock()
+    }
+}
+
+void main() {
+    // Counter — exercise sync.Mutex from N goroutines.
+    var c = Counter()
+    var done = Channel<bool>(3)
+    var i = 0
+    while (i < 3) {
+        spawn {
+            var k = 0
+            while (k < 100) {
+                c.inc()
+                k = k + 1
+            }
+            done.send(true)
+        }
+        i = i + 1
+    }
+    var d = 0
+    while (d < 3) {
+        done.recv()
+        d = d + 1
+    }
+    fmt.Println("counter: " + str(c.get()))
+
+    // Versioned — exercise sync.RWMutex.
+    var v = Versioned()
+    fmt.Println("initial: " + v.read())
+    v.write("v1")
+    fmt.Println("after write: " + v.read())
+
+    fmt.Println("sync field init OK")
+}
