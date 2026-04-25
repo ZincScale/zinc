@@ -1,0 +1,40 @@
+// Regression for the cross-package thrower-inference bug:
+// When a function consumes an inner thrower's error via `or { return X }`,
+// the function itself does NOT propagate. Cross-package callers must see
+// the declared (single-value) return type, not a falsely-widened (T, error).
+//
+// Mirrors the real shape that broke zinc-flow-go's
+// fabric/runtime.disableProvider — its body uses
+//   var prov = globalCtx.getProvider(name) or { return false }
+// and the caller (in another package) was failing to compile because the
+// compiler's cross-package methodBodyThrows walk reported it as throwing.
+
+// Local Err so this regression doesn't depend on stdlib/errors.
+// Same shape as stdlib's Err — message field, `Error() string` method.
+class Err {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+pub class LookupError : Err {
+    init(String message) {
+        super(message)
+    }
+}
+
+// throwingHelper — returns Err on the failure path, so the compiler
+// auto-widens its signature to (String, error).
+pub String throwingHelper(bool fail) {
+    if (fail) {
+        return LookupError("requested failure")
+    }
+    return "ok"
+}
+
+// nonThrower — calls a thrower but consumes the error with `or { return false }`.
+// Declared return type is bool. Public signature MUST stay bool, not (bool, error).
+pub bool nonThrower(bool shouldFail) {
+    var s = throwingHelper(shouldFail) or { return false }
+    return s == "ok"
+}

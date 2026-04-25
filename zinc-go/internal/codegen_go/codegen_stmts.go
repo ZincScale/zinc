@@ -1831,6 +1831,18 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
 		}
+		// A non-throwing `or { ... }` handler consumes the call's error —
+		// the enclosing function does NOT inherit thrower status from
+		// this statement. Without this short-circuit a function like
+		//   pub bool foo() {
+		//     var x = thrower() or { return false }
+		//     return true
+		//   }
+		// gets falsely classified as throwing because callReturnsError
+		// reports yes for thrower(); the `or { }` handling is ignored.
+		if stmt.OrHandler != nil {
+			return false
+		}
 		return g.callReturnsError(stmt.Value)
 	case *parser.AssignStmt:
 		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
@@ -1839,6 +1851,9 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
 		}
+		if stmt.OrHandler != nil {
+			return false
+		}
 		return g.callReturnsError(stmt.Value)
 	case *parser.ExprStmt:
 		if exprContainsPropagate(stmt.Expr) {
@@ -1846,6 +1861,9 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		}
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
+		}
+		if stmt.OrHandler != nil {
+			return false
 		}
 		return g.callReturnsError(stmt.Expr)
 	case *parser.TupleVarStmt:

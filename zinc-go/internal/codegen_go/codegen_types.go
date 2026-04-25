@@ -26,7 +26,10 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		return
 	}
 
-	canError := g.errorFuncs[name]
+	// errorFuncs is keyed by zinc name (collectDecls populates with
+	// decl.Name). Top-level fns in subpackages get exported via
+	// exportIfSubpackage, so look up by fn.Name not by the exported name.
+	canError := g.errorFuncs[fn.Name]
 	goRetType := g.goReturnTypeStr(fn.ReturnType)
 	var ret string
 	if canError {
@@ -431,7 +434,19 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		}
 		if parentType != "" {
 			args := g.formatExprList(ctor.SuperArgs)
-			litFields = append(litFields, fmt.Sprintf("%s: *New%s(%s)", parentType, parentType, args))
+			// Cross-package parent (`pkg.Type`): the embedded struct field
+			// is named with the unqualified type (Go embedding rule), and
+			// the constructor lives in the parent package as `pkg.NewType`.
+			// Same-package parent stays as `Type` / `NewType`.
+			fieldName := parentType
+			ctorRef := "New" + parentType
+			if idx := strings.LastIndex(parentType, "."); idx >= 0 {
+				pkg := parentType[:idx]
+				typeName := parentType[idx+1:]
+				fieldName = typeName
+				ctorRef = pkg + ".New" + typeName
+			}
+			litFields = append(litFields, fmt.Sprintf("%s: *%s(%s)", fieldName, ctorRef, args))
 		}
 	}
 

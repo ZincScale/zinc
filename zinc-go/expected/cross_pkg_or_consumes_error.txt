@@ -1,0 +1,3 @@
+ok path: true
+bad path: false
+cross_pkg_or_consumes_error OK

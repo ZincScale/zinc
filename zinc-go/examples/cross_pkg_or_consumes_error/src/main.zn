@@ -1,0 +1,14 @@
+// Cross-package consumer. Call sites must accept a single bool —
+// if compiler false-widens to (bool, error), generated Go fails typecheck.
+
+import lib
+
+void main() {
+    var ok = lib.nonThrower(false)
+    print("ok path: ${ok}")
+
+    var bad = lib.nonThrower(true)
+    print("bad path: ${bad}")
+
+    print("cross_pkg_or_consumes_error OK")
+}
