@@ -408,6 +408,25 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
+
+		// Track Channel-typed locals from `var ch = Channel<T>(N)` so that
+		// downstream codegen (for-range, isChannelVar, isCollectionVar) can
+		// identify them. Without this, only explicitly-typed declarations
+		// (`Channel<T> ch = …`) were recognized; the bare-init form is the
+		// idiomatic one used throughout zinc-flow-go.
+		// (Field-level synthesis already exists in fieldGenericType.)
+		if call, ok := v.Value.(*parser.CallExpr); ok && v.Type == nil {
+			if ident, ok := call.Callee.(*parser.Ident); ok &&
+				(ident.Name == "Channel" || ident.Name == "Chan") &&
+				len(call.TypeArgs) >= 1 {
+				elemType := &parser.SimpleType{Name: call.TypeArgs[0]}
+				g.varTypeExprs[v.Name] = &parser.GenericType{
+					Name:     "Channel",
+					TypeArgs: []parser.TypeExpr{elemType},
+				}
+				g.varTypes[v.Name] = "chan " + g.formatType(elemType)
+			}
+		}
 		if _, ok := v.Value.(*parser.SafeNavExpr); ok {
 			g.ptrVars[v.Name] = true
 		}
@@ -614,6 +633,10 @@ func (g *Generator) emitForStmt(f *parser.ForStmt) {
 				mapExpr := g.stripEntrySet(f.Range)
 				g.writeln("for %s := range %s {", f.Item, mapExpr)
 			} else if g.isMapVar(f.Range) {
+				g.writeln("for %s := range %s {", f.Item, g.formatExpr(f.Range))
+			} else if g.isChannelVar(f.Range) {
+				// Go channel range yields one value per iteration, not (i, v).
+				// Loop terminates when the channel is closed.
 				g.writeln("for %s := range %s {", f.Item, g.formatExpr(f.Range))
 			} else {
 				g.writeln("for _, %s := range %s {", f.Item, g.formatExpr(f.Range))

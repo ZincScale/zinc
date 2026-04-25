@@ -1,0 +1,34 @@
+// Regression: `for x in ch` over a typed Channel<T>(N).
+// Previously codegen'd `for _, n := range ch` (2 iter vars) which Go
+// rejects on channels — they only permit a single value per iteration.
+// Now requires the bare-init form `var ch = Channel<int>(N)` to also
+// register the channel type, so isChannelVar returns true at the
+// for-stmt site.
+
+import fmt
+
+void main() {
+    var ch = Channel<int>(8)
+
+    spawn {
+        var i = 0
+        while (i < 5) {
+            ch.send(i)
+            i = i + 1
+        }
+        ch.close()
+    }
+
+    var sum = 0
+    for (n in ch) {
+        sum = sum + n
+    }
+    fmt.Println("sum: " + str(sum))
+
+    var ch2 = Channel<String>(1)
+    ch2.send("hi")
+    ch2.close()
+    fmt.Println("first: " + ch2.recv())
+    fmt.Println("post-close: '" + ch2.recv() + "'")
+    fmt.Println("channel_range OK")
+}
