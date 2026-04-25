@@ -439,6 +439,38 @@ type MatchCase struct {
 	Body    *BlockStmt
 }
 
+// SelectStmt: multiplex over channel send/recv operations.
+//
+//   select {
+//       case x = ch1.recv(): ...      // recv with binding
+//       case ch2.recv(): ...           // recv without binding
+//       case ch3.send(value): ...      // send
+//       case time.After(d).recv(): ... // timer (just a recv on a timer chan)
+//       default: ...                   // optional, fires when none ready
+//   }
+//
+// Maps 1:1 to Go's select statement. Each case's CallExpr is restricted
+// to <chan>.recv() or <chan>.send(arg) at parse time.
+type SelectStmt struct {
+	Line    int           // source line number (1-indexed)
+	Cases   []*SelectCase
+	Default *BlockStmt    // nil if no default
+}
+
+func (s *SelectStmt) nodeTag() {}
+func (s *SelectStmt) stmtTag() {}
+
+// SelectCase: one arm of a select. Kind is "recv" or "send".
+//   - Recv:  Channel.Recv() with optional Binding (binding == "" → no binding)
+//   - Send:  Channel.Send(SendValue)
+type SelectCase struct {
+	Kind      string     // "recv" | "send"
+	Channel   Expr       // the channel expression (left of .recv()/.send())
+	Binding   string     // recv-only: var name to bind, "" if none
+	SendValue Expr       // send-only: the value being sent
+	Body      *BlockStmt
+}
+
 // BreakStmt: break
 type BreakStmt struct{}
 

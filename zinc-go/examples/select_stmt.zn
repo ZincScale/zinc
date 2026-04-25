@@ -1,0 +1,60 @@
+// select { case ... } — multiplex over channel send/recv operations.
+// Maps 1:1 to Go's select.
+
+import time
+import fmt
+
+void main() {
+    // --- Form 1: recv with binding ---
+    var ch1 = Channel<int>(1)
+    spawn { ch1.send(42) }
+    select {
+        case x = ch1.recv():
+            fmt.Println("recv-bind: " + str(x))
+    }
+
+    // --- Form 2: recv without binding ---
+    var ch2 = Channel<bool>(1)
+    spawn { ch2.send(true) }
+    select {
+        case ch2.recv():
+            fmt.Println("recv-discard: ok")
+    }
+
+    // --- Form 3: send ---
+    var ch3 = Channel<String>(1)
+    select {
+        case ch3.send("sent"):
+            fmt.Println("send: ok")
+    }
+    fmt.Println("send-recv: " + ch3.recv())
+
+    // --- Form 4: default arm via `case _:` ---
+    // Empty channel + non-blocking — default fires.
+    var ch4 = Channel<int>(1)
+    select {
+        case n = ch4.recv():
+            fmt.Println("recv: " + str(n) + " (BUG — should default)")
+        case _:
+            fmt.Println("default: nothing ready")
+    }
+
+    // --- Form 5: timer via time.After().recv() ---
+    select {
+        case time.After(20 * time.Millisecond).recv():
+            fmt.Println("timer: fired")
+    }
+
+    // --- Form 6: multiplex two recvs, deterministic via send order ---
+    var fast = Channel<String>(1)
+    var slow = Channel<String>(1)
+    spawn { fast.send("fast-wins") }
+    select {
+        case msg = fast.recv():
+            fmt.Println("multi: " + msg)
+        case msg = slow.recv():
+            fmt.Println("multi: " + msg + " (BUG — slow shouldn't be ready)")
+    }
+
+    fmt.Println("select_stmt OK")
+}

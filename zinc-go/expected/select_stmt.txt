@@ -1,0 +1,8 @@
+recv-bind: 42
+recv-discard: ok
+send: ok
+send-recv: sent
+default: nothing ready
+timer: fired
+multi: fast-wins
+select_stmt OK

@@ -77,6 +77,7 @@ const (
 	TOKEN_TIMEOUT    // timeout(dur) { }
 	TOKEN_ABSTRACT   // abstract (abstract class/method)
 	TOKEN_TYPE       // type (type alias)
+	TOKEN_SELECT     // select (multiplex over channel ops)
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -187,6 +188,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_CONCURRENT: "concurrent",
 	TOKEN_TIMEOUT:    "timeout",
 	TOKEN_ABSTRACT:   "abstract",
+	TOKEN_SELECT:     "select",
 	TOKEN_TYPE:       "type",
 
 	TOKEN_LPAREN:    "(",
@@ -304,6 +306,7 @@ var keywords = map[string]TokenType{
 	"timeout":    TOKEN_TIMEOUT,
 	"abstract":   TOKEN_ABSTRACT,
 	"type":       TOKEN_TYPE,
+	"select":     TOKEN_SELECT,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

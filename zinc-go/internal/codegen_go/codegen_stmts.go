@@ -113,7 +113,43 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("defer %s", g.formatExpr(stmt.Expr))
 	case *parser.AssertStmt:
 		g.emitAssertStmt(stmt)
+	case *parser.SelectStmt:
+		g.emitSelectStmt(stmt)
 	}
+}
+
+// emitSelectStmt translates zinc's `select { case ch.recv(): ... }` to Go's
+// `select { case <-ch: ... }`. Each case maps 1:1:
+//
+//   case <chan>.recv():        →  case <-ch:
+//   case <var> = <chan>.recv(): →  case <var> := <-ch:
+//   case <chan>.send(<expr>):  →  case ch <- <expr>:
+//   case _:                    →  default:
+func (g *Generator) emitSelectStmt(s *parser.SelectStmt) {
+	g.writeln("select {")
+	for _, c := range s.Cases {
+		ch := g.formatExpr(c.Channel)
+		switch c.Kind {
+		case "recv":
+			if c.Binding != "" {
+				g.writeln("case %s := <-%s:", c.Binding, ch)
+			} else {
+				g.writeln("case <-%s:", ch)
+			}
+		case "send":
+			g.writeln("case %s <- %s:", ch, g.formatExpr(c.SendValue))
+		}
+		g.indent++
+		g.emitBlock(c.Body)
+		g.indent--
+	}
+	if s.Default != nil {
+		g.writeln("default:")
+		g.indent++
+		g.emitBlock(s.Default)
+		g.indent--
+	}
+	g.writeln("}")
 }
 
 // --- Type inference helpers --------------------------------------------------

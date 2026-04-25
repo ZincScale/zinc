@@ -62,6 +62,8 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseConcurrentStmt()
 	case lexer.TOKEN_TIMEOUT:
 		return p.v2ParseTimeoutStmt()
+	case lexer.TOKEN_SELECT:
+		return p.v2ParseSelectStmt()
 	case lexer.TOKEN_IDENT:
 		if tok.Literal == "assert" {
 			return p.v2ParseAssertStmt()
@@ -450,6 +452,136 @@ func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return &MatchStmt{Line: line, Subject: subject, Cases: cases}
+}
+
+// v2ParseSelectStmt: select { case ch.recv(): stmts ... case _: stmts }
+//
+// Each case is one of:
+//   case <var> = <chan>.recv(): stmts   — recv with binding
+//   case <chan>.recv():        stmts    — recv without binding
+//   case <chan>.send(<expr>):  stmts    — send
+//   case _:                    stmts    — default (fires when none ready)
+//
+// Body of each case extends until the next `case` or closing `}`.
+// At most one `case _` per select. Maps 1:1 to Go's select statement.
+func (p *Parser) v2ParseSelectStmt() *SelectStmt {
+	line := p.peek().Line
+	p.expect(lexer.TOKEN_SELECT)
+	p.expect(lexer.TOKEN_LBRACE)
+	p.skipSemis()
+
+	stmt := &SelectStmt{Line: line}
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		if !p.check(lexer.TOKEN_CASE) {
+			p.errorf("expected `case` in select, got %s", p.peek().Literal)
+			p.advance()
+			continue
+		}
+		p.advance() // consume `case`
+
+		// Default arm: `case _:`
+		if p.peek().Type == lexer.TOKEN_IDENT && p.peek().Literal == "_" &&
+			p.peekAt(1).Type == lexer.TOKEN_COLON {
+			p.advance() // consume `_`
+			p.expect(lexer.TOKEN_COLON)
+			body := p.v2ParseSelectCaseBody()
+			if stmt.Default != nil {
+				p.errorf("select has more than one `case _` (default)")
+			}
+			stmt.Default = body
+			p.skipSemis()
+			continue
+		}
+
+		c := p.v2ParseSelectCase()
+		if c != nil {
+			stmt.Cases = append(stmt.Cases, c)
+		}
+		p.skipSemis()
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return stmt
+}
+
+// v2ParseSelectCase parses one `case` arm after the `case` keyword has been
+// consumed: case-expr `:` body. The case-expr must be one of the three
+// supported forms (recv, recv-with-binding, send) — anything else is a parse
+// error so we don't silently accept arbitrary expressions.
+func (p *Parser) v2ParseSelectCase() *SelectCase {
+	// Detect `<var> = <chan>.recv()` shape via lookahead before parsing as
+	// a generic expression — assignment isn't an expression in zinc, so
+	// v2ParseExpr would reject the `=`.
+	if p.v2IsIdent() && p.peekAt(1).Type == lexer.TOKEN_ASSIGN {
+		bindName := p.v2ExpectIdent()
+		p.advance() // consume `=`
+		recvExpr := p.v2ParseExpr()
+		p.expect(lexer.TOKEN_COLON)
+		body := p.v2ParseSelectCaseBody()
+		recvCh, ok := selectRecvChannel(recvExpr)
+		if !ok {
+			p.errorf("select case binding must be `<var> = <chan>.recv()`")
+			return nil
+		}
+		return &SelectCase{Kind: "recv", Channel: recvCh, Binding: bindName, Body: body}
+	}
+
+	expr := p.v2ParseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	body := p.v2ParseSelectCaseBody()
+
+	// Unwrap to find the underlying call shape.
+	if ch, ok := selectRecvChannel(expr); ok {
+		return &SelectCase{Kind: "recv", Channel: ch, Body: body}
+	}
+	if ch, val, ok := selectSendChannel(expr); ok {
+		return &SelectCase{Kind: "send", Channel: ch, SendValue: val, Body: body}
+	}
+	p.errorf("select case must be `<chan>.recv()`, `<var> = <chan>.recv()`, or `<chan>.send(<expr>)`")
+	return nil
+}
+
+// v2ParseSelectCaseBody parses the statement list for one case until the
+// next `case` or closing `}`. Statements separate by newline or `;`.
+func (p *Parser) v2ParseSelectCaseBody() *BlockStmt {
+	body := &BlockStmt{}
+	p.skipSemis()
+	for !p.check(lexer.TOKEN_CASE) &&
+		!p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		s := p.v2ParseStmt()
+		if s != nil {
+			body.Stmts = append(body.Stmts, s)
+		}
+		p.skipSemis()
+	}
+	return body
+}
+
+// selectRecvChannel inspects an expression looking for `<chan>.recv()` and
+// returns the channel sub-expression on match.
+func selectRecvChannel(e Expr) (Expr, bool) {
+	call, ok := e.(*CallExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := call.Callee.(*SelectorExpr)
+	if !ok || sel.Field != "recv" || len(call.Args) != 0 {
+		return nil, false
+	}
+	return sel.Object, true
+}
+
+// selectSendChannel inspects an expression looking for `<chan>.send(<value>)`
+// and returns the channel + value on match.
+func selectSendChannel(e Expr) (Expr, Expr, bool) {
+	call, ok := e.(*CallExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	sel, ok := call.Callee.(*SelectorExpr)
+	if !ok || sel.Field != "send" || len(call.Args) != 1 {
+		return nil, nil, false
+	}
+	return sel.Object, call.Args[0], true
 }
 
 // v2ParseWithStmt: with name = expr { } OR with expr { }
