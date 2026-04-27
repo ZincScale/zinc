@@ -120,14 +120,6 @@ def transpile_project(input_path: Path, out_dir: Path, config: dict | None = Non
         py_path.write_text(py_source)
         py_files.append(py_path)
 
-        # Create __init__.py in each package directory
-        pkg_dir = py_path.parent
-        while pkg_dir != out_dir:
-            init = pkg_dir / "__init__.py"
-            if not init.exists():
-                init.write_text("")
-            pkg_dir = pkg_dir.parent
-
     return py_files
 
 

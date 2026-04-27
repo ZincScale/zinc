@@ -109,15 +109,6 @@ def transpile_project(input_path, out_dir, config=None) {
         py_path.parent.mkdir(parents=True, exist_ok=True)
         py_path.write_text(py_source)
         py_files.append(py_path)
-
-        pkg_dir = py_path.parent
-        while pkg_dir != out_dir {
-            init_file = pkg_dir / "__init__.py"
-            if not init_file.exists() {
-                init_file.write_text("")
-            }
-            pkg_dir = pkg_dir.parent
-        }
     }
 
     return py_files

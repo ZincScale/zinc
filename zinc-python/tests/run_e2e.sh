@@ -53,6 +53,34 @@ for zn in "$E2E_DIR"/*.zn; do
     fi
 done
 
+# Multi-dir / multi-file project tests: each subdir under e2e/projects/
+# is a full zinc project (zinc.toml + src/) with its own expected.txt.
+if [ -d "$E2E_DIR/projects" ]; then
+    for proj in "$E2E_DIR/projects"/*/; do
+        [ -d "$proj" ] || continue
+        name="projects/$(basename "$proj")"
+        expected="${proj}expected.txt"
+
+        if [ ! -f "$expected" ]; then
+            echo "SKIP: $name (no expected output)"
+            continue
+        fi
+
+        actual=$("$ZINC" run "${proj%/}" 2>&1)
+        exp=$(cat "$expected")
+
+        if [ "$actual" = "$exp" ]; then
+            echo "PASS: $name"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: $name"
+            echo "  expected: $(echo "$exp" | head -3)"
+            echo "  got:      $(echo "$actual" | head -3)"
+            FAIL=$((FAIL + 1))
+        fi
+    done
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ] || exit 1
