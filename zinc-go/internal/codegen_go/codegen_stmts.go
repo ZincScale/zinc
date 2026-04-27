@@ -662,7 +662,7 @@ func (g *Generator) tryContainsKeyIfHeader(e parser.Expr) (string, string, bool)
 func (g *Generator) emitIfStmt(s *parser.IfStmt) {
 	// Map containsKey check in cond position emits the natural Go form
 	// `if _, _ok := m[k]; _ok { ... }` instead of an IIFE wrapper. Pure
-	// readability win in the generated Go (Caravan's value-prop is that
+	// readability win in the generated Go (Zinc's value-prop is that
 	// the output is editable). Negation `!m.containsKey(k)` lowers to
 	// `; !_ok`. Only fires when the call is in plain or single-negated
 	// position; compound boolean exprs fall back to the IIFE form.

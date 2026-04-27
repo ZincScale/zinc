@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="logo.png" alt="Caravan" width="320">
+  <img src="logo.png" alt="Zinc" width="320">
 </p>
 
-# Caravan
+# Zinc
 
 Thin transpilers that remove syntax warts from target languages. Clean source in, clean output you can read and edit directly.
 
 | Project | Target | Status |
 |---------|--------|--------|
-| [caravan-csharp](caravan-csharp/) | C# (.NET 10 AOT) | Build tool + transpiler variant used by caravan-flow-csharp |
+| [zinc-csharp](zinc-csharp/) | C# (.NET 10 AOT) | Build tool + transpiler variant used by zinc-flow-csharp |
 
 ## License
 

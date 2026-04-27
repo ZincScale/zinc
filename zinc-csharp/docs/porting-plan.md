@@ -1,7 +1,7 @@
-# caravan-csharp porting plan
+# zinc-csharp porting plan
 
 Delta between `zinc-go` (the shipping Zinc→Go transpiler) and
-`caravan-csharp` (today just a build tool), and the work required to
+`zinc-csharp` (today just a build tool), and the work required to
 bring a full Zinc→C# transpiler online.
 
 ## State of play
@@ -31,24 +31,24 @@ Core language features covered:
   external dep class-decl loading (`loadDepClassDecls`)
 - Line directives (`//line file.zn:N`) for error fidelity
 
-### caravan-csharp — what exists
+### zinc-csharp — what exists
 
 Build tool only. No transpiler.
 
 | Piece | Size | What it is |
 |---|---|---|
-| `build-tool/caravan-csharp` | 571 LOC bash | Scaffolds `.csproj`, delegates to `dotnet build/run/test`, handles AOT flags, cross-compile, test runner |
+| `build-tool/zinc-csharp` | 571 LOC bash | Scaffolds `.csproj`, delegates to `dotnet build/run/test`, handles AOT flags, cross-compile, test runner |
 | `install.sh` | 140 LOC | Installs .NET SDK + build tool, PATH wiring |
 | `docs/design-pooling.md` | Design doc | Memory/pooling strategy for runtime (forward-looking) |
 | `tests/e2e/hello/` | 1 test | **Hand-written C#** (`Hello/Program.cs`), not transpiled |
-| `caravan.toml` | Project config | Schema exists, parsed by build tool |
+| `zinc.toml` | Project config | Schema exists, parsed by build tool |
 
 What's **missing**: the entire Zinc→C# transpiler. There is no `.zn → .cs`
 translation anywhere. The hello test is hand-written C#.
 
 ## The delta
 
-| Component | zinc-go has | caravan-csharp has | Work |
+| Component | zinc-go has | zinc-csharp has | Work |
 |---|---|---|---|
 | Language spec (docs, grammar) | Yes, implicit in parser + docs/ | N/A | Reuse |
 | Lexer | Hand-rolled Go | — | Port to C#, OR share via cross-lang grammar |
@@ -56,7 +56,7 @@ translation anywhere. The hello test is hand-written C#.
 | Codegen | Zinc AST → Go | — | **New**: Zinc AST → C# |
 | Stdlib | Zinc `.zn` sources, compiled to Go | — | Same `.zn` sources should compile to C# — stdlib is language-level, not backend-level |
 | E2E test suite | 65 tests, each `.zn` + `expected/` | 1 hand-written hello | Reuse the `.zn` sources, add C#-specific `expected/` outputs |
-| Build tool | `zinc build/run/test/…` Go CLI | `caravan-csharp build/run/…` bash | Both exist; design question below |
+| Build tool | `zinc build/run/test/…` Go CLI | `zinc-csharp build/run/…` bash | Both exist; design question below |
 | Packaging | Go → static binary via goreleaser | .NET → Native AOT via dotnet | Different mechanics, both already work |
 
 ## Design questions to answer tomorrow
@@ -121,21 +121,21 @@ features used there. Verify that first as the stdlib compile test.
 
 ### Q5. Build tool unification
 
-`caravan-csharp` (bash) and `zinc` (Go CLI) both exist. Differences:
+`zinc-csharp` (bash) and `zinc` (Go CLI) both exist. Differences:
 
 - `zinc build` for a project generates Go in `zinc-out/` and delegates
   to `go build`. One tool.
-- `caravan-csharp build` scaffolds a `.csproj` and delegates to
+- `zinc-csharp build` scaffolds a `.csproj` and delegates to
   `dotnet build`. Build tool only — no transpilation.
 
 If we add a C# backend, the mental model could be:
 - `zinc build --target=go` (current default)
 - `zinc build --target=csharp` (new)
-- `caravan-csharp` becomes the .NET-specific build wrapper that `zinc
+- `zinc-csharp` becomes the .NET-specific build wrapper that `zinc
   build --target=csharp` delegates to for `.csproj` generation + AOT
   flags.
 
-Alternative: keep them completely separate — `zinc` for Go, `caravan-csharp`
+Alternative: keep them completely separate — `zinc` for Go, `zinc-csharp`
 for C#, duplicated project-config parsing. Simpler but inconsistent.
 
 ## Proposed first-session plan (tomorrow)
@@ -160,7 +160,7 @@ Scope-narrow bootstrap to get a `.zn` file compiling to running C#.
   emission incl. `emitReturnStmt`, `stmtCanReturnError`, or-handler
 - `zinc-go/examples/` — 65 test inputs, paired with `expected/` outputs
 - `zinc-go/stdlib/src/` — stdlib Zinc sources (should transpile as-is)
-- `caravan-csharp/build-tool/caravan-csharp` — existing .csproj
+- `zinc-csharp/build-tool/zinc-csharp` — existing .csproj
   generation + dotnet wrapping, ready to plug in
-- `caravan-csharp/docs/design-pooling.md` — runtime pooling design,
+- `zinc-csharp/docs/design-pooling.md` — runtime pooling design,
   relevant when emitting hot-path code

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# E2E tests for caravan-csharp build tool
+# E2E tests for zinc-csharp build tool
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOL="$SCRIPT_DIR/../build-tool/caravan-csharp"
+TOOL="$SCRIPT_DIR/../build-tool/zinc-csharp"
 PASS=0
 FAIL=0
 
@@ -40,7 +40,7 @@ run_test() {
     "$TOOL" clean >/dev/null 2>&1 || true
 }
 
-echo "=== caravan-csharp e2e tests ==="
+echo "=== zinc-csharp e2e tests ==="
 run_test "hello"
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="

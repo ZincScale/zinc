@@ -1,4 +1,4 @@
-package caravan;
+package zinc;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -7,16 +7,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /// Thin CLI wrapping sbt 2.0 via its bootstrap launcher
-/// (`sbt-launch.jar`, bundled alongside caravan-java). The goal is Java
+/// (`sbt-launch.jar`, bundled alongside zinc-java). The goal is Java
 /// developers never learn sbt's Scala configuration surface for
-/// day-to-day work — `caravan init`, `caravan build`, `caravan run`, `caravan test`,
-/// `caravan clean` cover the common loop.
+/// day-to-day work — `zinc init`, `zinc build`, `zinc run`, `zinc test`,
+/// `zinc clean` cover the common loop.
 ///
-/// The install script drops `sbt-launch.jar` next to `caravan-java.jar`
-/// and passes its path via -Dcaravan.sbtLaunch. No external sbt install
+/// The install script drops `sbt-launch.jar` next to `zinc-java.jar`
+/// and passes its path via -Dzinc.sbtLaunch. No external sbt install
 /// required; the launcher itself downloads the sbt distribution on
-/// first `caravan build` and caches it under ~/.sbt.
-public final class Caravan {
+/// first `zinc build` and caches it under ~/.sbt.
+public final class Zinc {
 
     private static final String VERSION = "0.1.0";
 
@@ -40,7 +40,7 @@ public final class Caravan {
             case "version", "--version", "-v" -> { printVersion(); yield 0; }
             case "help", "--help", "-h" -> { usage(); yield 0; }
             default -> {
-                System.err.println("caravan: unknown command '" + cmd + "'");
+                System.err.println("zinc: unknown command '" + cmd + "'");
                 usage();
                 yield 1;
             }
@@ -56,9 +56,9 @@ public final class Caravan {
         Path launchJar = resolveSbtLaunchJar();
         if (launchJar == null) {
             System.err.println("""
-                    caravan: sbt-launch.jar not found.
-                    Expected next to caravan-java.jar, but the install looks incomplete.
-                    Re-run install.sh from the caravan-java source directory.
+                    zinc: sbt-launch.jar not found.
+                    Expected next to zinc-java.jar, but the install looks incomplete.
+                    Re-run install.sh from the zinc-java source directory.
                     """);
             return 2;
         }
@@ -75,19 +75,19 @@ public final class Caravan {
     }
 
     /// Resolve sbt-launch.jar. Priority:
-    ///   1. -Dcaravan.sbtLaunch=/path (set by the install-generated wrapper)
-    ///   2. $CARAVAN_SBT_LAUNCH env var
-    ///   3. <dir-of-caravan-java.jar>/sbt-launch.jar (convention)
+    ///   1. -Dzinc.sbtLaunch=/path (set by the install-generated wrapper)
+    ///   2. $ZINC_SBT_LAUNCH env var
+    ///   3. <dir-of-zinc-java.jar>/sbt-launch.jar (convention)
     ///   4. $HOME/.local/lib/sbt-launch.jar (install default)
     private static Path resolveSbtLaunchJar() {
-        String prop = System.getProperty("caravan.sbtLaunch");
+        String prop = System.getProperty("zinc.sbtLaunch");
         if (prop != null && Files.isRegularFile(Path.of(prop))) return Path.of(prop);
 
-        String env = System.getenv("CARAVAN_SBT_LAUNCH");
+        String env = System.getenv("ZINC_SBT_LAUNCH");
         if (env != null && Files.isRegularFile(Path.of(env))) return Path.of(env);
 
         try {
-            Path self = Path.of(Caravan.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            Path self = Path.of(Zinc.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             Path sibling = self.getParent().resolve("sbt-launch.jar");
             if (Files.isRegularFile(sibling)) return sibling;
         } catch (Exception ignored) { /* fall through */ }
@@ -109,14 +109,14 @@ public final class Caravan {
     }
 
     /// First-run diagnostic. Walks the toolchain resolution chain and
-    /// surfaces what caravan actually sees: JDK path + version, sbt
-    /// launcher location, whether we're inside a caravan project right
+    /// surfaces what zinc actually sees: JDK path + version, sbt
+    /// launcher location, whether we're inside a zinc project right
     /// now, and what sbt version the project pins (if any).
     ///
-    /// Mirrors caravan-csharp's {@code doctor} command — intended as
+    /// Mirrors zinc-csharp's {@code doctor} command — intended as
     /// the first thing a user runs when something looks wrong.
     private static void printDoctor() {
-        System.out.println("caravan-java diagnostics");
+        System.out.println("zinc-java diagnostics");
         System.out.println();
 
         // JDK
@@ -126,12 +126,12 @@ public final class Caravan {
         System.out.println("  java: " + javaVer + " (" + vmName + ")");
         System.out.println("        " + javaHome);
 
-        // caravan-java.jar location
+        // zinc-java.jar location
         try {
-            Path self = Path.of(Caravan.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            System.out.println("  caravan-java.jar: " + self);
+            Path self = Path.of(Zinc.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            System.out.println("  zinc-java.jar: " + self);
         } catch (Exception ex) {
-            System.out.println("  caravan-java.jar: (unresolved — " + ex.getClass().getSimpleName() + ")");
+            System.out.println("  zinc-java.jar: (unresolved — " + ex.getClass().getSimpleName() + ")");
         }
 
         // sbt launcher
@@ -142,7 +142,7 @@ public final class Caravan {
             System.out.println("  sbt-launch.jar: " + launchJar);
         }
 
-        // Project context (are we inside a caravan-scaffolded repo?)
+        // Project context (are we inside a zinc-scaffolded repo?)
         Path buildSbt = Path.of(System.getProperty("user.dir"), "build.sbt");
         Path buildProps = Path.of(System.getProperty("user.dir"), "project", "build.properties");
         if (Files.isRegularFile(buildSbt)) {
@@ -162,7 +162,7 @@ public final class Caravan {
                 System.out.println("  project/build.properties: missing");
             }
         } else {
-            System.out.println("  project: (not in a caravan project — run 'caravan init <name>' to scaffold)");
+            System.out.println("  project: (not in a zinc project — run 'zinc init <name>' to scaffold)");
         }
 
         // sbt + ivy caches — useful when builds act weird
@@ -176,7 +176,7 @@ public final class Caravan {
     }
 
     private static void printVersion() {
-        System.out.println("caravan-java " + VERSION);
+        System.out.println("zinc-java " + VERSION);
         Path launchJar = resolveSbtLaunchJar();
         if (launchJar == null) {
             System.out.println("sbt      (launcher missing — reinstall)");
@@ -188,9 +188,9 @@ public final class Caravan {
 
     private static void usage() {
         System.out.println("""
-                caravan — build tool for Java projects (wraps sbt 2.0, launcher bundled).
+                zinc — build tool for Java projects (wraps sbt 2.0, launcher bundled).
 
-                Usage: caravan <command> [args]
+                Usage: zinc <command> [args]
 
                 Commands:
                   init [name]    Scaffold a new Java project in ./<name> (or current dir if omitted)
@@ -200,15 +200,15 @@ public final class Caravan {
                   clean          Remove build outputs
                   shell          Drop into interactive sbt (for power users)
                   doctor         Check toolchain and project status
-                  version        Print caravan + sbt launcher paths
+                  version        Print zinc + sbt launcher paths
                   help           Show this message
 
-                sbt itself is downloaded by the bundled launcher on first `caravan build`,
+                sbt itself is downloaded by the bundled launcher on first `zinc build`,
                 using the version pinned in project/build.properties. No external
                 install required.
 
                 The generated build.sbt is plain sbt Scala — edit it directly to add
-                library dependencies. caravan never rewrites it after init.
+                library dependencies. zinc never rewrites it after init.
                 """);
     }
 }

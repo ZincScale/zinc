@@ -1,7 +1,7 @@
 # Pooling & Memory Borrowing Design
 
 This document explains the pool types available in .NET, why we chose each strategy
-for caravan-flow-csharp, and how they interact with the GC.
+for zinc-flow-csharp, and how they interact with the GC.
 
 ## The Problem
 
@@ -37,7 +37,7 @@ pauses the thread for ~0.5-2ms. At scale, GC pauses dominate wall-clock time.
 - Any temporary `T[]` that would otherwise be allocated and immediately discarded
 - Especially important for arrays >85KB (these go on the Large Object Heap and trigger Gen2 collections)
 
-**caravan-flow usage:**
+**zinc-flow usage:**
 ```csharp
 // Raw content: rent byte[] from pool instead of allocating
 public Raw(ReadOnlySpan<byte> data) {
@@ -168,7 +168,7 @@ internal static class Pool<T> where T : class, new()
 - No `IDisposable` / lifetime tracking — caller must remember to return
 - Pool size is fixed; overflow objects are dropped (GC collects them)
 
-**Why this is ideal for caravan-flow:**
+**Why this is ideal for zinc-flow:**
 Each processor runs on a single thread (goroutine model). FlowFiles are created, processed,
 and consumed on the same thread within a single `Execute()` call. The pool never needs
 cross-thread access.
@@ -191,7 +191,7 @@ cross-thread access.
 memory access via the `fs`/`gs` segment register on x64. Fastest possible TLS access.
 
 **Async caveat:** `[ThreadStatic]` fields are tied to OS threads. If you `await` in the
-middle of a rent/return cycle, the continuation may run on a different thread. caravan-flow's
+middle of a rent/return cycle, the continuation may run on a different thread. zinc-flow's
 `Execute()` is fully synchronous within the lock, so this is not an issue.
 
 ---

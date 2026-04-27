@@ -2,7 +2,7 @@
 *.class
 out/
 dist/
-caravan-out/
+zinc-out/
 
 # Mill
 .mill-*

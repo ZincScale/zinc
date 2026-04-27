@@ -29,7 +29,7 @@ set -e
 
 ZINC_HOME="$HOME/.zinc-python"
 ZINC_BIN="$ZINC_HOME/bin"
-ZINC_REPO="https://github.com/CaravanScale/caravan.git"
+ZINC_REPO="https://github.com/ZincScale/zinc.git"
 
 echo "Installing zinc-python..."
 
@@ -62,7 +62,7 @@ echo "  installing zinc-python compiler..."
 mkdir -p "$ZINC_HOME" "$ZINC_BIN"
 
 # Clone or update the repo. The compiler lives at zinc-python/compiler/
-# inside the caravan monorepo.
+# inside the zinc monorepo.
 if [ -d "$ZINC_HOME/src" ]; then
     cd "$ZINC_HOME/src" && git pull --quiet 2>/dev/null || true
 else
