@@ -96,9 +96,10 @@ type MethodSig struct {
 
 // CtorDecl: new(params) { body }
 type CtorDecl struct {
-	Params    []*ParamDecl
-	Body      *BlockStmt
-	SuperArgs []Expr // args extracted from super(...) call in body
+	Params      []*ParamDecl
+	Body        *BlockStmt
+	SuperArgs   []Expr // args extracted from super(...) call in body
+	SuperCalled bool   // true when super(...) appeared in body (even with zero args)
 }
 
 // MethodDecl: [@annotations] [pub] [static] [abstract] fn name(params) [: ReturnType] { body }

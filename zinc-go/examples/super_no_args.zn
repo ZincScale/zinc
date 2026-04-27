@@ -1,0 +1,52 @@
+// Regression: bare `super()` (zero args) was dropped in the child ctor,
+// leaving the embedded base struct zero-valued. For parents that hold
+// auto-pointerized Go-stdlib fields (sync.Mutex, sync.RWMutex, ...),
+// this caused nil-pointer panics on the first lock — the parent's
+// constructor never ran, so the *sync.Mutex was nil.
+//
+// Fix: parser tracks `SuperCalled` independently of `SuperArgs`; codegen
+// emits `Base: *NewBase()` whenever super was called, regardless of
+// whether the user passed args.
+
+import sync
+import fmt
+
+class Base {
+    sync.Mutex mu
+    int hits
+
+    init() {
+        this.hits = 0
+    }
+
+    pub void bump() {
+        lock (mu) {
+            hits = hits + 1
+        }
+    }
+
+    pub int count() {
+        return hits
+    }
+}
+
+class Child : Base {
+    String label
+
+    init(String label) {
+        super()
+        this.label = label
+    }
+
+    pub String describe() {
+        return "${label}=${count()}"
+    }
+}
+
+void main() {
+    var c = Child("widget")
+    c.bump()
+    c.bump()
+    c.bump()
+    fmt.Println(c.describe())
+}

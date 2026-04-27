@@ -264,12 +264,14 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			body := p.v2ParseBlock()
 			// Extract super(...) call from body if present
 			var superArgs []Expr
+			var superCalled bool
 			var filteredStmts []Stmt
 			for _, s := range body.Stmts {
 				if es, ok := s.(*ExprStmt); ok {
 					if call, ok := es.Expr.(*CallExpr); ok {
 						if ident, ok := call.Callee.(*Ident); ok && ident.Name == "super" {
 							superArgs = call.Args
+							superCalled = true
 							continue
 						}
 					}
@@ -277,7 +279,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				filteredStmts = append(filteredStmts, s)
 			}
 			body.Stmts = filteredStmts
-			ctors = append(ctors, &CtorDecl{Params: params, Body: body, SuperArgs: superArgs})
+			ctors = append(ctors, &CtorDecl{Params: params, Body: body, SuperArgs: superArgs, SuperCalled: superCalled})
 		} else if tok.Type == lexer.TOKEN_VAR || tok.Type == lexer.TOKEN_CONST || tok.Type == lexer.TOKEN_INIT {
 			f := p.v2ParseFieldDecl()
 			fields = append(fields, f)

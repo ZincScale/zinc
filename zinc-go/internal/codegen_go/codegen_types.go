@@ -423,8 +423,13 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	var litFields []string
 	var remainingStmts []parser.Stmt
 
-	// Handle super() → embedded parent initialization
-	if len(ctor.SuperArgs) > 0 {
+	// Handle super(...) → embedded parent initialization. Triggers on any
+	// super() call regardless of arg count — bare super() must still emit
+	// `Base: *NewBase()` so the parent's ctor (which initializes auto-
+	// pointerized fields like *sync.Mutex) actually runs. Pre-fix we keyed
+	// off `len(SuperArgs) > 0` and silently dropped zero-arg super, leaving
+	// the embedded base zero-valued and any inherited mutex-typed field nil.
+	if ctor.SuperCalled {
 		parentType := ""
 		for _, p := range cls.Parents {
 			if !g.interfaces[p] {
