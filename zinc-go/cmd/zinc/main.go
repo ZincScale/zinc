@@ -24,8 +24,8 @@ func main() {
 			name = os.Args[2]
 		}
 		if name == "" {
-			errs.Error("zinc init requires a project name")
-			fmt.Fprintln(os.Stderr, "Usage: zinc init <name>")
+			errs.Error("zinc-go init requires a project name")
+			fmt.Fprintln(os.Stderr, "Usage: zinc-go init <name>")
 			os.Exit(1)
 		}
 		if err := initProject(name); err != nil {
@@ -96,7 +96,7 @@ func main() {
 
 	case "fmt":
 		if len(os.Args) < 3 {
-			errs.Error("zinc fmt requires a file or directory")
+			errs.Error("zinc-go fmt requires a file or directory")
 			os.Exit(1)
 		}
 		target := os.Args[2]
@@ -119,7 +119,7 @@ func main() {
 
 	case "add":
 		if len(os.Args) < 3 {
-			errs.Error("zinc add requires a module (e.g. github.com/foo/bar@v1.0.0)")
+			errs.Error("zinc-go add requires a module (e.g. github.com/foo/bar@v1.0.0)")
 			os.Exit(1)
 		}
 		if err := addDep(os.Args[2]); err != nil {
@@ -147,7 +147,7 @@ func main() {
 			}
 		}
 		if info, err := os.Stat(input); err != nil || !info.IsDir() || !isProjectDir(input) {
-			errs.Error("zinc test requires a project directory (with zinc.toml)")
+			errs.Error("zinc-go test requires a project directory (with zinc.toml)")
 			os.Exit(1)
 		}
 		if err := testProject(input, goTestArgs); err != nil {
@@ -156,7 +156,7 @@ func main() {
 		}
 
 	case "version":
-		fmt.Printf("zinc %s\n", version)
+		fmt.Printf("zinc-go %s\n", version)
 
 	default:
 		// Default: treat first arg as a .zn file to run (shorthand for zinc run)
@@ -189,18 +189,18 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: zinc <command> [args]")
+	fmt.Println("Usage: zinc-go <command> [args]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Printf("  %-45s %s\n", "zinc run <file.zn|dir> [-- args...]", "Transpile and run")
-	fmt.Printf("  %-45s %s\n", "zinc build [dir] [-o outdir] [--cross os/arch]", "Transpile and build")
-	fmt.Printf("  %-45s %s\n", "zinc test [dir] [-- go-test-args]", "Transpile *_test.zn and run go test")
-	fmt.Printf("  %-45s %s\n", "zinc init <name>", "Create a new Zinc project")
-	fmt.Printf("  %-45s %s\n", "zinc fmt <file.zn|dir>", "Format Zinc source code")
-	fmt.Printf("  %-45s %s\n", "zinc add <module@version>", "Add a Go dependency")
-	fmt.Printf("  %-45s %s\n", "zinc deps", "List dependencies")
-	fmt.Printf("  %-45s %s\n", "zinc <file.zn> [-- args...]", "Shorthand for zinc run")
-	fmt.Printf("  %-45s %s\n", "zinc version", "Show version")
+	fmt.Printf("  %-45s %s\n", "zinc-go run <file.zn|dir> [-- args...]", "Transpile and run")
+	fmt.Printf("  %-45s %s\n", "zinc-go build [dir] [-o outdir] [--cross os/arch]", "Transpile and build")
+	fmt.Printf("  %-45s %s\n", "zinc-go test [dir] [-- go-test-args]", "Transpile *_test.zn and run go test")
+	fmt.Printf("  %-45s %s\n", "zinc-go init <name>", "Create a new Zinc project")
+	fmt.Printf("  %-45s %s\n", "zinc-go fmt <file.zn|dir>", "Format Zinc source code")
+	fmt.Printf("  %-45s %s\n", "zinc-go add <module@version>", "Add a Go dependency")
+	fmt.Printf("  %-45s %s\n", "zinc-go deps", "List dependencies")
+	fmt.Printf("  %-45s %s\n", "zinc-go <file.zn> [-- args...]", "Shorthand for zinc-go run")
+	fmt.Printf("  %-45s %s\n", "zinc-go version", "Show version")
 	fmt.Println()
 	fmt.Println("Project mode: when a zinc.toml is present, build/run use the project config.")
 	fmt.Println()

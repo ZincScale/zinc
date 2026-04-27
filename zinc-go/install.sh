@@ -1,10 +1,12 @@
 #!/bin/bash
-# Zinc installer — downloads prebuilt binary or builds from source
+# zinc-go installer — downloads prebuilt binary or builds from source.
+# Installs as `zinc-go` (not `zinc`) so it coexists on PATH with
+# zinc-python's `zinc-python` binary; pick the one matching your target.
 set -e
 
 REPO="ZincScale/zinc"
-INSTALL_DIR="${ZINC_INSTALL_DIR:-$HOME/.zinc/bin}"
-VERSION="${ZINC_VERSION:-latest}"
+INSTALL_DIR="${ZINC_GO_INSTALL_DIR:-$HOME/.zinc-go/bin}"
+VERSION="${ZINC_GO_VERSION:-latest}"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -33,32 +35,32 @@ ensure_path() {
     fi
 }
 
-echo "Installing Zinc ($OS/$ARCH)..."
+echo "Installing zinc-go ($OS/$ARCH)..."
 mkdir -p "$INSTALL_DIR"
 
 # Try downloading prebuilt binary from GitHub releases
 if command -v curl &>/dev/null; then
     if [ "$VERSION" = "latest" ]; then
         DOWNLOAD_URL=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" \
-            | grep "browser_download_url.*zinc_.*_${OS}_${ARCH}.tar.gz" \
+            | grep "browser_download_url.*zinc-go_.*_${OS}_${ARCH}.tar.gz" \
             | head -1 | cut -d '"' -f 4)
     else
-        DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/zinc_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+        DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/zinc-go_${VERSION#v}_${OS}_${ARCH}.tar.gz"
     fi
 
     if [ -n "$DOWNLOAD_URL" ]; then
         echo "Downloading from $DOWNLOAD_URL"
         TMP=$(mktemp -d)
         curl -sL "$DOWNLOAD_URL" | tar xz -C "$TMP"
-        mv "$TMP/zinc" "$INSTALL_DIR/zinc"
-        chmod +x "$INSTALL_DIR/zinc"
+        mv "$TMP/zinc-go" "$INSTALL_DIR/zinc-go"
+        chmod +x "$INSTALL_DIR/zinc-go"
         rm -rf "$TMP"
 
-        echo "Installed zinc to $INSTALL_DIR/zinc"
+        echo "Installed zinc-go to $INSTALL_DIR/zinc-go"
         ensure_path
-        "$INSTALL_DIR/zinc" version
+        "$INSTALL_DIR/zinc-go" version
         echo ""
-        echo "Done! Try: zinc init myapp && cd myapp && zinc run"
+        echo "Done! Try: zinc-go init myapp && cd myapp && zinc-go run"
         exit 0
     fi
 fi
@@ -74,11 +76,11 @@ fi
 TMP=$(mktemp -d)
 git clone --depth 1 "https://github.com/$REPO.git" "$TMP/zinc"
 cd "$TMP/zinc/zinc-go"
-go build -ldflags "-s -w" -o "$INSTALL_DIR/zinc" ./cmd/zinc/
+go build -ldflags "-s -w" -o "$INSTALL_DIR/zinc-go" ./cmd/zinc/
 rm -rf "$TMP"
 
-echo "Built and installed zinc to $INSTALL_DIR/zinc"
+echo "Built and installed zinc-go to $INSTALL_DIR/zinc-go"
 ensure_path
-"$INSTALL_DIR/zinc" version
+"$INSTALL_DIR/zinc-go" version
 echo ""
-echo "Done! Try: zinc init myapp && cd myapp && zinc run"
+echo "Done! Try: zinc-go init myapp && cd myapp && zinc-go run"

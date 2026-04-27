@@ -5,7 +5,7 @@ LDFLAGS = -s -w -X main.version=$(VERSION)
 
 # Build zinc compiler
 build:
-	go build -ldflags "$(LDFLAGS)" -o zinc ./cmd/zinc/
+	go build -ldflags "$(LDFLAGS)" -o zinc-go ./cmd/zinc/
 
 # Run all e2e tests
 test:
@@ -13,15 +13,15 @@ test:
 
 # Install to /usr/local/bin (or DESTDIR)
 install: build
-	install -m 755 zinc $(DESTDIR)/usr/local/bin/zinc
+	install -m 755 zinc-go $(DESTDIR)/usr/local/bin/zinc-go
 
 # Cross-compile for all platforms
 cross: build
-	GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-linux-amd64   ./cmd/zinc/
-	GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-linux-arm64   ./cmd/zinc/
-	GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-darwin-amd64  ./cmd/zinc/
-	GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-darwin-arm64  ./cmd/zinc/
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-windows-amd64.exe ./cmd/zinc/
+	GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-go-linux-amd64   ./cmd/zinc/
+	GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-go-linux-arm64   ./cmd/zinc/
+	GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-go-darwin-amd64  ./cmd/zinc/
+	GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-go-darwin-arm64  ./cmd/zinc/
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/zinc-go-windows-amd64.exe ./cmd/zinc/
 	@echo "Built all platforms in dist/"
 
 # Release via goreleaser (requires GITHUB_TOKEN)
@@ -30,5 +30,5 @@ release:
 
 # Clean build artifacts
 clean:
-	rm -f zinc
+	rm -f zinc-go
 	rm -rf dist/ zinc-out/
