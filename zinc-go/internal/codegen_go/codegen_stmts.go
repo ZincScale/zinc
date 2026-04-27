@@ -630,8 +630,47 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	g.writeln("return %s", g.formatExpr(r.Value))
 }
 
+// tryContainsKeyIfHeader recognizes `m.containsKey(k)` or `!m.containsKey(k)`
+// in if-cond position and returns the (init, cond) parts of an `if init; cond {`
+// header. Returns ok=false for any other shape.
+func (g *Generator) tryContainsKeyIfHeader(e parser.Expr) (string, string, bool) {
+	negated := false
+	if u, ok := e.(*parser.UnaryExpr); ok && u.Op == "!" {
+		negated = true
+		e = u.Operand
+	}
+	call, ok := e.(*parser.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return "", "", false
+	}
+	sel, ok := call.Callee.(*parser.SelectorExpr)
+	if !ok || sel.Field != "containsKey" {
+		return "", "", false
+	}
+	if g.isStructVar(sel.Object) {
+		return "", "", false
+	}
+	obj := g.formatExpr(sel.Object)
+	key := g.formatExpr(call.Args[0])
+	cond := "_ok"
+	if negated {
+		cond = "!_ok"
+	}
+	return fmt.Sprintf("_, _ok := %s[%s]", obj, key), cond, true
+}
+
 func (g *Generator) emitIfStmt(s *parser.IfStmt) {
-	g.writeln("if %s {", g.formatExpr(s.Cond))
+	// Map containsKey check in cond position emits the natural Go form
+	// `if _, _ok := m[k]; _ok { ... }` instead of an IIFE wrapper. Pure
+	// readability win in the generated Go (Caravan's value-prop is that
+	// the output is editable). Negation `!m.containsKey(k)` lowers to
+	// `; !_ok`. Only fires when the call is in plain or single-negated
+	// position; compound boolean exprs fall back to the IIFE form.
+	if init, cond, ok := g.tryContainsKeyIfHeader(s.Cond); ok {
+		g.writeln("if %s; %s {", init, cond)
+	} else {
+		g.writeln("if %s {", g.formatExpr(s.Cond))
+	}
 	g.indent++
 	g.emitBlock(s.Then)
 	g.indent--
