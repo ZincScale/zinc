@@ -10,6 +10,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from transpiler import transpile
@@ -189,7 +190,7 @@ def cmd_run(args) {
         }
     }
 
-    tmp_dir = Path("/tmp/zinc-run-" + project_input.stem)
+    tmp_dir = Path(tempfile.gettempdir()) / ("zinc-run-" + project_input.stem)
     if tmp_dir.exists() {
         shutil.rmtree(tmp_dir)
     }

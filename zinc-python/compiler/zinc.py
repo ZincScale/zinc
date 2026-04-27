@@ -27,6 +27,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from transpiler import transpile
@@ -195,7 +196,7 @@ def cmd_run(args):
                 except ValueError:
                     aux_file = input_path
 
-    tmp_dir = Path(f"/tmp/zinc-run-{project_input.stem}")
+    tmp_dir = Path(tempfile.gettempdir()) / f"zinc-run-{project_input.stem}"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
 
