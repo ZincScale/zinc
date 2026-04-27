@@ -450,7 +450,7 @@ func (p *Parser) v2ParsePrimary() Expr {
 		return spawn
 	case lexer.TOKEN_NEW:
 		p.advance() // consume "new"
-		// Parse type name (possibly dotted: java.util.ArrayList)
+		// Parse type name (possibly dotted: bytes.Buffer, java.util.ArrayList)
 		nameTok := p.expect(lexer.TOKEN_IDENT)
 		name := nameTok.Literal
 		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
@@ -468,9 +468,17 @@ func (p *Parser) v2ParsePrimary() Expr {
 			}
 			p.expect(lexer.TOKEN_GT)
 		}
-		// Parse constructor args via v2ParseCallArgs (handles parens)
+		// Parens are optional: `new bytes.Buffer` ≡ `new bytes.Buffer()`. The
+		// no-paren form is the natural shape for zero-value-usable Go-stdlib
+		// types (sync.Mutex, bytes.Buffer, strings.Builder) where there are
+		// no init args. Either way the result is a CallExpr with IsNew=true.
 		ident := &Ident{Name: name}
-		call := p.v2ParseCallArgs(ident).(*CallExpr)
+		var call *CallExpr
+		if p.check(lexer.TOKEN_LPAREN) {
+			call = p.v2ParseCallArgs(ident).(*CallExpr)
+		} else {
+			call = &CallExpr{Callee: ident}
+		}
 		call.TypeArgs = typeArgs
 		call.IsNew = true
 		return call

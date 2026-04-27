@@ -1,0 +1,5 @@
+hello, world
+buf-content
+12
+5
+new_keyword OK

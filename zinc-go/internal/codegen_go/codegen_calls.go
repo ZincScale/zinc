@@ -494,10 +494,40 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		goTypeArgStr = "[" + strings.Join(goTA, ", ") + "]"
 	}
 
-	// Constructor calls: new Type() → NewType()
-	// Regular class constructors return *Type, so dereference for value semantics.
-	// Data class constructors return Type (by value), no dereference needed.
+	// Constructor calls. Two shapes:
+	//
+	// 1. Zinc class — `new Stats()` → `NewStats()`. The Zinc compiler
+	//    generates a NewT() factory for every class/data declaration.
+	//    Same-package detection: callee has no dot AND name is in
+	//    g.structs / g.dataClasses / g.unqualifiedNames.
+	//
+	// 2. Foreign Go-stdlib type — `new bytes.Buffer` → `&bytes.Buffer{}`.
+	//    Detected by the dotted callee (`pkg.Type`). Always pointerized
+	//    on the assumption that's why the user reached for `new` — Go-
+	//    stdlib types with pointer-receiver methods can't be used as
+	//    values (sync.Mutex, bytes.Buffer, strings.Builder, atomic.Int64).
+	//    No args supported here — for args, use the foreign struct-
+	//    literal form `pkg.Type(field=value, ...)` (handled elsewhere)
+	//    or the package's New* factory function.
 	if c.IsNew {
+		if strings.Contains(callee, ".") {
+			if len(c.Args) > 0 || len(c.NamedArgs) > 0 {
+				// Positional args on `new pkg.Type(...)` aren't safe to
+				// emit as a Go positional struct literal — Go struct
+				// field order can change without source-level breakage.
+				// Force the user to either use named args (handled by
+				// the foreign-struct-literal codegen path) or call the
+				// package's factory function explicitly.
+				return fmt.Sprintf("/* new %s with args: use named-arg form pkg.Type(field=value) or pkg.NewType(args) */", callee)
+			}
+			// Auto-import the package if needed
+			if dot := strings.Index(callee, "."); dot >= 0 {
+				if goPath, ok := g.importMap[callee[:dot]]; ok {
+					g.needImport(goPath)
+				}
+			}
+			return fmt.Sprintf("&%s{}", callee+goTypeArgStr)
+		}
 		ctorName := "New" + callee + goTypeArgStr
 		args = g.fillDefaultArgs("New"+callee, c.Args, c.NamedArgs, args)
 		return fmt.Sprintf("%s(%s)", ctorName, args)

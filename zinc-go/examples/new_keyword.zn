@@ -1,0 +1,48 @@
+// Regression: `new` keyword for Go-stdlib types as locals AND for
+// Zinc-class constructor calls (Java/C# style).
+//
+// Two shapes both supported:
+//
+//   • `new pkg.Type` / `new pkg.Type()` — Go-stdlib type, lowers to
+//     `&pkg.Type{}`. Closes the gap where zero-value-usable Go types
+//     (bytes.Buffer, strings.Builder, sync.Mutex, atomic.Int64) were
+//     unreachable as locals.
+//   • `new ZincClass()` / `new ZincClass(args)` — Zinc class ctor,
+//     lowers to `NewZincClass(args)`. Same as bare `ZincClass(args)`,
+//     just allows Java/C#-flavored call sites.
+
+import strings
+import bytes
+import fmt
+
+class Counter {
+    int n
+    init(int start) { this.n = start }
+    pub int get() { return n }
+    pub void bump() { n = n + 1 }
+}
+
+void main() {
+    // Foreign type, no factory in stdlib.
+    var sb = new strings.Builder
+    sb.WriteString("hello, ")
+    sb.WriteString("world")
+    fmt.Println(sb.String())
+
+    // Foreign type with parens — same lowering.
+    var buf = new bytes.Buffer()
+    buf.WriteString("buf-content")
+    fmt.Println(buf.String())
+
+    // Zinc class via `new` — equivalent to `Counter(10)`.
+    var c1 = new Counter(10)
+    c1.bump()
+    c1.bump()
+    fmt.Println(c1.get())
+
+    // Bare-call form should keep working unchanged.
+    var c2 = Counter(5)
+    fmt.Println(c2.get())
+
+    fmt.Println("new_keyword OK")
+}
