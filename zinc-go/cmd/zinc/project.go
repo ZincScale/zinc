@@ -349,7 +349,10 @@ func findZincToml(dir string) string {
 // [deps] keys are the local aliases you write in Zinc (`import viper`).
 // The right-hand side is `module/path@version`; `@version` is optional
 // (defaults to v0.0.0 when a [replace] override is set). [replace] keys
-// off the same alias so deps + replaces can never drift apart.
+// off the same alias so deps + replaces can never drift apart. Relative
+// [replace] paths are resolved against the directory containing zinc.toml,
+// letting devs commit a portable override that assumes a sibling repo
+// layout (e.g. "../zinc-stdlib/zinc-out") instead of an absolute path.
 func loadZincToml(path string) (*zincConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -422,10 +425,20 @@ func loadZincToml(path string) (*zincConfig, error) {
 	}
 
 	// Resolve [replace] aliases to module paths now that [deps] has been parsed.
+	// Relative local paths are resolved against the manifest's directory and
+	// canonicalized to absolute, so the path is anchored regardless of CWD when
+	// it's later stat'd or copied verbatim into the generated go.mod.
+	manifestDir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
 	for alias, localPath := range replaceByAlias {
 		modulePath, ok := cfg.Imports[alias]
 		if !ok {
 			return nil, fmt.Errorf("zinc.toml: [replace] %q has no matching [deps] entry", alias)
+		}
+		if !filepath.IsAbs(localPath) {
+			localPath = filepath.Join(manifestDir, localPath)
 		}
 		cfg.Replaces[modulePath] = localPath
 	}
