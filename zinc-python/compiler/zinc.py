@@ -30,7 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from transpiler import transpile
+from transpiler import transpile, untranspile
 
 try:
     import tomllib
@@ -94,6 +94,35 @@ def find_zn_files(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
     return sorted(path.rglob("*.zn"))
+
+
+def find_py_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    return sorted(path.rglob("*.py"))
+
+
+def untranspile_project(input_path: Path, out_dir: Path) -> list[Path]:
+    """Untranspile all .py files into .zn, preserving directory structure."""
+    py_files = find_py_files(input_path)
+    if not py_files:
+        print(f"error: no .py files found in {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    source_root = input_path if input_path.is_dir() else input_path.parent
+
+    zn_files = []
+    for py in py_files:
+        source = py.read_text()
+        zn_source = untranspile(source, str(py))
+
+        rel = py.relative_to(source_root)
+        zn_path = out_dir / rel.with_suffix(".zn")
+        zn_path.parent.mkdir(parents=True, exist_ok=True)
+        zn_path.write_text(zn_source)
+        zn_files.append(zn_path)
+
+    return zn_files
 
 
 def transpile_project(input_path: Path, out_dir: Path, config: dict | None = None) -> list[Path]:
@@ -285,6 +314,16 @@ def cmd_build(args):
     print(f"build complete: {out_dir}")
 
 
+def cmd_from_py(args):
+    input_path = Path(args.input)
+    out_dir = Path(args.output) if args.output else Path("zn")
+
+    zn_files = untranspile_project(input_path, out_dir)
+    for f in zn_files:
+        print(f"untranspiled: {f}")
+    print(f"from-py complete: {out_dir}")
+
+
 def cmd_init(args):
     project_dir = Path(args.name)
     project_name = project_dir.name  # just the basename, not full path
@@ -333,6 +372,10 @@ def main():
     build_p.add_argument("-o", "--output", help="output directory")
     build_p.add_argument("--native", action="store_true", help="build native binary via PyInstaller")
 
+    from_py_p = sub.add_parser("from-py", help="reverse: transpile .py back to .zn")
+    from_py_p.add_argument("input", help=".py file or directory")
+    from_py_p.add_argument("-o", "--output", help="output directory (default: zn/)")
+
     init_p = sub.add_parser("init", help="scaffold a new project")
     init_p.add_argument("name", help="project name")
 
@@ -342,6 +385,8 @@ def main():
         cmd_run(args)
     elif args.command == "build":
         cmd_build(args)
+    elif args.command == "from-py":
+        cmd_from_py(args)
     elif args.command == "init":
         cmd_init(args)
     else:

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "compiler"))
-from transpiler import transpile
+from transpiler import transpile, untranspile
 
 
 def test(name, source, expected):
@@ -205,6 +205,32 @@ test_raw("entry_point injects guard",
 
 if __name__ == "__main__":
     main()''')
+
+
+# --- Round-trip: zn → py → zn over every e2e fixture ---
+#
+# Catches drift in the reverse direction (untranspile) against any of
+# the four shim transforms — the forward pass is already covered above,
+# so any DIFF here means the reverse lost or moved something.
+
+e2e_dir = Path(__file__).parent / "e2e"
+for fixture in sorted(e2e_dir.glob("*.zn")):
+    src = fixture.read_text()
+    py = transpile(src, str(fixture), entry_point=False)
+    back = untranspile(py)
+    if src.rstrip() == back.rstrip():
+        print(f"PASS: round-trip {fixture.name}")
+        passed += 1
+    else:
+        print(f"FAIL: round-trip {fixture.name}")
+        import difflib
+        for line in list(difflib.unified_diff(
+            src.rstrip().splitlines(),
+            back.rstrip().splitlines(),
+            lineterm="",
+        ))[:20]:
+            print(f"  {line}")
+        failed += 1
 
 
 # --- Results ---

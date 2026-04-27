@@ -42,6 +42,9 @@ METHOD_MAP = {
     "exit": "__exit__",
 }
 
+# Inverse map for the reverse direction (.py → .zn).
+REVERSE_METHOD_MAP = {v: k for k, v in METHOD_MAP.items()}
+
 # Regex to match `def methodname(` in a line
 DEF_PATTERN = re.compile(r"^(\s*)def\s+(\w+)\s*\(")
 # Regex to match string literals (handles single, double, triple quotes)
@@ -326,4 +329,220 @@ def _fstrings(lines: list[str]) -> list[str]:
 
         line = STRING_PATTERN.sub(_maybe_fstring, line)
         out.append(line)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Reverse direction: .py → .zn
+# ---------------------------------------------------------------------------
+#
+# Mirror of transpile() — same four shim transforms applied in inverse order.
+# Round-trip goal: zn → py → zn ≈ original (modulo whitespace).
+
+# Match `def __dunder__(` for the unrename pass.
+DUNDER_DEF_PATTERN = re.compile(r"^(\s*)def\s+(__\w+__)\s*\(")
+# f-string literal — captures the prefix flag separately so we can drop it
+# without touching the body.
+FSTRING_PATTERN = re.compile(
+    r'''(?P<prefix>[fF])(?P<body>"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')'''
+)
+def untranspile(source: str, filename: str = "<stdin>") -> str:
+    """Transpile a .py source string back to Zinc.
+
+    Inverse of transpile(): drop f-prefixes on simple interpolations,
+    strip self/cls from class instance methods, rename Python dunders
+    back to sane names, drop any __main__ guard, then re-introduce
+    braces from indentation.
+    """
+    lines = source.split("\n")
+    result = _unfstrings(lines)
+    result = _strip_self(result)
+    result = _unrename_methods(result)
+    result = _strip_name_guard(result)
+    result = _indent_to_braces(result)
+    return "\n".join(result)
+
+
+def _unfstrings(lines: list[str]) -> list[str]:
+    """Drop the `f` prefix from every f-string. The forward auto-fstring pass
+    re-adds it whenever the literal contains `{name...}` interpolation, so
+    unconditional stripping is the round-trip-stable choice. Strings whose
+    only interpolations are non-name (`{1+1}`, etc.) lose nothing — Zinc
+    leaves them as plain strings, which is the same shape they had before
+    the forward pass tagged them."""
+    out = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            out.append(line)
+            continue
+        line = FSTRING_PATTERN.sub(lambda m: m.group("body"), line)
+        out.append(line)
+    return out
+
+
+def _strip_self(lines: list[str]) -> list[str]:
+    """Remove `self` from class instance methods (mirror of _inject_self).
+    Methods decorated with @staticmethod are left alone; @classmethod
+    methods keep `cls` (Zinc emits cls explicitly when intended)."""
+    out = []
+    in_class = False
+    class_indent = 0
+
+    for line in lines:
+        stripped = line.lstrip()
+        current_indent = len(line) - len(stripped)
+
+        if stripped.startswith("class ") and stripped.endswith(":"):
+            in_class = True
+            class_indent = current_indent
+            out.append(line)
+            continue
+
+        if in_class and stripped and current_indent <= class_indent and not stripped.startswith("class "):
+            in_class = False
+
+        if in_class and stripped.startswith("def ") and current_indent == class_indent + 4:
+            if out and out[-1].strip().startswith("@staticmethod"):
+                out.append(line)
+                continue
+            if out and out[-1].strip().startswith("@classmethod"):
+                out.append(line)
+                continue
+
+            m = DEF_PATTERN.match(line)
+            if m:
+                ws = m.group(1)
+                name = m.group(2)
+                after_paren = line[m.end():]
+                # `def f(self):` → `def f():`; `def f(self, x):` → `def f(x):`
+                if after_paren.startswith("self)"):
+                    line = f"{ws}def {name}(){after_paren[5:]}"
+                elif after_paren.startswith("self,"):
+                    rest = after_paren[5:].lstrip()
+                    line = f"{ws}def {name}({rest}"
+
+        out.append(line)
+    return out
+
+
+def _unrename_methods(lines: list[str]) -> list[str]:
+    """Rename Python dunders back to their sane Zinc names (inverse of _rename_methods).
+    Dunders not in REVERSE_METHOD_MAP (e.g. __add__, __len__) pass through
+    — the README documents them as the explicit form."""
+    out = []
+    for line in lines:
+        m = DUNDER_DEF_PATTERN.match(line)
+        if m:
+            name = m.group(2)
+            if name in REVERSE_METHOD_MAP:
+                line = line.replace(f"def {name}(", f"def {REVERSE_METHOD_MAP[name]}(", 1)
+        out.append(line)
+    return out
+
+
+# `elif`/`else`/`except`/`finally` after a dedent fold onto the previous
+# `}` line as `} elif ... {`, `} else {`, etc. — matching the forward
+# transpiler's `} else if ` → `elif ` rule and standard Zinc style.
+_CONTINUATION_KEYWORDS = ("elif ", "elif:", "else:", "except", "finally:")
+
+
+def _indent_to_braces(lines: list[str]) -> list[str]:
+    """Convert Python indentation back into Zinc-style braces.
+
+    Block openers (lines ending in `:`) get `:` replaced by ` {`. On
+    dedent, a `}` line is emitted at the outer indent. Continuation
+    clauses (else/elif/except/finally) fold onto the closing brace.
+    Lines inside triple-quoted strings pass through verbatim — a docstring
+    containing `Four transforms:` should not be mistaken for a block opener.
+    """
+    out = []
+    indent_stack = [0]  # indentation widths of currently open blocks
+    triple_state = None  # None, '"""', or "'''" while inside a triple-quoted literal
+
+    def _close_to(target: int) -> None:
+        # Emit `}` lines until indent_stack's top is <= target. Trailing
+        # blank lines in `out` are detached and re-appended after the `}`s
+        # so the close brace sits flush against the block body, matching
+        # the original Zinc style (matters for round-trip stability).
+        if indent_stack[-1] <= target:
+            return
+        trailing_blanks = 0
+        while out and out[-1] == "":
+            out.pop()
+            trailing_blanks += 1
+        while len(indent_stack) > 1 and indent_stack[-1] > target:
+            indent_stack.pop()
+            out.append(" " * indent_stack[-1] + "}")
+        for _ in range(trailing_blanks):
+            out.append("")
+
+    for raw in lines:
+        if raw.strip() == "":
+            out.append("")
+            continue
+
+        # Inside a triple-quoted string: pass through, watch for the closer.
+        if triple_state is not None:
+            out.append(raw)
+            # Count occurrences of the active triple quote on this line. A
+            # body that opens AND closes on the same line (handled below
+            # before entering the state) doesn't reach here, so any odd
+            # count of triple quotes flips us back out.
+            if raw.count(triple_state) % 2 == 1:
+                triple_state = None
+            continue
+
+        stripped = raw.lstrip()
+        indent = len(raw) - len(stripped)
+
+        # Detect entering a triple-quoted literal that doesn't close on
+        # the same line — toggle state and emit the line as-is.
+        for q in ('"""', "'''"):
+            if q in stripped and stripped.count(q) % 2 == 1:
+                triple_state = q
+                out.append(raw)
+                break
+        else:
+            q = None
+        if q is not None:
+            continue
+
+        # Dedent: close any open blocks deeper than this line's indent.
+        if indent < indent_stack[-1]:
+            _close_to(indent)
+
+        # Continuation clause folds onto the previous `}` line.
+        is_continuation = any(stripped.startswith(k) for k in _CONTINUATION_KEYWORDS)
+        if is_continuation and out and out[-1].lstrip() == "}":
+            close_line = out.pop()
+            close_indent = len(close_line) - len(close_line.lstrip())
+            content = stripped[:-1] if stripped.endswith(":") else stripped
+            # `elif X` → `else if X` so the forward rule (`else if ` → `elif `)
+            # round-trips cleanly.
+            if content.startswith("elif "):
+                content = "else if " + content[5:]
+            elif content == "elif":
+                content = "else if"
+            opens_block = stripped.endswith(":")
+            if opens_block:
+                out.append(" " * close_indent + "} " + content + " {")
+                indent_stack.append(indent + 4)
+            else:
+                out.append(" " * close_indent + "} " + content)
+            continue
+
+        # Block opener — line ends with `:` and isn't a slice/dict context
+        # (we're at statement level so trailing `:` is always a block).
+        if stripped.endswith(":"):
+            content = stripped[:-1]
+            out.append(" " * indent + content + " {")
+            indent_stack.append(indent + 4)
+            continue
+
+        # Regular line.
+        out.append(" " * indent + stripped)
+
+    # Close any blocks still open at EOF.
+    _close_to(0)
     return out
