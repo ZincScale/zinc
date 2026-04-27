@@ -1,0 +1,8 @@
+[project]
+name = "zinc"
+version = "2.0.0"
+main = "zinc.zn"
+
+[python]
+version = ">=3.12"
+deps = []
