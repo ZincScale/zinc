@@ -315,13 +315,13 @@ __pycache__/
     print(f"created project: {project_name}")
     print(f"  {src_dir}/main.zn")
     print(f"  {project_dir}/zinc.toml")
-    print(f"\nrun: cd {project_dir} && zinc run src/")
+    print(f"\nrun: cd {project_dir} && zinc-python run src/")
 
 
 # --- Main -------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(prog="zinc", description="braces Python")
+    parser = argparse.ArgumentParser(prog="zinc-python", description="braces Python")
     sub = parser.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="transpile and run")

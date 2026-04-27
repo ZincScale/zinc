@@ -43,7 +43,7 @@ if __name__ == "__main__":
 curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/install.sh | bash
 ```
 
-This installs [uv](https://github.com/astral-sh/uv), Python 3.14t (free-threading), and the zinc compiler. Everything goes into `~/.zinc/`.
+This installs [uv](https://github.com/astral-sh/uv), Python 3.14t (free-threading), and the zinc-python compiler. Everything goes into `~/.zinc-python/`.
 
 Or manually:
 
@@ -64,16 +64,16 @@ Four transforms, everything else is Python:
 ## Usage
 
 ```bash
-zinc run hello.zn              # transpile and run
-zinc run src/                  # run a multi-file project
-zinc build src/ -o build/      # transpile to .py files
-zinc build src/ --native       # native binary via PyInstaller
-zinc init myapp                # scaffold a new project
+zinc-python run hello.zn              # transpile and run
+zinc-python run src/                  # run a multi-file project
+zinc-python build src/ -o build/      # transpile to .py files
+zinc-python build src/ --native       # native binary via PyInstaller
+zinc-python init myapp                # scaffold a new project
 ```
 
 ## Dependencies
 
-Add deps in `zinc.toml` — zinc uses [uv](https://github.com/astral-sh/uv) to manage them automatically:
+Add deps in `zinc.toml` — zinc-python uses [uv](https://github.com/astral-sh/uv) to manage them automatically:
 
 ```toml
 [project]

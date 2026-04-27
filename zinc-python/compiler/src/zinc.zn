@@ -293,12 +293,12 @@ def cmd_init(args) {
     print("created project: {project_name}")
     print("  {src_dir}/main.zn")
     print("  {project_dir}/zinc.toml")
-    print("\nrun: cd {project_dir} && zinc run src/")
+    print("\nrun: cd {project_dir} && zinc-python run src/")
 }
 
 
 def main() {
-    parser = argparse.ArgumentParser(prog="zinc", description="braces Python")
+    parser = argparse.ArgumentParser(prog="zinc-python", description="braces Python")
     sub = parser.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="transpile and run")
