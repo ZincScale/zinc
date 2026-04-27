@@ -270,15 +270,30 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("slices.Reverse(%s)", obj)
 			}
 		default:
-			// Getter pattern: obj.getHost() → obj.Host
+			// Getter pattern: obj.getHost() → obj.Host. Sugar for the
+			// no-arg accessor where the method body is just `return host`.
+			// Only fires when no real method with that name exists on the
+			// class — otherwise a user-written `int getHost()` (which may
+			// transform the field, unwrap a wrapper type like atomic.Int64,
+			// or compute something derived) would be silently bypassed in
+			// favor of a field access of the wrong type.
 			if strings.HasPrefix(sel.Field, "get") && len(sel.Field) > 3 && len(c.Args) == 0 {
 				fieldName := strings.ToLower(sel.Field[3:4]) + sel.Field[4:]
 				if ident, ok := sel.Object.(*parser.Ident); ok {
 					if structName, ok := g.varStructTypes[ident.Name]; ok {
 						if cls, ok := g.structs[structName]; ok {
-							for _, f := range cls.Fields {
-								if f.Name == fieldName {
-									return fmt.Sprintf("%s.%s", obj, exportName(fieldName))
+							hasMethod := false
+							for _, m := range cls.Methods {
+								if m.Name == sel.Field {
+									hasMethod = true
+									break
+								}
+							}
+							if !hasMethod {
+								for _, f := range cls.Fields {
+									if f.Name == fieldName {
+										return fmt.Sprintf("%s.%s", obj, exportName(fieldName))
+									}
 								}
 							}
 						}

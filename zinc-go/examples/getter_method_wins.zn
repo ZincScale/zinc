@@ -1,0 +1,29 @@
+// Regression: when a class defines both a field `x` and an explicit
+// no-arg method `getX()`, the source-level call `obj.getX()` must dispatch
+// to the *method*, not get rewritten to the *field*. The getter-pattern
+// sugar (obj.getHost() → obj.Host) is for the case where the user did
+// NOT write an actual method — it must yield to a real method body.
+//
+// Pre-fix: `b.getHits()` codegen'd to `b.Hits` (field access), silently
+// bypassing the user's method body. Surfaced when probing atomic.Int64
+// as a class field — `.getCount()` returning `count.Load()` regressed
+// into a field access of the wrapped *atomic.Int64 struct, printing
+// `&{{} {} 3}` instead of `3`.
+
+import fmt
+
+class Bag {
+    int hits
+
+    init() { this.hits = 100 }
+
+    pub int getHits() {
+        return hits + 999
+    }
+}
+
+void main() {
+    var b = Bag()
+    fmt.Println("field:", b.hits)
+    fmt.Println("method:", b.getHits())
+}
