@@ -1,12 +1,12 @@
 # Error handling
 
-Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. Any class extending `Err` from `stdlib/errors` is an error type. Returning one widens the function's Go signature to `(T, error)` automatically. Callers either handle the error inline with `or { ... }` or let it propagate by doing nothing — in which case the caller's signature widens too.
+Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. Any class extending `BaseError` from `stdlib/errors` is an error type. Returning one widens the function's Go signature to `(T, error)` automatically. Callers either handle the error inline with `or { ... }` or let it propagate by doing nothing — in which case the caller's signature widens too.
 
 There is no `try / catch / throw / finally`.
 
 ## The model in one paragraph
 
-A function that returns an `Err`-extending value transpiles to a Go function returning `(T, error)`. At call sites, you write either `var x = call(...)` (the error propagates — your function widens) or `var x = call(...) or { ... }` (you handle it; `err` is bound inside the block). The `Err` base class has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
+A function that returns an `BaseError`-extending value transpiles to a Go function returning `(T, error)`. At call sites, you write either `var x = call(...)` (the error propagates — your function widens) or `var x = call(...) or { ... }` (you handle it; `err` is bound inside the block). The `BaseError` base class has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
 
 ## Defining errors
 
@@ -14,29 +14,29 @@ A function that returns an `Err`-extending value transpiles to a Go function ret
 
 ```zinc
 // stdlib/errors
-pub class Err {
+pub class BaseError {
     pub String message
     init(String message) { this.message = message }
     pub String Error() { return message }
-    pub String toString() { return "Err(${message})" }
+    pub String toString() { return "BaseError(${message})" }
 }
 
-pub class IllegalArgumentError : Err { ... }
-pub class IllegalStateError    : Err { ... }
-pub class IOError              : Err { ... }
-pub class ConfigError          : Err { ... }
+pub class IllegalArgumentError : BaseError { ... }
+pub class IllegalStateError    : BaseError { ... }
+pub class IOError              : BaseError { ... }
+pub class ConfigError          : BaseError { ... }
 ```
 
-Define your own domain errors by extending `Err`:
+Define your own domain errors by extending `BaseError`:
 
 ```zinc
 import stdlib/errors
 
-class ParseError : errors.Err {
+class ParseError : errors.BaseError {
     init(String message) { super(message) }
 }
 
-class NetworkError : errors.Err {
+class NetworkError : errors.BaseError {
     pub int statusCode
     init(String message, int statusCode) {
         super(message)
@@ -45,10 +45,10 @@ class NetworkError : errors.Err {
 }
 ```
 
-Subclass chains work too — anything transitively extending `Err` is an error:
+Subclass chains work too — anything transitively extending `BaseError` is an error:
 
 ```zinc
-class AppError : errors.Err {
+class AppError : errors.BaseError {
     init(String m) { super(m) }
 }
 
@@ -115,18 +115,18 @@ int doubleIt(String s) {
 
 ## Custom errors satisfy Go's `error`
 
-Because `Err.Error()` exists, any `Err`-extending class is a Go `error`. That means generated code interops cleanly with the Go ecosystem:
+Because `BaseError.Error()` exists, any `BaseError`-extending class is a Go `error`. That means generated code interops cleanly with the Go ecosystem:
 
 - Pass to `fmt.Errorf("...: %w", e)` to wrap.
 - Match with `errors.As(err, &target)` to extract a concrete type.
 - Compose with `errors.Is(err, sentinel)`.
 
-## Functions returning `Err` directly
+## Functions returning `BaseError` directly
 
 If a function's "happy path" return type *is* an error, declare it as such — no widening required:
 
 ```zinc
-errors.Err validate(Config c) {
+errors.BaseError validate(Config c) {
     if (c.host == "") {
         return errors.IllegalArgumentError("host required")
     }
@@ -151,7 +151,7 @@ spawn {
 For error fan-in, send errors over an explicit channel:
 
 ```zinc
-var errCh = Channel<errors.Err>(len(items))
+var errCh = Channel<errors.BaseError>(len(items))
 parallel for (item in items) {
     process(item) or { errCh.send(err); return }
 }

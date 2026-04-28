@@ -4,19 +4,19 @@
 // writes the call without ceremony; codegen lifts it to a temp +
 // error guard above the surrounding statement.
 
-class Err {
+class BaseError {
     pub String msg
     init(String m) { this.msg = m }
     pub String Error() { return msg }
 }
 
 int parseNum(String s) {
-    if (s == "") { return Err("empty") }
+    if (s == "") { return BaseError("empty") }
     return 42
 }
 
 bool isPositive(String s) {
-    if (s == "") { return Err("empty") }
+    if (s == "") { return BaseError("empty") }
     return true
 }
 

@@ -9,21 +9,21 @@
 // and the caller (in another package) was failing to compile because the
 // compiler's cross-package methodBodyThrows walk reported it as throwing.
 
-// Local Err so this regression doesn't depend on stdlib/errors.
-// Same shape as stdlib's Err — message field, `Error() string` method.
-class Err {
+// Local BaseError so this regression doesn't depend on stdlib/errors.
+// Same shape as stdlib's BaseError — message field, `Error() string` method.
+class BaseError {
     pub String message
     init(String msg) { this.message = msg }
     pub String Error() { return this.message }
 }
 
-pub class LookupError : Err {
+pub class LookupError : BaseError {
     init(String message) {
         super(message)
     }
 }
 
-// throwingHelper — returns Err on the failure path, so the compiler
+// throwingHelper — returns BaseError on the failure path, so the compiler
 // auto-widens its signature to (String, error).
 pub String throwingHelper(bool fail) {
     if (fail) {

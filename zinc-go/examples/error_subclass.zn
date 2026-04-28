@@ -1,13 +1,13 @@
-// Test: a class extending another class that extends Err is transitively
+// Test: a class extending another class that extends BaseError is transitively
 // an error. Compiler walks the full parent chain.
 
-class Err {
+class BaseError {
     pub String message
     init(String msg) { this.message = msg }
     pub String Error() { return this.message }
 }
 
-class AppError : Err {
+class AppError : BaseError {
     init(String msg) { super(msg) }
 }
 

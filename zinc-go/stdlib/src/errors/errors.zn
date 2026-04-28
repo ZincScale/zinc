@@ -1,7 +1,7 @@
 // errors — base class and common error types for Zinc.
 //
-// `Err` is the base class. Any class extending Err is an error; the
-// compiler widens the signature of any function returning one. Err has
+// `BaseError` is the base class. Any class extending BaseError is an error; the
+// compiler widens the signature of any function returning one. BaseError has
 // an `Error() string` method so instances satisfy Go's `error`
 // interface — this composes with `errors.Is`, `errors.As`,
 // `fmt.Errorf("%w", ...)`, etc.
@@ -17,10 +17,10 @@
 //         ...
 //     }
 //
-// Users define their own domain errors by extending Err.
+// Users define their own domain errors by extending BaseError.
 
-// Err is the base class for all Zinc errors.
-pub class Err {
+// BaseError is the base class for all Zinc errors.
+pub class BaseError {
     pub String message
 
     init(String message) {
@@ -32,26 +32,26 @@ pub class Err {
     }
 
     pub String toString() {
-        return "Err(${message})"
+        return "BaseError(${message})"
     }
 }
 
 // IllegalArgumentError — invalid argument passed to a function.
-pub class IllegalArgumentError : Err {
+pub class IllegalArgumentError : BaseError {
     init(String message) { super(message) }
 }
 
 // IllegalStateError — object is in the wrong state for the call.
-pub class IllegalStateError : Err {
+pub class IllegalStateError : BaseError {
     init(String message) { super(message) }
 }
 
 // IOError — I/O operation failed.
-pub class IOError : Err {
+pub class IOError : BaseError {
     init(String message) { super(message) }
 }
 
 // ConfigError — configuration or setup error.
-pub class ConfigError : Err {
+pub class ConfigError : BaseError {
     init(String message) { super(message) }
 }

@@ -1,13 +1,13 @@
 // Test: calling an error-returning function without `or { }` auto-widens
 // the caller. The error propagates up until it's handled.
 
-class Err {
+class BaseError {
     pub String message
     init(String msg) { this.message = msg }
     pub String Error() { return this.message }
 }
 
-class ParseError : Err {
+class ParseError : BaseError {
     init(String msg) { super(msg) }
 }
 

@@ -1,12 +1,12 @@
-// Test: returning a class extending Err widens the calling function.
+// Test: returning a class extending BaseError widens the calling function.
 
-class Err {
+class BaseError {
     pub String message
     init(String msg) { this.message = msg }
     pub String Error() { return this.message }
 }
 
-class ParseError : Err {
+class ParseError : BaseError {
     init(String msg) { super(msg) }
 }
 
