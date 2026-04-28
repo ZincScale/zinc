@@ -29,16 +29,15 @@ print(s.address())    // localhost:8080
 Go is fast, simple, and compiles everywhere. But its syntax has rough edges — verbose error handling, no classes, no generics sugar, no string interpolation. Zinc fixes these while keeping everything that makes Go great:
 
 - **Classes & inheritance** — familiar OO syntax compiled to Go structs with embedding
-- **Exceptions** — `try/catch/throw` with unchecked exceptions and auto-error-propagation
-- **Resource management** — `using (var r = ...) { }` wraps `defer r.Close()` cleanly
+- **Errors as values, with auto-widening** — return any class extending `Err` and the function's Go signature widens to `(T, error)` automatically; handle with `or { ... }` at call sites
 - **String interpolation** — `"Hello, ${name}!"` just works
-- **Streams** — `list.filter(it > 5).map(it * 2).sum()` with loop fusion
-- **Concurrency** — `spawn { }`, `Channel`, `parallel for`; uncaught throws inside goroutines panic the process (no silent failures)
+- **Concurrency** — `spawn { }`, `Channel<T>`, `parallel for`, full `select { case ... }`
+- **Sealed classes + match** — algebraic data types with exhaustive pattern matching
+- **Generics** — type parameters on functions and classes, mapped to Go generics
 - **Nullable types** — `String?` with safe navigation `?.`
-- **Default params** — `void serve(int port = 8080)`
-- **Enums & sealed classes** — proper algebraic data types
+- **Default & variadic params** — `void serve(int port = 8080)`, `int sum(int... xs)`
 - **Type-first declarations** — `int add(int a, int b)` / `void main()` (Java/C#/Dart shape)
-- **Clean output** — generated Go is readable and editable, with `//line` source maps
+- **Clean output** — generated Go is readable and editable
 
 ## Install
 
@@ -59,63 +58,60 @@ make build && sudo make install
 ```bash
 # Hello world
 echo 'print("Hello, World!")' > hello.zn
-zinc run hello.zn
+zinc-go run hello.zn
 
 # Create a project
-zinc init myapp && cd myapp
-zinc run
+zinc-go init myapp && cd myapp
+zinc-go run
 
 # Build a native binary
-zinc build
+zinc-go build
 ./zinc-out/myapp
 
 # Cross-compile
-zinc build --cross linux/arm64
+zinc-go build --cross linux/arm64
 ```
 
 ## Feature highlights
 
-### Exceptions — no `if err != nil` boilerplate
+### Errors are values — no `if err != nil` boilerplate
 
 ```zinc
-import stdlib.exceptions
+import stdlib/errors
 
 int parseInt(String s) {
     if (s == "") {
-        throw exceptions.IllegalArgumentException("empty input")
+        return errors.IllegalArgumentError("empty input")
     }
     return 42
 }
 
-try {
-    var n = parseInt(input)
+void main() {
+    var n = parseInt(input) or { print("bad input: ${err}"); return }
     use(n)
-} catch (exceptions.IllegalArgumentException e) {
-    print("bad input: ${e.message}")
-} catch (e) {
-    print("unexpected: ${e.Error()}")
 }
 ```
 
-A function that `throw`s (directly or transitively) gets its Go signature widened to `(T, error)`. At call sites, the compiler emits `if err != nil { return err }` automatically. Typed catches dispatch via `errors.As` — so subclass throws match superclass catches and wrapped errors compose with Go's `errors.Is` / `%w`.
+A function that returns an `Err`-extending class has its Go signature auto-widened to `(T, error)`. Callers either handle inline with `or { ... }` (where `err` is bound) or omit it — in which case the caller's signature widens too, propagating the error up.
 
-### Resources that clean up automatically
-
-```zinc
-using (var file = os.Open(path)) {
-    process(file)
-}  // file.Close() runs on exit, including via throw
-```
-
-### Streams with loop fusion
+### Sealed classes & pattern matching
 
 ```zinc
-var total = numbers
-    .filter(it > 5)
-    .map(it * 10)
-    .sum()
-// Compiled to a single loop — no intermediate allocations
+sealed class Shape {
+    data Circle(double radius)
+    data Rect(double width, double height)
+}
+
+double area(Shape s) {
+    match (s) {
+        case Circle(r) { return 3.14159 * r * r }
+        case Rect(w, h) { return w * h }
+    }
+    return 0.0
+}
 ```
+
+Match is exhaustive on sealed types — missing variants are a compile error.
 
 ### Concurrency
 
@@ -129,9 +125,14 @@ var msg = ch.recv()
 parallel for (url in urls) {
     fetch(url)
 }
-```
 
-Uncaught throws inside `spawn { }` panic the process with a stack trace — goroutines can't return errors to their launcher, and silent failure is never the default.
+select {
+    case msg = ch.recv():
+        print("got: ${msg}")
+    case _:
+        print("nothing ready")
+}
+```
 
 ### Classes & inheritance
 
@@ -155,14 +156,14 @@ print(a.speak())    // Rex says Woof
 
 | Command | Description |
 |---------|-------------|
-| `zinc init <name>` | Create a new project |
-| `zinc run [file\|dir] [-- args]` | Transpile and run |
-| `zinc build [dir] [-o outdir]` | Build native binary |
-| `zinc build --cross os/arch` | Cross-compile |
-| `zinc test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
-| `zinc fmt <file\|dir>` | Format source code |
-| `zinc add <pkg@version>` | Add a Go dependency |
-| `zinc deps` | List dependencies |
+| `zinc-go init <name>` | Create a new project |
+| `zinc-go run [file\|dir] [-- args]` | Transpile and run |
+| `zinc-go build [dir] [-o outdir]` | Build native binary |
+| `zinc-go build --cross os/arch` | Cross-compile |
+| `zinc-go test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
+| `zinc-go fmt <file\|dir>` | Format source code |
+| `zinc-go add <pkg@version>` | Add a Go dependency |
+| `zinc-go deps` | List dependencies |
 
 Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`.
 
@@ -174,7 +175,7 @@ myapp/
   src/
     main.zn              entry point
     lib/                 subpackages
-  tests/                 sibling test directory
+  tests/                 sibling test directory (or *_test.zn alongside src)
     main_test.zn
 ```
 
@@ -189,14 +190,20 @@ const PI = 3.14159              // constants
 
 // Control flow requires parens on the header
 if (x > 0) { ... } else if (x == 0) { ... } else { ... }
-for (i in 0..10) { ... }
+for (i in 0..10) { ... }        // exclusive
+for (i in 0..=10) { ... }       // inclusive
 while (cond) { ... }
 match (x) { case 1 { ... } case _ { ... } }
 
+// Expression if
+var label = if x > 0: "positive" else: "non-positive"
+
 // Type-first function declarations — no `fn` keyword
 int add(int a, int b) { return a + b }
+int doubled(int x) = x * 2          // single-expression form
 void main() { ... }
-String? find(String id) { ... }   // nullable return
+String? find(String id) { ... }     // nullable return
+int sum(int... xs) { ... }          // variadic
 
 // Class fields — declared as Type name, default via =
 class Counter {
@@ -222,13 +229,14 @@ zinc-go/
     lexer/            Tokenizer
     parser/           AST builder
     typechecker/      Type inference & checking
-    codegen_go/       Go code generator with loop fusion
+    codegen_go/       Go code generator
     errs/             Colored error output
-  examples/           57 example programs
-  expected/           Expected test outputs
-  examples-fail/      Negative tests (syntax errors, compile-time rejections)
-  docs/               Documentation
-  stdlib/             (lives at ../stdlib) — asserts, exceptions, config, logging
+  examples/           positive e2e tests
+  examples-fail/      negative tests (compile-time rejections)
+  examples-test/      `test "..." { }` regression suites
+  expected/           expected outputs for e2e
+  stdlib/src/         errors, asserts, config, logging (written in Zinc)
+  docs/               documentation
 ```
 
 ## License

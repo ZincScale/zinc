@@ -40,7 +40,7 @@ if __name__ == "__main__":
 ## Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-python/install.sh | bash
 ```
 
 This installs [uv](https://github.com/astral-sh/uv), Python 3.14t (free-threading), and the zinc-python compiler. Everything goes into `~/.zinc-python/`.
@@ -117,6 +117,12 @@ myapp/
       api.zn
 ```
 
+## Documentation
+
+- [Getting Started](docs/getting-started.md) — install, first project, CLI reference
+- [Language transforms](docs/language.md) — what zinc-python actually changes
+- [Method name mappings](docs/dunders.md) — `init`, `toString`, etc.
+
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](../LICENSE)

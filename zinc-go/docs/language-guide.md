@@ -7,14 +7,14 @@ Zinc is a clean-syntax language that transpiles to Go. It removes Go's syntax wa
 ```zinc
 var name = "Alice"              // inferred type (requires initializer)
 String greeting = "Hello"       // explicit type (no `var` — bare form)
-String host                     // explicit type, no initializer (fields only)
+String host                     // explicit type, no initializer
 const PI = 3.14159              // constant, inferred
 const String VERSION = "1.0"    // constant, explicit type
 ```
 
 Rule: `var` means "infer the type from the initializer." If you write the type explicitly, drop `var`. The hybrid `var Type name` is a compile error — write either `var name = expr` (inferred) or `Type name [= expr]` (explicit).
 
-Types: `int`, `double`, `bool`, `String`, `List<T>`, `Map<K,V>`.
+Primitive types: `int`, `long`, `double`, `float`, `bool`, `byte`, `String`. Container types: `List<T>`, `Map<K,V>`, fixed-size arrays `T[]`.
 
 ## Functions
 
@@ -23,6 +23,9 @@ int add(int a, int b) {
     return a + b
 }
 
+// Single-expression form — no braces, no return
+int doubled(int x) = x * 2
+
 // Default parameters
 String greet(String name, String greeting = "Hello") {
     return "${greeting}, ${name}!"
@@ -30,25 +33,34 @@ String greet(String name, String greeting = "Hello") {
 
 greet("Alice")          // "Hello, Alice!"
 greet("Bob", "Hey")     // "Hey, Bob!"
-```
 
-Constructors (`init`) can `throw` to abort construction — no partially-initialized object escapes. Bare `return` inside an `init` body is still a compile error (nothing meaningful to return). See [classes](classes.md#constructors-can-throw).
+// Variadic parameters
+int sum(int... numbers) {
+    var total = 0
+    for (n in numbers) { total = total + n }
+    return total
+}
+
+// Spread at the call site
+void wrapper(String msg, any... args) {
+    logMsg("INFO", msg, args...)
+}
+```
 
 ## String interpolation
 
-Any double-quoted string with `${expr}` is interpolated automatically. Single-quoted strings are literal — no interpolation:
+Double-quoted strings interpolate `${expr}`:
 
 ```zinc
 var name = "World"
 print("Hello, ${name}!")        // Hello, World!
-print("2 + 2 = ${2 + 2}")      // 2 + 2 = 4
-print('No interpolation: ${name}')  // No interpolation: ${name}
+print("2 + 2 = ${2 + 2}")       // 2 + 2 = 4
 ```
 
 ## Control flow
 
 ```zinc
-// If/else
+// If / else if / else — parens required on the header
 if (x > 0) {
     print("positive")
 } else if (x == 0) {
@@ -57,47 +69,44 @@ if (x > 0) {
     print("negative")
 }
 
-// Match (exhaustive pattern matching)
-match (direction) {
-    case North { print("going north") }
-    case South { print("going south") }
-    case _ { print("other") }
+// Expression if (ternary)
+var label = if x > 0: "positive" else: "non-positive"
+
+// Match — exhaustive on sealed types, otherwise needs `case _`
+match (cmd) {
+    case "start" { print("starting") }
+    case "stop"  { print("stopping") }
+    case _       { print("unknown") }
 }
 
-// For loops
-for (i in 0..10) {
-    print(i)
+// Match expression — every arm produces a value
+var status = match code {
+    case 0 { "ok" }
+    case 1 { "warn" }
+    case _ { "err" }
 }
 
+// For — collection iteration
 for (item in list) {
     print(item)
 }
 
+// For — map destructure
+for (k, v in scores) {
+    print("${k}=${v}")
+}
+
+// For — ranges
+for (i in 0..10)  { ... }       // exclusive: 0..9
+for (i in 0..=10) { ... }       // inclusive: 0..10
+
 // While
-while (condition) {
+while (cond) {
     doWork()
 }
 
-// Try / catch / finally — errors flow through throw, caught by type.
-try {
-    var n = parseInt(input)
-    use(n)
-} catch (exceptions.IllegalArgumentException e) {
-    logging.warn("bad input", "reason", e.message)
-} catch (e) {
-    logging.error("unexpected", "err", e.Error())
-} finally {
-    cleanup()
-}
-
-// Using — RAII-style resource management. Close() runs on exit,
-// including when the body throws. Preferred over finally for cleanup.
-using (var conn = pool.acquire()) {
-    conn.execute(query)
-}
+// break / continue work as expected
 ```
-
-See [error handling](error-handling.md) for the full model — typed catches via `errors.As`, uncaught-in-spawn panics the process, `Exception` base class from `stdlib.exceptions`.
 
 ## Collections
 
@@ -112,12 +121,22 @@ print("size: ${numbers.size()}")
 Map<String, int> ages = {"Alice": 30, "Bob": 25}
 ages.put("Carol", 28)
 var age = ages.get("Alice")
+ages.containsKey("Bob")
+ages.delete("Alice")
+var keys = ages.keys()
+var vals = ages.values()
 
 // Iteration
 for (key, value in ages) {
     print("${key} is ${value}")
 }
+
+// Fixed-size arrays
+int[] nums = [1, 2, 3]
+print(nums.length)
 ```
+
+There is no streams API (`.filter`, `.map`, `.reduce`, ...). Write the loop — that's the idiomatic Go you'd hand-write anyway.
 
 ## Nullable types
 
@@ -138,40 +157,13 @@ if (user is String) {
 }
 ```
 
-## Streams
-
-Chainable collection operations with loop fusion (compiled to a single pass):
+## Equality
 
 ```zinc
-List<int> numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-
-// Lambda syntax
-var evens = numbers.filter(x -> x % 2 == 0)
-
-// it keyword — implicit parameter
-var big = numbers.filter(it > 5)
-var doubled = numbers.map(it * 2)
-
-// Chaining
-var total = numbers.filter(it > 5).map(it * 10).sum()
-
-// Terminal operations
-numbers.anyMatch(it > 8)        // true
-numbers.allMatch(it > 0)        // true
-numbers.findFirst(it > 7)       // 8
-
-// More operations
-numbers.skip(3)                 // [4, 5, 6, 7, 8, 9, 10]
-numbers.limit(3)                // [1, 2, 3]
-numbers.distinct()              // unique elements
-numbers.sortBy(it)              // sorted
-numbers.reduce(0, (a, b) -> a + b)  // fold
-numbers.forEach(x -> print(x))
-
-// GroupBy
-List<String> words = ["cat", "car", "dog"]
-var grouped = words.groupBy(it.charAt(0))
-// {c: [cat, car], d: [dog]}
+var a = "hello"
+var b = "hello"
+print(a == b)    // structural equality — true
+print(a === b)   // reference identity
 ```
 
 ## Enums
@@ -186,25 +178,34 @@ enum Color {
 var c = Red
 
 match (c) {
-    case Red { print("red!") }
-    case Green { print("green!") }
-    case _ { print("other") }
+    case Red   { print("red") }
+    case Green { print("green") }
+    case _     { print("other") }
 }
 ```
 
 ## Sealed classes
 
-Algebraic data types with pattern matching:
+Algebraic data types with exhaustive pattern matching:
 
 ```zinc
 sealed class Shape {
     data Circle(double radius)
     data Rect(double width, double height)
+    data Triangle(double base, double height)
 }
 
-var s = Circle(5.0)
-print(s)    // Circle(radius=5)
+double area(Shape s) {
+    match (s) {
+        case Circle(r)    { return 3.14159 * r * r }
+        case Rect(w, h)   { return w * h }
+        case Triangle(b, h) { return 0.5 * b * h }
+    }
+    return 0.0
+}
 ```
+
+Match on a sealed type is exhaustive — the compiler rejects missing variants.
 
 ## Generics
 
@@ -219,6 +220,14 @@ T identity<T>(T x) {
 var n = identity<int>(42)
 var s = identity<String>("hi")
 
+// Multi-parameter
+String swap<A, B>(A a, B b) {
+    return "${b}, ${a}"
+}
+
+// Generic single-expression form
+T second<T>(List<T> items) = items[1]
+
 // Generic class
 class Box<T> {
     pub T value
@@ -227,23 +236,12 @@ class Box<T> {
 }
 
 var b = Box<int>(7)
-print(b.get())      // 7
 
-// Multi-parameter generics
-class Pair<A, B> {
-    pub A first
-    pub B second
-    init(A a, B b) {
-        this.first = a
-        this.second = b
-    }
-}
-
-var p = Pair<String, int>("age", 30)
-print("${p.first}=${p.second}")    // age=30
+// Generic data class
+data Pair<A, B>(A first, B second)
 ```
 
-Type parameters map directly to Go type parameters (`func identity[T any](x T) T`), so generic zinc code compiles to idiomatic generic Go.
+Type parameters map directly to Go type parameters (`func identity[T any](x T) T`).
 
 ## Function types & type aliases
 
@@ -255,26 +253,57 @@ int applyTwice(int x, Transform f) {
     return f(f(x))
 }
 
-var result = applyTwice(3, x -> x + 10)  // 23
+var result = applyTwice(3, (int x) -> x + 10)  // 23
 
-// Type aliases
+// Lambdas
+var doubled = (int x) -> x * 2
+
+// Type aliases for any type
 type Handler = Fn<(String), String>
+type IntList = List<int>
 ```
 
 ## Imports
 
-Import Go standard library packages directly:
+Go stdlib packages import directly:
 
 ```zinc
+import time
 import strings
-import math
 import strconv
 
 var upper = strings.ToUpper("hello")
 var pi = math.Pi
 ```
 
-Zinc auto-detects required imports for `fmt`, `sync`, `strconv`, and other common packages.
+Zinc subpackages and stdlib use slash-separated paths:
+
+```zinc
+import stdlib/errors
+import stdlib/asserts
+import store               // sibling subpackage in this project
+```
+
+External Go modules go through `zinc.toml`:
+
+```toml
+[deps]
+mux = "github.com/gorilla/mux@v1.8.1"
+```
+
+```zinc
+import mux
+
+mux.NewRouter()
+```
+
+## Errors
+
+See [error-handling.md](error-handling.md). The short version: any class extending `Err` is an error. Returning one auto-widens the function signature; handle with `or { }` at the call site or let it propagate.
+
+## Concurrency
+
+See [concurrency.md](concurrency.md). `spawn { }`, `Channel<T>(n)`, `parallel for`, and `select { case ... }` are all first-class.
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 # Concurrency
 
-Zinc wraps Go's concurrency primitives in clean syntax. All constructs compile to standard goroutines, channels, and sync primitives.
+Zinc wraps Go's concurrency primitives in clean syntax. Everything compiles to standard goroutines, channels, and `sync` primitives.
 
 ## spawn — goroutines
 
@@ -16,29 +16,35 @@ Compiles to `go func() { ... }()`.
 
 ### Errors inside spawn
 
-Goroutines cannot return errors to their launcher — Go has no return channel for a `go` statement. Zinc's contract is: **uncaught throws inside `spawn`, `go`, `parallel for`, and `concurrent { }` panic the process** with a stack trace pointing at the spawn site. No silent failures.
-
-If you want to handle the error locally, wrap with try/catch inside the goroutine:
+Goroutines have no return channel to their launcher. If `doRiskyWork()` can fail, handle it inside the goroutine:
 
 ```zinc
 spawn {
-    try {
-        doRiskyWork()
-    } catch (e) {
-        logging.error("worker failed", "err", e.Error())
+    var ok = doRiskyWork() or {
+        logging.error("worker failed", "err", err)
+        return
     }
+    use(ok)
 }
 ```
 
-If you want the error back on the launcher, use an actor (mailbox-based, errors travel as messages) or an explicit error channel. Raw `spawn` is fire-and-forget by design.
+For fan-in, pass errors out over a channel:
+
+```zinc
+var errCh = Channel<errors.Err>(len(items))
+
+parallel for (item in items) {
+    process(item) or { errCh.send(err); return }
+}
+```
 
 ## Channels
 
 Typed, buffered channels for goroutine communication:
 
 ```zinc
-// Create a buffered channel
-var ch = Channel(1)
+// Create — buffer size in parens
+var ch = Channel<String>(1)
 
 // Send and receive
 spawn {
@@ -54,7 +60,7 @@ ch.close()
 ### Producer / consumer
 
 ```zinc
-var work = Channel(10)
+var work = Channel<String>(10)
 work.send("task1")
 work.send("task2")
 work.send("task3")
@@ -67,13 +73,12 @@ for (i in 0..3) {
 
 ### Worker pool
 
-Fan-out pattern with multiple consumers:
+Fan-out with multiple consumers:
 
 ```zinc
-var jobs = Channel(10)
-var results = Channel(10)
+var jobs = Channel<String>(10)
+var results = Channel<String>(10)
 
-// Spawn 3 workers
 for (w in 0..3) {
     var id = w
     spawn {
@@ -85,44 +90,80 @@ for (w in 0..3) {
     }
 }
 
-// Send work
 List<String> tasks = ["fetch", "parse", "transform"]
-for (task in tasks) {
-    jobs.send(task)
-}
-
-// Send stop signals
-for (i in 0..3) {
-    jobs.send("STOP")
-}
-
-// Collect results
-for (i in 0..3) {
-    print(results.recv())
-}
+for (task in tasks) { jobs.send(task) }
+for (i in 0..3)     { jobs.send("STOP") }
+for (i in 0..3)     { print(results.recv()) }
 ```
 
 ## parallel for
 
-Concurrent iteration with automatic WaitGroup management:
+Concurrent iteration with automatic `sync.WaitGroup`:
 
 ```zinc
 List<String> urls = ["url1", "url2", "url3"]
 parallel for (url in urls) {
-    print("fetching: ${url}")
+    fetch(url)
 }
 // All iterations complete before continuing
 ```
 
 Compiles to a `sync.WaitGroup` with one goroutine per iteration.
 
+## select
+
+`select { case ... }` multiplexes channel operations. It maps 1:1 to Go's `select`:
+
+```zinc
+import time
+
+// Receive with binding
+var ch = Channel<int>(1)
+spawn { ch.send(42) }
+select {
+    case x = ch.recv():
+        print("got: ${x}")
+}
+
+// Receive without binding
+select {
+    case ch.recv():
+        print("ready")
+}
+
+// Send arm
+var out = Channel<String>(1)
+select {
+    case out.send("hi"):
+        print("sent")
+}
+
+// Default arm — non-blocking
+select {
+    case n = ch.recv():
+        print("got: ${n}")
+    case _:
+        print("nothing ready")
+}
+
+// Timer
+select {
+    case time.After(20 * time.Millisecond).recv():
+        print("timeout")
+    case msg = ch.recv():
+        print("got: ${msg}")
+}
+```
+
 ## Comparison with Go
 
 | Zinc | Go |
 |------|-----|
 | `spawn { ... }` | `go func() { ... }()` |
-| `var ch = Channel(n)` | `ch := make(chan interface{}, n)` |
+| `var ch = Channel<T>(n)` | `ch := make(chan T, n)` |
 | `ch.send(val)` | `ch <- val` |
 | `ch.recv()` | `<-ch` |
 | `ch.close()` | `close(ch)` |
 | `parallel for (x in xs) { ... }` | `var wg sync.WaitGroup` + goroutine loop |
+| `select { case x = ch.recv(): ... }` | `select { case x := <-ch: ... }` |
+| `select { case _: ... }` | `select { default: ... }` |

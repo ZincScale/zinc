@@ -17,6 +17,8 @@ make build
 sudo make install
 ```
 
+The binary is installed as `zinc-go`.
+
 ## Your first program
 
 Create `hello.zn`:
@@ -28,7 +30,7 @@ print("Hello, World!")
 Run it:
 
 ```bash
-zinc run hello.zn
+zinc-go run hello.zn
 ```
 
 Zinc transpiles to Go and runs the result. No boilerplate needed — top-level code is wrapped in `main()` automatically.
@@ -36,7 +38,7 @@ Zinc transpiles to Go and runs the result. No boilerplate needed — top-level c
 ## Create a project
 
 ```bash
-zinc init myapp
+zinc-go init myapp
 cd myapp
 ```
 
@@ -52,13 +54,13 @@ myapp/
 Run the project:
 
 ```bash
-zinc run
+zinc-go run
 ```
 
 Build a native binary:
 
 ```bash
-zinc build
+zinc-go build
 ./zinc-out/myapp
 ```
 
@@ -86,12 +88,13 @@ mux = "github.com/gorilla/mux@v1.8.1"
 `[deps]` keys are the local aliases you write in Zinc (`import mux`). The value
 is `module/path@version`; omit `@version` when a `[replace]` points at a local
 directory. Keys in `[replace]` match the same aliases as `[deps]`, so deps and
-replaces can't get out of sync.
+replaces can't get out of sync. Relative paths in `[replace]` resolve against
+the manifest directory.
 
 Add dependencies from the CLI:
 
 ```bash
-zinc add github.com/gorilla/mux@v1.8.1
+zinc-go add github.com/gorilla/mux@v1.8.1
 ```
 
 ## Cross-compilation
@@ -99,64 +102,68 @@ zinc add github.com/gorilla/mux@v1.8.1
 Build for any platform:
 
 ```bash
-zinc build --cross linux/amd64
-zinc build --cross darwin/arm64
-zinc build --cross windows/amd64
+zinc-go build --cross linux/amd64
+zinc-go build --cross darwin/arm64
+zinc-go build --cross windows/amd64
 ```
 
 ## Tests
 
-Put tests in a sibling `tests/` directory alongside `src/`:
+Tests live in `*_test.zn` files. They can sit alongside `src/` files or in a sibling `tests/` directory:
 
 ```
 myapp/
   src/
     main.zn
+    main_test.zn       # OR
   tests/
     main_test.zn
 ```
 
-Write `test "name" { body }` blocks at the top level of any `*_test.zn` file:
+Write `test "name" { body }` blocks at the top level of any `*_test.zn` file. `t` is an implicit `*testing.T` in scope:
 
 ```zinc
-import stdlib.asserts
+import stdlib/asserts
 
 test "addOne returns x + 1" {
     asserts.equalInt(t, addOne(41), 42)
+}
+
+test "raw t.Errorf works too" {
+    if (addOne(-10) != -9) {
+        t.Errorf("addOne(-10) != -9")
+    }
 }
 ```
 
 Run with:
 
 ```bash
-zinc test tests
-zinc test tests -v                      # verbose (show each test)
-zinc test tests -run TestAddOne         # filter by name
-zinc test tests -race                   # race detector
+zinc-go test                     # runs project tests
+zinc-go test -- -v               # forward flags to go test
+zinc-go test -- -run TestAddOne  # filter by name
+zinc-go test -- -race            # race detector
 ```
 
-`zinc test` transpiles prod + test code, then delegates to `go test ./...`, so
-the full Go test toolchain (coverage, `-count`, `-bench`, IDE integration) is
-available. `t` is an implicit `*testing.T` in scope inside each test block;
-`stdlib.asserts` provides `equalInt`, `equalString`, `isTrue`, `isFalse`,
-`contains`, `fail`, `fatal`.
+`zinc-go test` transpiles prod + test code, then delegates to `go test ./...`, so the full Go test toolchain (coverage, `-count`, `-bench`, IDE integration) is available. `stdlib/asserts` provides `equalInt`, `equalString`, `isTrue`, `isFalse`, `contains`, `fail`, `fatal`.
 
 ## CLI reference
 
 | Command | Description |
 |---------|-------------|
-| `zinc init <name>` | Create a new project |
-| `zinc run [file\|dir]` | Transpile and run |
-| `zinc build [dir]` | Build native binary |
-| `zinc build --cross os/arch` | Cross-compile |
-| `zinc test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
-| `zinc fmt <file\|dir>` | Format source code |
-| `zinc add <pkg@version>` | Add a Go dependency |
-| `zinc deps` | List dependencies |
+| `zinc-go init <name>` | Create a new project |
+| `zinc-go run [file\|dir] [-- args]` | Transpile and run |
+| `zinc-go build [dir] [-o outdir]` | Build native binary |
+| `zinc-go build --cross os/arch` | Cross-compile |
+| `zinc-go test [dir] [-- go-test-args]` | Transpile `*_test.zn` and run `go test` |
+| `zinc-go fmt <file\|dir>` | Format source code |
+| `zinc-go add <pkg@version>` | Add a Go dependency |
+| `zinc-go deps` | List dependencies |
+| `zinc-go version` | Print version |
 
 ## Next steps
 
 - [Language Guide](language-guide.md) — full syntax reference
-- [Error Handling](error-handling.md) — try/catch/throw, unchecked exceptions, `using` for cleanup
-- [Concurrency](concurrency.md) — spawn, channels, parallel for
 - [Classes & Inheritance](classes.md) — OO features
+- [Error Handling](error-handling.md) — `Err`, auto-widening, `or { }`
+- [Concurrency](concurrency.md) — spawn, channels, parallel for, select

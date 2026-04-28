@@ -28,14 +28,32 @@ print(s.address())    // localhost:3000
 print(s)              // Server(localhost:3000)
 ```
 
-Fields are accessed with `this.` in the constructor. In methods, bare field names work directly.
+Fields are accessed with `this.` in the constructor. In methods, bare field names work directly. `toString()` is honoured by `print()` and string interpolation.
 
-### Constructors can throw
+## Visibility
 
-An `init` that validates inputs can `throw` to abort construction — no partially-initialized object escapes. Callers handle it with the normal try/catch pattern:
+Use `pub` to expose fields and methods:
 
 ```zinc
-import stdlib.exceptions
+class Config {
+    pub String host = "localhost"     // exported Go field
+    pub int port = 8080
+    String secret                     // package-private
+
+    pub String describe() {
+        return "${host}:${port}"
+    }
+}
+```
+
+`pub` fields become exported Go struct fields; `pub` methods become exported Go methods. Default visibility is package-private.
+
+## Constructors that fail
+
+An `init` that validates inputs can return an error to abort construction. The class's "constructor" function widens to `(*T, error)` like any other widening function:
+
+```zinc
+import stdlib/errors
 
 class Server {
     String host
@@ -43,21 +61,20 @@ class Server {
 
     init(String host, int port) {
         if (port < 1 || port > 65535) {
-            throw exceptions.IllegalArgumentException("invalid port: ${port}")
+            return errors.IllegalArgumentError("invalid port: ${port}")
         }
         this.host = host
         this.port = port
     }
 }
 
-try {
-    var s = Server("localhost", 99999)
-} catch (exceptions.IllegalArgumentException e) {
-    fatal("bad config: ${e.message}")
+var s = Server("localhost", 99999) or {
+    print("bad config: ${err}")
+    return
 }
 ```
 
-Bare `return` inside an `init` body is still a compile error — there's nothing meaningful to return. To abort construction, `throw`.
+Bare `return` inside an `init` body is a compile error — there's nothing meaningful to return. To abort construction, return an `Err`-extending value.
 
 ## Data classes
 
@@ -68,6 +85,13 @@ data User(String name, String email, int age = 0)
 
 var u = User("Alice", "alice@example.com", 30)
 print(u)    // User(name=Alice, email=alice@example.com, age=30)
+```
+
+Data classes work with generics:
+
+```zinc
+data Pair<A, B>(A first, B second)
+data Result<T>(T value, bool ok)
 ```
 
 ## Inheritance
@@ -103,15 +127,15 @@ class Dog : Animal {
 }
 
 var dog = Dog("Rex", "Lab")
-print(dog.speak())    // Rex says Woof (inherited method)
-print(dog)            // Dog(Rex, Lab) (overridden toString)
+print(dog.speak())    // Rex says Woof (inherited)
+print(dog)            // Dog(Rex, Lab)  (overridden toString)
 ```
 
 Child classes:
-- Inherit all parent fields and methods
-- Can override methods by redefining them
-- Access parent fields directly by name
-- Call parent constructors via `super()`
+- Inherit all parent fields and methods.
+- Can override methods by redefining them with the same signature.
+- Access parent fields directly by name.
+- Call parent constructors via `super(...)`.
 
 ### Multi-level inheritance
 
@@ -119,14 +143,9 @@ Child classes:
 class Vehicle {
     String make
     int year
-
     init(String make, int year) {
         this.make = make
         this.year = year
-    }
-
-    String category() {
-        return "vehicle"
     }
 }
 
@@ -149,11 +168,11 @@ class ElectricCar : Car {
 
 ### Polymorphism
 
-Child types can be assigned to parent type variables:
+Child types assign to parent type variables:
 
 ```zinc
 Vehicle v = Car("Toyota", 2024, 4)
-print(v.category())    // "vehicle"
+print(v.make)    // "Toyota"
 ```
 
 ## Interfaces
@@ -181,28 +200,42 @@ class Truck : Vehicle, Printable {
 }
 ```
 
-## Visibility
+## Sealed classes
 
-Use `pub` to mark fields as public:
+Closed hierarchies for exhaustive pattern matching:
 
 ```zinc
-class Config {
-    pub String host = "localhost"
-    pub int port = 8080
+sealed class Shape {
+    data Circle(double radius)
+    data Rect(double width, double height)
+    data Triangle(double base, double height)
+}
+
+double area(Shape s) {
+    match (s) {
+        case Circle(r)      { return 3.14159 * r * r }
+        case Rect(w, h)     { return w * h }
+        case Triangle(b, h) { return 0.5 * b * h }
+    }
+    return 0.0
 }
 ```
+
+The compiler enforces exhaustiveness — match expressions over a sealed type must cover every variant or include `case _`.
 
 ## Constants
 
 ```zinc
 const String VERSION = "1.0"
+const PI = 3.14159
 ```
 
 ## How it works
 
 Under the hood, Zinc compiles classes to Go structs:
-- Inheritance uses Go struct embedding (field/method promotion)
-- Interfaces map directly to Go interfaces
-- `super()` calls the parent's constructor
-- Method overrides shadow the embedded struct's methods
-- Polymorphism works through Go's structural typing
+
+- Inheritance uses Go struct embedding (field/method promotion).
+- Interfaces map to Go interfaces.
+- `super(...)` calls the parent constructor.
+- Method overrides shadow the embedded struct's methods.
+- Polymorphism works through Go's structural typing.
