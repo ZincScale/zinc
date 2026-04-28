@@ -781,6 +781,14 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 			g.writeln("return %s, %s", zv, g.formatExpr(r.Value))
 			return
 		}
+		// `return thrower()` — the call already returns (T, error)
+		// matching this function's widened signature. Pass through
+		// the tuple directly instead of appending `, nil` (which
+		// would be a Go type error).
+		if g.currentFuncIsThrower && g.callReturnsError(r.Value) {
+			g.writeln("return %s", g.formatExpr(r.Value))
+			return
+		}
 		g.writeln("return %s, nil", g.formatExpr(r.Value))
 		return
 	}
@@ -2154,7 +2162,14 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 			return true
 		}
 		// `return expr as T` — auto-widens because the cast can fail.
-		return exprContainsAsCast(stmt.Value)
+		if exprContainsAsCast(stmt.Value) {
+			return true
+		}
+		// `return thrower()` — direct return of a thrower call. Same
+		// rule as `var x = thrower()`: the enclosing function inherits
+		// the thrower status. Mirrors VarStmt / AssignStmt / ExprStmt
+		// which already check callReturnsError here.
+		return g.callReturnsError(stmt.Value)
 	case *parser.VarStmt:
 		if exprContainsPropagate(stmt.Value) {
 			return true
