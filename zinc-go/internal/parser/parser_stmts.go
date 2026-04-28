@@ -215,10 +215,20 @@ func (p *Parser) v2IsTypedVarDecl() bool {
 		return false
 	}
 	i++
-	// After name, must see = or end-of-statement (not ( which would be a function call)
+	// After name, anything except continuations of the name expression
+	// (function call, indexing, selector) means we have a typed
+	// declaration. Newlines have no token in this lexer, so for
+	// `Type name\n nextStmt`, the next token is whatever starts the
+	// next statement — accept it. The negative test below rules out
+	// the `Type name(args)` shape (which is a function call) and
+	// `Type name[...]` / `Type name.field` (continuation of an expr).
 	next := p.peekAt(i)
-	return next.Type == lexer.TOKEN_ASSIGN || next.Type == lexer.TOKEN_RBRACE ||
-		next.Type == lexer.TOKEN_EOF
+	switch next.Type {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_DOT,
+		lexer.TOKEN_QUESTION_DOT:
+		return false
+	}
+	return true
 }
 
 // v2ParseTypedVarStmt parses: Type name = expr  or  Type name (no value)

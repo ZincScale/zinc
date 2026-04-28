@@ -1,0 +1,10 @@
+got: alpha
+got: beta
+absent
+box.name = the box
+items size = 3
+score a=1
+score b=2
+box.name cleared
+loop over null finished
+nullable OK

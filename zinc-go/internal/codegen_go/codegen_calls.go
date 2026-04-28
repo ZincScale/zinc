@@ -384,6 +384,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
+	// Resolve the called Zinc function's param types (if any) so we can
+	// auto-wrap plain values as pointers when the param is `T?`. Same
+	// shape as the goResolver path above but for user-declared funcs.
+	var zincExpectedParams []*parser.ParamDecl
+	if ident, ok := c.Callee.(*parser.Ident); ok {
+		if sig, ok := g.funcSigs[ident.Name]; ok {
+			zincExpectedParams = sig
+		}
+	}
+
 	// Rewrite `it` keyword in args + adapt callback signatures + auto-insert & for pointer params
 	var argStrs []string
 	for i, arg := range c.Args {
@@ -407,6 +417,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				}
 				if !alreadyPointer {
 					formatted = "&" + formatted
+				}
+			}
+			// Auto-wrap when a Zinc function's param is `T?` and the
+			// arg is a plain `T`. `&literal` is illegal in Go, so route
+			// through the _zincPtr helper which uses a generic temp.
+			if zincExpectedParams != nil && i < len(zincExpectedParams) &&
+				isPointerOptional(zincExpectedParams[i].Type) &&
+				!g.valueIsAlreadyPointer(arg) {
+				if _, isNull := arg.(*parser.NullLit); !isNull {
+					formatted = g.wrapAsPointer(formatted)
 				}
 			}
 			argStrs = append(argStrs, formatted)

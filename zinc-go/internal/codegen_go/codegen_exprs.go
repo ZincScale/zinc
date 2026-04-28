@@ -568,11 +568,7 @@ func (g *Generator) formatStringInterp(s *parser.StringInterpLit) string {
 		default:
 			fmtStr.WriteString("%v")
 			expr := g.formatExpr(part)
-			isPtr := false
-			if ident, ok := part.(*parser.Ident); ok {
-				isPtr = g.ptrVars[ident.Name]
-			}
-			if isPtr {
+			if g.exprIsPointerOptional(part) {
 				expr = fmt.Sprintf("func() interface{} { if %s != nil { return *%s }; return \"null\" }()", expr, expr)
 			}
 			args = append(args, expr)
@@ -596,17 +592,38 @@ func (g *Generator) formatPrintf(s *parser.StringInterpLit) (string, []string) {
 		default:
 			fmtStr.WriteString("%v")
 			expr := g.formatExpr(part)
-			isPtr := false
-			if ident, ok := part.(*parser.Ident); ok {
-				isPtr = g.ptrVars[ident.Name]
-			}
-			if isPtr {
+			if g.exprIsPointerOptional(part) {
 				expr = fmt.Sprintf("func() interface{} { if %s != nil { return *%s }; return \"null\" }()", expr, expr)
 			}
 			args = append(args, expr)
 		}
 	}
 	return fmtStr.String(), args
+}
+
+// exprIsPointerOptional reports whether the expression's static type
+// is `*T` — a Zinc nullable lowering for value/class types. Used to
+// auto-deref in `${expr}` interpolation and other read positions where
+// Go's default `%v` formatter would otherwise print the pointer
+// address. Conservative: false-negatives just print the pointer.
+func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
+	switch ex := e.(type) {
+	case *parser.Ident:
+		return g.ptrVars[ex.Name]
+	case *parser.SelectorExpr:
+		// `obj.field` — look up the field's declared type on the
+		// receiver class.
+		if recv := g.resolveReceiverClassName(ex.Object); recv != "" {
+			if cls, ok := g.structs[recv]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == ex.Field {
+						return isPointerOptional(f.Type)
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // formatMatchExpr generates a Go switch expression via IIFE.

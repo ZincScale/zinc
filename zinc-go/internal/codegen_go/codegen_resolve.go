@@ -939,6 +939,24 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 	case *parser.ArrayType:
 		return "[]" + g.formatType(typ.ElementType)
 	case *parser.OptionalType:
+		// Strategy B: collection nullables drop the pointer. Go's nil
+		// zero-value for slices/maps/channels already serves as the
+		// "absent" sentinel — `for x := range nilSlice` is zero
+		// iterations, `len(nilMap)` is 0, `nil == nil` works for the
+		// `== null` check. The pointer wrapping (`*[]T`, `*map[K]V`,
+		// `*chan T`) was unidiomatic and broke iteration / passing
+		// literals at the use site. For non-collection types (String,
+		// Class), `*T` is retained — Go has no nil-friendly empty value
+		// for value types.
+		if gt, ok := typ.Inner.(*parser.GenericType); ok {
+			switch gt.Name {
+			case "List", "Map", "Channel", "Set":
+				return g.formatType(typ.Inner)
+			}
+		}
+		if _, ok := typ.Inner.(*parser.ArrayType); ok {
+			return g.formatType(typ.Inner)
+		}
 		return "*" + g.formatType(typ.Inner)
 	case *parser.FuncTypeExpr:
 		var params []string

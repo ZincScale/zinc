@@ -61,6 +61,16 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.errVarCount = 0
 	g.currentFuncParams = fn.Params
 
+	// Register pointer-typed params (those with `T?` where T isn't a
+	// collection) so the implicit-deref pass treats them as `*T`. Without
+	// this, `String? s` parameters fall through to the default `%v`
+	// printer that emits the pointer address instead of the string.
+	for _, p := range fn.Params {
+		if isPointerOptional(p.Type) {
+			g.ptrVars[p.Name] = true
+		}
+	}
+
 	// Set active type params for generic functions
 	if len(fn.TypeParams) > 0 {
 		g.activeTypeParams = make(map[string]bool)
@@ -625,6 +635,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	// Track class/generic-typed method params so `param.field.method()` and
 	// `param.method().keys()` chains resolve. Entries are removed on exit.
 	var methodParamBackup []string
+	var ptrParamBackup []string
 	for _, p := range m.Params {
 		if genType, ok := p.Type.(*parser.GenericType); ok {
 			g.varTypeExprs[p.Name] = genType
@@ -633,6 +644,12 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
 			g.varStructTypes[p.Name] = simpleType.Name
 			methodParamBackup = append(methodParamBackup, p.Name)
+		}
+		// Pointer-typed params (T? for non-collection T) — same auto-deref
+		// handling as locals declared with `T?`.
+		if isPointerOptional(p.Type) {
+			g.ptrVars[p.Name] = true
+			ptrParamBackup = append(ptrParamBackup, p.Name)
 		}
 	}
 	defer func() {
@@ -644,6 +661,9 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		for _, pn := range methodParamBackup {
 			delete(g.varTypeExprs, pn)
 			delete(g.varStructTypes, pn)
+		}
+		for _, pn := range ptrParamBackup {
+			delete(g.ptrVars, pn)
 		}
 	}()
 

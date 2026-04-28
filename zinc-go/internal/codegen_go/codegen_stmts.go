@@ -580,7 +580,37 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			varName = safe
 		}
 		g.writeln("var %s %s", varName, typeName)
+		// Track ptr-typed locals so subsequent assignments and reads
+		// can apply auto-address-take / auto-deref. Only for shapes that
+		// actually lower to *T — collection nullables (List<T>?, Map?,
+		// Channel?) drop the pointer under Strategy B and don't need
+		// this.
+		if isPointerOptional(v.Type) {
+			g.ptrVars[v.Name] = true
+		}
 	}
+}
+
+// isPointerOptional reports whether the given TypeExpr lowers to a Go
+// pointer type. Only `T?` where T is a value type or class — collection
+// optionals (`List<T>?`, `Map<K,V>?`, `Channel<T>?`, `T[]?`) lower to
+// the bare collection (Strategy B) and use Go's nil zero-value as the
+// "absent" sentinel.
+func isPointerOptional(t parser.TypeExpr) bool {
+	opt, ok := t.(*parser.OptionalType)
+	if !ok {
+		return false
+	}
+	if gt, ok := opt.Inner.(*parser.GenericType); ok {
+		switch gt.Name {
+		case "List", "Map", "Channel", "Set":
+			return false
+		}
+	}
+	if _, ok := opt.Inner.(*parser.ArrayType); ok {
+		return false
+	}
+	return true
 }
 
 // --- Assignment, return, control flow ----------------------------------------
@@ -623,7 +653,87 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		g.writeln("%s = %s", g.formatExpr(a.Target), tmpName)
 		return
 	}
+	// Auto-address-take: if the LHS is `*T` (a nullable value/class) and
+	// the RHS is a plain `T`, wrap with _zincPtr() so the assignment
+	// type-checks. Without this, `box.name = "alice"` (where name is
+	// `String?`) fails with "cannot use string as *string". Skip for
+	// `null` (nil is the natural absent value) and for already-pointer
+	// RHS values.
+	if a.Op == "=" && g.targetIsPointerOptional(a.Target) && !g.valueIsAlreadyPointer(a.Value) {
+		if _, isNull := a.Value.(*parser.NullLit); !isNull {
+			g.writeln("%s = %s", g.formatExpr(a.Target), g.wrapAsPointer(g.formatExpr(a.Value)))
+			return
+		}
+	}
 	g.writeln("%s %s %s", g.formatExpr(a.Target), a.Op, g.formatExpr(a.Value))
+}
+
+// targetIsPointerOptional reports whether an assignment LHS expression
+// resolves to a `*T` type — a nullable value/class field or local.
+// Used to drive auto-address-take on the RHS.
+func (g *Generator) targetIsPointerOptional(target parser.Expr) bool {
+	switch t := target.(type) {
+	case *parser.Ident:
+		return g.ptrVars[t.Name]
+	case *parser.SelectorExpr:
+		// `box.name` — look up the field's type on the receiver class.
+		if recv := g.resolveReceiverClassName(t.Object); recv != "" {
+			if cls, ok := g.structs[recv]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == t.Field {
+						return isPointerOptional(f.Type)
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// valueIsAlreadyPointer reports whether the RHS expression already
+// produces a `*T` value — in which case auto-address-take would
+// double-wrap. Conservative: false-negatives just skip the rewrite
+// (and the user gets a Go type error pointing at the actual issue).
+func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
+	if value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case *parser.Ident:
+		if g.ptrVars[v.Name] {
+			return true
+		}
+	case *parser.CallExpr:
+		// Constructor call: NewFoo() returns *Foo.
+		if ident, ok := v.Callee.(*parser.Ident); ok {
+			if g.isClassType(ident.Name) {
+				return true
+			}
+			if g.funcReturnsOptional[ident.Name] {
+				return true
+			}
+		}
+		// `new T` and `new T()` lower to &T{} — pointer.
+		if v.IsNew {
+			return true
+		}
+	case *parser.UnaryExpr:
+		if v.Op == "&" {
+			return true
+		}
+	case *parser.SelectorExpr:
+		// Reading `box.name` where name is *string.
+		if recv := g.resolveReceiverClassName(v.Object); recv != "" {
+			if cls, ok := g.structs[recv]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == v.Field {
+						return isPointerOptional(f.Type)
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {

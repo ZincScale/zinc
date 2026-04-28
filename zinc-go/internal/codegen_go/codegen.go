@@ -97,6 +97,20 @@ type Generator struct {
 	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
 	// Checked by the caller after GenerateFiles returns.
 	compileErrors []string
+
+	// needsPtrHelper marks that the generated file references _zincPtr,
+	// the generic helper that boxes a value into a pointer. Required for
+	// `String? foo = "hi"` and similar — Go disallows `&"hi"` directly.
+	needsPtrHelper bool
+}
+
+// wrapAsPointer formats `_zincPtr(expr)` and flags the helper for
+// emission. The helper is `func _zincPtr[T any](v T) *T { return &v }`,
+// which makes auto-address-take work uniformly across literal values
+// (Go disallows `&"hi"`) and named values.
+func (g *Generator) wrapAsPointer(formatted string) string {
+	g.needsPtrHelper = true
+	return fmt.Sprintf("_zincPtr(%s)", formatted)
 }
 
 // CompileErrors returns any compile-time errors the generator detected during
@@ -758,6 +772,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	// bodyGen is a value copy (see `bodyGen := *g` above); the outer g
 	// wouldn't otherwise see errors appended to the copy's slice.
 	g.compileErrors = append(g.compileErrors, bodyGen.compileErrors...)
+	// Same propagation for the auto-address-take helper flag — set
+	// during body emission, consumed by the preamble below.
+	if bodyGen.needsPtrHelper {
+		g.needsPtrHelper = true
+	}
 
 	// Write final output: package + imports + body
 	pkgName := g.packageName
@@ -779,6 +798,14 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		}
 		g.indent--
 		g.writeln(")")
+		g.writeln("")
+	}
+
+	// Emit the auto-address-take helper if any wrapAsPointer call needed
+	// it. Only generated when used so files without nullable assignments
+	// stay clean.
+	if g.needsPtrHelper {
+		g.writeln("func _zincPtr[T any](v T) *T { return &v }")
 		g.writeln("")
 	}
 
