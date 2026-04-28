@@ -461,6 +461,75 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 // PropagateExpr (postfix `?`). Used by inference — any `?` in a function
 // body promotes that function to a thrower. Lambdas are a separate scope,
 // so we do *not* descend into LambdaExpr bodies.
+// exprContainsAsCast reports whether an expression tree contains an
+// `as` type cast. Like callReturnsError but for the failable cast —
+// drives both hoisting (to lower nested `as` to a comma-ok temp) and
+// the thrower-inference fixed-point (so functions using `as` widen
+// to (T, error)). The `is` predicate form (IsCheck=true) is not
+// failable and never matches here.
+//
+// Distinct from exprContainsPropagate: `?` always widens (or-handler
+// can't override), but `as` can be consumed by an or-handler at the
+// statement level — same rule as a thrower call. So callers that
+// implement the always-widen rule consult exprContainsPropagate; the
+// thrower-detection path consults this one alongside callReturnsError.
+func exprContainsAsCast(e parser.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch expr := e.(type) {
+	case *parser.TypeAssertExpr:
+		if !expr.IsCheck {
+			return true
+		}
+		return exprContainsAsCast(expr.Object)
+	case *parser.PropagateExpr:
+		return exprContainsAsCast(expr.Inner)
+	case *parser.CallExpr:
+		if exprContainsAsCast(expr.Callee) {
+			return true
+		}
+		for _, a := range expr.Args {
+			if exprContainsAsCast(a) {
+				return true
+			}
+		}
+		for _, na := range expr.NamedArgs {
+			if exprContainsAsCast(na.Value) {
+				return true
+			}
+		}
+		return false
+	case *parser.BinaryExpr:
+		return exprContainsAsCast(expr.Left) || exprContainsAsCast(expr.Right)
+	case *parser.UnaryExpr:
+		return exprContainsAsCast(expr.Operand)
+	case *parser.SelectorExpr:
+		return exprContainsAsCast(expr.Object)
+	case *parser.SafeNavExpr:
+		if exprContainsAsCast(expr.Object) {
+			return true
+		}
+		if expr.Call != nil {
+			for _, a := range expr.Call.Args {
+				if exprContainsAsCast(a) {
+					return true
+				}
+			}
+		}
+		return false
+	case *parser.IndexExpr:
+		return exprContainsAsCast(expr.Object) || exprContainsAsCast(expr.Index)
+	case *parser.SliceExpr:
+		return exprContainsAsCast(expr.Object) || exprContainsAsCast(expr.Low) || exprContainsAsCast(expr.High)
+	case *parser.SpreadExpr:
+		return exprContainsAsCast(expr.Expr)
+	case *parser.RangeExpr:
+		return exprContainsAsCast(expr.Start) || exprContainsAsCast(expr.End)
+	}
+	return false
+}
+
 func exprContainsPropagate(e parser.Expr) bool {
 	if e == nil {
 		return false

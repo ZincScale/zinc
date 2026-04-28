@@ -234,6 +234,16 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	// resolves the RHS `n` to the outer field (as Go's `n := n + 1` does)
 	// before the local shadows it for subsequent statements.
 	defer g.declareLocal(v.Name)
+	// Direct `as` cast: `var x = expr as T` (with optional `or { }` handler).
+	// Emit comma-ok directly into the var, skipping the hoist temp for a
+	// cleaner output. On mismatch, run the handler if present, otherwise
+	// auto-propagate via emitErrReturn (fixed-point pass marks the
+	// enclosing function as a thrower because exprContainsPropagate is
+	// true for `as`).
+	if ta, ok := v.Value.(*parser.TypeAssertExpr); ok && !ta.IsCheck {
+		g.emitTypeAssertVar(v, ta)
+		return
+	}
 	// Explicit error propagation: `var x = call()?`.
 	// Strip the PropagateExpr wrapper and fall through to the same
 	// propagation codegen the implicit path uses.
@@ -243,9 +253,10 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		g.emitErrorPropagatingVar(&stripped)
 		return
 	}
-	// Nested propagation: `var x = foo(bar()?) + 1`. Hoist each `?` to a
-	// temp above this statement, then emit the var with the rewritten RHS.
-	if v.Value != nil && exprContainsPropagate(v.Value) {
+	// Nested propagation: `var x = foo(bar()?) + 1`. Hoist each `?` (and
+	// any nested `as`) to a temp above this statement, then emit the var
+	// with the rewritten RHS.
+	if v.Value != nil && (exprContainsPropagate(v.Value) || exprContainsAsCast(v.Value)) {
 		rewritten := *v
 		rewritten.Value = g.hoistPropagates(v.Value)
 		g.emitVarStmt(&rewritten)
@@ -551,8 +562,9 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		g.emitAssignStmt(stripped)
 		return
 	}
-	// Nested propagation on RHS: `x = foo(bar()?) + 1`. Hoist, then emit.
-	if a.Value != nil && exprContainsPropagate(a.Value) {
+	// Nested propagation on RHS: `x = foo(bar()?) + 1`. Hoist any `?`
+	// or `as` to temps, then emit the rewritten assign.
+	if a.Value != nil && (exprContainsPropagate(a.Value) || exprContainsAsCast(a.Value)) {
 		rewritten := &parser.AssignStmt{Line: a.Line, Target: a.Target, Op: a.Op, Value: g.hoistPropagates(a.Value)}
 		g.emitAssignStmt(rewritten)
 		return
@@ -583,8 +595,9 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	// hoistPropagates emits `_pN, errM := inner; if errM != nil { return zero, errM }`
 	// for each `?`, then returns a rewritten value expression that
 	// references the temps. Top-level `return call()?` and nested
-	// `return call()? * 3` both go through this path.
-	if r.Value != nil && exprContainsPropagate(r.Value) {
+	// `return call()? * 3` (or any `as` cast inside the return value)
+	// both go through this path.
+	if r.Value != nil && (exprContainsPropagate(r.Value) || exprContainsAsCast(r.Value)) {
 		rewritten := &parser.ReturnStmt{Line: r.Line, Value: g.hoistPropagates(r.Value)}
 		g.emitReturnStmt(rewritten)
 		return
@@ -1206,9 +1219,10 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		g.emitExprStmt(stripped)
 		return
 	}
-	// Nested `?` inside an expression statement: e.g. `foo(bar()?)` as a
-	// bare statement. Hoist the `?`s, then emit the rewritten statement.
-	if exprContainsPropagate(es.Expr) {
+	// Nested `?` (or `as`) inside an expression statement: e.g.
+	// `foo(bar()?)` as a bare statement. Hoist, then emit the rewritten
+	// statement.
+	if exprContainsPropagate(es.Expr) || exprContainsAsCast(es.Expr) {
 		rewritten := &parser.ExprStmt{Line: es.Line, Expr: g.hoistPropagates(es.Expr)}
 		g.emitExprStmt(rewritten)
 		return
@@ -1660,7 +1674,30 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		}
 		return out
 	case *parser.TypeAssertExpr:
-		return &parser.TypeAssertExpr{Object: g.hoistPropagates(expr.Object), TypeName: expr.TypeName, IsCheck: expr.IsCheck}
+		// `is` predicate — pure expression, just descend.
+		if expr.IsCheck {
+			return &parser.TypeAssertExpr{Object: g.hoistPropagates(expr.Object), TypeName: expr.TypeName, IsCheck: true}
+		}
+		// `as` cast — failable. Emit comma-ok + error guard, replace with
+		// an Ident pointing at the bound value. Mirrors the PropagateExpr
+		// arm above; this is the lowering that makes `as` "return error
+		// instead of panic" — the function widens to (T, error) via the
+		// thrower fixed-point pass and the error propagates up.
+		inner := g.hoistPropagates(expr.Object)
+		count := g.errVarCount
+		tmpName := fmt.Sprintf("_p%d", count)
+		okName := fmt.Sprintf("_ok%d", count)
+		errName := g.nextErrName() // bumps errVarCount
+		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		g.needImport("fmt")
+		g.writeln("%s, %s := %s.(%s)", tmpName, okName, g.formatExpr(inner), goType)
+		g.writeln("if !%s {", okName)
+		g.indent++
+		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+expr.TypeName)
+		g.emitErrReturn(errName)
+		g.indent--
+		g.writeln("}")
+		return &parser.Ident{Name: tmpName}
 	case *parser.SpreadExpr:
 		return &parser.SpreadExpr{Expr: g.hoistPropagates(expr.Expr)}
 	case *parser.RangeExpr:
@@ -1713,6 +1750,38 @@ func (g *Generator) emitErrorPropagatingVar(v *parser.VarStmt) {
 }
 
 // --- Error handling (or expressions) -----------------------------------------
+
+// emitTypeAssertVar emits the direct form of `var x = expr as T` —
+// optionally with an `or { }` handler — using Go's comma-ok type
+// assertion. On mismatch, the handler runs (if present) or the error
+// propagates via emitErrReturn. Never panics. The enclosing function
+// auto-widens to (T, error) because exprContainsPropagate returns true
+// for `as`, which the thrower fixed-point pass picks up.
+func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertExpr) {
+	count := g.errVarCount
+	okName := fmt.Sprintf("_ok%d", count)
+	errName := g.nextErrName() // bumps errVarCount
+	goType := g.formatType(&parser.SimpleType{Name: ta.TypeName})
+	g.needImport("fmt")
+	g.writeln("%s, %s := %s.(%s)", v.Name, okName, g.formatExpr(ta.Object), goType)
+	g.writeln("if !%s {", okName)
+	g.indent++
+	if v.OrHandler != nil && v.OrHandler.Body != nil {
+		// `or { handler }` — bind err for the handler body to reference.
+		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+ta.TypeName)
+		g.writeln("_ = %s", errName)
+		savedErrVar := g.currentErrVar
+		g.currentErrVar = errName
+		g.emitOrBlock(v.OrHandler.Body)
+		g.currentErrVar = savedErrVar
+	} else {
+		// Auto-propagate.
+		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+ta.TypeName)
+		g.emitErrReturn(errName)
+	}
+	g.indent--
+	g.writeln("}")
+}
 
 // emitOrAssignment handles: target = call() or default / or { block }
 func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *parser.OrHandler) {
@@ -1935,7 +2004,11 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		// `return SomeError(...)` where SomeError is Error itself or
 		// any descendant — the compiler widens the function signature
 		// to (T, error).
-		return g.exprIsErrorCtor(stmt.Value)
+		if g.exprIsErrorCtor(stmt.Value) {
+			return true
+		}
+		// `return expr as T` — auto-widens because the cast can fail.
+		return exprContainsAsCast(stmt.Value)
 	case *parser.VarStmt:
 		if exprContainsPropagate(stmt.Value) {
 			return true
@@ -1952,10 +2025,11 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		//   }
 		// gets falsely classified as throwing because callReturnsError
 		// reports yes for thrower(); the `or { }` handling is ignored.
+		// The same rule applies to `as` casts — or-handler consumes.
 		if stmt.OrHandler != nil {
 			return false
 		}
-		return g.callReturnsError(stmt.Value)
+		return g.callReturnsError(stmt.Value) || exprContainsAsCast(stmt.Value)
 	case *parser.AssignStmt:
 		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
 			return true
@@ -1966,7 +2040,7 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		if stmt.OrHandler != nil {
 			return false
 		}
-		return g.callReturnsError(stmt.Value)
+		return g.callReturnsError(stmt.Value) || exprContainsAsCast(stmt.Value)
 	case *parser.ExprStmt:
 		if exprContainsPropagate(stmt.Expr) {
 			return true
@@ -1977,9 +2051,9 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		if stmt.OrHandler != nil {
 			return false
 		}
-		return g.callReturnsError(stmt.Expr)
+		return g.callReturnsError(stmt.Expr) || exprContainsAsCast(stmt.Expr)
 	case *parser.TupleVarStmt:
-		return g.callReturnsError(stmt.Value)
+		return g.callReturnsError(stmt.Value) || exprContainsAsCast(stmt.Value)
 	case *parser.IfStmt:
 		if g.blockCanReturnError(stmt.Then) {
 			return true

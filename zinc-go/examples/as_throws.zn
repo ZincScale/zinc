@@ -1,0 +1,54 @@
+// Regression: `as` is a failable cast, not a panicking one.
+//
+// On type mismatch the cast returns an error (no panic). The enclosing
+// function auto-widens to (T, error), the same way a thrower call does.
+// `or { }` at the call site can consume the error locally; otherwise it
+// propagates up the stack like any other failable expression.
+
+interface Stmt {
+    String describe()
+}
+
+class IfStmt : Stmt {
+    pub String cond
+    init(String c) { this.cond = c }
+    pub String describe() { return "if(${cond})" }
+}
+
+class ForStmt : Stmt {
+    pub String item
+    init(String i) { this.item = i }
+    pub String describe() { return "for(${item})" }
+}
+
+// 1. Auto-propagation — function widens to (String, error).
+String castAndDescribe(Stmt s) {
+    var i = s as IfStmt
+    return "got an if: ${i.cond}"
+}
+
+// 2. Local handling — or-handler consumes; function does NOT widen.
+String safeDescribe(Stmt s) {
+    var i = s as IfStmt or {
+        return "(handled: ${err})"
+    }
+    return "got an if: ${i.cond}"
+}
+
+// 3. Nested cast — hoisted automatically; widens through the parent.
+String nestedDescribe(Stmt s) {
+    return "nested: " + (s as IfStmt).cond
+}
+
+void main() {
+    Stmt good = IfStmt("x > 0")
+    Stmt bad = ForStmt("i in 0..10")
+
+    // Direct cast — happy path.
+    var r1 = castAndDescribe(good) or { print("propagated 1: ${err}"); return }
+    print(r1)
+
+    // Direct cast — error propagates up to main's `or { }`.
+    var r2 = castAndDescribe(bad) or { print("propagated 2: ${err}"); return }
+    print("should not reach: ${r2}")
+}
