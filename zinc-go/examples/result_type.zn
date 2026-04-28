@@ -1,0 +1,27 @@
+// Result<T, E> as an explicit return-type marker. Auto-widens callers
+// the same way the implicit thrower-inference does, but the type is
+// visible at the signature.
+
+class ParseError {
+    pub String msg
+    init(String m) { this.msg = m }
+    pub String Error() { return msg }
+}
+
+Result<int, ParseError> parseNum(String s) {
+    if (s == "") { return Err(ParseError("empty input")) }
+    return Ok(42)
+}
+
+int doubled(String s) {
+    var n = parseNum(s)    // auto-unwrap; Err propagates up
+    return n * 2
+}
+
+void main() {
+    var x = doubled("hi") or { print("err: ${err.Error()}"); return }
+    print("doubled: ${x}")
+
+    var y = doubled("") or { print("caught: ${err.Error()}"); return }
+    print("unreachable: ${y}")
+}

@@ -488,6 +488,24 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_SUPER:
 		p.advance()
 		return &Ident{Name: "super"}
+	case lexer.TOKEN_OK:
+		// Ok(value) — Result success constructor. Lowers to `return
+		// value, nil` in a Result-returning function. Bare `Ok`
+		// without parens is a parse error (stays consistent with the
+		// keyword being a constructor, not a value).
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		val := p.v2ParseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &OkExpr{Value: val}
+	case lexer.TOKEN_ERR:
+		// Err(error) — Result error constructor. Lowers to `return
+		// zero, error` in a Result-returning function.
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		val := p.v2ParseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &ErrExpr{Value: val}
 	case lexer.TOKEN_MATCH:
 		return p.v2ParseMatchExpr()
 	case lexer.TOKEN_IDENT, lexer.TOKEN_PRINT, lexer.TOKEN_DATA:

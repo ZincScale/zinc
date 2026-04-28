@@ -911,6 +911,25 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				return "chan " + g.formatType(typ.TypeArgs[0])
 			}
 			return "chan interface{}"
+		case "Result":
+			// Result<T, E> is a type marker, not a real Go type. In a
+			// function return position the caller (formatReturnType /
+			// goReturnTypeStr / Fn signature emit) reads it as the
+			// `(T, error)` tuple shape. As a value-position type — e.g.
+			// `Fn<(A), Result<T, E>>` — we still emit the tuple form
+			// because Go function types accept tuple returns. If the
+			// user has shadowed `Result` with a local data class, fall
+			// through to the user's class (existing g.structs /
+			// g.dataClasses hooks pick that up via the default case).
+			if _, userDefined := g.structs[typ.Name]; !userDefined {
+				if !g.dataClasses[typ.Name] {
+					if len(typ.TypeArgs) >= 1 {
+						return fmt.Sprintf("(%s, error)", g.formatType(typ.TypeArgs[0]))
+					}
+					return "(interface{}, error)"
+				}
+			}
+			fallthrough
 		default:
 			var args []string
 			for _, a := range typ.TypeArgs {
@@ -974,11 +993,39 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 }
 
 // goReturnTypeStr returns the Go type string for a return type.
+//
+// For `Result<T, E>` returns, this strips the Result wrapper and
+// returns just T. The caller (emitFnDecl etc.) re-applies the
+// `(T, error)` wrap via the existing thrower path so the output
+// matches `func foo() (T, error)` not `func foo() ((T, error), error)`.
 func (g *Generator) goReturnTypeStr(retType parser.TypeExpr) string {
 	if retType == nil {
 		return ""
 	}
+	if successT, _, ok := g.resultTypeArgs(retType); ok {
+		return g.formatType(successT)
+	}
 	return g.formatType(retType)
+}
+
+// resultTypeArgs reports whether the given type is the built-in
+// `Result<T, E>` marker (not a user-shadowed class). When yes,
+// returns the success type T and the error type E.
+func (g *Generator) resultTypeArgs(t parser.TypeExpr) (parser.TypeExpr, parser.TypeExpr, bool) {
+	gt, ok := t.(*parser.GenericType)
+	if !ok || gt.Name != "Result" {
+		return nil, nil, false
+	}
+	if _, shadowed := g.structs["Result"]; shadowed {
+		return nil, nil, false
+	}
+	if g.dataClasses["Result"] {
+		return nil, nil, false
+	}
+	if len(gt.TypeArgs) < 2 {
+		return nil, nil, false
+	}
+	return gt.TypeArgs[0], gt.TypeArgs[1], true
 }
 
 // formatReturnType builds the Go return type string (with leading space).

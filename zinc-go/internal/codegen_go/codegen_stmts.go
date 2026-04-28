@@ -774,6 +774,31 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		return
 	}
 
+	// `return Ok(value)` → `return value, nil`. Only valid in a
+	// thrower context (the function is declared `Result<T, _>` or
+	// inferred via auto-widen). emitFnDecl/emitMethodDecl populate
+	// errorFuncs for Result-returning fns; check it here so we get
+	// a clear error for misuse.
+	if okExpr, ok := r.Value.(*parser.OkExpr); ok {
+		if !g.currentFuncIsThrower {
+			g.compileError(r.Line, "Ok(...) is only valid inside a Result-returning (or auto-widened thrower) function")
+			return
+		}
+		g.writeln("return %s, nil", g.formatExpr(okExpr.Value))
+		return
+	}
+	// `return Err(value)` → `return zero, value`. Same thrower-context
+	// requirement.
+	if errExpr, ok := r.Value.(*parser.ErrExpr); ok {
+		if !g.currentFuncIsThrower {
+			g.compileError(r.Line, "Err(...) is only valid inside a Result-returning (or auto-widened thrower) function")
+			return
+		}
+		zv := g.zeroValueFor(g.currentReturnType)
+		g.writeln("return %s, %s", zv, g.formatExpr(errExpr.Value))
+		return
+	}
+
 	// Optional return: wrap value with new() for pointer type
 	if g.currentReturnOptional {
 		if _, ok := r.Value.(*parser.NullLit); ok {
@@ -1611,6 +1636,13 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 	if !ok {
 		return false
 	}
+	// Calling a function-typed value whose Fn signature returns
+	// Result<T, E> — the lowered Go is `(T, error)`, so the call is
+	// a thrower call. Lets `f(input)` propagate errors when `f` is
+	// declared `Fn<(A), Result<T, E>>` (or a type alias to that).
+	if g.fnCalleeReturnsResult(call.Callee) {
+		return true
+	}
 	switch callee := call.Callee.(type) {
 	case *parser.Ident:
 		if g.errorFuncs[callee.Name] {
@@ -1652,6 +1684,75 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// blockCanReturnErrorWithParams wraps blockCanReturnError so calls
+// through Fn-typed parameters are recognized as thrower calls during
+// the thrower fixed-point pass. At fixed-point time, params haven't
+// been registered in varTypeExprs (that happens at emit time inside
+// emitFnDecl / emitMethodDecl), so without this wrapper a function
+// that calls one of its own Fn-typed params wouldn't be classified
+// as a thrower even when the Fn signature declares Result<T, E>.
+func (g *Generator) blockCanReturnErrorWithParams(block *parser.BlockStmt, params []*parser.ParamDecl) bool {
+	var registered []string
+	for _, p := range params {
+		if _, isFunc := p.Type.(*parser.FuncTypeExpr); isFunc {
+			if _, exists := g.varTypeExprs[p.Name]; !exists {
+				g.varTypeExprs[p.Name] = p.Type
+				registered = append(registered, p.Name)
+			}
+		}
+		if simpleType, ok := p.Type.(*parser.SimpleType); ok {
+			if _, hasAlias := g.typeAliases[simpleType.Name]; hasAlias {
+				if _, exists := g.varTypeExprs[p.Name]; !exists {
+					g.varTypeExprs[p.Name] = p.Type
+					registered = append(registered, p.Name)
+				}
+			}
+		}
+	}
+	defer func() {
+		for _, name := range registered {
+			delete(g.varTypeExprs, name)
+		}
+	}()
+	return g.blockCanReturnError(block)
+}
+
+// fnCalleeReturnsResult reports whether the callee resolves to a
+// function-typed value (Fn<(args), Result<T, E>> in source, possibly
+// through a type alias) whose Go signature includes the (T, error)
+// tuple. Used by callReturnsError so calls through such values
+// auto-widen their callers via the existing thrower fixed-point.
+func (g *Generator) fnCalleeReturnsResult(callee parser.Expr) bool {
+	ident, ok := callee.(*parser.Ident)
+	if !ok {
+		return false
+	}
+	te, ok := g.varTypeExprs[ident.Name]
+	if !ok {
+		return false
+	}
+	return g.fnTypeReturnsResult(te)
+}
+
+// fnTypeReturnsResult walks a TypeExpr (a FuncTypeExpr directly or
+// through a SimpleType-named type alias) and reports whether its
+// return type is the built-in Result<T, E> marker.
+func (g *Generator) fnTypeReturnsResult(t parser.TypeExpr) bool {
+	if ft, ok := t.(*parser.FuncTypeExpr); ok {
+		if ft.ReturnType == nil {
+			return false
+		}
+		_, _, isResult := g.resultTypeArgs(ft.ReturnType)
+		return isResult
+	}
+	if simple, ok := t.(*parser.SimpleType); ok {
+		if alias, exists := g.typeAliases[simple.Name]; exists {
+			return g.fnTypeReturnsResult(alias)
 		}
 	}
 	return false
@@ -2249,6 +2350,15 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		// any descendant — the compiler widens the function signature
 		// to (T, error).
 		if g.exprIsErrorCtor(stmt.Value) {
+			return true
+		}
+		// `return Ok(...)` / `return Err(...)` — explicit Result form.
+		// Either makes the enclosing function a thrower; emitReturnStmt
+		// lowers them to the matching tuple shape.
+		if _, ok := stmt.Value.(*parser.OkExpr); ok {
+			return true
+		}
+		if _, ok := stmt.Value.(*parser.ErrExpr); ok {
 			return true
 		}
 		// `return expr as T` — auto-widens because the cast can fail.

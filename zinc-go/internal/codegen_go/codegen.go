@@ -394,7 +394,14 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			if g.blockCanReturnError(decl.Body) {
+			thrower := g.blockCanReturnErrorWithParams(decl.Body, decl.Params)
+			if thrower {
+				g.errorFuncs[decl.Name] = true
+			}
+			// `Result<T, E>` declared return type makes the fn a thrower
+			// regardless of body — the user has explicitly declared the
+			// failable contract.
+			if _, _, isResult := g.resultTypeArgs(decl.ReturnType); isResult {
 				g.errorFuncs[decl.Name] = true
 			}
 			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
@@ -438,7 +445,7 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 		for _, d := range prog.Decls {
 			switch decl := d.(type) {
 			case *parser.FnDecl:
-				if !g.errorFuncs[decl.Name] && g.blockCanReturnError(decl.Body) {
+				if !g.errorFuncs[decl.Name] && g.blockCanReturnErrorWithParams(decl.Body, decl.Params) {
 					g.errorFuncs[decl.Name] = true
 					changed = true
 				}

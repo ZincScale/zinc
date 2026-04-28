@@ -190,6 +190,16 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return "s"
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
+	case *parser.OkExpr:
+		// Ok/Err are only meaningful in a return statement of a
+		// Result-returning function. Reaching this expression-position
+		// emit means the user wrote `Ok(...)` outside that context —
+		// flag it. (emitReturnStmt special-cases the valid use.)
+		g.compileError(0, "Ok(...) can only appear in a return statement; got it as an expression value")
+		return fmt.Sprintf("/* misplaced Ok(%s) */", g.formatExpr(expr.Value))
+	case *parser.ErrExpr:
+		g.compileError(0, "Err(...) can only appear in a return statement; got it as an expression value")
+		return fmt.Sprintf("/* misplaced Err(%s) */", g.formatExpr(expr.Value))
 	case *parser.TypeAssertExpr:
 		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		if expr.IsCheck {

@@ -93,6 +93,19 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 			g.varStructTypes[p.Name] = simpleType.Name
 			paramNameBackup = append(paramNameBackup, p.Name)
 		}
+		// Function-typed params (Fn<...> directly, or via a SimpleType
+		// type alias to a Fn<...>): register so calls through them are
+		// recognized as thrower calls when the Fn returns Result<T, E>.
+		if _, isFunc := p.Type.(*parser.FuncTypeExpr); isFunc {
+			g.varTypeExprs[p.Name] = p.Type
+			paramNameBackup = append(paramNameBackup, p.Name)
+		}
+		if simpleType, ok := p.Type.(*parser.SimpleType); ok {
+			if _, exists := g.typeAliases[simpleType.Name]; exists {
+				g.varTypeExprs[p.Name] = p.Type
+				paramNameBackup = append(paramNameBackup, p.Name)
+			}
+		}
 	}
 
 	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
