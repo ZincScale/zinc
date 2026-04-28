@@ -1,0 +1,4 @@
+doubled: 84
+labeled: n=42
+ok: yes
+caught check: empty

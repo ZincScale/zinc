@@ -475,6 +475,78 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 // PropagateExpr (postfix `?`). Used by inference — any `?` in a function
 // body promotes that function to a thrower. Lambdas are a separate scope,
 // so we do *not* descend into LambdaExpr bodies.
+// exprContainsNestedThrowerCall reports whether the expression tree
+// contains a thrower call somewhere strictly inside a sub-expression
+// position. The top-level expression itself is excluded — when it IS
+// a thrower call, the statement-level codegen path already handles
+// it (emitErrorPropagatingVar for var-stmt, pass-through return for
+// return-stmt). Drives the hoist trigger sites so that `return
+// f(g(x))` where `g` throws auto-hoists `g` to a temp before the
+// outer call is emitted, with no `?` markup needed.
+func (g *Generator) exprContainsNestedThrowerCall(e parser.Expr) bool {
+	return g.containsThrowerCallRec(e, true)
+}
+
+func (g *Generator) containsThrowerCallRec(e parser.Expr, atTopLevel bool) bool {
+	if e == nil {
+		return false
+	}
+	switch ex := e.(type) {
+	case *parser.CallExpr:
+		if !atTopLevel && g.callReturnsError(ex) && !g.callIsVoidThrower(ex) {
+			return true
+		}
+		if g.containsThrowerCallRec(ex.Callee, false) {
+			return true
+		}
+		for _, a := range ex.Args {
+			if g.containsThrowerCallRec(a, false) {
+				return true
+			}
+		}
+		for _, na := range ex.NamedArgs {
+			if g.containsThrowerCallRec(na.Value, false) {
+				return true
+			}
+		}
+		return false
+	case *parser.BinaryExpr:
+		return g.containsThrowerCallRec(ex.Left, false) ||
+			g.containsThrowerCallRec(ex.Right, false)
+	case *parser.UnaryExpr:
+		return g.containsThrowerCallRec(ex.Operand, false)
+	case *parser.SelectorExpr:
+		return g.containsThrowerCallRec(ex.Object, false)
+	case *parser.IndexExpr:
+		return g.containsThrowerCallRec(ex.Object, false) ||
+			g.containsThrowerCallRec(ex.Index, false)
+	case *parser.SliceExpr:
+		return g.containsThrowerCallRec(ex.Object, false) ||
+			g.containsThrowerCallRec(ex.Low, false) ||
+			g.containsThrowerCallRec(ex.High, false)
+	case *parser.SpreadExpr:
+		return g.containsThrowerCallRec(ex.Expr, false)
+	case *parser.RangeExpr:
+		return g.containsThrowerCallRec(ex.Start, false) ||
+			g.containsThrowerCallRec(ex.End, false)
+	case *parser.SafeNavExpr:
+		if g.containsThrowerCallRec(ex.Object, false) {
+			return true
+		}
+		if ex.Call != nil {
+			for _, a := range ex.Call.Args {
+				if g.containsThrowerCallRec(a, false) {
+					return true
+				}
+			}
+		}
+		return false
+	case *parser.TypeAssertExpr:
+		return g.containsThrowerCallRec(ex.Object, false)
+	}
+	return false
+}
+
 // exprContainsAsCast reports whether an expression tree contains an
 // `as` type cast. Like callReturnsError but for the failable cast —
 // drives both hoisting (to lower nested `as` to a comma-ok temp) and
