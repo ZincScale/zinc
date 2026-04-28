@@ -229,6 +229,11 @@ func (g *Generator) inferSliceElemType(expr parser.Expr) string {
 // --- Variable declarations ---------------------------------------------------
 
 func (g *Generator) emitVarStmt(v *parser.VarStmt) {
+	// Register the local name for the implicit-self rewrite, but only
+	// AFTER the value expression has been formatted — so `var n = n + 1`
+	// resolves the RHS `n` to the outer field (as Go's `n := n + 1` does)
+	// before the local shadows it for subsequent statements.
+	defer g.declareLocal(v.Name)
 	// Explicit error propagation: `var x = call()?`.
 	// Strip the PropagateExpr wrapper and fall through to the same
 	// propagation codegen the implicit path uses.
@@ -733,7 +738,16 @@ func (g *Generator) emitForStmt(f *parser.ForStmt) {
 		g.writeln("for %s; %s; %s {", init, cond, post)
 	}
 	g.indent++
-	g.emitBlock(f.Body)
+	g.withLocalScope(func() {
+		// Loop-bound names shadow fields inside the body.
+		if f.IsRange {
+			g.declareLocal(f.Item)
+			g.declareLocal(f.IndexVar)
+		} else if init, ok := f.Init.(*parser.VarStmt); ok {
+			g.declareLocal(init.Name)
+		}
+		g.emitBlock(f.Body)
+	})
 	g.indent--
 	g.writeln("}")
 }
@@ -2141,11 +2155,14 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 			g.errVarCount++
 			g.writeln("%s := func() error {", errVar)
 			g.indent++
-			for _, r := range w.Resources {
-				g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-				g.writeln("defer %s.Close()", r.Name)
-			}
-			g.emitBlock(w.Body)
+			g.withLocalScope(func() {
+				for _, r := range w.Resources {
+					g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
+					g.writeln("defer %s.Close()", r.Name)
+					g.declareLocal(r.Name)
+				}
+				g.emitBlock(w.Body)
+			})
 			g.writeln("return nil")
 			g.indent--
 			g.writeln("}()")
@@ -2158,20 +2175,26 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 		}
 		g.writeln("func() {")
 		g.indent++
-		for _, r := range w.Resources {
-			g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-			g.writeln("defer %s.Close()", r.Name)
-		}
-		g.emitBlock(w.Body)
+		g.withLocalScope(func() {
+			for _, r := range w.Resources {
+				g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
+				g.writeln("defer %s.Close()", r.Name)
+				g.declareLocal(r.Name)
+			}
+			g.emitBlock(w.Body)
+		})
 		g.indent--
 		g.writeln("}()")
 		return
 	}
-	for _, r := range w.Resources {
-		g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-		g.writeln("defer %s.Close()", r.Name)
-	}
-	g.emitBlock(w.Body)
+	g.withLocalScope(func() {
+		for _, r := range w.Resources {
+			g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
+			g.writeln("defer %s.Close()", r.Name)
+			g.declareLocal(r.Name)
+		}
+		g.emitBlock(w.Body)
+	})
 }
 
 // blockEndsInReturn reports whether the final statement of a block is
@@ -2234,6 +2257,9 @@ func blockContainsReturn(block *parser.BlockStmt) bool {
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
 	names := strings.Join(t.Names, ", ")
 	g.writeln("%s := %s", names, g.formatExpr(t.Value))
+	for _, n := range t.Names {
+		g.declareLocal(n)
+	}
 }
 
 func (g *Generator) emitAssertStmt(a *parser.AssertStmt) {
@@ -2248,7 +2274,34 @@ func (g *Generator) emitBlock(block *parser.BlockStmt) {
 	if block == nil {
 		return
 	}
-	for _, s := range block.Stmts {
-		g.emitStmt(s)
+	g.withLocalScope(func() {
+		for _, s := range block.Stmts {
+			g.emitStmt(s)
+		}
+	})
+}
+
+// withLocalScope runs fn with currentLocals shallow-copied, so any names
+// added inside fn don't leak to the caller. Used by emitBlock and by
+// compound statements (for, with) that bind names visible only in their
+// body. Implements lexical block scoping for the implicit-self rewrite.
+func (g *Generator) withLocalScope(fn func()) {
+	saved := g.currentLocals
+	scope := make(map[string]bool, len(saved))
+	for k := range saved {
+		scope[k] = true
 	}
+	g.currentLocals = scope
+	defer func() { g.currentLocals = saved }()
+	fn()
+}
+
+// declareLocal registers a name as locally declared in the current scope.
+// Called from VarStmt / TupleVarStmt emission and from compound statements
+// that bind names (for-range loop vars, with/using/lock resources).
+func (g *Generator) declareLocal(name string) {
+	if name == "" || g.currentLocals == nil {
+		return
+	}
+	g.currentLocals[name] = true
 }

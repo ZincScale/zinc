@@ -30,6 +30,7 @@ type Generator struct {
 	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
 	currentMethods map[string]bool // method names of current class (for implicit self)
 	currentParams  map[string]bool // parameter names (shadow field names)
+	currentLocals  map[string]bool // locally-declared var names in scope (shadow fields)
 	currentClass   string          // current class name (for pub member lookups)
 
 	// Error handling
@@ -66,6 +67,7 @@ type Generator struct {
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	varStructTypes      map[string]string     // variable name → struct type name
 	dataClasses         map[string]bool       // data class names that have NewType constructors
+	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
 	typeAliases         map[string]parser.TypeExpr // type alias name → underlying type
 	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
 	importMap           map[string]string     // import prefix → full Go package path
@@ -316,6 +318,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			}
 		case *parser.DataClassDecl:
 			g.dataClasses[decl.Name] = true
+			if g.dataClassDecls == nil {
+				g.dataClassDecls = make(map[string]*parser.DataClassDecl)
+			}
+			g.dataClassDecls[decl.Name] = decl
 			g.funcSigs["New"+decl.Name] = fieldDeclsToParams(decl.Params)
 			if g.localDataFields == nil {
 				g.localDataFields = make(map[string][]*parser.FieldDecl)
@@ -331,6 +337,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				g.interfaces[decl.Name] = true
 				for _, v := range decl.Variants {
 					g.dataClasses[v.Name] = true
+					if g.dataClassDecls == nil {
+						g.dataClassDecls = make(map[string]*parser.DataClassDecl)
+					}
+					g.dataClassDecls[v.Name] = v
 					g.funcSigs["New"+v.Name] = fieldDeclsToParams(v.Params)
 					if g.localDataFields == nil {
 						g.localDataFields = make(map[string][]*parser.FieldDecl)

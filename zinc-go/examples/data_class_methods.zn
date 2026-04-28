@@ -1,0 +1,41 @@
+// Regression: methods on data classes use value receivers, matching the
+// value-returning constructor and the auto-String(). Three forms must
+// work:
+//
+//   1. Direct method call on a value local
+//   2. Interface dispatch — a data-class value satisfies an interface
+//      with the method (would fail with pointer receivers)
+//   3. Method call through a map value (would fail "cannot take address
+//      of map element" with pointer receivers)
+
+interface Summable {
+    int sum()
+}
+
+data Pair(int a, int b) {
+    int sum() { return a + b }
+    int diff() { return a - b }
+}
+
+void main() {
+    // 1. Direct call
+    var p = Pair(3, 4)
+    print("sum: ${p.sum()}")
+    print("diff: ${p.diff()}")
+
+    // 2. Interface dispatch — value satisfies interface
+    Summable s = Pair(10, 20)
+    print("via interface: ${s.sum()}")
+
+    // 3. Method on map value
+    Map<String, Pair> pairs = {"a": Pair(1, 2), "b": Pair(5, 6)}
+    print("map[a].sum: ${pairs["a"].sum()}")
+    print("map[b].sum: ${pairs["b"].sum()}")
+
+    // 4. Method on slice element
+    List<Pair> list = [Pair(7, 8), Pair(9, 10)]
+    print("list[0].sum: ${list[0].sum()}")
+    print("list[1].sum: ${list[1].sum()}")
+
+    print("data_class_methods OK")
+}

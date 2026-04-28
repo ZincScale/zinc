@@ -1,0 +1,8 @@
+sum: 7
+diff: -1
+via interface: 30
+map[a].sum: 3
+map[b].sum: 11
+list[0].sum: 15
+list[1].sum: 19
+data_class_methods OK

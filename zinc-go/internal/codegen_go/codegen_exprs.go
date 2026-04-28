@@ -29,8 +29,10 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		if expr.Name == "err" && g.currentErrVar != "" {
 			return g.currentErrVar
 		}
-		// Implicit self: bare field name → s.Field in method/ctor context
-		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] {
+		// Implicit self: bare field name → s.Field in method/ctor context.
+		// Skip when the name is shadowed by a method param OR a local var
+		// declared earlier in the body — Zinc follows Go's lexical scoping.
+		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] && !g.currentLocals[expr.Name] {
 			if goField, ok := g.currentFieldGoName[expr.Name]; ok {
 				return "s." + goField
 			}

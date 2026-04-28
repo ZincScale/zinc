@@ -1,0 +1,15 @@
+// Regression: mutating a data-class field must be rejected at compile time.
+// Data classes are immutable records — to "update" one, return a new instance
+// with the changed values. Without this check, value-receiver methods would
+// silently no-op on the caller's value, which is a real footgun.
+
+data Counter(int n) {
+    void inc() {
+        this.n = n + 1   // ERROR: mutates data-class field
+    }
+}
+
+void main() {
+    var c = Counter(0)
+    c.inc()
+}

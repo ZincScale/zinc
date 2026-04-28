@@ -1,0 +1,1 @@
+cannot mutate data-class field via "this.n" in method Counter.inc — data classes are immutable

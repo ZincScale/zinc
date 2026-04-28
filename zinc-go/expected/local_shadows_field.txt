@@ -1,0 +1,7 @@
+compute: 12
+withN: 51
+fieldDirect: 100
+inner: 999
+blockScope: 100
+point: 10
+local_shadows_field OK

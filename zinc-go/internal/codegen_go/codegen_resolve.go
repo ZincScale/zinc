@@ -627,6 +627,9 @@ func (g *Generator) isUserScopeShadow(name string) bool {
 	if g.currentParams != nil && g.currentParams[name] {
 		return true
 	}
+	if g.currentLocals != nil && g.currentLocals[name] {
+		return true
+	}
 	if _, ok := g.varStructTypes[name]; ok {
 		return true
 	}

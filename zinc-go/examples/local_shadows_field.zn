@@ -1,0 +1,58 @@
+// Regression: a local var declared inside a method body must shadow
+// a class field with the same name. Before the lexical-scoping fix,
+// the implicit-self rewrite at codegen_exprs.go:33 only checked params,
+// so bare `a` got rewritten to `s.A` even after `var a = ...` was declared.
+// The result was either a Go "declared and not used" error or, worse,
+// silent reads/writes against the field instead of the local.
+
+class Counter {
+    int n = 100
+
+    // Local 'n' shadows field 'n' for the duration of this method body.
+    pub int compute() {
+        var n = 5
+        n = n + 1            // local n becomes 6
+        return n * 2         // local n; result 12
+    }
+
+    // Param 'n' shadows field — still works.
+    pub int withN(int n) {
+        return n + 1
+    }
+
+    // Field access still works when nothing shadows.
+    pub int fieldDirect() {
+        return n
+    }
+
+    // Block scope — local in inner block doesn't leak.
+    pub int blockScope() {
+        if (true) {
+            var n = 999
+            print("inner: ${n}")
+        }
+        return n             // outer scope — refers to the field (100)
+    }
+}
+
+// Same rule for data classes.
+data Point(int x, int y) {
+    int compute() {
+        var x = 7
+        x = x + 1            // local x = 8 — must NOT be flagged as mutation
+        return x + y         // 8 + (field y)
+    }
+}
+
+void main() {
+    var c = Counter()
+    print("compute: ${c.compute()}")
+    print("withN: ${c.withN(50)}")
+    print("fieldDirect: ${c.fieldDirect()}")
+    print("blockScope: ${c.blockScope()}")
+
+    var p = Point(1, 2)
+    print("point: ${p.compute()}")
+
+    print("local_shadows_field OK")
+}

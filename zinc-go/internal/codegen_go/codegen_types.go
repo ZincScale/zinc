@@ -597,6 +597,24 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		for _, p := range m.Params {
 			g.currentParams[p.Name] = true
 		}
+	} else if dc, ok := g.dataClassDecls[receiver]; ok {
+		// Data classes have params (which become exported fields) and methods.
+		// Mirror the regular-class setup so bare `a` in a method body resolves
+		// to `s.A` via the implicit-self path.
+		g.currentFields = make(map[string]bool)
+		g.currentFieldGoName = make(map[string]string)
+		g.currentMethods = make(map[string]bool)
+		g.currentParams = make(map[string]bool)
+		for _, f := range dc.Params {
+			g.currentFields[f.Name] = true
+			g.currentFieldGoName[f.Name] = exportName(f.Name) // data fields are always exported
+		}
+		for _, method := range dc.Methods {
+			g.currentMethods[method.Name] = true
+		}
+		for _, p := range m.Params {
+			g.currentParams[p.Name] = true
+		}
 	}
 	g.currentClass = receiver
 	// Track class/generic-typed method params so `param.field.method()` and
@@ -684,7 +702,15 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	} else {
 		vis := goName(goMethodName, methodPub)
 		params := g.formatParams(m.Params)
-		g.writeln("func (s *%s) %s(%s)%s {", receiverTA, vis, params, ret)
+		// Data classes are values — methods take a value receiver to match
+		// the value-returning constructor and the auto-generated String().
+		// This keeps Pair (value) satisfying interfaces, addressable in maps,
+		// and consistent with Go conventions for record types.
+		recvPrefix := "*"
+		if g.dataClasses[receiver] {
+			recvPrefix = ""
+		}
+		g.writeln("func (s %s%s) %s(%s)%s {", recvPrefix, receiverTA, vis, params, ret)
 	}
 	g.indent++
 	g.emitBlock(m.Body)
@@ -804,7 +830,18 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 	g.indent--
 	g.writeln("}")
 
-	// Methods
+	// Methods — but first reject any that would mutate the receiver.
+	// Data classes are immutable records: emit a compile error for
+	// `this.field = ...` or bare `field = ...` (where field shadows nothing).
+	// To "update" a data class, return a new instance.
+	fieldSet := make(map[string]bool, len(d.Params))
+	for _, f := range d.Params {
+		fieldSet[f.Name] = true
+	}
+	for _, m := range d.Methods {
+		g.validateDataClassMethod(d.Name, m, fieldSet)
+	}
+
 	for _, m := range d.Methods {
 		g.writeln("")
 		g.emitMethodDecl(d.Name, m, d.TypeParams)
@@ -813,6 +850,159 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 	if len(d.TypeParams) > 0 {
 		g.activeTypeParams = nil
 	}
+}
+
+// --- Data-class immutability check ------------------------------------------
+
+// validateDataClassMethod walks a data-class method body and reports any
+// statement that would mutate the receiver. Catches:
+//   - `this.field = expr` (and compound forms +=, -=, etc.)
+//   - bare `field = expr` where field is a data-class field
+//   - mutation through the receiver, e.g. `this.list[i] = ...` or
+//     `list[i] = ...` when `list` is a field — the leftmost subject of the
+//     LHS is `this` or a field.
+//
+// Method parameters and locally-declared vars shadow fields. The walker
+// tracks declarations as it descends so a local named after a field
+// doesn't trigger a false positive — matches the codegen's implicit-self
+// rewrite semantics. Use `return DataClass(newA, b)` to "update" a data
+// class instead.
+func (g *Generator) validateDataClassMethod(typeName string, m *parser.MethodDecl, fields map[string]bool) {
+	shadow := make(map[string]bool, len(m.Params))
+	for _, p := range m.Params {
+		shadow[p.Name] = true
+	}
+	g.checkBlockMutation(m.Body, typeName, m.Name, fields, shadow)
+}
+
+// checkBlockMutation walks a block; declarations inside are scoped to a
+// fresh shadow map (extended from the caller's) so they don't leak out.
+func (g *Generator) checkBlockMutation(block *parser.BlockStmt, typeName, methodName string, fields, parentShadow map[string]bool) {
+	if block == nil {
+		return
+	}
+	scope := make(map[string]bool, len(parentShadow))
+	for k := range parentShadow {
+		scope[k] = true
+	}
+	for _, s := range block.Stmts {
+		g.checkStmtMutation(s, typeName, methodName, fields, scope)
+	}
+}
+
+func (g *Generator) checkStmtMutation(s parser.Stmt, typeName, methodName string, fields, scope map[string]bool) {
+	switch stmt := s.(type) {
+	case *parser.VarStmt:
+		// Local declaration shadows fields for subsequent statements in this
+		// scope (and any nested blocks). Don't add until *after* checking the
+		// RHS expression — but we don't recurse into expressions for the
+		// mutation check, so adding here is correct ordering-wise.
+		if stmt.Name != "" {
+			scope[stmt.Name] = true
+		}
+	case *parser.TupleVarStmt:
+		for _, n := range stmt.Names {
+			if n != "" {
+				scope[n] = true
+			}
+		}
+	case *parser.AssignStmt:
+		if g.lhsMutatesReceiver(stmt.Target, fields, scope) {
+			g.compileError(stmt.Line,
+				"cannot mutate data-class field via %q in method %s.%s — data classes are immutable; return a new instance instead (e.g. `return %s(...)`)",
+				lhsDescription(stmt.Target), typeName, methodName, typeName)
+		}
+	case *parser.IfStmt:
+		g.checkBlockMutation(stmt.Then, typeName, methodName, fields, scope)
+		if stmt.ElseStmt != nil {
+			g.checkStmtMutation(stmt.ElseStmt, typeName, methodName, fields, scope)
+		}
+	case *parser.BlockStmt:
+		g.checkBlockMutation(stmt, typeName, methodName, fields, scope)
+	case *parser.ForStmt:
+		// Loop-bound names shadow fields inside the body.
+		inner := make(map[string]bool, len(scope)+2)
+		for k := range scope {
+			inner[k] = true
+		}
+		if stmt.IsRange {
+			if stmt.Item != "" {
+				inner[stmt.Item] = true
+			}
+			if stmt.IndexVar != "" {
+				inner[stmt.IndexVar] = true
+			}
+		} else if init, ok := stmt.Init.(*parser.VarStmt); ok && init.Name != "" {
+			inner[init.Name] = true
+		}
+		g.checkBlockMutation(stmt.Body, typeName, methodName, fields, inner)
+	case *parser.WhileStmt:
+		g.checkBlockMutation(stmt.Body, typeName, methodName, fields, scope)
+	case *parser.MatchStmt:
+		for _, c := range stmt.Cases {
+			g.checkBlockMutation(c.Body, typeName, methodName, fields, scope)
+		}
+	case *parser.SelectStmt:
+		for _, c := range stmt.Cases {
+			g.checkBlockMutation(c.Body, typeName, methodName, fields, scope)
+		}
+	case *parser.WithStmt:
+		// Resource bindings shadow fields inside the body.
+		inner := make(map[string]bool, len(scope)+len(stmt.Resources))
+		for k := range scope {
+			inner[k] = true
+		}
+		for _, r := range stmt.Resources {
+			if r.Name != "" {
+				inner[r.Name] = true
+			}
+		}
+		g.checkBlockMutation(stmt.Body, typeName, methodName, fields, inner)
+	case *parser.ParallelForStmt:
+		g.checkBlockMutation(stmt.Body, typeName, methodName, fields, scope)
+	case *parser.TimeoutStmt:
+		g.checkBlockMutation(stmt.Body, typeName, methodName, fields, scope)
+	}
+}
+
+// lhsMutatesReceiver reports whether the leftmost subject of an assignment
+// target is `this` (or a data-class field name that isn't shadowed by a
+// method parameter).
+func (g *Generator) lhsMutatesReceiver(e parser.Expr, fields, shadow map[string]bool) bool {
+	for {
+		switch ex := e.(type) {
+		case *parser.SelectorExpr:
+			e = ex.Object
+		case *parser.IndexExpr:
+			e = ex.Object
+		case *parser.ThisExpr:
+			return true
+		case *parser.Ident:
+			if ex.Name == "this" {
+				return true
+			}
+			return fields[ex.Name] && !shadow[ex.Name]
+		default:
+			return false
+		}
+	}
+}
+
+// lhsDescription renders an LHS expression for use in the compile-error
+// message. Best-effort — falls back to a generic label when the shape
+// doesn't fit the common patterns.
+func lhsDescription(e parser.Expr) string {
+	switch ex := e.(type) {
+	case *parser.SelectorExpr:
+		return lhsDescription(ex.Object) + "." + ex.Field
+	case *parser.IndexExpr:
+		return lhsDescription(ex.Object) + "[...]"
+	case *parser.ThisExpr:
+		return "this"
+	case *parser.Ident:
+		return ex.Name
+	}
+	return "<expr>"
 }
 
 // --- Sealed classes (algebraic data types) -----------------------------------
