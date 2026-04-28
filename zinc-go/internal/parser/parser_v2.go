@@ -110,16 +110,6 @@ func (p *Parser) ParseV2() (prog *Program) {
 			prog.Decls = append(prog.Decls, p.v2ParseConstDecl())
 		case lexer.TOKEN_TYPE:
 			prog.Decls = append(prog.Decls, p.v2ParseTypeAlias())
-		case lexer.TOKEN_ABSTRACT:
-			// abstract class Name { ... }
-			p.advance() // consume "abstract"
-			if p.check(lexer.TOKEN_CLASS) {
-				cls := p.v2ParseClassDecl()
-				cls.IsAbstract = true
-				prog.Decls = append(prog.Decls, cls)
-			} else {
-				p.errorf("expected 'class' after 'abstract'")
-			}
 		default:
 			// Check for contextual keyword: sealed class
 			if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "sealed" && p.peekAt(1).Type == lexer.TOKEN_CLASS {

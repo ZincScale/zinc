@@ -41,8 +41,6 @@ func stmtLine(s parser.Stmt) int {
 		return stmt.Line
 	case *parser.ParallelForStmt:
 		return stmt.Line
-	case *parser.ConcurrentStmt:
-		return stmt.Line
 	case *parser.WithStmt:
 		return stmt.Line
 	case *parser.AssertStmt:
@@ -105,8 +103,6 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("}()")
 	case *parser.ParallelForStmt:
 		g.emitParallelForStmt(stmt)
-	case *parser.ConcurrentStmt:
-		g.emitConcurrentStmt(stmt)
 	case *parser.WithStmt:
 		g.emitWithStmt(stmt)
 	case *parser.DeferStmt:
@@ -2165,31 +2161,6 @@ func (g *Generator) emitParallelForStmt(p *parser.ParallelForStmt) {
 	g.writeln("}()")
 	g.indent--
 	g.writeln("}")
-	g.writeln("_wg.Wait()")
-}
-
-func (g *Generator) emitConcurrentStmt(c *parser.ConcurrentStmt) {
-	g.needImport("sync")
-	g.writeln("var _wg sync.WaitGroup")
-	for _, task := range c.Tasks {
-		g.writeln("_wg.Add(1)")
-		g.writeln("go func() {")
-		g.indent++
-		g.writeln("defer _wg.Done()")
-		// If the task is a call to a throwing function, panic on
-		// uncaught error — same contract as spawn/go bodies.
-		if g.callReturnsError(task) {
-			if g.callIsVoidThrower(task) {
-				g.writeln("if _gerr := %s; _gerr != nil { panic(_gerr) }", g.formatExpr(task))
-			} else {
-				g.writeln("if _, _gerr := %s; _gerr != nil { panic(_gerr) }", g.formatExpr(task))
-			}
-		} else {
-			g.writeln("%s", g.formatExpr(task))
-		}
-		g.indent--
-		g.writeln("}()")
-	}
 	g.writeln("_wg.Wait()")
 }
 

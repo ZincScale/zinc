@@ -1,0 +1,2 @@
+asserts ok: 5
+string asserts ok

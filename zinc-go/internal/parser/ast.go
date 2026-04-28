@@ -61,7 +61,6 @@ type ClassDecl struct {
 	Line        int // source line number (1-indexed)
 	Name        string
 	IsSealed    bool     // sealed class (has variant data classes)
-	IsAbstract  bool     // abstract class
 	TypeParams  []string // generic type parameter names
 	Parents     []string // base class + interfaces
 	Fields      []*FieldDecl
@@ -102,12 +101,10 @@ type CtorDecl struct {
 	SuperCalled bool   // true when super(...) appeared in body (even with zero args)
 }
 
-// MethodDecl: [@annotations] [pub] [static] [abstract] fn name(params) [: ReturnType] { body }
+// MethodDecl: [@annotations] [pub] fn name(params) [: ReturnType] { body }
 type MethodDecl struct {
 	Name        string
 	IsPub       bool
-	IsStatic    bool
-	IsAbstract  bool // abstract method (no body)
 	Params      []*ParamDecl
 	ReturnType  TypeExpr // nil = void
 	Body        *BlockStmt
@@ -536,19 +533,6 @@ type WithStmt struct {
 
 func (w *WithStmt) nodeTag() {}
 func (w *WithStmt) stmtTag() {}
-
-// ConcurrentStmt: concurrent { task1; task2; task3 }
-// With tuple assignment: var (a, b, c) = concurrent { ... }
-type ConcurrentStmt struct {
-	Line      int
-	Tasks     []Expr     // expressions to run concurrently
-	FirstOnly bool       // concurrent(first: true) — race semantics
-	Names     []string   // var (a, b, c) = concurrent { ... } — result names (empty if standalone)
-	OrHandler *OrHandler // optional error handler
-}
-
-func (c *ConcurrentStmt) nodeTag() {}
-func (c *ConcurrentStmt) stmtTag() {}
 
 // TimeoutStmt: timeout(dur) { body } [or { fallback }]
 type TimeoutStmt struct {

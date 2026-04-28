@@ -1,0 +1,14 @@
+// `assert cond` and `assert cond, "message"`.
+
+void main() {
+    var x = 5
+    assert x > 0
+    assert x == 5, "x should equal 5"
+    print("asserts ok: ${x}")
+
+    // Assert on a derived value.
+    var s = "hello"
+    assert s.length == 5
+    assert s.length == 5, "length must be 5"
+    print("string asserts ok")
+}

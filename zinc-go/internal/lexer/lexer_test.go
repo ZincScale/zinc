@@ -32,12 +32,12 @@ func types(tokens []Token) []TokenType {
 }
 
 func TestKeywords(t *testing.T) {
-	src := "fn class interface var return if else for while pub static"
+	src := "fn class interface var return if else for while pub"
 	toks := tokenize(src)
 	expected := []TokenType{
 		TOKEN_FN, TOKEN_CLASS, TOKEN_INTERFACE, TOKEN_VAR,
 		TOKEN_RETURN, TOKEN_IF, TOKEN_ELSE, TOKEN_FOR,
-		TOKEN_WHILE, TOKEN_PUB, TOKEN_STATIC, TOKEN_EOF,
+		TOKEN_WHILE, TOKEN_PUB, TOKEN_EOF,
 	}
 	if len(toks) != len(expected) {
 		t.Fatalf("expected %d tokens, got %d", len(expected), len(toks))

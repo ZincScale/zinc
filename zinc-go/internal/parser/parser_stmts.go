@@ -58,8 +58,6 @@ func (p *Parser) v2ParseStmt() Stmt {
 		return p.v2ParseSpawnStmt()
 	case lexer.TOKEN_PARALLEL:
 		return p.v2ParseParallelForStmt()
-	case lexer.TOKEN_CONCURRENT:
-		return p.v2ParseConcurrentStmt()
 	case lexer.TOKEN_TIMEOUT:
 		return p.v2ParseTimeoutStmt()
 	case lexer.TOKEN_SELECT:
@@ -122,12 +120,6 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 		}
 		p.expect(lexer.TOKEN_RPAREN)
 		p.expect(lexer.TOKEN_ASSIGN)
-		// Check for concurrent { ... }
-		if p.check(lexer.TOKEN_CONCURRENT) {
-			cs := p.v2ParseConcurrentStmt()
-			cs.Names = names
-			return cs
-		}
 		val := p.v2ParseExpr()
 		return &TupleVarStmt{Line: line, Names: names, Value: val}
 	}
@@ -159,12 +151,6 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 				names = append(names, tupleName)
 			}
 			p.expect(lexer.TOKEN_ASSIGN)
-			// Check for concurrent { ... }
-			if p.check(lexer.TOKEN_CONCURRENT) {
-				cs := p.v2ParseConcurrentStmt()
-				cs.Names = names
-				return cs
-			}
 			val := p.v2ParseExpr()
 			return &TupleVarStmt{Line: line, Names: names, Value: val}
 		}
@@ -719,47 +705,6 @@ func (p *Parser) v2ParseParallelForStmt() *ParallelForStmt {
 	body := p.v2ParseBlock()
 	handler := p.v2ParseErrHandler()
 	return &ParallelForStmt{Line: line, Item: item, IndexVar: indexVar, Range: rangeExpr, Body: body, OrHandler: handler, Max: maxConcurrency}
-}
-
-// v2ParseConcurrentStmt: concurrent { task1; task2 } or concurrent(first: true) { ... }
-func (p *Parser) v2ParseConcurrentStmt() *ConcurrentStmt {
-	line := p.peek().Line
-	p.advance() // consume "concurrent"
-
-	firstOnly := false
-	// Check for concurrent(first: true)
-	if p.check(lexer.TOKEN_LPAREN) {
-		p.advance()
-		for !p.check(lexer.TOKEN_RPAREN) && !p.check(lexer.TOKEN_EOF) {
-			name := p.v2ExpectIdent()
-			p.expect(lexer.TOKEN_COLON)
-			if name == "first" {
-				tok := p.advance()
-				if tok.Literal == "true" {
-					firstOnly = true
-				}
-			} else {
-				p.v2ParseExpr() // skip unknown named args
-			}
-			if p.check(lexer.TOKEN_COMMA) {
-				p.advance()
-			}
-		}
-		p.expect(lexer.TOKEN_RPAREN)
-	}
-
-	// Parse block — each statement is a concurrent task
-	p.expect(lexer.TOKEN_LBRACE)
-	var tasks []Expr
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		expr := p.v2ParseExpr()
-		tasks = append(tasks, expr)
-	}
-	p.expect(lexer.TOKEN_RBRACE)
-
-	handler := p.v2ParseErrHandler()
-
-	return &ConcurrentStmt{Line: line, Tasks: tasks, FirstOnly: firstOnly, OrHandler: handler}
 }
 
 // v2ParseTimeoutStmt: timeout(dur) { body } [or { fallback }]

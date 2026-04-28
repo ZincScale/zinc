@@ -1,0 +1,24 @@
+// `using (var r = init) { body }` — RAII form. The resource's Close()
+// runs when the block exits, including on a thrown error from the body.
+
+class Resource {
+    pub String name
+    init(String n) { this.name = n }
+    pub void Close() { print("closing ${name}") }
+    pub void work() { print("working on ${name}") }
+}
+
+void main() {
+    print("before")
+    using (var r = Resource("r1")) {
+        r.work()
+    }
+    print("after first")
+
+    // Multi-resource — both closed in reverse order at scope exit.
+    using (var a = Resource("a"), var b = Resource("b")) {
+        a.work()
+        b.work()
+    }
+    print("after multi")
+}

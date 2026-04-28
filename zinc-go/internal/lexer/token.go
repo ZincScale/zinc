@@ -45,7 +45,6 @@ const (
 	TOKEN_PRINT
 	TOKEN_VAR
 	TOKEN_PUB
-	TOKEN_STATIC
 	TOKEN_SUPER
 	TOKEN_THIS
 	TOKEN_IMPORT
@@ -73,9 +72,7 @@ const (
 	TOKEN_FROM  // from (import support)
 	TOKEN_PARALLEL   // parallel (parallel for)
 	TOKEN_INIT       // init (constructor-set immutable field)
-	TOKEN_CONCURRENT // concurrent { } (fan-out/fan-in)
 	TOKEN_TIMEOUT    // timeout(dur) { }
-	TOKEN_ABSTRACT   // abstract (abstract class/method)
 	TOKEN_TYPE       // type (type alias)
 	TOKEN_SELECT     // select (multiplex over channel ops)
 
@@ -157,7 +154,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_PRINT:     "print",
 	TOKEN_VAR:       "var",
 	TOKEN_PUB:       "pub",
-	TOKEN_STATIC:    "static",
 	TOKEN_SUPER:     "super",
 	TOKEN_THIS:      "this",
 	TOKEN_IMPORT:    "import",
@@ -185,9 +181,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_FROM:      "from",
 	TOKEN_PARALLEL:   "parallel",
 	TOKEN_INIT:       "init",
-	TOKEN_CONCURRENT: "concurrent",
 	TOKEN_TIMEOUT:    "timeout",
-	TOKEN_ABSTRACT:   "abstract",
 	TOKEN_SELECT:     "select",
 	TOKEN_TYPE:       "type",
 
@@ -273,7 +267,6 @@ var keywords = map[string]TokenType{
 	"print":     TOKEN_PRINT,
 	"var":       TOKEN_VAR,
 	"pub":       TOKEN_PUB,
-	"static":    TOKEN_STATIC,
 	"super":     TOKEN_SUPER,
 	"this":      TOKEN_THIS,
 	"import":    TOKEN_IMPORT,
@@ -302,9 +295,7 @@ var keywords = map[string]TokenType{
 	"from":      TOKEN_FROM,
 	"parallel":   TOKEN_PARALLEL,
 	"init":       TOKEN_INIT,
-	"concurrent": TOKEN_CONCURRENT,
 	"timeout":    TOKEN_TIMEOUT,
-	"abstract":   TOKEN_ABSTRACT,
 	"type":       TOKEN_TYPE,
 	"select":     TOKEN_SELECT,
 }

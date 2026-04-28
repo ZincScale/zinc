@@ -700,11 +700,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 
 	receiverTA := receiver + goTypeArgs(tps)
 	methodPub := m.IsPub || !g.isSubpackage()
-	if m.IsStatic {
-		name := receiver + goName(goMethodName, methodPub)
-		params := g.formatParams(m.Params)
-		g.writeln("func %s(%s)%s {", name, params, ret)
-	} else {
+	{
 		vis := goName(goMethodName, methodPub)
 		params := g.formatParams(m.Params)
 		// Data classes are values — methods take a value receiver to match

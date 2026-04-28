@@ -184,22 +184,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
 		tok := p.peek()
 
-		if tok.Type == lexer.TOKEN_ABSTRACT {
-			// abstract fn name(...): ReturnType
-			p.advance() // consume abstract
-			isPub := false
-			if p.check(lexer.TOKEN_PUB) {
-				isPub = true
-				p.advance()
-			}
-			m := p.v2ParseMethodDecl()
-			m.IsAbstract = true
-			m.IsPub = true // abstract methods are always public
-			if isPub {
-				m.IsPub = true
-			}
-			methods = append(methods, m)
-		} else if tok.Type == lexer.TOKEN_DATA {
+		if tok.Type == lexer.TOKEN_DATA {
 			// Sealed class variant: data Circle(double radius)
 			variants = append(variants, p.v2ParseDataClassDecl())
 		} else if tok.Type == lexer.TOKEN_AT {
@@ -207,11 +192,6 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 			isPub := false
 			if p.check(lexer.TOKEN_PUB) {
 				isPub = true
-				p.advance()
-			}
-			isStatic := false
-			if p.check(lexer.TOKEN_STATIC) {
-				isStatic = true
 				p.advance()
 			}
 			// Dispatch on what follows: a field (var/const/bare type-first)
@@ -229,7 +209,6 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				m := p.v2ParseMethodDecl()
 				m.Annotations = annots
 				m.IsPub = m.IsPub || isPub
-				m.IsStatic = m.IsStatic || isStatic
 				methods = append(methods, m)
 			} else if next.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
 				f := p.v2ParseFieldDeclNoKeyword()
@@ -244,7 +223,6 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				m := p.v2ParseMethodDecl()
 				m.Annotations = annots
 				m.IsPub = m.IsPub || isPub
-				m.IsStatic = m.IsStatic || isStatic
 				methods = append(methods, m)
 			}
 		} else if tok.Type == lexer.TOKEN_OVERRIDE {
@@ -344,7 +322,7 @@ func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	p.v2ValidateDeclName(name)
 	params := p.v2ParseParamList()
 
-	// Body is optional for abstract methods
+	// Body is optional — interface methods declare the signature only.
 	var body *BlockStmt
 	if p.check(lexer.TOKEN_LBRACE) {
 		body = p.v2ParseBlock()
@@ -507,7 +485,7 @@ func (p *Parser) v2IsClassFieldDecl() bool {
 		next.Type == lexer.TOKEN_PUB || next.Type == lexer.TOKEN_READONLY ||
 		next.Type == lexer.TOKEN_INIT ||
 		next.Type == lexer.TOKEN_CONST || next.Type == lexer.TOKEN_VAR ||
-		next.Type == lexer.TOKEN_OVERRIDE || next.Type == lexer.TOKEN_STATIC ||
+		next.Type == lexer.TOKEN_OVERRIDE ||
 		next.Type == lexer.TOKEN_AT // annotation
 }
 
@@ -707,7 +685,7 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 // isIdentLike returns true if the token type can be used as a name segment
 // (identifier or keyword that could appear in a dotted path like java.util.concurrent).
 func isIdentLike(t lexer.TokenType) bool {
-	return t == lexer.TOKEN_IDENT || t == lexer.TOKEN_CONCURRENT ||
+	return t == lexer.TOKEN_IDENT ||
 		t == lexer.TOKEN_DATA || t == lexer.TOKEN_MATCH ||
 		t == lexer.TOKEN_PRINT || t == lexer.TOKEN_SPAWN ||
 		t == lexer.TOKEN_INTERFACE
