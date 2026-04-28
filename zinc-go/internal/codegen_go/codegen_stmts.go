@@ -498,6 +498,14 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				if gt2, ok := gt.TypeArgs[1].(*parser.GenericType); ok {
 					g.varTypeExprs[v.Name] = gt2
 				}
+				// Map<K, AliasName> — propagate the alias so calls
+				// through the looked-up value see the alias's Fn shape
+				// (and thus the Result-return marker, if any).
+				if st, ok := gt.TypeArgs[1].(*parser.SimpleType); ok {
+					if _, hasAlias := g.typeAliases[st.Name]; hasAlias {
+						g.varTypeExprs[v.Name] = st
+					}
+				}
 			}
 		}
 
@@ -1781,6 +1789,11 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 		}
 		for _, m := range cls.Methods {
 			if m.Name == methodName {
+				// `Result<T, E>` declared return — thrower regardless
+				// of body shape.
+				if _, _, isResult := g.resultTypeArgs(m.ReturnType); isResult {
+					return true
+				}
 				return g.blockCanReturnError(m.Body)
 			}
 		}
@@ -1867,9 +1880,20 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 		if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
-			if g.errorFuncs[recv+"."+sel.Field] {
-				// Unknown method return arity — conservative false;
-				// class methods declared void are rare in existing code.
+			// Either errorFuncs has it, or methodBodyThrows confirms it
+			// for a cross-package method whose Result return / thrower
+			// body wasn't propagated into our local errorFuncs.
+			if g.errorFuncs[recv+"."+sel.Field] || g.methodBodyThrows(recv, sel.Field) {
+				// Look up the method's declared return type. Void methods
+				// (no ReturnType) lower to a single `error` return; non-void
+				// to `(T, error)`.
+				if cls := g.lookupClassDecl(recv); cls != nil {
+					for _, m := range cls.Methods {
+						if m.Name == sel.Field {
+							return m.ReturnType == nil
+						}
+					}
+				}
 				return false
 			}
 		}

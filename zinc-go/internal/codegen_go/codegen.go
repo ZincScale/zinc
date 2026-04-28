@@ -383,6 +383,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				if g.blockCanReturnError(m.Body) {
 					g.errorFuncs[key] = true
 				}
+				// `Result<T, E>` return type marks the method a thrower
+				// even when the body has no propagating call yet.
+				if _, _, isResult := g.resultTypeArgs(m.ReturnType); isResult {
+					g.errorFuncs[key] = true
+				}
 			}
 			for _, f := range decl.Fields {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
@@ -463,13 +468,27 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 						changed = true
 					}
 				}
+				// resolveReceiverClassName for fields needs g.currentClass and
+				// g.currentFields to look up field types. Set them during the
+				// fixed-point so `reg.method()` (where reg is a class field)
+				// is correctly classified as a thrower at detection time
+				// (not just at emit time).
+				savedClass := g.currentClass
+				savedFields := g.currentFields
+				g.currentClass = decl.Name
+				g.currentFields = map[string]bool{}
+				for _, f := range decl.Fields {
+					g.currentFields[f.Name] = true
+				}
 				for _, m := range decl.Methods {
 					key := decl.Name + "." + m.Name
-					if !g.errorFuncs[key] && g.blockCanReturnError(m.Body) {
+					if !g.errorFuncs[key] && g.blockCanReturnErrorWithParams(m.Body, m.Params) {
 						g.errorFuncs[key] = true
 						changed = true
 					}
 				}
+				g.currentClass = savedClass
+				g.currentFields = savedFields
 			}
 		}
 		if !changed {

@@ -658,6 +658,19 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			g.varStructTypes[p.Name] = simpleType.Name
 			methodParamBackup = append(methodParamBackup, p.Name)
 		}
+		// Function-typed params (mirrors emitFnDecl): register so calls
+		// through them are recognized as thrower calls when the Fn
+		// returns Result<T, E>.
+		if _, isFunc := p.Type.(*parser.FuncTypeExpr); isFunc {
+			g.varTypeExprs[p.Name] = p.Type
+			methodParamBackup = append(methodParamBackup, p.Name)
+		}
+		if simpleType, ok := p.Type.(*parser.SimpleType); ok {
+			if _, exists := g.typeAliases[simpleType.Name]; exists {
+				g.varTypeExprs[p.Name] = p.Type
+				methodParamBackup = append(methodParamBackup, p.Name)
+			}
+		}
 		// Pointer-typed params (T? for non-collection T) — same auto-deref
 		// handling as locals declared with `T?`.
 		if isPointerOptional(p.Type) {
