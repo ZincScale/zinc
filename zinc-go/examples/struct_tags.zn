@@ -1,0 +1,47 @@
+// Regression: @Json / @Yaml / @Toml annotations on class fields and
+// data class params lower to Go struct tags. Without this, JSON
+// serialization round-trips would use Go-exported names (UserName)
+// instead of the user's intended names (name).
+//
+// Multi-tag combinations are joined with spaces, options like
+// `omitempty` are appended to the format value.
+
+import encoding/json
+
+class User {
+    @Json("name") pub String userName
+    @Json("email", omitempty) pub String emailAddr
+    @Json("-") pub int internalCounter
+    pub int age   // no annotation — falls back to Go-exported name
+}
+
+class Server {
+    @Json("host") @Yaml("host") @Toml("host") pub String hostName
+    @Json("port", omitempty) @Toml("port") pub int portNumber
+}
+
+// Annotations on data class params work too.
+data Position(@Json("line") int lineNumber, @Json("col") int colNumber)
+
+void main() {
+    // Class with @Json — verify field renames + omitempty + skip.
+    var u = User()
+    u.userName = "alice"
+    u.emailAddr = ""              // omitempty drops empty string
+    u.internalCounter = 999       // @Json("-") drops entirely
+    u.age = 30                    // no tag — emitted as "Age"
+    var ub = json.Marshal(u) or { print("err: ${err}"); return }
+    print(string(ub))
+
+    // Multi-tag — Json should fire on Marshal, others verified by codegen.
+    var s = Server()
+    s.hostName = "localhost"
+    s.portNumber = 0              // omitempty drops zero
+    var sb = json.Marshal(s) or { print("err: ${err}"); return }
+    print(string(sb))
+
+    // Data class params with @Json.
+    var p = Position(10, 5)
+    var pb = json.Marshal(p) or { print("err: ${err}"); return }
+    print(string(pb))
+}

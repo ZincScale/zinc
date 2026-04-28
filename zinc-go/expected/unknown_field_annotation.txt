@@ -1,0 +1,1 @@
+unknown field annotation @Foo — supported: @Json, @Yaml, @Toml

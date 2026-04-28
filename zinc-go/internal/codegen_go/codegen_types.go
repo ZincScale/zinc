@@ -168,7 +168,12 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 				typeName = g.inferFieldType(f.Default)
 			}
 		}
-		g.writeln("%s %s", goName(f.Name, f.IsPub || !g.isSubpackage()), typeName)
+		fieldName := goName(f.Name, f.IsPub || !g.isSubpackage())
+		if tag := g.fieldTagString(f.Annotations, cls.Line); tag != "" {
+			g.writeln("%s %s `%s`", fieldName, typeName, tag)
+		} else {
+			g.writeln("%s %s", fieldName, typeName)
+		}
 	}
 	g.indent--
 	g.writeln("}")
@@ -765,6 +770,64 @@ func (g *Generator) collectParentMethods(cls *parser.ClassDecl, methods map[stri
 	}
 }
 
+// fieldTagString builds the Go struct tag string (without surrounding
+// backticks) for a field's annotations. Recognizes @Json / @Yaml / @Toml
+// and joins multiple tags with spaces, e.g.
+//
+//   @Json("name") @Yaml("name") String userName
+//
+// becomes the tag `json:"name" yaml:"name"`. Tag options like `omitempty`
+// are trailing bare-ident args:
+//
+//   @Json("email", omitempty) → json:"email,omitempty"
+//
+// Unknown field annotations are a compile error — fields only carry
+// serialization tags today. Returns "" when there are no annotations.
+func (g *Generator) fieldTagString(annots []*parser.Annotation, fallbackLine int) string {
+	if len(annots) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, a := range annots {
+		format, ok := fieldTagFormat(a.Name)
+		if !ok {
+			g.compileError(fallbackLine,
+				"unknown field annotation @%s — supported: @Json, @Yaml, @Toml", a.Name)
+			continue
+		}
+		if len(a.Args) == 0 {
+			g.compileError(fallbackLine,
+				"annotation @%s requires a field name, e.g. @%s(\"name\")", a.Name, a.Name)
+			continue
+		}
+		// Args[0] is the field name — wrapped in quotes by the parser
+		// when the source was a string literal. Strip the outer quotes
+		// to get the raw name.
+		nameLit := strings.Trim(a.Args[0], `"`)
+		tagValue := nameLit
+		for _, opt := range a.Args[1:] {
+			// Trailing options like `omitempty` are bare idents, no quotes.
+			tagValue += "," + strings.Trim(opt, `"`)
+		}
+		parts = append(parts, fmt.Sprintf(`%s:%q`, format, tagValue))
+	}
+	return strings.Join(parts, " ")
+}
+
+// fieldTagFormat maps a Zinc annotation name to its Go struct-tag key.
+// Unknown names return ("", false) so the caller can emit a compile error.
+func fieldTagFormat(name string) (string, bool) {
+	switch name {
+	case "Json":
+		return "json", true
+	case "Yaml":
+		return "yaml", true
+	case "Toml":
+		return "toml", true
+	}
+	return "", false
+}
+
 // --- Data classes (record types with auto-generated String()) -----------------
 
 func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
@@ -792,7 +855,12 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 			typeName = g.formatType(f.Type)
 		}
 		// Data class fields are always exported (data = transparent DTO)
-		g.writeln("%s %s", exportName(f.Name), typeName)
+		fieldName := exportName(f.Name)
+		if tag := g.fieldTagString(f.Annotations, d.Line); tag != "" {
+			g.writeln("%s %s `%s`", fieldName, typeName, tag)
+		} else {
+			g.writeln("%s %s", fieldName, typeName)
+		}
 	}
 	g.indent--
 	g.writeln("}")

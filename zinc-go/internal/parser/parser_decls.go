@@ -214,11 +214,39 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 				isStatic = true
 				p.advance()
 			}
-			m := p.v2ParseMethodDecl()
-			m.Annotations = annots
-			m.IsPub = m.IsPub || isPub
-			m.IsStatic = m.IsStatic || isStatic
-			methods = append(methods, m)
+			// Dispatch on what follows: a field (var/const/bare type-first)
+			// or a method. Annotations on fields drive Go struct tags;
+			// on methods they're recognized markers like @Override.
+			next := p.peek()
+			if next.Type == lexer.TOKEN_VAR || next.Type == lexer.TOKEN_CONST {
+				f := p.v2ParseFieldDecl()
+				f.Annotations = annots
+				if isPub {
+					f.IsPub = true
+				}
+				fields = append(fields, f)
+			} else if p.v2IsFnDeclTypeFirst() {
+				m := p.v2ParseMethodDecl()
+				m.Annotations = annots
+				m.IsPub = m.IsPub || isPub
+				m.IsStatic = m.IsStatic || isStatic
+				methods = append(methods, m)
+			} else if next.Type == lexer.TOKEN_IDENT && p.v2IsClassFieldDecl() {
+				f := p.v2ParseFieldDeclNoKeyword()
+				f.Annotations = annots
+				if isPub {
+					f.IsPub = true
+				}
+				fields = append(fields, f)
+			} else {
+				// Fallback to method — preserves existing behavior for
+				// cases the type-first detector can't classify upfront.
+				m := p.v2ParseMethodDecl()
+				m.Annotations = annots
+				m.IsPub = m.IsPub || isPub
+				m.IsStatic = m.IsStatic || isStatic
+				methods = append(methods, m)
+			}
 		} else if tok.Type == lexer.TOKEN_OVERRIDE {
 			// override ReturnType name(...) { ... }
 			p.advance() // consume override
@@ -539,8 +567,12 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	return &DataClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Params: params, Methods: methods}
 }
 
-// v2ParseDataClassParam: Type name [= default]
+// v2ParseDataClassParam: [@Annotations] Type name [= default]
 func (p *Parser) v2ParseDataClassParam() *FieldDecl {
+	var annots []*Annotation
+	if p.check(lexer.TOKEN_AT) {
+		annots = p.v2ParseAnnotations()
+	}
 	typ := p.v2ParseType()
 	name := p.v2ExpectIdent()
 	var def Expr
@@ -548,7 +580,7 @@ func (p *Parser) v2ParseDataClassParam() *FieldDecl {
 		p.advance()
 		def = p.v2ParseExpr()
 	}
-	return &FieldDecl{Name: name, IsPub: true, Type: typ, Default: def}
+	return &FieldDecl{Name: name, IsPub: true, Type: typ, Default: def, Annotations: annots}
 }
 
 // v2ParseInterfaceDecl: interface Name { ReturnType method(params) ... }

@@ -1,0 +1,10 @@
+// Regression: unknown field annotations are a compile error so typos
+// surface immediately instead of being silently dropped.
+
+class Bad {
+    @Foo("x") pub String name
+}
+
+void main() {
+    print("never")
+}
