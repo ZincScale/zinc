@@ -115,24 +115,35 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			return fmt.Sprintf("%s(%s)", goFunc, obj)
 		}
 
-		// Collection methods — apply builtins unless receiver is a known struct/class.
+		// Collection methods — apply builtins unless the receiver is a
+		// known struct/class variable, OR a class/enum *name* (which
+		// otherwise misroutes: `Math.add(2,3)` used to lower to
+		// `append(Math, 2, 3)` because `Math` is a class name, not a
+		// struct variable).
+		recvIsClassName := false
+		if id, ok := sel.Object.(*parser.Ident); ok {
+			if g.isClassType(id.Name) || g.interfaces[id.Name] {
+				recvIsClassName = true
+			}
+		}
+		shouldApplyBuiltin := !g.isStructVar(sel.Object) && !recvIsClassName
 		obj := g.formatExpr(sel.Object)
 		switch sel.Field {
 		case "add":
-			if !g.isStructVar(sel.Object) {
+			if shouldApplyBuiltin {
 				args := g.formatExprList(c.Args)
 				return fmt.Sprintf("append(%s, %s)", obj, args)
 			}
 		case "put":
-			if len(c.Args) == 2 && !g.isStructVar(sel.Object) {
+			if len(c.Args) == 2 && shouldApplyBuiltin {
 				return fmt.Sprintf("func() { %s[%s] = %s }()", obj, g.formatExpr(c.Args[0]), g.formatExpr(c.Args[1]))
 			}
 		case "send":
-			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
+			if len(c.Args) == 1 && shouldApplyBuiltin {
 				return fmt.Sprintf("func() { %s <- %s }()", obj, g.formatExpr(c.Args[0]))
 			}
 		case "recv":
-			if !g.isStructVar(sel.Object) {
+			if shouldApplyBuiltin {
 				// Add type assertion only for untyped channels (`chan interface{}`).
 				// Typed `Channel<T>(n)` already yields T on recv, so the cast
 				// would be a compile error. Detect typedness by walking the

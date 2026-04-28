@@ -111,7 +111,47 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitAssertStmt(stmt)
 	case *parser.SelectStmt:
 		g.emitSelectStmt(stmt)
+	case *parser.TimeoutStmt:
+		g.emitTimeoutStmt(stmt)
 	}
+}
+
+// emitTimeoutStmt: timeout(d) { body } [or { fallback }] →
+//
+//   _done := make(chan struct{})
+//   go func() { defer close(_done); /* body */ }()
+//   select {
+//   case <-_done:
+//       // body finished in time
+//   case <-time.After(d):
+//       /* fallback (or panic if no handler) */
+//   }
+//
+// Body runs in a goroutine because select needs a channel signal to know
+// it's complete. The handler is the user's "what to do on timeout" hook;
+// without one, an uncaught timeout panics (same contract as spawn).
+func (g *Generator) emitTimeoutStmt(t *parser.TimeoutStmt) {
+	g.needImport("time")
+	doneVar := fmt.Sprintf("_done%d", g.errVarCount)
+	g.errVarCount++
+	g.writeln("%s := make(chan struct{})", doneVar)
+	g.writeln("go func() {")
+	g.indent++
+	g.writeln("defer close(%s)", doneVar)
+	g.emitBlock(t.Body)
+	g.indent--
+	g.writeln("}()")
+	g.writeln("select {")
+	g.writeln("case <-%s:", doneVar)
+	g.writeln("case <-time.After(%s):", g.formatExpr(t.Duration))
+	g.indent++
+	if t.OrHandler != nil && t.OrHandler.Body != nil {
+		g.emitOrBlock(t.OrHandler.Body)
+	} else {
+		g.writeln("panic(\"timeout exceeded\")")
+	}
+	g.indent--
+	g.writeln("}")
 }
 
 // emitSelectStmt translates zinc's `select { case ch.recv(): ... }` to Go's

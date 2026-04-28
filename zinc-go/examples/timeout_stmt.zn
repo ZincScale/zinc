@@ -1,0 +1,27 @@
+// Regression: `timeout(d) { body } [or { fallback }]` lowers to
+// select+time.After. Without an or-handler an exceeded deadline panics;
+// with one, the handler runs.
+//
+// Note: previously parsed but missing from emitStmt's dispatch — the
+// whole statement was silently dropped at codegen.
+
+import time
+
+void main() {
+    // Body finishes before the deadline — body output is visible.
+    timeout(50 * time.Millisecond) {
+        print("fast done")
+    } or {
+        print("should not see fast timeout")
+    }
+
+    // Body exceeds the deadline — fallback runs, body never finishes.
+    timeout(20 * time.Millisecond) {
+        time.Sleep(200 * time.Millisecond)
+        print("should not see slow body")
+    } or {
+        print("slow timed out")
+    }
+
+    print("timeout_stmt OK")
+}
