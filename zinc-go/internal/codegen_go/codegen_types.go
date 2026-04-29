@@ -44,12 +44,14 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	// Save/restore state for function scope
 	prevRetType := g.currentReturnType
+	prevRetTypeExpr := g.currentReturnTypeExpr
 	prevOuterRetType := g.currentOuterReturnType
 	prevRetOpt := g.currentReturnOptional
 	prevErrCount := g.errVarCount
 	prevIsThrower := g.currentFuncIsThrower
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
+	g.currentReturnTypeExpr = fn.ReturnType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -136,6 +138,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	}
 
 	g.currentReturnType = prevRetType
+	g.currentReturnTypeExpr = prevRetTypeExpr
 	g.currentOuterReturnType = prevOuterRetType
 	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
@@ -723,11 +726,13 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 
 	prevRetType := g.currentReturnType
+	prevRetTypeExpr := g.currentReturnTypeExpr
 	prevOuterRetType := g.currentOuterReturnType
 	prevMethodRetType := g.currentMethodRetType
 	prevIsThrower := g.currentFuncIsThrower
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
+	g.currentReturnTypeExpr = m.ReturnType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -777,6 +782,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.writeln("}")
 
 	g.currentReturnType = prevRetType
+	g.currentReturnTypeExpr = prevRetTypeExpr
 	g.currentOuterReturnType = prevOuterRetType
 	g.currentMethodRetType = prevMethodRetType
 	g.currentFuncIsThrower = prevIsThrower

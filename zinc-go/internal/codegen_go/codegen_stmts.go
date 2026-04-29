@@ -583,6 +583,28 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
+		// Stash Fn-typed locals so subsequent assignments (`f = lambda`)
+		// can recover the target Fn type for the lambda hint pushdown.
+		// Mirrors the existing param-type registration in emitFnDecl.
+		if v.Type != nil {
+			if ft := g.resolveFuncTypeExpr(v.Type); ft != nil {
+				_ = ft
+				g.varTypeExprs[v.Name] = v.Type
+			}
+		}
+		// If the LHS is a Fn<...> type and the RHS is a lambda literal,
+		// publish the target Fn type so formatLambdaExpr can drive the
+		// lambda's Go signature from it — particularly important when
+		// the Fn return is `Result<T, E>`, since that flips the lambda
+		// body into thrower mode (allowing `return Ok(...)` / `return
+		// Err(...)` to lower correctly).
+		if _, isLambda := v.Value.(*parser.LambdaExpr); isLambda && v.Type != nil {
+			if ft := g.resolveFuncTypeExpr(v.Type); ft != nil {
+				prev := g.pendingLambdaTarget
+				g.pendingLambdaTarget = ft
+				defer func() { g.pendingLambdaTarget = prev }()
+			}
+		}
 		if useExplicitType {
 			typeName := g.formatType(v.Type)
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
@@ -637,6 +659,21 @@ func isPointerOptional(t parser.TypeExpr) bool {
 // --- Assignment, return, control flow ----------------------------------------
 
 func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
+	// Lambda RHS into a Fn-typed LHS: recover the LHS's declared Fn type
+	// (registered in varTypeExprs by emitFnDecl for params and emitVarStmt
+	// for locals) and publish it as the lambda hint. Defer restore so
+	// every formatExpr branch below sees a consistent state.
+	if _, isLambda := a.Value.(*parser.LambdaExpr); isLambda {
+		if ident, ok := a.Target.(*parser.Ident); ok {
+			if t, ok := g.varTypeExprs[ident.Name]; ok {
+				if ft := g.resolveFuncTypeExpr(t); ft != nil {
+					prev := g.pendingLambdaTarget
+					g.pendingLambdaTarget = ft
+					defer func() { g.pendingLambdaTarget = prev }()
+				}
+			}
+		}
+	}
 	if a.OrHandler != nil {
 		targetStr := g.formatExpr(a.Target)
 		g.emitOrAssignment(targetStr, a.Value, a.OrHandler)
@@ -758,6 +795,20 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
+	// `return lambdaLiteral` from a Fn-returning function: publish the
+	// declared return type as the lambda hint so a Result<T, E> tail in
+	// the Fn type drives thrower-mode body emit for the lambda. Save +
+	// restore via defer so all formatExpr calls below see the hint
+	// uniformly. (Non-lambda values just ignore it.)
+	if r.Value != nil {
+		if _, isLambda := r.Value.(*parser.LambdaExpr); isLambda {
+			if ft := g.resolveFuncTypeExpr(g.currentReturnTypeExpr); ft != nil {
+				prev := g.pendingLambdaTarget
+				g.pendingLambdaTarget = ft
+				defer func() { g.pendingLambdaTarget = prev }()
+			}
+		}
+	}
 	// Explicit error propagation: any `?` in the returned expression.
 	// hoistPropagates emits `_pN, errM := inner; if errM != nil { return zero, errM }`
 	// for each `?`, then returns a rewritten value expression that
@@ -1764,6 +1815,40 @@ func (g *Generator) fnTypeReturnsResult(t parser.TypeExpr) bool {
 		}
 	}
 	return false
+}
+
+// resolveFuncTypeExpr returns the underlying FuncTypeExpr for `t`,
+// peeling a single layer of type alias if needed. nil if `t` is not
+// a function type.
+func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr {
+	if t == nil {
+		return nil
+	}
+	if ft, ok := t.(*parser.FuncTypeExpr); ok {
+		return ft
+	}
+	if simple, ok := t.(*parser.SimpleType); ok {
+		if alias, exists := g.typeAliases[simple.Name]; exists {
+			return g.resolveFuncTypeExpr(alias)
+		}
+	}
+	return nil
+}
+
+// formatExprWithLambdaTarget formats `e` with `target` published as the
+// pending lambda hint — the hint is consumed only if `e` (or the lambda
+// it dispatches to) is a LambdaExpr; non-lambda expressions ignore it.
+// Save/restore pattern lets callers push hints without perturbing
+// nested expression contexts.
+func (g *Generator) formatExprWithLambdaTarget(e parser.Expr, target *parser.FuncTypeExpr) string {
+	if target == nil {
+		return g.formatExpr(e)
+	}
+	prev := g.pendingLambdaTarget
+	g.pendingLambdaTarget = target
+	out := g.formatExpr(e)
+	g.pendingLambdaTarget = prev
+	return out
 }
 
 // methodBodyThrows walks the method declaration (from either local

@@ -1,0 +1,7 @@
+var: 2
+alias caught: aliased
+arg: 4
+method caught: from method
+return: 3
+reassign: 102
+reassign caught: blank

@@ -36,6 +36,7 @@ type Generator struct {
 	// Error handling
 	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values in error returns)
+	currentReturnTypeExpr parser.TypeExpr   // current function's declared return type (TypeExpr form, for lambda hint pushdown on `return lambda`)
 	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
 	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
@@ -56,6 +57,15 @@ type Generator struct {
 	// throwers propagate via `return zero, err`; non-throwers panic
 	// (unchecked-exception semantics — e.g. main() with uncaught).
 	currentFuncIsThrower bool
+
+	// pendingLambdaTarget carries the declared Fn<...> target type from
+	// the immediate emit site (VarStmt LHS, AssignStmt LHS, CallExpr arg
+	// slot) into formatLambdaExpr. The lambda consumes it to drive its
+	// Go signature — most importantly, a Result<T, E> return on the
+	// target flips the lambda body into thrower mode so `return Ok(...)`
+	// / `return Err(...)` lower correctly. formatLambdaExpr clears it on
+	// entry so nested lambdas don't accidentally inherit the hint.
+	pendingLambdaTarget *parser.FuncTypeExpr
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
