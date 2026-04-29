@@ -31,7 +31,7 @@ spawn {
 For fan-in, pass errors out over a channel:
 
 ```zinc
-var errCh = Channel<errors.Err>(len(items))
+var errCh = Channel<error>(len(items))
 
 parallel for (item in items) {
     process(item) or { errCh.send(err); return }

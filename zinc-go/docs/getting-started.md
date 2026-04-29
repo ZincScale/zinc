@@ -165,5 +165,5 @@ zinc-go test -- -race            # race detector
 
 - [Language Guide](language-guide.md) — full syntax reference
 - [Classes & Inheritance](classes.md) — OO features
-- [Error Handling](error-handling.md) — `Err`, auto-widening, `or { }`
+- [Error Handling](error-handling.md) — `(T, error)` signatures, `or { }` at call sites
 - [Concurrency](concurrency.md) — spawn, channels, parallel for, select

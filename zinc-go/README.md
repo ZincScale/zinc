@@ -1,4 +1,8 @@
-# <img src="docs/logo.svg" alt="Zinc" width="360">
+<p align="center">
+  <img src="../logo.png" alt="Zinc" width="320">
+</p>
+
+# Zinc
 
 [![Build](https://github.com/ZincScale/zinc/actions/workflows/ci.yml/badge.svg)](https://github.com/ZincScale/zinc/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../LICENSE)
@@ -29,7 +33,7 @@ print(s.address())    // localhost:8080
 Go is fast, simple, and compiles everywhere. But its syntax has rough edges — verbose error handling, no classes, no generics sugar, no string interpolation. Zinc fixes these while keeping everything that makes Go great:
 
 - **Classes & inheritance** — familiar OO syntax compiled to Go structs with embedding
-- **Errors as values, with auto-widening** — return any class extending `Err` and the function's Go signature widens to `(T, error)` automatically; handle with `or { ... }` at call sites
+- **Errors as values, declared in the signature** — `pub (T, error) foo()` (or bare `error` for void throwers) is purely syntactic; handle with `or { ... }` at call sites, propagate with `or { return err }`
 - **String interpolation** — `"Hello, ${name}!"` just works
 - **Concurrency** — `spawn { }`, `Channel<T>`, `parallel for`, full `select { case ... }`
 - **Sealed classes + match** — algebraic data types with exhaustive pattern matching
@@ -79,11 +83,11 @@ zinc-go build --cross linux/arm64
 ```zinc
 import stdlib/errors
 
-int parseInt(String s) {
+(int, error) parseInt(String s) {
     if (s == "") {
         return errors.IllegalArgumentError("empty input")
     }
-    return 42
+    return 42, null
 }
 
 void main() {
@@ -92,7 +96,7 @@ void main() {
 }
 ```
 
-A function that returns an `Err`-extending class has its Go signature auto-widened to `(T, error)`. Callers either handle inline with `or { ... }` (where `err` is bound) or omit it — in which case the caller's signature widens too, propagating the error up.
+A function declared with `error` in the trailing position is a thrower — Go signature `(T, error)`. Callers handle the error inline with `or { ... }` (where `err` is bound) or, from inside another thrower, propagate with `or { return err }`. Detection is purely syntactic: the declared `error` is the only marker.
 
 ### Sealed classes & pattern matching
 

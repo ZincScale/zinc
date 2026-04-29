@@ -299,7 +299,7 @@ mux.NewRouter()
 
 ## Errors
 
-See [error-handling.md](error-handling.md). The short version: any class extending `Err` is an error. Returning one auto-widens the function signature; handle with `or { }` at the call site or let it propagate.
+See [error-handling.md](error-handling.md). The short version: a function is a thrower iff its declared return type ends in `error` — `error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Handle with `or { }` at the call site, propagate with `or { return err }` from inside another thrower. No auto-widening, no `?` operator.
 
 ## Concurrency
 

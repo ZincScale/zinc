@@ -1,16 +1,70 @@
 # Error handling
 
-Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. Any class extending `BaseError` from `stdlib/errors` is an error type. Returning one widens the function's Go signature to `(T, error)` automatically. Callers either handle the error inline with `or { ... }` or let it propagate by doing nothing — in which case the caller's signature widens too.
-
-There is no `try / catch / throw / finally`.
+Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. A function is a thrower iff its **declared return type contains `error` in the trailing position** — `error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Callers handle errors at the call site with `or { ... }`. There is no `try / catch / throw / finally`, no auto-widening, no `?` operator.
 
 ## The model in one paragraph
 
-A function that returns an `BaseError`-extending value transpiles to a Go function returning `(T, error)`. At call sites, you write either `var x = call(...)` (the error propagates — your function widens) or `var x = call(...) or { ... }` (you handle it; `err` is bound inside the block). The `BaseError` base class has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
+A function whose declared return type ends in `error` becomes a Go function with `error` as the trailing result. The match is 1:1 with Go's native `(T, error)` shape — no wrapper types, no inference. At the call site, write `var x = call(...) or { ... }` to handle the error (`err` is bound inside the block) or destructure a multi-value thrower with `var (a, b) = call(...) or { ... }`. To propagate from inside another thrower, the canonical form is `or { return err }`. The `BaseError` base class in `stdlib/errors` has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
 
-## Defining errors
+## Declaring a thrower
 
-`stdlib/errors` ships the base class and a small set of common types:
+The trailing-`error` rule covers three shapes:
+
+```zinc
+import stdlib/errors
+
+// Single-value thrower — Go: func parseInt(s string) (int, error)
+(int, error) parseInt(String s) {
+    if (s == "") {
+        return errors.IllegalArgumentError("empty input")
+    }
+    return 42, null
+}
+
+// Multi-value thrower — Go: func lookup(k string) (int, string, error)
+(int, String, error) lookup(String key) {
+    if (key == "") {
+        return errors.IllegalArgumentError("missing key")
+    }
+    return 7, "found", null
+}
+
+// Bare-error / void thrower — Go: func validate(s string) error
+error validate(String s) {
+    if (s == "bad") {
+        return errors.IllegalArgumentError("bad input")
+    }
+    return null
+}
+```
+
+The `(T)` singleton form collapses to `T`, so `(Int) foo()` parses identically to `Int foo()` — both forms are non-throwers.
+
+## Returning from a thrower
+
+Three valid return forms inside a declared thrower:
+
+| Form | Meaning |
+|---|---|
+| `return v1, ..., vN, null` | Success: every value slot spelled out, `null` for the error slot |
+| `return v` (single-value thrower only) | Success shorthand: `return v` from `(T, error)` lowers to `return v, nil` |
+| `return errVal` | Failure: any expression whose type extends `BaseError`. Value slots auto-fill with their zero values. |
+
+```zinc
+(int, String, error) parseUser(String s) {
+    if (s == "") {
+        return errors.IllegalArgumentError("empty")
+        // → emitted as: return 0, "", NewIllegalArgumentError("empty")
+    }
+    return 42, "alice", null
+}
+```
+
+The auto-zero-fill is what makes the design ergonomic — you don't repeat `0, ""` on every error path.
+
+## Defining error types
+
+`stdlib/errors` ships the base class and common types:
 
 ```zinc
 // stdlib/errors
@@ -18,7 +72,6 @@ pub class BaseError {
     pub String message
     init(String message) { this.message = message }
     pub String Error() { return message }
-    pub String toString() { return "BaseError(${message})" }
 }
 
 pub class IllegalArgumentError : BaseError { ... }
@@ -27,7 +80,7 @@ pub class IOError              : BaseError { ... }
 pub class ConfigError          : BaseError { ... }
 ```
 
-Define your own domain errors by extending `BaseError`:
+Define your own by extending `BaseError`:
 
 ```zinc
 import stdlib/errors
@@ -45,32 +98,7 @@ class NetworkError : errors.BaseError {
 }
 ```
 
-Subclass chains work too — anything transitively extending `BaseError` is an error:
-
-```zinc
-class AppError : errors.BaseError {
-    init(String m) { super(m) }
-}
-
-class NotFoundError : AppError {        // still an error — chain walked
-    init(String m) { super(m) }
-}
-```
-
-## Returning errors
-
-```zinc
-import stdlib/errors
-
-int parseInt(String s) {
-    if (s == "") {
-        return errors.IllegalArgumentError("empty input")
-    }
-    return 42
-}
-```
-
-`parseInt` declares `int` but can also return `IllegalArgumentError`. The compiler widens its Go signature to `(int, error)`. No `?` operator, no marker keyword — the error type in the body is the source of truth.
+Subclass chains work — anything transitively extending `BaseError` is an error.
 
 ## Handling at the call site: `or { }`
 
@@ -86,53 +114,113 @@ void main() {
 
 Inside the `or { }` block:
 
-- `err` is bound to the error value.
-- The block must `return` (or otherwise exit the function), so control doesn't fall through with `n` undefined.
-- The block can do anything Zinc allows — log, fall back, rewrap, re-return.
+- `err` is bound to the error value (always typed as `error`).
+- The block must terminate the binding's scope — typically `return`, `break`, `continue`, or a fallback assignment. Otherwise control would fall through with `n` undefined.
+
+A few common patterns:
 
 ```zinc
-// Fallback value
-var port = parsePort(s) or { return 8080 }
+// Fallback value via single-expression block
+var port = parsePort(s) or { 8080 }
 
-// Wrap and re-return
+// Wrap and re-throw (works inside a thrower function)
 var cfg = loadConfig(path) or {
     return errors.ConfigError("loading ${path} failed: ${err}")
 }
+
+// Type-dispatched handling
+var x = call() or match err {
+    case errors.IOError    -> { logging.warn("io"); return }
+    case errors.ConfigError -> { logging.warn("config"); return }
+}
 ```
 
-## Auto-propagation
+## Multi-value destructure with `or { }`
 
-If you call a throwing function without `or { }`, the error propagates: your function's signature widens to `(T, error)` and the error returns up to your caller.
+A thrower whose return is `(T1, ..., Tn, error)` destructures into N value names — the error slot is captured in the implicit `err` binding:
 
 ```zinc
-int doubleIt(String s) {
-    var n = parseInt(s)        // no `or { }` — propagates
+var (n, label) = lookup("foo") or {
+    print("lookup err: ${err}")
+    return
+}
+print("got: ${n}/${label}")
+```
+
+The compiler emits `n, label, _err := lookup("foo"); if _err != nil { ... }`.
+
+## Propagation: `or { return err }`
+
+There is no implicit propagation and no `?` operator. To forward an error to your caller, the calling function must itself be a declared thrower, and the call site spells out the propagation:
+
+```zinc
+(int, error) doubleIt(String s) {
+    var n = parseInt(s) or { return err }
     return n * 2
 }
 ```
 
-`doubleIt` becomes `(int, error)` in Go. Your caller faces the same choice — handle with `or { }` or propagate further.
-
-## Custom errors satisfy Go's `error`
-
-Because `BaseError.Error()` exists, any `BaseError`-extending class is a Go `error`. That means generated code interops cleanly with the Go ecosystem:
-
-- Pass to `fmt.Errorf("...: %w", e)` to wrap.
-- Match with `errors.As(err, &target)` to extract a concrete type.
-- Compose with `errors.Is(err, sentinel)`.
+`return err` from a `(T1, ..., Tn, error)` thrower auto-fills the value slots with their zero values, so the user never types `return 0, "", err`.
 
 ## Functions returning `BaseError` directly
 
-If a function's "happy path" return type *is* an error, declare it as such — no widening required:
+A method whose "happy path" return type is the error itself uses the bare-error form:
 
 ```zinc
-errors.BaseError validate(Config c) {
+error validate(Config c) {
     if (c.host == "") {
         return errors.IllegalArgumentError("host required")
     }
     return null
 }
 ```
+
+This emits `func validate(c *Config) error`.
+
+## Function-typed slots: `Fn<...>` with thrower returns
+
+Function-type aliases follow the same trailing-`error` rule:
+
+```zinc
+// A factory that produces a Processor or fails
+type ProcessorFactory = Fn<(Config), (Processor, error)>
+
+class Registry {
+    Map<String, ProcessorFactory> factories
+
+    pub (Processor, error) create(String name, Config cfg) {
+        var fac = factories[name]
+        return fac(cfg)              // pass-through; fac()'s tuple flows out
+    }
+}
+```
+
+The transpiler resolves the alias at the call site (`fac(cfg)`) and recognizes the call as a thrower — so the surrounding `(Processor, error)` signature absorbs the call cleanly. Cross-package alias resolution works the same way; the compiler propagates `type` declarations across packages automatically.
+
+## Lambdas with thrower bodies
+
+A lambda assigned to a `Fn<..., (T, error)>` slot picks up the thrower context from the target type. Both expression-form and block-form bodies work:
+
+```zinc
+Fn<(int), (int, error)> dbl = (int x) -> (x * 2, null)
+
+Fn<(int), (int, error)> safeDiv = (int n) -> {
+    if (n == 0) {
+        return errors.IllegalArgumentError("zero")
+    }
+    return 100 / n, null
+}
+```
+
+The same hint flows through method args — `reg.register("dbl", (int x) -> ...)` lets the lambda's body emit with the registry method's parameter type as the target.
+
+## Custom errors satisfy Go's `error`
+
+Because `BaseError.Error()` exists, every `BaseError`-extending class is a Go `error`. Generated code interops cleanly with the Go ecosystem:
+
+- Pass to `fmt.Errorf("...: %w", e)` to wrap.
+- Match with `errors.As(err, &target)` to extract a concrete type.
+- Compose with `errors.Is(err, sentinel)`.
 
 ## Goroutines
 
@@ -151,19 +239,28 @@ spawn {
 For error fan-in, send errors over an explicit channel:
 
 ```zinc
-var errCh = Channel<errors.BaseError>(len(items))
+var errCh = Channel<error>(len(items))
 parallel for (item in items) {
     process(item) or { errCh.send(err); return }
 }
 ```
 
-## Migration from try/catch
+## Migration from older Zinc
 
-Earlier drafts of Zinc had `try / catch / throw / finally`. Those keywords are gone. The mechanical rewrite:
+If you have older Zinc code that relied on the auto-widen design (returning a `BaseError` from a function declared with a non-error type), the rewrite is mechanical:
 
-| Old | New |
+| Old (auto-widen) | New (explicit) |
+|---|---|
+| `int parse(String s) { return ParseError(...) }` | `(int, error) parse(String s) { return ParseError(...) }` |
+| `int wrap(String s) { var n = parse(s); return n*2 }` | `(int, error) wrap(String s) { var n = parse(s) or { return err }; return n*2 }` |
+| `error validate(...) { return null }` | unchanged — bare `error` was always valid |
+| `var x = thrower()` (implicit propagate) | `var x = thrower() or { return err }` |
+
+Earlier drafts also had `try / catch / throw / finally` and an experimental `Result<T, E>` wrapper. Both are gone:
+
+| Older form | New form |
 |---|---|
 | `throw FooError("msg")` | `return errors.FooError("msg")` |
 | `try { var x = call() } catch (e) { handle }` | `var x = call() or { handle }` (where `err` replaces `e`) |
-| `try { ... } catch (FooError e) { ... } catch (e) { ... }` | One `or { }` plus type checks: `or { if (err is FooError) { ... } else { ... } }` |
-| `try { ... } finally { cleanup }` | Wrap the resource and call `cleanup` explicitly, or use Go's `defer` from generated code as needed |
+| `Result<T, E> foo()` | `(T, error) foo()` (`E` collapses to the single `error` interface — use a class hierarchy on top of `BaseError` if you need typed dispatch) |
+| `Ok(v)` / `Err(e)` | `return v, null` / `return e` |

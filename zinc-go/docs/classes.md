@@ -50,31 +50,35 @@ class Config {
 
 ## Constructors that fail
 
-An `init` that validates inputs can return an error to abort construction. The class's "constructor" function widens to `(*T, error)` like any other widening function:
+Under the explicit-`error` design, an `init` block doesn't return an error directly — `init` is a constructor and has no return type to declare. To express a fallible construction, expose a free factory function (or a static-style helper) whose declared signature carries the trailing `error`:
 
 ```zinc
 import stdlib/errors
 
 class Server {
-    String host
-    int port
+    pub String host
+    pub int port
 
     init(String host, int port) {
-        if (port < 1 || port > 65535) {
-            return errors.IllegalArgumentError("invalid port: ${port}")
-        }
         this.host = host
         this.port = port
     }
 }
 
-var s = Server("localhost", 99999) or {
+(Server, error) NewValidatedServer(String host, int port) {
+    if (port < 1 || port > 65535) {
+        return errors.IllegalArgumentError("invalid port: ${port}")
+    }
+    return Server(host, port), null
+}
+
+var s = NewValidatedServer("localhost", 99999) or {
     print("bad config: ${err}")
     return
 }
 ```
 
-Bare `return` inside an `init` body is a compile error — there's nothing meaningful to return. To abort construction, return an `Err`-extending value.
+This keeps the rule simple — thrower-ness is purely a property of the declared return type — and matches Go's idiomatic `New…(...) (*T, error)` constructor pattern.
 
 ## Data classes
 
