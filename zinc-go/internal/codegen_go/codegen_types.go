@@ -52,6 +52,16 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		}
 	} else {
 		ret = g.formatReturnType(fn.ReturnType, fn.Body)
+		// Non-thrower tuple returns still need per-slot zero values for the
+		// fallthrough emit below — `goRetType` carries the full
+		// "(A, B, C)" string which zeroValueFor can't produce a valid Go
+		// composite literal for. Populate valueGoTypes so the fallthrough
+		// uses the same per-slot path as the thrower branches.
+		if tup, ok := fn.ReturnType.(*parser.TupleType); ok {
+			for _, t := range tup.Elements {
+				valueGoTypes = append(valueGoTypes, g.formatType(t))
+			}
+		}
 	}
 
 	// Save/restore state for function scope
@@ -144,6 +154,14 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 			} else {
 				g.writeln("return %s, nil", g.zeroValueFor(goRetType))
 			}
+		} else if len(valueGoTypes) > 0 {
+			// Tuple return: emit per-slot zeros so we don't produce
+			// `(A, B, C){}` (invalid Go composite literal on a tuple).
+			parts := make([]string, 0, len(valueGoTypes))
+			for _, vt := range valueGoTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			g.writeln("return %s", strings.Join(parts, ", "))
 		} else if goRetType != "" {
 			g.writeln("return %s", g.zeroValueFor(goRetType))
 		}
@@ -740,6 +758,13 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		}
 	} else {
 		ret = g.formatReturnType(m.ReturnType, m.Body)
+		// Mirror the function-level fix: tuple-returning methods need
+		// per-slot zeros for fallthrough fallback emission.
+		if tup, ok := m.ReturnType.(*parser.TupleType); ok {
+			for _, t := range tup.Elements {
+				valueGoTypes = append(valueGoTypes, g.formatType(t))
+			}
+		}
 	}
 
 	prevRetType := g.currentReturnType
@@ -804,6 +829,12 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			} else {
 				g.writeln("return %s, nil", g.zeroValueFor(goRetType))
 			}
+		} else if len(valueGoTypes) > 0 {
+			parts := make([]string, 0, len(valueGoTypes))
+			for _, vt := range valueGoTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			g.writeln("return %s", strings.Join(parts, ", "))
 		} else if goRetType != "" && !strings.HasPrefix(ret, " *") {
 			// Non-thrower T-returning method: emit zero fallback.
 			g.writeln("return %s", g.zeroValueFor(goRetType))

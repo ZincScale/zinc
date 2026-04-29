@@ -11,6 +11,39 @@ import (
 	"zinc-go/internal/parser"
 )
 
+// formatCallArgsWithPointerWrap formats a positional argument list,
+// prepending `&` to any arg whose target Go param needs a pointer at
+// runtime (resolver says ParamIsPointer, or the (pkgPath, funcName) is
+// listed in implicitPointerParams for that index). Skips the wrap when
+// the arg is already a pointer-shaped expression (`nil`, or a call that
+// returns a pointer).
+//
+// Used by the import-alias / zinc-subpackage call fast-path. The general
+// call path (formatCallExpr's later branches) does the same wrap inline
+// — keep the two in sync.
+func (g *Generator) formatCallArgsWithPointerWrap(pkgPath, funcName string, args []parser.Expr) string {
+	if pkgPath == "" {
+		return g.formatExprList(args)
+	}
+	out := make([]string, 0, len(args))
+	for i, arg := range args {
+		formatted := g.formatExpr(arg)
+		if g.goResolver.NeedsPointerArg(pkgPath, funcName, i) {
+			alreadyPointer := formatted == "nil"
+			if !alreadyPointer {
+				if callArg, ok := arg.(*parser.CallExpr); ok {
+					alreadyPointer = g.callReturnsPointer(callArg)
+				}
+			}
+			if !alreadyPointer {
+				formatted = "&" + formatted
+			}
+		}
+		out = append(out, formatted)
+	}
+	return strings.Join(out, ", ")
+}
+
 // callReturnsPointer checks if a call expression returns a pointer type,
 // using the GoTypeResolver to inspect the function/method signature.
 func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
@@ -56,10 +89,17 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
 			pkg := ident.Name
 			name := sel.Field
-			if goPath, ok := g.importMap[pkg]; ok {
-				g.needImport(goPath)
+			goPath := ""
+			if gp, ok := g.importMap[pkg]; ok {
+				g.needImport(gp)
+				goPath = gp
 			}
-			args := g.formatExprList(c.Args)
+			// Same auto-pointer-wrap as the general call path below: a
+			// Go-side function whose param wants a pointer at runtime
+			// (explicit *T or in implicitPointerParams) gets `&` prepended
+			// to the corresponding arg. Without this hambaAvro.Unmarshal
+			// and similar `any`-shape sinks emit broken Go.
+			args := g.formatCallArgsWithPointerWrap(goPath, name, c.Args)
 
 			// Check what kind of export this is
 			kind := ""

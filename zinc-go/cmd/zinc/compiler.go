@@ -40,7 +40,7 @@ func parseFile(path string) (*parser.Program, error) {
 }
 
 // compileFile reads a .zn file, parses it, and generates Go source.
-func compileFile(path string, importAliases ...map[string]string) ([]codegen.OutputFile, error) {
+func compileFile(path, goModDir string, importAliases ...map[string]string) ([]codegen.OutputFile, error) {
 	prog, err := parseFile(path)
 	if err != nil {
 		return nil, err
@@ -53,6 +53,16 @@ func compileFile(path string, importAliases ...map[string]string) ([]codegen.Out
 
 	gen := codegen.New()
 	gen.SetSourceFile(prog.SourceFile)
+	// goModDir is the directory containing (or about to contain) go.mod for
+	// the generated output. The codegen resolver uses it to locate third-
+	// party deps (via go.mod replace directives or the module cache) when
+	// deciding whether to pointerize qualified type references like
+	// `pkg.Type` → `*pkg.Type`. Without this, all third-party qualified
+	// types silently emit as value types, breaking any List<pkg.T> where
+	// pkg.T's constructor returns *T.
+	if goModDir != "" {
+		gen.SetGoModDir(goModDir)
+	}
 	if len(importAliases) > 0 && importAliases[0] != nil {
 		gen.SetImportAliases(importAliases[0])
 	}
@@ -122,7 +132,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 
 	// If there's only one file, use the single-file path (simpler output naming)
 	if len(znFiles) == 1 {
-		files, err := compileFile(znFiles[0], importAliases...)
+		files, err := compileFile(znFiles[0], outDir, importAliases...)
 		if err != nil {
 			return err
 		}
@@ -160,6 +170,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 
 		gen := codegen.New()
 		gen.SetSourceFile(prog.SourceFile)
+		gen.SetGoModDir(outDir)
 		gen.SetSiblingExports(allExports)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])

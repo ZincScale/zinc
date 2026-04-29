@@ -7,7 +7,10 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"golang.org/x/tools/go/packages"
@@ -120,10 +123,7 @@ func (r *GoTypeResolver) resolvePackageDir(pkgPath string) string {
 	}
 	// 2. Module with replace: parse go.mod for replace directives
 	gomod := filepath.Join(r.dir, "go.mod")
-	data, err := os.ReadFile(gomod)
-	if err != nil {
-		return ""
-	}
+	data, _ := os.ReadFile(gomod)
 	// Simple line-based go.mod parser for replace directives
 	lines := splitLines(string(data))
 	for _, line := range lines {
@@ -149,6 +149,84 @@ func (r *GoTypeResolver) resolvePackageDir(pkgPath string) string {
 				}
 			}
 		}
+	}
+	// 3. Module cache: $GOMODCACHE/<pkgPath>@<version>/. The transpiler
+	// runs codegen BEFORE `go mod tidy` populates zinc-out's go.mod, so
+	// loadPkgViaGoPackages can't see the dep. But the dep was likely
+	// downloaded by a previous build (or by `zinc-go add`), so its source
+	// sits in the user's module cache. Look there as a last resort.
+	if cached := r.resolveFromModCache(pkgPath); cached != "" {
+		return cached
+	}
+	return ""
+}
+
+// resolveFromModCache looks in $GOMODCACHE for a checked-out version of
+// pkgPath. Picks the highest version when multiple exist. Returns "" if
+// no match found.
+func (r *GoTypeResolver) resolveFromModCache(pkgPath string) string {
+	modCache := goModCacheDir()
+	if modCache == "" {
+		return ""
+	}
+	// Walk up the path looking for a `<segment>@<version>` directory
+	// match. We try from the longest prefix to the shortest because Go
+	// modules can sub-package (e.g. github.com/hamba/avro/v2 → the
+	// `v2` is part of the import path, not the version).
+	parts := strings.Split(pkgPath, "/")
+	for cut := len(parts); cut > 0; cut-- {
+		modPath := strings.Join(parts[:cut], "/")
+		subPath := strings.Join(parts[cut:], "/")
+		// Module dirs in the cache use ! to escape uppercase letters in
+		// their original path; we only call into ASCII-lowercase paths
+		// (github.com/foo/bar) so this is mostly cosmetic, but keep
+		// the simple form to avoid pulling in module/cache.
+		parent := filepath.Join(modCache, filepath.FromSlash(modPath))
+		parentDir := filepath.Dir(parent)
+		base := filepath.Base(parent)
+		entries, err := os.ReadDir(parentDir)
+		if err != nil {
+			continue
+		}
+		var matches []string
+		prefix := base + "@"
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+				matches = append(matches, e.Name())
+			}
+		}
+		if len(matches) == 0 {
+			continue
+		}
+		sort.Strings(matches) // lexicographic — close to semver for vN.N.N tags
+		picked := matches[len(matches)-1]
+		resolved := filepath.Join(parentDir, picked, filepath.FromSlash(subPath))
+		if isDir(resolved) {
+			return resolved
+		}
+	}
+	return ""
+}
+
+// goModCacheDir returns $GOMODCACHE, falling back to $GOPATH/pkg/mod
+// then ~/go/pkg/mod. Empty string if neither resolves.
+func goModCacheDir() string {
+	if v := os.Getenv("GOMODCACHE"); v != "" {
+		return v
+	}
+	// `go env GOMODCACHE` is the canonical answer; fall through to env
+	// vars if the binary isn't on PATH for some reason.
+	if out, err := exec.Command("go", "env", "GOMODCACHE").Output(); err == nil {
+		v := strings.TrimSpace(string(out))
+		if v != "" {
+			return v
+		}
+	}
+	if v := os.Getenv("GOPATH"); v != "" {
+		return filepath.Join(v, "pkg", "mod")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "go", "pkg", "mod")
 	}
 	return ""
 }
@@ -350,19 +428,51 @@ func (r *GoTypeResolver) IsStruct(pkgPath, name string) bool {
 // `nil`, not `Type{}` which the Go compiler rejects.
 func (r *GoTypeResolver) IsInterface(pkgPath, name string) bool {
 	pkg := r.loadPkg(pkgPath)
-	if pkg == nil {
+	if pkg != nil {
+		obj := pkg.Scope().Lookup(name)
+		if obj != nil {
+			tn, ok := obj.(*types.TypeName)
+			if ok {
+				_, isIface := tn.Type().Underlying().(*types.Interface)
+				return isIface
+			}
+		}
+	}
+	// Fallback: parse AST. Mirrors hasStructDecl. Without this,
+	// zeroValueFor on a third-party-package interface type falls
+	// through to the `goType + "{}"` branch and emits an invalid
+	// composite literal (`pkg.Iface{}`) — Go rejects composite
+	// literals on interfaces. The most visible breakage is on
+	// fallthrough returns after exhaustive `match`, where codegen
+	// inserts a zero-value return at the end of the function body.
+	return r.hasInterfaceDeclAST(pkgPath, name)
+}
+
+// hasInterfaceDeclAST is the AST-level companion to IsInterface.
+func (r *GoTypeResolver) hasInterfaceDeclAST(pkgPath, name string) bool {
+	astPkg := r.loadAST(pkgPath)
+	if astPkg == nil {
 		return false
 	}
-	obj := pkg.Scope().Lookup(name)
-	if obj == nil {
-		return false
+	for _, file := range astPkg.Files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if typeSpec.Name.Name == name {
+					_, isIface := typeSpec.Type.(*ast.InterfaceType)
+					return isIface
+				}
+			}
+		}
 	}
-	tn, ok := obj.(*types.TypeName)
-	if !ok {
-		return false
-	}
-	_, isIface := tn.Type().Underlying().(*types.Interface)
-	return isIface
+	return false
 }
 
 // HasFunc reports whether pkgPath has a function named funcName.
@@ -475,36 +585,81 @@ func (r *GoTypeResolver) ReturnsErrorOnly(pkgPath, funcName string) bool {
 // with pointer receivers. If so, the type is designed to be used as *T.
 func (r *GoTypeResolver) HasPointerReceiverMethods(pkgPath, typeName string) bool {
 	pkg := r.loadPkg(pkgPath)
-	if pkg == nil {
-		return false
+	if pkg != nil {
+		obj := pkg.Scope().Lookup(typeName)
+		if obj != nil {
+			tn, ok := obj.(*types.TypeName)
+			if ok {
+				// Check method set of *T — if it has more methods than T,
+				// the extra ones have pointer receivers.
+				valMethods := types.NewMethodSet(tn.Type())
+				ptrMethods := types.NewMethodSet(types.NewPointer(tn.Type()))
+				return ptrMethods.Len() > valMethods.Len()
+			}
+		}
 	}
-	obj := pkg.Scope().Lookup(typeName)
-	if obj == nil {
-		return false
-	}
-	tn, ok := obj.(*types.TypeName)
-	if !ok {
-		return false
-	}
-	// Check method set of *T — if it has more methods than T,
-	// the extra ones have pointer receivers.
-	valMethods := types.NewMethodSet(tn.Type())
-	ptrMethods := types.NewMethodSet(types.NewPointer(tn.Type()))
-	return ptrMethods.Len() > valMethods.Len()
+	// Fallback: parse AST directly. loadPkg can fail for legitimate reasons
+	// — go.mod hasn't been written by the transpiler yet, the dep is fresh,
+	// the package isn't in the build cache. Without this fallback, every
+	// formatType call site that gates pointerization on
+	// HasPointerReceiverMethods silently emits non-pointer types, which
+	// produces broken Go code (e.g. `[]hambaAvro.Field{}` when hamba's
+	// NewField returns *Field). Mirror hasStructDecl's AST walk and look
+	// for any FuncDecl whose receiver is *typeName.
+	return r.hasPointerReceiverMethodAST(pkgPath, typeName)
 }
 
+// hasPointerReceiverMethodAST is the AST-level companion to
+// HasPointerReceiverMethods. Returns true if the package has at least one
+// method declaration with a pointer receiver on the named type.
+func (r *GoTypeResolver) hasPointerReceiverMethodAST(pkgPath, typeName string) bool {
+	astPkg := r.loadAST(pkgPath)
+	if astPkg == nil {
+		return false
+	}
+	for _, file := range astPkg.Files {
+		for _, decl := range file.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok || funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
+				continue
+			}
+			recvType := funcDecl.Recv.List[0].Type
+			star, isPtr := recvType.(*ast.StarExpr)
+			if !isPtr {
+				continue
+			}
+			ident, ok := star.X.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if ident.Name == typeName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// implicitPointerParams whitelists Go functions whose static signature is
+// `any` (or another non-pointer type) but whose runtime contract requires
+// a pointer to write into. Without this list, Zinc users would need a
+// unary `&` expression — currently only `&` (bitwise AND) is parsed.
+//
+// Add new entries when porting a third-party lib whose Unmarshal/Decode
+// idiom takes `any`. Pattern: `<full-go-import-path>.<FuncName>`.
 var implicitPointerParams = map[string]map[int]bool{
-	"encoding/json.Unmarshal": {1: true},
-	"encoding/xml.Unmarshal":  {1: true},
-	"fmt.Scan":                {0: true},
-	"fmt.Scanln":              {0: true},
-	"fmt.Scanf":               {1: true},
-	"fmt.Sscan":               {1: true},
-	"fmt.Sscanln":             {1: true},
-	"fmt.Sscanf":              {2: true},
-	"fmt.Fscan":               {1: true},
-	"fmt.Fscanln":             {1: true},
-	"fmt.Fscanf":              {2: true},
+	"encoding/json.Unmarshal":            {1: true},
+	"encoding/xml.Unmarshal":             {1: true},
+	"fmt.Scan":                           {0: true},
+	"fmt.Scanln":                         {0: true},
+	"fmt.Scanf":                          {1: true},
+	"fmt.Sscan":                          {1: true},
+	"fmt.Sscanln":                        {1: true},
+	"fmt.Sscanf":                         {2: true},
+	"fmt.Fscan":                          {1: true},
+	"fmt.Fscanln":                        {1: true},
+	"fmt.Fscanf":                         {2: true},
+	"github.com/hamba/avro/v2.Unmarshal": {2: true},
 }
 
 func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex int) bool {

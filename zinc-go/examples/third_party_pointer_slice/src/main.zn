@@ -1,0 +1,31 @@
+// E2E: third-party dep × `List<pkg.T>` × pointer-receiver methods.
+// Pre-fix the codegen pipeline failed in this exact cell:
+//   • formatType saw `pkg.Watcher`, asked goResolver for IsStruct
+//     (worked via AST fallback) and HasPointerReceiverMethods
+//     (had no AST fallback → returned false).
+//   • `List<pkg.Watcher>` formatted as `[]pkg.Watcher` instead of
+//     `[]*pkg.Watcher`.
+//   • `pkg.NewWatcher()` returned `*pkg.Watcher`, the append failed
+//     to type-check, build broke.
+// Same shape that blocks zinc-flow's hamba-avro bridge from emitting
+// a `List<hambaAvro.Field>` collected via `hambaAvro.NewField`.
+
+import fsnotify
+
+void main() {
+    // Build a small slice of *fsnotify.Watcher. We don't actually use
+    // the watchers — the test is whether codegen accepts the shape.
+    var watchers = List<fsnotify.Watcher>[]
+    var w1 = fsnotify.NewWatcher() or { print("err1: ${err}"); return }
+    watchers = append(watchers, w1)
+    var w2 = fsnotify.NewWatcher() or { print("err2: ${err}"); return }
+    watchers = append(watchers, w2)
+
+    print("watchers: ${len(watchers)}")
+
+    // Close them to release fds (matches normal lifecycle).
+    for (w in watchers) {
+        w.Close()
+    }
+    print("done")
+}

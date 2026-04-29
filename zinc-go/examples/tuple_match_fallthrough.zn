@@ -1,0 +1,21 @@
+// E2E: tuple-returning function whose body is an exhaustive match.
+// Pre-fix codegen emitted an unreachable `return (A, B, C){}` after
+// the match — invalid Go (composite literal on a tuple). Now the
+// fallthrough emits per-slot zeros via the valueGoTypes path.
+
+(int, String, bool) classify(int n) {
+    match (n) {
+        case 0 { return 0, "zero", false }
+        case 1 { return 1, "one", true }
+        case _ { return n, "other", n > 0 }
+    }
+}
+
+void main() {
+    var a, b, c = classify(0)
+    print("a=${a} b=${b} c=${c}")
+    var d, e, f = classify(1)
+    print("d=${d} e=${e} f=${f}")
+    var g, h, i = classify(42)
+    print("g=${g} h=${h} i=${i}")
+}

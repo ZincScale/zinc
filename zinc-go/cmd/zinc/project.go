@@ -52,7 +52,7 @@ func build(input, outDir string, quiet bool) error {
 			return err
 		}
 	} else {
-		files, cErr := compileFile(input)
+		files, cErr := compileFile(input, outDir)
 		if cErr != nil {
 			return cErr
 		}
@@ -122,7 +122,7 @@ func run(input string, progArgs []string) error {
 			return err
 		}
 	} else {
-		files, cErr := compileFile(input)
+		files, cErr := compileFile(input, tmpDir)
 		if cErr != nil {
 			return cErr
 		}
@@ -407,6 +407,17 @@ func loadZincToml(path string) (*zincConfig, error) {
 		// parsing, since [deps] may come after [replace] in the file.
 		if section == "replace" {
 			replaceByAlias[key] = val
+			continue
+		}
+
+		// [imports] — alias → Go import path. Unlike [deps] this does NOT
+		// emit a go.mod require line, so it's how you alias a subpackage
+		// of a module already declared in [deps] (e.g. hambaOcf →
+		// github.com/hamba/avro/v2/ocf when [deps] already requires
+		// github.com/hamba/avro/v2). The codegen-side import-map only
+		// cares about the alias→path mapping.
+		if section == "imports" {
+			cfg.Imports[key] = val
 			continue
 		}
 

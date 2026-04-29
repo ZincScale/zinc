@@ -1,0 +1,29 @@
+// E2E: function with exhaustive `match` returning a third-party-package
+// interface. Pre-fix the codegen fallthrough emitted `pkg.Iface{}` (a
+// composite literal on an interface — Go rejects it) because IsInterface
+// had no AST fallback for module-cached deps. The fix lets zeroValueFor
+// answer "this is an interface, the zero is nil" via the AST.
+
+import hambaAvro
+
+enum Kind {
+    INT_KIND,
+    STRING_KIND,
+    BOOL_KIND
+}
+
+// Returns a hamba.Schema (interface). Match is exhaustive — every Kind
+// has a return — but codegen still emits a fallthrough zero-value
+// return at the bottom. That fallthrough has to compile.
+hambaAvro.Schema schemaFor(Kind k) {
+    match (k) {
+        case INT_KIND    { return hambaAvro.NewPrimitiveSchema(hambaAvro.Int,    nil) }
+        case STRING_KIND { return hambaAvro.NewPrimitiveSchema(hambaAvro.String, nil) }
+        case BOOL_KIND   { return hambaAvro.NewPrimitiveSchema(hambaAvro.Boolean, nil) }
+    }
+}
+
+void main() {
+    var s = schemaFor(STRING_KIND)
+    print("type: ${s.Type()}")
+}

@@ -1,0 +1,13 @@
+[project]
+name = "third_party_pointer_slice"
+version = "0.0.1"
+main = "main.zn"
+
+[go]
+version = "1.26"
+
+[deps]
+fsnotify = "github.com/fsnotify/fsnotify@v1.7.0"
+
+[imports]
+fsnotify = "github.com/fsnotify/fsnotify"
