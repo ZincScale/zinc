@@ -1,5 +1,6 @@
-// Test: calling an error-returning function without `or { }` auto-widens
-// the caller. The error propagates up until it's handled.
+// Explicit error propagation: calling a thrower from inside another
+// thrower uses `or { return err }` to forward the error up. The new
+// design replaces implicit auto-widen with explicit declared throwers.
 
 class BaseError {
     pub String message
@@ -11,18 +12,17 @@ class ParseError : BaseError {
     init(String msg) { super(msg) }
 }
 
-int parseNum(String s) {
+(int, error) parseNum(String s) {
     if (s == "") {
         return ParseError("empty input")
     }
-    return 42
+    return 42, null
 }
 
-// No `or { }` — parseNum returns error, so this function auto-widens
-// to (int, error) and propagates the error up.
-int doubleIt(String s) {
-    var n = parseNum(s)
-    return n * 2
+// Caller is also declared as a thrower; propagates via `or { return err }`.
+(int, error) doubleIt(String s) {
+    var n = parseNum(s) or { return err }
+    return n * 2, null
 }
 
 void main() {

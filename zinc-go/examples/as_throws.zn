@@ -1,9 +1,10 @@
 // Regression: `as` is a failable cast, not a panicking one.
 //
-// On type mismatch the cast returns an error (no panic). The enclosing
-// function auto-widens to (T, error), the same way a thrower call does.
-// `or { }` at the call site can consume the error locally; otherwise it
-// propagates up the stack like any other failable expression.
+// On type mismatch the cast returns an error. Enclosing functions
+// must declare `error` in the return tail to propagate. `or { }` at
+// the call site consumes the error locally; otherwise the function
+// declares the failure in its signature and propagates with
+// `or { return err }`.
 
 interface Stmt {
     String describe()
@@ -21,13 +22,13 @@ class ForStmt : Stmt {
     pub String describe() { return "for(${item})" }
 }
 
-// 1. Auto-propagation — function widens to (String, error).
-String castAndDescribe(Stmt s) {
-    var i = s as IfStmt
-    return "got an if: ${i.cond}"
+// 1. Declared thrower — propagation via `or { return err }`.
+(String, error) castAndDescribe(Stmt s) {
+    var i = s as IfStmt or { return err }
+    return "got an if: ${i.cond}", null
 }
 
-// 2. Local handling — or-handler consumes; function does NOT widen.
+// 2. Local handling — or-handler consumes; function does NOT throw.
 String safeDescribe(Stmt s) {
     var i = s as IfStmt or {
         return "(handled: ${err})"
@@ -35,8 +36,8 @@ String safeDescribe(Stmt s) {
     return "got an if: ${i.cond}"
 }
 
-// 3. Nested cast — hoisted automatically; widens through the parent.
-String nestedDescribe(Stmt s) {
+// 3. Nested cast — hoisted automatically inside a declared thrower.
+(String, error) nestedDescribe(Stmt s) {
     return "nested: " + (s as IfStmt).cond
 }
 

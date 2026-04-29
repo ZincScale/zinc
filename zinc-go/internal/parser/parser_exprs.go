@@ -322,13 +322,6 @@ func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 			} else {
 				return expr
 			}
-		case p.check(lexer.TOKEN_QUESTION):
-			// Error propagation: expr?
-			// Only meaningful on call-like expressions; still accept any
-			// expression here and let codegen complain if the inner form
-			// can't produce an error.
-			p.advance()
-			expr = &PropagateExpr{Inner: expr}
 		default:
 			return expr
 		}

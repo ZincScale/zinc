@@ -793,8 +793,11 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 	if g.currentReturnIsDeclaredThrower {
 		valueTypes := g.currentThrowerValueGoTypes
 		// `return SomeError(...)` — single error-class value. Fill value
-		// slots with zero, then the error.
-		if g.exprIsErrorCtor(r.Value) {
+		// slots with zero, then the error. Also catches `return err` in
+		// an `or { }` block, where `err` is the in-scope error variable
+		// — propagation shorthand for `or { return err }` from a thrower
+		// caller.
+		if g.exprIsErrorCtor(r.Value) || g.exprIsErrorVar(r.Value) {
 			parts := make([]string, 0, len(valueTypes)+1)
 			for _, vt := range valueTypes {
 				parts = append(parts, g.zeroValueFor(vt))
@@ -814,6 +817,16 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		if len(valueTypes) == 0 {
 			g.writeln("return %s", g.formatExpr(r.Value))
 			return
+		}
+		// Single-value thrower (`(T, error)`) returning a non-error,
+		// non-tuple value: auto-fill the error slot with nil. Lets the
+		// user write `return v` instead of `return v, null` in the
+		// success path. Multi-value throwers must spell out all slots.
+		if len(valueTypes) == 1 {
+			if _, isTup := r.Value.(*parser.TupleLit); !isTup {
+				g.writeln("return %s, nil", g.formatExpr(r.Value))
+				return
+			}
 		}
 		// TupleLit with all slots — fall through to the existing
 		// currentReturnIsTuple branch, which emits comma-separated.
@@ -1760,7 +1773,9 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 		}
 		for _, m := range cls.Methods {
 			if m.Name == methodName {
-				return g.blockCanReturnError(m.Body)
+				// Syntactic check — the declared return type is the
+				// definitive thrower marker. No body inspection.
+				return returnTypeDeclaresError(m.ReturnType)
 			}
 		}
 		return false
@@ -1812,6 +1827,22 @@ func (g *Generator) emitErrReturn(errVar string) {
 		g.writeln("panic(%s)", errVar)
 		return
 	}
+	// Declared-thrower path: render per-slot zeros from
+	// currentThrowerValueGoTypes, then the error. Bare-error throwers
+	// (no value slots) emit just `return errVar`.
+	if g.currentReturnIsDeclaredThrower {
+		if len(g.currentThrowerValueGoTypes) == 0 {
+			g.writeln("return %s", errVar)
+			return
+		}
+		parts := make([]string, 0, len(g.currentThrowerValueGoTypes)+1)
+		for _, vt := range g.currentThrowerValueGoTypes {
+			parts = append(parts, g.zeroValueFor(vt))
+		}
+		parts = append(parts, errVar)
+		g.writeln("return %s", strings.Join(parts, ", "))
+		return
+	}
 	zv := g.zeroValueFor(g.currentReturnType)
 	if zv != "" {
 		g.writeln("return %s, %s", zv, errVar)
@@ -1835,7 +1866,10 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
 		if g.errorFuncs[ident.Name] {
 			rt, exists := g.funcReturnTypes[ident.Name]
-			return !exists || rt == "" || rt == "void"
+			// "error" is the bare-error declared form (`pub error f()`)
+			// — no value slot, so it's a void thrower for call-site
+			// destructure purposes.
+			return !exists || rt == "" || rt == "void" || rt == "error"
 		}
 		// Unqualified Go stdlib — ask the resolver about return arity.
 		if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "func" {
@@ -2428,6 +2462,19 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 //   - `pkg.Foo(...)` — class in a sibling subpackage (g.subpkgStructs)
 // External Go deps are not yet supported — those would need the
 // dependency's class decls to be loaded.
+// exprIsErrorVar reports whether `e` is the in-scope error variable
+// `err` made visible inside an `or { }` block. Used by emitReturnStmt
+// in declared-thrower context: `or { return err }` is the canonical
+// propagation form, and `return err` from a multi-value-thrower caller
+// must zero-fill the value slots so the resulting Go is well-typed.
+func (g *Generator) exprIsErrorVar(e parser.Expr) bool {
+	if g.currentErrVar == "" {
+		return false
+	}
+	id, ok := e.(*parser.Ident)
+	return ok && id.Name == "err"
+}
+
 func (g *Generator) exprIsErrorCtor(e parser.Expr) bool {
 	call, ok := e.(*parser.CallExpr)
 	if !ok {

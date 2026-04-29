@@ -1,8 +1,8 @@
-// Regression: thrower calls auto-hoist when nested inside any
-// expression position — call args, binary operands, if/while
-// conditions. Mirrors the existing rule for `?` and `as`: the user
-// writes the call without ceremony; codegen lifts it to a temp +
-// error guard above the surrounding statement.
+// Regression: thrower calls nested inside any expression position
+// (call args, binary operands, if/while conditions, string interp)
+// auto-hoist to a temp + error guard above the surrounding statement.
+// Each fn that calls a thrower must declare its own `error` tail —
+// the new design enforces explicit thrower signatures end to end.
 
 class BaseError {
     pub String msg
@@ -10,41 +10,42 @@ class BaseError {
     pub String Error() { return msg }
 }
 
-int parseNum(String s) {
+(int, error) parseNum(String s) {
     if (s == "") { return BaseError("empty") }
-    return 42
+    return 42, null
 }
 
-bool isPositive(String s) {
+(bool, error) isPositive(String s) {
     if (s == "") { return BaseError("empty") }
-    return true
+    return true, null
 }
 
 String label(int n) { return "n=${n}" }
 
 // Nested in BinaryExpr:
-int doubled(String s) {
+(int, error) doubled(String s) {
     return parseNum(s) * 2
 }
 
 // Nested in CallExpr arg:
-String labeled(String s) {
+(String, error) labeled(String s) {
     return label(parseNum(s))
 }
 
 // Top-level call in a single-value position (if-cond):
-void check(String s) {
+error check(String s) {
     if (isPositive(s)) {
         print("ok: ${s}")
     } else {
         print("not ok: ${s}")
     }
+    return null
 }
 
 // Nested in string interpolation (which compiles to a call):
-String describe(String s) {
-    var n = parseNum(s)
-    return "got ${n} from ${s}"
+(String, error) describe(String s) {
+    var n = parseNum(s) or { return err }
+    return "got ${n} from ${s}", null
 }
 
 void main() {

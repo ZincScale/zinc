@@ -1,4 +1,5 @@
-// Test: returning a class extending BaseError widens the calling function.
+// Returning a class extending BaseError from a function declared
+// `(T, error)` — the thrower marker is the explicit `error` tail.
 
 class BaseError {
     pub String message
@@ -10,11 +11,11 @@ class ParseError : BaseError {
     init(String msg) { super(msg) }
 }
 
-int parseNum(String s) {
+(int, error) parseNum(String s) {
     if (s == "") {
         return ParseError("empty input")
     }
-    return 42
+    return 42, null
 }
 
 void main() {

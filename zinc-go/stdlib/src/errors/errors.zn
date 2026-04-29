@@ -1,20 +1,24 @@
 // errors — base class and common error types for Zinc.
 //
-// `BaseError` is the base class. Any class extending BaseError is an error; the
-// compiler widens the signature of any function returning one. BaseError has
-// an `Error() string` method so instances satisfy Go's `error`
-// interface — this composes with `errors.Is`, `errors.As`,
-// `fmt.Errorf("%w", ...)`, etc.
+// `BaseError` is the base class for all Zinc errors. Any class extending
+// BaseError satisfies Go's `error` interface via its `Error() string`
+// method — this composes with `errors.Is`, `errors.As`, `fmt.Errorf`,
+// etc.
+//
+// Thrower-ness is purely syntactic: a function is a thrower iff its
+// declared return type contains `error` in the trailing position
+// (bare `error` for void throwers, `(T, error)` for single-value, or
+// `(T1, ..., Tn, error)` for multi-value).
 //
 // Usage:
 //
 //     import stdlib/errors
 //
-//     Config loadConfig(String path) {
+//     (Config, error) loadConfig(String path) {
 //         if (path == "") {
 //             return errors.IllegalArgumentError("path is required")
 //         }
-//         ...
+//         return Config(path), null
 //     }
 //
 // Users define their own domain errors by extending BaseError.

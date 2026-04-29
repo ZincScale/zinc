@@ -1,5 +1,6 @@
 // Test: a class extending another class that extends BaseError is transitively
-// an error. Compiler walks the full parent chain.
+// an error. Compiler walks the full parent chain. The function declares
+// `(T, error)` explicitly; thrower-ness is purely syntactic now.
 
 class BaseError {
     pub String message
@@ -16,11 +17,11 @@ class NetworkError : AppError {
     init(String msg) { super(msg) }
 }
 
-String fetch(String url) {
+(String, error) fetch(String url) {
     if (url == "") {
         return NetworkError("empty url")
     }
-    return "response for ${url}"
+    return "response for ${url}", null
 }
 
 void main() {
