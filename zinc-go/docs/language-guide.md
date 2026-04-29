@@ -18,16 +18,18 @@ Primitive types: `int`, `long`, `double`, `float`, `bool`, `byte`, `String`. Con
 
 ## Functions
 
+`pub` makes a function callable from other packages — the generated Go name becomes exported (capitalized). Without `pub`, the function is package-private (lowercase Go name). The same rule applies to classes, methods, fields, and constants.
+
 ```zinc
-int add(int a, int b) {
+pub int add(int a, int b) {
     return a + b
 }
 
 // Single-expression form — no braces, no return
-int doubled(int x) = x * 2
+pub int doubled(int x) = x * 2
 
 // Default parameters
-String greet(String name, String greeting = "Hello") {
+pub String greet(String name, String greeting = "Hello") {
     return "${greeting}, ${name}!"
 }
 
@@ -35,14 +37,19 @@ greet("Alice")          // "Hello, Alice!"
 greet("Bob", "Hey")     // "Hey, Bob!"
 
 // Variadic parameters
-int sum(int... numbers) {
+pub int sum(int... numbers) {
     var total = 0
     for (n in numbers) { total = total + n }
     return total
 }
 
+// Package-private helper (no `pub`)
+void logMsg(String level, String msg, any... args) {
+    // ...
+}
+
 // Spread at the call site
-void wrapper(String msg, any... args) {
+pub void wrapper(String msg, any... args) {
     logMsg("INFO", msg, args...)
 }
 ```
@@ -195,7 +202,7 @@ sealed class Shape {
     data Triangle(double base, double height)
 }
 
-double area(Shape s) {
+pub double area(Shape s) {
     match (s) {
         case Circle(r)    { return 3.14159 * r * r }
         case Rect(w, h)   { return w * h }
@@ -213,7 +220,7 @@ Both functions and classes can be generic:
 
 ```zinc
 // Generic function
-T identity<T>(T x) {
+pub T identity<T>(T x) {
     return x
 }
 
@@ -221,12 +228,12 @@ var n = identity<int>(42)
 var s = identity<String>("hi")
 
 // Multi-parameter
-String swap<A, B>(A a, B b) {
+pub String swap<A, B>(A a, B b) {
     return "${b}, ${a}"
 }
 
 // Generic single-expression form
-T second<T>(List<T> items) = items[1]
+pub T second<T>(List<T> items) = items[1]
 
 // Generic class
 class Box<T> {
@@ -249,7 +256,7 @@ Type parameters map directly to Go type parameters (`func identity[T any](x T) T
 // Function types
 type Transform = Fn<(int), int>
 
-int applyTwice(int x, Transform f) {
+pub int applyTwice(int x, Transform f) {
     return f(f(x))
 }
 

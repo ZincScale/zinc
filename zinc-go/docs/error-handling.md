@@ -13,24 +13,24 @@ The trailing-`error` rule covers three shapes:
 ```zinc
 import stdlib/errors
 
-// Single-value thrower — Go: func parseInt(s string) (int, error)
-(int, error) parseInt(String s) {
+// Single-value thrower — Go: func ParseInt(s string) (int, error)
+pub (int, error) parseInt(String s) {
     if (s == "") {
         return errors.IllegalArgumentError("empty input")
     }
     return 42, null
 }
 
-// Multi-value thrower — Go: func lookup(k string) (int, string, error)
-(int, String, error) lookup(String key) {
+// Multi-value thrower — Go: func Lookup(k string) (int, string, error)
+pub (int, String, error) lookup(String key) {
     if (key == "") {
         return errors.IllegalArgumentError("missing key")
     }
     return 7, "found", null
 }
 
-// Bare-error / void thrower — Go: func validate(s string) error
-error validate(String s) {
+// Bare-error / void thrower — Go: func Validate(s string) error
+pub error validate(String s) {
     if (s == "bad") {
         return errors.IllegalArgumentError("bad input")
     }
@@ -51,7 +51,7 @@ Three valid return forms inside a declared thrower:
 | `return errVal` | Failure: any expression whose type extends `BaseError`. Value slots auto-fill with their zero values. |
 
 ```zinc
-(int, String, error) parseUser(String s) {
+pub (int, String, error) parseUser(String s) {
     if (s == "") {
         return errors.IllegalArgumentError("empty")
         // → emitted as: return 0, "", NewIllegalArgumentError("empty")
@@ -154,7 +154,7 @@ The compiler emits `n, label, _err := lookup("foo"); if _err != nil { ... }`.
 There is no implicit propagation and no `?` operator. To forward an error to your caller, the calling function must itself be a declared thrower, and the call site spells out the propagation:
 
 ```zinc
-(int, error) doubleIt(String s) {
+pub (int, error) doubleIt(String s) {
     var n = parseInt(s) or { return err }
     return n * 2
 }
@@ -167,7 +167,7 @@ There is no implicit propagation and no `?` operator. To forward an error to you
 A method whose "happy path" return type is the error itself uses the bare-error form:
 
 ```zinc
-error validate(Config c) {
+pub error validate(Config c) {
     if (c.host == "") {
         return errors.IllegalArgumentError("host required")
     }
@@ -185,7 +185,7 @@ Function-type aliases follow the same trailing-`error` rule:
 // A factory that produces a Processor or fails
 type ProcessorFactory = Fn<(Config), (Processor, error)>
 
-class Registry {
+pub class Registry {
     Map<String, ProcessorFactory> factories
 
     pub (Processor, error) create(String name, Config cfg) {

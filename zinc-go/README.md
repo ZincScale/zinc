@@ -83,7 +83,7 @@ zinc-go build --cross linux/arm64
 ```zinc
 import stdlib/errors
 
-(int, error) parseInt(String s) {
+pub (int, error) parseInt(String s) {
     if (s == "") {
         return errors.IllegalArgumentError("empty input")
     }
@@ -106,7 +106,7 @@ sealed class Shape {
     data Rect(double width, double height)
 }
 
-double area(Shape s) {
+pub double area(Shape s) {
     match (s) {
         case Circle(r) { return 3.14159 * r * r }
         case Rect(w, h) { return w * h }
@@ -202,15 +202,18 @@ match (x) { case 1 { ... } case _ { ... } }
 // Expression if
 var label = if x > 0: "positive" else: "non-positive"
 
-// Type-first function declarations — no `fn` keyword
-int add(int a, int b) { return a + b }
-int doubled(int x) = x * 2          // single-expression form
-void main() { ... }
-String? find(String id) { ... }     // nullable return
-int sum(int... xs) { ... }          // variadic
+// Type-first function declarations — no `fn` keyword.
+// `pub` exports the function (capitalized Go name); without it,
+// the function is package-private.
+pub int add(int a, int b) { return a + b }
+pub int doubled(int x) = x * 2      // single-expression form
+void main() { ... }                 // entry point — never `pub`
+pub String? find(String id) { ... } // nullable return
+pub int sum(int... xs) { ... }      // variadic
 
-// Class fields — declared as Type name, default via =
-class Counter {
+// Class fields — declared as Type name, default via =. Same `pub`
+// rule on the class itself, fields, and methods.
+pub class Counter {
     pub int value = 0
     pub void inc() { value = value + 1 }
 }

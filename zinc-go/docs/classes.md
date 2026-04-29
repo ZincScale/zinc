@@ -65,7 +65,7 @@ class Server {
     }
 }
 
-(Server, error) NewValidatedServer(String host, int port) {
+pub (Server, error) NewValidatedServer(String host, int port) {
     if (port < 1 || port > 65535) {
         return errors.IllegalArgumentError("invalid port: ${port}")
     }
@@ -215,7 +215,7 @@ sealed class Shape {
     data Triangle(double base, double height)
 }
 
-double area(Shape s) {
+pub double area(Shape s) {
     match (s) {
         case Circle(r)      { return 3.14159 * r * r }
         case Rect(w, h)     { return w * h }
