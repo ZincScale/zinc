@@ -71,7 +71,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		// who needs per-iteration evaluation should do it inside the
 		// body via `var x = thrower() or { break }`.
 		cond := stmt.Cond
-		if exprContainsPropagate(cond) || exprContainsAsCast(cond) || g.exprContainsNestedThrowerCall(cond) {
+		if exprContainsAsCast(cond) || g.exprContainsNestedThrowerCall(cond) {
 			cond = g.hoistArg(cond)
 		} else if call, ok := cond.(*parser.CallExpr); ok && g.callReturnsError(call) && !g.callIsVoidThrower(call) {
 			cond = g.hoistArg(cond)
@@ -286,26 +286,15 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	// Direct `as` cast: `var x = expr as T` (with optional `or { }` handler).
 	// Emit comma-ok directly into the var, skipping the hoist temp for a
 	// cleaner output. On mismatch, run the handler if present, otherwise
-	// auto-propagate via emitErrReturn (fixed-point pass marks the
-	// enclosing function as a thrower because exprContainsPropagate is
-	// true for `as`).
+	// auto-propagate via emitErrReturn — the enclosing function must be
+	// declared a thrower (signature with `error` tail) for this to work.
 	if ta, ok := v.Value.(*parser.TypeAssertExpr); ok && !ta.IsCheck {
 		g.emitTypeAssertVar(v, ta)
 		return
 	}
-	// Explicit error propagation: `var x = call()?`.
-	// Strip the PropagateExpr wrapper and fall through to the same
-	// propagation codegen the implicit path uses.
-	if prop, ok := v.Value.(*parser.PropagateExpr); ok {
-		stripped := *v
-		stripped.Value = prop.Inner
-		g.emitErrorPropagatingVar(&stripped)
-		return
-	}
-	// Nested propagation: `var x = foo(bar()?) + 1`. Hoist each `?` (and
-	// any nested `as`) to a temp above this statement, then emit the var
-	// with the rewritten RHS.
-	if v.Value != nil && (exprContainsPropagate(v.Value) || exprContainsAsCast(v.Value) || g.exprContainsNestedThrowerCall(v.Value)) {
+	// Nested failable expr: hoist each `as` (and nested thrower call) to
+	// a temp above this statement, then emit the var with the rewritten RHS.
+	if v.Value != nil && (exprContainsAsCast(v.Value) || g.exprContainsNestedThrowerCall(v.Value)) {
 		rewritten := *v
 		rewritten.Value = g.hoistPropagates(v.Value)
 		g.emitVarStmt(&rewritten)
@@ -645,16 +634,9 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 		g.emitOrAssignment(targetStr, a.Value, a.OrHandler)
 		return
 	}
-	// Explicit error propagation: `x = call()?`.
-	// Strip the wrapper and fall through to the existing propagation path.
-	if prop, ok := a.Value.(*parser.PropagateExpr); ok && a.Op == "=" {
-		stripped := &parser.AssignStmt{Line: a.Line, Target: a.Target, Op: a.Op, Value: prop.Inner}
-		g.emitAssignStmt(stripped)
-		return
-	}
-	// Nested propagation on RHS: `x = foo(bar()?) + 1`. Hoist any `?`
-	// or `as` to temps, then emit the rewritten assign.
-	if a.Value != nil && (exprContainsPropagate(a.Value) || exprContainsAsCast(a.Value) || g.exprContainsNestedThrowerCall(a.Value)) {
+	// Nested failable expr on RHS: hoist any `as` cast or nested
+	// thrower call to temps, then emit the rewritten assign.
+	if a.Value != nil && (exprContainsAsCast(a.Value) || g.exprContainsNestedThrowerCall(a.Value)) {
 		rewritten := &parser.AssignStmt{Line: a.Line, Target: a.Target, Op: a.Op, Value: g.hoistPropagates(a.Value)}
 		g.emitAssignStmt(rewritten)
 		return
@@ -761,13 +743,11 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 }
 
 func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
-	// Explicit error propagation: any `?` in the returned expression.
-	// hoistPropagates emits `_pN, errM := inner; if errM != nil { return zero, errM }`
-	// for each `?`, then returns a rewritten value expression that
-	// references the temps. Top-level `return call()?` and nested
-	// `return call()? * 3` (or any `as` cast inside the return value)
-	// both go through this path.
-	if r.Value != nil && (exprContainsPropagate(r.Value) || exprContainsAsCast(r.Value) || g.exprContainsNestedThrowerCall(r.Value)) {
+	// Hoist failable sub-expressions in the returned value: `as` casts
+	// and nested thrower calls each get lifted to a temp + error guard
+	// above the return, with the value expression rewritten to
+	// reference the temps.
+	if r.Value != nil && (exprContainsAsCast(r.Value) || g.exprContainsNestedThrowerCall(r.Value)) {
 		rewritten := &parser.ReturnStmt{Line: r.Line, Value: g.hoistPropagates(r.Value)}
 		g.emitReturnStmt(rewritten)
 		return
@@ -927,7 +907,7 @@ func (g *Generator) emitIfStmt(s *parser.IfStmt) {
 	// guaranteed to be a single-value expression suitable for Go's
 	// `if cond { ... }`.
 	cond := s.Cond
-	if exprContainsPropagate(cond) || exprContainsAsCast(cond) || g.exprContainsNestedThrowerCall(cond) {
+	if exprContainsAsCast(cond) || g.exprContainsNestedThrowerCall(cond) {
 		cond = g.hoistArg(cond)
 	} else if call, ok := cond.(*parser.CallExpr); ok && g.callReturnsError(call) && !g.callIsVoidThrower(call) {
 		// Top-level thrower call as the cond — also a single-value
@@ -1468,17 +1448,10 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 		g.emitOrAssignment("_", es.Expr, es.OrHandler)
 		return
 	}
-	// Explicit error propagation: `call()?` as a bare statement.
-	// Strip the wrapper and reuse the existing propagation path.
-	if prop, ok := es.Expr.(*parser.PropagateExpr); ok {
-		stripped := &parser.ExprStmt{Line: es.Line, Expr: prop.Inner}
-		g.emitExprStmt(stripped)
-		return
-	}
-	// Nested `?` (or `as`) inside an expression statement: e.g.
-	// `foo(bar()?)` as a bare statement. Hoist, then emit the rewritten
+	// Nested failable expr in an expression statement: hoist any `as`
+	// cast or nested thrower call to temps, then emit the rewritten
 	// statement.
-	if exprContainsPropagate(es.Expr) || exprContainsAsCast(es.Expr) || g.exprContainsNestedThrowerCall(es.Expr) {
+	if exprContainsAsCast(es.Expr) || g.exprContainsNestedThrowerCall(es.Expr) {
 		rewritten := &parser.ExprStmt{Line: es.Line, Expr: g.hoistPropagates(es.Expr)}
 		g.emitExprStmt(rewritten)
 		return
@@ -1902,15 +1875,14 @@ func (g *Generator) nextErrName() string {
 }
 
 // hoistPropagates walks an expression tree, emits the hoist for every
-// failable construct it contains (PropagateExpr `?`, TypeAssertExpr
-// `as`, and nested thrower-call expressions via hoistArg), and
-// returns a rewritten expression with those constructs replaced by
-// Idents pointing at the hoisted temps. Used by statement emitters
-// so that nested failable usage (e.g. `foo(bar()?) + 1`,
-// `return call()? * 3`, `return f(g(x))` where g throws) lowers to
-// idiomatic Go. LambdaExpr is a separate scope and is not descended
-// into — a failable construct inside a lambda is the lambda's own
-// codegen concern.
+// failable sub-expression it contains (TypeAssertExpr `as` casts and
+// nested thrower-call expressions via hoistArg), and returns a
+// rewritten expression with those constructs replaced by Idents
+// pointing at the hoisted temps. Used by statement emitters so
+// `return f(g(x))` where g throws, `foo(bar() as T) + 1`, and
+// similar shapes lower to idiomatic Go. LambdaExpr is a separate
+// scope and is not descended into — a failable construct inside a
+// lambda is the lambda's own codegen concern.
 //
 // The top-level entry expression itself is NOT hoisted as a
 // thrower-call — that case is handled by the calling statement
@@ -1923,17 +1895,6 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		return nil
 	}
 	switch expr := e.(type) {
-	case *parser.PropagateExpr:
-		inner := g.hoistArg(expr.Inner)
-		tmpName := fmt.Sprintf("_p%d", g.errVarCount)
-		errName := g.nextErrName()
-		g.writeln("%s, %s := %s", tmpName, errName, g.formatExpr(inner))
-		g.writeln("if %s != nil {", errName)
-		g.indent++
-		g.emitErrReturn(errName)
-		g.indent--
-		g.writeln("}")
-		return &parser.Ident{Name: tmpName}
 	case *parser.BinaryExpr:
 		return &parser.BinaryExpr{
 			Op:    expr.Op,
@@ -1983,11 +1944,10 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		if expr.IsCheck {
 			return &parser.TypeAssertExpr{Object: g.hoistArg(expr.Object), TypeName: expr.TypeName, IsCheck: true}
 		}
-		// `as` cast — failable. Emit comma-ok + error guard, replace with
-		// an Ident pointing at the bound value. Mirrors the PropagateExpr
-		// arm above; this is the lowering that makes `as` "return error
-		// instead of panic" — the function widens to (T, error) via the
-		// thrower fixed-point pass and the error propagates up.
+		// `as` cast — failable. Emit comma-ok + error guard, replace
+		// with an Ident pointing at the bound value. The enclosing
+		// function must declare `error` in its return tail to absorb
+		// the propagation emitted by emitErrReturn.
 		inner := g.hoistArg(expr.Object)
 		count := g.errVarCount
 		tmpName := fmt.Sprintf("_p%d", count)
@@ -2025,7 +1985,7 @@ func (g *Generator) condCanReturnError(cond parser.Expr) bool {
 	if cond == nil {
 		return false
 	}
-	if exprContainsPropagate(cond) || exprContainsAsCast(cond) {
+	if exprContainsAsCast(cond) {
 		return true
 	}
 	if g.exprContainsNestedThrowerCall(cond) {
@@ -2112,8 +2072,7 @@ func (g *Generator) emitErrorPropagatingVar(v *parser.VarStmt) {
 // optionally with an `or { }` handler — using Go's comma-ok type
 // assertion. On mismatch, the handler runs (if present) or the error
 // propagates via emitErrReturn. Never panics. The enclosing function
-// auto-widens to (T, error) because exprContainsPropagate returns true
-// for `as`, which the thrower fixed-point pass picks up.
+// must declare `error` in its return tail for propagation to compile.
 func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertExpr) {
 	count := g.errVarCount
 	okName := fmt.Sprintf("_ok%d", count)
@@ -2356,49 +2315,29 @@ func (g *Generator) blockCanReturnError(block *parser.BlockStmt) bool {
 func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 	switch stmt := s.(type) {
 	case *parser.ReturnStmt:
-		if exprContainsPropagate(stmt.Value) {
-			return true
-		}
 		// `return SomeError(...)` where SomeError is Error itself or
-		// any descendant — the compiler widens the function signature
-		// to (T, error).
+		// any descendant — the function's signature should declare
+		// `error` in the tail.
 		if g.exprIsErrorCtor(stmt.Value) {
 			return true
 		}
-		// `return expr as T` — auto-widens because the cast can fail.
 		if exprContainsAsCast(stmt.Value) {
 			return true
 		}
-		// `return thrower()` — direct return of a thrower call. Same
-		// rule as `var x = thrower()`: the enclosing function inherits
-		// the thrower status. Mirrors VarStmt / AssignStmt / ExprStmt
-		// which already check callReturnsError here.
+		// `return thrower()` — direct return of a thrower call.
 		return g.callReturnsError(stmt.Value) || g.exprContainsNestedThrowerCall(stmt.Value)
 	case *parser.VarStmt:
-		if exprContainsPropagate(stmt.Value) {
-			return true
-		}
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
 		}
-		// A non-throwing `or { ... }` handler consumes the call's error —
-		// the enclosing function does NOT inherit thrower status from
-		// this statement. Without this short-circuit a function like
-		//   pub bool foo() {
-		//     var x = thrower() or { return false }
-		//     return true
-		//   }
-		// gets falsely classified as throwing because callReturnsError
-		// reports yes for thrower(); the `or { }` handling is ignored.
-		// The same rule applies to `as` casts — or-handler consumes.
+		// A non-throwing `or { ... }` handler consumes the call's error,
+		// so a thrower call on the RHS doesn't make the surrounding body
+		// fail — same rule for `as` casts.
 		if stmt.OrHandler != nil {
 			return false
 		}
 		return g.callReturnsError(stmt.Value) || exprContainsAsCast(stmt.Value) || g.exprContainsNestedThrowerCall(stmt.Value)
 	case *parser.AssignStmt:
-		if exprContainsPropagate(stmt.Value) || exprContainsPropagate(stmt.Target) {
-			return true
-		}
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
 		}
@@ -2407,9 +2346,6 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 		}
 		return g.callReturnsError(stmt.Value) || exprContainsAsCast(stmt.Value) || g.exprContainsNestedThrowerCall(stmt.Value)
 	case *parser.ExprStmt:
-		if exprContainsPropagate(stmt.Expr) {
-			return true
-		}
 		if g.orHandlerCanReturnError(stmt.OrHandler) {
 			return true
 		}

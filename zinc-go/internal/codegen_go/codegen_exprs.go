@@ -14,14 +14,6 @@ import (
 // formatExpr converts a Zinc AST expression to its Go source representation.
 func (g *Generator) formatExpr(e parser.Expr) string {
 	switch expr := e.(type) {
-	case *parser.PropagateExpr:
-		// Error propagation is hoisted to a statement by the statement
-		// emitters (emitVarStmt / emitReturnStmt / emitAssignStmt / emitExprStmt).
-		// If we reach here, `?` is nested inside a compound expression
-		// where the surrounding statement didn't intercept it — fall
-		// through by unwrapping. A later slice will add true hoisting
-		// for nested positions.
-		return g.formatExpr(expr.Inner)
 	case *parser.Ident:
 		if expr.Name == "this" {
 			return recvName

@@ -617,18 +617,6 @@ type SafeNavExpr struct {
 func (s *SafeNavExpr) nodeTag() {}
 func (s *SafeNavExpr) exprTag() {}
 
-// PropagateExpr: call()? — error propagation. On error, the enclosing
-// function returns (zero, err). The presence of a PropagateExpr in a
-// function body promotes that function's emitted Go signature to
-// (T, error). `?` is only meaningful on calls (direct or method); the
-// parser wraps whatever expression precedes the `?`.
-type PropagateExpr struct {
-	Inner Expr
-}
-
-func (p *PropagateExpr) nodeTag() {}
-func (p *PropagateExpr) exprTag() {}
-
 // IndexExpr: obj[index]
 type IndexExpr struct {
 	Object Expr
