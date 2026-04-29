@@ -1,0 +1,35 @@
+// Regression: zinc-go used to hardcode `s` as the Go receiver name for
+// method bodies, so any method param, local, or lambda param named `s`
+// would collide ("redeclared in this block"). The receiver is now
+// emitted as `this` — collision-free with user identifiers because
+// Zinc's `this` is a keyword, never lexed as an identifier.
+
+class Holder {
+    pub int n
+    init(int n) { this.n = n }
+
+    // Method param named `s` — used to collide with the receiver.
+    pub int withS(String s) {
+        return s.length() + this.n
+    }
+
+    // Lambda param named `s` inside a method body — same shape, used
+    // to collide with the receiver via the inner lambda's `s`.
+    pub int withSLambda(String input) {
+        Fn<(String), int> f = (String s) -> s.length() + this.n
+        return f(input)
+    }
+
+    // Local var named `s` — also used to shadow the receiver.
+    pub int withSLocal() {
+        var s = this.n + 100
+        return s
+    }
+}
+
+void main() {
+    var h = Holder(7)
+    print("withS: ${h.withS("abc")}")
+    print("withSLambda: ${h.withSLambda("hello")}")
+    print("withSLocal: ${h.withSLocal()}")
+}

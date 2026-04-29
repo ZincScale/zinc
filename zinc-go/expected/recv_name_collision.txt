@@ -1,0 +1,3 @@
+withS: 10
+withSLambda: 12
+withSLocal: 107

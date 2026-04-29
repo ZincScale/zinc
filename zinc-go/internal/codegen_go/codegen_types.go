@@ -231,9 +231,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 	// errors.As — the types are distinct.
 	if parent := g.exceptionParent(cls); parent != "" {
 		tpArgs := goTypeArgs(cls.TypeParams)
-		g.writeln("func (s *%s%s) Unwrap() error {", name, tpArgs)
+		g.writeln("func (%s *%s%s) Unwrap() error {", recvName, name, tpArgs)
 		g.indent++
-		g.writeln("return &s.%s", parent)
+		g.writeln("return &%s.%s", recvName, parent)
 		g.indent--
 		g.writeln("}")
 		g.writeln("")
@@ -296,7 +296,7 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	// Register field type expressions for type-aware codegen (e.g. map.keys())
 	for _, f := range cls.Fields {
-		fieldExpr := "s." + goName(f.Name, f.IsPub || !g.isSubpackage())
+		fieldExpr := recvName + "." + goName(f.Name, f.IsPub || !g.isSubpackage())
 		if f.Type != nil {
 			if genType, ok := f.Type.(*parser.GenericType); ok {
 				g.varTypeExprs[fieldExpr] = genType
@@ -581,18 +581,18 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 				}
 			}
 		} else {
-			g.writeln("s := &%s{%s}", typeNameTA, strings.Join(litFields, ", "))
+			g.writeln("%s := &%s{%s}", recvName, typeNameTA, strings.Join(litFields, ", "))
 			for _, stmt := range remainingStmts {
 				g.emitStmt(stmt)
 			}
-			retVal("s")
+			retVal(recvName)
 		}
 	} else if len(remainingStmts) > 0 {
-		g.writeln("s := &%s{}", typeNameTA)
+		g.writeln("%s := &%s{}", recvName, typeNameTA)
 		for _, stmt := range remainingStmts {
 			g.emitStmt(stmt)
 		}
-		retVal("s")
+		retVal(recvName)
 	} else {
 		retVal(fmt.Sprintf("&%s{}", typeNameTA))
 	}
@@ -631,7 +631,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	} else if dc, ok := g.dataClassDecls[receiver]; ok {
 		// Data classes have params (which become exported fields) and methods.
 		// Mirror the regular-class setup so bare `a` in a method body resolves
-		// to `s.A` via the implicit-self path.
+		// to `this.A` via the implicit-self path.
 		g.currentFields = make(map[string]bool)
 		g.currentFieldGoName = make(map[string]string)
 		g.currentMethods = make(map[string]bool)
@@ -762,7 +762,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		if g.dataClasses[receiver] {
 			recvPrefix = ""
 		}
-		g.writeln("func (s %s%s) %s(%s)%s {", recvPrefix, receiverTA, vis, params, ret)
+		g.writeln("func (%s %s%s) %s(%s)%s {", recvName, recvPrefix, receiverTA, vis, params, ret)
 	}
 	g.indent++
 	g.emitBlock(m.Body)
@@ -938,9 +938,9 @@ func (g *Generator) emitDataClassDecl(d *parser.DataClassDecl) {
 	var fmtArgs []string
 	for _, f := range d.Params {
 		fmtParts = append(fmtParts, f.Name+"=%v")
-		fmtArgs = append(fmtArgs, "s."+exportName(f.Name))
+		fmtArgs = append(fmtArgs, recvName+"."+exportName(f.Name))
 	}
-	g.writeln("func (s %s) String() string {", nameTA)
+	g.writeln("func (%s %s) String() string {", recvName, nameTA)
 	g.indent++
 	g.writeln("return fmt.Sprintf(\"%s(%s)\", %s)", d.Name, strings.Join(fmtParts, ", "), strings.Join(fmtArgs, ", "))
 	g.indent--

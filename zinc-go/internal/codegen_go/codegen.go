@@ -17,6 +17,14 @@ import (
 	"zinc-go/internal/parser"
 )
 
+// recvName is the Go identifier used for method/ctor receivers and as
+// the lowering of `this` in expression position. `this` is a reserved
+// Zinc keyword (TOKEN_THIS, never lexed as TOKEN_IDENT), so user code
+// cannot name a variable, parameter, or field that collides with it —
+// which makes it a safe, collision-free receiver name. Reading the
+// generated Go, `this.Field` also tracks the Zinc source one-for-one.
+const recvName = "this"
+
 // Generator produces Go source from a Zinc AST.
 type Generator struct {
 	buf            strings.Builder

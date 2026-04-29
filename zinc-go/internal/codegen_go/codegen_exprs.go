@@ -24,19 +24,20 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return g.formatExpr(expr.Inner)
 	case *parser.Ident:
 		if expr.Name == "this" {
-			return "s"
+			return recvName
 		}
 		if expr.Name == "err" && g.currentErrVar != "" {
 			return g.currentErrVar
 		}
-		// Implicit self: bare field name → s.Field in method/ctor context.
-		// Skip when the name is shadowed by a method param OR a local var
-		// declared earlier in the body — Zinc follows Go's lexical scoping.
+		// Implicit self: bare field name → this.Field in method/ctor
+		// context. Skip when the name is shadowed by a method param OR
+		// a local var declared earlier in the body — Zinc follows Go's
+		// lexical scoping.
 		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] && !g.currentLocals[expr.Name] {
 			if goField, ok := g.currentFieldGoName[expr.Name]; ok {
-				return "s." + goField
+				return recvName + "." + goField
 			}
-			return "s." + exportName(expr.Name)
+			return recvName + "." + exportName(expr.Name)
 		}
 		if g.renamedVars != nil {
 			if renamed, ok := g.renamedVars[expr.Name]; ok {
@@ -123,19 +124,19 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		// `this.field` on the current class: honor the field's declared
 		// visibility (`pub` → exported, private → lowercase inside the
 		// same subpackage). Without this, `this.privateField = x` emitted
-		// `s.PrivateField = x` even though the struct was declared with
-		// the lowercase form. Top-level `this.field = value` in the ctor
-		// body already respected this via currentFieldGoName; the
+		// `this.PrivateField = x` even though the struct was declared
+		// with the lowercase form. Top-level `this.field = value` in the
+		// ctor body already respected this via currentFieldGoName; the
 		// sub-statement path (inside `if`, `for`, nested blocks) fell
 		// back to exportName and lost the declared casing.
 		if _, isThis := expr.Object.(*parser.ThisExpr); isThis {
 			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
-				return fmt.Sprintf("s.%s", gn)
+				return fmt.Sprintf("%s.%s", recvName, gn)
 			}
 		}
 		if ident, isIdent := expr.Object.(*parser.Ident); isIdent && ident.Name == "this" {
 			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
-				return fmt.Sprintf("s.%s", gn)
+				return fmt.Sprintf("%s.%s", recvName, gn)
 			}
 		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))
@@ -187,7 +188,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.LambdaExpr:
 		return g.formatLambdaExpr(expr)
 	case *parser.ThisExpr:
-		return "s"
+		return recvName
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
 	case *parser.OkExpr:
@@ -462,6 +463,12 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 		retType := "interface{}"
 		if l.ReturnType != nil {
 			retType = g.formatType(l.ReturnType)
+		} else if target != nil && target.ReturnType != nil {
+			// Non-Result target: drive the lambda's return type from the
+			// declared Fn slot. Beats inferLambdaReturnType, which falls
+			// back to interface{} on anything it can't statically resolve
+			// (e.g. method calls, field accesses).
+			retType = g.formatType(target.ReturnType)
 		} else if allTyped && firstParamType != "" {
 			retType = g.inferLambdaReturnType(l.Expr, l.Params)
 		}
@@ -502,6 +509,12 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 		// ReturnStmt branch (with currentFuncIsThrower set above) lowers
 		// `return Ok(...)` / `return Err(...)` into the tuple form.
 		if isResultLambda {
+			retType := g.formatType(target.ReturnType)
+			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
+		}
+		// Non-Result target: drive the block lambda's return type from
+		// the declared Fn slot. Same rationale as the Expr-form path.
+		if target != nil && target.ReturnType != nil {
 			retType := g.formatType(target.ReturnType)
 			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
 		}

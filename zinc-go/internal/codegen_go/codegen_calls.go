@@ -354,15 +354,15 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			if g.isSubpackage() && g.currentClass != "" {
 				methodGoName = goName(ident.Name, g.isPubMember(g.currentClass, ident.Name))
 			}
-			callee = "s." + methodGoName
+			callee = recvName + "." + methodGoName
 		}
 		if strings.HasPrefix(ident.Name, "get") && len(ident.Name) > 3 {
 			fieldName := strings.ToLower(ident.Name[3:4]) + ident.Name[4:]
 			if g.currentFields != nil && g.currentFields[fieldName] {
 				if goField, ok := g.currentFieldGoName[fieldName]; ok {
-					return "s." + goField
+					return recvName + "." + goField
 				}
-				return "s." + exportName(fieldName)
+				return recvName + "." + exportName(fieldName)
 			}
 		}
 	}
