@@ -991,6 +991,51 @@ func (g *Generator) goReturnTypeStr(retType parser.TypeExpr) string {
 	return g.formatType(retType)
 }
 
+// returnTypeDeclaresError reports whether a function's declared return
+// type makes it a thrower under the explicit-`error` design: either a
+// bare `error` (void thrower) or a TupleType whose last element is
+// `error`. This is the only thrower test going forward — no more
+// body-walking, no more cross-package fixed-point. Pure syntax.
+func returnTypeDeclaresError(retType parser.TypeExpr) bool {
+	if retType == nil {
+		return false
+	}
+	if isZincErrorType(retType) {
+		return true
+	}
+	if tup, ok := retType.(*parser.TupleType); ok && len(tup.Elements) > 0 {
+		return isZincErrorType(tup.Elements[len(tup.Elements)-1])
+	}
+	return false
+}
+
+// isZincErrorType reports whether `t` is the bare `error` type.
+func isZincErrorType(t parser.TypeExpr) bool {
+	if t == nil {
+		return false
+	}
+	st, ok := t.(*parser.SimpleType)
+	return ok && st.Name == "error"
+}
+
+// throwerValueTypes returns the value-portion types of a declared-
+// thrower return type, with the trailing `error` peeled off:
+//   - bare `error`            → nil  (void thrower)
+//   - `(T, error)`            → [T]  (single-value thrower)
+//   - `(T1, T2, error)`       → [T1, T2] (multi-value thrower)
+// For non-thrower return types, returns nil. Callers should check
+// returnTypeDeclaresError first.
+func throwerValueTypes(retType parser.TypeExpr) []parser.TypeExpr {
+	if !returnTypeDeclaresError(retType) {
+		return nil
+	}
+	if isZincErrorType(retType) {
+		return nil
+	}
+	tup := retType.(*parser.TupleType)
+	return tup.Elements[:len(tup.Elements)-1]
+}
+
 // formatReturnType builds the Go return type string (with leading space).
 func (g *Generator) formatReturnType(retType parser.TypeExpr, body *parser.BlockStmt) string {
 	if retType == nil {

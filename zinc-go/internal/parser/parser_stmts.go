@@ -121,7 +121,10 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 		p.expect(lexer.TOKEN_RPAREN)
 		p.expect(lexer.TOKEN_ASSIGN)
 		val := p.v2ParseExpr()
-		return &TupleVarStmt{Line: line, Names: names, Value: val}
+		// Optional `or { }` handler — destructuring a multi-value
+		// thrower call needs to consume the trailing `error` slot.
+		handler := p.v2ParseErrHandler()
+		return &TupleVarStmt{Line: line, Names: names, Value: val, OrHandler: handler}
 	}
 
 	if p.v2IsTypeAnnotation() {
@@ -152,7 +155,8 @@ func (p *Parser) v2ParseVarOrConstStmt() Stmt {
 			}
 			p.expect(lexer.TOKEN_ASSIGN)
 			val := p.v2ParseExpr()
-			return &TupleVarStmt{Line: line, Names: names, Value: val}
+			handler := p.v2ParseErrHandler()
+			return &TupleVarStmt{Line: line, Names: names, Value: val, OrHandler: handler}
 		}
 	}
 

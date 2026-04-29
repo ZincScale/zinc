@@ -1,0 +1,34 @@
+// Lambda literals with explicit `error` in the target Fn slot.
+// Mirrors error_explicit.zn's named-fn cases for inline lambdas.
+// The target's TupleType return drives the lambda body's emit:
+// `return v, e` lowers to a multi-value return; `return SomeError(...)`
+// zero-fills the value slots.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class LookupError : BaseError {
+    init(String msg) { super(msg) }
+}
+
+void main() {
+    // Single-value thrower lambda, expr-form body.
+    Fn<(Int), (Int, error)> dbl = (Int x) -> (x * 2, null)
+    var (v1, e1) = dbl(21)
+    print("expr-form: ${v1} (err: ${e1})")
+
+    // Single-value thrower lambda, block-form body that branches.
+    Fn<(Int), (Int, error)> safeDiv = (Int n) -> {
+        if (n == 0) {
+            return LookupError("zero")
+        }
+        return 100 / n, null
+    }
+    var (v2, e2) = safeDiv(4)
+    print("block-form ok: ${v2} (err: ${e2})")
+    var (v3, e3) = safeDiv(0)
+    print("block-form err: ${v3}/${e3}")
+}

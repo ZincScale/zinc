@@ -391,6 +391,38 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 	target := g.pendingLambdaTarget
 	g.pendingLambdaTarget = nil
 
+	// Set up tuple-return / thrower context for the body emit when the
+	// target Fn slot's return type is a TupleType (with or without an
+	// `error` tail). formatStmtInline reads these flags to lower
+	// `return v1, v2[, err]` and `return SomeError(...)` correctly.
+	if target != nil && target.ReturnType != nil {
+		if tup, ok := target.ReturnType.(*parser.TupleType); ok {
+			prevIsTuple := g.currentReturnIsTuple
+			prevDeclThrower := g.currentReturnIsDeclaredThrower
+			prevValueGoTypes := g.currentThrowerValueGoTypes
+			prevIsThrower := g.currentFuncIsThrower
+			g.currentReturnIsTuple = true
+			declared := returnTypeDeclaresError(tup)
+			g.currentReturnIsDeclaredThrower = declared
+			if declared {
+				g.currentFuncIsThrower = true
+				var vts []string
+				for _, t := range throwerValueTypes(tup) {
+					vts = append(vts, g.formatType(t))
+				}
+				g.currentThrowerValueGoTypes = vts
+			} else {
+				g.currentThrowerValueGoTypes = nil
+			}
+			defer func() {
+				g.currentReturnIsTuple = prevIsTuple
+				g.currentReturnIsDeclaredThrower = prevDeclThrower
+				g.currentThrowerValueGoTypes = prevValueGoTypes
+				g.currentFuncIsThrower = prevIsThrower
+			}()
+		}
+	}
+
 	var params []string
 	var firstParamType string
 	allTyped := true
@@ -423,6 +455,30 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 		}
 		if g.isVoidExpr(l.Expr) {
 			return fmt.Sprintf("func(%s) { %s }", paramStr, g.formatExpr(l.Expr))
+		}
+		// Tuple-returning expr-form lambda: `(args) -> (v1, v2)` lowers
+		// the body's TupleLit into a multi-value return rather than the
+		// default slice form. Same rationale as the ReturnStmt branch in
+		// formatStmtInline; expr-form lambdas don't go through that path
+		// so the rewrite has to live here.
+		if g.currentReturnIsTuple {
+			if tup, ok := l.Expr.(*parser.TupleLit); ok {
+				var parts []string
+				for _, el := range tup.Elements {
+					parts = append(parts, g.formatExpr(el))
+				}
+				return fmt.Sprintf("func(%s) %s { return %s }", paramStr, retType, strings.Join(parts, ", "))
+			}
+		}
+		// Declared-thrower expr-form lambda returning an error ctor:
+		// `(args) -> SomeError(...)` zero-fills value slots.
+		if g.currentReturnIsDeclaredThrower && g.exprIsErrorCtor(l.Expr) {
+			parts := make([]string, 0, len(g.currentThrowerValueGoTypes)+1)
+			for _, vt := range g.currentThrowerValueGoTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			parts = append(parts, g.formatExpr(l.Expr))
+			return fmt.Sprintf("func(%s) %s { return %s }", paramStr, retType, strings.Join(parts, ", "))
 		}
 		return fmt.Sprintf("func(%s) %s { return %s }", paramStr, retType, g.formatExpr(l.Expr))
 	}
@@ -690,9 +746,56 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 		return g.formatExpr(stmt.Expr)
 	case *parser.ReturnStmt:
 		if stmt.Value != nil {
+			// Inside a tuple-returning lambda body (the body's outer
+			// emit-context flagged currentReturnIsTuple), `return v1, v2`
+			// (a TupleLit) lowers to Go's multi-value form rather than the
+			// default TupleLit-as-slice. Mirrors emitReturnStmt's logic;
+			// the lambda's surrounding emit (formatLambdaExpr) is
+			// responsible for setting up the context flags.
+			if g.currentReturnIsTuple {
+				if tup, ok := stmt.Value.(*parser.TupleLit); ok {
+					var parts []string
+					for _, el := range tup.Elements {
+						parts = append(parts, g.formatExpr(el))
+					}
+					return "return " + strings.Join(parts, ", ")
+				}
+			}
+			// Declared-thrower lambda body: a single `return SomeError(...)`
+			// auto-fills value-slot zeros; `return null` from a bare-error
+			// lambda emits as-is. Keeps the ergonomics of named-fn throwers
+			// for inline lambdas too.
+			if g.currentReturnIsDeclaredThrower {
+				if g.exprIsErrorCtor(stmt.Value) {
+					parts := make([]string, 0, len(g.currentThrowerValueGoTypes)+1)
+					for _, vt := range g.currentThrowerValueGoTypes {
+						parts = append(parts, g.zeroValueFor(vt))
+					}
+					parts = append(parts, g.formatExpr(stmt.Value))
+					return "return " + strings.Join(parts, ", ")
+				}
+			}
 			return "return " + g.formatExpr(stmt.Value)
 		}
 		return "return"
+	case *parser.BlockStmt:
+		var inner []string
+		for _, s := range stmt.Stmts {
+			inner = append(inner, g.formatStmtInline(s))
+		}
+		return "{ " + strings.Join(inner, "; ") + " }"
+	case *parser.IfStmt:
+		var thenInner []string
+		if stmt.Then != nil {
+			for _, s := range stmt.Then.Stmts {
+				thenInner = append(thenInner, g.formatStmtInline(s))
+			}
+		}
+		out := fmt.Sprintf("if %s { %s }", g.formatExpr(stmt.Cond), strings.Join(thenInner, "; "))
+		if stmt.ElseStmt != nil {
+			out += " else " + g.formatStmtInline(stmt.ElseStmt)
+		}
+		return out
 	default:
 		return "/* inline stmt */"
 	}

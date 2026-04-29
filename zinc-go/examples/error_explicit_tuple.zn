@@ -1,0 +1,28 @@
+// Multi-value thrower destructured at the call site via `or { }`.
+// Companion to error_explicit.zn — separated to keep the two cases
+// easy to triage if either path regresses.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class LookupError : BaseError {
+    init(String msg) { super(msg) }
+}
+
+pub (Int, String, error) lookup(String key) {
+    if (key == "") {
+        return LookupError("missing key")
+    }
+    return 7, "found", null
+}
+
+void main() {
+    var (n, msg) = lookup("foo") or { print("err: ${err}"); return }
+    print("got: ${n}/${msg}")
+
+    var (n2, msg2) = lookup("") or { print("err: ${err}"); return }
+    print("should not reach: ${n2}/${msg2}")
+}

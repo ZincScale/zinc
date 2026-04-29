@@ -72,6 +72,22 @@ type Generator struct {
 	// slice lowering used for tuple values in expression position.
 	currentReturnIsTuple bool
 
+	// currentThrowerValueGoTypes holds the Go-formatted types of the
+	// value slots of the current thrower's return signature, with the
+	// trailing `error` slot peeled off. nil/empty for non-throwers and
+	// for bare-error void throwers. Used by emitReturnStmt to render
+	// per-slot zero values when emitting `return zero1, ..., zeroN, err`
+	// for an error-only return (`return SomeError(...)`) from a
+	// multi-value-thrower signature.
+	currentThrowerValueGoTypes []string
+
+	// currentReturnIsDeclaredThrower distinguishes declared-thrower
+	// functions (signature explicitly contains `error` in the tail —
+	// new design) from legacy auto-widen throwers detected by body
+	// inspection. Drives emitReturnStmt's per-slot zero-fill path
+	// instead of the single-slot currentReturnType-based fallback.
+	currentReturnIsDeclaredThrower bool
+
 	// pendingLambdaTarget carries the declared Fn<...> target type from
 	// the immediate emit site (currently VarStmt LHS) into
 	// formatLambdaExpr, so the lambda's Go return type is driven from
@@ -405,7 +421,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			for _, m := range decl.Methods {
 				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
 				key := decl.Name + "." + m.Name
-				if g.blockCanReturnError(m.Body) {
+				// Explicit `error` in declared return type — definitive
+				// thrower marker. Takes precedence over body-walking.
+				if returnTypeDeclaresError(m.ReturnType) {
+					g.errorFuncs[key] = true
+				} else if g.blockCanReturnError(m.Body) {
 					g.errorFuncs[key] = true
 				}
 			}
@@ -419,7 +439,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			if g.blockCanReturnError(decl.Body) {
+			// Explicit `error` in declared return type — definitive
+			// thrower marker. Takes precedence over body-walking.
+			if returnTypeDeclaresError(decl.ReturnType) {
+				g.errorFuncs[decl.Name] = true
+			} else if g.blockCanReturnError(decl.Body) {
 				g.errorFuncs[decl.Name] = true
 			}
 			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {

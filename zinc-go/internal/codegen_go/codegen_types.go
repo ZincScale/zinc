@@ -30,13 +30,25 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	// decl.Name). Top-level fns in subpackages get exported via
 	// exportIfSubpackage, so look up by fn.Name not by the exported name.
 	canError := g.errorFuncs[fn.Name]
+	declaredThrower := returnTypeDeclaresError(fn.ReturnType)
 	goRetType := g.goReturnTypeStr(fn.ReturnType)
 	var ret string
-	if canError {
+	var valueGoTypes []string // value-slot Go types (sans trailing `error`)
+	if declaredThrower {
+		// User wrote `error` (bare) or `(..., error)` in the signature.
+		// formatType already produces the right Go shape — no wrapping.
+		ret = g.formatReturnType(fn.ReturnType, fn.Body)
+		for _, t := range throwerValueTypes(fn.ReturnType) {
+			valueGoTypes = append(valueGoTypes, g.formatType(t))
+		}
+	} else if canError {
+		// Legacy auto-widen path: thrower-detected from body, signature
+		// declared a non-error type. Wrap as `(T, error)`.
 		if goRetType == "" {
 			ret = " error"
 		} else {
 			ret = fmt.Sprintf(" (%s, error)", goRetType)
+			valueGoTypes = []string{goRetType}
 		}
 	} else {
 		ret = g.formatReturnType(fn.ReturnType, fn.Body)
@@ -49,9 +61,21 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	prevErrCount := g.errVarCount
 	prevIsThrower := g.currentFuncIsThrower
 	prevIsTuple := g.currentReturnIsTuple
-	g.currentFuncIsThrower = canError
+	prevValueGoTypes := g.currentThrowerValueGoTypes
+	prevDeclaredThrower := g.currentReturnIsDeclaredThrower
+	// Thrower iff syntactically declared OR detected by body-walk.
+	// Body-walk path (canError) is the legacy widening path; declared-
+	// thrower (declaredThrower) is the new explicit-`error` form.
+	g.currentFuncIsThrower = canError || declaredThrower
+	g.currentReturnIsDeclaredThrower = declaredThrower
 	g.currentOuterReturnType = goRetType
-	if canError {
+	g.currentThrowerValueGoTypes = valueGoTypes
+	if declaredThrower {
+		// Declared throwers manage zero-value rendering per slot via
+		// currentThrowerValueGoTypes — leave currentReturnType empty
+		// so the legacy single-slot zero path doesn't fire.
+		g.currentReturnType = ""
+	} else if canError {
 		g.currentReturnType = goRetType
 	}
 	_, isOptional := fn.ReturnType.(*parser.OptionalType)
@@ -106,7 +130,15 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	// where each branch returns but the compiler can't see it. Tail
 	// shape depends on thrower + return-type combination.
 	if !blockEndsInReturn(fn.Body) {
-		if canError {
+		if declaredThrower {
+			// Per-slot zeros for value slots, then nil for the error.
+			parts := make([]string, 0, len(valueGoTypes)+1)
+			for _, vt := range valueGoTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			parts = append(parts, "nil")
+			g.writeln("return %s", strings.Join(parts, ", "))
+		} else if canError {
 			if goRetType == "" {
 				g.writeln("return nil")
 			} else {
@@ -131,6 +163,8 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.errVarCount = prevErrCount
 	g.currentFuncIsThrower = prevIsThrower
 	g.currentReturnIsTuple = prevIsTuple
+	g.currentThrowerValueGoTypes = prevValueGoTypes
+	g.currentReturnIsDeclaredThrower = prevDeclaredThrower
 	if len(fn.TypeParams) > 0 {
 		g.activeTypeParams = nil
 	}
@@ -673,6 +707,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 
 	methodKey := receiver + "." + m.Name
 	canError := g.errorFuncs[methodKey]
+	declaredThrower := returnTypeDeclaresError(m.ReturnType)
 	goRetType := g.goReturnTypeStr(m.ReturnType)
 
 	// If the return type is a known class (not data class), return *Type
@@ -684,11 +719,18 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 
 	var ret string
-	if canError {
+	var valueGoTypes []string
+	if declaredThrower {
+		ret = g.formatReturnType(m.ReturnType, m.Body)
+		for _, t := range throwerValueTypes(m.ReturnType) {
+			valueGoTypes = append(valueGoTypes, g.formatType(t))
+		}
+	} else if canError {
 		if goRetType == "" {
 			ret = " error"
 		} else {
 			ret = fmt.Sprintf(" (%s, error)", goRetType)
+			valueGoTypes = []string{goRetType}
 		}
 	} else if simpleType, ok := m.ReturnType.(*parser.SimpleType); ok {
 		if _, isStruct := g.structs[simpleType.Name]; isStruct {
@@ -705,9 +747,15 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	prevMethodRetType := g.currentMethodRetType
 	prevIsThrower := g.currentFuncIsThrower
 	prevIsTuple := g.currentReturnIsTuple
-	g.currentFuncIsThrower = canError
+	prevValueGoTypes := g.currentThrowerValueGoTypes
+	prevDeclaredThrower := g.currentReturnIsDeclaredThrower
+	g.currentFuncIsThrower = canError || declaredThrower
+	g.currentReturnIsDeclaredThrower = declaredThrower
 	g.currentOuterReturnType = goRetType
-	if canError {
+	g.currentThrowerValueGoTypes = valueGoTypes
+	if declaredThrower {
+		g.currentReturnType = ""
+	} else if canError {
 		g.currentReturnType = goRetType
 	}
 	_, isTuple := m.ReturnType.(*parser.TupleType)
@@ -743,7 +791,14 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.indent++
 	g.emitBlock(m.Body)
 	if !blockEndsInReturn(m.Body) {
-		if canError {
+		if declaredThrower {
+			parts := make([]string, 0, len(valueGoTypes)+1)
+			for _, vt := range valueGoTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			parts = append(parts, "nil")
+			g.writeln("return %s", strings.Join(parts, ", "))
+		} else if canError {
 			if goRetType == "" {
 				g.writeln("return nil")
 			} else {
@@ -762,6 +817,8 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.currentMethodRetType = prevMethodRetType
 	g.currentFuncIsThrower = prevIsThrower
 	g.currentReturnIsTuple = prevIsTuple
+	g.currentThrowerValueGoTypes = prevValueGoTypes
+	g.currentReturnIsDeclaredThrower = prevDeclaredThrower
 }
 
 // collectParentFields walks the inheritance chain and adds parent fields to the map.

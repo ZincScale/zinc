@@ -785,6 +785,42 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		return
 	}
 
+	// Declared-thrower handling (signature explicitly contains `error` in
+	// the tail). Distinct from the legacy auto-widen path which uses
+	// currentReturnType for a single value-slot Go type — declared
+	// throwers carry per-slot Go types in currentThrowerValueGoTypes so
+	// multi-value forms can render zero values correctly.
+	if g.currentReturnIsDeclaredThrower {
+		valueTypes := g.currentThrowerValueGoTypes
+		// `return SomeError(...)` — single error-class value. Fill value
+		// slots with zero, then the error.
+		if g.exprIsErrorCtor(r.Value) {
+			parts := make([]string, 0, len(valueTypes)+1)
+			for _, vt := range valueTypes {
+				parts = append(parts, g.zeroValueFor(vt))
+			}
+			parts = append(parts, g.formatExpr(r.Value))
+			g.writeln("return %s", strings.Join(parts, ", "))
+			return
+		}
+		// `return thrower()` — the call already returns the matching
+		// (..., error) tuple; pass through.
+		if g.callReturnsError(r.Value) {
+			g.writeln("return %s", g.formatExpr(r.Value))
+			return
+		}
+		// Bare-error thrower returning a single value (typically `null`):
+		// emit it as the error slot directly.
+		if len(valueTypes) == 0 {
+			g.writeln("return %s", g.formatExpr(r.Value))
+			return
+		}
+		// TupleLit with all slots — fall through to the existing
+		// currentReturnIsTuple branch, which emits comma-separated.
+		// Anything else (single non-error value into a multi-value
+		// thrower) is malformed — let Go surface the type error.
+	}
+
 	// Multi-value return: function declared with TupleType return type
 	// (e.g. `pub (Int, String) foo()`) and the value is a TupleLit (built
 	// by the parser from `return a, b` or explicit `(a, b)`). Lower to
@@ -2610,6 +2646,37 @@ func blockContainsReturn(block *parser.BlockStmt) bool {
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
+	if t.OrHandler != nil {
+		// Multi-value thrower destructure with `or { }`: the call returns
+		// (v1, ..., vN, error); destructure into the user's N names plus
+		// an _err slot, then run the handler if non-nil.
+		errVar := "_err"
+		if g.errVarCount > 0 {
+			errVar = fmt.Sprintf("_err%d", g.errVarCount)
+		}
+		g.errVarCount++
+		savedErrVar := g.currentErrVar
+		g.currentErrVar = errVar
+
+		callExpr := g.formatExpr(t.Value)
+		names := append([]string{}, t.Names...)
+		names = append(names, errVar)
+		g.writeln("%s := %s", strings.Join(names, ", "), callExpr)
+		g.writeln("if %s != nil {", errVar)
+		g.indent++
+		if len(t.OrHandler.MatchCases) > 0 {
+			g.emitOrMatch(errVar, t.OrHandler)
+		} else if t.OrHandler.Body != nil {
+			g.emitOrBlock(t.OrHandler.Body)
+		}
+		g.indent--
+		g.writeln("}")
+		g.currentErrVar = savedErrVar
+		for _, n := range t.Names {
+			g.declareLocal(n)
+		}
+		return
+	}
 	names := strings.Join(t.Names, ", ")
 	g.writeln("%s := %s", names, g.formatExpr(t.Value))
 	for _, n := range t.Names {
