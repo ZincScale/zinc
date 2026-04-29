@@ -653,26 +653,6 @@ type SuperCallExpr struct {
 func (s *SuperCallExpr) nodeTag() {}
 func (s *SuperCallExpr) exprTag() {}
 
-// OkExpr: Ok(value) — Result<T, E> success constructor.
-// Only valid in a return statement of a Result-returning function.
-// Lowers to `return value, nil` in the generated Go.
-type OkExpr struct {
-	Value Expr
-}
-
-func (*OkExpr) nodeTag() {}
-func (*OkExpr) exprTag() {}
-
-// ErrExpr: Err(value) — Result<T, E> error constructor.
-// Only valid in a return statement of a Result-returning function.
-// Lowers to `return zero, value` in the generated Go.
-type ErrExpr struct {
-	Value Expr
-}
-
-func (*ErrExpr) nodeTag() {}
-func (*ErrExpr) exprTag() {}
-
 // Ident: a bare identifier
 type Ident struct {
 	Name string

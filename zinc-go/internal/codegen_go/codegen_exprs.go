@@ -191,16 +191,6 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return recvName
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
-	case *parser.OkExpr:
-		// Ok/Err are only meaningful in a return statement of a
-		// Result-returning function. Reaching this expression-position
-		// emit means the user wrote `Ok(...)` outside that context —
-		// flag it. (emitReturnStmt special-cases the valid use.)
-		g.compileError(0, "Ok(...) can only appear in a return statement; got it as an expression value")
-		return fmt.Sprintf("/* misplaced Ok(%s) */", g.formatExpr(expr.Value))
-	case *parser.ErrExpr:
-		g.compileError(0, "Err(...) can only appear in a return statement; got it as an expression value")
-		return fmt.Sprintf("/* misplaced Err(%s) */", g.formatExpr(expr.Value))
 	case *parser.TypeAssertExpr:
 		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		if expr.IsCheck {
@@ -395,35 +385,6 @@ var stringMethodMapping = map[string]string{
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
-	// Consume the pending Fn<...> target hint set by the immediate emit
-	// site (e.g. `Fn<(A), Result<T, E>> f = (...) -> ...`). Clear it on
-	// entry so nested lambdas inside the body don't accidentally inherit
-	// the outer hint.
-	target := g.pendingLambdaTarget
-	g.pendingLambdaTarget = nil
-
-	// Result<T, E> on the target return flips the lambda into thrower
-	// mode for body emit: `return Ok(...)` / `return Err(...)` lower to
-	// the (T, error) tuple shape, matching the named-thrower path.
-	var throwerT parser.TypeExpr
-	isResultLambda := false
-	if target != nil && target.ReturnType != nil {
-		if t, _, ok := g.resultTypeArgs(target.ReturnType); ok {
-			throwerT = t
-			isResultLambda = true
-		}
-	}
-	if isResultLambda {
-		savedThrower := g.currentFuncIsThrower
-		savedRetType := g.currentReturnType
-		g.currentFuncIsThrower = true
-		g.currentReturnType = g.formatType(throwerT)
-		defer func() {
-			g.currentFuncIsThrower = savedThrower
-			g.currentReturnType = savedRetType
-		}()
-	}
-
 	var params []string
 	var firstParamType string
 	allTyped := true
@@ -442,24 +403,6 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 	paramStr := strings.Join(params, ", ")
 
 	if l.Expr != nil {
-		// Result-returning lambda whose single-expression body is `Ok(v)`
-		// / `Err(e)` lowers directly to the (value, nil) / (zero, err)
-		// tuple — bypasses the misplaced-Ok diagnostic in formatExpr,
-		// which only recognizes Ok/Err as part of a return statement.
-		if isResultLambda {
-			retType := g.formatType(target.ReturnType) // emits "(T, error)"
-			if okExpr, ok := l.Expr.(*parser.OkExpr); ok {
-				return fmt.Sprintf("func(%s) %s { return %s, nil }", paramStr, retType, g.formatExpr(okExpr.Value))
-			}
-			if errExpr, ok := l.Expr.(*parser.ErrExpr); ok {
-				zv := g.zeroValueFor(g.currentReturnType)
-				return fmt.Sprintf("func(%s) %s { return %s, %s }", paramStr, retType, zv, g.formatExpr(errExpr.Value))
-			}
-			// Fall through: a non-Ok/Err expression in a Result-returning
-			// lambda is a user error (Ok must be explicit per the design),
-			// but let the Go compiler surface it rather than forcing a
-			// special case here.
-		}
 		retType := "interface{}"
 		if l.ReturnType != nil {
 			retType = g.formatType(l.ReturnType)
@@ -504,20 +447,6 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 			stmts = append(stmts, g.formatStmtInline(s))
 		}
 
-		// Result-returning lambda: emit signature with the (T, error)
-		// tuple from the target's ReturnType. formatStmtInline's
-		// ReturnStmt branch (with currentFuncIsThrower set above) lowers
-		// `return Ok(...)` / `return Err(...)` into the tuple form.
-		if isResultLambda {
-			retType := g.formatType(target.ReturnType)
-			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
-		}
-		// Non-Result target: drive the block lambda's return type from
-		// the declared Fn slot. Same rationale as the Expr-form path.
-		if target != nil && target.ReturnType != nil {
-			retType := g.formatType(target.ReturnType)
-			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
-		}
 		if blockRetType != "" && blockRetType != "interface{}" {
 			return fmt.Sprintf("func(%s) %s { %s }", paramStr, blockRetType, strings.Join(stmts, "; "))
 		}
@@ -748,41 +677,9 @@ func (g *Generator) formatStmtInline(s parser.Stmt) string {
 		return g.formatExpr(stmt.Expr)
 	case *parser.ReturnStmt:
 		if stmt.Value != nil {
-			// In a thrower context (e.g. inside a Result-returning lambda
-			// body), `return Ok(v)` / `return Err(e)` lower to the
-			// (value, nil) / (zero, err) tuple form. Mirrors the same
-			// special-case in emitReturnStmt, but for the inline-stmt
-			// path used inside lambda block bodies.
-			if g.currentFuncIsThrower {
-				if okExpr, ok := stmt.Value.(*parser.OkExpr); ok {
-					return fmt.Sprintf("return %s, nil", g.formatExpr(okExpr.Value))
-				}
-				if errExpr, ok := stmt.Value.(*parser.ErrExpr); ok {
-					zv := g.zeroValueFor(g.currentReturnType)
-					return fmt.Sprintf("return %s, %s", zv, g.formatExpr(errExpr.Value))
-				}
-			}
 			return "return " + g.formatExpr(stmt.Value)
 		}
 		return "return"
-	case *parser.BlockStmt:
-		var inner []string
-		for _, s := range stmt.Stmts {
-			inner = append(inner, g.formatStmtInline(s))
-		}
-		return "{ " + strings.Join(inner, "; ") + " }"
-	case *parser.IfStmt:
-		var thenInner []string
-		if stmt.Then != nil {
-			for _, s := range stmt.Then.Stmts {
-				thenInner = append(thenInner, g.formatStmtInline(s))
-			}
-		}
-		out := fmt.Sprintf("if %s { %s }", g.formatExpr(stmt.Cond), strings.Join(thenInner, "; "))
-		if stmt.ElseStmt != nil {
-			out += " else " + g.formatStmtInline(stmt.ElseStmt)
-		}
-		return out
 	default:
 		return "/* inline stmt */"
 	}

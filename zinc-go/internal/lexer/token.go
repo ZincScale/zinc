@@ -75,8 +75,6 @@ const (
 	TOKEN_TIMEOUT    // timeout(dur) { }
 	TOKEN_TYPE       // type (type alias)
 	TOKEN_SELECT     // select (multiplex over channel ops)
-	TOKEN_OK         // Ok(value) — Result success constructor
-	TOKEN_ERR        // Err(error) — Result error constructor
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -186,8 +184,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_TIMEOUT:    "timeout",
 	TOKEN_SELECT:     "select",
 	TOKEN_TYPE:       "type",
-	TOKEN_OK:         "Ok",
-	TOKEN_ERR:        "Err",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -302,8 +298,6 @@ var keywords = map[string]TokenType{
 	"timeout":    TOKEN_TIMEOUT,
 	"type":       TOKEN_TYPE,
 	"select":     TOKEN_SELECT,
-	"Ok":         TOKEN_OK,
-	"Err":        TOKEN_ERR,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

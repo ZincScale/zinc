@@ -44,7 +44,6 @@ type Generator struct {
 	// Error handling
 	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values in error returns)
-	currentReturnTypeExpr parser.TypeExpr   // current function's declared return type (TypeExpr form, for lambda hint pushdown on `return lambda`)
 	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
 	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
@@ -65,15 +64,6 @@ type Generator struct {
 	// throwers propagate via `return zero, err`; non-throwers panic
 	// (unchecked-exception semantics — e.g. main() with uncaught).
 	currentFuncIsThrower bool
-
-	// pendingLambdaTarget carries the declared Fn<...> target type from
-	// the immediate emit site (VarStmt LHS, AssignStmt LHS, CallExpr arg
-	// slot) into formatLambdaExpr. The lambda consumes it to drive its
-	// Go signature — most importantly, a Result<T, E> return on the
-	// target flips the lambda body into thrower mode so `return Ok(...)`
-	// / `return Err(...)` lower correctly. formatLambdaExpr clears it on
-	// entry so nested lambdas don't accidentally inherit the hint.
-	pendingLambdaTarget *parser.FuncTypeExpr
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
@@ -401,11 +391,6 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				if g.blockCanReturnError(m.Body) {
 					g.errorFuncs[key] = true
 				}
-				// `Result<T, E>` return type marks the method a thrower
-				// even when the body has no propagating call yet.
-				if _, _, isResult := g.resultTypeArgs(m.ReturnType); isResult {
-					g.errorFuncs[key] = true
-				}
 			}
 			for _, f := range decl.Fields {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
@@ -417,14 +402,7 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			thrower := g.blockCanReturnErrorWithParams(decl.Body, decl.Params)
-			if thrower {
-				g.errorFuncs[decl.Name] = true
-			}
-			// `Result<T, E>` declared return type makes the fn a thrower
-			// regardless of body — the user has explicitly declared the
-			// failable contract.
-			if _, _, isResult := g.resultTypeArgs(decl.ReturnType); isResult {
+			if g.blockCanReturnError(decl.Body) {
 				g.errorFuncs[decl.Name] = true
 			}
 			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
@@ -468,7 +446,7 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 		for _, d := range prog.Decls {
 			switch decl := d.(type) {
 			case *parser.FnDecl:
-				if !g.errorFuncs[decl.Name] && g.blockCanReturnErrorWithParams(decl.Body, decl.Params) {
+				if !g.errorFuncs[decl.Name] && g.blockCanReturnError(decl.Body) {
 					g.errorFuncs[decl.Name] = true
 					changed = true
 				}
@@ -486,27 +464,13 @@ func (g *Generator) propagateThrowerFixedPoint(prog *parser.Program) {
 						changed = true
 					}
 				}
-				// resolveReceiverClassName for fields needs g.currentClass and
-				// g.currentFields to look up field types. Set them during the
-				// fixed-point so `reg.method()` (where reg is a class field)
-				// is correctly classified as a thrower at detection time
-				// (not just at emit time).
-				savedClass := g.currentClass
-				savedFields := g.currentFields
-				g.currentClass = decl.Name
-				g.currentFields = map[string]bool{}
-				for _, f := range decl.Fields {
-					g.currentFields[f.Name] = true
-				}
 				for _, m := range decl.Methods {
 					key := decl.Name + "." + m.Name
-					if !g.errorFuncs[key] && g.blockCanReturnErrorWithParams(m.Body, m.Params) {
+					if !g.errorFuncs[key] && g.blockCanReturnError(m.Body) {
 						g.errorFuncs[key] = true
 						changed = true
 					}
 				}
-				g.currentClass = savedClass
-				g.currentFields = savedFields
 			}
 		}
 		if !changed {

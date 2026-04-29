@@ -393,25 +393,6 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			zincExpectedParams = sig
 		}
 	}
-	// Method call `obj.method(args)`: walk the receiver's class for the
-	// matching method declaration and use its params. Without this,
-	// passing a lambda to a method that declares a `Fn<..., Result<...>>`
-	// param wouldn't get the lambda hint and `Ok(...)` / `Err(...)` in
-	// the lambda body would fail with the misplaced-Ok diagnostic.
-	if zincExpectedParams == nil {
-		if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-			if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
-				if cls := g.lookupClassDecl(recv); cls != nil {
-					for _, m := range cls.Methods {
-						if m.Name == sel.Field {
-							zincExpectedParams = m.Params
-							break
-						}
-					}
-				}
-			}
-		}
-	}
 
 	// Rewrite `it` keyword in args + adapt callback signatures + auto-insert & for pointer params
 	var argStrs []string
@@ -421,16 +402,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		} else if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
 			argStrs = append(argStrs, g.adaptCallback(ident.Name, goExpectedParams[i]))
 		} else {
-			// Lambda passed into a Fn-typed param slot: publish the
-			// declared param type as the lambda hint so the lambda's
-			// Result<T, E> return (if any) drives thrower-mode body emit.
-			var lambdaHint *parser.FuncTypeExpr
-			if zincExpectedParams != nil && i < len(zincExpectedParams) {
-				if _, isLambda := arg.(*parser.LambdaExpr); isLambda {
-					lambdaHint = g.resolveFuncTypeExpr(zincExpectedParams[i].Type)
-				}
-			}
-			formatted := g.formatExprWithLambdaTarget(arg, lambdaHint)
+			formatted := g.formatExpr(arg)
 			// Auto-insert & when Go function expects a pointer parameter
 			// (explicit *T in signature or implicit via known table)
 			if goPkgPath != "" && g.goResolver.NeedsPointerArg(goPkgPath, goFuncName, i) {

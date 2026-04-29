@@ -1,21 +1,21 @@
 // Sealed failure test — verifies Failure variant doesn't collide with Go's error type.
 // Tests sealed class with success/failure variants and match destructuring.
 
-sealed class Outcome {
-    data Success(String value)
+sealed class Result {
+    data Ok(String value)
     data Failure(String reason)
 }
 
-Outcome divide(int a, int b) {
+Result divide(int a, int b) {
     if (b == 0) {
         return Failure("division by zero")
     }
-    return Success(str(a / b))
+    return Ok(str(a / b))
 }
 
-String describe(Outcome r) {
+String describe(Result r) {
     match (r) {
-        case Success(value) {
+        case Ok(value) {
             return "ok: " + value
         }
         case Failure(reason) {
@@ -31,9 +31,9 @@ void main() {
     print(describe(divide(7, 0)))
 
     // Type annotation with sealed interface
-    Outcome r = Success("hello")
+    Result r = Ok("hello")
     match (r) {
-        case Success(v) {
+        case Ok(v) {
             print("typed ok: ${v}")
         }
         case Failure(reason) {

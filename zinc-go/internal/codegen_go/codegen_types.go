@@ -44,14 +44,12 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	// Save/restore state for function scope
 	prevRetType := g.currentReturnType
-	prevRetTypeExpr := g.currentReturnTypeExpr
 	prevOuterRetType := g.currentOuterReturnType
 	prevRetOpt := g.currentReturnOptional
 	prevErrCount := g.errVarCount
 	prevIsThrower := g.currentFuncIsThrower
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
-	g.currentReturnTypeExpr = fn.ReturnType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -95,19 +93,6 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 			g.varStructTypes[p.Name] = simpleType.Name
 			paramNameBackup = append(paramNameBackup, p.Name)
 		}
-		// Function-typed params (Fn<...> directly, or via a SimpleType
-		// type alias to a Fn<...>): register so calls through them are
-		// recognized as thrower calls when the Fn returns Result<T, E>.
-		if _, isFunc := p.Type.(*parser.FuncTypeExpr); isFunc {
-			g.varTypeExprs[p.Name] = p.Type
-			paramNameBackup = append(paramNameBackup, p.Name)
-		}
-		if simpleType, ok := p.Type.(*parser.SimpleType); ok {
-			if _, exists := g.typeAliases[simpleType.Name]; exists {
-				g.varTypeExprs[p.Name] = p.Type
-				paramNameBackup = append(paramNameBackup, p.Name)
-			}
-		}
 	}
 
 	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
@@ -138,7 +123,6 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	}
 
 	g.currentReturnType = prevRetType
-	g.currentReturnTypeExpr = prevRetTypeExpr
 	g.currentOuterReturnType = prevOuterRetType
 	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
@@ -661,19 +645,6 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			g.varStructTypes[p.Name] = simpleType.Name
 			methodParamBackup = append(methodParamBackup, p.Name)
 		}
-		// Function-typed params (mirrors emitFnDecl): register so calls
-		// through them are recognized as thrower calls when the Fn
-		// returns Result<T, E>.
-		if _, isFunc := p.Type.(*parser.FuncTypeExpr); isFunc {
-			g.varTypeExprs[p.Name] = p.Type
-			methodParamBackup = append(methodParamBackup, p.Name)
-		}
-		if simpleType, ok := p.Type.(*parser.SimpleType); ok {
-			if _, exists := g.typeAliases[simpleType.Name]; exists {
-				g.varTypeExprs[p.Name] = p.Type
-				methodParamBackup = append(methodParamBackup, p.Name)
-			}
-		}
 		// Pointer-typed params (T? for non-collection T) — same auto-deref
 		// handling as locals declared with `T?`.
 		if isPointerOptional(p.Type) {
@@ -726,13 +697,11 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 
 	prevRetType := g.currentReturnType
-	prevRetTypeExpr := g.currentReturnTypeExpr
 	prevOuterRetType := g.currentOuterReturnType
 	prevMethodRetType := g.currentMethodRetType
 	prevIsThrower := g.currentFuncIsThrower
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
-	g.currentReturnTypeExpr = m.ReturnType
 	if canError {
 		g.currentReturnType = goRetType
 	}
@@ -782,7 +751,6 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.writeln("}")
 
 	g.currentReturnType = prevRetType
-	g.currentReturnTypeExpr = prevRetTypeExpr
 	g.currentOuterReturnType = prevOuterRetType
 	g.currentMethodRetType = prevMethodRetType
 	g.currentFuncIsThrower = prevIsThrower

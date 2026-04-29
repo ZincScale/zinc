@@ -1,2 +1,0 @@
-doubled: 84
-caught: empty input
