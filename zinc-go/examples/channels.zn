@@ -1,6 +1,6 @@
 void main() {
     // Basic send/receive
-    var ch = Channel(1)
+    var ch = Channel<String>(1)
     spawn {
         ch.send("hello from channel")
     }
@@ -8,7 +8,7 @@ void main() {
     print("received: ${msg}")
 
     // Producer/consumer
-    var work = Channel(3)
+    var work = Channel<String>(3)
     work.send("task1")
     work.send("task2")
     work.send("task3")
@@ -19,7 +19,7 @@ void main() {
     }
 
     // Close channel
-    var done = Channel(1)
+    var done = Channel<String>(1)
     spawn {
         done.send("finished")
     }

@@ -584,6 +584,11 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		chanType := "interface{}"
 		if len(c.TypeArgs) > 0 {
 			chanType = g.resolveTypeArg(c.TypeArgs[0])
+		} else {
+			// Untyped Channel(N) lowers to `chan interface{}`. That's legal
+			// but loses static typing — sends accept anything, recvs require
+			// a type assertion. Warn the user to write Channel<T>(N).
+			g.compileWarning(0, "Channel(%s) without a type argument lowers to chan interface{}; prefer Channel<T>(%s) for typed channels", args, args)
 		}
 		if args != "" {
 			return fmt.Sprintf("make(chan %s, %s)", chanType, args)

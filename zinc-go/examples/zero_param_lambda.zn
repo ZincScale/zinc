@@ -22,7 +22,7 @@ void main() {
     print("x=${x}")
 
     // Pass directly to Go stdlib func() parameter
-    var done = Channel(1)
+    var done = Channel<int>(1)
     var t = time.AfterFunc(10 * time.Millisecond, () -> {
         done.send(1)
     })

@@ -76,7 +76,14 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		} else if call, ok := cond.(*parser.CallExpr); ok && g.callReturnsError(call) && !g.callIsVoidThrower(call) {
 			cond = g.hoistArg(cond)
 		}
-		g.writeln("for %s {", g.formatExpr(cond))
+		// `while (true) { ... }` lowers to Go's idiomatic infinite-loop
+		// form `for { ... }` rather than `for true { ... }`. Both compile,
+		// but bare `for {}` is what a Go dev would write.
+		if lit, ok := cond.(*parser.BoolLit); ok && lit.Value {
+			g.writeln("for {")
+		} else {
+			g.writeln("for %s {", g.formatExpr(cond))
+		}
 		g.indent++
 		g.emitBlock(stmt.Body)
 		g.indent--

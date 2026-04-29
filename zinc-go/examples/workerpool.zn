@@ -1,8 +1,8 @@
 // Worker Pool — fan-out/fan-in with channels
 
 void main() {
-    var jobs = Channel(10)
-    var results = Channel(10)
+    var jobs = Channel<String>(10)
+    var results = Channel<String>(10)
 
     // Send jobs first (buffered channel)
     List<String> tasks = ["fetch", "parse", "transform", "validate", "store"]

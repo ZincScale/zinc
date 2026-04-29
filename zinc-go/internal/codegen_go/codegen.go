@@ -138,7 +138,8 @@ type Generator struct {
 
 	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
 	// Checked by the caller after GenerateFiles returns.
-	compileErrors []string
+	compileErrors   []string
+	compileWarnings []string
 
 	// needsPtrHelper marks that the generated file references _zincPtr,
 	// the generic helper that boxes a value into a pointer. Required for
@@ -161,6 +162,14 @@ func (g *Generator) CompileErrors() []string {
 	return g.compileErrors
 }
 
+// CompileWarnings returns non-fatal advisory messages the generator detected
+// during code generation. The driver prints them to stderr but the build
+// proceeds. Used for things like `Channel(N)` without a type argument
+// (lowers to `chan interface{}` — legal but stylistically loose).
+func (g *Generator) CompileWarnings() []string {
+	return g.compileWarnings
+}
+
 // compileError records a compile-time error with source location. Formatted to
 // match Go compiler's "file:line: message" style so editors highlight correctly.
 func (g *Generator) compileError(line int, format string, args ...any) {
@@ -170,6 +179,18 @@ func (g *Generator) compileError(line int, format string, args ...any) {
 		loc = "<input>"
 	}
 	g.compileErrors = append(g.compileErrors, fmt.Sprintf("%s:%d: %s", loc, line, msg))
+}
+
+// compileWarning records a non-fatal advisory. Same "file:line: message"
+// format as compileError; the driver prefixes with `warning: ` so editors
+// still parse the location but humans can scan past.
+func (g *Generator) compileWarning(line int, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	loc := g.sourceFile
+	if loc == "" {
+		loc = "<input>"
+	}
+	g.compileWarnings = append(g.compileWarnings, fmt.Sprintf("%s:%d: warning: %s", loc, line, msg))
 }
 
 // Name resolution, type formatting, and visibility helpers are in codegen_resolve.go.
@@ -780,6 +801,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	// bodyGen is a value copy (see `bodyGen := *g` above); the outer g
 	// wouldn't otherwise see errors appended to the copy's slice.
 	g.compileErrors = append(g.compileErrors, bodyGen.compileErrors...)
+	g.compileWarnings = append(g.compileWarnings, bodyGen.compileWarnings...)
 	// Same propagation for the auto-address-take helper flag — set
 	// during body emission, consumed by the preamble below.
 	if bodyGen.needsPtrHelper {

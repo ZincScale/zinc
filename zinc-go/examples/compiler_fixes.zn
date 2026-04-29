@@ -63,7 +63,7 @@ void testToBytes() {
 
 // --- Fix 5: Channel as class field ---
 class MsgQueue {
-    var inbox = Channel(10)
+    var inbox = Channel<String>(10)
     pub void send(String msg) {
         inbox.send(msg)
     }
