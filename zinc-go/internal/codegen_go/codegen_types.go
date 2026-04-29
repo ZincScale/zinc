@@ -48,6 +48,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	prevRetOpt := g.currentReturnOptional
 	prevErrCount := g.errVarCount
 	prevIsThrower := g.currentFuncIsThrower
+	prevIsTuple := g.currentReturnIsTuple
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
 	if canError {
@@ -58,6 +59,8 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	if isOptional && !canError {
 		g.currentReturnType = goRetType
 	}
+	_, isTuple := fn.ReturnType.(*parser.TupleType)
+	g.currentReturnIsTuple = isTuple
 	g.errVarCount = 0
 	g.currentFuncParams = fn.Params
 
@@ -127,6 +130,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.currentReturnOptional = prevRetOpt
 	g.errVarCount = prevErrCount
 	g.currentFuncIsThrower = prevIsThrower
+	g.currentReturnIsTuple = prevIsTuple
 	if len(fn.TypeParams) > 0 {
 		g.activeTypeParams = nil
 	}
@@ -700,11 +704,14 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	prevOuterRetType := g.currentOuterReturnType
 	prevMethodRetType := g.currentMethodRetType
 	prevIsThrower := g.currentFuncIsThrower
+	prevIsTuple := g.currentReturnIsTuple
 	g.currentFuncIsThrower = canError
 	g.currentOuterReturnType = goRetType
 	if canError {
 		g.currentReturnType = goRetType
 	}
+	_, isTuple := m.ReturnType.(*parser.TupleType)
+	g.currentReturnIsTuple = isTuple
 	g.currentMethodRetType = goRetType
 
 	// Map Zinc method names to Go equivalents
@@ -754,6 +761,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.currentOuterReturnType = prevOuterRetType
 	g.currentMethodRetType = prevMethodRetType
 	g.currentFuncIsThrower = prevIsThrower
+	g.currentReturnIsTuple = prevIsTuple
 }
 
 // collectParentFields walks the inheritance chain and adds parent fields to the map.

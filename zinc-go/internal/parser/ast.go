@@ -273,6 +273,18 @@ type FuncTypeExpr struct {
 func (f *FuncTypeExpr) nodeTag() {}
 func (f *FuncTypeExpr) typeTag() {}
 
+// TupleType: (Int, String) — multi-value return position only.
+// Lowers to Go's tuple-return shape `(int, string)`. A single-element
+// `(T)` is unwrapped at parse time, so a TupleType always has >= 2
+// elements. Allowed only at function/method return-type position and
+// inside Fn<(...), HERE>; never as a value/var/field type.
+type TupleType struct {
+	Elements []TypeExpr
+}
+
+func (t *TupleType) nodeTag() {}
+func (t *TupleType) typeTag() {}
+
 // --- Statements --------------------------------------------------------------
 
 // Stmt is a statement node.

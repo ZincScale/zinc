@@ -1,0 +1,39 @@
+// Multi-value returns via TupleType in the return-type position.
+// `pub (Int, String) foo()` — two return values. Caller destructures
+// with the existing tuple-var-stmt form (`var a, b = foo()`).
+//
+// No `error` involvement here — that's the next slice. This test just
+// proves the tuple-return shape parses, codegens, and round-trips
+// through destructuring at the function-decl and method-decl positions.
+// Lambda bodies returning tuples come with the error-redesign slice.
+
+pub (Int, String) makeUser() {
+    return 42, "alice"
+}
+
+// Three-value form, just to exercise the loop.
+pub (Int, Int, Int) triple() {
+    return 1, 2, 3
+}
+
+// Method on a class returning a tuple.
+class Counter {
+    pub Int n
+    init(Int n) { this.n = n }
+
+    pub (Int, Int) bothBumps() {
+        return this.n + 1, this.n + 2
+    }
+}
+
+void main() {
+    var (id, name) = makeUser()
+    print("user: ${id}/${name}")
+
+    var (a, b, c) = triple()
+    print("triple: ${a},${b},${c}")
+
+    var ctr = Counter(10)
+    var (x, y) = ctr.bothBumps()
+    print("bumps: ${x},${y}")
+}

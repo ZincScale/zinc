@@ -968,6 +968,16 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			ret = " " + g.formatType(typ.ReturnType)
 		}
 		return fmt.Sprintf("func(%s)%s", strings.Join(params, ", "), ret)
+	case *parser.TupleType:
+		// Multi-value return shape — Go: `(T1, T2, ...)`. Only valid in
+		// return position (function return slot, Fn<...> return arg);
+		// the parser only constructs TupleType in those positions, so
+		// no need to guard against value-position misuse here.
+		var elems []string
+		for _, e := range typ.Elements {
+			elems = append(elems, g.formatType(e))
+		}
+		return "(" + strings.Join(elems, ", ") + ")"
 	default:
 		return "interface{}"
 	}

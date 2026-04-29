@@ -22,6 +22,29 @@ import (
 
 // --- Types (v2: angle-bracket generics <>) -----------------------------------
 
+// v2ParseTypeOrTuple parses a single type or a parenthesized tuple
+// `(T1, T2, ...)`. Used at positions that allow multi-value returns:
+// function/method return-type slot and the Fn<...> return-type slot.
+// A single-element parenthesized form `(T)` collapses to T so users
+// can write either `Fn<(A), R>` or `Fn<(A), (R)>` interchangeably.
+func (p *Parser) v2ParseTypeOrTuple() TypeExpr {
+	if !p.check(lexer.TOKEN_LPAREN) {
+		return p.v2ParseType()
+	}
+	p.advance() // consume (
+	var elems []TypeExpr
+	elems = append(elems, p.v2ParseType())
+	for p.check(lexer.TOKEN_COMMA) {
+		p.advance()
+		elems = append(elems, p.v2ParseType())
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	if len(elems) == 1 {
+		return elems[0]
+	}
+	return &TupleType{Elements: elems}
+}
+
 // v2ParseType: str, int, list<int>, dict<str, int>, str?
 func (p *Parser) v2ParseType() TypeExpr {
 	tok := p.expect(lexer.TOKEN_IDENT)
@@ -57,7 +80,7 @@ func (p *Parser) v2ParseTypeFrom(name string) TypeExpr {
 		var retType TypeExpr
 		if p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			retType = p.v2ParseType()
+			retType = p.v2ParseTypeOrTuple()
 		}
 		p.expect(lexer.TOKEN_GT)
 		typ = &FuncTypeExpr{Params: params, ReturnType: retType}

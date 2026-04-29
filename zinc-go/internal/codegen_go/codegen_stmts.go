@@ -785,6 +785,21 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		return
 	}
 
+	// Multi-value return: function declared with TupleType return type
+	// (e.g. `pub (Int, String) foo()`) and the value is a TupleLit (built
+	// by the parser from `return a, b` or explicit `(a, b)`). Lower to
+	// Go's `return a, b` form instead of the default TupleLit-as-slice.
+	if g.currentReturnIsTuple {
+		if tup, ok := r.Value.(*parser.TupleLit); ok {
+			var parts []string
+			for _, el := range tup.Elements {
+				parts = append(parts, g.formatExpr(el))
+			}
+			g.writeln("return %s", strings.Join(parts, ", "))
+			return
+		}
+	}
+
 	// Optional return: wrap value with new() for pointer type
 	if g.currentReturnOptional {
 		if _, ok := r.Value.(*parser.NullLit); ok {

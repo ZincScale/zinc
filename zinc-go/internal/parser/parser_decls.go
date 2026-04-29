@@ -48,14 +48,15 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 }
 
 // v2ParseFnReturnType parses either `void` (returns nil) or any type
-// expression. Used by both top-level fn decls and class method decls.
+// expression — including a multi-value tuple `(T1, T2, ...)`. Used by
+// both top-level fn decls and class method decls.
 func (p *Parser) v2ParseFnReturnType() TypeExpr {
 	tok := p.peek()
 	if tok.Type == lexer.TOKEN_IDENT && tok.Literal == "void" {
 		p.advance()
 		return nil
 	}
-	return p.v2ParseType()
+	return p.v2ParseTypeOrTuple()
 }
 
 // v2ParseParamList: (type name, type name = default, ...)
@@ -430,6 +431,18 @@ func (p *Parser) v2IsFnDeclTypeFirst() bool {
 		j := p.v2SkipFnNameTypeParams(2)
 		return p.peekAt(j).Type == lexer.TOKEN_LPAREN
 	}
+	// `(T1, T2, ...) name [<...>] (` — tuple return type
+	if p.peek().Type == lexer.TOKEN_LPAREN {
+		i := p.v2SkipBalancedParens(0)
+		if i < 0 {
+			return false
+		}
+		if !isIdentLike(p.peekAt(i).Type) {
+			return false
+		}
+		j := p.v2SkipFnNameTypeParams(i + 1)
+		return p.peekAt(j).Type == lexer.TOKEN_LPAREN
+	}
 	if !p.v2IsTypeAnnotation() {
 		return false
 	}
@@ -439,6 +452,30 @@ func (p *Parser) v2IsFnDeclTypeFirst() bool {
 	}
 	j := p.v2SkipFnNameTypeParams(i + 1)
 	return p.peekAt(j).Type == lexer.TOKEN_LPAREN
+}
+
+// v2SkipBalancedParens walks past a `(...)` block starting at `start`
+// (which must point at `(`), returning the index of the token after the
+// matching `)`. Returns -1 on mismatch / EOF. Used to skip a
+// parenthesized tuple type in lookahead positions.
+func (p *Parser) v2SkipBalancedParens(start int) int {
+	if p.peekAt(start).Type != lexer.TOKEN_LPAREN {
+		return -1
+	}
+	depth := 1
+	i := start + 1
+	for depth > 0 {
+		switch p.peekAt(i).Type {
+		case lexer.TOKEN_EOF:
+			return -1
+		case lexer.TOKEN_LPAREN:
+			depth++
+		case lexer.TOKEN_RPAREN:
+			depth--
+		}
+		i++
+	}
+	return i
 }
 
 // v2SkipFnNameTypeParams skips a `<T, U, ...>` block right after a

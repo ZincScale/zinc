@@ -65,6 +65,13 @@ type Generator struct {
 	// (unchecked-exception semantics — e.g. main() with uncaught).
 	currentFuncIsThrower bool
 
+	// currentReturnIsTuple is true while emitting a function whose
+	// declared return type is a TupleType (e.g. `pub (Int, String) foo()`).
+	// Drives emitReturnStmt: a TupleLit return value lowers to Go's
+	// multi-value `return a, b` form instead of the default `[]interface{}`
+	// slice lowering used for tuple values in expression position.
+	currentReturnIsTuple bool
+
 	// pendingLambdaTarget carries the declared Fn<...> target type from
 	// the immediate emit site (currently VarStmt LHS) into
 	// formatLambdaExpr, so the lambda's Go return type is driven from
