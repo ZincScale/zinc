@@ -1,0 +1,33 @@
+// E2E: `as` and `is` against qualified types from external Go packages.
+// Pre-fix:
+//   • `as pkg.Type`  failed at parse with "unexpected token . in expression"
+//   • `is pkg.Type`  parsed but always returned false (the reflect-based
+//     codegen compared "*pkg.Type" against the formatted alias-qualified
+//     name; runtime's reflect produces the actual Go package short name).
+// This file locks in both behaviors via stdlib types so it doesn't need
+// a third-party dep.
+
+import strings as str
+
+void main() {
+    // Build a strings.Reader and round-trip through io.Reader.
+    var r = str.NewReader("hello zinc")
+
+    // `is pkg.Type` — true because r really is *strings.Reader.
+    if (r is str.Reader) {
+        print("is strings.Reader: true")
+    } else {
+        print("is strings.Reader: false")
+    }
+
+    // `is pkg.Type` against an unrelated qualified type — must be false.
+    if (r is str.Builder) {
+        print("is strings.Builder: true")
+    } else {
+        print("is strings.Builder: false")
+    }
+
+    // `as pkg.Type` — succeeds. Without the parser fix this didn't even parse.
+    var rr = r as str.Reader
+    print("as strings.Reader len: ${rr.Len()}")
+}

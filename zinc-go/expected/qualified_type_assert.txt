@@ -1,0 +1,3 @@
+is strings.Reader: true
+is strings.Builder: false
+as strings.Reader len: 10

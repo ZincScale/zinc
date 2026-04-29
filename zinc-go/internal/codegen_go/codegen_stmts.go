@@ -2133,7 +2133,11 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	errName := g.nextErrName() // bumps errVarCount
 	goType := g.formatType(&parser.SimpleType{Name: ta.TypeName})
 	g.needImport("fmt")
-	g.writeln("%s, %s := %s.(%s)", v.Name, okName, g.formatExpr(ta.Object), goType)
+	// Wrap operand in any() so type assertion compiles regardless of the
+	// operand's declared type. Bare `concrete.(T)` is rejected by Go when
+	// the concrete type isn't an interface, which broke `as pkg.Type`
+	// against any concrete-typed local (e.g. `r := strings.NewReader(...)`).
+	g.writeln("%s, %s := any(%s).(%s)", v.Name, okName, g.formatExpr(ta.Object), goType)
 	g.writeln("if !%s {", okName)
 	g.indent++
 	if v.OrHandler != nil && v.OrHandler.Body != nil {

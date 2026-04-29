@@ -186,11 +186,17 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.TypeAssertExpr:
 		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		if expr.IsCheck {
-			obj := g.formatExpr(expr.Object)
-			g.needImport("reflect")
-			return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", obj, goType, obj, goType)
+			// Use Go's native comma-ok type assertion wrapped in any() so it
+			// works regardless of the operand's declared type (concrete value,
+			// interface, or pointer). Replaces a reflect-based string compare
+			// that broke for qualified types: reflect produces the Go package
+			// short name (e.g. "*avro.PrimitiveSchema") while the formatted
+			// type string carries the import alias (e.g. "*hambaAvro.PrimitiveSchema"),
+			// so the strings never matched and `is pkg.Type` always returned false.
+			return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return _ok }()", g.formatExpr(expr.Object), goType)
 		}
-		return fmt.Sprintf("%s.(%s)", g.formatExpr(expr.Object), goType)
+		// Wrap operand in any() — see emitTypeAssertVar for rationale.
+		return fmt.Sprintf("any(%s).(%s)", g.formatExpr(expr.Object), goType)
 	case *parser.SafeNavExpr:
 		obj := g.formatExpr(expr.Object)
 		deref := "*" + obj
@@ -328,8 +334,12 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
 			return fmt.Sprintf("func() bool { _ = %s; return true }()", left)
 		}
-		g.needImport("reflect")
-		return fmt.Sprintf("(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
+		// Comma-ok type assertion through `any()`. Replaces a reflect-based
+		// string compare that broke for aliased imports: reflect emits the
+		// real Go package name (`strings`, `avro`) but goType carries the
+		// import alias (`str`, `hambaAvro`), so the strings never matched
+		// and `is pkg.Type` always returned false.
+		return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return _ok }()", left, goType)
 	case "is not":
 		left := g.formatExpr(b.Left)
 		right := g.formatExpr(b.Right)
@@ -338,8 +348,7 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
 			return fmt.Sprintf("func() bool { _ = %s; return false }()", left)
 		}
-		g.needImport("reflect")
-		return fmt.Sprintf("!(reflect.TypeOf(%s).String() == \"%s\" || reflect.TypeOf(%s).Kind().String() == \"%s\")", left, goType, left, goType)
+		return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return !_ok }()", left, goType)
 	default:
 		left := g.formatExpr(b.Left)
 		right := g.formatExpr(b.Right)
