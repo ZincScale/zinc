@@ -426,7 +426,19 @@ func (g *Generator) lookupFieldTypeExpr(className, fieldName string) parser.Type
 // chain through `obj.getMap().keys()` and `this.outer.inner.size()`.
 func (g *Generator) resolveReceiverClassName(e parser.Expr) string {
 	switch expr := e.(type) {
+	case *parser.ThisExpr:
+		// `this` resolves to the enclosing class name. Without this case,
+		// chains rooted at `this` (e.g. `this.factories[k]`) couldn't
+		// reach lookupFieldTypeExpr, so Map-index value-type tracking
+		// silently failed for `var x = this.field[k]`.
+		return g.currentClass
 	case *parser.Ident:
+		// `this` is sometimes parsed as a bare Ident rather than a
+		// ThisExpr (depends on the surrounding statement shape) — treat
+		// both forms identically.
+		if expr.Name == "this" {
+			return g.currentClass
+		}
 		if st, ok := g.varStructTypes[expr.Name]; ok {
 			return st
 		}

@@ -393,6 +393,25 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			zincExpectedParams = sig
 		}
 	}
+	// Method call `obj.method(args)` — walk the receiver's class for the
+	// matching method declaration and use its params. Without this, a
+	// lambda passed to a method whose param is `Fn<..., (T, error)>`
+	// wouldn't pick up the target hint, and the lambda body's
+	// `return v, e` form wouldn't lower correctly.
+	if zincExpectedParams == nil {
+		if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+			if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
+				if cls := g.lookupClassDecl(recv); cls != nil {
+					for _, m := range cls.Methods {
+						if m.Name == sel.Field {
+							zincExpectedParams = m.Params
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Rewrite `it` keyword in args + adapt callback signatures + auto-insert & for pointer params
 	var argStrs []string
@@ -402,7 +421,24 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		} else if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
 			argStrs = append(argStrs, g.adaptCallback(ident.Name, goExpectedParams[i]))
 		} else {
+			// Lambda arg into a Fn-typed param slot: publish the param's
+			// declared Fn type as the lambda hint so the lambda body's
+			// return shape (multi-value or thrower-mode) is driven by
+			// the target slot, not by inferLambdaReturnType.
+			var prevTarget *parser.FuncTypeExpr
+			restoreTarget := false
+			if _, isLambda := arg.(*parser.LambdaExpr); isLambda &&
+				zincExpectedParams != nil && i < len(zincExpectedParams) {
+				if ft := g.resolveFuncTypeExpr(zincExpectedParams[i].Type); ft != nil {
+					prevTarget = g.pendingLambdaTarget
+					g.pendingLambdaTarget = ft
+					restoreTarget = true
+				}
+			}
 			formatted := g.formatExpr(arg)
+			if restoreTarget {
+				g.pendingLambdaTarget = prevTarget
+			}
 			// Auto-insert & when Go function expects a pointer parameter
 			// (explicit *T in signature or implicit via known table)
 			if goPkgPath != "" && g.goResolver.NeedsPointerArg(goPkgPath, goFuncName, i) {

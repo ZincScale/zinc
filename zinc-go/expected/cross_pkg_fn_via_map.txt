@@ -1,0 +1,3 @@
+dbl: dbl=14
+pos: pos=3
+pos rejected: negative seed

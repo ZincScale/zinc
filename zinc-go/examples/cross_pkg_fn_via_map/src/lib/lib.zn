@@ -1,0 +1,41 @@
+// Regression: a typed Fn-alias stored in a Map field, looked up at
+// call time, must be recognized as a thrower so the surrounding
+// signature's `(T, error)` tail absorbs the call cleanly. Mirrors
+// the shape that broke zinc-flow-go's Registry.create() before the
+// var-type tracker learned to register SimpleType aliases from
+// Map<K,V> indices and callReturnsError learned to peel them.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+pub class LookupError : BaseError {
+    init(String msg) { super(msg) }
+}
+
+// Type alias for the factory shape — a Fn whose return is a
+// declared thrower tuple. Stored by value in the registry's map.
+type Factory = Fn<(Int), (String, error)>
+
+pub class Registry {
+    Map<String, Factory> factories
+
+    init() {
+        this.factories = Map<String, Factory>{}
+    }
+
+    pub void register(String name, Factory f) {
+        this.factories[name] = f
+    }
+
+    // The crux: `var fac = factories[name]` lifts the Factory alias
+    // out of a Map<String, Factory>. The call `fac(seed)` must be
+    // recognized as a thrower so this method's `(String, error)`
+    // signature is well-typed.
+    pub (String, error) create(String name, Int seed) {
+        var fac = this.factories[name]
+        return fac(seed)
+    }
+}

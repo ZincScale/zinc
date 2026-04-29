@@ -482,11 +482,13 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// Map<K,V> → x has type V. Without this propagation, `x.keys()` on a
 		// nested-map value (where x itself is a Map<K2,V2>) falls back to
 		// []interface{} (ZCA-11b). Covers both local-var and class-field m.
+		// Stores V whatever its kind — GenericType, SimpleType (for type
+		// aliases like `type Factory = Fn<...>`), FuncTypeExpr, etc. —
+		// so callReturnsError can later resolve through the alias to
+		// detect Fn-typed throwers stored in a registry map.
 		if idx, ok := v.Value.(*parser.IndexExpr); ok && v.Type == nil {
 			if gt := g.resolveReceiverGenericType(idx.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
-				if gt2, ok := gt.TypeArgs[1].(*parser.GenericType); ok {
-					g.varTypeExprs[v.Name] = gt2
-				}
+				g.varTypeExprs[v.Name] = gt.TypeArgs[1]
 			}
 		}
 
@@ -1682,6 +1684,21 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 				}
 			}
 		}
+		// Fn-typed local invoked by name: `var fac = registry[name]; fac(ctx, cfg)`.
+		// If `fac` was registered in varTypeExprs (e.g. by the Map-index
+		// var-type tracker, or by a typed `Fn<...> fac = ...` decl), peel
+		// any single-layer type alias and check whether the resolved
+		// FuncTypeExpr's return type contains `error` in the tail.
+		// Without this, an invocation through a registry-map slot
+		// reads as a non-thrower call and the surrounding signature's
+		// `(T, error)` return is left dangling.
+		if t, ok := g.varTypeExprs[callee.Name]; ok {
+			if ft := g.resolveFuncTypeExpr(t); ft != nil {
+				if returnTypeDeclaresError(ft.ReturnType) {
+					return true
+				}
+			}
+		}
 	case *parser.SelectorExpr:
 		// Method on a class: Class.method key in errorFuncs, or the
 		// method declaration in a sibling/subpackage class.
@@ -1706,8 +1723,8 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 }
 
 // resolveFuncTypeExpr returns the underlying FuncTypeExpr for `t`,
-// peeling a single layer of type alias if needed. Returns nil if `t`
-// is not a function type.
+// peeling type aliases as needed (single-package and cross-package).
+// Returns nil if `t` doesn't bottom out at a function type.
 func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr {
 	if t == nil {
 		return nil
@@ -1718,6 +1735,15 @@ func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr 
 	if simple, ok := t.(*parser.SimpleType); ok {
 		if alias, exists := g.typeAliases[simple.Name]; exists {
 			return g.resolveFuncTypeExpr(alias)
+		}
+		// Cross-package: param/field types referencing an alias declared
+		// in another package surface here as a bare SimpleType.
+		// subpkgTypeAliases is populated by the compiler driver from
+		// every imported package's CollectTypeAliases output.
+		for _, pkgAliases := range g.subpkgTypeAliases {
+			if alias, exists := pkgAliases[simple.Name]; exists {
+				return g.resolveFuncTypeExpr(alias)
+			}
 		}
 	}
 	return nil
@@ -1848,6 +1874,16 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "func" {
 			if pkgPath, ok := g.importMap[entry.pkg]; ok {
 				return g.goResolver.ReturnsErrorOnly(pkgPath, entry.name)
+			}
+		}
+		// Fn-typed local: a bare-`error` slot like `Fn<(...), error>`
+		// dispatches to the void destructure form (`_err := f()`).
+		// Mirrors the parallel branch in callReturnsError.
+		if t, ok := g.varTypeExprs[ident.Name]; ok {
+			if ft := g.resolveFuncTypeExpr(t); ft != nil {
+				if isZincErrorType(ft.ReturnType) {
+					return true
+				}
 			}
 		}
 	}

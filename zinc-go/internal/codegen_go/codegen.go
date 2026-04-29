@@ -126,6 +126,7 @@ type Generator struct {
 	subpkgDataFields map[string]map[string][]*parser.FieldDecl   // pkg → data class name → field params
 	localDataFields  map[string][]*parser.FieldDecl              // current package data class name → params
 	subpkgStructs    map[string]map[string]*parser.ClassDecl    // pkg → class name → full class decl (for method lookups)
+	subpkgTypeAliases map[string]map[string]parser.TypeExpr    // pkg → alias name → underlying TypeExpr (for cross-pkg resolveFuncTypeExpr)
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
 
@@ -337,12 +338,40 @@ func CollectClassDecls(prog *parser.Program) map[string]*parser.ClassDecl {
 	return classes
 }
 
+// CollectTypeAliases gathers `type Name = TypeExpr` declarations from a
+// program. Used to propagate subpackage aliases across generators so
+// `resolveFuncTypeExpr` can peel a SimpleType-name through an alias
+// declared in a different package — required for cross-package method
+// arg resolution where the param type is a Fn-alias from the callee's
+// package (e.g. `Factory` → `Fn<(...), (T, error)>`).
+func CollectTypeAliases(prog *parser.Program) map[string]parser.TypeExpr {
+	aliases := make(map[string]parser.TypeExpr)
+	for _, d := range prog.Decls {
+		if decl, ok := d.(*parser.TypeAliasDecl); ok {
+			aliases[decl.Name] = decl.Type
+		}
+	}
+	return aliases
+}
+
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
 func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
 	if g.subpkgStructs == nil {
 		g.subpkgStructs = make(map[string]map[string]*parser.ClassDecl)
 	}
 	g.subpkgStructs[pkg] = classes
+}
+
+// SetSubpackageTypeAliases registers `type Name = ...` aliases from a
+// subpackage so cross-package callers can peel them via
+// resolveFuncTypeExpr. Without this, a `Factory` param declared in
+// lib but resolved during main's emit reads as an opaque SimpleType
+// and the lambda-target inference for method args silently drops.
+func (g *Generator) SetSubpackageTypeAliases(pkg string, aliases map[string]parser.TypeExpr) {
+	if g.subpkgTypeAliases == nil {
+		g.subpkgTypeAliases = make(map[string]map[string]parser.TypeExpr)
+	}
+	g.subpkgTypeAliases[pkg] = aliases
 }
 
 // SetSubpackageDataFields registers data class field info from a subpackage.

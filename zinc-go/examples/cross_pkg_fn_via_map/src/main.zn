@@ -1,0 +1,29 @@
+// Cross-package consumer of lib's Registry. Registers a couple of
+// factories — a happy-path one and an erroring one — then exercises
+// both via the registry's create() method.
+
+import lib
+
+void main() {
+    var reg = lib.Registry()
+
+    // Happy-path factory: doubles the seed and labels it.
+    reg.register("dbl", (Int x) -> ("dbl=${x * 2}", null))
+
+    // Erroring factory: rejects negatives.
+    reg.register("pos", (Int x) -> {
+        if (x < 0) {
+            return lib.LookupError("negative seed")
+        }
+        return "pos=${x}", null
+    })
+
+    var ok = reg.create("dbl", 7) or { print("dbl err: ${err}"); return }
+    print("dbl: ${ok}")
+
+    var pos = reg.create("pos", 3) or { print("pos err: ${err}"); return }
+    print("pos: ${pos}")
+
+    var bad = reg.create("pos", -1) or { print("pos rejected: ${err}"); return }
+    print("should not reach: ${bad}")
+}
