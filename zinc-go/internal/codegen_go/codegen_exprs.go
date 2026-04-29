@@ -385,6 +385,12 @@ var stringMethodMapping = map[string]string{
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
+	// Consume the pending Fn<...> target hint set by the immediate emit
+	// site (e.g. `Fn<(A), R> f = (...) -> ...`). Cleared on entry so a
+	// nested lambda inside the body doesn't inherit the outer hint.
+	target := g.pendingLambdaTarget
+	g.pendingLambdaTarget = nil
+
 	var params []string
 	var firstParamType string
 	allTyped := true
@@ -407,10 +413,10 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 		if l.ReturnType != nil {
 			retType = g.formatType(l.ReturnType)
 		} else if target != nil && target.ReturnType != nil {
-			// Non-Result target: drive the lambda's return type from the
-			// declared Fn slot. Beats inferLambdaReturnType, which falls
-			// back to interface{} on anything it can't statically resolve
-			// (e.g. method calls, field accesses).
+			// Drive the lambda's return type from the declared Fn slot.
+			// Beats inferLambdaReturnType, which falls back to interface{}
+			// on anything it can't statically resolve (method calls,
+			// field accesses on `this`, etc.).
 			retType = g.formatType(target.ReturnType)
 		} else if allTyped && firstParamType != "" {
 			retType = g.inferLambdaReturnType(l.Expr, l.Params)
@@ -449,6 +455,13 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 
 		if blockRetType != "" && blockRetType != "interface{}" {
 			return fmt.Sprintf("func(%s) %s { %s }", paramStr, blockRetType, strings.Join(stmts, "; "))
+		}
+		// Same target-driven fallback as the expression-form path: when
+		// the target Fn declares a return type, prefer it over emitting
+		// a void signature (which would drop the return value).
+		if target != nil && target.ReturnType != nil {
+			retType := g.formatType(target.ReturnType)
+			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
 		}
 		return fmt.Sprintf("func(%s) { %s }", paramStr, strings.Join(stmts, "; "))
 	}

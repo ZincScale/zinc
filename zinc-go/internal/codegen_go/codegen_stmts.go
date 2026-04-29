@@ -575,6 +575,17 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
+		// LHS is Fn<...> and RHS is a lambda literal: publish the target
+		// Fn type so formatLambdaExpr can drive the lambda's Go return
+		// type from the slot, instead of defaulting to interface{} when
+		// the body has expressions inferLambdaReturnType can't resolve.
+		if _, isLambda := v.Value.(*parser.LambdaExpr); isLambda && v.Type != nil {
+			if ft := g.resolveFuncTypeExpr(v.Type); ft != nil {
+				prev := g.pendingLambdaTarget
+				g.pendingLambdaTarget = ft
+				defer func() { g.pendingLambdaTarget = prev }()
+			}
+		}
 		if useExplicitType {
 			typeName := g.formatType(v.Type)
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
@@ -1655,6 +1666,24 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 		}
 	}
 	return false
+}
+
+// resolveFuncTypeExpr returns the underlying FuncTypeExpr for `t`,
+// peeling a single layer of type alias if needed. Returns nil if `t`
+// is not a function type.
+func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr {
+	if t == nil {
+		return nil
+	}
+	if ft, ok := t.(*parser.FuncTypeExpr); ok {
+		return ft
+	}
+	if simple, ok := t.(*parser.SimpleType); ok {
+		if alias, exists := g.typeAliases[simple.Name]; exists {
+			return g.resolveFuncTypeExpr(alias)
+		}
+	}
+	return nil
 }
 
 // methodBodyThrows walks the method declaration (from either local

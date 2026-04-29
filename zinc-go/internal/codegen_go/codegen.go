@@ -65,6 +65,16 @@ type Generator struct {
 	// (unchecked-exception semantics — e.g. main() with uncaught).
 	currentFuncIsThrower bool
 
+	// pendingLambdaTarget carries the declared Fn<...> target type from
+	// the immediate emit site (currently VarStmt LHS) into
+	// formatLambdaExpr, so the lambda's Go return type is driven from
+	// the target slot instead of falling back to interface{} when the
+	// body contains expressions inferLambdaReturnType can't resolve
+	// statically (e.g. method calls, field accesses on `this`).
+	// Cleared on entry to formatLambdaExpr so nested lambdas don't
+	// inherit the outer hint.
+	pendingLambdaTarget *parser.FuncTypeExpr
+
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	varTypeExprs        map[string]parser.TypeExpr // variable name → original AST type (for generics)
