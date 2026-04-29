@@ -1,0 +1,121 @@
+// Edge cases in the explicit-error system flagged by the post-redesign
+// audit. Each section pins one branch of the codegen that wasn't
+// otherwise exercised by the existing examples.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class TagError : BaseError {
+    init(String msg) { super(msg) }
+}
+
+// (1) TupleLit value into a multi-value thrower — `return v1, v2`
+// from a `(T1, T2, error)` signature must lower to comma-separated
+// `return v1, v2, nil`, not the slice form. Audit gap #1.
+(Int, String, error) namedPair() {
+    return 7, "seven", null
+}
+
+// (2) Method call on a class field that returns a thrower tuple,
+// returned directly from the outer thrower — pure passthrough,
+// no `, nil` appended. Audit gap #4.
+class Inner {
+    pub (Int, error) compute(Int x) {
+        if (x < 0) { return TagError("neg") }
+        return x * 2, null
+    }
+}
+class Outer {
+    Inner inner
+
+    init() { this.inner = Inner() }
+
+    pub (Int, error) handle(Int x) {
+        return this.inner.compute(x)
+    }
+}
+
+// (3) Fn-typed local declared with an explicit type — `Fn<...,(T,error)>`
+// captured from a named function reference, then invoked. Exercises
+// callReturnsError's varTypeExprs lookup for non-Map sources.
+// Audit gap #6.
+(Int, error) parseSeed(String s) {
+    if (s == "") { return TagError("empty") }
+    return 42, null
+}
+
+(Int, error) callViaFnLocal() {
+    Fn<(String), (Int, error)> f = parseSeed
+    return f("hello")
+}
+
+// (4) Synthesized return tail for a declared thrower whose body
+// doesn't end in an explicit return — emitFnDecl must per-slot zero-fill
+// + nil to keep the Go compiler happy. Audit gap #7.
+//
+// Note: a single `if` without `else` would normally emit no tail
+// statement. Here the inner branch is the only return; the synthesized
+// tail covers the fall-through. We force the false branch to fall
+// through by passing in a value that takes neither path.
+(Int, String, error) maybeBoth(Int x) {
+    if (x > 0) {
+        return x, "pos", null
+    }
+    if (x < 0) {
+        return TagError("neg")
+    }
+    // x == 0: no explicit return — synthesized tail must emit
+    // `return 0, "", nil`.
+}
+
+// (5) `return SomeError(...)` from a single-value thrower whose
+// body is a method call return — exercises the auto-fill path
+// where the error ctor lives at the top level. Audit gap #4 variant.
+class Source {
+    Bool fail
+    init(Bool fail) { this.fail = fail }
+
+    pub (String, error) read() {
+        if (this.fail) {
+            return TagError("read failed")
+        }
+        return "data", null
+    }
+}
+
+// Wrap each scenario so an error path can `return` from its own function
+// without short-circuiting the rest of the audit.
+void runOuter(Int x) {
+    var outer = Outer()
+    var m = outer.handle(x) or { print("Outer.handle(${x}) err: ${err}"); return }
+    print("Outer.handle(${x}): ${m}")
+}
+
+void runFnLocal() {
+    var k = callViaFnLocal() or { print("callViaFnLocal err: ${err}"); return }
+    print("callViaFnLocal: ${k}")
+}
+
+void runSource(Bool fail) {
+    var src = Source(fail)
+    var v = src.read() or { print("src(${fail}) err: ${err}"); return }
+    print("src(${fail}): ${v}")
+}
+
+void main() {
+    var (n, s, e1) = namedPair()
+    print("namedPair: ${n}/${s}/${e1}")
+
+    runOuter(5)
+    runOuter(-1)
+    runFnLocal()
+
+    var (a, b, c) = maybeBoth(0)
+    print("maybeBoth(0): ${a}/${b}/${c}")
+
+    runSource(false)
+    runSource(true)
+}

@@ -1,0 +1,7 @@
+namedPair: 7/seven/<nil>
+Outer.handle(5): 10
+Outer.handle(-1) err: neg
+callViaFnLocal: 42
+maybeBoth(0): 0//<nil>
+src(false): data
+src(true) err: read failed

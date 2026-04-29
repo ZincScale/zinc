@@ -492,6 +492,24 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
+		// Explicit Fn-typed local: `Fn<(A), R> f = expr` — register the
+		// declared type so a later `f(args)` call can resolve through
+		// callReturnsError's varTypeExprs lookup. Mirrors the Map-index
+		// tracker above; without this, only Fn values pulled out of a
+		// Map were seen as throwers.
+		if v.Type != nil {
+			if _, ok := v.Type.(*parser.FuncTypeExpr); ok {
+				g.varTypeExprs[v.Name] = v.Type
+			} else if simple, ok := v.Type.(*parser.SimpleType); ok {
+				// Type-alias case: `Factory f = …` where Factory is an
+				// alias to `Fn<...>`. Register the SimpleType — alias
+				// peeling happens at call time via resolveFuncTypeExpr.
+				if _, hasAlias := g.typeAliases[simple.Name]; hasAlias {
+					g.varTypeExprs[v.Name] = v.Type
+				}
+			}
+		}
+
 		// Track pointer vars from optional-returning functions
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
