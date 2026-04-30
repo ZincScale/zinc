@@ -59,16 +59,30 @@ type Generator struct {
 	// prog.Decls before body emission.
 	classes map[string]bool
 
+	// sealedVariants maps a sealed-variant name (e.g. "Circle") to
+	// its parent sealed class name (e.g. "Shape") and field-name list.
+	// Drives match lowering: when a `case Circle(r)` pattern appears,
+	// codegen knows the case-in arm needs `Shape::Circle` (qualified)
+	// and that `r` binds to the first field (from the DataClassDecl's
+	// Params).
+	sealedVariants map[string]sealedVariantInfo
+
 	// Per-file errors. Non-empty means the build fails; the driver
 	// prints these and exits non-zero.
 	compileErrors []string
 }
 
+type sealedVariantInfo struct {
+	Parent string   // sealed class name (e.g. "Shape")
+	Fields []string // field names in declaration order
+}
+
 // New returns a fresh Generator with all maps initialized.
 func New() *Generator {
 	return &Generator{
-		requireSet: make(map[string]bool),
-		classes:    make(map[string]bool),
+		requireSet:     make(map[string]bool),
+		classes:        make(map[string]bool),
+		sealedVariants: make(map[string]sealedVariantInfo),
 	}
 }
 
@@ -106,10 +120,27 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 	// Pre-pass: collect class names so emitCall can rewrite Foo(...)
 	// to Foo.new(...). Has to happen before body emission since a
 	// constructor call to Bar may appear in a class declared earlier
-	// in the file.
+	// in the file. Sealed-class variants register both as constructable
+	// classes and as match-pattern targets.
 	for _, d := range prog.Decls {
-		if c, ok := d.(*parser.ClassDecl); ok {
-			g.classes[c.Name] = true
+		switch decl := d.(type) {
+		case *parser.ClassDecl:
+			g.classes[decl.Name] = true
+			if decl.IsSealed {
+				for _, v := range decl.Variants {
+					g.classes[v.Name] = true
+					fields := make([]string, 0, len(v.Params))
+					for _, p := range v.Params {
+						fields = append(fields, p.Name)
+					}
+					g.sealedVariants[v.Name] = sealedVariantInfo{
+						Parent: decl.Name,
+						Fields: fields,
+					}
+				}
+			}
+		case *parser.DataClassDecl:
+			g.classes[decl.Name] = true
 		}
 	}
 
@@ -210,6 +241,99 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 	}
 }
 
+// emitClassDecl dispatches on whether the class is sealed. Sealed
+// classes get a totally different shape (abstract base + nested
+// variant classes); plain classes go through emitPlainClass.
+func (g *Generator) emitClassDecl(c *parser.ClassDecl) {
+	if c.IsSealed {
+		g.emitSealedClass(c)
+		return
+	}
+	g.emitPlainClass(c)
+}
+
+// emitSealedClass lowers a sealed class to PLAN §4.3 Option A:
+// abstract base + concrete subclasses scoped under the base's
+// namespace. Per phase0's confirmation that Crystal's `case in`
+// doesn't accept this encoding as exhaustive, every match over a
+// sealed subject gets a runtime `in <Base>; raise` arm — emitted
+// here as a marker on the class, consumed by emitMatch.
+//
+// Shape:
+//   abstract class Shape
+//     # base methods (shared across variants)
+//   end
+//   class Shape::Circle < Shape
+//     getter radius : Float64
+//     def initialize(@radius : Float64); end
+//   end
+//   class Shape::Rect < Shape
+//     getter width : Float64
+//     getter height : Float64
+//     def initialize(@width : Float64, @height : Float64); end
+//   end
+//
+// SKETCH: no `to_s` override yet — Crystal's default prints
+// `#<Shape::Circle:0x...>`. Fixing this needs a Float64-formatter
+// helper (phase0/MISMATCH §4) which is a separate slice. For now,
+// `print(c)` on a variant prints the default repr. Computed values
+// from match (`area(c)`, `describe(c)`) work fine.
+func (g *Generator) emitSealedClass(c *parser.ClassDecl) {
+	g.writeln("abstract class %s", c.Name)
+	g.indent++
+	for _, m := range c.Methods {
+		g.emitMethod(c, m)
+	}
+	g.indent--
+	g.writeln("end")
+	g.writeln("")
+
+	// Emit each variant.
+	for i, v := range c.Variants {
+		if i > 0 {
+			g.writeln("")
+		}
+		g.emitSealedVariant(c, v)
+	}
+}
+
+// emitSealedVariant emits one variant of a sealed class. Field
+// declarations all become `getter` (visible from outside the class
+// since match bindings need `s.radius`-style access). Constructor
+// is auto-generated from the variant's params.
+func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataClassDecl) {
+	g.writeln("class %s::%s < %s", parent.Name, v.Name, parent.Name)
+	g.indent++
+	for _, p := range v.Params {
+		g.writeln("getter %s : %s", p.Name, g.crType(p.Type))
+	}
+	if len(v.Params) > 0 {
+		// Constructor: `def initialize(@a : T, @b : U); end`. The
+		// @-prefix syntax is Crystal's shorthand for assigning the
+		// argument to an instance variable in one go.
+		params := make([]string, 0, len(v.Params))
+		for _, p := range v.Params {
+			params = append(params, fmt.Sprintf("@%s : %s", p.Name, g.crType(p.Type)))
+		}
+		g.writeln("")
+		g.writeln("def initialize(%s)", strings.Join(params, ", "))
+		g.writeln("end")
+	}
+	for _, m := range v.Methods {
+		g.writeln("")
+		// Method on a variant — uses the parent class for field
+		// bookkeeping. Construct a synthetic ClassDecl for the
+		// emitMethod's currentClassFields tracking.
+		synth := &parser.ClassDecl{Name: parent.Name + "::" + v.Name}
+		for _, p := range v.Params {
+			synth.Fields = append(synth.Fields, &parser.FieldDecl{Name: p.Name, Type: p.Type})
+		}
+		g.emitMethod(synth, m)
+	}
+	g.indent--
+	g.writeln("end")
+}
+
 // emitClassDecl lowers `class Foo[ : Bar] { fields, init, methods }`
 // to Crystal `class Foo[ < Bar] ... end`.
 //
@@ -238,7 +362,7 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 //   - No const / readonly / init field modifiers — TODO.
 //   - No annotations.
 //   - `super(...)` calls in ctor body — TODO.
-func (g *Generator) emitClassDecl(c *parser.ClassDecl) {
+func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	header := "class " + c.Name
 	if len(c.Parents) > 0 {
 		header += " < " + c.Parents[0]
@@ -473,6 +597,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 			break
 		}
 		g.writeln("end")
+	case *parser.MatchStmt:
+		g.emitMatch(stmt)
 	case *parser.WhileStmt:
 		// `while (cond) { body }` → `while cond; body; end`.
 		// SKETCH: the §1.4 plan note about `while (true)` lowering to
@@ -489,6 +615,88 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	default:
 		g.compileError(0, "codegen_cr: unsupported stmt %T", stmt)
 	}
+}
+
+// emitMatch lowers `match (s) { case Pat(bindings) { ... } }` to a
+// Crystal `case s; in ParentName::Pat; <bindings>; <body>; end` form.
+//
+// For sealed-class subjects, every case-in arm gets type-narrowing
+// (Crystal sees `in Shape::Circle` and treats `s` as `Shape::Circle`
+// in that arm, so `s.radius` works). zinc patterns of the form
+// `Circle(r)` translate to two parts:
+//   1. The type test:        in Shape::Circle
+//   2. Binding to fields:    r = s.radius
+// We emit the binding statements as the first lines inside the arm.
+//
+// Per phase0/MISMATCH §3 + PLAN §11.6: an extra trailing arm
+//   in <Base>; raise "unreachable: bare abstract <Base>"
+// is required because Crystal's exhaustiveness checker reports the
+// abstract base class as a "missing type" even when every concrete
+// subclass is covered. The arm is unreachable at runtime (you can't
+// instantiate an abstract class) but mandatory for the type-checker.
+//
+// SKETCH: only sealed-variant patterns are handled. Wildcard `_`,
+// literal patterns (`case 0`), and tuple destructuring (`case (a, b)`)
+// all TODO. Match expressions (vs match statements) also TODO —
+// they need an outer `result = case ...` shape.
+func (g *Generator) emitMatch(m *parser.MatchStmt) {
+	subject := g.emitExpr(m.Subject)
+	g.writeln("case %s", subject)
+
+	var sealedParent string
+	for _, mc := range m.Cases {
+		// Pattern is typically a CallExpr like `Circle(r)` — Callee is
+		// the variant name, Args are the binding names.
+		call, ok := mc.Pattern.(*parser.CallExpr)
+		if !ok {
+			g.compileError(0, "codegen_cr: match: pattern %T not supported yet", mc.Pattern)
+			continue
+		}
+		ident, ok := call.Callee.(*parser.Ident)
+		if !ok {
+			g.compileError(0, "codegen_cr: match: pattern callee %T not supported", call.Callee)
+			continue
+		}
+		info, ok := g.sealedVariants[ident.Name]
+		if !ok {
+			g.compileError(0, "codegen_cr: match: %q is not a sealed-class variant", ident.Name)
+			continue
+		}
+		sealedParent = info.Parent
+
+		g.writeln("in %s::%s", info.Parent, ident.Name)
+		g.indent++
+		// Emit field bindings: `r = s.radius` for each arg in the pattern.
+		for i, a := range call.Args {
+			if i >= len(info.Fields) {
+				g.compileError(0, "codegen_cr: match pattern %s has more bindings than the variant has fields", ident.Name)
+				break
+			}
+			bindIdent, ok := a.(*parser.Ident)
+			if !ok {
+				g.compileError(0, "codegen_cr: match: pattern binding %T not supported", a)
+				continue
+			}
+			g.writeln("%s = %s.%s", bindIdent.Name, subject, info.Fields[i])
+		}
+		// Emit the case body.
+		if mc.Body != nil {
+			for _, s := range mc.Body.Stmts {
+				g.emitStmt(s)
+			}
+		}
+		g.indent--
+	}
+
+	// Crystal's case-in over an abstract base requires the runtime
+	// fallback arm — phase0 confirmed.
+	if sealedParent != "" {
+		g.writeln("in %s", sealedParent)
+		g.indent++
+		g.writeln(`raise "unreachable: bare abstract %s"`, sealedParent)
+		g.indent--
+	}
+	g.writeln("end")
 }
 
 // --- Expression dispatch -------------------------------------------------
@@ -618,12 +826,19 @@ func (g *Generator) emitCall(c *parser.CallExpr) string {
 	// Constructor call: `Foo(args)` → `Foo.new(args)` when Foo is a
 	// known class. Crystal classes are constructed via `.new`; bare
 	// `Foo(args)` is a syntax error (looks like a function call).
+	// Sealed-class variants need their parent prefix:
+	// `Circle(5.0)` → `Shape::Circle.new(5.0)` because Circle is
+	// declared as a nested class under Shape.
 	if ident, ok := c.Callee.(*parser.Ident); ok && g.classes[ident.Name] {
 		args := make([]string, 0, len(c.Args))
 		for _, a := range c.Args {
 			args = append(args, g.emitExpr(a))
 		}
-		return fmt.Sprintf("%s.new(%s)", ident.Name, strings.Join(args, ", "))
+		typeName := ident.Name
+		if v, isVariant := g.sealedVariants[ident.Name]; isVariant {
+			typeName = v.Parent + "::" + ident.Name
+		}
+		return fmt.Sprintf("%s.new(%s)", typeName, strings.Join(args, ", "))
 	}
 	// Method call with zero args: `c.inc()` — Crystal lets you drop the
 	// parens entirely (`c.inc`), which is the more idiomatic shape.
