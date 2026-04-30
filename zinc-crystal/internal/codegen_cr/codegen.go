@@ -260,12 +260,116 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitFnDecl(decl)
 	case *parser.ClassDecl:
 		g.emitClassDecl(decl)
+	case *parser.DataClassDecl:
+		g.emitTopLevelDataClass(decl)
+	case *parser.EnumDecl:
+		g.emitEnumDecl(decl)
+	case *parser.ConstDecl:
+		g.emitConstDecl(decl)
+	case *parser.InterfaceDecl:
+		g.emitInterfaceDecl(decl)
 	default:
-		// SKETCH: sealed, enums, data classes, interfaces all land
-		// incrementally. Today's class slice covers plain `class Foo`
-		// with init + fields + methods + single-parent inheritance.
 		g.compileError(0, "codegen_cr: %T not implemented yet", decl)
 	}
+}
+
+// emitTopLevelDataClass lowers `data Foo(int x, String y)` declared at
+// the top level (not as a sealed variant). Same shape as a sealed
+// variant minus the parent class — plain class + getters + initialize +
+// to_s in the zinc-go printable format.
+func (g *Generator) emitTopLevelDataClass(d *parser.DataClassDecl) {
+	header := "class " + d.Name
+	if len(d.Parents) > 0 {
+		header += " < " + d.Parents[0]
+	}
+	g.writeln(header)
+	g.indent++
+	for _, p := range d.Params {
+		g.writeln("getter %s : %s", p.Name, g.crType(p.Type))
+	}
+	if len(d.Params) > 0 {
+		params := make([]string, 0, len(d.Params))
+		for _, p := range d.Params {
+			params = append(params, fmt.Sprintf("@%s : %s", p.Name, g.crType(p.Type)))
+		}
+		g.writeln("")
+		g.writeln("def initialize(%s)", strings.Join(params, ", "))
+		g.writeln("end")
+		g.needsZincFmt = true
+		g.writeln("")
+		g.writeln("def to_s(io : IO) : Nil")
+		g.indent++
+		g.writeln(`io << "%s("`, d.Name)
+		for i, p := range d.Params {
+			if i > 0 {
+				g.writeln(`io << ", "`)
+			}
+			g.writeln(`io << "%s=" << zinc_fmt(@%s)`, p.Name, p.Name)
+		}
+		g.writeln(`io << ")"`)
+		g.indent--
+		g.writeln("end")
+	}
+	for _, m := range d.Methods {
+		g.writeln("")
+		synth := &parser.ClassDecl{Name: d.Name}
+		for _, p := range d.Params {
+			synth.Fields = append(synth.Fields, &parser.FieldDecl{Name: p.Name, Type: p.Type})
+		}
+		g.emitMethod(synth, m)
+	}
+	g.indent--
+	g.writeln("end")
+	g.classes[d.Name] = true
+}
+
+// emitEnumDecl lowers `enum Color { Red, Green, Blue }` to Crystal's
+// `enum Color; Red; Green; Blue; end`. zinc enums today are
+// value-less (just discriminants); Crystal enums get integer backing
+// automatically. Match patterns over enum members work natively.
+func (g *Generator) emitEnumDecl(e *parser.EnumDecl) {
+	g.writeln("enum %s", e.Name)
+	g.indent++
+	for _, v := range e.Variants {
+		g.writeln("%s", v)
+	}
+	g.indent--
+	g.writeln("end")
+}
+
+// emitConstDecl lowers `[pub] const X[: T] = expr` to Crystal's
+// top-level `X = expr`. Crystal constants are by-convention SCREAMING_CASE
+// but case isn't enforced; emit the user's exact name. Type annotation
+// lands as a comment for now (Crystal infers from the value).
+func (g *Generator) emitConstDecl(c *parser.ConstDecl) {
+	g.writeln("%s = %s", c.Name, g.emitExpr(c.Value))
+}
+
+// emitInterfaceDecl lowers `interface Speaker { void greet() }` to
+// Crystal's `module Speaker` with `abstract def` declarations.
+// Implementing classes do `include Speaker` (lowered when emitting
+// classes whose Parents includes an interface name — TODO).
+func (g *Generator) emitInterfaceDecl(i *parser.InterfaceDecl) {
+	g.writeln("module %s", i.Name)
+	g.indent++
+	for _, m := range i.Methods {
+		params := make([]string, 0, len(m.Params))
+		for _, p := range m.Params {
+			params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+		}
+		ret := g.crType(m.ReturnType)
+		if ret == "" {
+			ret = "Nil"
+		}
+		name := crMethodName(m.Name)
+		if len(m.Params) == 0 {
+			g.writeln("abstract def %s : %s", name, ret)
+		} else {
+			g.writeln("abstract def %s(%s) : %s", name, strings.Join(params, ", "), ret)
+		}
+	}
+	g.indent--
+	g.writeln("end")
 }
 
 // emitClassDecl dispatches on whether the class is sealed. Sealed
@@ -784,6 +888,13 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 		}
 		return "Tuple(" + strings.Join(parts, ", ") + ")"
 	}
+	if arr, ok := t.(*parser.ArrayType); ok {
+		// Sized array `int[]` → `Array(Int32)`. zinc's typed ArrayType
+		// (without explicit size) is a regular Crystal Array. Sized
+		// fixed-length arrays would use StaticArray(T, N) — TODO when
+		// SizedArrayExpr is the input.
+		return "Array(" + g.crType(arr.ElementType) + ")"
+	}
 	g.compileError(0, "codegen_cr: unsupported type %T", t)
 	return "Object"
 }
@@ -860,6 +971,14 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitMatch(stmt)
 	case *parser.ParallelForStmt:
 		g.emitParallelFor(stmt)
+	case *parser.AssertStmt:
+		// `assert (cond)` → `raise "assertion failed" unless cond`.
+		// `assert (cond, msg)` → `raise msg unless cond`.
+		msg := `"assertion failed"`
+		if stmt.Message != nil {
+			msg = g.emitExpr(stmt.Message)
+		}
+		g.writeln("raise %s unless %s", msg, g.emitExpr(stmt.Cond))
 	case *parser.ForStmt:
 		g.emitFor(stmt)
 	case *parser.WhileStmt:
@@ -1274,41 +1393,59 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 
 	var sealedParent string
 	for _, mc := range m.Cases {
-		// Pattern is typically a CallExpr like `Circle(r)` — Callee is
-		// the variant name, Args are the binding names.
-		call, ok := mc.Pattern.(*parser.CallExpr)
-		if !ok {
-			g.compileError(0, "codegen_cr: match: pattern %T not supported yet", mc.Pattern)
-			continue
-		}
-		ident, ok := call.Callee.(*parser.Ident)
-		if !ok {
-			g.compileError(0, "codegen_cr: match: pattern callee %T not supported", call.Callee)
-			continue
-		}
-		info, ok := g.sealedVariants[ident.Name]
-		if !ok {
-			g.compileError(0, "codegen_cr: match: %q is not a sealed-class variant", ident.Name)
-			continue
-		}
-		sealedParent = info.Parent
-
-		g.writeln("in %s::%s", info.Parent, ident.Name)
-		g.indent++
-		// Emit field bindings: `r = s.radius` for each arg in the pattern.
-		for i, a := range call.Args {
-			if i >= len(info.Fields) {
-				g.compileError(0, "codegen_cr: match pattern %s has more bindings than the variant has fields", ident.Name)
-				break
+		// Wildcard `_` (Pattern is nil) → Crystal `else` arm.
+		if mc.Pattern == nil {
+			g.writeln("else")
+			g.indent++
+			if mc.Body != nil {
+				for _, s := range mc.Body.Stmts {
+					g.emitStmt(s)
+				}
 			}
-			bindIdent, ok := a.(*parser.Ident)
+			g.indent--
+			continue
+		}
+		// Pattern is typically a CallExpr like `Circle(r)` for sealed
+		// destructuring. Plain idents and literals are also valid for
+		// non-sealed match (enum variants, integer cases, etc.).
+		if call, ok := mc.Pattern.(*parser.CallExpr); ok {
+			ident, ok := call.Callee.(*parser.Ident)
 			if !ok {
-				g.compileError(0, "codegen_cr: match: pattern binding %T not supported", a)
+				g.compileError(0, "codegen_cr: match: pattern callee %T not supported", call.Callee)
 				continue
 			}
-			g.writeln("%s = %s.%s", bindIdent.Name, subject, info.Fields[i])
+			info, ok := g.sealedVariants[ident.Name]
+			if !ok {
+				g.compileError(0, "codegen_cr: match: %q is not a sealed-class variant", ident.Name)
+				continue
+			}
+			sealedParent = info.Parent
+			g.writeln("in %s::%s", info.Parent, ident.Name)
+			g.indent++
+			for i, a := range call.Args {
+				if i >= len(info.Fields) {
+					g.compileError(0, "codegen_cr: match pattern %s has more bindings than fields", ident.Name)
+					break
+				}
+				bindIdent, ok := a.(*parser.Ident)
+				if !ok {
+					g.compileError(0, "codegen_cr: match: pattern binding %T not supported", a)
+					continue
+				}
+				g.writeln("%s = %s.%s", bindIdent.Name, subject, info.Fields[i])
+			}
+			if mc.Body != nil {
+				for _, s := range mc.Body.Stmts {
+					g.emitStmt(s)
+				}
+			}
+			g.indent--
+			continue
 		}
-		// Emit the case body.
+		// Literal / ident pattern (enum variant, integer literal, etc.).
+		// Crystal's case-in handles these natively.
+		g.writeln("in %s", g.emitExpr(mc.Pattern))
+		g.indent++
 		if mc.Body != nil {
 			for _, s := range mc.Body.Stmts {
 				g.emitStmt(s)
@@ -1400,6 +1537,32 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return fmt.Sprintf("(%s%s%s)", g.emitExpr(expr.Start), op, g.emitExpr(expr.End))
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.emitExpr(expr.Object), g.emitExpr(expr.Index))
+	case *parser.SliceExpr:
+		// `arr[low:high]` → `arr[low...high]`. zinc semantics match Go
+		// (exclusive upper), Crystal's `..` is inclusive so we use `...`.
+		// Open-ended slices: `arr[:high]` → `arr[..high-1]` (TODO: edge
+		// cases); `arr[low:]` → `arr[low..-1]` (TODO).
+		obj := g.emitExpr(expr.Object)
+		low := "0"
+		if expr.Low != nil {
+			low = g.emitExpr(expr.Low)
+		}
+		if expr.High == nil {
+			return fmt.Sprintf("%s[%s..-1]", obj, low)
+		}
+		return fmt.Sprintf("%s[%s...%s]", obj, low, g.emitExpr(expr.High))
+	case *parser.SafeNavExpr:
+		// `obj?.field` → `obj.try(&.field)`. For `obj?.method(args)` use
+		// `obj.try(&.method(args))` or block form. SKETCH: only the
+		// field-access form today; method form lands when needed.
+		if expr.Call == nil {
+			return fmt.Sprintf("%s.try(&.%s)", g.emitExpr(expr.Object), crMethodName(expr.Field))
+		}
+		args := make([]string, 0, len(expr.Call.Args))
+		for _, a := range expr.Call.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		return fmt.Sprintf("%s.try(&.%s(%s))", g.emitExpr(expr.Object), crMethodName(expr.Field), strings.Join(args, ", "))
 	case *parser.CapacityExpr:
 		return g.emitCapacity(expr)
 	case *parser.SpawnExpr:
