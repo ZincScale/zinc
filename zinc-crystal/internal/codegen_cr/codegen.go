@@ -863,6 +863,11 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	if len(fn.Params) == 0 {
 		header = fmt.Sprintf("def %s : %s", fn.Name, ret)
 	}
+	// Generic params: zinc `T identity<T>(T x)` → Crystal
+	// `def identity(x : T) : T forall T`. Multiple params space-separated.
+	if len(fn.TypeParams) > 0 {
+		header += " forall " + strings.Join(fn.TypeParams, ", ")
+	}
 	g.writeln(header)
 	g.indent++
 
