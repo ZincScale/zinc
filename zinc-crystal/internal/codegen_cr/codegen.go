@@ -72,6 +72,12 @@ type Generator struct {
 	// lower to) require `include`, real classes use `<`.
 	interfaces map[string]bool
 
+	// enumMembers maps a variant name (e.g. "Red") to the enum it
+	// belongs to (e.g. "Color"). zinc lets users write bare `Red`;
+	// Crystal requires the qualified form `Color::Red` everywhere
+	// (variable assignments, match patterns, comparisons).
+	enumMembers map[string]string
+
 	// sealedVariants maps a sealed-variant name (e.g. "Circle") to
 	// its parent sealed class name (e.g. "Shape") and field-name list.
 	// Drives match lowering: when a `case Circle(r)` pattern appears,
@@ -106,6 +112,7 @@ func New() *Generator {
 		classes:        make(map[string]bool),
 		interfaces:     make(map[string]bool),
 		sealedVariants: make(map[string]sealedVariantInfo),
+		enumMembers:    make(map[string]string),
 	}
 }
 
@@ -166,6 +173,10 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 			g.classes[decl.Name] = true
 		case *parser.InterfaceDecl:
 			g.interfaces[decl.Name] = true
+		case *parser.EnumDecl:
+			for _, v := range decl.Variants {
+				g.enumMembers[v] = decl.Name
+			}
 		}
 	}
 
@@ -1625,6 +1636,12 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		// lowers to `@field`. Outside class scope, plain ident.
 		if g.currentClassFields != nil && g.currentClassFields[expr.Name] {
 			return "@" + expr.Name
+		}
+		// Enum member qualification: bare `Red` → `Color::Red`.
+		// zinc lets users write the variant name unqualified; Crystal
+		// always requires the enum prefix.
+		if enumName, ok := g.enumMembers[expr.Name]; ok {
+			return enumName + "::" + expr.Name
 		}
 		return expr.Name
 	case *parser.ThisExpr:
