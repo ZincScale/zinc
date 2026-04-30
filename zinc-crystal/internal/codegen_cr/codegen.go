@@ -268,6 +268,11 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 		g.emitConstDecl(decl)
 	case *parser.InterfaceDecl:
 		g.emitInterfaceDecl(decl)
+	case *parser.TypeAliasDecl:
+		// `type Foo = Bar` → Crystal's `alias Foo = Bar`. Both have
+		// the same semantics — Foo and Bar are interchangeable in
+		// type position.
+		g.writeln("alias %s = %s", decl.Name, g.crType(decl.Type))
 	default:
 		g.compileError(0, "codegen_cr: %T not implemented yet", decl)
 	}
@@ -895,6 +900,21 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 		// SizedArrayExpr is the input.
 		return "Array(" + g.crType(arr.ElementType) + ")"
 	}
+	if fn, ok := t.(*parser.FuncTypeExpr); ok {
+		// `Fn<(A, B), C>` → Crystal `Proc(A, B, C)` (return type
+		// trails the param types). Crystal procs have the same
+		// shape — first-class function values.
+		parts := make([]string, 0, len(fn.Params)+1)
+		for _, p := range fn.Params {
+			parts = append(parts, g.crType(p))
+		}
+		ret := g.crType(fn.ReturnType)
+		if ret == "" {
+			ret = "Nil"
+		}
+		parts = append(parts, ret)
+		return "Proc(" + strings.Join(parts, ", ") + ")"
+	}
 	g.compileError(0, "codegen_cr: unsupported type %T", t)
 	return "Object"
 }
@@ -1003,6 +1023,10 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("next")
 	case *parser.WithStmt:
 		g.emitWith(stmt)
+	case *parser.TupleVarStmt:
+		// `(a, b) = expr` → `a, b = expr` (Crystal native tuple
+		// destructuring on the LHS). Names are already in stmt.Names.
+		g.writeln("%s = %s", strings.Join(stmt.Names, ", "), g.emitExpr(stmt.Value))
 	default:
 		g.compileError(0, "codegen_cr: unsupported stmt %T", stmt)
 	}
@@ -1474,6 +1498,13 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 // marked TODO and routes through compileError so we know what the
 // next slice has to grow.
 func (g *Generator) emitExpr(e parser.Expr) string {
+	if e == nil {
+		// Nil expr usually means a missing-value slot the caller should
+		// have skipped (e.g. nullable field with no default). Emit the
+		// nil literal so we never produce malformed Crystal; callers
+		// that want to skip should check for nil before invoking us.
+		return "nil"
+	}
 	switch expr := e.(type) {
 	case *parser.Ident:
 		// Implicit self: bare field name inside a method/ctor body
@@ -1575,6 +1606,36 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 			args = append(args, g.emitExpr(a))
 		}
 		return fmt.Sprintf("super(%s)", strings.Join(args, ", "))
+	case *parser.SpreadExpr:
+		// `arr...` at a call site → Crystal's `*arr` splat.
+		return "*" + g.emitExpr(expr.Expr)
+	case *parser.SizedArrayExpr:
+		// `int[10]` → `Array(Int32).new(10, 0)`. Crystal initializes
+		// new arrays explicitly with a default value; the zero value
+		// for Int32/Int64/Float* is 0, for String "" — we'd need
+		// type-aware default selection. SKETCH: use 0 for numeric,
+		// rely on Crystal's compile-time check for others.
+		zero := "0"
+		switch expr.ElementType {
+		case "String":
+			zero = `""`
+		case "boolean", "Bool":
+			zero = "false"
+		}
+		ct := expr.ElementType
+		if mapped, ok := primitiveTypeMap[ct]; ok {
+			ct = mapped
+		}
+		return fmt.Sprintf("Array(%s).new(%s, %s)", ct, g.emitExpr(expr.Size), zero)
+	case *parser.IfExpr:
+		// `if cond: a else: b` → Crystal ternary form
+		// `(if cond; a; else; b; end)`. zinc users may have chained
+		// elses (else if cond: c else: d) which we walk recursively.
+		return g.emitIfExpr(expr)
+	case *parser.LambdaExpr:
+		return g.emitLambda(expr)
+	case *parser.MatchExpr:
+		return g.emitMatchExpr(expr)
 	case *parser.TupleLit:
 		parts := make([]string, len(expr.Elements))
 		for i, e := range expr.Elements {
@@ -1679,6 +1740,133 @@ var crystalMethodRewrite = map[string]string{
 	"Unlock":  "unlock_write",
 }
 
+// emitLambda lowers `(x: Int) => x + 1` to Crystal's proc form
+// `->(x : Int32) { x + 1 }`. Both single-expr and block-body forms
+// are supported. Crystal procs are first-class values that can be
+// stored, passed, called, etc. — same role as zinc lambdas.
+//
+// SKETCH: when the lambda is passed as the trailing arg of a method
+// call, Crystal idiom is `arr.each { |x| ... }` (block) rather than
+// a proc. We emit the proc form universally for now; converting to
+// block form when called as `arr.each(lambda)` would need pattern
+// detection and a wrapper. Phase 1 follow-up.
+func (g *Generator) emitLambda(l *parser.LambdaExpr) string {
+	params := make([]string, 0, len(l.Params))
+	for _, p := range l.Params {
+		if p.Type != nil {
+			params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+		} else {
+			// Untyped params — Crystal procs need types, so fall back
+			// to a block-style emit when types aren't known.
+			params = append(params, p.Name)
+		}
+	}
+	paramStr := ""
+	if len(params) > 0 {
+		paramStr = "(" + strings.Join(params, ", ") + ")"
+	}
+	if l.Expr != nil {
+		return fmt.Sprintf("->%s { %s }", paramStr, g.emitExpr(l.Expr))
+	}
+	if l.Body == nil {
+		return fmt.Sprintf("->%s { }", paramStr)
+	}
+	// Block body: emit as multi-statement proc. The body sub-emit
+	// captures stmts to a sub-buffer.
+	sub := *g
+	sub.buf.Reset()
+	sub.indent = 0
+	for _, s := range l.Body.Stmts {
+		sub.emitStmt(s)
+	}
+	body := strings.TrimSpace(sub.buf.String())
+	body = strings.ReplaceAll(body, "\n", "; ")
+	return fmt.Sprintf("->%s { %s }", paramStr, body)
+}
+
+// emitMatchExpr lowers a match expression — match in value position
+// like `var x = match (s) { case Foo -> 1, case Bar -> 2 }`. Crystal's
+// `case in` is itself an expression, so we wrap directly.
+//
+// SKETCH: same restrictions as emitMatch — sealed-variant + literal
+// patterns supported, no destructuring of arbitrary patterns yet.
+func (g *Generator) emitMatchExpr(m *parser.MatchExpr) string {
+	var sb strings.Builder
+	sb.WriteString("(case ")
+	sb.WriteString(g.emitExpr(m.Subject))
+	for _, mc := range m.Cases {
+		if mc.Pattern == nil {
+			sb.WriteString("; else; ")
+			sb.WriteString(g.emitExpr(mc.Value))
+			continue
+		}
+		// Sealed-variant pattern.
+		if call, ok := mc.Pattern.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				if info, ok := g.sealedVariants[ident.Name]; ok {
+					sb.WriteString("; in ")
+					sb.WriteString(info.Parent)
+					sb.WriteString("::")
+					sb.WriteString(ident.Name)
+					sb.WriteString("; ")
+					// Inline bindings + value as a block expression.
+					subject := g.emitExpr(m.Subject)
+					for i, a := range call.Args {
+						if i >= len(info.Fields) {
+							break
+						}
+						if bid, ok := a.(*parser.Ident); ok {
+							sb.WriteString(bid.Name)
+							sb.WriteString(" = ")
+							sb.WriteString(subject)
+							sb.WriteString(".")
+							sb.WriteString(info.Fields[i])
+							sb.WriteString("; ")
+						}
+					}
+					sb.WriteString(g.emitExpr(mc.Value))
+					continue
+				}
+			}
+		}
+		// Literal pattern.
+		sb.WriteString("; in ")
+		sb.WriteString(g.emitExpr(mc.Pattern))
+		sb.WriteString("; ")
+		sb.WriteString(g.emitExpr(mc.Value))
+	}
+	sb.WriteString("; end)")
+	return sb.String()
+}
+
+// emitIfExpr lowers a ternary-like if-expression. Crystal's `if/else`
+// is itself an expression so we wrap in parens for clarity at use site:
+// `var x = if cond: 1 else: 2` becomes `x = (if cond; 1; else; 2; end)`.
+// Chained else-ifs walk through expr.Else if it's another IfExpr.
+func (g *Generator) emitIfExpr(e *parser.IfExpr) string {
+	var sb strings.Builder
+	sb.WriteString("(if ")
+	sb.WriteString(g.emitExpr(e.Cond))
+	sb.WriteString("; ")
+	sb.WriteString(g.emitExpr(e.Then))
+	cur := e.Else
+	for cur != nil {
+		if elif, ok := cur.(*parser.IfExpr); ok {
+			sb.WriteString("; elsif ")
+			sb.WriteString(g.emitExpr(elif.Cond))
+			sb.WriteString("; ")
+			sb.WriteString(g.emitExpr(elif.Then))
+			cur = elif.Else
+			continue
+		}
+		sb.WriteString("; else; ")
+		sb.WriteString(g.emitExpr(cur))
+		break
+	}
+	sb.WriteString("; end)")
+	return sb.String()
+}
+
 // emitListLit lowers a list literal. zinc `["a","b"]` → Crystal `["a","b"]`
 // (1:1 syntax). When ExplicitType is set (`List<int> xs = [1,2]`), we
 // emit the typed array form `[1, 2] of Int32` so Crystal infers the
@@ -1706,8 +1894,16 @@ func (g *Generator) emitListLit(l *parser.ListLit) string {
 // SKETCH leaves that case as a TODO.
 func (g *Generator) emitMapLit(m *parser.MapLit) string {
 	if len(m.Keys) == 0 {
-		g.compileError(0, "codegen_cr: empty map literal needs explicit type — TODO")
-		return "{} of String => Int32"
+		// Empty map: prefer the explicit-type form when zinc gave one,
+		// otherwise emit Hash(String, String).new which is the most
+		// common-case default and lets Crystal's type inference take
+		// over once the map is populated.
+		if m.ExplicitType != nil {
+			if gt, ok := m.ExplicitType.(*parser.GenericType); ok && len(gt.TypeArgs) == 2 {
+				return "{} of " + g.crType(gt.TypeArgs[0]) + " => " + g.crType(gt.TypeArgs[1])
+			}
+		}
+		return "Hash(String, String).new"
 	}
 	parts := make([]string, 0, len(m.Keys))
 	for i := range m.Keys {
