@@ -721,7 +721,7 @@ func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 
 	params := make([]string, 0, len(m.Params))
 	for _, p := range m.Params {
-		params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+		params = append(params, g.formatParam(p))
 	}
 	ret := g.crType(m.ReturnType)
 	if ret == "" {
@@ -765,6 +765,28 @@ func isTrueLit(e parser.Expr) bool {
 // can revisit if users hit a case the convention misses.
 func isErrorClassName(name string) bool {
 	return strings.HasSuffix(name, "Error") || strings.HasSuffix(name, "Exception")
+}
+
+// formatParam renders one zinc parameter to its Crystal form, including
+// the default-value tail when the user supplied one. Variadic params
+// get the splat prefix:
+//
+//   String host                → host : String
+//   int port = 8080            → port : Int32 = 8080
+//   int... numbers             → *numbers : Int32
+//
+// Crystal's defaults are call-site-implicit (same shape as Python and
+// Ruby); zinc-go's projects pass calls through unchanged and let
+// Crystal fill missing trailing args.
+func (g *Generator) formatParam(p *parser.ParamDecl) string {
+	t := g.crType(p.Type)
+	if p.Variadic {
+		return "*" + p.Name + " : " + t
+	}
+	if p.Default != nil {
+		return fmt.Sprintf("%s : %s = %s", p.Name, t, g.emitExpr(p.Default))
+	}
+	return fmt.Sprintf("%s : %s", p.Name, t)
 }
 
 // isThrowerType reports whether a TypeExpr is a thrower return shape:
@@ -824,7 +846,7 @@ func (g *Generator) throwerValueType(t parser.TypeExpr) string {
 func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	params := make([]string, 0, len(fn.Params))
 	for _, p := range fn.Params {
-		params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+		params = append(params, g.formatParam(p))
 	}
 	ret := g.crType(fn.ReturnType)
 	if ret == "" {
