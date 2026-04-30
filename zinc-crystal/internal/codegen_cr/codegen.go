@@ -323,7 +323,12 @@ func (g *Generator) emitSealedClass(c *parser.ClassDecl) {
 // emitSealedVariant emits one variant of a sealed class. Field
 // declarations all become `getter` (visible from outside the class
 // since match bindings need `s.radius`-style access). Constructor
-// is auto-generated from the variant's params.
+// is auto-generated from the variant's params, plus a `to_s` override
+// that matches zinc-go's `Circle(radius=5)` format byte-for-byte.
+//
+// The to_s emit goes through zinc_fmt for each field value so
+// integer-valued Float64 fields (`Circle(radius=5.0)`) print as
+// `Circle(radius=5)` matching Go's %v output.
 func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataClassDecl) {
 	g.writeln("class %s::%s < %s", parent.Name, v.Name, parent.Name)
 	g.indent++
@@ -340,6 +345,26 @@ func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataCl
 		}
 		g.writeln("")
 		g.writeln("def initialize(%s)", strings.Join(params, ", "))
+		g.writeln("end")
+	}
+	// to_s override — `<Variant>(<field>=<value>, ...)` shape.
+	if len(v.Params) > 0 {
+		g.needsZincFmt = true
+		g.writeln("")
+		g.writeln("def to_s(io : IO) : Nil")
+		g.indent++
+		// Build the output as one io << "..." chain. Crystal allows
+		// io << "Circle(radius=" << zinc_fmt(@radius) << ")" but
+		// requires no commas. We emit pieces line by line for clarity.
+		g.writeln(`io << "%s("`, v.Name)
+		for i, p := range v.Params {
+			if i > 0 {
+				g.writeln(`io << ", "`)
+			}
+			g.writeln(`io << "%s=" << zinc_fmt(@%s)`, p.Name, p.Name)
+		}
+		g.writeln(`io << ")"`)
+		g.indent--
 		g.writeln("end")
 	}
 	for _, m := range v.Methods {
@@ -1428,6 +1453,14 @@ var crystalMethodRewrite = map[string]string{
 	"filter":   "select",
 	"length":   "size",
 	"indexOf":  "index",
+	// Sync::RWLock idioms — Go-style RLock/RUnlock map to Crystal's
+	// imperative read/write helpers. Block forms (`rw.read { }`,
+	// `rw.write { }`) are also supported in Crystal but require a
+	// control-flow rewrite, not just a method rename.
+	"RLock":   "lock_read",
+	"RUnlock": "unlock_read",
+	"Lock":    "lock_write",
+	"Unlock":  "unlock_write",
 }
 
 // emitListLit lowers a list literal. zinc `["a","b"]` → Crystal `["a","b"]`
