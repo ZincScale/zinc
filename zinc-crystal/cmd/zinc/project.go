@@ -434,16 +434,30 @@ func invokeBuildStatic(projectDir, projectName string) error {
 	return nil
 }
 
-// transpileSources walks <projectDir>/src/, parses each .zn file
-// through zinc-go's shared parser, runs the Crystal codegen, and
-// writes the result alongside the .zn as .cr.
+// parsedSource holds one .zn file's parser output along with paths.
+// transpileSources collects these in a first pass so the second pass
+// can cross-pollinate symbol tables across files (a class declared
+// in helpers.zn must be visible to the entry-point's codegen).
+type parsedSource struct {
+	base   string
+	znPath string
+	crPath string
+	prog   *parser.Program
+}
+
+// transpileSources walks <projectDir>/src/ in two passes:
 //
-// Multi-file flow: the file matching cfg.Name (the project entry)
-// is the one Crystal's `crystal build` compiles, and it gets
-// `require "./<sibling>"` lines prepended so all helper files are
-// pulled in. Non-entry files are emitted as plain Crystal modules
-// with no trailing main invocation (the codegen handles that based
-// on whether a main FnDecl is present).
+//   1. Parse every .zn file into an AST. Capture each as parsedSource.
+//   2. For each file, build a Generator that has been pre-seeded with
+//      every OTHER file's top-level symbols via CollectSymbols, then
+//      emit. This way a constructor call like `Foo(...)` resolves to
+//      `Foo.new(...)` even when class Foo lives in a sibling .zn.
+//
+// The entry-point file (matching cfg.Name) gets `require "./<sibling>"`
+// lines prepended so Crystal's compiler pulls in helper files at
+// build time. Non-entry files are emitted as plain Crystal source
+// (no trailing main invocation — codegen handles that based on
+// presence of a main FnDecl in the program).
 //
 // SKETCH: subdirectory subpackages (`src/core/foo.zn`) — TODO. For
 // now, all .zn files must be at the top of src/.
@@ -453,16 +467,9 @@ func transpileSources(cfg *crystalConfig, projectDir string) error {
 	if err != nil {
 		return fmt.Errorf("read src/: %w", err)
 	}
-	var siblings []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zn") {
-			continue
-		}
-		base := strings.TrimSuffix(e.Name(), ".zn")
-		if base != cfg.Name {
-			siblings = append(siblings, base)
-		}
-	}
+
+	// Pass 1: parse every .zn into a parsedSource.
+	var sources []parsedSource
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zn") {
 			continue
@@ -470,22 +477,73 @@ func transpileSources(cfg *crystalConfig, projectDir string) error {
 		base := strings.TrimSuffix(e.Name(), ".zn")
 		znPath := filepath.Join(srcDir, e.Name())
 		crPath := filepath.Join(srcDir, base+".cr")
-		isEntry := base == cfg.Name
-		var entrySiblings []string
-		if isEntry {
-			entrySiblings = siblings
+		prog, err := parseZnFile(znPath)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", e.Name(), err)
 		}
-		if err := transpileOne(znPath, crPath, cfg.Name, entrySiblings); err != nil {
-			return fmt.Errorf("transpile %s: %w", e.Name(), err)
+		sources = append(sources, parsedSource{
+			base:   base,
+			znPath: znPath,
+			crPath: crPath,
+			prog:   prog,
+		})
+	}
+
+	// Determine sibling list (everything that isn't the entry point).
+	var siblings []string
+	for _, s := range sources {
+		if s.base != cfg.Name {
+			siblings = append(siblings, s.base)
+		}
+	}
+
+	// Pass 2: emit each, with cross-file symbols pre-seeded.
+	for _, s := range sources {
+		g := codegen_cr.New()
+		g.SetClassName(cfg.Name)
+		// Seed g's symbol tables from every OTHER source's program.
+		// This is what makes class names declared in helpers.zn
+		// visible to entry-point.zn's codegen — `Foo(...)` lowers
+		// to `Foo.new(...)` correctly even when Foo is cross-file.
+		for _, other := range sources {
+			if other.base == s.base {
+				continue
+			}
+			g.CollectSymbols(other.prog)
+		}
+		files := g.GenerateFiles(s.prog)
+		if errs := g.CompileErrors(); len(errs) > 0 {
+			return fmt.Errorf("transpile %s.zn: codegen errors: %s",
+				s.base, strings.Join(errs, "; "))
+		}
+		if len(files) == 0 {
+			return fmt.Errorf("codegen produced no output for %s.zn", s.base)
+		}
+		content := files[0].Content
+		// Entry-point file requires every sibling.
+		if s.base == cfg.Name && len(siblings) > 0 {
+			var b strings.Builder
+			for _, sib := range siblings {
+				fmt.Fprintf(&b, "require \"./%s\"\n", sib)
+			}
+			b.WriteString("\n")
+			b.WriteString(content)
+			content = b.String()
+		}
+		if err := os.WriteFile(s.crPath, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", s.crPath, err)
 		}
 	}
 	return nil
 }
 
-func transpileOne(znPath, crPath, projectName string, siblings []string) error {
+// parseZnFile reads, lexes, and parses one .zn into a Program. Used
+// by both pass 1 of transpileSources and any other call site that
+// needs an AST without immediately emitting Crystal.
+func parseZnFile(znPath string) (*parser.Program, error) {
 	src, err := os.ReadFile(znPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	l := lexer.New(string(src))
 	var tokens []lexer.Token
@@ -497,39 +555,14 @@ func transpileOne(znPath, crPath, projectName string, siblings []string) error {
 		}
 	}
 	if len(l.Errors) > 0 {
-		return fmt.Errorf("lex errors: %s", strings.Join(l.Errors, "; "))
+		return nil, fmt.Errorf("lex errors: %s", strings.Join(l.Errors, "; "))
 	}
 	p := parser.New(tokens)
 	prog := p.ParseV2()
 	if len(p.Errors) > 0 {
-		return fmt.Errorf("parse errors: %s", strings.Join(p.Errors, "; "))
+		return nil, fmt.Errorf("parse errors: %s", strings.Join(p.Errors, "; "))
 	}
-	g := codegen_cr.New()
-	g.SetClassName(projectName)
-	files := g.GenerateFiles(prog)
-	if errs := g.CompileErrors(); len(errs) > 0 {
-		return fmt.Errorf("codegen errors: %s", strings.Join(errs, "; "))
-	}
-	// SKETCH: GenerateFiles returns one file today (single-target name).
-	// Write its content to crPath. Multi-file lands when codegen_cr
-	// grows class-per-file emit.
-	if len(files) == 0 {
-		return fmt.Errorf("codegen produced no output")
-	}
-	content := files[0].Content
-	if len(siblings) > 0 {
-		// Prepend `require "./<sibling>"` lines for the entry-point
-		// file so Crystal's compiler pulls in helper files. Crystal
-		// require paths are relative to the file when prefixed with `./`.
-		var b strings.Builder
-		for _, s := range siblings {
-			fmt.Fprintf(&b, "require \"./%s\"\n", s)
-		}
-		b.WriteString("\n")
-		b.WriteString(content)
-		content = b.String()
-	}
-	return os.WriteFile(crPath, []byte(content), 0o644)
+	return prog, nil
 }
 
 // runProject does `zinc build` if the binary is stale (or missing),

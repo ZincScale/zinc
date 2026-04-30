@@ -128,38 +128,23 @@ func New() *Generator {
 // Non-empty result must cause the driver to fail the build.
 func (g *Generator) CompileErrors() []string { return g.compileErrors }
 
-// SetClassName sets the Crystal target binary's basename. Used both
-// for the `def main` / trailing-`main` shape and (eventually) for
-// any naming that derives from the binary's identity. Conventionally
-// matches the project name from zinc.toml.
-func (g *Generator) SetClassName(name string) { g.className = name }
-
-// OutputFile is the (filename, content) pair the driver writes to disk.
-// Mirrors zinc-go's same struct. zinc-crystal currently emits a single
-// file per .zn input — multi-file projects work because each .zn
-// becomes its own .cr (no merging needed at this stage).
-type OutputFile struct {
-	Name    string
-	Content string
-}
-
-// GenerateFiles walks the parsed Program and returns the .cr files
-// to write to disk. SKETCH: emits one src/<className>.cr that
-// contains every decl + a `def main` wrapping any top-level stmts.
+// CollectSymbols walks one Program's top-level Decls and registers
+// the class / interface / enum / sealed-variant names into the
+// Generator's symbol tables. Idempotent and additive — call it for
+// every sibling Program in a multi-file project before calling
+// GenerateFiles, so the entry-point file's emitCall sees that
+// `class Foo` declared in helpers.zn is a class (and lowers
+// `Foo(...)` → `Foo.new(...)`) rather than treating it as a free
+// function call.
 //
-// The hello-world target is reached when this lowers a Program with
-// one FnDecl `main` (zero params, void return, body of one print
-// call) into the exact byte sequence of phase0/cr/hello.cr (modulo
-// the leading hand-written comment).
-func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
-	g.buf.Reset()
-	g.indent = 0
-
-	// Pre-pass: collect class names so emitCall can rewrite Foo(...)
-	// to Foo.new(...). Has to happen before body emission since a
-	// constructor call to Bar may appear in a class declared earlier
-	// in the file. Sealed-class variants register both as constructable
-	// classes and as match-pattern targets.
+// Symbols collected:
+//   - class names → g.classes (drives `Foo(...)` → `Foo.new(...)`)
+//   - sealed variants → g.sealedVariants (drives match patterns and
+//     qualified `Parent::Variant.new(...)` constructor calls)
+//   - interface names → g.interfaces (drives `< Bar` vs `include Bar`
+//     for class parents)
+//   - enum members → g.enumMembers (drives `Red` → `Color::Red`)
+func (g *Generator) CollectSymbols(prog *parser.Program) {
 	for _, d := range prog.Decls {
 		switch decl := d.(type) {
 		case *parser.ClassDecl:
@@ -187,6 +172,40 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 			}
 		}
 	}
+}
+
+// SetClassName sets the Crystal target binary's basename. Used both
+// for the `def main` / trailing-`main` shape and (eventually) for
+// any naming that derives from the binary's identity. Conventionally
+// matches the project name from zinc.toml.
+func (g *Generator) SetClassName(name string) { g.className = name }
+
+// OutputFile is the (filename, content) pair the driver writes to disk.
+// Mirrors zinc-go's same struct. zinc-crystal currently emits a single
+// file per .zn input — multi-file projects work because each .zn
+// becomes its own .cr (no merging needed at this stage).
+type OutputFile struct {
+	Name    string
+	Content string
+}
+
+// GenerateFiles walks the parsed Program and returns the .cr files
+// to write to disk. SKETCH: emits one src/<className>.cr that
+// contains every decl + a `def main` wrapping any top-level stmts.
+//
+// The hello-world target is reached when this lowers a Program with
+// one FnDecl `main` (zero params, void return, body of one print
+// call) into the exact byte sequence of phase0/cr/hello.cr (modulo
+// the leading hand-written comment).
+func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
+	g.buf.Reset()
+	g.indent = 0
+
+	// Pre-pass: collect symbols (class names, interface names, enum
+	// members, sealed variants) so emit decisions like `Foo()` →
+	// `Foo.new()` and `Red` → `Color::Red` work. Idempotent — calling
+	// it again with the same program is fine.
+	g.CollectSymbols(prog)
 
 	// Walk decls into a body buffer so we can emit `require` lines at
 	// the top once requireSet is finalized. Same trick zinc-go uses
