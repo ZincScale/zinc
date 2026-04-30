@@ -79,7 +79,11 @@ func (r *GoTypeResolver) loadPkgViaGoPackages(pkgPath string) *types.Package {
 		return nil
 	}
 	pkg := pkgs[0]
-	if pkg.Types == nil || pkg.Types.Scope().Len() == 0 {
+	// Errors here mean packages.Load couldn't fully resolve — usually
+	// "no required module provides package X" when the dep is in
+	// go.mod but the in-process module state is stale. Reject so the
+	// caller doesn't read garbage from an empty scope.
+	if len(pkg.Errors) > 0 || pkg.Types == nil || pkg.Types.Scope().Len() == 0 {
 		return nil
 	}
 	return pkg.Types

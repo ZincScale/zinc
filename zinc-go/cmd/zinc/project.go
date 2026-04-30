@@ -753,10 +753,23 @@ func testProject(projectDir string, goTestArgs []string) error {
 	if err := generateGoMod(cfg, outDir); err != nil {
 		return fmt.Errorf("generate go.mod: %w", err)
 	}
+	// Pre-transpile, run `go mod download` (NOT tidy) so every dep
+	// listed in the just-written go.mod ends up in GOMODCACHE. The
+	// resolver's packages.Load then works during transpile.
+	//
+	// Why download not tidy: tidy PRUNES unused deps. At this point
+	// no .go files exist in outDir yet, so every declared dep looks
+	// unused — tidy would strip the whole require list. download
+	// just pulls listed deps without pruning. Tidy still runs AFTER
+	// transpile (line ~793) to clean up indirect deps once .go files
+	// reveal what's actually used.
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
-		tidy.Dir = outDir
-		tidy.Run() // best-effort before transpile
+		dl := exec.Command("go", "mod", "download", "all")
+		dl.Dir = outDir
+		dl.Stderr = os.Stderr
+		if err := dl.Run(); err != nil {
+			return fmt.Errorf("go mod download (pre-transpile): %w", err)
+		}
 	}
 
 	subdirs, _ := collectSubdirs(srcDir)
