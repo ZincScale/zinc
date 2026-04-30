@@ -874,6 +874,15 @@ func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 	if ret == "" {
 		ret = "Nil"
 	}
+	// Thrower return type rewrite — same as emitFnDecl. A method
+	// declared `pub (Int, error) parse(...)` lowers to `: Int32` plus
+	// raise/rescue at call sites. Without this, the `error` slot
+	// leaks into the Crystal return type as a literal `error`
+	// identifier, which Crystal rejects.
+	isThrower := isThrowerType(m.ReturnType)
+	if isThrower {
+		ret = g.throwerValueType(m.ReturnType)
+	}
 	methodName := crMethodName(m.Name)
 	if len(m.Params) == 0 {
 		g.writeln("def %s : %s", methodName, ret)
@@ -881,11 +890,14 @@ func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 		g.writeln("def %s(%s) : %s", methodName, strings.Join(params, ", "), ret)
 	}
 	g.indent++
+	prevThrower := g.currentFnIsThrower
+	g.currentFnIsThrower = isThrower
 	if m.Body != nil {
 		for _, s := range m.Body.Stmts {
 			g.emitStmt(s)
 		}
 	}
+	g.currentFnIsThrower = prevThrower
 	g.indent--
 	g.writeln("end")
 }
@@ -927,13 +939,14 @@ func isErrorClassName(name string) bool {
 // Crystal fill missing trailing args.
 func (g *Generator) formatParam(p *parser.ParamDecl) string {
 	t := g.crType(p.Type)
+	name := crParamName(p.Name)
 	if p.Variadic {
-		return "*" + p.Name + " : " + t
+		return "*" + name + " : " + t
 	}
 	if p.Default != nil {
-		return fmt.Sprintf("%s : %s = %s", p.Name, t, g.emitExpr(p.Default))
+		return fmt.Sprintf("%s : %s = %s", name, t, g.emitExpr(p.Default))
 	}
-	return fmt.Sprintf("%s : %s", p.Name, t)
+	return fmt.Sprintf("%s : %s", name, t)
 }
 
 // isThrowerType reports whether a TypeExpr is a thrower return shape:
@@ -1039,34 +1052,17 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 		return ""
 	}
 	if name, ok := t.(*parser.SimpleType); ok {
-		switch name.Name {
-		case "void":
-			return "Nil"
-		case "int":
-			return "Int32"
-		case "long":
-			return "Int64"
-		case "byte":
-			return "UInt8"
-		case "double":
-			return "Float64"
-		case "float":
-			return "Float32"
-		case "boolean":
-			return "Bool"
-		case "String":
-			return "String"
-		case "any":
-			// Per PLAN §1.4 + per-target diff list: `any` doesn't have a
-			// natural Crystal lowering. Reject at validate time. For now
-			// emit a placeholder + record the error so the driver fails.
+		// `any` is rejected per the per-target diff list (zinc-go has it,
+		// zinc-crystal doesn't — Crystal needs concrete types).
+		if name.Name == "any" {
 			g.compileError(0, "type 'any' is not allowed in zinc-crystal — use a concrete type")
 			return "Object" // unreachable in practice; build fails first
 		}
-		// Stdlib type rewrites: zinc users write `sync.Mutex` (Go-style),
-		// Crystal-target maps to `Sync::Mutex`. Same shape for RWLock,
-		// WaitGroup, etc. Same convention for any future stdlib import
-		// that has a different naming idiom in Crystal.
+		// Primitive type map handles int/Int/long/Long/etc. uniformly.
+		if mapped, ok := primitiveTypeMap[name.Name]; ok {
+			return mapped
+		}
+		// Stdlib type rewrites: `sync.Mutex` → `Sync::Mutex`, etc.
 		if mapped, ok := stdlibTypeRewrite[name.Name]; ok {
 			return mapped
 		}
@@ -1808,9 +1804,11 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	case *parser.Ident:
 		// Param shadows field: `init(String host) { this.host = host }`
 		// has a `host` param AND a `host` field; the bare RHS `host`
-		// must lower to the param, not @host. Param check first.
+		// must lower to the param, not @host. Param check first; also
+		// apply the reserved-name rename so the body matches the
+		// param signature.
 		if g.currentParams[expr.Name] {
-			return expr.Name
+			return crParamName(expr.Name)
 		}
 		// Implicit self: bare field name inside a method/ctor body
 		// lowers to `@field`. Outside class scope, plain ident.
@@ -1837,9 +1835,32 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		if id, ok := expr.Object.(*parser.Ident); ok && id.Name == "this" {
 			return "@" + expr.Field
 		}
+		// Stdlib member access — `math.pi` → `Math::PI`. Constants
+		// or properties under a Go-style stdlib package.
+		if id, ok := expr.Object.(*parser.Ident); ok {
+			key := id.Name + "." + expr.Field
+			if mapped, ok := stdlibSelectorRewrites[key]; ok {
+				return mapped
+			}
+		}
 		return fmt.Sprintf("%s.%s", g.emitExpr(expr.Object), crMethodName(expr.Field))
 	case *parser.IntLit:
-		return expr.Value
+		// Crystal accepts only lowercase hex/binary/octal prefixes
+		// (0x, 0b, 0o). zinc-go's parser preserves the original case
+		// the user typed (so `0XFF` stays `0XFF`); normalize here so
+		// either form transpiles cleanly.
+		v := expr.Value
+		if len(v) > 1 && v[0] == '0' {
+			switch v[1] {
+			case 'X':
+				v = "0x" + v[2:]
+			case 'B':
+				v = "0b" + v[2:]
+			case 'O':
+				v = "0o" + v[2:]
+			}
+		}
+		return v
 	case *parser.FloatLit:
 		return expr.Value
 	case *parser.StringLit:
@@ -1994,11 +2015,83 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 var primitiveTypeMap = map[string]string{
 	"void":    "Nil",
 	"int":     "Int32",
+	"Int":     "Int32",
 	"long":    "Int64",
+	"Long":    "Int64",
 	"byte":    "UInt8",
+	"Byte":    "UInt8",
 	"double":  "Float64",
+	"Double":  "Float64",
 	"float":   "Float32",
+	"Float":   "Float32",
 	"boolean": "Bool",
+	"bool":    "Bool",
+	"Bool":    "Bool",
+	"string":  "String",
+	// `error` maps to Exception. zinc thrower-shape lowering strips
+	// it from FunctionDecl/MethodDecl return tuples; this fallback
+	// covers all OTHER positions (Tuple(T, error) inside a lambda
+	// type, `error` field in a struct, etc.). Crystal accepts
+	// `Exception` everywhere `error` appears in zinc.
+	"error":   "Exception",
+	"Error":   "Exception",
+}
+
+// reservedParamNames is Crystal's list of identifiers we can't use
+// as parameter names. zinc lets users name params anything; if the
+// name collides we suffix with `_` and the call site sees the same
+// rename (the param is local-scope so call sites don't reference
+// the name). Confirmed list from Crystal's reserved-keyword set.
+var reservedParamNames = map[string]bool{
+	"next":     true,
+	"break":    true,
+	"return":   true,
+	"yield":    true,
+	"begin":    true,
+	"end":      true,
+	"do":       true,
+	"if":       true,
+	"unless":   true,
+	"while":    true,
+	"until":    true,
+	"case":     true,
+	"when":     true,
+	"in":       true,
+	"of":       true,
+	"as":       true,
+	"is_a?":    true,
+	"nil":      true,
+	"true":     true,
+	"false":    true,
+	"self":     true,
+	"super":    true,
+	"def":      true,
+	"class":    true,
+	"module":   true,
+	"struct":   true,
+	"abstract": true,
+	"include":  true,
+	"extend":   true,
+	"alias":    true,
+	"type":     true,
+	"private":  true,
+	"protected": true,
+	"public":   true,
+	"out":      true,
+	"pointerof": true,
+	"sizeof":   true,
+	"typeof":   true,
+	"forall":   true,
+	"with":     true,
+	"select":   true,
+	"spawn":    true,
+}
+
+func crParamName(name string) string {
+	if reservedParamNames[name] {
+		return name + "_"
+	}
+	return name
 }
 
 // stdlibTypeRewrite maps Go-style stdlib type names to Crystal stdlib
@@ -2015,6 +2108,98 @@ var stdlibTypeRewrite = map[string]string{
 	"sync.Mutex":     "Sync::Mutex",
 	"sync.RWMutex":   "Sync::RWLock",
 	"sync.WaitGroup": "WaitGroup",
+}
+
+// stdlibCallRewrite maps Go-style stdlib package calls (`strings.X`,
+// `strconv.X`, `math.X`, `fmt.X`) to their Crystal idiomatic shape.
+//
+// receiver = 0  → emit `args[0].method(args[1:])`. The first arg
+//                 becomes the message receiver, the rest are passed
+//                 along. Common for strings/Hash/Array methods that
+//                 are top-level functions in Go but instance methods
+//                 in Crystal.
+// receiver = -1 → emit the literal Crystal target with all args. Used
+//                 for namespaced functions like `Math.sqrt` that DO
+//                 stay top-level in Crystal under their module.
+type stdlibRewriteTarget struct {
+	target   string // method name on receiver, OR full Crystal call
+	receiver int    // 0 = first arg is receiver, -1 = full call
+}
+
+var stdlibCallRewrites = map[string]stdlibRewriteTarget{
+	// strings package
+	"strings.upper":      {"upcase", 0},
+	"strings.toUpper":    {"upcase", 0},
+	"strings.ToUpper":    {"upcase", 0},
+	"strings.lower":      {"downcase", 0},
+	"strings.toLower":    {"downcase", 0},
+	"strings.ToLower":    {"downcase", 0},
+	"strings.contains":   {"includes?", 0},
+	"strings.Contains":   {"includes?", 0},
+	"strings.startsWith": {"starts_with?", 0},
+	"strings.HasPrefix":  {"starts_with?", 0},
+	"strings.endsWith":   {"ends_with?", 0},
+	"strings.HasSuffix":  {"ends_with?", 0},
+	"strings.Split":      {"split", 0},
+	"strings.split":      {"split", 0},
+	"strings.Join":       {"join", 0},
+	"strings.join":       {"join", 0},
+	"strings.Replace":    {"gsub", 0},
+	"strings.replace":    {"gsub", 0},
+	"strings.TrimSpace":  {"strip", 0},
+	"strings.trimSpace":  {"strip", 0},
+	"strings.Trim":       {"strip", 0},
+	"strings.trim":       {"strip", 0},
+	"strings.Index":      {"index", 0},
+	"strings.indexOf":    {"index", 0},
+
+	// strconv package
+	"strconv.itoa":    {"to_s", 0},
+	"strconv.Itoa":    {"to_s", 0},
+	"strconv.atoi":    {"to_i", 0},
+	"strconv.Atoi":    {"to_i", 0},
+	"strconv.parseInt":   {"to_i", 0},
+	"strconv.ParseInt":   {"to_i", 0},
+	"strconv.parseFloat": {"to_f", 0},
+	"strconv.ParseFloat": {"to_f", 0},
+
+	// math package — Crystal has Math module with namespaced functions.
+	"math.sqrt": {"Math.sqrt", -1},
+	"math.Sqrt": {"Math.sqrt", -1},
+	"math.pow":  {"(args[0]) ** (args[1])", -1}, // special — handled inline
+	"math.Pow":  {"(args[0]) ** (args[1])", -1},
+	"math.abs":  {"(args[0]).abs", -1},
+	"math.Abs":  {"(args[0]).abs", -1},
+	"math.min":  {"Math.min", -1},
+	"math.Min":  {"Math.min", -1},
+	"math.max":  {"Math.max", -1},
+	"math.Max":  {"Math.max", -1},
+	"math.floor": {"Math.floor", -1},
+	"math.Floor": {"Math.floor", -1},
+	"math.ceil":  {"Math.ceil", -1},
+	"math.Ceil":  {"Math.ceil", -1},
+
+	// fmt package — Go's fmt.Println / fmt.Printf land in Crystal as
+	// puts / printf at top level. fmt.Sprintf → String#format-like
+	// (handled with String#% operator).
+	"fmt.Println": {"puts", -1},
+	"fmt.Print":   {"print", -1},
+	"fmt.Printf":  {"printf", -1},
+	"fmt.Errorf":  {"Exception.new", -1},
+}
+
+// stdlibSelectorRewrite handles `pkg.MEMBER` accesses (no parens) — like
+// `math.pi`, `math.e`. These are properties / constants in Crystal under
+// a module. Maps `pkg.member` → full Crystal access form.
+var stdlibSelectorRewrites = map[string]string{
+	"math.pi":   "Math::PI",
+	"math.Pi":   "Math::PI",
+	"math.e":    "Math::E",
+	"math.E":    "Math::E",
+	"math.MaxInt32": "Int32::MAX",
+	"math.MinInt32": "Int32::MIN",
+	"math.MaxInt64": "Int64::MAX",
+	"math.MinInt64": "Int64::MIN",
 }
 
 // crMethodName returns the Crystal-side method name for a zinc method.
@@ -2083,6 +2268,17 @@ var crystalMethodRewrite = map[string]string{
 	"join":       "join",
 	"toUpper":    "upcase",
 	"toLower":    "downcase",
+	"trimStart":  "lstrip",
+	"trimEnd":    "rstrip",
+	// Hash / Map idioms
+	"containsKey": "has_key?",
+	"hasKey":      "has_key?",
+	"containsValue": "has_value?",
+	"keySet":      "keys",
+	"values":      "values",
+	"get":         "[]?",
+	"put":         "[]=",
+	"remove":      "delete",
 }
 
 // emitLambda lowers `(x: Int) => x + 1` to Crystal's proc form
@@ -2136,6 +2332,25 @@ func (g *Generator) emitLambda(l *parser.LambdaExpr) string {
 // SKETCH: same restrictions as emitMatch — sealed-variant + literal
 // patterns supported, no destructuring of arbitrary patterns yet.
 func (g *Generator) emitMatchExpr(m *parser.MatchExpr) string {
+	// Same logic as emitMatch: scan for a wildcard arm; if present,
+	// switch to `case when` (non-exhaustive) since `case in` rejects
+	// `else`. Also Crystal's `case in` is restrictive on patterns
+	// (must be constant/generic/bool/nil/question-method) — string
+	// literals work, but if we have any string-literal pattern with
+	// a wildcard, `case when` is the safe form.
+	hasWildcard := false
+	for _, mc := range m.Cases {
+		if mc.Pattern == nil {
+			hasWildcard = true
+			break
+		}
+	}
+	useWhen := hasWildcard
+	kw := "in"
+	if useWhen {
+		kw = "when"
+	}
+
 	var sb strings.Builder
 	sb.WriteString("(case ")
 	sb.WriteString(g.emitExpr(m.Subject))
@@ -2149,12 +2364,13 @@ func (g *Generator) emitMatchExpr(m *parser.MatchExpr) string {
 		if call, ok := mc.Pattern.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if info, ok := g.sealedVariants[ident.Name]; ok {
-					sb.WriteString("; in ")
+					sb.WriteString("; ")
+					sb.WriteString(kw)
+					sb.WriteString(" ")
 					sb.WriteString(info.Parent)
 					sb.WriteString("::")
 					sb.WriteString(ident.Name)
 					sb.WriteString("; ")
-					// Inline bindings + value as a block expression.
 					subject := g.emitExpr(m.Subject)
 					for i, a := range call.Args {
 						if i >= len(info.Fields) {
@@ -2175,7 +2391,9 @@ func (g *Generator) emitMatchExpr(m *parser.MatchExpr) string {
 			}
 		}
 		// Literal pattern.
-		sb.WriteString("; in ")
+		sb.WriteString("; ")
+		sb.WriteString(kw)
+		sb.WriteString(" ")
 		sb.WriteString(g.emitExpr(mc.Pattern))
 		sb.WriteString("; ")
 		sb.WriteString(g.emitExpr(mc.Value))
@@ -2365,14 +2583,84 @@ func (g *Generator) emitZincFmtHelper() {
 // because zinc's `print` semantics include a trailing newline (matches
 // Go's fmt.Println).
 func (g *Generator) emitCall(c *parser.CallExpr) string {
-	if ident, ok := c.Callee.(*parser.Ident); ok && ident.Name == "print" {
-		args := make([]string, 0, len(c.Args))
-		for _, a := range c.Args {
-			args = append(args, g.emitExpr(a))
+	if ident, ok := c.Callee.(*parser.Ident); ok {
+		// Builtin functions zinc-go users write as bare calls but
+		// Crystal has either as methods on the receiver or under
+		// a stdlib name. Rewrite to the Crystal idiom.
+		switch ident.Name {
+		case "print":
+			args := make([]string, 0, len(c.Args))
+			for _, a := range c.Args {
+				args = append(args, g.emitExpr(a))
+			}
+			return "puts " + strings.Join(args, ", ")
+		case "len":
+			// `len(x)` → `x.size`. Crystal's universal length
+			// accessor is .size (Array, Hash, String all support it).
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".size"
+			}
+		case "str":
+			// `str(x)` → `x.to_s`. zinc-go's str() is "convert to
+			// string"; Crystal's to_s on any value does the same,
+			// and is universally available via Object#to_s.
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_s"
+			}
+		case "int":
+			// `int(x)` → `x.to_i`. Same pattern: zinc's coercion
+			// builtin maps to Crystal's instance method.
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_i"
+			}
+		case "float", "float64":
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_f"
+			}
+		case "long":
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_i64"
+			}
+		case "byte":
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_u8"
+			}
+		case "double":
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_f64"
+			}
+		case "short":
+			if len(c.Args) == 1 {
+				return g.emitExpr(c.Args[0]) + ".to_i16"
+			}
+		case "append":
+			// Go's `append(arr, x)` → Crystal `arr.push(x)`. Returns
+			// the array (mutating); Crystal's push returns self too.
+			if len(c.Args) >= 2 {
+				args := make([]string, 0, len(c.Args)-1)
+				for _, a := range c.Args[1:] {
+					args = append(args, g.emitExpr(a))
+				}
+				return g.emitExpr(c.Args[0]) + ".push(" + strings.Join(args, ", ") + ")"
+			}
 		}
-		// puts with multiple args: comma-joined; with one, just the value.
-		// hello.zn only ever passes one, so this is safe.
-		return "puts " + strings.Join(args, ", ")
+	}
+	// stdlib package call: `strings.upper("x")`, `math.sqrt(2.0)`, etc.
+	// Look up in stdlibCallRewrites and rewrite to Crystal's idiom.
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		if pkg, ok := sel.Object.(*parser.Ident); ok {
+			key := pkg.Name + "." + sel.Field
+			if rw, ok := stdlibCallRewrites[key]; ok {
+				args := make([]string, 0, len(c.Args))
+				for _, a := range c.Args {
+					args = append(args, g.emitExpr(a))
+				}
+				if rw.receiver == 0 && len(args) >= 1 {
+					return fmt.Sprintf("%s.%s(%s)", args[0], rw.target, strings.Join(args[1:], ", "))
+				}
+				return fmt.Sprintf("%s(%s)", rw.target, strings.Join(args, ", "))
+			}
+		}
 	}
 	// Channel<T>(N) — typed channel constructor. Parses as CallExpr
 	// with TypeArgs=["T"]. Lower to Crystal's Channel(T).new(N).
