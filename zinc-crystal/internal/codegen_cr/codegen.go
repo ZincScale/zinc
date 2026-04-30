@@ -331,6 +331,9 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 // to_s in the zinc-go printable format.
 func (g *Generator) emitTopLevelDataClass(d *parser.DataClassDecl) {
 	header := "class " + d.Name
+	if len(d.TypeParams) > 0 {
+		header += "(" + strings.Join(d.TypeParams, ", ") + ")"
+	}
 	if len(d.Parents) > 0 {
 		header += " < " + d.Parents[0]
 	}
