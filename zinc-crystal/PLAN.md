@@ -1217,6 +1217,41 @@ targets:
 Phase 4 is where we *might* add `[ffi.types]` to zinc.toml, if Phase-1
 empirics show option 1 isn't enough.
 
+### 9.2.1 Server-shaped imports use Crystal idioms, not literal Go API
+
+When `import_map.toml` covers a server-shaped library — HTTP server,
+websocket server, RPC, anything with a `listen + handle each
+connection` pattern — the lowering MUST use Crystal's native fiber +
+execution-context idioms, not translate the source target's API
+literally.
+
+Concretely:
+
+  - `import http` / equivalent → Crystal `HTTP::Server`. Each request
+    runs in its own fiber automatically, owned by the server's
+    listener.
+  - Wrap the listener in `Fiber::ExecutionContext::Parallel` for
+    multi-threaded request handling, or `Isolated` for a single-
+    threaded server with a re-raised completion handle.
+  - When zinc source has a hand-rolled server loop
+    (`for { conn = listener.accept(); spawn { handle(conn) } }`),
+    the codegen detects and rewrites to
+    `HTTP::Server.new { |context| ... }`. Pattern detection lands
+    when the first real example needs it; until then, the user can
+    write the Crystal-idiomatic shape directly.
+
+This is §1.4 cashed out for servers: HTTP::Server's fiber pool has an
+owner (the listener); when the server stops, all request fibers stop
+with it. A literal translation of Go's `net/http.HandlerFunc` —
+emitting `go func() { handle(conn) }()` analogs — throws away
+Crystal's lifecycle and the whole execution-context machinery the
+zinc-crystal target was designed around.
+
+Same principle generalizes to other server-shaped idioms: DB
+connection pools, message-queue consumers, etc. — leverage Crystal's
+stdlib first, fall back to literal translation only when no
+idiomatic equivalent exists.
+
 ### 9.3 FFI escape hatch
 
 Crystal has `lib LibC` for C bindings. Out of scope for zinc Phase 1–4;
