@@ -53,6 +53,14 @@ type Generator struct {
 	// Cleared when class emit finishes. nil outside any class scope.
 	currentClassFields map[string]bool
 
+	// currentParams holds the parameter names of the method or ctor
+	// currently being emitted. Crucial because a param name can shadow
+	// a field name — `init(String host) { this.host = host }` has
+	// both a `host` field and a `host` param, and the bare `host` on
+	// the RHS must lower to the param, not @host. Checked before
+	// currentClassFields in the Ident lowering.
+	currentParams map[string]bool
+
 	// currentFnIsThrower is true while emitting the body of a function
 	// whose declared return type ends in `error` (bare or trailing in
 	// a tuple). Drives `return ErrorExpr` → `raise ErrorExpr` and
@@ -611,9 +619,16 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 		g.writeln("")
 	}
 
-	// Constructor.
+	// Constructor. Always emit one even when zinc didn't declare an
+	// explicit `init()` — Crystal demands every instance variable be
+	// initialized in initialize, and zinc's "field declared, not set
+	// in ctor" semantics maps cleanly to Crystal's `uninitialized T`
+	// expression. Without a synthesized init, untouched fields error
+	// out at compile time.
 	if c.Ctor != nil {
 		g.emitCtor(c, autoException)
+	} else if len(c.Fields) > 0 {
+		g.emitSynthesizedCtor(c, autoException)
 	}
 
 	// Methods.
@@ -628,6 +643,91 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	g.writeln("end")
 }
 
+// fieldsTouchedByCtor walks the ctor body and returns the set of
+// field names that get assigned at least once. Drives the "uninitialized
+// T" emit for untouched fields — Crystal won't compile a class whose
+// initialize doesn't cover every ivar.
+//
+// Recognized assignment shapes:
+//   this.field = X
+//   field = X      (when field is in currentClassFields scope —
+//                  bare-name with implicit self)
+//
+// For autoException classes, `this.message = X` is rewritten to
+// `super(X)` and considered "touched" since super sets @message in
+// Exception's ctor.
+func fieldsTouchedByCtor(body *parser.BlockStmt, autoException bool) map[string]bool {
+	touched := make(map[string]bool)
+	if body == nil {
+		return touched
+	}
+	for _, s := range body.Stmts {
+		assign, ok := s.(*parser.AssignStmt)
+		if !ok {
+			continue
+		}
+		// `this.field = X`
+		if sel, ok := assign.Target.(*parser.SelectorExpr); ok {
+			if _, isThis := sel.Object.(*parser.ThisExpr); isThis {
+				touched[sel.Field] = true
+				continue
+			}
+			if id, ok := sel.Object.(*parser.Ident); ok && id.Name == "this" {
+				touched[sel.Field] = true
+				continue
+			}
+		}
+		// `field = X` (implicit self) — caller is responsible for
+		// confirming the ident is actually a class field. We mark it
+		// optimistically; emitCtor only consults the touched set for
+		// fields it knows about.
+		if id, ok := assign.Target.(*parser.Ident); ok {
+			touched[id.Name] = true
+		}
+	}
+	if autoException {
+		// super(msg) covers @message — Exception's ctor sets it.
+		touched["message"] = true
+	}
+	return touched
+}
+
+// emitUninitFields emits `@field = uninitialized T` lines for every
+// declared field not in the touched set. Crystal accepts this as a
+// valid initialization that bypasses the "must be set" check —
+// matching zinc's "uninitialized is uninitialized" semantics. Reading
+// before set is undefined behavior, on the user.
+func (g *Generator) emitUninitFields(c *parser.ClassDecl, touched map[string]bool, autoException bool) {
+	for _, f := range c.Fields {
+		if touched[f.Name] {
+			continue
+		}
+		if autoException && f.Name == "message" {
+			continue
+		}
+		// Stdlib types (sync.Mutex etc.) already get auto-init
+		// elsewhere; skip them here so we don't double-emit.
+		if simple, ok := f.Type.(*parser.SimpleType); ok {
+			if _, isStdlib := stdlibTypeRewrite[simple.Name]; isStdlib {
+				continue
+			}
+		}
+		g.writeln("@%s = uninitialized %s", f.Name, g.crType(f.Type))
+	}
+}
+
+// emitSynthesizedCtor handles the case where zinc's class has fields
+// but no explicit `init()`. Crystal still demands an initialize that
+// covers every ivar; we generate `def initialize` with one
+// `uninitialized T` line per field.
+func (g *Generator) emitSynthesizedCtor(c *parser.ClassDecl, autoException bool) {
+	g.writeln("def initialize")
+	g.indent++
+	g.emitUninitFields(c, nil, autoException)
+	g.indent--
+	g.writeln("end")
+}
+
 // emitCtor emits `def initialize(...) ... end`. We build a class-body
 // scope (currentClassFields) so `this.x = e` and bare `x = e` both
 // lower to `@x = e`.
@@ -638,11 +738,19 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 // the parent class's @message instead of re-declaring our own.
 func (g *Generator) emitCtor(c *parser.ClassDecl, autoException bool) {
 	prevFields := g.currentClassFields
+	prevParams := g.currentParams
 	g.currentClassFields = make(map[string]bool, len(c.Fields))
 	for _, f := range c.Fields {
 		g.currentClassFields[f.Name] = true
 	}
-	defer func() { g.currentClassFields = prevFields }()
+	g.currentParams = make(map[string]bool, len(c.Ctor.Params))
+	for _, p := range c.Ctor.Params {
+		g.currentParams[p.Name] = true
+	}
+	defer func() {
+		g.currentClassFields = prevFields
+		g.currentParams = prevParams
+	}()
 
 	params := make([]string, 0, len(c.Ctor.Params))
 	for _, p := range c.Ctor.Params {
@@ -679,6 +787,13 @@ func (g *Generator) emitCtor(c *parser.ClassDecl, autoException bool) {
 			}
 		}
 	}
+
+	// `uninitialized T` for every field the ctor body doesn't assign.
+	// Crystal demands every ivar reachable from initialize be set;
+	// `uninitialized` is the explicit "trust me" that maps zinc's
+	// "uninitialized is uninitialized" semantics through.
+	touched := fieldsTouchedByCtor(c.Ctor.Body, autoException)
+	g.emitUninitFields(c, touched, autoException)
 
 	if c.Ctor.Body != nil {
 		for _, s := range c.Ctor.Body.Stmts {
@@ -718,11 +833,19 @@ func isMessageAssign(s parser.Stmt) bool {
 // (Crystal methods are public by default; private would be `private def`).
 func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 	prevFields := g.currentClassFields
+	prevParams := g.currentParams
 	g.currentClassFields = make(map[string]bool, len(c.Fields))
 	for _, f := range c.Fields {
 		g.currentClassFields[f.Name] = true
 	}
-	defer func() { g.currentClassFields = prevFields }()
+	g.currentParams = make(map[string]bool, len(m.Params))
+	for _, p := range m.Params {
+		g.currentParams[p.Name] = true
+	}
+	defer func() {
+		g.currentClassFields = prevFields
+		g.currentParams = prevParams
+	}()
 
 	params := make([]string, 0, len(m.Params))
 	for _, p := range m.Params {
@@ -1664,6 +1787,12 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 	}
 	switch expr := e.(type) {
 	case *parser.Ident:
+		// Param shadows field: `init(String host) { this.host = host }`
+		// has a `host` param AND a `host` field; the bare RHS `host`
+		// must lower to the param, not @host. Param check first.
+		if g.currentParams[expr.Name] {
+			return expr.Name
+		}
 		// Implicit self: bare field name inside a method/ctor body
 		// lowers to `@field`. Outside class scope, plain ident.
 		if g.currentClassFields != nil && g.currentClassFields[expr.Name] {
