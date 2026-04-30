@@ -62,13 +62,28 @@ type ClassDecl struct {
 	Name        string
 	IsSealed    bool     // sealed class (has variant data classes)
 	TypeParams  []string // generic type parameter names
-	Parents     []string // base class + interfaces
+	Parents     []ParentRef // base class + interfaces (with generic args)
 	Fields      []*FieldDecl
 	Ctor        *CtorDecl   // primary constructor (nil if none)
 	Ctors       []*CtorDecl // overloaded constructors (nil or empty if none)
 	Methods     []*MethodDecl
 	Variants    []*DataClassDecl // sealed class variants
 	Annotations []*Annotation
+}
+
+// ParentRef is one entry in a class's parent list. zinc syntax
+// `class Foo : Bar, Container<T>, core.Describable` produces:
+//   ParentRef{Name: "Bar"}
+//   ParentRef{Name: "Container", TypeArgs: [T]}
+//   ParentRef{Name: "core.Describable"}
+//
+// TypeArgs is nil for non-generic parents. Codegen for targets that
+// need to propagate generics through inheritance (Crystal: `include
+// Container(T)`) consumes TypeArgs; Go-target ignores it because Go's
+// type system carries generics inline at the use site.
+type ParentRef struct {
+	Name     string
+	TypeArgs []TypeExpr
 }
 
 func (c *ClassDecl) nodeTag()      {}
@@ -147,7 +162,7 @@ type DataClassDecl struct {
 	Line       int // source line number (1-indexed)
 	Name       string
 	TypeParams []string     // generic type parameter names
-	Parents    []string     // base class + interfaces
+	Parents    []ParentRef  // base class + interfaces (with generic args)
 	Params     []*FieldDecl // constructor params (become fields)
 	Methods    []*MethodDecl
 }

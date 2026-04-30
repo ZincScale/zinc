@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	codegen "zinc-go/internal/codegen_go"
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // ---------------------------------------------------------------------------

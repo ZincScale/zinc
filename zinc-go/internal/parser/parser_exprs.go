@@ -15,7 +15,7 @@
 package parser
 
 import (
-	"zinc-go/lexer"
+	"zinc-go/internal/lexer"
 )
 
 // --- Expressions -------------------------------------------------------------

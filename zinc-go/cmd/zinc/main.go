@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"zinc-go/errs"
+	"zinc-go/internal/errs"
 )
 
 // version is set via ldflags: -X main.version=v1.0.0

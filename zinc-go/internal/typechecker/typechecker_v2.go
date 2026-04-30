@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // V2Error represents a type error found during v2 type checking.
@@ -200,7 +200,11 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 	case *parser.ClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 		if len(d.Parents) > 0 {
-			c.parentTypes[d.Name] = d.Parents
+			names := make([]string, len(d.Parents))
+			for i, p := range d.Parents {
+				names[i] = p.Name
+			}
+			c.parentTypes[d.Name] = names
 		}
 	case *parser.DataClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})

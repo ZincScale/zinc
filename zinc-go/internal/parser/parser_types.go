@@ -17,7 +17,7 @@ package parser
 import (
 	"strings"
 
-	"zinc-go/lexer"
+	"zinc-go/internal/lexer"
 )
 
 // --- Types (v2: angle-bracket generics <>) -----------------------------------

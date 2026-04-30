@@ -17,7 +17,7 @@ package parser
 import (
 	"strconv"
 
-	"zinc-go/lexer"
+	"zinc-go/internal/lexer"
 )
 
 // --- Statements --------------------------------------------------------------

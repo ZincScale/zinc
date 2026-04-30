@@ -14,7 +14,7 @@ import (
 	"go/types"
 	"strings"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // recvName is the Go identifier used for method/ctor receivers and as

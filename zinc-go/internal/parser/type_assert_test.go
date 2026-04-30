@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"zinc-go/lexer"
+	"zinc-go/internal/lexer"
 )
 
 // Tests for `as` type-cast parsing across qualified and unqualified type

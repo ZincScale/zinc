@@ -15,7 +15,7 @@
 package parser
 
 import (
-	"zinc-go/lexer"
+	"zinc-go/internal/lexer"
 )
 
 // --- Declarations ------------------------------------------------------------
@@ -139,39 +139,13 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	typeParams := p.parseTypeParams()
 
 	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>, core.Describable
-	var parents []string
+	var parents []ParentRef
 	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
-		parentName := p.expect(lexer.TOKEN_IDENT).Literal
-		// Dotted parent: core.Describable
-		for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
-			p.advance()
-			parentName += "." + p.advance().Literal
-		}
-		parents = append(parents, parentName)
-		// Skip generic type args on parent: Queue<T> → consume <T>
-		if p.check(lexer.TOKEN_LT) {
-			p.advance()
-			for !p.check(lexer.TOKEN_GT) && !p.check(lexer.TOKEN_EOF) {
-				p.advance()
-			}
-			p.expect(lexer.TOKEN_GT)
-		}
+		parents = append(parents, p.parseParentRef())
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			parentName = p.expect(lexer.TOKEN_IDENT).Literal
-			for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
-				p.advance()
-				parentName += "." + p.advance().Literal
-			}
-			parents = append(parents, parentName)
-			if p.check(lexer.TOKEN_LT) {
-				p.advance()
-				for !p.check(lexer.TOKEN_GT) && !p.check(lexer.TOKEN_EOF) {
-					p.advance()
-				}
-				p.expect(lexer.TOKEN_GT)
-			}
+			parents = append(parents, p.parseParentRef())
 		}
 	}
 
@@ -549,14 +523,14 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
-	// Optional parents: data User(String name) : Serializable
-	var parents []string
+	// Optional parents: data User(String name) : Serializable, Container<T>
+	var parents []ParentRef
 	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
-		parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+		parents = append(parents, p.parseParentRef())
 		for p.check(lexer.TOKEN_COMMA) {
 			p.advance()
-			parents = append(parents, p.expect(lexer.TOKEN_IDENT).Literal)
+			parents = append(parents, p.parseParentRef())
 		}
 	}
 
@@ -720,6 +694,33 @@ func (p *Parser) v2ParseImport() *ImportDecl {
 }
 
 // isIdentLike returns true if the token type can be used as a name segment
+// parseParentRef parses one entry in a class/data-class parent list.
+// Handles dotted names (`core.Describable`) and generic args (`Queue<T>`,
+// `Container<K, V>`). The generic args were previously consumed and
+// thrown away — they're now retained so codegen targets that need
+// to propagate generics through inheritance (Crystal's `include
+// Container(T)`) can do so.
+func (p *Parser) parseParentRef() ParentRef {
+	name := p.expect(lexer.TOKEN_IDENT).Literal
+	for p.check(lexer.TOKEN_DOT) && isIdentLike(p.peekAt(1).Type) {
+		p.advance()
+		name += "." + p.advance().Literal
+	}
+	var typeArgs []TypeExpr
+	if p.check(lexer.TOKEN_LT) {
+		p.advance()
+		// Comma-separated TypeExpr list. Reuses the existing type
+		// parser so nested generics (Container<List<T>>) compose.
+		typeArgs = append(typeArgs, p.v2ParseType())
+		for p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			typeArgs = append(typeArgs, p.v2ParseType())
+		}
+		p.expect(lexer.TOKEN_GT)
+	}
+	return ParentRef{Name: name, TypeArgs: typeArgs}
+}
+
 // (identifier or keyword that could appear in a dotted path like java.util.concurrent).
 func isIdentLike(t lexer.TokenType) bool {
 	return t == lexer.TOKEN_IDENT ||

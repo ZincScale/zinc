@@ -3,7 +3,7 @@ package codegen_go
 import (
 	"testing"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // Pure-function tests for the explicit-error helpers introduced in

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // emitFnDecl generates a top-level Go function from a Zinc fn declaration.
@@ -212,8 +212,8 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 
 	// Embedded parent (first non-interface parent for inheritance)
 	for _, p := range cls.Parents {
-		if !g.interfaces[p] && !g.isImportedInterface(p) {
-			resolved := g.resolveParentType(p)
+		if !g.interfaces[p.Name] && !g.isImportedInterface(p.Name) {
+			resolved := g.resolveParentType(p.Name)
 			g.writeln("%s", resolved)
 		}
 	}
@@ -368,12 +368,12 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 // Returns the parent name (for the embedded field reference) or "".
 func (g *Generator) exceptionParent(cls *parser.ClassDecl) string {
 	for _, p := range cls.Parents {
-		if g.interfaces[p] || g.isImportedInterface(p) {
+		if g.interfaces[p.Name] || g.isImportedInterface(p.Name) {
 			continue
 		}
-		name := p
-		if idx := strings.LastIndex(p, "."); idx >= 0 {
-			name = p[idx+1:]
+		name := p.Name
+		if idx := strings.LastIndex(p.Name, "."); idx >= 0 {
+			name = p.Name[idx+1:]
 		}
 		if g.classExtendsError(name, map[string]bool{}) {
 			return name
@@ -425,9 +425,9 @@ func (g *Generator) classExtendsError(className string, visited map[string]bool)
 		return false
 	}
 	for _, p := range hit.Parents {
-		name := p
-		if idx := strings.LastIndex(p, "."); idx >= 0 {
-			name = p[idx+1:]
+		name := p.Name
+		if idx := strings.LastIndex(p.Name, "."); idx >= 0 {
+			name = p.Name[idx+1:]
 		}
 		if g.classExtendsError(name, visited) {
 			return true
@@ -503,8 +503,8 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	if ctor.SuperCalled {
 		parentType := ""
 		for _, p := range cls.Parents {
-			if !g.interfaces[p] {
-				parentType = p
+			if !g.interfaces[p.Name] {
+				parentType = p.Name
 				break
 			}
 		}
@@ -855,10 +855,10 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 // collectParentFields walks the inheritance chain and adds parent fields to the map.
 func (g *Generator) collectParentFields(cls *parser.ClassDecl, fields map[string]bool) {
 	for _, p := range cls.Parents {
-		if g.interfaces[p] {
+		if g.interfaces[p.Name] {
 			continue
 		}
-		if parentCls, ok := g.structs[p]; ok {
+		if parentCls, ok := g.structs[p.Name]; ok {
 			for _, f := range parentCls.Fields {
 				fields[f.Name] = true
 			}
@@ -870,10 +870,10 @@ func (g *Generator) collectParentFields(cls *parser.ClassDecl, fields map[string
 // collectParentMethods walks the inheritance chain and adds parent methods to the map.
 func (g *Generator) collectParentMethods(cls *parser.ClassDecl, methods map[string]bool) {
 	for _, p := range cls.Parents {
-		if g.interfaces[p] {
+		if g.interfaces[p.Name] {
 			continue
 		}
-		if parentCls, ok := g.structs[p]; ok {
+		if parentCls, ok := g.structs[p.Name]; ok {
 			for _, m := range parentCls.Methods {
 				methods[m.Name] = true
 			}

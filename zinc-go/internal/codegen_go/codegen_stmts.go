@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // stmtLine returns the source line of a statement, or 0 if unknown.
@@ -1828,9 +1828,9 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 	}
 	// Method not declared here — walk parents.
 	for _, parent := range match.Parents {
-		parentName := parent
-		if idx := strings.LastIndex(parent, "."); idx >= 0 {
-			parentName = parent[idx+1:]
+		parentName := parent.Name
+		if idx := strings.LastIndex(parent.Name, "."); idx >= 0 {
+			parentName = parent.Name[idx+1:]
 		}
 		if g.methodBodyThrowsRec(parentName, methodName, visited) {
 			return true

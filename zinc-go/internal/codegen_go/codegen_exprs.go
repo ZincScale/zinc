@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/parser"
+	"zinc-go/internal/parser"
 )
 
 // formatExpr converts a Zinc AST expression to its Go source representation.
