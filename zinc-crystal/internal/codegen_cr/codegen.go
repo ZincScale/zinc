@@ -279,6 +279,58 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		} else {
 			g.writeln("%s = %s", stmt.Name, g.emitExpr(stmt.Value))
 		}
+	case *parser.AssignStmt:
+		// `x = expr` — Crystal accepts the same shape. SKETCH: only
+		// covers Ident targets today (`x = 1`). Field/index assignments
+		// (`obj.f = 1`, `arr[0] = 1`) land when classes/collections do.
+		g.writeln("%s = %s", g.emitExpr(stmt.Target), g.emitExpr(stmt.Value))
+	case *parser.IfStmt:
+		// Crystal: `if cond ... [elsif ...] [else ...] end`. zinc's AST
+		// nests `else if` as a chain of IfStmts in ElseStmt; we walk
+		// that chain and emit `elsif` arms instead of nested `if/end`s.
+		g.writeln("if %s", g.emitExpr(stmt.Cond))
+		g.indent++
+		for _, s := range stmt.Then.Stmts {
+			g.emitStmt(s)
+		}
+		g.indent--
+		// Walk the else-if chain.
+		cur := stmt.ElseStmt
+		for cur != nil {
+			if elif, ok := cur.(*parser.IfStmt); ok {
+				g.writeln("elsif %s", g.emitExpr(elif.Cond))
+				g.indent++
+				for _, s := range elif.Then.Stmts {
+					g.emitStmt(s)
+				}
+				g.indent--
+				cur = elif.ElseStmt
+				continue
+			}
+			if block, ok := cur.(*parser.BlockStmt); ok {
+				g.writeln("else")
+				g.indent++
+				for _, s := range block.Stmts {
+					g.emitStmt(s)
+				}
+				g.indent--
+			}
+			break
+		}
+		g.writeln("end")
+	case *parser.WhileStmt:
+		// `while (cond) { body }` → `while cond; body; end`.
+		// SKETCH: the §1.4 plan note about `while (true)` lowering to
+		// Crystal's `loop do ... end` idiom (matching zinc-go's
+		// while(true)→for{} rewrite) lands when we have a BoolLit
+		// detection here. For now, plain `while`.
+		g.writeln("while %s", g.emitExpr(stmt.Cond))
+		g.indent++
+		for _, s := range stmt.Body.Stmts {
+			g.emitStmt(s)
+		}
+		g.indent--
+		g.writeln("end")
 	default:
 		g.compileError(0, "codegen_cr: unsupported stmt %T", stmt)
 	}
@@ -311,12 +363,47 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return "nil"
 	case *parser.StringInterpLit:
 		return g.emitStringInterp(expr)
+	case *parser.BinaryExpr:
+		return g.emitBinary(expr)
+	case *parser.UnaryExpr:
+		// SKETCH: `-x` and `!x` map directly. `&x` is rejected per
+		// the per-target diff list — Crystal has no address-of operator.
+		if expr.Op == "&" {
+			g.compileError(0, "& (address-of) is not allowed in zinc-crystal")
+			return ""
+		}
+		return fmt.Sprintf("%s%s", expr.Op, g.emitExpr(expr.Operand))
 	case *parser.CallExpr:
 		return g.emitCall(expr)
 	default:
 		g.compileError(0, "codegen_cr: unsupported expr %T", expr)
 		return fmt.Sprintf("/* TODO %T */", expr)
 	}
+}
+
+// emitBinary lowers a binary expression. Most zinc operators map 1:1
+// to Crystal (+, -, *, /, %, ==, !=, <, <=, >, >=, &&, ||). The few
+// that don't:
+//   - `and` / `or` keywords → Crystal also accepts `&&` / `||`. zinc
+//     uses the symbolic form, so this is a passthrough.
+//   - bitwise &, |, ^ → 1:1.
+//   - `is` / `is not` → Crystal `is_a?` / `!is_a?` — TODO (lands with
+//     match's type guards).
+//   - `in` / `not in` → Crystal `.includes?` — TODO.
+func (g *Generator) emitBinary(b *parser.BinaryExpr) string {
+	left := g.emitExpr(b.Left)
+	right := g.emitExpr(b.Right)
+	switch b.Op {
+	case "is":
+		return fmt.Sprintf("%s.is_a?(%s)", left, right)
+	case "is not":
+		return fmt.Sprintf("!%s.is_a?(%s)", left, right)
+	case "in":
+		return fmt.Sprintf("%s.includes?(%s)", right, left)
+	case "not in":
+		return fmt.Sprintf("!%s.includes?(%s)", right, left)
+	}
+	return fmt.Sprintf("%s %s %s", left, b.Op, right)
 }
 
 // emitStringInterp lowers `"hello, ${name}!"` → `"hello, #{name}!"`.
