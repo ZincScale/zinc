@@ -904,7 +904,7 @@ func (g *Generator) fieldTagString(annots []*parser.Annotation, fallbackLine int
 		format, ok := fieldTagFormat(a.Name)
 		if !ok {
 			g.compileError(fallbackLine,
-				"unknown field annotation @%s — supported: @Json, @Yaml, @Toml", a.Name)
+				"unknown field annotation @%s — supported: @Json, @Yaml, @Toml, @Avro", a.Name)
 			continue
 		}
 		if len(a.Args) == 0 {
@@ -936,6 +936,8 @@ func fieldTagFormat(name string) (string, bool) {
 		return "yaml", true
 	case "Toml":
 		return "toml", true
+	case "Avro":
+		return "avro", true
 	}
 	return "", false
 }
