@@ -536,8 +536,14 @@ func runProject(projectDir string, progArgs []string) error {
 }
 
 // needsRebuild reports whether bin/<name> is missing or older than
-// any .zn source / zinc.toml. Avoids re-running the (slow) docker
-// build on every `zinc run` when nothing changed.
+// any input that affects the build:
+//   - zinc.toml (project config)
+//   - any .zn under src/ (source)
+//   - the zinc-crystal compiler binary itself (codegen changes)
+//
+// The compiler-binary check is what catches `zinc-crystal updated,
+// no .zn changes, but the .cr we'd emit is now different`. Without
+// it, codegen changes silently no-op until the user touches a .zn.
 func needsRebuild(binPath, projectDir string) bool {
 	binInfo, err := os.Stat(binPath)
 	if err != nil {
@@ -545,9 +551,13 @@ func needsRebuild(binPath, projectDir string) bool {
 	}
 	binMtime := binInfo.ModTime()
 
-	// Compare against zinc.toml + every .zn under src/.
 	if info, err := os.Stat(filepath.Join(projectDir, "zinc.toml")); err == nil {
 		if info.ModTime().After(binMtime) {
+			return true
+		}
+	}
+	if zincBin, err := os.Executable(); err == nil {
+		if info, err := os.Stat(zincBin); err == nil && info.ModTime().After(binMtime) {
 			return true
 		}
 	}

@@ -67,6 +67,15 @@ type Generator struct {
 	// Params).
 	sealedVariants map[string]sealedVariantInfo
 
+	// needsZincFmt is set when emit produces any string interpolation
+	// expression. Drives whether we prepend the zinc_fmt helper at the
+	// top of the file. The helper exists to fix phase0/MISMATCH §4 —
+	// Crystal's Float64#to_s prints "12.0" where Go's %v prints "12".
+	// Wrapping every interpolated expression in zinc_fmt(...) trims
+	// the trailing ".0" from integer-valued floats, matching zinc-go's
+	// expected/<name>.txt outputs byte-for-byte.
+	needsZincFmt bool
+
 	// Per-file errors. Non-empty means the build fails; the driver
 	// prints these and exits non-zero.
 	compileErrors []string
@@ -185,12 +194,19 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 		g.requireSet[k] = true
 	}
 	g.compileErrors = append(g.compileErrors, bodyGen.compileErrors...)
+	if bodyGen.needsZincFmt {
+		g.needsZincFmt = true
+	}
 
-	// Assemble final file: requires + blank line + body.
+	// Assemble final file: requires + zinc_fmt helper (if used) + body.
 	for k := range g.requireSet {
 		g.writeln(`require "%s"`, k)
 	}
 	if len(g.requireSet) > 0 {
+		g.writeln("")
+	}
+	if g.needsZincFmt {
+		g.emitZincFmtHelper()
 		g.writeln("")
 	}
 	g.buf.WriteString(bodyGen.buf.String())
@@ -787,8 +803,14 @@ func (g *Generator) emitBinary(b *parser.BinaryExpr) string {
 }
 
 // emitStringInterp lowers `"hello, ${name}!"` → `"hello, #{name}!"`.
-// SKETCH — straight token-by-token map; no escape edge cases yet.
+//
+// Every interpolated expression gets wrapped in `zinc_fmt(...)` so
+// Float64 values without fractional parts print as "12" (matching
+// Go's %v) instead of Crystal's default "12.0". The helper is a
+// no-op for non-Float values — it just calls to_s — so wrapping
+// every interpolation is uniform and cheap. See phase0/MISMATCH §4.
 func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
+	g.needsZincFmt = true
 	var sb strings.Builder
 	sb.WriteByte('"')
 	for _, p := range s.Parts {
@@ -796,14 +818,39 @@ func (g *Generator) emitStringInterp(s *parser.StringInterpLit) string {
 		case *parser.StringLit:
 			sb.WriteString(part.Value)
 		default:
-			// Any non-StringLit part is an interpolated expression.
-			sb.WriteString("#{")
+			sb.WriteString("#{zinc_fmt(")
 			sb.WriteString(g.emitExpr(part))
-			sb.WriteByte('}')
+			sb.WriteString(")}")
 		}
 	}
 	sb.WriteByte('"')
 	return sb.String()
+}
+
+// emitZincFmtHelper writes the zinc_fmt top-level helper. Crystal
+// allows top-level defs without a module wrapper; using a free
+// function keeps the call sites short (`zinc_fmt(x)` vs
+// `Zinc.fmt(x)`) and avoids polluting the symbol table with our
+// own module name.
+//
+// The helper is intentionally permissive: anything that responds to
+// to_s passes through unchanged. Only Float values get the
+// integer-valued trim. Phase-1 follow-up: move this into a
+// `zinc-runtime` shard so projects with multiple .zn files don't
+// each ship a copy.
+func (g *Generator) emitZincFmtHelper() {
+	g.writeln("# Bridge for zinc-go output parity: integer-valued Float64s")
+	g.writeln("# print as \"12\" not \"12.0\". phase0/MISMATCH §4.")
+	g.writeln("def zinc_fmt(v) : String")
+	g.indent++
+	g.writeln("if v.is_a?(Float)")
+	g.indent++
+	g.writeln("return v.to_i.to_s if v == v.to_i")
+	g.indent--
+	g.writeln("end")
+	g.writeln("v.to_s")
+	g.indent--
+	g.writeln("end")
 }
 
 // emitCall lowers a call expression. The two cases at this slice:
