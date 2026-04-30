@@ -545,6 +545,11 @@ func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataCl
 //   - `super(...)` calls in ctor body — TODO.
 func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	header := "class " + c.Name
+	// Generic class params: zinc `class Box<T> { ... }` → Crystal
+	// `class Box(T) ... end`. Crystal uses parens not angle brackets.
+	if len(c.TypeParams) > 0 {
+		header += "(" + strings.Join(c.TypeParams, ", ") + ")"
+	}
 	autoException := false
 	// Walk Parents — first non-interface entry becomes the `< Parent`
 	// inheritance, all interface entries get emitted as `include` lines
@@ -1912,6 +1917,24 @@ var crystalMethodRewrite = map[string]string{
 	"RUnlock": "unlock_read",
 	"Lock":    "lock_write",
 	"Unlock":  "unlock_write",
+	// String idioms — zinc users follow Java/Go shape, Crystal uses
+	// different names. Crystal's String is well-behaved enough that
+	// these direct-rename cases compile cleanly.
+	"upper":      "upcase",
+	"lower":      "downcase",
+	"trim":       "strip",
+	"trimLeft":   "lstrip",
+	"trimRight":  "rstrip",
+	"startsWith": "starts_with?",
+	"endsWith":   "ends_with?",
+	"toBytes":    "bytes",
+	"charAt":     "char_at",
+	"substring":  "byte_slice",
+	"replace":    "gsub",
+	"split":      "split",
+	"join":       "join",
+	"toUpper":    "upcase",
+	"toLower":    "downcase",
 }
 
 // emitLambda lowers `(x: Int) => x + 1` to Crystal's proc form
