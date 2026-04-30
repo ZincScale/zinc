@@ -1,0 +1,22 @@
+name: {{ .Name }}
+version: {{ .Version }}
+{{ if .Authors }}
+authors:{{ range .Authors }}
+  - {{ . }}{{ end }}
+{{ end }}{{ if .Description }}
+description: |
+  {{ .Description }}
+{{ end }}
+targets:
+  {{ .Name }}:
+    main: src/{{ .Name }}.cr
+
+{{ if .Deps }}dependencies:{{ range .Deps }}
+  {{ .Alias }}:{{ if .Path }}
+    path: {{ printf "%q" .Path }}{{ else if .Github }}
+    github: {{ .Github }}{{ if .Version }}
+    version: {{ .Version }}{{ end }}{{ end }}{{ end }}
+
+{{ end }}crystal: ">= {{ .CrystalVersion }}"
+
+license: {{ .License }}

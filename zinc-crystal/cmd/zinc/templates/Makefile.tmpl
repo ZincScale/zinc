@@ -1,0 +1,50 @@
+.PHONY: build build-release build-static run clean test image
+
+# preview_mt: turns on Crystal's multi-threaded fiber runtime. Without
+# this, all fibers run on a single OS thread (cooperative-only) and
+# zinc's `concurrent { }` / `parallel for` lowerings collapse to
+# sequential. Always emitted.
+MT_FLAG := -Dpreview_mt
+{{ if .HostLibraryPath }}
+# Brew lib paths for native deps on host build. The Alpine container
+# build doesn't need these — apk packages land in the default search
+# path. Generated from [build.docker.brew_libs] in zinc.toml.
+HOST_LIBRARY_PATH := {{ .HostLibraryPath }}
+
+build:
+	CRYSTAL_LIBRARY_PATH=$(HOST_LIBRARY_PATH) crystal build src/{{ .Name }}.cr -o bin/{{ .Name }} $(MT_FLAG)
+
+build-release:
+	CRYSTAL_LIBRARY_PATH=$(HOST_LIBRARY_PATH) crystal build src/{{ .Name }}.cr -o bin/{{ .Name }} --release --no-debug $(MT_FLAG)
+	@ls -lh bin/{{ .Name }}
+
+run: build
+	LD_LIBRARY_PATH=$(HOST_LIBRARY_PATH) CRYSTAL_WORKERS={{ .Workers }} ./bin/{{ .Name }}{{ if .ConfigFile }} {{ .ConfigFile }}{{ end }}
+
+test:
+	CRYSTAL_LIBRARY_PATH=$(HOST_LIBRARY_PATH) crystal spec $(MT_FLAG)
+{{ else }}
+build:
+	crystal build src/{{ .Name }}.cr -o bin/{{ .Name }} $(MT_FLAG)
+
+build-release:
+	crystal build src/{{ .Name }}.cr -o bin/{{ .Name }} --release --no-debug $(MT_FLAG)
+	@ls -lh bin/{{ .Name }}
+
+run: build
+	CRYSTAL_WORKERS={{ .Workers }} ./bin/{{ .Name }}{{ if .ConfigFile }} {{ .ConfigFile }}{{ end }}
+
+test:
+	crystal spec $(MT_FLAG)
+{{ end }}
+# Fully-static binary via Alpine+Crystal container. Use this for
+# distribution — no glibc/libgc coupling to the host.
+build-static:
+	./scripts/build-static.sh
+
+# Runtime image built from scratch (just the binary{{ if .ConfigFile }} + config{{ end }}). Tiny.
+image:
+	docker build -t {{ .Name }}:latest .
+
+clean:
+	rm -rf bin lib .crystal .shards

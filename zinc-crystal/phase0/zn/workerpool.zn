@@ -1,0 +1,39 @@
+// Worker Pool — fan-out/fan-in with channels.
+// REWRITTEN from zinc-go's examples/workerpool.zn to satisfy zinc-crystal's
+// §1.4 no-fire-and-forget rule: every spawn lives inside concurrent { }.
+
+void main() {
+    var jobs = Channel<String>(10)
+    var results = Channel<String>(10)
+
+    List<String> tasks = ["fetch", "parse", "transform", "validate", "store"]
+    for (task in tasks) {
+        jobs.send(task)
+    }
+
+    concurrent {
+        for (w in 0..3) {
+            spawn {
+                while (true) {
+                    var job = jobs.recv()
+                    if (job == "STOP") {
+                        return
+                    }
+                    results.send("done: ${job}")
+                }
+            }
+        }
+
+        for (i in 0..3) {
+            jobs.send("STOP")
+        }
+
+        spawn {
+            for (i in 0..5) {
+                print(results.recv())
+            }
+        }
+    }
+
+    print("Worker Pool OK")
+}

@@ -1,0 +1,55 @@
+# Two-stage build: Alpine + Crystal gives us a fully-static binary
+# (musl libc + static-linked libgc / libpcre / libssl / libyaml{{ range .ApkStatic }} / {{ . }}{{ end }}),
+# so the resulting image — and the extracted binary — runs on any
+# Linux with a 2.6.32+ kernel.
+#
+# MT is on (-Dpreview_mt); CRYSTAL_WORKERS=N at runtime picks the
+# scheduler thread count.
+{{ if .SiblingShards }}#
+# Build context: expects the repo root so sibling shards are reachable
+# (path: deps in shard.yml). `scripts/build-static.sh` handles this.
+{{ end }}
+# ---- build stage ----
+FROM crystallang/crystal:{{ .CrystalVersion }}-alpine AS build
+
+RUN apk add --no-cache \
+    yaml-static libxml2-static xz-static zlib-static \
+    openssl-libs-static{{ range .ApkStatic }} \
+    {{ . }}{{ end }}
+
+WORKDIR /src
+{{ range .SiblingShards }}
+COPY {{ . }} /src/{{ . }}{{ end }}
+COPY {{ .CtxPrefix }}shard.yml  /src/{{ .ProjectDir }}/shard.yml{{ if .HasShardLock }}
+COPY {{ .CtxPrefix }}shard.lock /src/{{ .ProjectDir }}/shard.lock{{ end }}
+
+WORKDIR /src/{{ .ProjectDir }}
+# Drop --production: path: deps don't benefit from strict locking, and
+# COPY's mtime stamping collides with --production's freshness check.
+RUN shards install
+
+COPY {{ .CtxPrefix }}src/  ./src/{{ if .HasSpec }}
+COPY {{ .CtxPrefix }}spec/ ./spec/
+
+# Specs run inside the build container — regressions break the build,
+# not just the runtime. Same MT flag as the eventual binary.
+RUN crystal spec -Dpreview_mt
+{{ end }}
+RUN mkdir -p /out \
+ && crystal build src/{{ .Name }}.cr \
+    -o /out/{{ .Name }} \
+    --release --no-debug --static -Dpreview_mt \
+ && strip /out/{{ .Name }} \
+ && ls -lh /out/{{ .Name }}
+
+# ---- runtime stage ----
+FROM scratch
+
+COPY --from=build /out/{{ .Name }} /{{ .Name }}{{ if .ConfigFile }}
+COPY {{ .CtxPrefix }}{{ .ConfigFile }} /{{ .ConfigFile }}{{ end }}
+{{ range .Expose }}
+EXPOSE {{ . }}{{ end }}
+ENV CRYSTAL_WORKERS={{ .Workers }}
+
+ENTRYPOINT ["/{{ .Name }}"]{{ if .ConfigFile }}
+CMD ["/{{ .ConfigFile }}"]{{ end }}
