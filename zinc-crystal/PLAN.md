@@ -1217,17 +1217,16 @@ targets:
 Phase 4 is where we *might* add `[ffi.types]` to zinc.toml, if Phase-1
 empirics show option 1 isn't enough.
 
-### 9.2.1 Server-shaped imports — fibers + execution contexts, with caveats
+### 9.2.1 Server-shaped imports — fibers + execution contexts
 
 When `import_map.toml` covers a server-shaped library — HTTP server,
 websocket server, RPC, anything with a `listen + handle each
-connection` pattern — the lowering uses Crystal's native fiber +
-execution-context idioms, not a literal translation of the source
-target's API. **But** Crystal's stdlib `HTTP::Server` itself isn't
-§1.4-compliant out of the box, which is worth being honest about.
+connection` pattern — the lowering uses Crystal's fiber +
+execution-context model. The §1.4 ownership story is real, but
+needs honesty about *where* the ownership lives.
 
-What Crystal's `HTTP::Server` actually does (verified in
-`stdlib/http/server.cr`):
+**Crystal stdlib `HTTP::Server` today** (verified in
+`stdlib/http/server.cr:451`):
 
 ```crystal
 protected def dispatch(io)
@@ -1235,33 +1234,76 @@ protected def dispatch(io)
 end
 ```
 
-Each connection IS processed in its own fiber (true), but that fiber
-is bare-spawned — not tracked, not waited on at shutdown. This is
-exactly the fire-and-forget pattern §1.4 rejects, sitting inside
-Crystal stdlib.
+Each connection runs in its own fiber, but that fiber is
+bare-spawned — not tracked, not drained on shutdown. By itself this
+is the fire-and-forget pattern §1.4 rejects.
 
-What zinc-crystal needs to emit instead:
+**The fix today** — verified working pattern from the Crystal
+forum thread "Execution contexts and HTTP::Server" (jgaskins,
+2025), shipping as a thin subclass:
 
-  - `import http` / equivalent → a thin wrapper that subclasses
-    `HTTP::Server` and overrides `dispatch` to use a `WaitGroup` (so
-    shutdown waits for in-flight requests) and/or a
-    `Fiber::ExecutionContext::Parallel` (for true multi-threading).
-    Ship this in a `zinc-runtime` shard; user code just writes
-    `import http`.
+```crystal
+class HTTP::Server::WithExecutionContext < HTTP::Server
+  private getter execution_context : Fiber::ExecutionContext
+
+  def initialize(handlers : Indexable(HTTP::Handler), @execution_context)
+    super HTTP::Server.build_middleware(handlers)
+  end
+
+  def dispatch(io)
+    execution_context.spawn { handle_client io }
+  end
+end
+```
+
+Used like:
+
+```crystal
+context = Fiber::ExecutionContext::Parallel.new("http.server", 8)
+http = HTTP::Server::WithExecutionContext.new(handlers, context)
+```
+
+**Where the §1.4 ownership comes from**: not the server itself, but
+the `Fiber::ExecutionContext` the server dispatches into. The EC
+pool has a documented shutdown that drains all fibers running in
+it. The wrapper closes the EC when the server closes, so all
+in-flight requests get drained. That's the ownership chain:
+
+```
+zinc user code
+   │
+   ▼
+HTTP::Server::WithExecutionContext   (zinc-runtime shard)
+   │
+   ▼
+Fiber::ExecutionContext::Parallel    (owns the request fibers)
+   │
+   ▼
+request fibers (one per connection)
+```
+
+**zinc-crystal's job**:
+
+  - `import http` / equivalent → ship `HTTP::Server::WithExecutionContext`
+    (or equivalent) in a `zinc-runtime` shard, plus the EC
+    construction. User code just writes `import http` and gets the
+    structured-shutdown guarantees.
   - When zinc source has a hand-rolled server loop
     (`for { conn = listener.accept(); spawn { handle(conn) } }`),
     detection + rewrite to the wrapped server form. Pattern
     detection lands when the first real example needs it.
 
-This connects to PLAN §13 risk #6 ("rule too strict for real
-idioms"): Crystal stdlib `HTTP::Server` is exhibit A. zinc-crystal's
-job is to provide a wrapped variant that *is* §1.4-compliant, so
-users get the rule's guarantees on shutdown / error propagation
-without writing the supervisor scaffold themselves.
+**Upstream watch**: the Crystal team is actively debating native EC
+support for HTTP::Server (forum thread referenced above). Two
+proposals on the table — fiber-local spawn context (ysbaddaden) vs.
+explicit configuration (straight-shoota). Once one lands in stdlib,
+the wrapper subclass becomes redundant and zinc-crystal's
+`import http` lowering simplifies to use the native shape directly.
+Tracking that thread is a Phase 1 task.
 
-Same shape applies to DB connection pools, message-queue consumers,
-any "fiber-per-thing" server idiom: lower to a wrapped variant that
-adds the missing ownership.
+Same shape applies to other server-idioms (DB connection pools,
+message-queue consumers): lower to a wrapped variant whose EC owns
+the worker fibers, and shutdown drains them.
 
 ### 9.3 FFI escape hatch
 
