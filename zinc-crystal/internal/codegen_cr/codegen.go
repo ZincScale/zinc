@@ -1186,7 +1186,26 @@ func (g *Generator) emitWith(w *parser.WithStmt) {
 		g.writeln("end")
 		return
 	}
-	g.compileError(0, "codegen_cr: with/using lowering — TODO (Resources[0]=%q)", w.Resources[0].Name)
+	// `using (var r = open()) { body }` — declare r, run body, close r
+	// even on exception. Crystal's idiom is begin/ensure.
+	for _, r := range w.Resources {
+		g.writeln("%s = %s", r.Name, g.emitExpr(r.Value))
+	}
+	g.writeln("begin")
+	g.indent++
+	if w.Body != nil {
+		for _, s := range w.Body.Stmts {
+			g.emitStmt(s)
+		}
+	}
+	g.indent--
+	g.writeln("ensure")
+	g.indent++
+	for _, r := range w.Resources {
+		g.writeln("%s.close", r.Name)
+	}
+	g.indent--
+	g.writeln("end")
 }
 
 // emitFor lowers zinc for loops to Crystal:
@@ -1277,6 +1296,20 @@ func (g *Generator) emitCapacity(c *parser.CapacityExpr) string {
 		if len(c.CollectionType.TypeArgs) == 1 {
 			return fmt.Sprintf("Array(%s).new(%s)",
 				g.crType(c.CollectionType.TypeArgs[0]), g.emitExpr(c.Capacity))
+		}
+	case "Map":
+		if len(c.CollectionType.TypeArgs) == 2 {
+			// Crystal's Hash#new accepts `initial_capacity:` named arg.
+			return fmt.Sprintf("Hash(%s, %s).new(initial_capacity: %s)",
+				g.crType(c.CollectionType.TypeArgs[0]),
+				g.crType(c.CollectionType.TypeArgs[1]),
+				g.emitExpr(c.Capacity))
+		}
+	case "Set":
+		if len(c.CollectionType.TypeArgs) == 1 {
+			// Set has no capacity ctor; ignore the capacity hint.
+			return fmt.Sprintf("Set(%s).new",
+				g.crType(c.CollectionType.TypeArgs[0]))
 		}
 	}
 	g.compileError(0, "codegen_cr: capacity ctor for %s not supported", name)
@@ -1430,33 +1463,52 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 			continue
 		}
 		// Pattern is typically a CallExpr like `Circle(r)` for sealed
-		// destructuring. Plain idents and literals are also valid for
-		// non-sealed match (enum variants, integer cases, etc.).
+		// destructuring, or `String(s)` for type-match. Plain idents
+		// and literals are also valid for non-sealed match.
 		if call, ok := mc.Pattern.(*parser.CallExpr); ok {
 			ident, ok := call.Callee.(*parser.Ident)
 			if !ok {
 				g.compileError(0, "codegen_cr: match: pattern callee %T not supported", call.Callee)
 				continue
 			}
-			info, ok := g.sealedVariants[ident.Name]
-			if !ok {
-				g.compileError(0, "codegen_cr: match: %q is not a sealed-class variant", ident.Name)
+			// Sealed variant pattern: bind to fields.
+			if info, ok := g.sealedVariants[ident.Name]; ok {
+				sealedParent = info.Parent
+				g.writeln("in %s::%s", info.Parent, ident.Name)
+				g.indent++
+				for i, a := range call.Args {
+					if i >= len(info.Fields) {
+						g.compileError(0, "codegen_cr: match pattern %s has more bindings than fields", ident.Name)
+						break
+					}
+					bindIdent, ok := a.(*parser.Ident)
+					if !ok {
+						g.compileError(0, "codegen_cr: match: pattern binding %T not supported", a)
+						continue
+					}
+					g.writeln("%s = %s.%s", bindIdent.Name, subject, info.Fields[i])
+				}
+				if mc.Body != nil {
+					for _, s := range mc.Body.Stmts {
+						g.emitStmt(s)
+					}
+				}
+				g.indent--
 				continue
 			}
-			sealedParent = info.Parent
-			g.writeln("in %s::%s", info.Parent, ident.Name)
+			// Type-match pattern: `case T(x)` — narrow subject to T,
+			// bind x to subject. Crystal's `case in` does the type
+			// narrowing automatically; we add the binding statement.
+			typeName := ident.Name
+			if mapped, ok := primitiveTypeMap[typeName]; ok {
+				typeName = mapped
+			}
+			g.writeln("in %s", typeName)
 			g.indent++
-			for i, a := range call.Args {
-				if i >= len(info.Fields) {
-					g.compileError(0, "codegen_cr: match pattern %s has more bindings than fields", ident.Name)
-					break
+			if len(call.Args) == 1 {
+				if bindIdent, ok := call.Args[0].(*parser.Ident); ok {
+					g.writeln("%s = %s", bindIdent.Name, subject)
 				}
-				bindIdent, ok := a.(*parser.Ident)
-				if !ok {
-					g.compileError(0, "codegen_cr: match: pattern binding %T not supported", a)
-					continue
-				}
-				g.writeln("%s = %s.%s", bindIdent.Name, subject, info.Fields[i])
 			}
 			if mc.Body != nil {
 				for _, s := range mc.Body.Stmts {
@@ -1636,6 +1688,22 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return g.emitLambda(expr)
 	case *parser.MatchExpr:
 		return g.emitMatchExpr(expr)
+	case *parser.TypeAssertExpr:
+		// `x as T` → `x.as(T)` (Crystal cast — raises on failure).
+		// `x is T` → `x.is_a?(T)`.
+		typeName := expr.TypeName
+		if mapped, ok := primitiveTypeMap[typeName]; ok {
+			typeName = mapped
+		}
+		if expr.IsCheck {
+			return fmt.Sprintf("%s.is_a?(%s)", g.emitExpr(expr.Object), typeName)
+		}
+		return fmt.Sprintf("%s.as(%s)", g.emitExpr(expr.Object), typeName)
+	case *parser.RawStringLit:
+		// Backtick raw string. Crystal's `%q( ... )` is the closest
+		// equivalent; for simple cases the basic double-quoted string
+		// with escaping works too. SKETCH: emit %q for safety.
+		return fmt.Sprintf("%%q(%s)", expr.Value)
 	case *parser.TupleLit:
 		parts := make([]string, len(expr.Elements))
 		for i, e := range expr.Elements {
