@@ -191,8 +191,12 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 		bodyGen.writeln("")
 	}
 
-	// Trailing `main` invocation — both for explicit and synthesized.
-	bodyGen.writeln("main")
+	// Trailing `main` invocation — only when this file actually has a
+	// main entry point (explicit `void main()` decl or top-level stmts
+	// that we wrapped). Helper / module files don't need it.
+	if hasExplicitMain || (len(prog.Stmts) > 0 && !hasExplicitMain) {
+		bodyGen.writeln("main")
+	}
 
 	// Propagate state changes from the body pass back to the outer
 	// Generator (Crystal-side requires accumulate during emit, errors
@@ -494,6 +498,19 @@ func (g *Generator) emitCtor(c *parser.ClassDecl, autoException bool) {
 	}
 	g.indent++
 
+	// super(args) — zinc's parser strips the super(...) call out of
+	// the ctor body and parks the args on the CtorDecl. We have to
+	// re-emit it at the top of initialize. Without this, ParseError
+	// extending BaseError would never run BaseError's init (which
+	// sets the message via super → Exception).
+	if c.Ctor.SuperCalled {
+		args := make([]string, 0, len(c.Ctor.SuperArgs))
+		for _, a := range c.Ctor.SuperArgs {
+			args = append(args, g.emitExpr(a))
+		}
+		g.writeln("super(%s)", strings.Join(args, ", "))
+	}
+
 	// Auto-init for stdlib types like sync.Mutex / sync.RWMutex /
 	// sync.WaitGroup. zinc-go does the same thing in its codegen
 	// (sync_field_init.zn was the regression test). Without this, the
@@ -558,10 +575,11 @@ func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 	if ret == "" {
 		ret = "Nil"
 	}
+	methodName := crMethodName(m.Name)
 	if len(m.Params) == 0 {
-		g.writeln("def %s : %s", m.Name, ret)
+		g.writeln("def %s : %s", methodName, ret)
 	} else {
-		g.writeln("def %s(%s) : %s", m.Name, strings.Join(params, ", "), ret)
+		g.writeln("def %s(%s) : %s", methodName, strings.Join(params, ", "), ret)
 	}
 	g.indent++
 	if m.Body != nil {
@@ -1331,14 +1349,16 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		// `this` alone (e.g. returned, passed) becomes `self` in Crystal.
 		return "self"
 	case *parser.SelectorExpr:
-		// `this.x` → `@x`. Other selectors → `obj.field` 1:1.
+		// `this.x` → `@x`. Other selectors → `obj.field` with method-name
+		// lowercasing applied (zinc-go users write `obj.Foo` Go-style;
+		// Crystal needs `obj.foo` since uppercase is a constant ref).
 		if _, isThis := expr.Object.(*parser.ThisExpr); isThis {
 			return "@" + expr.Field
 		}
 		if id, ok := expr.Object.(*parser.Ident); ok && id.Name == "this" {
 			return "@" + expr.Field
 		}
-		return fmt.Sprintf("%s.%s", g.emitExpr(expr.Object), expr.Field)
+		return fmt.Sprintf("%s.%s", g.emitExpr(expr.Object), crMethodName(expr.Field))
 	case *parser.IntLit:
 		return expr.Value
 	case *parser.FloatLit:
@@ -1444,6 +1464,39 @@ var stdlibTypeRewrite = map[string]string{
 	"sync.Mutex":     "Sync::Mutex",
 	"sync.RWMutex":   "Sync::RWLock",
 	"sync.WaitGroup": "WaitGroup",
+}
+
+// crMethodName returns the Crystal-side method name for a zinc method.
+// Two transforms applied in order:
+//   1. crystalMethodRewrite hit (recv → receive, isEmpty → empty?, etc.)
+//   2. Lowercase first letter if uppercase. Crystal requires methods
+//      to start with a lowercase letter (or _); uppercase identifiers
+//      are constants/types. zinc-go users follow Go's "capitalize for
+//      exported" convention, so `pub String Error()` is common —
+//      becomes `def error : String` in Crystal.
+//
+// The mirror of zinc-go's exportName(). Used at both decl sites
+// (emitMethod) and call sites (emitCall on SelectorExpr).
+//
+// Edge cases:
+//   - Names that lowercase to a Crystal reserved word would conflict;
+//     not handled today (Phase 1 enumeration). Most zinc method names
+//     don't.
+//   - All-uppercase acronyms (HTTP, URL) lowercase only the first
+//     char (HTTP → hTTP), which looks bad but is technically valid.
+//     Phase 1 can apply smarter casing if a real example hits it.
+func crMethodName(name string) string {
+	if r, ok := crystalMethodRewrite[name]; ok {
+		return r
+	}
+	if name == "" {
+		return name
+	}
+	first := name[0]
+	if first >= 'A' && first <= 'Z' {
+		return string(first+32) + name[1:]
+	}
+	return name
 }
 
 var crystalMethodRewrite = map[string]string{
@@ -1636,13 +1689,10 @@ func (g *Generator) emitCall(c *parser.CallExpr) string {
 		}
 		return fmt.Sprintf("%s.new(%s)", typeName, strings.Join(args, ", "))
 	}
-	// Method calls — apply the crystalMethodRewrite map and the
-	// drop-parens-on-zero-args idiom.
+	// Method calls — apply crMethodName (rewrite map + auto-lowercase)
+	// and the drop-parens-on-zero-args idiom.
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		field := sel.Field
-		if rewrite, ok := crystalMethodRewrite[field]; ok {
-			field = rewrite
-		}
+		field := crMethodName(sel.Field)
 		obj := g.emitExpr(sel.Object)
 		if len(c.Args) == 0 {
 			return fmt.Sprintf("%s.%s", obj, field)

@@ -438,29 +438,51 @@ func invokeBuildStatic(projectDir, projectName string) error {
 // through zinc-go's shared parser, runs the Crystal codegen, and
 // writes the result alongside the .zn as .cr.
 //
-// SKETCH: single-file projects only. Multi-file (subpackages) lands
-// later — same flat-walk shape, but with per-package output dirs.
+// Multi-file flow: the file matching cfg.Name (the project entry)
+// is the one Crystal's `crystal build` compiles, and it gets
+// `require "./<sibling>"` lines prepended so all helper files are
+// pulled in. Non-entry files are emitted as plain Crystal modules
+// with no trailing main invocation (the codegen handles that based
+// on whether a main FnDecl is present).
+//
+// SKETCH: subdirectory subpackages (`src/core/foo.zn`) — TODO. For
+// now, all .zn files must be at the top of src/.
 func transpileSources(cfg *crystalConfig, projectDir string) error {
 	srcDir := filepath.Join(projectDir, "src")
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		return fmt.Errorf("read src/: %w", err)
 	}
+	var siblings []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zn") {
 			continue
 		}
+		base := strings.TrimSuffix(e.Name(), ".zn")
+		if base != cfg.Name {
+			siblings = append(siblings, base)
+		}
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zn") {
+			continue
+		}
+		base := strings.TrimSuffix(e.Name(), ".zn")
 		znPath := filepath.Join(srcDir, e.Name())
-		crName := strings.TrimSuffix(e.Name(), ".zn") + ".cr"
-		crPath := filepath.Join(srcDir, crName)
-		if err := transpileOne(znPath, crPath, cfg.Name); err != nil {
+		crPath := filepath.Join(srcDir, base+".cr")
+		isEntry := base == cfg.Name
+		var entrySiblings []string
+		if isEntry {
+			entrySiblings = siblings
+		}
+		if err := transpileOne(znPath, crPath, cfg.Name, entrySiblings); err != nil {
 			return fmt.Errorf("transpile %s: %w", e.Name(), err)
 		}
 	}
 	return nil
 }
 
-func transpileOne(znPath, crPath, projectName string) error {
+func transpileOne(znPath, crPath, projectName string, siblings []string) error {
 	src, err := os.ReadFile(znPath)
 	if err != nil {
 		return err
@@ -494,7 +516,20 @@ func transpileOne(znPath, crPath, projectName string) error {
 	if len(files) == 0 {
 		return fmt.Errorf("codegen produced no output")
 	}
-	return os.WriteFile(crPath, []byte(files[0].Content), 0o644)
+	content := files[0].Content
+	if len(siblings) > 0 {
+		// Prepend `require "./<sibling>"` lines for the entry-point
+		// file so Crystal's compiler pulls in helper files. Crystal
+		// require paths are relative to the file when prefixed with `./`.
+		var b strings.Builder
+		for _, s := range siblings {
+			fmt.Fprintf(&b, "require \"./%s\"\n", s)
+		}
+		b.WriteString("\n")
+		b.WriteString(content)
+		content = b.String()
+	}
+	return os.WriteFile(crPath, []byte(content), 0o644)
 }
 
 // runProject does `zinc build` if the binary is stale (or missing),
