@@ -53,6 +53,13 @@ type Generator struct {
 	// Cleared when class emit finishes. nil outside any class scope.
 	currentClassFields map[string]bool
 
+	// currentFnIsThrower is true while emitting the body of a function
+	// whose declared return type ends in `error` (bare or trailing in
+	// a tuple). Drives `return ErrorExpr` → `raise ErrorExpr` and
+	// `return v, null` → `return v` rewrites. Saved/restored across
+	// nested function emits.
+	currentFnIsThrower bool
+
 	// classes tracks all class names declared in this Program. Used
 	// by emitCall to discriminate `Foo(args)` (constructor → Foo.new(args))
 	// from `someFn(args)` (regular call). Populated in a pre-pass over
@@ -380,8 +387,17 @@ func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataCl
 //   - `super(...)` calls in ctor body — TODO.
 func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	header := "class " + c.Name
+	autoException := false
 	if len(c.Parents) > 0 {
 		header += " < " + c.Parents[0]
+	} else if isErrorClassName(c.Name) {
+		// Convention: any class named *Error or *Exception auto-extends
+		// Crystal's Exception. Zinc users write `class ParseError { ... }`
+		// and zinc-crystal makes it raisable. Without this, `raise
+		// ParseError.new(...)` is a Crystal compile error because plain
+		// classes can't be raised.
+		header += " < Exception"
+		autoException = true
 	}
 	g.writeln(header)
 	g.indent++
@@ -389,7 +405,16 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	// Field declarations: private fields as @-vars, pub as getters.
 	// Default values move into initialize since Crystal doesn't allow
 	// `@x : Int32 = 0` at the class-body level.
+	//
+	// Auto-Exception subclasses skip emitting a `message` field —
+	// Crystal's Exception base class already provides @message : String?,
+	// and re-declaring it as String here would be a type-redeclaration
+	// error. The user's `pub String message` in zinc is the same field;
+	// we just route through the parent class.
 	for _, f := range c.Fields {
+		if autoException && f.Name == "message" {
+			continue
+		}
 		if f.IsPub {
 			g.writeln("getter %s : %s", f.Name, g.crType(f.Type))
 		} else {
@@ -402,7 +427,7 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 
 	// Constructor.
 	if c.Ctor != nil {
-		g.emitCtor(c)
+		g.emitCtor(c, autoException)
 	}
 
 	// Methods.
@@ -420,7 +445,12 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 // emitCtor emits `def initialize(...) ... end`. We build a class-body
 // scope (currentClassFields) so `this.x = e` and bare `x = e` both
 // lower to `@x = e`.
-func (g *Generator) emitCtor(c *parser.ClassDecl) {
+//
+// autoException == true means this class extends Crystal's Exception
+// via our naming convention. In that mode, any `this.message = X`
+// statement in the ctor body is rewritten to `super(X)` so we set
+// the parent class's @message instead of re-declaring our own.
+func (g *Generator) emitCtor(c *parser.ClassDecl, autoException bool) {
 	prevFields := g.currentClassFields
 	g.currentClassFields = make(map[string]bool, len(c.Fields))
 	for _, f := range c.Fields {
@@ -438,13 +468,51 @@ func (g *Generator) emitCtor(c *parser.ClassDecl) {
 		g.writeln("def initialize(%s)", strings.Join(params, ", "))
 	}
 	g.indent++
+
+	// Auto-init for stdlib types like sync.Mutex / sync.RWMutex /
+	// sync.WaitGroup. zinc-go does the same thing in its codegen
+	// (sync_field_init.zn was the regression test). Without this, the
+	// field stays nil and the first method call segfaults.
+	for _, f := range c.Fields {
+		if simple, ok := f.Type.(*parser.SimpleType); ok {
+			if mapped, ok := stdlibTypeRewrite[simple.Name]; ok {
+				g.writeln("@%s = %s.new", f.Name, mapped)
+			}
+		}
+	}
+
 	if c.Ctor.Body != nil {
 		for _, s := range c.Ctor.Body.Stmts {
+			if autoException && isMessageAssign(s) {
+				assign := s.(*parser.AssignStmt)
+				g.writeln("super(%s)", g.emitExpr(assign.Value))
+				continue
+			}
 			g.emitStmt(s)
 		}
 	}
 	g.indent--
 	g.writeln("end")
+}
+
+// isMessageAssign matches `this.message = X` AST shape. Used in the
+// auto-Exception ctor lowering to rewrite to `super(X)`.
+func isMessageAssign(s parser.Stmt) bool {
+	a, ok := s.(*parser.AssignStmt)
+	if !ok {
+		return false
+	}
+	sel, ok := a.Target.(*parser.SelectorExpr)
+	if !ok || sel.Field != "message" {
+		return false
+	}
+	if _, isThis := sel.Object.(*parser.ThisExpr); isThis {
+		return true
+	}
+	if id, ok := sel.Object.(*parser.Ident); ok && id.Name == "this" {
+		return true
+	}
+	return false
 }
 
 // emitMethod emits a `def name(...) : Ret ... end`. Drops `pub`
@@ -480,6 +548,77 @@ func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
 	g.writeln("end")
 }
 
+// isTrueLit returns true iff the expression is the bool literal `true`.
+// Used by the `while (true)` → `loop do` rewrite.
+func isTrueLit(e parser.Expr) bool {
+	if b, ok := e.(*parser.BoolLit); ok {
+		return b.Value
+	}
+	return false
+}
+
+// isErrorClassName tells the class-decl emitter whether a class is a
+// candidate to inherit from Crystal's Exception. Convention-based —
+// names ending in "Error" or "Exception" are treated as raisable.
+// Anything else stays a plain class.
+//
+// SKETCH: cross-class inheritance complicates this. If `class
+// ParseError : BaseError` and BaseError already extends Exception,
+// ParseError gets it transitively and we shouldn't add the explicit
+// `< Exception`. The current code only adds it when Parents is empty,
+// which means user-declared inheritance chains work as written. Phase 1
+// can revisit if users hit a case the convention misses.
+func isErrorClassName(name string) bool {
+	return strings.HasSuffix(name, "Error") || strings.HasSuffix(name, "Exception")
+}
+
+// isThrowerType reports whether a TypeExpr is a thrower return shape:
+// bare `error`, or a TupleType whose last element is `error`. Used to
+// decide whether to drop the error slot from the Crystal return type
+// signature (Crystal uses raise/rescue, not error-as-value).
+func isThrowerType(t parser.TypeExpr) bool {
+	if t == nil {
+		return false
+	}
+	if s, ok := t.(*parser.SimpleType); ok && s.Name == "error" {
+		return true
+	}
+	if tup, ok := t.(*parser.TupleType); ok && len(tup.Elements) > 0 {
+		if last, ok := tup.Elements[len(tup.Elements)-1].(*parser.SimpleType); ok && last.Name == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+// throwerValueType strips the trailing `error` slot from a thrower
+// signature, returning the Crystal type for the "value" portion.
+//
+//   error               → Nil
+//   (Int, error)        → Int32
+//   (Int, String, error) → Tuple(Int32, String)
+//
+// SKETCH: multi-value throwers lower to a Tuple. zinc-go uses tuple
+// returns natively; Crystal supports the same shape with Tuple(...).
+func (g *Generator) throwerValueType(t parser.TypeExpr) string {
+	if s, ok := t.(*parser.SimpleType); ok && s.Name == "error" {
+		return "Nil"
+	}
+	if tup, ok := t.(*parser.TupleType); ok && len(tup.Elements) > 1 {
+		// Drop trailing error.
+		valueTypes := tup.Elements[:len(tup.Elements)-1]
+		if len(valueTypes) == 1 {
+			return g.crType(valueTypes[0])
+		}
+		parts := make([]string, len(valueTypes))
+		for i, vt := range valueTypes {
+			parts[i] = g.crType(vt)
+		}
+		return "Tuple(" + strings.Join(parts, ", ") + ")"
+	}
+	return "Nil"
+}
+
 // emitFnDecl emits a Crystal `def <name>(<params>) : <ret>` block.
 //
 // SKETCH: handles the simplest shape — primitive-only param types,
@@ -496,17 +635,29 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	if ret == "" {
 		ret = "Nil" // void → Nil
 	}
+	// Thrower return type rewrite: `(Int, error)` → `Int32`,
+	// bare `error` → `Nil`. Crystal uses raise/rescue rather than
+	// returning an error slot.
+	isThrower := isThrowerType(fn.ReturnType)
+	if isThrower {
+		ret = g.throwerValueType(fn.ReturnType)
+	}
 	header := fmt.Sprintf("def %s(%s) : %s", fn.Name, strings.Join(params, ", "), ret)
 	if len(fn.Params) == 0 {
 		header = fmt.Sprintf("def %s : %s", fn.Name, ret)
 	}
 	g.writeln(header)
 	g.indent++
+
+	prevThrower := g.currentFnIsThrower
+	g.currentFnIsThrower = isThrower
 	if fn.Body != nil {
 		for _, s := range fn.Body.Stmts {
 			g.emitStmt(s)
 		}
 	}
+	g.currentFnIsThrower = prevThrower
+
 	g.indent--
 	g.writeln("end")
 }
@@ -543,6 +694,13 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 			g.compileError(0, "type 'any' is not allowed in zinc-crystal — use a concrete type")
 			return "Object" // unreachable in practice; build fails first
 		}
+		// Stdlib type rewrites: zinc users write `sync.Mutex` (Go-style),
+		// Crystal-target maps to `Sync::Mutex`. Same shape for RWLock,
+		// WaitGroup, etc. Same convention for any future stdlib import
+		// that has a different naming idiom in Crystal.
+		if mapped, ok := stdlibTypeRewrite[name.Name]; ok {
+			return mapped
+		}
 		return name.Name // assume user-defined type, pass through
 	}
 	if gt, ok := t.(*parser.GenericType); ok {
@@ -576,6 +734,13 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 		// nullable shorthand. Plan §4.1 lowering.
 		return g.crType(opt.Inner) + "?"
 	}
+	if tup, ok := t.(*parser.TupleType); ok {
+		parts := make([]string, len(tup.Elements))
+		for i, e := range tup.Elements {
+			parts[i] = g.crType(e)
+		}
+		return "Tuple(" + strings.Join(parts, ", ") + ")"
+	}
 	g.compileError(0, "codegen_cr: unsupported type %T", t)
 	return "Object"
 }
@@ -588,19 +753,23 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 func (g *Generator) emitStmt(s parser.Stmt) {
 	switch stmt := s.(type) {
 	case *parser.ReturnStmt:
-		if stmt.Value == nil {
-			g.writeln("return")
-		} else {
-			g.writeln("return %s", g.emitExpr(stmt.Value))
-		}
+		g.emitReturn(stmt)
 	case *parser.ExprStmt:
-		g.writeln("%s", g.emitExpr(stmt.Expr))
+		if stmt.OrHandler != nil {
+			g.emitOrHandlerStmt(stmt.Expr, stmt.OrHandler, "")
+		} else {
+			g.writeln("%s", g.emitExpr(stmt.Expr))
+		}
 	case *parser.VarStmt:
 		// Local var. Crystal infers the type from the RHS; emit
 		// `<name> = <expr>` for type-inferred or `<name> : <type> = <expr>`
-		// when the user wrote an explicit type. SKETCH: matches phase0
-		// hello.cr's `x : Int32 = 42` shape when the type is given.
-		if stmt.Type != nil {
+		// when the user wrote an explicit type. With an or { } handler,
+		// wrap the RHS in a begin/rescue block so a thrown exception
+		// runs the handler body. The `err` binding inside the handler
+		// becomes a Crystal `rescue err : Exception` capture.
+		if stmt.OrHandler != nil {
+			g.emitOrHandlerStmt(stmt.Value, stmt.OrHandler, stmt.Name)
+		} else if stmt.Type != nil {
 			g.writeln("%s : %s = %s", stmt.Name, g.crType(stmt.Type), g.emitExpr(stmt.Value))
 		} else {
 			g.writeln("%s = %s", stmt.Name, g.emitExpr(stmt.Value))
@@ -646,24 +815,192 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("end")
 	case *parser.MatchStmt:
 		g.emitMatch(stmt)
+	case *parser.ParallelForStmt:
+		g.emitParallelFor(stmt)
 	case *parser.ForStmt:
 		g.emitFor(stmt)
 	case *parser.WhileStmt:
-		// `while (cond) { body }` → `while cond; body; end`.
-		// SKETCH: the §1.4 plan note about `while (true)` lowering to
-		// Crystal's `loop do ... end` idiom (matching zinc-go's
-		// while(true)→for{} rewrite) lands when we have a BoolLit
-		// detection here. For now, plain `while`.
-		g.writeln("while %s", g.emitExpr(stmt.Cond))
+		// `while (true) { body }` lowers to `loop do ... end` (the
+		// idiomatic Crystal infinite-loop form, matching zinc-go's
+		// while(true)→for{} rewrite). All other `while` keep the
+		// natural Crystal shape.
+		if isTrueLit(stmt.Cond) {
+			g.writeln("loop do")
+		} else {
+			g.writeln("while %s", g.emitExpr(stmt.Cond))
+		}
 		g.indent++
 		for _, s := range stmt.Body.Stmts {
 			g.emitStmt(s)
 		}
 		g.indent--
 		g.writeln("end")
+	case *parser.BreakStmt:
+		g.writeln("break")
+	case *parser.ContinueStmt:
+		g.writeln("next")
+	case *parser.WithStmt:
+		g.emitWith(stmt)
 	default:
 		g.compileError(0, "codegen_cr: unsupported stmt %T", stmt)
 	}
+}
+
+// emitReturn lowers a return statement, with thrower-shape rewrites
+// active when currentFnIsThrower is set.
+//
+// Inside a thrower:
+//   - `return ErrorExpr` (a single value that's an error class instance)
+//     → `raise ErrorExpr`
+//   - `return v, null` (multi-value with implicit no-error)
+//     → `return v` (drop the trailing nil for the error slot)
+//   - `return v1, v2, null`
+//     → `return {v1, v2}` (Tuple shape — values combined, error dropped)
+//   - `return null` (bare for an `error`-typed thrower) → just `return`
+//
+// SKETCH: distinguishing "this single-value return is an error" vs
+// "this single-value return is the success value" needs type info we
+// don't fully have. Heuristic: if the return value is a CallExpr whose
+// callee is a known class name and the class extends Exception (or
+// has Error in its hierarchy), treat it as raise. Else value. For
+// phase0/error_explicit.zn this is enough.
+func (g *Generator) emitReturn(r *parser.ReturnStmt) {
+	if r.Value == nil {
+		g.writeln("return")
+		return
+	}
+	if g.currentFnIsThrower {
+		// TupleLit return — split error handling.
+		if tup, ok := r.Value.(*parser.TupleLit); ok && len(tup.Elements) > 0 {
+			last := tup.Elements[len(tup.Elements)-1]
+			if _, isNull := last.(*parser.NullLit); isNull {
+				// Drop the trailing null (error slot).
+				values := tup.Elements[:len(tup.Elements)-1]
+				if len(values) == 0 {
+					g.writeln("return")
+					return
+				}
+				if len(values) == 1 {
+					g.writeln("return %s", g.emitExpr(values[0]))
+					return
+				}
+				parts := make([]string, len(values))
+				for i, v := range values {
+					parts[i] = g.emitExpr(v)
+				}
+				g.writeln("return {%s}", strings.Join(parts, ", "))
+				return
+			}
+		}
+		// Bare null in a thrower — no-op return.
+		if _, isNull := r.Value.(*parser.NullLit); isNull {
+			g.writeln("return")
+			return
+		}
+		// Single-value return where the value looks like an error
+		// constructor — heuristic: CallExpr whose callee Ident name
+		// ends in "Error" or is a known class name we've registered.
+		if call, ok := r.Value.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				name := ident.Name
+				if strings.HasSuffix(name, "Error") || strings.HasSuffix(name, "Exception") || g.classes[name] {
+					// Render the call WITHOUT the `Foo.new` constructor
+					// rewrite — we want `raise Foo.new(msg)` shape.
+					args := make([]string, 0, len(call.Args))
+					for _, a := range call.Args {
+						args = append(args, g.emitExpr(a))
+					}
+					g.writeln("raise %s.new(%s)", name, strings.Join(args, ", "))
+					return
+				}
+			}
+		}
+	}
+	g.writeln("return %s", g.emitExpr(r.Value))
+}
+
+// emitOrHandlerStmt lowers a call-site `or { }` to a begin/rescue
+// block. `varName` is non-empty for the VarStmt case (`var ok = ...`),
+// empty for the ExprStmt case (`proc.start() or { ... }`).
+//
+// Result shape:
+//
+//   <name> = begin     <-- only when varName != ""
+//     <expr>
+//   rescue err : Exception   <-- err is implicit zinc binding
+//     <handler body>
+//   end
+//
+// For the `or match err { case Type -> ... }` form, we'd emit
+// multiple `rescue err : Type` arms. SKETCH: simple form only
+// today; or-match lands when phase0/error_explicit needs it.
+func (g *Generator) emitOrHandlerStmt(value parser.Expr, h *parser.OrHandler, varName string) {
+	prefix := ""
+	if varName != "" {
+		prefix = varName + " = "
+	}
+	g.writeln("%sbegin", prefix)
+	g.indent++
+	g.writeln("%s", g.emitExpr(value))
+	g.indent--
+	if h.MatchCases != nil {
+		// or match err { case Foo -> ...; case _ -> ... }
+		matchVar := h.MatchVar
+		if matchVar == "" {
+			matchVar = "err"
+		}
+		for _, mc := range h.MatchCases {
+			if mc.Type == "" {
+				g.writeln("rescue %s : Exception", matchVar)
+			} else {
+				g.writeln("rescue %s : %s", matchVar, mc.Type)
+			}
+			g.indent++
+			if mc.Body != nil {
+				for _, s := range mc.Body.Stmts {
+					g.emitStmt(s)
+				}
+			}
+			g.indent--
+		}
+	} else {
+		g.writeln("rescue err : Exception")
+		g.indent++
+		if h.Body != nil {
+			for _, s := range h.Body.Stmts {
+				g.emitStmt(s)
+			}
+		}
+		g.indent--
+	}
+	g.writeln("end")
+}
+
+// emitWith handles both `lock (mu) { }` (zinc parser uses WithStmt
+// with Resources[0].Name == "_lock" as the marker) and `using/with`
+// resource-managed blocks.
+//
+//   lock (mu) { body }   → mu.synchronize do; body; end
+//   with (var f = open()) { body }  → wraps body in a begin/ensure
+//                                     that calls f.close
+//
+// SKETCH: only the lock form is wired today. Full with/using lowering
+// (begin/ensure with auto-Close) lands when a real example needs it.
+func (g *Generator) emitWith(w *parser.WithStmt) {
+	if len(w.Resources) == 1 && w.Resources[0].Name == "_lock" {
+		mu := g.emitExpr(w.Resources[0].Value)
+		g.writeln("%s.synchronize do", mu)
+		g.indent++
+		if w.Body != nil {
+			for _, s := range w.Body.Stmts {
+				g.emitStmt(s)
+			}
+		}
+		g.indent--
+		g.writeln("end")
+		return
+	}
+	g.compileError(0, "codegen_cr: with/using lowering — TODO (Resources[0]=%q)", w.Resources[0].Name)
 }
 
 // emitFor lowers zinc for loops to Crystal:
@@ -725,6 +1062,145 @@ func (g *Generator) emitFor(f *parser.ForStmt) {
 	}
 	g.indent--
 	g.writeln("end")
+}
+
+// emitCapacity lowers a capacity-typed constructor.
+//
+//   Channel<T>(N)  → Channel(T).new(N)
+//   List<T>(N)     → Array(T).new(N)            (preallocated array)
+//   Map<K,V>(N)    → Hash(K, V).new(initial_capacity: N)  (TODO)
+//
+// SKETCH: currently only Channel is the common case; List/Map with
+// capacity are rare in zinc and Crystal's defaults are good enough.
+func (g *Generator) emitCapacity(c *parser.CapacityExpr) string {
+	if c.CollectionType == nil {
+		return "/* TODO: bare capacity */"
+	}
+	name := c.CollectionType.Name
+	switch name {
+	case "Channel", "Chan":
+		if len(c.CollectionType.TypeArgs) == 1 {
+			return fmt.Sprintf("Channel(%s).new(%s)",
+				g.crType(c.CollectionType.TypeArgs[0]), g.emitExpr(c.Capacity))
+		}
+		// Untyped Channel(N) — Crystal needs a type. Default to
+		// Channel(Nil) which matches zinc-go's chan interface{}
+		// semantics roughly. Phase 1 should warn here.
+		return fmt.Sprintf("Channel(Nil).new(%s)", g.emitExpr(c.Capacity))
+	case "List":
+		if len(c.CollectionType.TypeArgs) == 1 {
+			return fmt.Sprintf("Array(%s).new(%s)",
+				g.crType(c.CollectionType.TypeArgs[0]), g.emitExpr(c.Capacity))
+		}
+	}
+	g.compileError(0, "codegen_cr: capacity ctor for %s not supported", name)
+	return ""
+}
+
+// emitSpawn implements the §1.4 no-fire-and-forget rule. spawn { }
+// outside an owner scope is a compile error. Inside a parallel-for
+// (or future concurrent { } / task { } when those land), it lowers
+// to `wg.spawn do ... end`.
+//
+// Owner-scope tracking lives in concurrencyOwnerDepth +
+// currentOwnerKind. emitParallelFor sets them on entry, restores
+// on exit.
+func (g *Generator) emitSpawn(s *parser.SpawnExpr) string {
+	if g.concurrencyOwnerDepth == 0 {
+		g.compileError(0, "spawn { } must be inside an owner scope (parallel for / concurrent / task); "+
+			"bare spawn has no owner — see PLAN §1.4 no-fire-and-forget rule")
+		return "/* spawn-outside-owner */"
+	}
+
+	// Currently only the parallel-for owner emits spawn-as-expression
+	// inline. Future concurrent { } / task { } slices land their own
+	// emit shapes here.
+	prefix := "wg.spawn"
+	if g.currentOwnerKind == "task" {
+		prefix = "Fiber::ExecutionContext::Isolated.new(\"task\")"
+	}
+
+	// Build the body inline using a sub-generator to capture indented
+	// statements. We could also do raw emit in-buffer, but a substring
+	// is cleaner and reuses emitStmt verbatim.
+	sub := *g
+	sub.buf.Reset()
+	sub.indent = g.indent + 1
+	if s.Body != nil {
+		for _, st := range s.Body.Stmts {
+			sub.emitStmt(st)
+		}
+	}
+	g.compileErrors = append(g.compileErrors, sub.compileErrors[len(g.compileErrors):]...)
+
+	// Inline spawn-as-expression form: `<prefix> do; <body>; end`.
+	// Crystal accepts trailing `do ... end` blocks on method calls
+	// uniformly, so this composes when spawn is nested inside another
+	// expression (rare but valid).
+	body := sub.buf.String()
+	return fmt.Sprintf("%s do\n%s%send", prefix, body, indentStr(g.indent))
+}
+
+// emitParallelFor lowers `parallel for (x in xs) { body }` to:
+//
+//   WaitGroup.wait do |wg|
+//     xs.each do |x|
+//       wg.spawn do
+//         body
+//       end
+//     end
+//   end
+//
+// Inside the body, concurrencyOwnerDepth=1 and currentOwnerKind="parallel"
+// so any zinc-source `spawn { }` inside (rare but legal) lowers to
+// wg.spawn. Outside the body, spawn would trip the §1.4 validator.
+//
+// `or { handler }` on the parallel-for is TODO — needs the same
+// shape as `or { }` lowering, which lands in its own slice.
+func (g *Generator) emitParallelFor(p *parser.ParallelForStmt) {
+	g.requireSet["wait_group"] = true
+
+	rangeExpr := g.emitExpr(p.Range)
+	if rng, ok := p.Range.(*parser.RangeExpr); ok {
+		op := "..."
+		if rng.Inclusive {
+			op = ".."
+		}
+		rangeExpr = fmt.Sprintf("(%s%s%s)", g.emitExpr(rng.Start), op, g.emitExpr(rng.End))
+	}
+
+	g.writeln("WaitGroup.wait do |wg|")
+	g.indent++
+	g.writeln("%s.each do |%s|", rangeExpr, p.Item)
+	g.indent++
+	g.writeln("wg.spawn do")
+	g.indent++
+
+	prevDepth := g.concurrencyOwnerDepth
+	prevKind := g.currentOwnerKind
+	g.concurrencyOwnerDepth++
+	g.currentOwnerKind = "parallel"
+
+	if p.Body != nil {
+		for _, s := range p.Body.Stmts {
+			g.emitStmt(s)
+		}
+	}
+
+	g.concurrencyOwnerDepth = prevDepth
+	g.currentOwnerKind = prevKind
+
+	g.indent--
+	g.writeln("end")
+	g.indent--
+	g.writeln("end")
+	g.indent--
+	g.writeln("end")
+}
+
+// indentStr returns n levels of two-space indent.
+func indentStr(n int) string {
+	return strings.Repeat("  ", n)
 }
 
 // emitMatch lowers `match (s) { case Pat(bindings) { ... } }` to a
@@ -879,10 +1355,79 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return fmt.Sprintf("(%s%s%s)", g.emitExpr(expr.Start), op, g.emitExpr(expr.End))
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.emitExpr(expr.Object), g.emitExpr(expr.Index))
+	case *parser.CapacityExpr:
+		return g.emitCapacity(expr)
+	case *parser.SpawnExpr:
+		return g.emitSpawn(expr)
+	case *parser.SuperCallExpr:
+		// `super(args)` inside ctor → Crystal's `super(args)` form
+		// (1:1). Used when zinc explicitly chains to a parent's init.
+		args := make([]string, 0, len(expr.Args))
+		for _, a := range expr.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		return fmt.Sprintf("super(%s)", strings.Join(args, ", "))
+	case *parser.TupleLit:
+		parts := make([]string, len(expr.Elements))
+		for i, e := range expr.Elements {
+			parts[i] = g.emitExpr(e)
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
 	default:
 		g.compileError(0, "codegen_cr: unsupported expr %T", expr)
 		return fmt.Sprintf("/* TODO %T */", expr)
 	}
+}
+
+// crystalMethodRewrite maps zinc method names that mean something to
+// Crystal's idiomatic equivalents. Applied at every method-call
+// emission site (emitCall) for SelectorExpr callees. Per the user's
+// "leverage Crystal's collection methods" principle: Channel.recv →
+// receive, isEmpty → empty?, contains → includes?, filter → select,
+// etc. The user can still call methods literally named "recv" on a
+// user-defined class — those would shadow the rewrite, which the
+// rewrite map shouldn't catch — but for the common stdlib-like
+// targets, this gives idiomatic Crystal output.
+//
+// SKETCH: shadow detection (rename only when receiver is a known
+// stdlib type, not a user class) lands when zinc-crystal grows a
+// type tracker. For now, any method named "recv" is rewritten.
+// primitiveTypeMap is the same lookup as crType but for use when the
+// type appears as a string (e.g. CallExpr.TypeArgs is []string, not
+// []TypeExpr). Keep keys in sync with crType's switch.
+var primitiveTypeMap = map[string]string{
+	"void":    "Nil",
+	"int":     "Int32",
+	"long":    "Int64",
+	"byte":    "UInt8",
+	"double":  "Float64",
+	"float":   "Float32",
+	"boolean": "Bool",
+}
+
+// stdlibTypeRewrite maps Go-style stdlib type names to Crystal stdlib
+// equivalents. Most zinc projects write `sync.Mutex` because that's
+// the Go convention they're used to; zinc-crystal lowers them to the
+// Crystal-side shape.
+//
+// Also drives the auto-init logic in emitCtor — if a class has a
+// field of one of these types and no explicit init for it, we emit
+// `@field = TypeName.new` at the top of initialize. Crystal classes
+// can't initialize ivars at the declaration site, so this avoids
+// every project re-typing the same boilerplate.
+var stdlibTypeRewrite = map[string]string{
+	"sync.Mutex":     "Sync::Mutex",
+	"sync.RWMutex":   "Sync::RWLock",
+	"sync.WaitGroup": "WaitGroup",
+}
+
+var crystalMethodRewrite = map[string]string{
+	"recv":     "receive",
+	"isEmpty":  "empty?",
+	"contains": "includes?",
+	"filter":   "select",
+	"length":   "size",
+	"indexOf":  "index",
 }
 
 // emitListLit lowers a list literal. zinc `["a","b"]` → Crystal `["a","b"]`
@@ -1021,6 +1566,26 @@ func (g *Generator) emitCall(c *parser.CallExpr) string {
 		// hello.zn only ever passes one, so this is safe.
 		return "puts " + strings.Join(args, ", ")
 	}
+	// Channel<T>(N) — typed channel constructor. Parses as CallExpr
+	// with TypeArgs=["T"]. Lower to Crystal's Channel(T).new(N).
+	// Untyped Channel(N) is rejected per the per-target diff list
+	// (Crystal needs a concrete element type).
+	if ident, ok := c.Callee.(*parser.Ident); ok && (ident.Name == "Channel" || ident.Name == "Chan") {
+		args := make([]string, 0, len(c.Args))
+		for _, a := range c.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		typeArg := "Nil"
+		if len(c.TypeArgs) == 1 {
+			typeArg = c.TypeArgs[0]
+			// Apply primitive-type renames since TypeArgs is []string,
+			// not TypeExpr — bypass crType.
+			if mapped := primitiveTypeMap[typeArg]; mapped != "" {
+				typeArg = mapped
+			}
+		}
+		return fmt.Sprintf("Channel(%s).new(%s)", typeArg, strings.Join(args, ", "))
+	}
 	// Constructor call: `Foo(args)` → `Foo.new(args)` when Foo is a
 	// known class. Crystal classes are constructed via `.new`; bare
 	// `Foo(args)` is a syntax error (looks like a function call).
@@ -1038,11 +1603,22 @@ func (g *Generator) emitCall(c *parser.CallExpr) string {
 		}
 		return fmt.Sprintf("%s.new(%s)", typeName, strings.Join(args, ", "))
 	}
-	// Method call with zero args: `c.inc()` — Crystal lets you drop the
-	// parens entirely (`c.inc`), which is the more idiomatic shape.
-	// Keep parens for any-args case to preserve clarity.
-	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && len(c.Args) == 0 {
-		return g.emitExpr(sel)
+	// Method calls — apply the crystalMethodRewrite map and the
+	// drop-parens-on-zero-args idiom.
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+		field := sel.Field
+		if rewrite, ok := crystalMethodRewrite[field]; ok {
+			field = rewrite
+		}
+		obj := g.emitExpr(sel.Object)
+		if len(c.Args) == 0 {
+			return fmt.Sprintf("%s.%s", obj, field)
+		}
+		args := make([]string, 0, len(c.Args))
+		for _, a := range c.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		return fmt.Sprintf("%s.%s(%s)", obj, field, strings.Join(args, ", "))
 	}
 	args := make([]string, 0, len(c.Args))
 	for _, a := range c.Args {
