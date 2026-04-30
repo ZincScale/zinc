@@ -545,6 +545,37 @@ func (g *Generator) crType(t parser.TypeExpr) string {
 		}
 		return name.Name // assume user-defined type, pass through
 	}
+	if gt, ok := t.(*parser.GenericType); ok {
+		switch gt.Name {
+		case "List":
+			if len(gt.TypeArgs) == 1 {
+				return "Array(" + g.crType(gt.TypeArgs[0]) + ")"
+			}
+		case "Map":
+			if len(gt.TypeArgs) == 2 {
+				return "Hash(" + g.crType(gt.TypeArgs[0]) + ", " + g.crType(gt.TypeArgs[1]) + ")"
+			}
+		case "Set":
+			if len(gt.TypeArgs) == 1 {
+				return "Set(" + g.crType(gt.TypeArgs[0]) + ")"
+			}
+		case "Channel", "Chan":
+			if len(gt.TypeArgs) == 1 {
+				return "Channel(" + g.crType(gt.TypeArgs[0]) + ")"
+			}
+		}
+		// User-defined generic — pass through (e.g. `Box<T>` → `Box(T)`)
+		args := make([]string, 0, len(gt.TypeArgs))
+		for _, a := range gt.TypeArgs {
+			args = append(args, g.crType(a))
+		}
+		return fmt.Sprintf("%s(%s)", gt.Name, strings.Join(args, ", "))
+	}
+	if opt, ok := t.(*parser.OptionalType); ok {
+		// `T?` → Crystal's `T?` (nilable union). Crystal's
+		// nullable shorthand. Plan §4.1 lowering.
+		return g.crType(opt.Inner) + "?"
+	}
 	g.compileError(0, "codegen_cr: unsupported type %T", t)
 	return "Object"
 }
@@ -615,6 +646,8 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.writeln("end")
 	case *parser.MatchStmt:
 		g.emitMatch(stmt)
+	case *parser.ForStmt:
+		g.emitFor(stmt)
 	case *parser.WhileStmt:
 		// `while (cond) { body }` → `while cond; body; end`.
 		// SKETCH: the §1.4 plan note about `while (true)` lowering to
@@ -631,6 +664,67 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	default:
 		g.compileError(0, "codegen_cr: unsupported stmt %T", stmt)
 	}
+}
+
+// emitFor lowers zinc for loops to Crystal:
+//
+//   for (x in xs) { body }              → xs.each do |x| ... end
+//   for (i in 0..n) { body }            → (0...n).each do |i| ... end   (exclusive)
+//   for (i in 0..=n) { body }           → (0..n).each do |i| ... end    (inclusive)
+//   for (k, v in m) { body }            → m.each do |k, v| ... end
+//   for (init; cond; post) { body }     → init; while cond; body; post; end
+//
+// Crystal range note: zinc's `..` is exclusive (matches Go); Crystal's
+// `..` is inclusive. So we always emit `...` for zinc's `..`. This is
+// PLAN §11.11 cashed out.
+//
+// SKETCH: C-style for stays as a fallback. Range-style is the common
+// case across the example corpus.
+func (g *Generator) emitFor(f *parser.ForStmt) {
+	if !f.IsRange {
+		// C-style: lower as while + post-step. Wraps in a `begin/end`
+		// scope so the init var is local. SKETCH — uncommon path.
+		if f.Init != nil {
+			g.emitStmt(f.Init)
+		}
+		g.writeln("while %s", g.emitExpr(f.Cond))
+		g.indent++
+		for _, s := range f.Body.Stmts {
+			g.emitStmt(s)
+		}
+		if f.Post != nil {
+			g.emitStmt(f.Post)
+		}
+		g.indent--
+		g.writeln("end")
+		return
+	}
+
+	// Range-style. Two sub-cases: range expression vs collection.
+	rangeExpr := g.emitExpr(f.Range)
+	if rng, ok := f.Range.(*parser.RangeExpr); ok {
+		op := "..."
+		if rng.Inclusive {
+			op = ".."
+		}
+		rangeExpr = fmt.Sprintf("(%s%s%s)", g.emitExpr(rng.Start), op, g.emitExpr(rng.End))
+	}
+
+	loopVars := f.Item
+	if f.IndexVar != "" {
+		// `for (i, item) in xs` — Crystal's each_with_index passes
+		// (item, idx). Note the order swap: zinc says (i, item),
+		// Crystal yields (item, idx). We rebind for clarity.
+		g.writeln("%s.each_with_index do |%s, %s|", rangeExpr, f.Item, f.IndexVar)
+	} else {
+		g.writeln("%s.each do |%s|", rangeExpr, loopVars)
+	}
+	g.indent++
+	for _, s := range f.Body.Stmts {
+		g.emitStmt(s)
+	}
+	g.indent--
+	g.writeln("end")
 }
 
 // emitMatch lowers `match (s) { case Pat(bindings) { ... } }` to a
@@ -771,10 +865,67 @@ func (g *Generator) emitExpr(e parser.Expr) string {
 		return fmt.Sprintf("%s%s", expr.Op, g.emitExpr(expr.Operand))
 	case *parser.CallExpr:
 		return g.emitCall(expr)
+	case *parser.ListLit:
+		return g.emitListLit(expr)
+	case *parser.MapLit:
+		return g.emitMapLit(expr)
+	case *parser.RangeExpr:
+		// Bare range expression (outside a for loop, e.g. saved to a
+		// var). Same translation rule as in emitFor.
+		op := "..."
+		if expr.Inclusive {
+			op = ".."
+		}
+		return fmt.Sprintf("(%s%s%s)", g.emitExpr(expr.Start), op, g.emitExpr(expr.End))
+	case *parser.IndexExpr:
+		return fmt.Sprintf("%s[%s]", g.emitExpr(expr.Object), g.emitExpr(expr.Index))
 	default:
 		g.compileError(0, "codegen_cr: unsupported expr %T", expr)
 		return fmt.Sprintf("/* TODO %T */", expr)
 	}
+}
+
+// emitListLit lowers a list literal. zinc `["a","b"]` → Crystal `["a","b"]`
+// (1:1 syntax). When ExplicitType is set (`List<int> xs = [1,2]`), we
+// emit the typed array form `[1, 2] of Int32` so Crystal infers the
+// element type rather than `Array(Int32 | other)`.
+func (g *Generator) emitListLit(l *parser.ListLit) string {
+	parts := make([]string, 0, len(l.Elements))
+	for _, e := range l.Elements {
+		parts = append(parts, g.emitExpr(e))
+	}
+	body := "[" + strings.Join(parts, ", ") + "]"
+	if l.ExplicitType != nil {
+		// `List<int>` → element type is the GenericType's first TypeArg.
+		if gt, ok := l.ExplicitType.(*parser.GenericType); ok && len(gt.TypeArgs) == 1 {
+			return body + " of " + g.crType(gt.TypeArgs[0])
+		}
+	}
+	return body
+}
+
+// emitMapLit lowers a map literal. zinc `{"a": 1, "b": 2}` → Crystal
+// `{"a" => 1, "b" => 2}` (Crystal uses `=>` for hash literals, not `:`).
+// Empty map needs a type annotation in Crystal — without an explicit
+// type or any keys to infer from, we emit `Hash(String, Int32).new`
+// for zinc's bare `{}` ... but zinc rarely emits a bare `{}`, so the
+// SKETCH leaves that case as a TODO.
+func (g *Generator) emitMapLit(m *parser.MapLit) string {
+	if len(m.Keys) == 0 {
+		g.compileError(0, "codegen_cr: empty map literal needs explicit type — TODO")
+		return "{} of String => Int32"
+	}
+	parts := make([]string, 0, len(m.Keys))
+	for i := range m.Keys {
+		parts = append(parts, fmt.Sprintf("%s => %s", g.emitExpr(m.Keys[i]), g.emitExpr(m.Values[i])))
+	}
+	body := "{" + strings.Join(parts, ", ") + "}"
+	if m.ExplicitType != nil {
+		if gt, ok := m.ExplicitType.(*parser.GenericType); ok && len(gt.TypeArgs) == 2 {
+			return body + " of " + g.crType(gt.TypeArgs[0]) + " => " + g.crType(gt.TypeArgs[1])
+		}
+	}
+	return body
 }
 
 // emitBinary lowers a binary expression. Most zinc operators map 1:1
