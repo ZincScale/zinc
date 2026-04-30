@@ -1217,40 +1217,51 @@ targets:
 Phase 4 is where we *might* add `[ffi.types]` to zinc.toml, if Phase-1
 empirics show option 1 isn't enough.
 
-### 9.2.1 Server-shaped imports use Crystal idioms, not literal Go API
+### 9.2.1 Server-shaped imports — fibers + execution contexts, with caveats
 
 When `import_map.toml` covers a server-shaped library — HTTP server,
 websocket server, RPC, anything with a `listen + handle each
-connection` pattern — the lowering MUST use Crystal's native fiber +
-execution-context idioms, not translate the source target's API
-literally.
+connection` pattern — the lowering uses Crystal's native fiber +
+execution-context idioms, not a literal translation of the source
+target's API. **But** Crystal's stdlib `HTTP::Server` itself isn't
+§1.4-compliant out of the box, which is worth being honest about.
 
-Concretely:
+What Crystal's `HTTP::Server` actually does (verified in
+`stdlib/http/server.cr`):
 
-  - `import http` / equivalent → Crystal `HTTP::Server`. Each request
-    runs in its own fiber automatically, owned by the server's
-    listener.
-  - Wrap the listener in `Fiber::ExecutionContext::Parallel` for
-    multi-threaded request handling, or `Isolated` for a single-
-    threaded server with a re-raised completion handle.
+```crystal
+protected def dispatch(io)
+  spawn handle_client(io)   # bare spawn, no owner
+end
+```
+
+Each connection IS processed in its own fiber (true), but that fiber
+is bare-spawned — not tracked, not waited on at shutdown. This is
+exactly the fire-and-forget pattern §1.4 rejects, sitting inside
+Crystal stdlib.
+
+What zinc-crystal needs to emit instead:
+
+  - `import http` / equivalent → a thin wrapper that subclasses
+    `HTTP::Server` and overrides `dispatch` to use a `WaitGroup` (so
+    shutdown waits for in-flight requests) and/or a
+    `Fiber::ExecutionContext::Parallel` (for true multi-threading).
+    Ship this in a `zinc-runtime` shard; user code just writes
+    `import http`.
   - When zinc source has a hand-rolled server loop
     (`for { conn = listener.accept(); spawn { handle(conn) } }`),
-    the codegen detects and rewrites to
-    `HTTP::Server.new { |context| ... }`. Pattern detection lands
-    when the first real example needs it; until then, the user can
-    write the Crystal-idiomatic shape directly.
+    detection + rewrite to the wrapped server form. Pattern
+    detection lands when the first real example needs it.
 
-This is §1.4 cashed out for servers: HTTP::Server's fiber pool has an
-owner (the listener); when the server stops, all request fibers stop
-with it. A literal translation of Go's `net/http.HandlerFunc` —
-emitting `go func() { handle(conn) }()` analogs — throws away
-Crystal's lifecycle and the whole execution-context machinery the
-zinc-crystal target was designed around.
+This connects to PLAN §13 risk #6 ("rule too strict for real
+idioms"): Crystal stdlib `HTTP::Server` is exhibit A. zinc-crystal's
+job is to provide a wrapped variant that *is* §1.4-compliant, so
+users get the rule's guarantees on shutdown / error propagation
+without writing the supervisor scaffold themselves.
 
-Same principle generalizes to other server-shaped idioms: DB
-connection pools, message-queue consumers, etc. — leverage Crystal's
-stdlib first, fall back to literal translation only when no
-idiomatic equivalent exists.
+Same shape applies to DB connection pools, message-queue consumers,
+any "fiber-per-thing" server idiom: lower to a wrapped variant that
+adds the missing ownership.
 
 ### 9.3 FFI escape hatch
 
