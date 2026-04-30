@@ -47,6 +47,18 @@ type Generator struct {
 	concurrencyOwnerDepth   int
 	currentOwnerKind        string // "concurrent" / "parallel" / "task" / ""
 
+	// currentClassFields is the field name set of the class currently
+	// being emitted. Drives the implicit-self lowering: bare `x = 1`
+	// inside a method body becomes `@x = 1` when `x` is in this set.
+	// Cleared when class emit finishes. nil outside any class scope.
+	currentClassFields map[string]bool
+
+	// classes tracks all class names declared in this Program. Used
+	// by emitCall to discriminate `Foo(args)` (constructor → Foo.new(args))
+	// from `someFn(args)` (regular call). Populated in a pre-pass over
+	// prog.Decls before body emission.
+	classes map[string]bool
+
 	// Per-file errors. Non-empty means the build fails; the driver
 	// prints these and exits non-zero.
 	compileErrors []string
@@ -56,6 +68,7 @@ type Generator struct {
 func New() *Generator {
 	return &Generator{
 		requireSet: make(map[string]bool),
+		classes:    make(map[string]bool),
 	}
 }
 
@@ -89,6 +102,16 @@ type OutputFile struct {
 func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 	g.buf.Reset()
 	g.indent = 0
+
+	// Pre-pass: collect class names so emitCall can rewrite Foo(...)
+	// to Foo.new(...). Has to happen before body emission since a
+	// constructor call to Bar may appear in a class declared earlier
+	// in the file.
+	for _, d := range prog.Decls {
+		if c, ok := d.(*parser.ClassDecl); ok {
+			g.classes[c.Name] = true
+		}
+	}
 
 	// Walk decls into a body buffer so we can emit `require` lines at
 	// the top once requireSet is finalized. Same trick zinc-go uses
@@ -177,12 +200,144 @@ func (g *Generator) emitDecl(d parser.TopLevelDecl) {
 	switch decl := d.(type) {
 	case *parser.FnDecl:
 		g.emitFnDecl(decl)
+	case *parser.ClassDecl:
+		g.emitClassDecl(decl)
 	default:
-		// SKETCH: classes, sealed, enums, data classes, etc. land later.
-		// Today's slice is hello-world only, so anything else surfaces
-		// as a TODO that hasn't been wired.
+		// SKETCH: sealed, enums, data classes, interfaces all land
+		// incrementally. Today's class slice covers plain `class Foo`
+		// with init + fields + methods + single-parent inheritance.
 		g.compileError(0, "codegen_cr: %T not implemented yet", decl)
 	}
+}
+
+// emitClassDecl lowers `class Foo[ : Bar] { fields, init, methods }`
+// to Crystal `class Foo[ < Bar] ... end`.
+//
+// Field handling:
+//   - private (default): `@field : Type`
+//   - pub: `getter field : Type` (Crystal's getter macro auto-emits an
+//     accessor; PLAN §4.2 — using built-in macros is OK per the
+//     "leave macros for now" decision applies to *custom* macros, not
+//     stdlib ones like getter/property)
+//   - default value: appended to the @field declaration (`@n = 0`)
+//     in initialize, not as `= ...` after the type — Crystal classes
+//     can't initialize ivars at the declaration site.
+//
+// Constructor:
+//   - `init() { body }` → `def initialize; body; end`. zinc's `this.x = e`
+//     becomes Crystal's `@x = e` (the implicit-self lowering).
+//
+// Methods:
+//   - `pub void inc() { n = n + 1 }` → `def inc : Nil; @n = @n + 1; end`.
+//     Bare field references (`n` inside a method body) lower to `@n`.
+//
+// SKETCH limitations:
+//   - No interfaces / multiple parents (`class Foo : Bar, Qux` — TODO).
+//   - No generics (`class Box<T>` — TODO).
+//   - No overloaded constructors (zinc's Ctors[] beyond primary — TODO).
+//   - No const / readonly / init field modifiers — TODO.
+//   - No annotations.
+//   - `super(...)` calls in ctor body — TODO.
+func (g *Generator) emitClassDecl(c *parser.ClassDecl) {
+	header := "class " + c.Name
+	if len(c.Parents) > 0 {
+		header += " < " + c.Parents[0]
+	}
+	g.writeln(header)
+	g.indent++
+
+	// Field declarations: private fields as @-vars, pub as getters.
+	// Default values move into initialize since Crystal doesn't allow
+	// `@x : Int32 = 0` at the class-body level.
+	for _, f := range c.Fields {
+		if f.IsPub {
+			g.writeln("getter %s : %s", f.Name, g.crType(f.Type))
+		} else {
+			g.writeln("@%s : %s", f.Name, g.crType(f.Type))
+		}
+	}
+	if len(c.Fields) > 0 && (c.Ctor != nil || len(c.Methods) > 0) {
+		g.writeln("")
+	}
+
+	// Constructor.
+	if c.Ctor != nil {
+		g.emitCtor(c)
+	}
+
+	// Methods.
+	for i, m := range c.Methods {
+		if i > 0 || c.Ctor != nil {
+			g.writeln("")
+		}
+		g.emitMethod(c, m)
+	}
+
+	g.indent--
+	g.writeln("end")
+}
+
+// emitCtor emits `def initialize(...) ... end`. We build a class-body
+// scope (currentClassFields) so `this.x = e` and bare `x = e` both
+// lower to `@x = e`.
+func (g *Generator) emitCtor(c *parser.ClassDecl) {
+	prevFields := g.currentClassFields
+	g.currentClassFields = make(map[string]bool, len(c.Fields))
+	for _, f := range c.Fields {
+		g.currentClassFields[f.Name] = true
+	}
+	defer func() { g.currentClassFields = prevFields }()
+
+	params := make([]string, 0, len(c.Ctor.Params))
+	for _, p := range c.Ctor.Params {
+		params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+	}
+	if len(c.Ctor.Params) == 0 {
+		g.writeln("def initialize")
+	} else {
+		g.writeln("def initialize(%s)", strings.Join(params, ", "))
+	}
+	g.indent++
+	if c.Ctor.Body != nil {
+		for _, s := range c.Ctor.Body.Stmts {
+			g.emitStmt(s)
+		}
+	}
+	g.indent--
+	g.writeln("end")
+}
+
+// emitMethod emits a `def name(...) : Ret ... end`. Drops `pub`
+// (Crystal methods are public by default; private would be `private def`).
+func (g *Generator) emitMethod(c *parser.ClassDecl, m *parser.MethodDecl) {
+	prevFields := g.currentClassFields
+	g.currentClassFields = make(map[string]bool, len(c.Fields))
+	for _, f := range c.Fields {
+		g.currentClassFields[f.Name] = true
+	}
+	defer func() { g.currentClassFields = prevFields }()
+
+	params := make([]string, 0, len(m.Params))
+	for _, p := range m.Params {
+		params = append(params, fmt.Sprintf("%s : %s", p.Name, g.crType(p.Type)))
+	}
+	ret := g.crType(m.ReturnType)
+	if ret == "" {
+		ret = "Nil"
+	}
+	if len(m.Params) == 0 {
+		g.writeln("def %s : %s", m.Name, ret)
+	} else {
+		g.writeln("def %s(%s) : %s", m.Name, strings.Join(params, ", "), ret)
+	}
+	g.indent++
+	if m.Body != nil {
+		for _, s := range m.Body.Stmts {
+			g.emitStmt(s)
+		}
+	}
+	g.indent--
+	g.writeln("end")
 }
 
 // emitFnDecl emits a Crystal `def <name>(<params>) : <ret>` block.
@@ -347,7 +502,24 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 func (g *Generator) emitExpr(e parser.Expr) string {
 	switch expr := e.(type) {
 	case *parser.Ident:
+		// Implicit self: bare field name inside a method/ctor body
+		// lowers to `@field`. Outside class scope, plain ident.
+		if g.currentClassFields != nil && g.currentClassFields[expr.Name] {
+			return "@" + expr.Name
+		}
 		return expr.Name
+	case *parser.ThisExpr:
+		// `this` alone (e.g. returned, passed) becomes `self` in Crystal.
+		return "self"
+	case *parser.SelectorExpr:
+		// `this.x` → `@x`. Other selectors → `obj.field` 1:1.
+		if _, isThis := expr.Object.(*parser.ThisExpr); isThis {
+			return "@" + expr.Field
+		}
+		if id, ok := expr.Object.(*parser.Ident); ok && id.Name == "this" {
+			return "@" + expr.Field
+		}
+		return fmt.Sprintf("%s.%s", g.emitExpr(expr.Object), expr.Field)
 	case *parser.IntLit:
 		return expr.Value
 	case *parser.FloatLit:
@@ -442,6 +614,22 @@ func (g *Generator) emitCall(c *parser.CallExpr) string {
 		// puts with multiple args: comma-joined; with one, just the value.
 		// hello.zn only ever passes one, so this is safe.
 		return "puts " + strings.Join(args, ", ")
+	}
+	// Constructor call: `Foo(args)` → `Foo.new(args)` when Foo is a
+	// known class. Crystal classes are constructed via `.new`; bare
+	// `Foo(args)` is a syntax error (looks like a function call).
+	if ident, ok := c.Callee.(*parser.Ident); ok && g.classes[ident.Name] {
+		args := make([]string, 0, len(c.Args))
+		for _, a := range c.Args {
+			args = append(args, g.emitExpr(a))
+		}
+		return fmt.Sprintf("%s.new(%s)", ident.Name, strings.Join(args, ", "))
+	}
+	// Method call with zero args: `c.inc()` — Crystal lets you drop the
+	// parens entirely (`c.inc`), which is the more idiomatic shape.
+	// Keep parens for any-args case to preserve clarity.
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && len(c.Args) == 0 {
+		return g.emitExpr(sel)
 	}
 	args := make([]string, 0, len(c.Args))
 	for _, a := range c.Args {
