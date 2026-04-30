@@ -66,6 +66,12 @@ type Generator struct {
 	// prog.Decls before body emission.
 	classes map[string]bool
 
+	// interfaces tracks names declared as `interface Foo` in this
+	// Program. Used in emitClassDecl to choose `include` vs `<` for
+	// each entry in Parents — Crystal modules (which interfaces
+	// lower to) require `include`, real classes use `<`.
+	interfaces map[string]bool
+
 	// sealedVariants maps a sealed-variant name (e.g. "Circle") to
 	// its parent sealed class name (e.g. "Shape") and field-name list.
 	// Drives match lowering: when a `case Circle(r)` pattern appears,
@@ -98,6 +104,7 @@ func New() *Generator {
 	return &Generator{
 		requireSet:     make(map[string]bool),
 		classes:        make(map[string]bool),
+		interfaces:     make(map[string]bool),
 		sealedVariants: make(map[string]sealedVariantInfo),
 	}
 }
@@ -157,6 +164,8 @@ func (g *Generator) GenerateFiles(prog *parser.Program) []OutputFile {
 			}
 		case *parser.DataClassDecl:
 			g.classes[decl.Name] = true
+		case *parser.InterfaceDecl:
+			g.interfaces[decl.Name] = true
 		}
 	}
 
@@ -526,8 +535,22 @@ func (g *Generator) emitSealedVariant(parent *parser.ClassDecl, v *parser.DataCl
 func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	header := "class " + c.Name
 	autoException := false
-	if len(c.Parents) > 0 {
-		header += " < " + c.Parents[0]
+	// Walk Parents — first non-interface entry becomes the `< Parent`
+	// inheritance, all interface entries get emitted as `include` lines
+	// inside the class body. zinc allows `class Foo : Bar, IBaz, IQux`
+	// with multiple interfaces; Crystal requires single inheritance plus
+	// any number of module includes, so this split works.
+	var classParent string
+	var includeMixins []string
+	for _, p := range c.Parents {
+		if g.interfaces[p] {
+			includeMixins = append(includeMixins, p)
+		} else if classParent == "" {
+			classParent = p
+		}
+	}
+	if classParent != "" {
+		header += " < " + classParent
 	} else if isErrorClassName(c.Name) {
 		// Convention: any class named *Error or *Exception auto-extends
 		// Crystal's Exception. Zinc users write `class ParseError { ... }`
@@ -539,6 +562,15 @@ func (g *Generator) emitPlainClass(c *parser.ClassDecl) {
 	}
 	g.writeln(header)
 	g.indent++
+
+	// Mixin interfaces via `include`. Has to come first in the body
+	// before fields/methods so the include is in scope.
+	for _, iface := range includeMixins {
+		g.writeln("include %s", iface)
+	}
+	if len(includeMixins) > 0 && len(c.Fields) > 0 {
+		g.writeln("")
+	}
 
 	// Field declarations: private fields as @-vars, pub as getters.
 	// Default values move into initialize since Crystal doesn't allow
@@ -1446,11 +1478,28 @@ func indentStr(n int) string {
 // they need an outer `result = case ...` shape.
 func (g *Generator) emitMatch(m *parser.MatchStmt) {
 	subject := g.emitExpr(m.Subject)
+
+	// Detect whether this match has a wildcard `_` arm. Crystal's
+	// `case in` (exhaustive) doesn't allow `else`; the wildcard
+	// requires the non-exhaustive `case when` form. So we pick the
+	// keyword based on what the cases contain. Sealed-class matches
+	// without wildcards stay on `case in` to keep the runtime
+	// fallback arm we emit.
+	hasWildcard := false
+	for _, mc := range m.Cases {
+		if mc.Pattern == nil {
+			hasWildcard = true
+			break
+		}
+	}
+	useWhen := hasWildcard
 	g.writeln("case %s", subject)
 
 	var sealedParent string
 	for _, mc := range m.Cases {
-		// Wildcard `_` (Pattern is nil) → Crystal `else` arm.
+		// Wildcard `_` (Pattern is nil) → Crystal `else` arm. Only
+		// reachable when useWhen=true (we already detected the case
+		// requires the non-exhaustive form).
 		if mc.Pattern == nil {
 			g.writeln("else")
 			g.indent++
@@ -1474,7 +1523,11 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 			// Sealed variant pattern: bind to fields.
 			if info, ok := g.sealedVariants[ident.Name]; ok {
 				sealedParent = info.Parent
-				g.writeln("in %s::%s", info.Parent, ident.Name)
+				kw := "in"
+				if useWhen {
+					kw = "when"
+				}
+				g.writeln("%s %s::%s", kw, info.Parent, ident.Name)
 				g.indent++
 				for i, a := range call.Args {
 					if i >= len(info.Fields) {
@@ -1503,7 +1556,11 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 			if mapped, ok := primitiveTypeMap[typeName]; ok {
 				typeName = mapped
 			}
-			g.writeln("in %s", typeName)
+			kw := "in"
+			if useWhen {
+				kw = "when"
+			}
+			g.writeln("%s %s", kw, typeName)
 			g.indent++
 			if len(call.Args) == 1 {
 				if bindIdent, ok := call.Args[0].(*parser.Ident); ok {
@@ -1519,8 +1576,11 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 			continue
 		}
 		// Literal / ident pattern (enum variant, integer literal, etc.).
-		// Crystal's case-in handles these natively.
-		g.writeln("in %s", g.emitExpr(mc.Pattern))
+		kw := "in"
+		if useWhen {
+			kw = "when"
+		}
+		g.writeln("%s %s", kw, g.emitExpr(mc.Pattern))
 		g.indent++
 		if mc.Body != nil {
 			for _, s := range mc.Body.Stmts {
@@ -1531,8 +1591,10 @@ func (g *Generator) emitMatch(m *parser.MatchStmt) {
 	}
 
 	// Crystal's case-in over an abstract base requires the runtime
-	// fallback arm — phase0 confirmed.
-	if sealedParent != "" {
+	// fallback arm — phase0 confirmed. Only needed for `case in`
+	// (sealed without wildcard); when useWhen is set the user's
+	// `else` arm already covers the unreachable case.
+	if sealedParent != "" && !useWhen {
 		g.writeln("in %s", sealedParent)
 		g.indent++
 		g.writeln(`raise "unreachable: bare abstract %s"`, sealedParent)
@@ -1939,14 +2001,32 @@ func (g *Generator) emitIfExpr(e *parser.IfExpr) string {
 // (1:1 syntax). When ExplicitType is set (`List<int> xs = [1,2]`), we
 // emit the typed array form `[1, 2] of Int32` so Crystal infers the
 // element type rather than `Array(Int32 | other)`.
+//
+// Empty lists are special: Crystal rejects bare `[]` because it can't
+// infer the element type. With ExplicitType we can emit `[] of T`;
+// without it we fall back to a generic-Object array (less ideal but
+// at least compiles).
 func (g *Generator) emitListLit(l *parser.ListLit) string {
+	if len(l.Elements) == 0 {
+		if l.ExplicitType != nil {
+			if gt, ok := l.ExplicitType.(*parser.GenericType); ok && len(gt.TypeArgs) == 1 {
+				return "[] of " + g.crType(gt.TypeArgs[0])
+			}
+			if at, ok := l.ExplicitType.(*parser.ArrayType); ok {
+				return "[] of " + g.crType(at.ElementType)
+			}
+		}
+		// No type hint — fall back to Object. Crystal will complain
+		// at use site if this conflicts, but at least the empty
+		// literal compiles.
+		return "[] of Object"
+	}
 	parts := make([]string, 0, len(l.Elements))
 	for _, e := range l.Elements {
 		parts = append(parts, g.emitExpr(e))
 	}
 	body := "[" + strings.Join(parts, ", ") + "]"
 	if l.ExplicitType != nil {
-		// `List<int>` → element type is the GenericType's first TypeArg.
 		if gt, ok := l.ExplicitType.(*parser.GenericType); ok && len(gt.TypeArgs) == 1 {
 			return body + " of " + g.crType(gt.TypeArgs[0])
 		}
