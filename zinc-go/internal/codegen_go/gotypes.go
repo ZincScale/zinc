@@ -640,37 +640,19 @@ func (r *GoTypeResolver) hasPointerReceiverMethodAST(pkgPath, typeName string) b
 	return false
 }
 
-// implicitPointerParams whitelists Go functions whose static signature is
-// `any` (or another non-pointer type) but whose runtime contract requires
-// a pointer to write into. Without this list, Zinc users would need a
-// unary `&` expression — currently only `&` (bitwise AND) is parsed.
+// NeedsPointerArg reports whether the i-th parameter of pkgPath.funcName
+// has an explicit pointer (*T) in its Go signature. Used by codegen to
+// auto-insert `&` at the call site for typed-pointer params.
 //
-// Add new entries when porting a third-party lib whose Unmarshal/Decode
-// idiom takes `any`. Pattern: `<full-go-import-path>.<FuncName>`.
-var implicitPointerParams = map[string]map[int]bool{
-	"encoding/json.Unmarshal":            {1: true},
-	"encoding/xml.Unmarshal":             {1: true},
-	"fmt.Scan":                           {0: true},
-	"fmt.Scanln":                         {0: true},
-	"fmt.Scanf":                          {1: true},
-	"fmt.Sscan":                          {1: true},
-	"fmt.Sscanln":                        {1: true},
-	"fmt.Sscanf":                         {2: true},
-	"fmt.Fscan":                          {1: true},
-	"fmt.Fscanln":                        {1: true},
-	"fmt.Fscanf":                         {2: true},
-	"github.com/hamba/avro/v2.Unmarshal": {2: true},
-}
-
+// We deliberately do NOT carry a hand-curated table of `any`-typed funcs
+// whose runtime contract requires a pointer (e.g. encoding/json.Unmarshal,
+// fmt.Scan, hamba/avro.Unmarshal). Those used to live in a map here — they
+// were a maintenance debt and an admission that the answer couldn't be
+// derived from tooling. The replacement is the explicit prefix `&x`
+// operator at the call site: the user signals the pointer requirement
+// directly when the type system has no information.
 func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex int) bool {
-	if r.ParamIsPointer(pkgPath, funcName, paramIndex) {
-		return true
-	}
-	key := pkgPath + "." + funcName
-	if params, ok := implicitPointerParams[key]; ok {
-		return params[paramIndex]
-	}
-	return false
+	return r.ParamIsPointer(pkgPath, funcName, paramIndex)
 }
 
 // ListExports returns all exported names from a Go package with their kind.

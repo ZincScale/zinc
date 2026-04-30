@@ -304,6 +304,21 @@ import mux
 mux.NewRouter()
 ```
 
+### FFI pointer arguments — explicit `&`
+
+When a Go library function takes `*T` in its signature, zinc auto-inserts `&` at the call site. You don't have to write it.
+
+When a Go library function takes `any` / `interface{}` but its **runtime contract** requires a pointer (canonical case: `json.Unmarshal(data, v any)` and `avro.Unmarshal(data, schema, v any)`), the type system has nothing to read. In that case you write `&` yourself:
+
+```zinc
+import encoding/json
+
+var p = Person("", 0)
+json.Unmarshal(data, &p) or { return }
+```
+
+Outside of a Go-library call argument, `&` is not a legal zinc operator. Var inits, returns, assignments, args of zinc-side functions, and nested sub-expressions all reject it. This keeps `&` as an FFI escape hatch — never zinc surface area.
+
 ## Errors
 
 See [error-handling.md](error-handling.md). The short version: a function is a thrower iff its declared return type ends in `error` — `error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Handle with `or { }` at the call site, propagate with `or { return err }` from inside another thrower. No auto-widening, no `?` operator.

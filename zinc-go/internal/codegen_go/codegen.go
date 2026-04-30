@@ -145,6 +145,22 @@ type Generator struct {
 	// the generic helper that boxes a value into a pointer. Required for
 	// `String? foo = "hi"` and similar — Go disallows `&"hi"` directly.
 	needsPtrHelper bool
+
+	// addrOfAllowed is true at the start of formatExpr only when the
+	// caller has just entered the top-level expression of a Go-library
+	// (FFI) call argument. The flag is consumed (cleared) on entry to
+	// every formatExpr call, so only the immediate UnaryExpr{Op:"&"}
+	// at the top of an FFI arg sees it set. Anywhere else — assignments,
+	// returns, var inits, args of zinc-side calls, nested sub-expressions
+	// — the flag is false, and a `&x` there is rejected with a clear
+	// compile error. This is the only acceptable use of `&` in zinc.
+	addrOfAllowed bool
+
+	// addrOfReported guards against re-reporting the same `&` once a
+	// misplaced occurrence has been logged at the formatExpr UnaryExpr
+	// site. Without it, downstream emit paths that re-format the same
+	// expression (e.g. retry paths) would emit duplicate errors.
+	addrOfReported map[*parser.UnaryExpr]bool
 }
 
 // wrapAsPointer formats `_zincPtr(expr)` and flags the helper for
@@ -217,6 +233,7 @@ func New() *Generator {
 		importMap:           make(map[string]string),
 		typeImports:         make(map[string]string),
 		pubNames:            make(map[string]bool),
+		addrOfReported:      make(map[*parser.UnaryExpr]bool),
 	}
 }
 

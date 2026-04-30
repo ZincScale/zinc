@@ -1,0 +1,1 @@
+'&' (address-of) is only allowed as an argument to a Go-library call

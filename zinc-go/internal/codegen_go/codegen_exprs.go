@@ -12,7 +12,15 @@ import (
 )
 
 // formatExpr converts a Zinc AST expression to its Go source representation.
+//
+// Address-of consumption: g.addrOfAllowed is captured-and-cleared on entry
+// so only the immediate UnaryExpr{Op:"&"} at the top level of the call
+// site sees the flag. Recursive descents into sub-expressions (operands,
+// nested calls, etc.) all see addrOfAllowed=false. This is what restricts
+// `&x` to FFI argument positions.
 func (g *Generator) formatExpr(e parser.Expr) string {
+	addrAllowed := g.addrOfAllowed
+	g.addrOfAllowed = false
 	switch expr := e.(type) {
 	case *parser.Ident:
 		if expr.Name == "this" {
@@ -87,6 +95,16 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.BinaryExpr:
 		return g.formatBinaryExpr(expr)
 	case *parser.UnaryExpr:
+		if expr.Op == "&" {
+			if !addrAllowed && !g.addrOfReported[expr] {
+				g.addrOfReported[expr] = true
+				g.compileError(0, "'&' (address-of) is only allowed as an argument to a Go-library call; "+
+					"reject it elsewhere — assignments, returns, var inits, args of zinc-side calls, or nested sub-expressions")
+			}
+			// Emit anyway so a single misplaced `&` doesn't cascade into
+			// further malformed Go. The compileError above causes the
+			// driver to fail the build before the output is consumed.
+		}
 		return fmt.Sprintf("%s%s", expr.Op, g.formatExpr(expr.Operand))
 	case *parser.CallExpr:
 		return g.formatCallExpr(expr)

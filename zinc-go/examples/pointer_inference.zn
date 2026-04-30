@@ -1,5 +1,7 @@
-// Test automatic pointer inference for Go functions that expect pointers.
-// json.Unmarshal([]byte, interface{}) expects &target for the second param.
+// FFI pointer arguments via the explicit `&` operator.
+// json.Unmarshal([]byte, v any) requires a pointer at runtime but its
+// static type is `any`, so the resolver can't auto-insert `&` — the
+// user writes it. This is the only place `&` is legal in zinc.
 
 import encoding/json
 import fmt
@@ -13,9 +15,10 @@ void main() {
     var data = json.Marshal(p) or { return }
     print("json: ${string(data)}")
 
-    // Unmarshal back — zinc should auto-insert & for the pointer param
+    // Unmarshal back — explicit `&` since json.Unmarshal's second
+    // param is statically `any`.
     var p2 = Person("", 0)
-    json.Unmarshal(data, p2) or { return }
+    json.Unmarshal(data, &p2) or { return }
     print("name: ${p2.name}")
     print("age: ${p2.age}")
 
@@ -25,7 +28,7 @@ void main() {
     print("map json: ${string(mData)}")
 
     var m2 = Map<String, String>{}
-    json.Unmarshal(mData, m2) or { return }
+    json.Unmarshal(mData, &m2) or { return }
     var val = m2["key"]
     print("map key: ${val}")
 

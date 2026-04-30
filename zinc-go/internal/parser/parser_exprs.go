@@ -244,9 +244,17 @@ func (p *Parser) v2ParseMulDiv() Expr {
 	return left
 }
 
-// v2ParseUnary: -expr
+// v2ParseUnary: -expr | &expr
+//
+// Prefix `&` exists solely as an FFI escape hatch — for cases where a Go
+// library's runtime contract requires a pointer but its static signature
+// is `any` (e.g. hamba/avro `Unmarshal(data, v any)`). The validator then
+// rejects `&x` anywhere except as a top-level argument to a call into an
+// imported Go package. Binary `&` (bitwise AND) lives at lower precedence
+// in v2ParseBitwiseAnd; entering this prefix branch is unambiguous because
+// it only fires at the start of a unary position.
 func (p *Parser) v2ParseUnary() Expr {
-	if p.check(lexer.TOKEN_MINUS) {
+	if p.check(lexer.TOKEN_MINUS) || p.check(lexer.TOKEN_AMP) {
 		op := p.advance().Literal
 		operand := p.v2ParseUnary()
 		return &UnaryExpr{Op: op, Operand: operand}

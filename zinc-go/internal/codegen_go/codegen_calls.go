@@ -12,27 +12,42 @@ import (
 )
 
 // formatCallArgsWithPointerWrap formats a positional argument list,
-// prepending `&` to any arg whose target Go param needs a pointer at
-// runtime (resolver says ParamIsPointer, or the (pkgPath, funcName) is
-// listed in implicitPointerParams for that index). Skips the wrap when
-// the arg is already a pointer-shaped expression (`nil`, or a call that
-// returns a pointer).
+// prepending `&` to any arg whose target Go param has an explicit `*T`
+// in its signature (resolver says ParamIsPointer). Skips the wrap when
+// the arg is already a pointer-shaped expression (`nil`, a call that
+// returns a pointer, or an explicit `&x` written by the user).
+//
+// For Go funcs whose static signature is `any` but whose runtime
+// contract requires a pointer (e.g. avro.Unmarshal), no auto-wrap
+// happens here — the user must write `&x` at the call site.
 //
 // Used by the import-alias / zinc-subpackage call fast-path. The general
 // call path (formatCallExpr's later branches) does the same wrap inline
 // — keep the two in sync.
-func (g *Generator) formatCallArgsWithPointerWrap(pkgPath, funcName string, args []parser.Expr) string {
+func (g *Generator) formatCallArgsWithPointerWrap(pkgPath, funcName string, args []parser.Expr, isFFI bool) string {
 	if pkgPath == "" {
 		return g.formatExprList(args)
 	}
 	out := make([]string, 0, len(args))
 	for i, arg := range args {
+		// Allow `&x` only when we're formatting the top-level expression
+		// of a Go-library (FFI) call argument. Zinc-subpackage call args
+		// pass isFFI=false, which keeps the validator strict for those.
+		if isFFI {
+			g.addrOfAllowed = true
+		}
 		formatted := g.formatExpr(arg)
+		g.addrOfAllowed = false
 		if g.goResolver.NeedsPointerArg(pkgPath, funcName, i) {
 			alreadyPointer := formatted == "nil"
 			if !alreadyPointer {
 				if callArg, ok := arg.(*parser.CallExpr); ok {
 					alreadyPointer = g.callReturnsPointer(callArg)
+				}
+			}
+			if !alreadyPointer {
+				if u, ok := arg.(*parser.UnaryExpr); ok && u.Op == "&" {
+					alreadyPointer = true
 				}
 			}
 			if !alreadyPointer {
@@ -94,12 +109,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				g.needImport(gp)
 				goPath = gp
 			}
-			// Same auto-pointer-wrap as the general call path below: a
-			// Go-side function whose param wants a pointer at runtime
-			// (explicit *T or in implicitPointerParams) gets `&` prepended
-			// to the corresponding arg. Without this hambaAvro.Unmarshal
-			// and similar `any`-shape sinks emit broken Go.
-			args := g.formatCallArgsWithPointerWrap(goPath, name, c.Args)
+			// Auto-pointer-wrap for explicit `*T` Go params. `any`-shape
+			// sinks like avro.Unmarshal require the user to write `&x`
+			// explicitly. isFFI is true only for import-alias calls
+			// (third-party Go modules) — zinc subpackage calls don't
+			// permit `&` because they aren't going across the FFI boundary.
+			isFFI := g.isImportAlias(ident.Name) && !g.isZincSubpackage(ident.Name)
+			args := g.formatCallArgsWithPointerWrap(goPath, name, c.Args, isFFI)
 
 			// Check what kind of export this is
 			kind := ""
@@ -475,20 +491,35 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 					restoreTarget = true
 				}
 			}
+			// goPkgPath is set only for SelectorExpr callees that resolve
+			// via importMap (third-party / stdlib Go pkg). Permit `&x`
+			// at the top of those arg expressions only.
+			if goPkgPath != "" {
+				g.addrOfAllowed = true
+			}
 			formatted := g.formatExpr(arg)
+			g.addrOfAllowed = false
 			if restoreTarget {
 				g.pendingLambdaTarget = prevTarget
 			}
 			// Auto-insert & when Go function expects a pointer parameter
-			// (explicit *T in signature or implicit via known table)
+			// (explicit *T in signature). Note: implicitPointerParams
+			// has been removed — `any`-typed params now require the
+			// user to write `&x` at the call site (FFI escape hatch).
 			if goPkgPath != "" && g.goResolver.NeedsPointerArg(goPkgPath, goFuncName, i) {
 				// Don't add & if the argument already produces a pointer:
 				// - nil is already a valid nil pointer
 				// - function calls that return pointers (e.g. slog.New() returns *Logger)
+				// - the user already wrote an explicit `&x`
 				alreadyPointer := formatted == "nil"
 				if !alreadyPointer {
 					if callArg, ok := arg.(*parser.CallExpr); ok {
 						alreadyPointer = g.callReturnsPointer(callArg)
+					}
+				}
+				if !alreadyPointer {
+					if u, ok := arg.(*parser.UnaryExpr); ok && u.Op == "&" {
+						alreadyPointer = true
 					}
 				}
 				if !alreadyPointer {

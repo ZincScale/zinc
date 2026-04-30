@@ -154,27 +154,30 @@ type Other struct{}
 	}
 }
 
-// implicitPointerParams entries are looked up via NeedsPointerArg; the
-// zinc-flow Avro port lives or dies on the hamba.Unmarshal entry, since
-// hamba's third arg has static type `any` but expects `*T` at runtime.
-// A future port of yaml.v3 / toml etc. will land more entries — keep
-// the lookup wired.
-func TestNeedsPointerArg_ImplicitPointerParams(t *testing.T) {
+// NeedsPointerArg now returns true only when the Go signature has an
+// explicit *T at the given index. The old hand-curated table for
+// `any`-typed runtime-pointer params (json/xml/avro Unmarshal, fmt.Scan
+// family) is gone — those cases require the user to write `&x` at the
+// call site (the FFI-only address-of operator). This test pins the new
+// contract: previously-tabled funcs no longer auto-report needs-pointer.
+func TestNeedsPointerArg_NoImplicitTable(t *testing.T) {
 	r := NewGoTypeResolver()
 	cases := []struct {
 		pkg, fn string
 		idx     int
-		want    bool
+		why     string
 	}{
-		{"encoding/json", "Unmarshal", 1, true},
-		{"github.com/hamba/avro/v2", "Unmarshal", 2, true},
-		{"github.com/hamba/avro/v2", "Unmarshal", 0, false}, // schema arg — value
-		{"fmt", "Println", 0, false},
+		{"encoding/json", "Unmarshal", 1, "any-typed runtime-pointer; explicit & required at call site"},
+		{"encoding/xml", "Unmarshal", 1, "any-typed runtime-pointer; explicit & required at call site"},
+		{"fmt", "Scan", 0, "variadic any, explicit & required at call site"},
+		{"fmt", "Sscanf", 2, "variadic any, explicit & required at call site"},
+		{"github.com/hamba/avro/v2", "Unmarshal", 2, "any-typed runtime-pointer; explicit & required at call site"},
+		{"fmt", "Println", 0, "variadic any, never needed pointer"},
 	}
 	for _, c := range cases {
-		got := r.NeedsPointerArg(c.pkg, c.fn, c.idx)
-		if got != c.want {
-			t.Errorf("NeedsPointerArg(%q, %q, %d) = %v, want %v", c.pkg, c.fn, c.idx, got, c.want)
+		if r.NeedsPointerArg(c.pkg, c.fn, c.idx) {
+			t.Errorf("NeedsPointerArg(%q, %q, %d) = true, want false (%s)",
+				c.pkg, c.fn, c.idx, c.why)
 		}
 	}
 }

@@ -1,0 +1,11 @@
+// Prefix `&` (address-of) is only legal as a top-level argument to a
+// Go-library call. Anywhere else — var inits, returns, assignments,
+// args of zinc-side calls, nested sub-expressions — must be rejected.
+
+data Person(String name, int age)
+
+void main() {
+    var p = Person("Alice", 30)
+    var ptr = &p   // ERROR: & is not allowed in a var initializer
+    print("${ptr.name}")
+}
