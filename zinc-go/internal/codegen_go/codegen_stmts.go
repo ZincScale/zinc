@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/internal/parser"
+	"zinc-go/parser"
 )
 
 // stmtLine returns the source line of a statement, or 0 if unknown.

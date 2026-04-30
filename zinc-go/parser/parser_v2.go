@@ -15,7 +15,7 @@
 package parser
 
 import (
-	"zinc-go/internal/lexer"
+	"zinc-go/lexer"
 )
 
 // ParseV2 parses Zinc v2 syntax (end blocks, fn keyword, script mode).

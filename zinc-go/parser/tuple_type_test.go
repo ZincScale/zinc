@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"zinc-go/internal/lexer"
+	"zinc-go/lexer"
 )
 
 // Tests for the multi-value-return TupleType surface added by the

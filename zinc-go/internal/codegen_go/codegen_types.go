@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/internal/parser"
+	"zinc-go/parser"
 )
 
 // emitFnDecl generates a top-level Go function from a Zinc fn declaration.

@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	codegen "zinc-go/internal/codegen_go"
-	"zinc-go/internal/lexer"
-	"zinc-go/internal/parser"
+	"zinc-go/lexer"
+	"zinc-go/parser"
 )
 
 // parseFile reads and parses a .zn file, returning the AST.

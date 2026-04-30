@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/internal/parser"
+	"zinc-go/parser"
 )
 
 // formatCallArgsWithPointerWrap formats a positional argument list,

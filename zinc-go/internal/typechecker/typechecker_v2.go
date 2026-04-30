@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/internal/parser"
+	"zinc-go/parser"
 )
 
 // V2Error represents a type error found during v2 type checking.

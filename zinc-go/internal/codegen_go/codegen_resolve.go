@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"zinc-go/internal/parser"
+	"zinc-go/parser"
 )
 
 // --- Unqualified name resolution ---------------------------------------------

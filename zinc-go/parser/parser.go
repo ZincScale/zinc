@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"strings"
 
-	"zinc-go/internal/lexer"
+	"zinc-go/lexer"
 )
 
 // parseError is a sentinel type used to halt parsing via panic/recover.
