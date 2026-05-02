@@ -43,10 +43,16 @@ func (e V2Error) String() string {
 // Phase 3.5 introduced this; the `varGoTypes`-style codegen tables are
 // migrating to consume it via the BoundProgram's NodeTypes side-map.
 type V2Type struct {
-	Name     string   // "int", "String", "List", "Map", "null", "any"
-	Args     []V2Type // generic args: list[int] → Args=[int]
-	Nullable bool     // Optional[T]
+	Name     string     // "int", "String", "List", "Map", "null", "any"
+	Args     []V2Type   // generic args: list[int] → Args=[int]
+	Nullable bool       // Optional[T]
 	GoType   types.Type // optional Go-resolved type (FFI bridge)
+	// TypeExpr (Phase 3.7.2): the original parser AST node this V2Type
+	// was derived from, when known. Carried forward through inference
+	// so codegen can walk into Fn types and generic args without a
+	// separate TypeExprs side-map. nil when the type was synthesized
+	// (literals, builtins) or inference has no AST shadow.
+	TypeExpr parser.TypeExpr
 }
 
 func (t V2Type) String() string {
@@ -1190,22 +1196,25 @@ func (c *V2Checker) resolveTypeExpr(t parser.TypeExpr) V2Type {
 	if t == nil {
 		return typeAny
 	}
-	switch t := t.(type) {
+	switch tt := t.(type) {
 	case *parser.SimpleType:
-		return V2Type{Name: canonicalTypeName(t.Name)}
+		return V2Type{Name: canonicalTypeName(tt.Name), TypeExpr: t}
 	case *parser.GenericType:
 		var args []V2Type
-		for _, a := range t.TypeArgs {
+		for _, a := range tt.TypeArgs {
 			args = append(args, c.resolveTypeExpr(a))
 		}
-		return V2Type{Name: t.Name, Args: args}
+		return V2Type{Name: tt.Name, Args: args, TypeExpr: t}
 	case *parser.ArrayType:
-		elem := c.resolveTypeExpr(t.ElementType)
-		return V2Type{Name: elem.Name + "[]", Args: elem.Args}
+		elem := c.resolveTypeExpr(tt.ElementType)
+		return V2Type{Name: elem.Name + "[]", Args: elem.Args, TypeExpr: t}
 	case *parser.OptionalType:
-		inner := c.resolveTypeExpr(t.Inner)
+		inner := c.resolveTypeExpr(tt.Inner)
 		inner.Nullable = true
+		inner.TypeExpr = t
 		return inner
+	case *parser.FuncTypeExpr:
+		return V2Type{Name: "Fn", TypeExpr: t}
 	default:
 		return typeAny
 	}

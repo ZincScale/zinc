@@ -636,12 +636,17 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	if !ok {
 		return nil
 	}
-	// Side-map first (Phase 3.7.2): bind carries the declared TypeExpr
-	// on Symbol. Falls back to ad-hoc varTypeExprs when bind has no
-	// declared type (inferred locals).
+	// Side-map first (Phase 3.7.2): Symbol.DeclType for explicit
+	// declarations, then NodeTypes[useIdent].TypeExpr for inferred
+	// locals (via Map<K, V> → V on a Map<...,Box<T>>).
 	if g.bound != nil {
 		if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
 			if gt, ok := sym.DeclType.(*parser.GenericType); ok {
+				return gt
+			}
+		}
+		if t, ok := g.bound.NodeTypes[ident]; ok && t.TypeExpr != nil {
+			if gt, ok := t.TypeExpr.(*parser.GenericType); ok {
 				return gt
 			}
 		}
