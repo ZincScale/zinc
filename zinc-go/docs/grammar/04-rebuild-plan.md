@@ -350,7 +350,18 @@ This section is the source of truth for "where are we in Phase 3." Updated after
 ### Phase 3.7 (cleanup)
 
 - [x] 3.7.1 Default `--typecheck` to on. `ZINC_TYPECHECK=0` escape hatch removed; typecheck unconditional. Bind/check wired into all four `codegen.New()` paths (single-file `compileFile`, multi-file, leaf packages, root files). Three latent typechecker bugs fixed that the gate had been masking: `Int`/`Bool` canonicalization, `error` accepts `null` (errors-as-values success path), variadic params propagate via `V2FnSig.Variadic`.
-- [x] 3.7.2 Codegen → side-map consultation order — readers consult the bind side-map first (`inferExprType` Ident path, `isMapVar`/`isListVar`/`isChannelVar`, `isStructVar`, `resolveMethodReturnType`, `resolveReceiverClassName`, `resolveReceiverGenericType`, the Fn-type readers in `callReturnsError` / `callIsVoidThrower`). `Symbol.DeclType` added to carry declared `parser.TypeExpr` for SymLocal/SymParam, populated by the bind walk. Codegen tracking maps (`varTypes`/`varStructTypes`/`varTypeExprs`) remain as gap-filler for emit-time type tracking that bind/check doesn't cover (e.g. `var x = m[key]` → typechecker returns `any`; codegen's existing inference fills the gap). Original task framing ("delete dead maps") was wrong: the maps aren't dead, they cover complementary ground to the bind side-map. The deliverable is the consultation order: side-map first, codegen-tracking second.
+- [x] 3.7.2 Delete dead codegen tracking maps — **fully drained**. `varTypeExprs` (commit d7fc243), `varStructTypes` (commit 38db9e4), and `varGoTypes` (commit ac503f3) are all gone from the Generator struct. The bind side-map is the single source of truth for variable type tracking. Required typechecker improvements:
+  - `Symbol.DeclType parser.TypeExpr` carries declared types for SymLocal/SymParam.
+  - `V2Type.TypeExpr parser.TypeExpr` propagates parser AST through inference (Map/List index, generic args, type-alias peeling).
+  - `IndexExpr` infers `List<T>/T[] → T` and `Map<K,V> → V`.
+  - `SelectorExpr` resolves class fields + method returns + `pkg.Class` cross-pkg ctor + `this.field` via `currentClass`.
+  - `CallExpr` ctor inference: `MyClass(...)` → V2Type{Name:"MyClass"}, `pkg.Class(...)` via cross-pkg `classNames`.
+  - Sealed-variant parent registration so `Shape s = Circle(...)` typechecks.
+  - `compatible()` recurses through parent chains; accepts structural conformance for `error` + interface targets; accepts `V2Type{Name:"go-ffi"}` against any declared type (Go enforces).
+  - `compileFile` and per-leaf `compileSubpackages` build importMap from each file's `import` directives so the FFI resolver works for single-file scripts and cross-package imports not in `[deps]`.
+  - Cross-package `MethodSigs`/`ParentTypes`/`ClassNames` threaded through `runTypecheck` via `crossPkgClassDecls`.
+  - `tupleSlotTypes` populates `NodeTypes[ident].GoType` for multi-value FFI returns; CallExpr SelectorExpr-callee path does the same for single-value.
+  - Companion fix: `pre-transpile use go mod download not tidy` (commit b92b0d7) so the resolver can load third-party deps before the typecheck pass runs.
 - [x] 3.7.3 Delete `go_types.go` Java stubs (`ZincToJavaClass`, `MethodThrows` — both no-op).
 - [x] 3.7.4 Delete `Result[T]` / `isinstance` dead branches in CheckV2.
 - [x] 3.7.5 Final spec sweep — high-impact drifts resolved: 02-semantics.md §5.7 (`null` in error slots) + §5.2 examples switched from `err != nil` to `err != null`; §5.4 reworded for null-error semantics. 03-type-system.md §2.5 documents the `error`-implicit-null carve-out. `V2Type` for `bool` is spec-canonical `"bool"` (legacy spellings `Bool`/`Boolean`/`boolean` collapse via `canonicalTypeName`). Lexer keyword count corrected in 01-grammar.md §1.2 (45 keywords; `construct` removed since the parser never used it; `assert`/`Err`/`void` documented as spec-reserved IDENTs).
