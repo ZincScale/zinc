@@ -582,16 +582,24 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		return fmt.Errorf("generate go.mod: %w", err)
 	}
 
-	// If there are deps, run go mod tidy before transpilation
-	// so the GoTypeResolver can introspect module types
+	// Pre-transpile, run `go mod download` (NOT tidy) so every dep
+	// listed in the just-written go.mod ends up in GOMODCACHE. The
+	// resolver's packages.Load then works during transpile.
+	//
+	// Why download not tidy: tidy PRUNES unused deps. At this point
+	// no .go files exist in outDir yet, so every declared dep looks
+	// unused — tidy would strip the whole require list. download
+	// just pulls listed deps without pruning. Tidy still runs AFTER
+	// transpile to clean up indirect deps once .go files reveal what's
+	// actually used. Mirrors the testProject path's earlier fix.
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
-		tidy.Dir = outDir
+		dl := exec.Command("go", "mod", "download", "all")
+		dl.Dir = outDir
 		if !quiet {
-			tidy.Stderr = os.Stderr
+			dl.Stderr = os.Stderr
 		}
-		if err := tidy.Run(); err != nil && !quiet {
-			fmt.Fprintf(os.Stderr, "warning: go mod tidy: %v\n", err)
+		if err := dl.Run(); err != nil && !quiet {
+			fmt.Fprintf(os.Stderr, "warning: go mod download: %v\n", err)
 		}
 	}
 
@@ -671,10 +679,18 @@ func runProject(projectDir string, progArgs []string) error {
 	if err := generateGoMod(cfg, tmpDir); err != nil {
 		return err
 	}
+	// Pre-transpile, run `go mod download` (NOT tidy) so deps land in
+	// GOMODCACHE without pruning. tidy strips unused deps, but at this
+	// point no Go source exists yet so EVERY dep looks unused. download
+	// pulls listed deps without pruning. Tidy still runs after transpile
+	// to clean up indirect deps. Mirrors testProject's earlier fix.
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
-		tidy.Dir = tmpDir
-		tidy.Run() // best effort — may fail before code is generated
+		dl := exec.Command("go", "mod", "download", "all")
+		dl.Dir = tmpDir
+		dl.Stderr = os.Stderr
+		if err := dl.Run(); err != nil {
+			return fmt.Errorf("go mod download (pre-transpile): %w", err)
+		}
 	}
 
 	// Transpile
