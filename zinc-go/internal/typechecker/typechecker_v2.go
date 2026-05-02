@@ -376,6 +376,17 @@ func (c *V2Checker) checkDecl(d parser.TopLevelDecl) {
 		c.checkClassDecl(d)
 	case *parser.DataClassDecl:
 		c.checkDataClassDecl(d)
+	case *parser.TestDecl:
+		// 3.7.2: walk test bodies so the side-map sees idents inside
+		// `test "..." { ... }`. Without this, codegen has no NodeTypes
+		// for vars declared inside test blocks.
+		if d.Body != nil {
+			inner := newV2Scope(c.scope)
+			prevScope := c.scope
+			c.scope = inner
+			c.checkBlock(d.Body)
+			c.scope = prevScope
+		}
 	}
 }
 
@@ -718,7 +729,15 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		return typeInt
 	case *parser.FloatLit:
 		return typeDouble
-	case *parser.StringLit, *parser.StringInterpLit, *parser.RawStringLit:
+	case *parser.StringLit, *parser.RawStringLit:
+		return typeStr
+	case *parser.StringInterpLit:
+		// 3.7.2: walk interpolation parts so the side-map gets entries
+		// for every Ident/Expr inside `${...}`. Without this, codegen
+		// can't see types of interpolated values via NodeTypes.
+		for _, p := range e.Parts {
+			c.inferType(p)
+		}
 		return typeStr
 	case *parser.BoolLit:
 		return typeBool
