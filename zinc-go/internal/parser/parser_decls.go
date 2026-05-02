@@ -32,7 +32,7 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 	retType := p.v2ParseFnReturnType()
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
-	typeParams := p.parseTypeParams()
+	typeParams, typeParamBounds := p.parseTypeParamsWithBounds()
 	params := p.v2ParseParamList()
 
 	// Single-expression form: ReturnType name(params) = expr
@@ -40,11 +40,11 @@ func (p *Parser) v2ParseFnDecl() *FnDecl {
 		p.advance()
 		expr := p.v2ParseExpr()
 		body := &BlockStmt{Stmts: []Stmt{&ReturnStmt{Line: line, Value: expr}}}
-		return &FnDecl{Line: line, Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+		return &FnDecl{Line: line, Name: name, TypeParams: typeParams, TypeParamBounds: typeParamBounds, Params: params, ReturnType: retType, Body: body}
 	}
 
 	body := p.v2ParseBlock()
-	return &FnDecl{Line: line, Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+	return &FnDecl{Line: line, Name: name, TypeParams: typeParams, TypeParamBounds: typeParamBounds, Params: params, ReturnType: retType, Body: body}
 }
 
 // v2ParseFnReturnType parses either `void` (returns nil) or any type
@@ -136,7 +136,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	p.expect(lexer.TOKEN_CLASS)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
-	typeParams := p.parseTypeParams()
+	typeParams, typeParamBounds := p.parseTypeParamsWithBounds()
 
 	// Optional parent class/interfaces: class Dog : Animal, Serializable, Queue<T>, core.Describable
 	var parents []ParentRef
@@ -285,7 +285,7 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 	if len(ctors) > 0 {
 		ctor = ctors[0]
 	}
-	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Fields: fields, Ctor: ctor, Ctors: ctors, Methods: methods, Variants: variants}
+	return &ClassDecl{Line: line, Name: name, TypeParams: typeParams, TypeParamBounds: typeParamBounds, Parents: parents, Fields: fields, Ctor: ctor, Ctors: ctors, Methods: methods, Variants: variants}
 }
 
 // v2ParseMethodDecl: [abstract] ReturnType name(params) [{ body }]
@@ -506,7 +506,7 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 	p.expect(lexer.TOKEN_DATA)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
-	typeParams := p.parseTypeParams()
+	typeParams, typeParamBounds := p.parseTypeParamsWithBounds()
 
 	// Parse record-style params: data User(String name, int age = 0)
 	p.expect(lexer.TOKEN_LPAREN)
@@ -553,7 +553,7 @@ func (p *Parser) v2ParseDataClassDecl() *DataClassDecl {
 		p.expect(lexer.TOKEN_RBRACE)
 	}
 
-	return &DataClassDecl{Line: line, Name: name, TypeParams: typeParams, Parents: parents, Params: params, Methods: methods}
+	return &DataClassDecl{Line: line, Name: name, TypeParams: typeParams, TypeParamBounds: typeParamBounds, Parents: parents, Params: params, Methods: methods}
 }
 
 // v2ParseDataClassParam: [@Annotations] Type name [= default]
@@ -578,7 +578,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 	p.expect(lexer.TOKEN_INTERFACE)
 	name := p.expect(lexer.TOKEN_IDENT).Literal
 	p.v2ValidateDeclName(name)
-	typeParams := p.parseTypeParams()
+	typeParams, typeParamBounds := p.parseTypeParamsWithBounds()
 	p.expect(lexer.TOKEN_LBRACE)
 	var methods []*MethodSig
 	p.skipSemis()
@@ -595,7 +595,7 @@ func (p *Parser) v2ParseInterfaceDecl() *InterfaceDecl {
 		p.skipSemis()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &InterfaceDecl{Line: line, Name: name, TypeParams: typeParams, Methods: methods}
+	return &InterfaceDecl{Line: line, Name: name, TypeParams: typeParams, TypeParamBounds: typeParamBounds, Methods: methods}
 }
 
 // v2ParseConstDecl: const [type] NAME = expr (top-level constant)

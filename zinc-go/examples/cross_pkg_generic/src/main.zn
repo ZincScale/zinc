@@ -1,0 +1,15 @@
+// Cross-package generic instantiation: package main composes
+// box.Container<item.Thing>, exercising imports + generic substitution.
+
+import box
+import item
+
+void main() {
+    var t = item.make(7, "widget")
+    var c = box.wrap(t, "primary")
+
+    print("label: ${c.label}")
+    print("id: ${c.value.id}")
+    print("name: ${c.value.name}")
+    print("cross_pkg_generic OK")
+}

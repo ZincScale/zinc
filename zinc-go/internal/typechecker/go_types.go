@@ -13,7 +13,7 @@ func ResolveZincMethodReturn(typeName string, typeArgs []string, method string) 
 	case "String.length", "String.indexOf":
 		return "int"
 	case "String.contains", "String.startsWith", "String.endsWith", "String.isEmpty":
-		return "boolean"
+		return "bool"
 	case "String.charAt":
 		return "char"
 	case "String.split":
@@ -32,7 +32,7 @@ func ResolveZincMethodReturn(typeName string, typeArgs []string, method string) 
 		case "get":
 			return elemType
 		case "contains":
-			return "boolean"
+			return "bool"
 		case "filter", "map", "distinct", "limit", "skip", "sortBy":
 			return typeName
 		case "sum", "count":
@@ -40,9 +40,9 @@ func ResolveZincMethodReturn(typeName string, typeArgs []string, method string) 
 		case "findFirst", "min", "max":
 			return elemType
 		case "anyMatch", "allMatch", "noneMatch":
-			return "boolean"
+			return "bool"
 		case "isEmpty":
-			return "boolean"
+			return "bool"
 		}
 	}
 
@@ -52,21 +52,12 @@ func ResolveZincMethodReturn(typeName string, typeArgs []string, method string) 
 		case "size":
 			return "int"
 		case "containsKey":
-			return "boolean"
+			return "bool"
 		case "isEmpty":
-			return "boolean"
+			return "bool"
 		}
 	}
 
 	return ""
 }
 
-// ZincToJavaClass is a no-op stub for Go backend (no Java class mapping needed).
-func ZincToJavaClass(name string) (string, bool) {
-	return "", false
-}
-
-// MethodThrows is a no-op stub for Go backend (Go uses error returns, not exceptions).
-func MethodThrows(className, methodName string) (bool, bool) {
-	return false, false
-}

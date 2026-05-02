@@ -1,0 +1,9 @@
+import workshop
+
+void main() {
+    var c = workshop.assemble(7, "widget", "primary")
+    print("label: ${c.label}")
+    print("id: ${c.value.id}")
+    print("name: ${c.value.name}")
+    print("cross_pkg_generic_3pkg OK")
+}

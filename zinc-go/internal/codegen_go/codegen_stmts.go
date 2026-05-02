@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
 
 // stmtLine returns the source line of a statement, or 0 if unknown.
@@ -273,6 +274,13 @@ func inferMapLitType(keys []parser.Expr, values []parser.Expr) (string, string) 
 func (g *Generator) inferSliceElemType(expr parser.Expr) string {
 	switch e := expr.(type) {
 	case *parser.Ident:
+		// Side-map first (Phase 3.4 type-tracking migration) — falls back
+		// to ad-hoc varTypes when bind isn't on.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[e]; ok && t.Name != "" && t.Name != "any" {
+				return t.Name
+			}
+		}
 		if t, ok := g.varTypes[e.Name]; ok {
 			return t
 		}
@@ -553,7 +561,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// as an import must not be treated as a package here (ZCA-10).
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
+				if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
 					if pkgPath, ok := g.importMap[ident.Name]; ok {
 						if retType := g.goResolver.FuncReturnType(pkgPath, sel.Field); retType != nil {
 							g.varGoTypes[v.Name] = retType
@@ -1041,6 +1049,11 @@ func (g *Generator) isEntrySetCall(e parser.Expr) bool {
 // isMapVar checks if the expression is a variable declared as a Map type.
 func (g *Generator) isMapVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[ident]; ok && t.Name == "Map" {
+				return true
+			}
+		}
 		if te, ok := g.varTypeExprs[ident.Name]; ok {
 			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" {
 				return true
@@ -1059,6 +1072,13 @@ func (g *Generator) isMapVar(e parser.Expr) bool {
 // isListVar checks if the expression is a variable declared as a List/slice type.
 func (g *Generator) isListVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[ident]; ok {
+				if t.Name == "List" || strings.HasSuffix(t.Name, "[]") {
+					return true
+				}
+			}
+		}
 		if te, ok := g.varTypeExprs[ident.Name]; ok {
 			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "List" {
 				return true
@@ -1074,6 +1094,11 @@ func (g *Generator) isListVar(e parser.Expr) bool {
 // isChannelVar checks if the expression is a variable declared as a Channel type.
 func (g *Generator) isChannelVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[ident]; ok && t.Name == "Channel" {
+				return true
+			}
+		}
 		if te, ok := g.varTypeExprs[ident.Name]; ok {
 			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Channel" {
 				return true
@@ -1173,6 +1198,18 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 		}
 		if call, ok := c.Pattern.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
+				// Side-map first (Phase 3.4 resolution migration): bind
+				// resolved this ident to a definite Symbol; SymType /
+				// SymSealedVariant means it's a known type/variant pattern.
+				if g.bound != nil {
+					if sym, ok := g.bound.Bindings[ident]; ok {
+						switch sym.Kind {
+						case typechecker.SymType, typechecker.SymClass, typechecker.SymDataClass,
+							typechecker.SymInterface, typechecker.SymEnum, typechecker.SymSealedVariant:
+							return true
+						}
+					}
+				}
 				// Data classes (sealed variants)
 				if g.dataClasses[ident.Name] {
 					return true
@@ -1255,6 +1292,34 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 			// Primitive types: map Zinc name → Go name
 			if goType, ok := zincToGoType[ident.Name]; ok {
 				typeName = goType
+			} else if g.bound != nil {
+				// Side-map first (Phase 3.4 resolution migration). With
+				// granular SymKind we know whether the cross-pkg type is
+				// a data class (no pointer) vs a regular class/interface
+				// (pointer prefix).
+				handled := false
+				if sym, ok := g.bound.Bindings[ident]; ok && sym.Pkg != "" {
+					switch sym.Kind {
+					case typechecker.SymDataClass, typechecker.SymSealedVariant:
+						typeName = sym.Pkg + "." + exportName(ident.Name)
+						isDataClass = true
+						handled = true
+					case typechecker.SymClass, typechecker.SymInterface:
+						typeName = "*" + sym.Pkg + "." + exportName(ident.Name)
+						handled = true
+					}
+				}
+				if !handled {
+					if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+						typeName = entry.pkg + "." + exportName(ident.Name)
+						if entry.kind == "class" || entry.kind == "interface" {
+							typeName = "*" + typeName
+						}
+						isDataClass = entry.kind == "data"
+					} else if _, ok := g.structs[ident.Name]; ok {
+						typeName = "*" + exportName(ident.Name)
+					}
+				}
 			} else if entry, ok := g.unqualifiedNames[ident.Name]; ok {
 				// Cross-package: resolve to Go-qualified form
 				typeName = entry.pkg + "." + exportName(ident.Name)
@@ -1304,9 +1369,36 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 			if dataDecl != nil {
 				fieldParams = dataDecl.Params
 			} else if callerIdent, ok := call.Callee.(*parser.Ident); ok {
-				if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
-					if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
-						fieldParams = pkgFields[callerIdent.Name]
+				// Side-map first (Phase 3.4 resolution migration). With
+				// granular SymKind, only data classes / sealed variants
+				// have positional fields to destructure.
+				if g.bound != nil {
+					if sym, ok := g.bound.Bindings[callerIdent]; ok && sym.Pkg != "" {
+						switch sym.Kind {
+						case typechecker.SymDataClass, typechecker.SymSealedVariant:
+							if pkgFields, ok := g.subpkgDataFields[sym.Pkg]; ok {
+								fieldParams = pkgFields[callerIdent.Name]
+							}
+						}
+					}
+				}
+				if fieldParams == nil {
+					if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
+						if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
+							fieldParams = pkgFields[callerIdent.Name]
+						}
+					}
+				}
+			} else if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				// Qualified pattern `pkg.Variant(binders...)` — look up
+				// fieldParams via the package alias rather than the bind
+				// side-map (the SelectorExpr's outer Ident binds to a
+				// package alias, not the variant). Without this branch,
+				// `case lib.Ok(v) → v := _v.V` (wrong field name from
+				// the binder) instead of `_v.Value` (the data field).
+				if pkgIdent, ok := sel.Object.(*parser.Ident); ok {
+					if pkgFields, ok := g.subpkgDataFields[pkgIdent.Name]; ok {
+						fieldParams = pkgFields[sel.Field]
 					}
 				}
 			}
@@ -1586,9 +1678,18 @@ func (g *Generator) isClassType(name string) bool {
 func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
 	receiverType := ""
 	if ident, ok := sel.Object.(*parser.Ident); ok {
-		// Check local variables
-		if st, ok := g.varStructTypes[ident.Name]; ok {
-			receiverType = st
+		// Side-map first — when the typechecker has resolved this Ident
+		// to a struct/data class, that's the authoritative answer.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[ident]; ok && t.Name != "" && t.Name != "any" {
+				receiverType = t.Name
+			}
+		}
+		// Check local variables (legacy fallback)
+		if receiverType == "" {
+			if st, ok := g.varStructTypes[ident.Name]; ok {
+				receiverType = st
+			}
 		}
 		// Check class fields
 		if receiverType == "" && g.currentClass != "" && g.currentFields[ident.Name] {
@@ -1637,6 +1738,13 @@ func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
 func (g *Generator) isStructVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
 		name := ident.Name
+		// Side-map first: bind tells us this Ident's V2Type. If the
+		// type name is a known class/data-class, treat it as a struct.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[ident]; ok && g.isClassType(t.Name) {
+				return true
+			}
+		}
 		// Check local variables explicitly tracked as struct types
 		if _, ok := g.varStructTypes[name]; ok {
 			return true
@@ -1701,7 +1809,18 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 		}
 		// Unqualified Go stdlib call: `ReadFile(path)` with `import os`
 		// resolves to `os.ReadFile`. Check the underlying Go signature
-		// for a trailing error result.
+		// for a trailing error result. Side-map first (Phase 3.4
+		// resolution migration); falls back to ad-hoc unqualifiedNames
+		// when bound is unset.
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[callee]; ok && sym.Kind == typechecker.SymFn && sym.Pkg != "" {
+				if pkgPath, ok := g.importMap[sym.Pkg]; ok {
+					if g.goResolver.ReturnsError(pkgPath, callee.Name) {
+						return true
+					}
+				}
+			}
+		}
 		if entry, ok := g.unqualifiedNames[callee.Name]; ok && entry.kind == "func" {
 			if pkgPath, ok := g.importMap[entry.pkg]; ok {
 				if g.goResolver.ReturnsError(pkgPath, entry.name) {
@@ -1710,15 +1829,23 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 		// Fn-typed local invoked by name: `var fac = registry[name]; fac(ctx, cfg)`.
-		// If `fac` was registered in varTypeExprs (e.g. by the Map-index
-		// var-type tracker, or by a typed `Fn<...> fac = ...` decl), peel
-		// any single-layer type alias and check whether the resolved
-		// FuncTypeExpr's return type contains `error` in the tail.
-		// Without this, an invocation through a registry-map slot
-		// reads as a non-thrower call and the surrounding signature's
-		// `(T, error)` return is left dangling.
-		if t, ok := g.varTypeExprs[callee.Name]; ok {
-			if ft := g.resolveFuncTypeExpr(t); ft != nil {
+		// Side-map first (Phase 3.7.2): the bind side-map carries the
+		// declared TypeExpr on the resolved Symbol. Walk it to check
+		// for an `error` tail. Falls back to legacy varTypeExprs when
+		// bind didn't capture a declared type (inferred locals).
+		var declType parser.TypeExpr
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[callee]; ok && sym.DeclType != nil {
+				declType = sym.DeclType
+			}
+		}
+		if declType == nil {
+			if t, ok := g.varTypeExprs[callee.Name]; ok {
+				declType = t
+			}
+		}
+		if declType != nil {
+			if ft := g.resolveFuncTypeExpr(declType); ft != nil {
 				if returnTypeDeclaresError(ft.ReturnType) {
 					return true
 				}
@@ -1736,7 +1863,7 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 		// Go stdlib package call.
-		if ident, ok := callee.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
+		if ident, ok := callee.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
 			if pkgPath, ok := g.importMap[ident.Name]; ok {
 				if g.goResolver.ReturnsError(pkgPath, callee.Field) {
 					return true
@@ -1896,6 +2023,14 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 			return !exists || rt == "" || rt == "void" || rt == "error"
 		}
 		// Unqualified Go stdlib — ask the resolver about return arity.
+		// Side-map first; falls back to ad-hoc unqualifiedNames.
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[ident]; ok && sym.Kind == typechecker.SymFn && sym.Pkg != "" {
+				if pkgPath, ok := g.importMap[sym.Pkg]; ok {
+					return g.goResolver.ReturnsErrorOnly(pkgPath, ident.Name)
+				}
+			}
+		}
 		if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "func" {
 			if pkgPath, ok := g.importMap[entry.pkg]; ok {
 				return g.goResolver.ReturnsErrorOnly(pkgPath, entry.name)
@@ -1903,9 +2038,20 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 		// Fn-typed local: a bare-`error` slot like `Fn<(...), error>`
 		// dispatches to the void destructure form (`_err := f()`).
-		// Mirrors the parallel branch in callReturnsError.
-		if t, ok := g.varTypeExprs[ident.Name]; ok {
-			if ft := g.resolveFuncTypeExpr(t); ft != nil {
+		// Side-map first (Phase 3.7.2); fallback to varTypeExprs.
+		var declType parser.TypeExpr
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
+				declType = sym.DeclType
+			}
+		}
+		if declType == nil {
+			if t, ok := g.varTypeExprs[ident.Name]; ok {
+				declType = t
+			}
+		}
+		if declType != nil {
+			if ft := g.resolveFuncTypeExpr(declType); ft != nil {
 				if isZincErrorType(ft.ReturnType) {
 					return true
 				}
@@ -2202,62 +2348,10 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 	}
 	g.writeln("if %s != nil {", errVar)
 	g.indent++
-	if len(handler.MatchCases) > 0 {
-		g.emitOrMatch(errVar, handler)
-	} else if handler.Body != nil {
+	if handler.Body != nil {
 		g.emitOrBlock(handler.Body)
 	}
 	g.indent--
-	g.writeln("}")
-	g.currentErrVar = savedErrVar
-}
-
-// emitOrMatch lowers `or match err { case T -> body ... }` to a Go
-// type switch. The zinc match variable (`handler.MatchVar`, default
-// `err`) is bound to the typed error inside each case, matching how a
-// Go dev would write `switch err := _err.(type) { case *T: ... }`.
-// An explicit wildcard (`case _`) becomes `default:`. If no wildcard
-// is present and no case re-throws, unmatched errors propagate via
-// `return zero, _err`; this forces the enclosing function to be a
-// thrower (handled by inference so the signature picks up (T, error)).
-func (g *Generator) emitOrMatch(errVar string, handler *parser.OrHandler) {
-	matchVar := handler.MatchVar
-	if matchVar == "" {
-		matchVar = "err"
-	}
-	savedErrVar := g.currentErrVar
-	g.currentErrVar = matchVar
-
-	hasWildcard := false
-	for _, c := range handler.MatchCases {
-		if c.Type == "" {
-			hasWildcard = true
-			break
-		}
-	}
-
-	g.writeln("switch %s := %s.(type) {", matchVar, errVar)
-	for _, c := range handler.MatchCases {
-		if c.Type == "" {
-			g.writeln("default:")
-		} else {
-			g.writeln("case *%s:", c.Type)
-		}
-		g.indent++
-		g.writeln("_ = %s", matchVar)
-		if c.Body != nil {
-			for _, s := range c.Body.Stmts {
-				g.emitStmt(s)
-			}
-		}
-		g.indent--
-	}
-	if !hasWildcard {
-		g.writeln("default:")
-		g.indent++
-		g.emitErrReturn(errVar)
-		g.indent--
-	}
 	g.writeln("}")
 	g.currentErrVar = savedErrVar
 }
@@ -2281,7 +2375,7 @@ func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
 	// Case 1: Package-level function — pkg.Func().
 	// Guard against user-scope shadow so a field/param/local with the
 	// same name as an imported package isn't treated as one (ZCA-10).
-	if !g.isUserScopeShadow(ident.Name) {
+	if !g.isUserScopeShadowIdent(ident) {
 		if pkgPath, ok := g.importMap[ident.Name]; ok {
 			return g.goResolver.ReturnsErrorOnly(pkgPath, sel.Field)
 		}
@@ -2512,20 +2606,6 @@ func (g *Generator) orHandlerCanReturnError(h *parser.OrHandler) bool {
 	if h.Body != nil && g.blockCanReturnError(h.Body) {
 		return true
 	}
-	if len(h.MatchCases) > 0 {
-		hasWildcard := false
-		for _, c := range h.MatchCases {
-			if c.Type == "" {
-				hasWildcard = true
-			}
-			if c.Body != nil && g.blockCanReturnError(c.Body) {
-				return true
-			}
-		}
-		if !hasWildcard {
-			return true
-		}
-	}
 	return false
 }
 
@@ -2694,6 +2774,23 @@ func blockContainsReturn(block *parser.BlockStmt) bool {
 }
 
 func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
+	// Track Go return-slot types so a later method call on a tuple-bound
+	// var (e.g. `var dec, derr = hambaOcf.NewDecoder(...); dec.Decode(...)`)
+	// is recognized as an FFI seam — required for the explicit-`&`
+	// validator and for callReturnsPointer-style introspection.
+	if call, ok := t.Value.(*parser.CallExpr); ok {
+		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+			if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
+				if pkgPath, ok := g.importMap[ident.Name]; ok {
+					for i, n := range t.Names {
+						if rt := g.goResolver.FuncReturnTypeAt(pkgPath, sel.Field, i); rt != nil {
+							g.varGoTypes[n] = rt
+						}
+					}
+				}
+			}
+		}
+	}
 	if t.OrHandler != nil {
 		// Multi-value thrower destructure with `or { }`: the call returns
 		// (v1, ..., vN, error); destructure into the user's N names plus
@@ -2712,9 +2809,7 @@ func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
 		g.writeln("%s := %s", strings.Join(names, ", "), callExpr)
 		g.writeln("if %s != nil {", errVar)
 		g.indent++
-		if len(t.OrHandler.MatchCases) > 0 {
-			g.emitOrMatch(errVar, t.OrHandler)
-		} else if t.OrHandler.Body != nil {
+		if t.OrHandler.Body != nil {
 			g.emitOrBlock(t.OrHandler.Body)
 		}
 		g.indent--

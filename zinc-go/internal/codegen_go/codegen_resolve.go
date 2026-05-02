@@ -5,10 +5,11 @@ package codegen_go
 
 import (
 	"fmt"
-	"os"
+	"sort"
 	"strings"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
 
 // --- Unqualified name resolution ---------------------------------------------
@@ -246,12 +247,35 @@ func (g *Generator) resolveTypeArg(ta string) string {
 	if resolved, ok := g.resolveUnqualifiedType(ta); ok {
 		return resolved
 	}
-	// Check if unresolved due to collision across imported packages
+	// Unresolved due to collision across imported packages → Zinc-level error.
 	if pkgs, ok := g.unqualifiedCollisions[ta]; ok {
-		fmt.Fprintf(os.Stderr, "error: ambiguous type %q — exported by multiple imports: %s. Use qualified form (e.g. %s.%s)\n",
-			ta, strings.Join(pkgs, ", "), pkgs[0], ta)
+		g.reportCollision(0, ta, pkgs)
 	}
 	return ta
+}
+
+// reportCollision emits a Zinc-level compile error for an ambiguous bare name
+// that was excluded from `unqualifiedNames` because two or more imported
+// packages export it. Dedupes per (line, name) so the same site doesn't error
+// repeatedly.
+func (g *Generator) reportCollision(line int, name string, pkgs []string) {
+	if g.collisionsReported == nil {
+		g.collisionsReported = make(map[string]bool)
+	}
+	key := fmt.Sprintf("%d:%s", line, name)
+	if g.collisionsReported[key] {
+		return
+	}
+	g.collisionsReported[key] = true
+	sortedPkgs := append([]string(nil), pkgs...)
+	sort.Strings(sortedPkgs)
+	suggestions := make([]string, len(sortedPkgs))
+	for i, p := range sortedPkgs {
+		suggestions[i] = fmt.Sprintf("%s.%s", p, name)
+	}
+	g.compileError(line,
+		"ambiguous bare name %q — exported by both %s. Use %s to disambiguate.",
+		name, strings.Join(sortedPkgs, " and "), strings.Join(suggestions, " or "))
 }
 
 // splitTopLevelTypeArgs splits a type-argument string on top-level commas,
@@ -439,6 +463,13 @@ func (g *Generator) resolveReceiverClassName(e parser.Expr) string {
 		if expr.Name == "this" {
 			return g.currentClass
 		}
+		// Side-map first: bind+typecheck resolved this Ident's V2Type.
+		// When that type is a class/data-class, return its name directly.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[expr]; ok && t.Name != "" && t.Name != "any" && g.isClassType(t.Name) {
+				return t.Name
+			}
+		}
 		if st, ok := g.varStructTypes[expr.Name]; ok {
 			return st
 		}
@@ -605,7 +636,16 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	if !ok {
 		return nil
 	}
-	// Local variable with a tracked type expression.
+	// Side-map first (Phase 3.7.2): bind carries the declared TypeExpr
+	// on Symbol. Falls back to ad-hoc varTypeExprs when bind has no
+	// declared type (inferred locals).
+	if g.bound != nil {
+		if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
+			if gt, ok := sym.DeclType.(*parser.GenericType); ok {
+				return gt
+			}
+		}
+	}
 	if te, ok := g.varTypeExprs[ident.Name]; ok {
 		if gt, ok := te.(*parser.GenericType); ok {
 			return gt
@@ -622,6 +662,30 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	return nil
 }
 
+// isUserScopeShadowIdent is the side-map-aware version of isUserScopeShadow.
+// When the bind phase has resolved the ident, return whether the resolved
+// Symbol is in user scope. Otherwise fall through to the name-based check.
+//
+// Use this variant whenever the caller has the *parser.Ident node in hand.
+// Today's shadow-gate self-stomp bug class (where a tracking-table addition
+// leaks into the gate's input set) is structurally impossible under the
+// side-map path: a Symbol's Kind is set at bind time and doesn't change.
+func (g *Generator) isUserScopeShadowIdent(ident *parser.Ident) bool {
+	if g.bound != nil {
+		if sym, ok := g.bound.Bindings[ident]; ok {
+			switch sym.Kind {
+			case typechecker.SymLocal, typechecker.SymParam,
+				typechecker.SymField, typechecker.SymThis, typechecker.SymSuper:
+				return true
+			}
+			// Any other kind (Fn, Type, Const, ZincPkg, GoPkg, Builtin,
+			// EnumVariant, SealedVariant, Unknown) is NOT user scope.
+			return false
+		}
+	}
+	return g.isUserScopeShadow(ident.Name)
+}
+
 // isUserScopeShadow returns true when `name` is shadowed by user scope —
 // a current-class field, a method parameter, or a tracked local variable.
 // Callers that would otherwise interpret `name` as an imported package,
@@ -632,6 +696,10 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 // Normal scoping rule: inner scope shadows outer. Zinc's codegen flattens
 // resolution tables across the project, so we need an explicit guard at
 // every place the tables are consulted with a user-typed identifier.
+//
+// Prefer isUserScopeShadowIdent when you have the *parser.Ident node —
+// it consults the bind side-map first and is structurally safe against
+// the self-stomp bug class.
 func (g *Generator) isUserScopeShadow(name string) bool {
 	if g.currentClass != "" && g.currentFields[name] {
 		return true
@@ -679,7 +747,7 @@ func (g *Generator) isZincSubpackage(name string) bool {
 	return false
 }
 
-// isImportAlias checks if an identifier is a package alias from [imports] in zinc.toml.
+// isImportAlias checks if an identifier is a package alias from [deps] in zinc.toml.
 func (g *Generator) isImportAlias(name string) bool {
 	if g.importAliases == nil {
 		return false
@@ -803,17 +871,130 @@ var zincToGoType = map[string]string{
 	"Any":     "interface{}",
 }
 
+// goTypeFromV2 translates a typechecker V2Type to its Go-type string for
+// codegen. Returns "" when the type doesn't have a clean translation
+// (e.g. unresolved generics, `any`, `null`) so callers can fall back.
+//
+// Phase 3.7.2: this is the bridge that lets codegen consume the bind
+// side-map directly instead of the string-keyed varTypes / inferExprType
+// scaffolding inherited from earlier phases.
+func (g *Generator) goTypeFromV2(t typechecker.V2Type) string {
+	if t.Name == "" || t.Name == "any" || t.Name == "null" {
+		return ""
+	}
+	if mapped, ok := zincToGoType[t.Name]; ok {
+		return mapped
+	}
+	if strings.HasSuffix(t.Name, "[]") {
+		elem := strings.TrimSuffix(t.Name, "[]")
+		if mapped, ok := zincToGoType[elem]; ok {
+			return "[]" + mapped
+		}
+		return "[]" + elem
+	}
+	if t.Name == "List" && len(t.Args) == 1 {
+		inner := g.goTypeFromV2(t.Args[0])
+		if inner == "" {
+			return ""
+		}
+		return "[]" + inner
+	}
+	if t.Name == "Map" && len(t.Args) == 2 {
+		k := g.goTypeFromV2(t.Args[0])
+		v := g.goTypeFromV2(t.Args[1])
+		if k == "" || v == "" {
+			return ""
+		}
+		return "map[" + k + "]" + v
+	}
+	return t.Name
+}
+
 // goTypeParams returns the Go type parameter clause, e.g. "[T any, U any]".
 // Returns "" when params is empty.
 func goTypeParams(params []string) string {
+	return goTypeParamsWithBounds(params, nil)
+}
+
+// goTypeParamsWithBounds emits a Go constraint clause that respects Zinc
+// bounds (Phase 3.6.1). Translation:
+//
+//	Comparable           → cmp.Ordered    (allows ==, !=, <, <=, >, >=)
+//	Hashable / Equatable → comparable     (== / != only)
+//	Stringer             → fmt.Stringer
+//	other (user iface)   → emitted verbatim
+//	(unbound)            → any
+//
+// Multi-bound constraints fall back to the most permissive matching Go
+// constraint (Comparable wins over comparable). Bound mismatches are
+// caught earlier by the typechecker, so codegen aims for "compiles cleanly
+// in Go" rather than re-checking.
+func goTypeParamsWithBounds(params []string, bounds map[string][]parser.TypeExpr) string {
 	if len(params) == 0 {
 		return ""
 	}
 	var parts []string
 	for _, p := range params {
-		parts = append(parts, p+" any")
+		parts = append(parts, p+" "+goConstraintFor(bounds[p]))
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// trackTypeParamImports adds the Go imports needed by `goConstraintFor`'s
+// translation of Zinc bounds. Called from the FnDecl/ClassDecl/InterfaceDecl
+// emit paths that have access to bound info.
+func (g *Generator) trackTypeParamImports(bounds map[string][]parser.TypeExpr) {
+	for _, paramBounds := range bounds {
+		for _, b := range paramBounds {
+			st, ok := b.(*parser.SimpleType)
+			if !ok {
+				continue
+			}
+			switch st.Name {
+			case "Comparable":
+				g.needImport("cmp")
+			case "Stringer":
+				g.needImport("fmt")
+			}
+		}
+	}
+}
+
+func goConstraintFor(boundExprs []parser.TypeExpr) string {
+	if len(boundExprs) == 0 {
+		return "any"
+	}
+	hasComparable := false
+	hasHashable := false
+	hasStringer := false
+	var others []string
+	for _, b := range boundExprs {
+		st, ok := b.(*parser.SimpleType)
+		if !ok {
+			continue
+		}
+		switch st.Name {
+		case "Comparable":
+			hasComparable = true
+		case "Hashable", "Equatable":
+			hasHashable = true
+		case "Stringer":
+			hasStringer = true
+		default:
+			others = append(others, st.Name)
+		}
+	}
+	switch {
+	case hasComparable:
+		return "cmp.Ordered"
+	case hasHashable:
+		return "comparable"
+	case hasStringer:
+		return "fmt.Stringer"
+	case len(others) == 1:
+		return others[0]
+	}
+	return "any"
 }
 
 // goTypeArgs returns the Go type argument clause, e.g. "[T, U]".

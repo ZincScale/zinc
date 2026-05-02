@@ -1,0 +1,14 @@
+// Sealed type in a subpackage — exported for cross-package qualified match.
+
+sealed class Result {
+    data Ok(int value)
+    data Err(String message)
+}
+
+pub Result success(int v) {
+    return Ok(v)
+}
+
+pub Result failure(String m) {
+    return Err(m)
+}

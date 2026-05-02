@@ -1,0 +1,12 @@
+// MyBox is not Comparable — calling max(MyBox, MyBox) must fail typecheck.
+
+data MyBox(int v)
+
+T max<T : Comparable>(T a, T b) {
+    if (a > b) { return a }
+    return b
+}
+
+void main() {
+    print(max(MyBox(1), MyBox(2)))
+}

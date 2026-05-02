@@ -13,7 +13,88 @@ import (
 	codegen "zinc-go/internal/codegen_go"
 	"zinc-go/internal/lexer"
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
+
+// runTypecheck collects signatures across all programs, runs the bind
+// phase to resolve every Ident to a Symbol, then runs CheckV2 on each.
+// Returns the bound programs (keyed by parser.Program pointer identity)
+// + aggregated V2Errors from both passes. Caller decides whether to fail.
+//
+// `crossPkgExports` provides the bind phase's ZincSubpkgExports map —
+// alias → exported name → kind. The caller (compileSubpackages) builds
+// this from `allExports` so cross-package enum variants and types
+// resolve correctly. Pass nil for single-package compileMultiFile usage.
+//
+// `goModDir` is the dir holding go.mod (or about to). When non-empty, a
+// GoTypeResolver is constructed and supplied to CheckV2 so Go-imported
+// package calls get GoType-tagged returns in the NodeTypes side-map.
+func runTypecheck(progs []*parser.Program, importMap map[string]string,
+	crossPkgExports map[string]map[string]string, goModDir string) (
+	map[*parser.Program]*typechecker.BoundProgram, []typechecker.V2Error) {
+	if len(progs) == 0 {
+		return nil, nil
+	}
+
+	// Phase 3.5.2 — Go-FFI resolver shared across this typecheck pass.
+	// Lazily created when both importMap and goModDir are available.
+	var ffi typechecker.GoFFIResolver
+	if importMap != nil && goModDir != "" {
+		r := codegen.NewGoTypeResolver()
+		r.SetDir(goModDir)
+		ffi = r
+	}
+	merged := mergePrograms(progs)
+	externalSigs := typechecker.CollectSignatures(merged)
+
+	// Build the bind context: same-package siblings + cross-package imports.
+	bindCtx := typechecker.CollectBindContext(merged)
+	if crossPkgExports != nil {
+		for alias, exports := range crossPkgExports {
+			bindCtx.ZincSubpkgExports[alias] = exports
+		}
+	}
+	for _, prog := range progs {
+		// Each file's own ImportAliases set: aliases used in `import alias`
+		// declarations. We mark every imported alias as "in use" so the
+		// bind resolver considers cross-pkg matches under that alias.
+		for _, imp := range prog.Imports {
+			alias := imp.Alias
+			if alias == "" {
+				// Last segment of the import path is the implicit alias.
+				parts := strings.Split(imp.Path, "/")
+				alias = parts[len(parts)-1]
+				parts = strings.Split(alias, ".")
+				alias = parts[len(parts)-1]
+			}
+			bindCtx.ImportAliases[alias] = true
+		}
+	}
+	// Phase 3.3 stub: GoPkgExports left empty. Go-imported package symbols
+	// (hambaAvro.Schema, etc.) aren't yet introspected at the bind layer.
+	// Phase 3.5 wires this through `goResolver`.
+	_ = importMap
+
+	bps := make(map[*parser.Program]*typechecker.BoundProgram)
+	var allErrors []typechecker.V2Error
+	for _, prog := range progs {
+		bp, bindErrs := typechecker.Bind(prog, bindCtx)
+		bps[prog] = bp
+		allErrors = append(allErrors, bindErrs...)
+	}
+	for _, prog := range progs {
+		// Phase 3.5: pass importMap (alias→pkgPath) and the FFI resolver
+		// so CheckV2 can tag return types of Go-imported calls with GoType.
+		// Codegen consumes via the BoundProgram side-map.
+		checkErrs, nodeTypes := typechecker.CheckV2WithContextAndNodes(
+			prog, &externalSigs, importMap, ffi)
+		allErrors = append(allErrors, checkErrs...)
+		if bp, ok := bps[prog]; ok {
+			bp.NodeTypes = nodeTypes
+		}
+	}
+	return bps, allErrors
+}
 
 // parseFile reads and parses a .zn file, returning the AST.
 func parseFile(path string) (*parser.Program, error) {
@@ -63,8 +144,20 @@ func compileFile(path, goModDir string, importAliases ...map[string]string) ([]c
 	if goModDir != "" {
 		gen.SetGoModDir(goModDir)
 	}
+	var im map[string]string
 	if len(importAliases) > 0 && importAliases[0] != nil {
-		gen.SetImportAliases(importAliases[0])
+		im = importAliases[0]
+		gen.SetImportAliases(im)
+	}
+	bps, tcErrors := runTypecheck([]*parser.Program{prog}, im, nil, goModDir)
+	if len(tcErrors) > 0 {
+		for _, e := range tcErrors {
+			fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
+		}
+		return nil, fmt.Errorf("%d typecheck error(s)", len(tcErrors))
+	}
+	if bp, ok := bps[prog]; ok {
+		gen.SetBoundProgram(bp)
 	}
 	files := gen.GenerateFiles(prog, className)
 	for _, w := range gen.CompileWarnings() {
@@ -164,6 +257,27 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 	// Collect exports from all files for sibling awareness
 	merged := mergePrograms(progs)
 	allExports := codegen.CollectExports(merged)
+	allPubs := codegen.CollectPubs(merged)
+
+	// Bind + typecheck pass. Bind() resolves every Ident to a Symbol via
+	// the 5-level order in the spec; CheckV2 then runs with shared
+	// signature context. Any error aborts before codegen. The BoundProgram
+	// per file feeds each Generator so codegen consumes the side-map.
+	var boundPrograms map[*parser.Program]*typechecker.BoundProgram
+	{
+		var im map[string]string
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			im = importAliases[0]
+		}
+		bps, tcErrors := runTypecheck(progs, im, nil, outDir)
+		if len(tcErrors) > 0 {
+			for _, e := range tcErrors {
+				fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
+			}
+			return fmt.Errorf("%d typecheck error(s)", len(tcErrors))
+		}
+		boundPrograms = bps
+	}
 
 	// Pass 2: Generate each file individually with sibling context
 	var allCompileErrors []string
@@ -175,8 +289,12 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 		gen.SetSourceFile(prog.SourceFile)
 		gen.SetGoModDir(outDir)
 		gen.SetSiblingExports(allExports)
+		gen.SetSiblingPubs(allPubs)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
+		}
+		if bp, ok := boundPrograms[prog]; ok {
+			gen.SetBoundProgram(bp)
 		}
 		files := gen.GenerateFiles(prog, className)
 		allCompileErrors = append(allCompileErrors, gen.CompileErrors()...)
@@ -206,7 +324,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 // compileDir compiles all .zn files in a directory using multi-file merging
 // for cross-file type resolution. Writes generated .go files into outDir.
 // If quiet is true, the progress lines are suppressed.
-// importAliases are optional [imports] entries from zinc.toml for package resolution.
+// importAliases are optional [deps] entries from zinc.toml for package resolution.
 func compileDir(dir, outDir string, quiet bool, importAliases ...map[string]string) error {
 	znFiles, err := collectZnFiles(dir)
 	if err != nil {
@@ -304,11 +422,13 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
 	allExports := make(map[string]map[string]string)            // pkg → name → kind
+	allPubs := make(map[string]map[string]bool)                 // pkg → name → isPub
 	allDataFields := make(map[string]map[string][]*parser.FieldDecl)  // pkg → data class name → fields
 	allClassDecls := make(map[string]map[string]*parser.ClassDecl)   // pkg → class name → full decl
 	allTypeAliases := make(map[string]map[string]parser.TypeExpr)    // pkg → alias name → underlying TypeExpr
 	allMerged := make(map[string]*parser.Program)               // pkg → merged AST
 	allZnFiles := make(map[string][]string)                     // pkg → source file paths
+	allProgs := make(map[string][]*parser.Program)              // pkg → per-file ASTs (one per file in znFiles)
 
 	for _, pkg := range leafPkgs {
 		pkgDir := pkgFsDir[pkg]
@@ -330,10 +450,54 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		merged := mergePrograms(progs)
 		allMerged[pkg] = merged
 		allZnFiles[pkg] = znFiles
+		allProgs[pkg] = progs
 		allExports[pkg] = codegen.CollectExports(merged)
+		allPubs[pkg] = codegen.CollectPubs(merged)
 		allDataFields[pkg] = codegen.CollectDataClassFields(merged)
 		allClassDecls[pkg] = codegen.CollectClassDecls(merged)
 		allTypeAliases[pkg] = codegen.CollectTypeAliases(merged)
+	}
+
+	// Phase 3.2 + 3.3 — bind + typecheck for the multi-package case. We
+	// share the BoundProgram across the per-file emit loop so the codegen's
+	// side-map lookups (keyed by *parser.Ident pointer identity) hit. The
+	// previous approach re-parsed each file at emit time, producing different
+	// AST nodes that the side-map would never match.
+	allBound := make(map[*parser.Program]*typechecker.BoundProgram)
+	{
+		var im map[string]string
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			im = importAliases[0]
+		}
+		var allTcErrors []typechecker.V2Error
+		for _, pkg := range leafPkgs {
+			pkgProgs := allProgs[pkg]
+			if len(pkgProgs) == 0 {
+				continue
+			}
+			// Build cross-package exports for this package's bind context:
+			// every other package's exports, keyed by the alias the
+			// importer would use (the package's last path segment).
+			crossPkg := make(map[string]map[string]string)
+			for otherPkg, otherExports := range allExports {
+				if otherPkg == pkg {
+					continue
+				}
+				alias := filepath.Base(otherPkg)
+				crossPkg[alias] = otherExports
+			}
+			bps, errs := runTypecheck(pkgProgs, im, crossPkg, goModDir)
+			for prog, bp := range bps {
+				allBound[prog] = bp
+			}
+			allTcErrors = append(allTcErrors, errs...)
+		}
+		if len(allTcErrors) > 0 {
+			for _, e := range allTcErrors {
+				fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
+			}
+			return fmt.Errorf("%d typecheck error(s)", len(allTcErrors))
+		}
 	}
 
 	// 4. Generate Go code for each subpackage — one .go file per .zn file
@@ -350,13 +514,15 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		goPkgName := filepath.Base(pkg)
 		znFiles := allZnFiles[pkg]
 		siblingExports := allExports[pkg] // exports from all files in this package
+		siblingPubs := allPubs[pkg]       // pub-ness of those exports
+		pkgProgs := allProgs[pkg]         // per-file ASTs (parsed in step 3)
 
-		// Parse each file individually and generate separately
-		for _, znPath := range znFiles {
-			prog, err := parseFile(znPath)
-			if err != nil {
-				return err
-			}
+		// Use the per-file ASTs from step 3 instead of re-parsing — the
+		// bind side-map (when typecheck is on) is keyed by AST node pointer
+		// identity, so re-parsing would produce nodes the side-map can't
+		// recognize.
+		for i, znPath := range znFiles {
+			prog := pkgProgs[i]
 
 			baseName := strings.TrimSuffix(filepath.Base(znPath), ".zn")
 			className := strings.ToUpper(baseName[:1]) + baseName[1:]
@@ -368,8 +534,12 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			gen.SetGoModDir(goModDir)
 			gen.SetZincSubpackages(subpackages)
 			gen.SetSiblingExports(siblingExports)
+			gen.SetSiblingPubs(siblingPubs)
 			if len(importAliases) > 0 && importAliases[0] != nil {
 				gen.SetImportAliases(importAliases[0])
+			}
+			if bp, ok := allBound[prog]; ok {
+				gen.SetBoundProgram(bp)
 			}
 			for otherPkg, otherExports := range allExports {
 				if otherPkg != pkg {
@@ -434,6 +604,33 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 	}
 	rootMerged := mergePrograms(rootProgs)
 	rootExports := codegen.CollectExports(rootMerged)
+	rootPubs := codegen.CollectPubs(rootMerged)
+
+	// Bind + typecheck root files. Cross-package exports surface every
+	// leaf subpackage so root code can reference `core.Foo` etc. through
+	// the side-map, matching what the leaf-package emit loop does.
+	rootBound := make(map[*parser.Program]*typechecker.BoundProgram)
+	{
+		var im map[string]string
+		if len(importAliases) > 0 && importAliases[0] != nil {
+			im = importAliases[0]
+		}
+		crossPkg := make(map[string]map[string]string)
+		for otherPkg, otherExports := range allExports {
+			alias := filepath.Base(otherPkg)
+			crossPkg[alias] = otherExports
+		}
+		bps, errs := runTypecheck(rootProgs, im, crossPkg, goModDir)
+		for prog, bp := range bps {
+			rootBound[prog] = bp
+		}
+		if len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
+			}
+			return fmt.Errorf("%d typecheck error(s)", len(errs))
+		}
+	}
 
 	// Generate each root file individually
 	for i, prog := range rootProgs {
@@ -446,8 +643,12 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		gen.SetGoModDir(goModDir)
 		gen.SetZincSubpackages(subpackages)
 		gen.SetSiblingExports(rootExports)
+		gen.SetSiblingPubs(rootPubs)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
+		}
+		if bp, ok := rootBound[prog]; ok {
+			gen.SetBoundProgram(bp)
 		}
 		for pkg, exports := range allExports {
 			alias := filepath.Base(pkg)

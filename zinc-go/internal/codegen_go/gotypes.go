@@ -301,15 +301,52 @@ func (r *GoTypeResolver) lookupFunc(pkgPath, funcName string) *types.Signature {
 }
 
 func (r *GoTypeResolver) FuncReturnType(pkgPath, funcName string) types.Type {
+	return r.FuncReturnTypeAt(pkgPath, funcName, 0)
+}
+
+// FuncReturnTypeAt returns the i-th return slot's type (0-based) or nil if
+// the function doesn't have that many results. Used by the multi-value
+// var-decl path to track Go types per slot.
+func (r *GoTypeResolver) FuncReturnTypeAt(pkgPath, funcName string, idx int) types.Type {
 	sig := r.lookupFunc(pkgPath, funcName)
 	if sig == nil {
 		return nil
 	}
 	results := sig.Results()
-	if results.Len() == 0 {
+	if idx < 0 || idx >= results.Len() {
 		return nil
 	}
-	return results.At(0).Type()
+	return results.At(idx).Type()
+}
+
+// MethodReturnTypeAt returns the i-th return slot's Go type for a method
+// on a Go-resolved receiver type. Falls back to *T method-set when the
+// value-receiver method-set doesn't have it.
+func (r *GoTypeResolver) MethodReturnTypeAt(typ types.Type, methodName string, idx int) types.Type {
+	if typ == nil {
+		return nil
+	}
+	mset := types.NewMethodSet(typ)
+	sel := mset.Lookup(nil, methodName)
+	if sel == nil {
+		if _, isPtr := typ.(*types.Pointer); !isPtr {
+			mset = types.NewMethodSet(types.NewPointer(typ))
+			sel = mset.Lookup(nil, methodName)
+		}
+	}
+	if sel == nil {
+		return nil
+	}
+	fn, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return nil
+	}
+	sig := fn.Type().(*types.Signature)
+	results := sig.Results()
+	if idx < 0 || idx >= results.Len() {
+		return nil
+	}
+	return results.At(idx).Type()
 }
 
 func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName string) bool {

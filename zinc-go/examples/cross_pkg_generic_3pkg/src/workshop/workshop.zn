@@ -1,0 +1,10 @@
+// Workshop bridges box (generic) and item (concrete).
+// Cross-package generic instantiation: returns box.Container<item.Thing>.
+
+import box
+import item
+
+pub box.Container<item.Thing> assemble(int id, String name, String label) {
+    var t = item.make(id, name)
+    return box.wrap(t, label)
+}

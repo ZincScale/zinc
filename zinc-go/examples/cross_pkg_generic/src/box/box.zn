@@ -1,0 +1,9 @@
+// Generic container in package "box".
+// Tests cross-package generic instantiation: `box.Container<item.Thing>`
+// from a third package should compile to a Go-generic instantiation.
+
+data Container<T>(T value, String label)
+
+pub Container<T> wrap<T>(T v, String l) {
+    return Container(v, l)
+}

@@ -180,10 +180,6 @@ func (l *Lexer) NextToken() Token {
 		}
 		return l.makeToken(TOKEN_DOT, ".", line, col)
 	case ':':
-		if l.peek() == '=' {
-			l.advance()
-			return l.makeToken(TOKEN_COLONASSIGN, ":=", line, col)
-		}
 		return l.makeToken(TOKEN_COLON, ":", line, col)
 	case ';':
 		return l.makeToken(TOKEN_SEMICOLON, ";", line, col)
@@ -191,10 +187,6 @@ func (l *Lexer) NextToken() Token {
 		if l.peek() == '.' {
 			l.advance()
 			return l.makeToken(TOKEN_QUESTION_DOT, "?.", line, col)
-		}
-		if l.peek() == '?' {
-			l.advance()
-			return l.makeToken(TOKEN_QUESTION_QUESTION, "??", line, col)
 		}
 		return l.makeToken(TOKEN_QUESTION, "?", line, col)
 	case '@':
@@ -236,20 +228,12 @@ func (l *Lexer) NextToken() Token {
 	case '!':
 		if l.peek() == '=' {
 			l.advance()
-			if l.peek() == '=' {
-				l.advance()
-				return l.makeToken(TOKEN_REF_NEQ, "!==", line, col)
-			}
 			return l.makeToken(TOKEN_NEQ, "!=", line, col)
 		}
 		return l.makeToken(TOKEN_BANG, "!", line, col)
 	case '=':
 		if l.peek() == '=' {
 			l.advance()
-			if l.peek() == '=' {
-				l.advance()
-				return l.makeToken(TOKEN_REF_EQ, "===", line, col)
-			}
 			return l.makeToken(TOKEN_EQ, "==", line, col)
 		}
 		return l.makeToken(TOKEN_ASSIGN, "=", line, col)

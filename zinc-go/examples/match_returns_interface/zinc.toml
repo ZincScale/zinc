@@ -8,6 +8,3 @@ version = "1.26"
 
 [deps]
 hambaAvro = "github.com/hamba/avro/v2@v2.25.0"
-
-[imports]
-hambaAvro = "github.com/hamba/avro/v2"

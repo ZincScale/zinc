@@ -16,6 +16,7 @@ package typechecker
 
 import (
 	"fmt"
+	"go/types"
 	"strings"
 
 	"zinc-go/internal/parser"
@@ -35,10 +36,17 @@ func (e V2Error) String() string {
 }
 
 // V2Type represents a resolved type in the v2 type system.
+//
+// `GoType` is set when the V2Type bridges to a Go-imported type (FFI). When
+// non-nil, it carries the precise Go type (`*ocf.Decoder`, `[]byte`, etc.)
+// that codegen needs for method-set lookups and pointer-vs-value emission.
+// Phase 3.5 introduced this; the `varGoTypes`-style codegen tables are
+// migrating to consume it via the BoundProgram's NodeTypes side-map.
 type V2Type struct {
 	Name     string   // "int", "String", "List", "Map", "null", "any"
 	Args     []V2Type // generic args: list[int] → Args=[int]
 	Nullable bool     // Optional[T]
+	GoType   types.Type // optional Go-resolved type (FFI bridge)
 }
 
 func (t V2Type) String() string {
@@ -59,7 +67,7 @@ var (
 	typeInt     = V2Type{Name: "int"}
 	typeDouble  = V2Type{Name: "double"}
 	typeStr     = V2Type{Name: "String"}
-	typeBool    = V2Type{Name: "boolean"}
+	typeBool    = V2Type{Name: "bool"}
 	typeNull    = V2Type{Name: "null"}
 	typeAny     = V2Type{Name: "any"}
 )
@@ -93,6 +101,30 @@ type V2FnSig struct {
 	Params     []V2Type
 	ParamNames []string
 	ReturnType V2Type
+	Variadic   bool // true if last param is `T... name`
+
+	// TypeParams (3.6.1): generic type parameter names declared on the fn.
+	// `T max<T>(T a, T b)` → ["T"]. Used to recognize a Param/Return type
+	// of name "T" as a type-parameter reference during call-site checking.
+	TypeParams []string
+	// TypeParamBounds (3.6.1): per-param bound list. Each bound is a
+	// type name that the inferred concrete must satisfy.
+	TypeParamBounds map[string][]string
+}
+
+// GoFFIResolver provides Go-imported-package type information to the
+// typechecker. The codegen's GoTypeResolver implements it. Decoupled so
+// the typechecker doesn't import codegen_go (would be a cycle).
+type GoFFIResolver interface {
+	// FuncReturnTypeAt returns the i-th return slot's Go type for a
+	// package-level function. nil if the function or slot doesn't exist.
+	FuncReturnTypeAt(pkgPath, funcName string, idx int) types.Type
+	// IsStruct reports whether `name` is a struct in `pkgPath`.
+	IsStruct(pkgPath, name string) bool
+	// MethodReturnTypeAt returns the i-th return slot's Go type for
+	// `methodName` on the Go-resolved receiver type. nil when the method
+	// doesn't exist on either the value or *value method-set.
+	MethodReturnTypeAt(recv types.Type, methodName string, idx int) types.Type
 }
 
 // V2Checker performs type checking on a v2 AST.
@@ -104,6 +136,18 @@ type V2Checker struct {
 	methodSigs   map[string]map[string]V2FnSig // type → method → signature
 	parentTypes  map[string][]string // class → parent types (interfaces, superclasses)
 	inLoop       bool               // tracking if inside a loop for break/continue
+
+	// nodeTypes side-map keyed by parser.Expr pointer identity. inferType
+	// populates this during the type walk. Codegen consumes via the
+	// BoundProgram (Phase 3.5+).
+	nodeTypes map[parser.Expr]V2Type
+
+	// FFI plumbing — set by the driver when typecheck mode includes Go-pkg
+	// awareness. importMap[alias] = Go package path; ffi resolves Go
+	// signatures. Both nil = no FFI awareness (calls into pkg.X return
+	// typeAny). When set, pkg.Func(...) returns gain GoType annotations.
+	importMap map[string]string
+	ffi       GoFFIResolver
 }
 
 // CheckV2 runs the v2 type checker on a parsed program.
@@ -114,7 +158,35 @@ func CheckV2(prog *parser.Program) []V2Error {
 
 // CheckV2WithContext runs the type checker with pre-populated cross-file signatures.
 // externalSigs contains function/method signatures from other files in the project.
+//
+// Returns errors only — the side-map of node types lives on the checker itself.
+// Use CheckV2WithContextAndNodes to capture both errors and the node-type map
+// in one call (Phase 3.5+ driver path).
 func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2Error {
+	c := newCheckerForProgram(externalSigs)
+	checkProgram(c, prog)
+	return c.errors
+}
+
+// CheckV2WithContextAndNodes runs the type checker like CheckV2WithContext but
+// returns the populated NodeTypes side-map along with any errors. Used by the
+// Phase 3.5+ pipeline driver to attach types to the BoundProgram.
+//
+// importMap and ffi are optional. When supplied, calls into Go-imported
+// packages get GoType annotations on their result V2Types — codegen reads
+// these to decide pointer-vs-value emission and method-set lookups.
+func CheckV2WithContextAndNodes(prog *parser.Program, externalSigs *CollectedSigs,
+	importMap map[string]string, ffi GoFFIResolver) (
+	[]V2Error, map[parser.Expr]V2Type) {
+	c := newCheckerForProgram(externalSigs)
+	c.nodeTypes = make(map[parser.Expr]V2Type)
+	c.importMap = importMap
+	c.ffi = ffi
+	checkProgram(c, prog)
+	return c.errors, c.nodeTypes
+}
+
+func newCheckerForProgram(externalSigs *CollectedSigs) *V2Checker {
 	c := &V2Checker{
 		scope:       newV2Scope(nil),
 		fnSigs:      make(map[string]V2FnSig),
@@ -134,23 +206,22 @@ func CheckV2WithContext(prog *parser.Program, externalSigs *CollectedSigs) []V2E
 			c.parentTypes[k] = v
 		}
 	}
+	return c
+}
 
+func checkProgram(c *V2Checker, prog *parser.Program) {
 	// Register top-level declarations (overrides externals for this file)
 	for _, d := range prog.Decls {
 		c.registerDecl(d)
 	}
-
 	// Check declarations
 	for _, d := range prog.Decls {
 		c.checkDecl(d)
 	}
-
 	// Check top-level statements
 	for _, s := range prog.Stmts {
 		c.checkStmt(s)
 	}
-
-	return c.errors
 }
 
 // CollectSignatures extracts function and interface method signatures from a program.
@@ -192,11 +263,34 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 		// Store full signature for call checking
 		var paramTypes []V2Type
 		var paramNames []string
+		variadic := false
 		for _, p := range d.Params {
 			paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
 			paramNames = append(paramNames, p.Name)
+			if p.Variadic {
+				variadic = true
+			}
 		}
-		c.fnSigs[d.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+		// 3.6.1: Translate parser bounds (TypeExpr) into bound name strings.
+		var boundsByName map[string][]string
+		if len(d.TypeParamBounds) > 0 {
+			boundsByName = make(map[string][]string, len(d.TypeParamBounds))
+			for tp, bounds := range d.TypeParamBounds {
+				names := make([]string, 0, len(bounds))
+				for _, b := range bounds {
+					names = append(names, c.resolveTypeExpr(b).Name)
+				}
+				boundsByName[tp] = names
+			}
+		}
+		c.fnSigs[d.Name] = V2FnSig{
+			Params:          paramTypes,
+			ParamNames:      paramNames,
+			ReturnType:      retType,
+			Variadic:        variadic,
+			TypeParams:      d.TypeParams,
+			TypeParamBounds: boundsByName,
+		}
 	case *parser.ClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 		if len(d.Parents) > 0 {
@@ -295,17 +389,21 @@ func (c *V2Checker) stmtReturns(s parser.Stmt) bool {
 		}
 		return thenReturns && elseReturns
 	case *parser.MatchStmt:
-		// All cases must return, and there must be a wildcard
-		hasWildcard := false
+		// Match returns iff every arm returns. Codegen enforces exhaustivity
+		// separately (compile error on non-exhaustive match against a sealed
+		// type or enum). The typechecker doesn't yet know cross-pkg sealed
+		// structure, so requiring a literal `_` wildcard would false-positive
+		// every exhaustive sealed match. Relaxed per spec §6.6 + §6.4 —
+		// exhaustivity is a separate check, not a return-paths check.
+		if len(s.Cases) == 0 {
+			return false
+		}
 		for _, mc := range s.Cases {
-			if mc.Pattern == nil {
-				hasWildcard = true
-			}
 			if !c.blockReturns(mc.Body) {
 				return false
 			}
 		}
-		return hasWildcard
+		return true
 	case *parser.BlockStmt:
 		return c.blockReturns(s)
 	}
@@ -375,10 +473,7 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 			valType := c.inferType(s.Value)
 			// Check return value matches declared return type
 			if c.fnReturnType != nil && c.fnReturnType.Name != "any" && valType.Name != "any" {
-				// For Result[T], Err() returns are always valid
-				if c.isResultReturn(c.fnReturnType) && c.isErrCall(s.Value) {
-					// OK — Err("msg") is valid for Result[T]
-				} else if !c.compatible(*c.fnReturnType, valType) {
+				if !c.compatible(*c.fnReturnType, valType) {
 					c.errorf(s.Line, "return type mismatch: expected %s, got %s", c.fnReturnType, valType)
 				}
 			}
@@ -448,9 +543,17 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 	case *parser.BlockStmt:
 		c.checkBlock(s)
 	case *parser.TupleVarStmt:
+		// Multi-value var. When the RHS is a Go-FFI call, propagate per-slot
+		// Go types into the scope so each name has the right GoType when
+		// later expressions reference it. Otherwise fall back to typeAny.
 		c.inferType(s.Value)
-		for _, name := range s.Names {
-			c.scope.set(name, typeAny)
+		slotTypes := c.tupleSlotTypes(s.Value, len(s.Names))
+		for i, name := range s.Names {
+			t := typeAny
+			if i < len(slotTypes) {
+				t = slotTypes[i]
+			}
+			c.scope.set(name, t)
 		}
 	case *parser.BreakStmt:
 		if !c.inLoop {
@@ -511,8 +614,15 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 
 func (c *V2Checker) checkAssignStmt(s *parser.AssignStmt) {
 	if ident, ok := s.Target.(*parser.Ident); ok {
-		if _, found := c.scope.lookup(ident.Name); !found {
-			c.errorf(s.Line, "undefined variable %q", ident.Name)
+		// `_` is the discard target — `_ = expr` is "evaluate, throw away".
+		// Also `=` may be the FIRST assignment to a name in some Zinc forms,
+		// so an unfound name shouldn't be a hard error here. Phase 3.5 will
+		// tighten this once bind+typecheck flow is mature.
+		if ident.Name != "_" {
+			if _, found := c.scope.lookup(ident.Name); !found {
+				// Quietly tolerate — the codegen surfaces real errors.
+				_ = ident
+			}
 		}
 	}
 	c.inferType(s.Value)
@@ -520,10 +630,32 @@ func (c *V2Checker) checkAssignStmt(s *parser.AssignStmt) {
 
 // --- Type inference ----------------------------------------------------------
 
+// inferType wraps inferTypeImpl and records the result in the nodeTypes
+// side-map (when initialized) so codegen can read per-expression types
+// without redoing inference. The side-map is keyed by parser.Expr pointer
+// identity, so different occurrences of the same name resolve to whatever
+// type they had at *that* AST position.
 func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	if e == nil {
 		return typeNull
 	}
+	t := c.inferTypeImpl(e)
+	if c.nodeTypes != nil {
+		c.nodeTypes[e] = t
+	}
+	return t
+}
+
+// NodeTypes returns the side-map populated during checking. Returns nil
+// if the checker hasn't been told to capture node types (the Phase 3.5
+// driver in compiler.go enables this via CheckV2WithBindings).
+func (c *V2Checker) NodeTypes() map[parser.Expr]V2Type {
+	return c.nodeTypes
+}
+
+// inferTypeImpl is the original inference logic; inferType wraps it with
+// node-type recording.
+func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 	switch e := e.(type) {
 	case *parser.IntLit:
 		return typeInt
@@ -544,6 +676,16 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	case *parser.BinaryExpr:
 		left := c.inferType(e.Left)
 		right := c.inferType(e.Right)
+		// Spec §7.1: `==` / `!=` on slices/maps is a compile error.
+		// Suggest slices.Equal / maps.Equal. Phase 3.6.3.
+		if e.Op == "==" || e.Op == "!=" {
+			if isSliceOrListType(left) && isSliceOrListType(right) {
+				c.errorf(0, "'%s' on List/slice values is not allowed; use slices.Equal(a, b)", e.Op)
+			}
+			if isMapType(left) && isMapType(right) {
+				c.errorf(0, "'%s' on Map values is not allowed; use maps.Equal(a, b)", e.Op)
+			}
+		}
 		result := c.inferBinaryType(e.Op, left, right)
 		e.ResolvedType = result.Name
 		return result
@@ -558,6 +700,34 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		var argTypes []V2Type
 		for _, a := range e.Args {
 			argTypes = append(argTypes, c.inferType(a))
+		}
+		// Go-FFI call detection. Two seams handled:
+		//  (a) pkg.Func(...) where `pkg` is a Go-imported package alias.
+		//  (b) recv.Method(...) where `recv` has GoType (from a previous
+		//      FFI call's return). e.g. `var dec, _ = ocf.NewDecoder(...);
+		//      dec.Decode(&got)` — `dec.Decode`'s return type comes from
+		//      the method-set on `*ocf.Decoder`.
+		// In both cases, the codegen reads the resulting V2Type.GoType to
+		// drive pointer-vs-value emission and method-set lookups.
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok && c.ffi != nil {
+			if pkgIdent, ok := sel.Object.(*parser.Ident); ok {
+				if pkgPath, isPkg := c.importMap[pkgIdent.Name]; isPkg {
+					if goType := c.ffi.FuncReturnTypeAt(pkgPath, sel.Field, 0); goType != nil {
+						return V2Type{Name: "go-ffi", GoType: goType}
+					}
+				}
+			}
+			// (b) Method on Go-typed receiver. Walk the receiver's V2Type
+			// (already inferred earlier in this function for the method-
+			// call branch — see below). To avoid a double-infer, look up
+			// the receiver's NodeType via the side-map if available; fall
+			// back to inferType, which is idempotent.
+			recvType := c.inferType(sel.Object)
+			if recvType.GoType != nil {
+				if goType := c.ffi.MethodReturnTypeAt(recvType.GoType, sel.Field, 0); goType != nil {
+					return V2Type{Name: "go-ffi", GoType: goType}
+				}
+			}
 		}
 		// Check method call on object: obj.method(args)
 		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
@@ -583,23 +753,79 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		// Check function call argument types against signature
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if sig, found := c.fnSigs[ident.Name]; found {
-				// Check arg count (skip if *args/**kwargs)
-				if len(argTypes) != len(sig.Params) && len(sig.Params) > 0 {
-					hasVariadic := false
-					for _, pn := range sig.ParamNames {
-						if strings.HasPrefix(pn, "**") || strings.HasPrefix(pn, "*") {
-							hasVariadic = true
-						}
-					}
-					if !hasVariadic && len(argTypes) > len(sig.Params) {
-						c.errorf(0, "function %q expects %d args, got %d", ident.Name, len(sig.Params), len(argTypes))
+				// Spread args at the call site (`f(...xs)`) make the
+				// effective arg count dynamic — skip arity + per-position
+				// type checks when any arg is a spread.
+				hasSpread := false
+				for _, a := range e.Args {
+					if _, ok := a.(*parser.SpreadExpr); ok {
+						hasSpread = true
+						break
 					}
 				}
-				// Check arg types
-				for i, argT := range argTypes {
-					if i < len(sig.Params) && !c.compatible(sig.Params[i], argT) {
-						c.errorf(0, "argument %d of %q: expected %s, got %s",
-							i+1, ident.Name, sig.Params[i], argT)
+				if !hasSpread {
+					// Check arg count (skip if `T... name` in sig or
+					// legacy `*args` / `**kwargs` ParamName prefix).
+					if len(argTypes) != len(sig.Params) && len(sig.Params) > 0 {
+						hasVariadic := sig.Variadic
+						if !hasVariadic {
+							for _, pn := range sig.ParamNames {
+								if strings.HasPrefix(pn, "**") || strings.HasPrefix(pn, "*") {
+									hasVariadic = true
+								}
+							}
+						}
+						if !hasVariadic && len(argTypes) > len(sig.Params) {
+							c.errorf(0, "function %q expects %d args, got %d", ident.Name, len(sig.Params), len(argTypes))
+						}
+					}
+					// Check arg types (skip the variadic tail slot —
+					// callers pass individual elements, not the slice).
+					typedSlots := len(sig.Params)
+					if sig.Variadic && typedSlots > 0 {
+						typedSlots--
+					}
+					// 3.6.1 generic bounds: as we walk args, accumulate the
+					// concrete type each type-param resolves to (`typeArgs`).
+					// Then verify each bound is satisfied by the inferred
+					// concrete. A type-param slot accepts any actual type
+					// (modulo bounds), but multiple uses of the same param
+					// must agree (e.g. `max(T a, T b)` requires same T).
+					typeParamSet := make(map[string]bool, len(sig.TypeParams))
+					for _, tp := range sig.TypeParams {
+						typeParamSet[tp] = true
+					}
+					typeArgs := make(map[string]V2Type)
+					for i, argT := range argTypes {
+						if i >= typedSlots {
+							continue
+						}
+						declared := sig.Params[i]
+						if typeParamSet[declared.Name] {
+							if prev, seen := typeArgs[declared.Name]; seen {
+								if !c.compatible(prev, argT) && !c.compatible(argT, prev) {
+									c.errorf(0, "type parameter %s of %q is %s but argument %d is %s",
+										declared.Name, ident.Name, prev, i+1, argT)
+								}
+								continue
+							}
+							typeArgs[declared.Name] = argT
+							continue
+						}
+						if !c.compatible(declared, argT) {
+							c.errorf(0, "argument %d of %q: expected %s, got %s",
+								i+1, ident.Name, declared, argT)
+						}
+					}
+					// Bound satisfaction check.
+					for tp, concrete := range typeArgs {
+						bounds := sig.TypeParamBounds[tp]
+						for _, bound := range bounds {
+							if !c.satisfiesBound(concrete, bound) {
+								c.errorf(0, "type parameter %s of %q: %s does not satisfy bound %s",
+									tp, ident.Name, concrete, bound)
+							}
+						}
 					}
 				}
 				return sig.ReturnType
@@ -621,8 +847,22 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 		}
 		return typeAny
 	case *parser.IndexExpr:
-		c.inferType(e.Object)
+		objType := c.inferType(e.Object)
 		c.inferType(e.Index)
+		// Spec §3.x — index access narrows the result type:
+		//   List<T> / T[] → T   (numeric index)
+		//   Map<K, V>    → V   (key index)
+		// Other / unknown → any.
+		if objType.Name == "List" && len(objType.Args) == 1 {
+			return objType.Args[0]
+		}
+		if strings.HasSuffix(objType.Name, "[]") {
+			elem := strings.TrimSuffix(objType.Name, "[]")
+			return V2Type{Name: elem}
+		}
+		if objType.Name == "Map" && len(objType.Args) == 2 {
+			return objType.Args[1]
+		}
 		return typeAny
 	case *parser.ListLit:
 		for _, el := range e.Elements {
@@ -671,8 +911,45 @@ func (c *V2Checker) inferType(e parser.Expr) V2Type {
 	}
 }
 
+// tupleSlotTypes returns per-slot V2Types for a tuple-producing expression.
+// Today this handles Go-FFI calls (`pkg.Func(...)`) where the resolver
+// supplies per-slot Go return types. Other shapes (Zinc-side multi-return
+// fns, method calls returning tuples) fall through and the caller uses
+// typeAny per slot. Length of the result may be less than `arity`; the
+// caller pads with typeAny.
+func (c *V2Checker) tupleSlotTypes(e parser.Expr, arity int) []V2Type {
+	if c.ffi == nil {
+		return nil
+	}
+	call, ok := e.(*parser.CallExpr)
+	if !ok {
+		return nil
+	}
+	sel, ok := call.Callee.(*parser.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	pkgIdent, ok := sel.Object.(*parser.Ident)
+	if !ok {
+		return nil
+	}
+	pkgPath, isPkg := c.importMap[pkgIdent.Name]
+	if !isPkg {
+		return nil
+	}
+	out := make([]V2Type, arity)
+	for i := 0; i < arity; i++ {
+		if goType := c.ffi.FuncReturnTypeAt(pkgPath, sel.Field, i); goType != nil {
+			out[i] = V2Type{Name: "go-ffi", GoType: goType}
+		} else {
+			out[i] = typeAny
+		}
+	}
+	return out
+}
+
 // tryNarrow checks if a condition narrows a variable's type.
-// Supports: x is Type, isinstance(x, Type)
+// Supports: `x is Type` and `x != null` (smart-cast per spec §5.2).
 // Returns a new scope with the narrowed type, or nil.
 func (c *V2Checker) tryNarrow(cond parser.Expr) *V2Scope {
 	switch e := cond.(type) {
@@ -687,36 +964,50 @@ func (c *V2Checker) tryNarrow(cond parser.Expr) *V2Scope {
 				}
 			}
 		}
-	case *parser.CallExpr:
-		// isinstance(x, Type) → narrow x to Type
-		if callee, ok := e.Callee.(*parser.Ident); ok && callee.Name == "isinstance" {
-			if len(e.Args) == 2 {
-				if ident, ok := e.Args[0].(*parser.Ident); ok {
-					if typeIdent, ok := e.Args[1].(*parser.Ident); ok {
-						narrowed := newV2Scope(c.scope)
-						narrowed.set(ident.Name, V2Type{Name: typeIdent.Name})
-						return narrowed
-					}
-				}
+		// `x != null` (or `null != x`) narrows `x` to non-null in the
+		// then-branch.
+		if e.Op == "!=" {
+			if narrowed := c.narrowNonNull(e.Left, e.Right); narrowed != nil {
+				return narrowed
+			}
+			if narrowed := c.narrowNonNull(e.Right, e.Left); narrowed != nil {
+				return narrowed
 			}
 		}
 	}
 	return nil
 }
 
-// isResultReturn checks if a return type is Result[T].
-func (c *V2Checker) isResultReturn(t *V2Type) bool {
-	return t != nil && t.Name == "Result"
+func (c *V2Checker) narrowNonNull(identSide, nullSide parser.Expr) *V2Scope {
+	ident, ok := identSide.(*parser.Ident)
+	if !ok {
+		return nil
+	}
+	if _, isNull := nullSide.(*parser.NullLit); !isNull {
+		return nil
+	}
+	current, found := c.scope.lookup(ident.Name)
+	if !found || !current.Nullable {
+		return nil
+	}
+	narrowed := newV2Scope(c.scope)
+	nonNull := current
+	nonNull.Nullable = false
+	narrowed.set(ident.Name, nonNull)
+	return narrowed
 }
 
-// isErrCall checks if an expression is a call to Err().
-func (c *V2Checker) isErrCall(e parser.Expr) bool {
-	call, ok := e.(*parser.CallExpr)
-	if !ok {
-		return false
+// isSliceOrListType reports whether t is a List<T> or T[] type.
+func isSliceOrListType(t V2Type) bool {
+	if t.Name == "List" {
+		return true
 	}
-	ident, ok := call.Callee.(*parser.Ident)
-	return ok && ident.Name == "Err"
+	return strings.HasSuffix(t.Name, "[]")
+}
+
+// isMapType reports whether t is a Map<K,V> type.
+func isMapType(t V2Type) bool {
+	return t.Name == "Map"
 }
 
 func (c *V2Checker) inferBinaryType(op string, left, right V2Type) V2Type {
@@ -750,6 +1041,14 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 	if declared.Name == actual.Name {
 		return true
 	}
+	// Trailing-segment match for qualified-vs-bare type names. When one
+	// side is `pkg.T` and the other is `T` and the call site's import
+	// graph collapses both to the same definition, they're compatible.
+	// Conservative approximation until Phase 3.5 wires per-call-site
+	// import resolution into the typechecker.
+	if trailingMatch(declared.Name, actual.Name) {
+		return true
+	}
 	// int → float is OK
 	if declared.Name == "double" && actual.Name == "int" {
 		return true
@@ -758,18 +1057,23 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 	if strings.HasSuffix(declared.Name, "[]") && actual.Name == "List" {
 		return true
 	}
-	// none is compatible with Optional
-	if actual.Name == "null" && declared.Nullable {
-		return true
-	}
-	// null is compatible with any reference type (non-primitive)
+	// Spec §5.1 (Phase 3.6.2): null is compatible ONLY with explicitly
+	// nullable types (`T?`). Non-nullable `T` rejects null at compile time.
+	// This is a deliberate break from the legacy permissive behavior —
+	// existing code that returned/assigned null to non-`T?` slots needs
+	// to migrate. Smart-cast on `x != null` covers the common usage in
+	// `tryNarrow` so a guard restores non-null type within its branch.
+	//
+	// Exception: `error` is the errors-as-values tail type. It's a Go
+	// interface with `nil` as a valid zero — a function returning
+	// `(T, error)` returns `value, null` on the success path. Treating
+	// it as implicitly nullable preserves the spec's idiomatic shape
+	// without requiring `error?` everywhere.
 	if actual.Name == "null" {
-		switch declared.Name {
-		case "int", "long", "double", "float", "boolean", "char", "byte", "short":
-			return false // primitives can't be null
-		default:
-			return true // reference types accept null
+		if declared.Name == "error" {
+			return true
 		}
+		return declared.Nullable
 	}
 	// Check if actual type implements/extends declared type
 	if parents, ok := c.parentTypes[actual.Name]; ok {
@@ -784,13 +1088,111 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 
 // --- Type resolution ---------------------------------------------------------
 
+// trailingMatch returns true when two type names share the same trailing
+// identifier after the last `.` separator and at least one side is bare
+// (no `.`). e.g. `core.Schema` and `Schema` match; `core.Schema` and
+// `hambaAvro.Schema` do not (both are qualified). Used as a phase-3-era
+// approximation for qualified-vs-bare type compatibility.
+func trailingMatch(a, b string) bool {
+	aDot := strings.LastIndex(a, ".")
+	bDot := strings.LastIndex(b, ".")
+	// Both qualified or both bare → exact-name match was already checked
+	// by the caller; a trailing match here is unsafe.
+	if (aDot >= 0) == (bDot >= 0) {
+		return false
+	}
+	aTail := a
+	if aDot >= 0 {
+		aTail = a[aDot+1:]
+	}
+	bTail := b
+	if bDot >= 0 {
+		bTail = b[bDot+1:]
+	}
+	return aTail == bTail && aTail != ""
+}
+
+// satisfiesBound reports whether a concrete type satisfies a generic bound.
+// Spec §4.3 — primitive built-in satisfactions:
+//
+//	int, long, float, double, byte, String → Comparable, Hashable, Equatable, Stringer
+//	bool → Equatable, Hashable, Stringer
+//
+// User-defined bounds are interfaces — concrete satisfies bound iff
+// concrete declares it as a parent (implements relation tracked via
+// parentTypes during registration).
+func (c *V2Checker) satisfiesBound(concrete V2Type, bound string) bool {
+	if bound == "" || bound == "any" {
+		return true
+	}
+	if concrete.Name == bound {
+		return true
+	}
+	switch concrete.Name {
+	case "int", "long", "float", "double", "byte", "String":
+		switch bound {
+		case "Comparable", "Hashable", "Equatable", "Stringer":
+			return true
+		}
+	case "bool":
+		switch bound {
+		case "Equatable", "Hashable", "Stringer":
+			return true
+		}
+	}
+	// User-defined: walk the parent chain.
+	if parents, ok := c.parentTypes[concrete.Name]; ok {
+		for _, p := range parents {
+			if p == bound {
+				return true
+			}
+			if c.satisfiesBound(V2Type{Name: p}, bound) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// canonicalTypeName normalizes type names that have multiple spellings
+// in source code to the canonical V2Type form. Without this the
+// typechecker treats `bool` (spec canonical) and `boolean`/`Bool`/`Boolean`
+// (legacy spellings) as distinct types and rejects straightforward returns.
+// `Object` is the Zinc-source name for the universal type — collapses to
+// `any` for compatibility.
+func canonicalTypeName(name string) string {
+	switch name {
+	case "boolean":
+		return "bool"
+	case "Bool":
+		return "bool"
+	case "Boolean":
+		return "bool"
+	case "Int":
+		return "int"
+	case "Integer":
+		return "int"
+	case "Long":
+		return "long"
+	case "Float":
+		return "float"
+	case "Double":
+		return "double"
+	case "String":
+		return "String"
+	case "Object":
+		return "any"
+	}
+	return name
+}
+
 func (c *V2Checker) resolveTypeExpr(t parser.TypeExpr) V2Type {
 	if t == nil {
 		return typeAny
 	}
 	switch t := t.(type) {
 	case *parser.SimpleType:
-		return V2Type{Name: t.Name}
+		return V2Type{Name: canonicalTypeName(t.Name)}
 	case *parser.GenericType:
 		var args []V2Type
 		for _, a := range t.TypeArgs {

@@ -28,11 +28,12 @@ if (val is String) {
     print("is String: true")
 }
 
-// Structural equality vs reference identity
+// Equality. `==` semantics are Go-identity: byte-compare for primitives
+// and strings, field-by-field for data classes, pointer-identity for
+// class instances. `===`/`!==` were removed 2026-05-01.
 var a = "hello"
 var b = "hello"
-print("structural eq: ${a == b}")
-print("reference eq: ${a === b}")
+print("eq: ${a == b}")
 
 // --- Generic type alias-like pattern ---
 data Result<T>(T value, bool ok)

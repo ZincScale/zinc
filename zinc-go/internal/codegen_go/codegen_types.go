@@ -132,7 +132,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		}
 	}
 
-	g.writeln("func %s%s(%s)%s {", name, goTypeParams(fn.TypeParams), params, ret)
+	tparams := goTypeParamsWithBounds(fn.TypeParams, fn.TypeParamBounds)
+	g.trackTypeParamImports(fn.TypeParamBounds)
+	g.writeln("func %s%s(%s)%s {", name, tparams, params, ret)
 	g.indent++
 	g.emitBlock(fn.Body)
 	// Ensure all paths return. Go requires an explicit return when the

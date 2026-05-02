@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
 
 // recvName is the Go identifier used for method/ctor receivers and as
@@ -135,6 +136,7 @@ type Generator struct {
 	// Processor instead of lib.Processor when import lib is declared.
 	unqualifiedNames      map[string]unqualifiedEntry
 	unqualifiedCollisions map[string][]string // name → list of packages that export it
+	collisionsReported    map[string]bool     // dedup key "line:name" for collision errors
 
 	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
 	// Checked by the caller after GenerateFiles returns.
@@ -161,6 +163,11 @@ type Generator struct {
 	// site. Without it, downstream emit paths that re-format the same
 	// expression (e.g. retry paths) would emit duplicate errors.
 	addrOfReported map[*parser.UnaryExpr]bool
+
+	// bound is the Phase 3.3 BoundProgram. Nil when typecheck mode is off.
+	// Phase 3.4 progressively migrates codegen branches from ad-hoc lookup
+	// (the 24+ tracking fields above) to side-map reads via this field.
+	bound *typechecker.BoundProgram
 }
 
 // wrapAsPointer formats `_zincPtr(expr)` and flags the helper for
@@ -268,15 +275,28 @@ func (g *Generator) SetGoModDir(dir string) {
 	g.goResolver.SetDir(dir)
 }
 
-// SetImportAliases sets the import alias → module path mappings from zinc.toml [imports].
+// SetBoundProgram attaches a Phase 3.3 BoundProgram. When set, codegen
+// consumes the side-map (resolving every Ident to a Symbol) instead of
+// running its own ad-hoc resolution. Phase 3.4 progressively migrates
+// codegen branches from on-the-fly lookup to side-map reads; until the
+// migration is complete, both paths coexist (gated by `g.bound != nil`).
+func (g *Generator) SetBoundProgram(bp *typechecker.BoundProgram) {
+	g.bound = bp
+}
+
+// SetImportAliases sets the import alias → module path mappings from zinc.toml [deps].
 func (g *Generator) SetImportAliases(aliases map[string]string) {
 	g.importAliases = aliases
 }
 
 // SetSiblingExports registers names from sibling files in the same package.
 // These are types, functions, etc. declared in other .zn files in the same directory.
-// Go handles cross-file visibility natively within a package, but the codegen
-// needs this for constructor name resolution and export capitalization decisions.
+// Go handles cross-file visibility natively within a package via package-level
+// scoping. The codegen records the names so it can route calls correctly, but
+// the `pub` bit must be plumbed separately via SetSiblingPubs because exports
+// alone don't tell us which decls were `pub`-declared. Per the 2026-05-01 spec
+// decision, only user-declared `pub` modifiers belong in `g.pubNames` —
+// same-package access does not require `pub`.
 func (g *Generator) SetSiblingExports(exports map[string]string) {
 	for name, kind := range exports {
 		switch kind {
@@ -289,7 +309,8 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 		case "interface":
 			g.interfaces[name] = true
 		case "func":
-			// Register sibling functions so cross-file calls get exported names
+			// Register sibling functions so the codegen knows about them.
+			// Casing at call sites is determined by `pubNames` membership.
 			if g.funcSigs == nil {
 				g.funcSigs = make(map[string][]*parser.ParamDecl)
 			}
@@ -297,8 +318,37 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 				g.funcSigs[name] = nil // mark as known function (no param info)
 			}
 		}
-		g.pubNames[name] = true // siblings in same package are always visible
 	}
+}
+
+// SetSiblingPubs registers which sibling-file names were `pub`-declared.
+// Companion to SetSiblingExports. The user-pub bit can't be inferred from
+// exports alone (`CollectExports` returns name→kind without pub-ness).
+func (g *Generator) SetSiblingPubs(pubs map[string]bool) {
+	for name, isPub := range pubs {
+		if isPub {
+			g.pubNames[name] = true
+		}
+	}
+}
+
+// CollectPubs returns the names of `pub`-declared top-level decls.
+// Companion to CollectExports. Used by SetSiblingPubs in compileMultiFile.
+func CollectPubs(prog *parser.Program) map[string]bool {
+	pubs := make(map[string]bool)
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.FnDecl:
+			if decl.IsPub {
+				pubs[decl.Name] = true
+			}
+		case *parser.ConstDecl:
+			if decl.IsPub {
+				pubs[decl.Name] = true
+			}
+		}
+	}
+	return pubs
 }
 
 // SetSubpackageExports registers exported names from a subpackage.
@@ -709,7 +759,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 			localName = imp.Alias
 		}
 
-		// Check import aliases from zinc.toml [imports] section.
+		// Check import aliases from zinc.toml [deps] section.
 		// Handles both: "import viper" (direct alias) and "import stdlib.config" (prefix alias)
 		if g.importAliases != nil {
 			// Direct alias: import viper → viper = "github.com/spf13/viper"

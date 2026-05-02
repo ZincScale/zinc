@@ -11,6 +11,14 @@ import (
 // version is set via ldflags: -X main.version=v1.0.0
 var version = "dev"
 
+// parserFeatures bumps whenever the syntactic surface changes (token set,
+// keyword set, expression precedence, statement forms). Build-tooling and
+// editor plugins can pin a minimum to detect "your zinc-go binary is older
+// than your zinc.toml/source expects." Format: ISO date of the most recent
+// surface-changing commit, prefixed with `v2-` to indicate the v2 grammar
+// pivot.
+const parserFeatures = "v2-2026-05-01"
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -155,8 +163,8 @@ func main() {
 			os.Exit(1)
 		}
 
-	case "version":
-		fmt.Printf("zinc-go %s\n", version)
+	case "version", "--version", "-v":
+		fmt.Printf("zinc-go %s (parser-features: %s)\n", version, parserFeatures)
 
 	default:
 		// Default: treat first arg as a .zn file to run (shorthand for zinc run)

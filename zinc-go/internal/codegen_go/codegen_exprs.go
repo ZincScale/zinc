@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
 
 // formatExpr converts a Zinc AST expression to its Go source representation.
@@ -28,6 +29,52 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		if expr.Name == "err" && g.currentErrVar != "" {
 			return g.currentErrVar
+		}
+		// Phase 3.4 side-map fast path. When the bind side-map has a
+		// definitive answer for this Ident, short-circuit through it.
+		// Cross-package cases (Symbol.Pkg != "") still need the import
+		// alias resolution (handled by resolveUnqualifiedExpr's tail
+		// path) for proper Go-name qualification, so those fall through.
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[expr]; ok {
+				if sym.Pkg == "" {
+					// Same-pkg / local cases.
+					switch sym.Kind {
+					case typechecker.SymLocal, typechecker.SymParam, typechecker.SymBuiltin:
+						// Renamed-var rewrite is the one wrinkle (e.g. user
+						// var named `error` → `_error`). Honor that map.
+						if g.renamedVars != nil {
+							if renamed, ok := g.renamedVars[expr.Name]; ok {
+								return renamed
+							}
+						}
+						return expr.Name
+					case typechecker.SymField:
+						if goField, ok := g.currentFieldGoName[expr.Name]; ok {
+							return recvName + "." + goField
+						}
+						return recvName + "." + exportName(expr.Name)
+					case typechecker.SymFn, typechecker.SymConst:
+						// Same-package — apply pub-aware casing.
+						if g.isSubpackage() {
+							return g.exportIfSubpackage(expr.Name)
+						}
+						return expr.Name
+					}
+				} else {
+					// Cross-package cases: emit `pkg.Name` with appropriate
+					// Go-name casing, ensuring the import is registered.
+					switch sym.Kind {
+					case typechecker.SymFn, typechecker.SymType, typechecker.SymClass,
+					typechecker.SymDataClass, typechecker.SymInterface, typechecker.SymEnum,
+					typechecker.SymTypeAlias, typechecker.SymConst, typechecker.SymEnumVariant:
+						if goPath, ok := g.importMap[sym.Pkg]; ok {
+							g.needImport(goPath)
+						}
+						return sym.Pkg + "." + exportName(expr.Name)
+					}
+				}
+			}
 		}
 		// Implicit self: bare field name → this.Field in method/ctor
 		// context. Skip when the name is shadowed by a method param OR
@@ -54,6 +101,12 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		if !g.isLocalVar(expr.Name) {
 			if resolved, ok := g.resolveUnqualifiedExpr(expr.Name); ok {
 				return resolved
+			}
+			// Collision: name was excluded from unqualifiedNames because two
+			// or more imports export it. Surface a Zinc-level error rather
+			// than letting Go's compiler emit `undefined: X`.
+			if pkgs, ok := g.unqualifiedCollisions[expr.Name]; ok {
+				g.reportCollision(0, expr.Name, pkgs)
 			}
 		}
 		return expr.Name
@@ -125,7 +178,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			// Skip when the name is shadowed by a user-scope field/param/local
 			// (ZCA-10) — otherwise we'd emit a spurious import for code that
 			// actually references a field/variable.
-			if !g.isUserScopeShadow(ident.Name) {
+			if !g.isUserScopeShadowIdent(ident) {
 				if goPath, ok := g.importMap[ident.Name]; ok {
 					g.needImport(goPath)
 				}
@@ -571,6 +624,16 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 	case *parser.BoolLit:
 		return "bool"
 	case *parser.Ident:
+		// Phase 3.7.2 — prefer the bind side-map when available.
+		// `known` (g.varTypes) remains the legacy fallback while writes
+		// to the codegen tracking maps are still drained.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[e]; ok {
+				if gt := g.goTypeFromV2(t); gt != "" {
+					return gt
+				}
+			}
+		}
 		if t, ok := known[e.Name]; ok {
 			return t
 		}

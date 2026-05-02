@@ -1,0 +1,5 @@
+data Container<T>(T value, String label)
+
+pub Container<T> wrap<T>(T v, String l) {
+    return Container(v, l)
+}

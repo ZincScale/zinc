@@ -1,0 +1,4 @@
+label: primary
+id: 7
+name: widget
+cross_pkg_generic OK

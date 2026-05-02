@@ -1,0 +1,7 @@
+// Concrete payload in a separate package.
+
+data Thing(int id, String name)
+
+pub Thing make(int id, String name) {
+    return Thing(id, name)
+}

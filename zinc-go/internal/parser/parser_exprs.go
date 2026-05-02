@@ -148,7 +148,7 @@ func (p *Parser) v2ParseComparison() Expr {
 				break // let v2ParseShift handle it
 			}
 		}
-		if !p.match(lexer.TOKEN_EQ, lexer.TOKEN_NEQ, lexer.TOKEN_REF_EQ, lexer.TOKEN_REF_NEQ,
+		if !p.match(lexer.TOKEN_EQ, lexer.TOKEN_NEQ,
 			lexer.TOKEN_LT, lexer.TOKEN_LTE, lexer.TOKEN_GT, lexer.TOKEN_GTE,
 			lexer.TOKEN_IS, lexer.TOKEN_IN) {
 			break

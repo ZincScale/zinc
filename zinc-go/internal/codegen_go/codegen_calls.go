@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
 
 // formatCallArgsWithPointerWrap formats a positional argument list,
@@ -67,12 +68,19 @@ func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
 			// Package function: pkg.Func() — guarded so a user-space
 			// field/param/local with the same name as a package doesn't
 			// fall into the importMap lookup (see ZCA-10).
-			if !g.isUserScopeShadow(ident.Name) {
+			if !g.isUserScopeShadowIdent(ident) {
 				if pkgPath, ok := g.importMap[ident.Name]; ok {
 					return g.goResolver.FuncReturnsPointer(pkgPath, sel.Field)
 				}
 			}
-			// Method on tracked variable: obj.Method()
+			// Method on tracked variable: obj.Method().
+			// Side-map first (Phase 3.4 type-tracking migration) — falls
+			// back to ad-hoc varGoTypes when bind isn't on.
+			if g.bound != nil {
+				if t, ok := g.bound.NodeTypes[ident]; ok && t.GoType != nil {
+					return g.goResolver.ExprReturnsPointer("", sel.Field, t.GoType)
+				}
+			}
 			if goType, ok := g.varGoTypes[ident.Name]; ok {
 				return g.goResolver.ExprReturnsPointer("", sel.Field, goType)
 			}
@@ -100,7 +108,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// `processors.containsKey(...)` as a package call (ZCA-10).
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
 		if ident, ok := sel.Object.(*parser.Ident); ok &&
-			!g.isUserScopeShadow(ident.Name) &&
+			!g.isUserScopeShadowIdent(ident) &&
 			(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
 			pkg := ident.Name
 			name := sel.Field
@@ -212,11 +220,19 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 					isTypedChannel = true
 				}
 				// Fallback: scalar-type tracking for simple local vars.
+				// Side-map first; ad-hoc varTypes when bind isn't on.
 				if !isTypedChannel {
 					if ident, ok := sel.Object.(*parser.Ident); ok {
-						elt := g.varTypes[ident.Name]
-						if elt != "" && elt != "interface{}" {
-							isTypedChannel = true
+						if g.bound != nil {
+							if t, ok := g.bound.NodeTypes[ident]; ok && t.Name != "" && t.Name != "any" {
+								isTypedChannel = true
+							}
+						}
+						if !isTypedChannel {
+							elt := g.varTypes[ident.Name]
+							if elt != "" && elt != "interface{}" {
+								isTypedChannel = true
+							}
 						}
 					}
 				}
@@ -347,20 +363,28 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			if strings.HasPrefix(sel.Field, "get") && len(sel.Field) > 3 && len(c.Args) == 0 {
 				fieldName := strings.ToLower(sel.Field[3:4]) + sel.Field[4:]
 				if ident, ok := sel.Object.(*parser.Ident); ok {
-					if structName, ok := g.varStructTypes[ident.Name]; ok {
-						if cls, ok := g.structs[structName]; ok {
-							hasMethod := false
-							for _, m := range cls.Methods {
-								if m.Name == sel.Field {
-									hasMethod = true
-									break
-								}
+					structName := ""
+					// Side-map first (Phase 3.4 type-tracking migration).
+					if g.bound != nil {
+						if t, ok := g.bound.NodeTypes[ident]; ok && t.Name != "" && t.Name != "any" {
+							structName = t.Name
+						}
+					}
+					if structName == "" {
+						structName = g.varStructTypes[ident.Name]
+					}
+					if cls, ok := g.structs[structName]; structName != "" && ok {
+						hasMethod := false
+						for _, m := range cls.Methods {
+							if m.Name == sel.Field {
+								hasMethod = true
+								break
 							}
-							if !hasMethod {
-								for _, f := range cls.Fields {
-									if f.Name == fieldName {
-										return fmt.Sprintf("%s.%s", obj, exportName(fieldName))
-									}
+						}
+						if !hasMethod {
+							for _, f := range cls.Fields {
+								if f.Name == fieldName {
+									return fmt.Sprintf("%s.%s", obj, exportName(fieldName))
 								}
 							}
 						}
@@ -375,7 +399,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// and Name is a struct (not a function) in the Go package. Guarded so a
 	// user-space shadow of the package name doesn't trip the dispatch (ZCA-10).
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && len(c.NamedArgs) > 0 {
-		if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
+		if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
 			if goPath, ok := g.importMap[ident.Name]; ok {
 				if g.goResolver.IsStruct(goPath, sel.Field) {
 					g.needImport(goPath)
@@ -427,14 +451,44 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	var goExpectedParams [][]string
 	var goPkgPath string
 	var goFuncName string
+	// goMethodOnFFIVar: callee is a method call on a variable whose type
+	// was returned by a Go function (e.g. `dec.Decode(&raw)` where `dec`
+	// came from `hambaOcf.NewDecoder(...)`). That's still an FFI seam, so
+	// explicit `&x` at the top of an arg expression must be allowed —
+	// even though we don't have package-level `goPkgPath` to drive auto-
+	// pointer-wrap. The user is writing `&` deliberately; just don't
+	// reject it.
+	//
+	// The varGoTypes check has to bypass `isUserScopeShadow` because the
+	// shadow check itself includes varGoTypes membership (a tracked var
+	// counts as user scope, which is correct for the package-call branch
+	// below — `dec` is not a package). So check varGoTypes first; only
+	// fall to the package branch when the receiver is unambiguously a
+	// package alias.
+	goMethodOnFFIVar := false
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadow(ident.Name) {
-			if pkgPath, ok := g.importMap[ident.Name]; ok {
-				goPkgPath = pkgPath
-				goFuncName = sel.Field
-				goExpectedParams = make([][]string, len(c.Args))
-				for i := range c.Args {
-					goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
+		if ident, ok := sel.Object.(*parser.Ident); ok {
+			// Side-map fast path — when bound + typecheck supplied a GoType
+			// for this ident's binding, the receiver is Go-typed and this
+			// is an FFI method-call seam. Phase 3.5+ produces this for
+			// `var dec, _ = pkg.NewDecoder(...); dec.Decode(...)` shapes.
+			if g.bound != nil {
+				if t, ok := g.bound.NodeTypes[ident]; ok && t.GoType != nil {
+					goMethodOnFFIVar = true
+				}
+			}
+			if !goMethodOnFFIVar {
+				if _, ok := g.varGoTypes[ident.Name]; ok {
+					goMethodOnFFIVar = true
+				} else if !g.isUserScopeShadowIdent(ident) {
+					if pkgPath, ok := g.importMap[ident.Name]; ok {
+						goPkgPath = pkgPath
+						goFuncName = sel.Field
+						goExpectedParams = make([][]string, len(c.Args))
+						for i := range c.Args {
+							goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
+						}
+					}
 				}
 			}
 		}
@@ -491,10 +545,11 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 					restoreTarget = true
 				}
 			}
-			// goPkgPath is set only for SelectorExpr callees that resolve
-			// via importMap (third-party / stdlib Go pkg). Permit `&x`
-			// at the top of those arg expressions only.
-			if goPkgPath != "" {
+			// Permit `&x` at the top of an arg expression only when the
+			// call is across a Go FFI seam — either a package-level call
+			// (goPkgPath set via importMap) or a method call on a variable
+			// whose type came from a Go function (goMethodOnFFIVar).
+			if goPkgPath != "" || goMethodOnFFIVar {
 				g.addrOfAllowed = true
 			}
 			formatted := g.formatExpr(arg)
@@ -689,6 +744,26 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			return fmt.Sprintf("%s(%s)", ctorName, args)
 		}
 		// Unqualified import: Item(...) → lib.NewItem(...), formatItem(...) → lib.FormatItem(...)
+		// Side-map first (Phase 3.4 resolution migration) — the bind phase
+		// already resolved this ident to a definite Symbol with Pkg set
+		// when it's a cross-pkg reference. Falls back to the ad-hoc
+		// unqualifiedNames table when bound is unset.
+		if g.bound != nil {
+			if sym, ok := g.bound.Bindings[ident]; ok && sym.Pkg != "" {
+				if goPath, ok := g.importMap[sym.Pkg]; ok {
+					g.needImport(goPath)
+				}
+				switch sym.Kind {
+				case typechecker.SymType, typechecker.SymClass, typechecker.SymDataClass:
+					// Constructor call: pkg.NewType(args). Both classes and
+					// data classes have NewType factories in Go.
+					ctorName := sym.Pkg + ".New" + exportName(ident.Name) + goTypeArgStr
+					return fmt.Sprintf("%s(%s)", ctorName, args)
+				case typechecker.SymFn:
+					return fmt.Sprintf("%s.%s%s(%s)", sym.Pkg, exportName(ident.Name), goTypeArgStr, args)
+				}
+			}
+		}
 		if entry, ok := g.unqualifiedNames[ident.Name]; ok {
 			if goPath, ok := g.importMap[entry.pkg]; ok {
 				g.needImport(goPath)

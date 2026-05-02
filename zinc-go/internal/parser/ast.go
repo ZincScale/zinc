@@ -58,11 +58,12 @@ func (i *ImportDecl) topLevelTag() {}
 
 // ClassDecl: [@annotations] [abstract] [sealed] class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
-	Line        int // source line number (1-indexed)
-	Name        string
-	IsSealed    bool     // sealed class (has variant data classes)
-	TypeParams  []string // generic type parameter names
-	Parents     []ParentRef // base class + interfaces (with generic args)
+	Line             int // source line number (1-indexed)
+	Name             string
+	IsSealed         bool                  // sealed class (has variant data classes)
+	TypeParams       []string              // generic type parameter names
+	TypeParamBounds  map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
+	Parents          []ParentRef           // base class + interfaces (with generic args)
 	Fields      []*FieldDecl
 	Ctor        *CtorDecl   // primary constructor (nil if none)
 	Ctors       []*CtorDecl // overloaded constructors (nil or empty if none)
@@ -91,10 +92,11 @@ func (c *ClassDecl) topLevelTag() {}
 
 // InterfaceDecl: interface Speaker[<T>] { ... }
 type InterfaceDecl struct {
-	Line       int
-	Name       string
-	TypeParams []string // generic type parameter names
-	Methods    []*MethodSig
+	Line            int
+	Name            string
+	TypeParams      []string              // generic type parameter names
+	TypeParamBounds map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
+	Methods         []*MethodSig
 }
 
 func (i *InterfaceDecl) nodeTag()      {}
@@ -130,14 +132,15 @@ func (m *MethodDecl) nodeTag() {}
 
 // FnDecl: [@annotations] [pub] fn name[<T, U>](params) [: ReturnType] { body }
 type FnDecl struct {
-	Line        int // source line number (1-indexed)
-	Name        string
-	IsPub       bool
-	TypeParams  []string  // generic type parameter names, e.g. ["T", "U"]
-	Params      []*ParamDecl
-	ReturnType  TypeExpr // nil = void
-	Body        *BlockStmt
-	Annotations []*Annotation
+	Line            int // source line number (1-indexed)
+	Name            string
+	IsPub           bool
+	TypeParams      []string              // generic type parameter names, e.g. ["T", "U"]
+	TypeParamBounds map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
+	Params          []*ParamDecl
+	ReturnType      TypeExpr // nil = void
+	Body            *BlockStmt
+	Annotations     []*Annotation
 }
 
 func (f *FnDecl) nodeTag()      {}
@@ -159,12 +162,13 @@ func (t *TestDecl) topLevelTag() {}
 
 // DataClassDecl: data User(pub String name, pub Int age) { optional methods }
 type DataClassDecl struct {
-	Line       int // source line number (1-indexed)
-	Name       string
-	TypeParams []string     // generic type parameter names
-	Parents    []ParentRef  // base class + interfaces (with generic args)
-	Params     []*FieldDecl // constructor params (become fields)
-	Methods    []*MethodDecl
+	Line            int // source line number (1-indexed)
+	Name            string
+	TypeParams      []string              // generic type parameter names
+	TypeParamBounds map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
+	Parents         []ParentRef           // base class + interfaces (with generic args)
+	Params          []*FieldDecl          // constructor params (become fields)
+	Methods         []*MethodDecl
 }
 
 func (d *DataClassDecl) nodeTag()      {}
@@ -414,17 +418,10 @@ func (g *GoStmt) nodeTag() {}
 func (g *GoStmt) stmtTag() {}
 
 // OrHandler: or { body } — inline error handler. `err` is implicitly available.
-// OrMatchCase: or match err { case Type -> body ... }
+// The `or match err { case Type -> ... }` form was removed 2026-05-01;
+// callers wanting type-switching errors write `or { match (err) { ... } }`.
 type OrHandler struct {
-	Body       *BlockStmt    // handler body; `err` is implicitly available (nil if match form)
-	MatchCases []*OrMatchCase // or match err { case Type -> ... } (nil if simple form)
-	MatchVar   string         // variable name in or match (e.g. "err")
-}
-
-// OrMatchCase: case TypeName -> { body }
-type OrMatchCase struct {
-	Type string     // exception type (e.g. "NotFound"), empty for wildcard (_)
-	Body *BlockStmt // handler body
+	Body *BlockStmt // handler body; `err` is implicitly available
 }
 
 func (o *OrHandler) nodeTag() {}
@@ -650,9 +647,6 @@ type SliceExpr struct {
 
 func (s *SliceExpr) nodeTag() {}
 func (s *SliceExpr) exprTag() {}
-
-// SendExpr and ReceiveExpr are no longer created by the parser.
-// Channel send/receive are now parsed as regular CallExpr and handled in codegen.
 
 // ThisExpr: this
 type ThisExpr struct{}

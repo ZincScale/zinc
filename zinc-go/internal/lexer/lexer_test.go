@@ -32,10 +32,11 @@ func types(tokens []Token) []TokenType {
 }
 
 func TestKeywords(t *testing.T) {
-	src := "fn class interface var return if else for while pub"
+	// `fn` keyword removed 2026-05-01 (type-first declarations are the only function form).
+	src := "class interface var return if else for while pub"
 	toks := tokenize(src)
 	expected := []TokenType{
-		TOKEN_FN, TOKEN_CLASS, TOKEN_INTERFACE, TOKEN_VAR,
+		TOKEN_CLASS, TOKEN_INTERFACE, TOKEN_VAR,
 		TOKEN_RETURN, TOKEN_IF, TOKEN_ELSE, TOKEN_FOR,
 		TOKEN_WHILE, TOKEN_PUB, TOKEN_EOF,
 	}

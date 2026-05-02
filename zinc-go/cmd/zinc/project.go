@@ -341,18 +341,24 @@ func findZincToml(dir string) string {
 //     version = "1.26"
 //
 //     [deps]
-//     viper = "github.com/spf13/viper@v1.20.1"
+//     viper    = "github.com/spf13/viper@v1.20.1"      # module + version → go.mod require
+//     viperRem = "github.com/spf13/viper/remote"       # subpackage alias only — no require
 //
 //     [replace]
 //     viper = "/home/local/fork-of-viper"
 //
-// [deps] keys are the local aliases you write in Zinc (`import viper`).
-// The right-hand side is `module/path@version`; `@version` is optional
-// (defaults to v0.0.0 when a [replace] override is set). [replace] keys
-// off the same alias so deps + replaces can never drift apart. Relative
-// [replace] paths are resolved against the directory containing zinc.toml,
-// letting devs commit a portable override that assumes a sibling repo
-// layout (e.g. "../zinc-stdlib/zinc-out") instead of an absolute path.
+// [deps] is the single dependency table — keys are the local aliases used
+// in Zinc (`import viper`), values are the fully-qualified Go import paths.
+// An optional `@version` suffix promotes the entry to a go.mod require
+// line. Entries without `@version` are alias-only (used for subpackages
+// of a module already required, or for [replace]-overridden local deps,
+// where v0.0.0 is emitted as the placeholder version).
+//
+// [replace] keys off the same alias so deps + replaces can never drift
+// apart. Relative [replace] paths are resolved against the directory
+// containing zinc.toml, letting devs commit a portable override that
+// assumes a sibling repo layout (e.g. "../zinc-stdlib/zinc-out") instead
+// of an absolute path.
 func loadZincToml(path string) (*zincConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -389,17 +395,17 @@ func loadZincToml(path string) (*zincConfig, error) {
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, "\"")
 
-		// [deps] — unified form: alias = "module/path@version"
+		// [deps] — unified table: alias = "module/path[@version]".
+		// With @version: alias-resolved import + go.mod require.
+		// Without @version: alias-resolved import only (subpackage of an
+		// already-required module, or [replace]-overridden local dep —
+		// the post-parse [replace] pass promotes those to v0.0.0 requires).
 		if section == "deps" {
 			modulePath, version := splitModuleVersion(val)
 			cfg.Imports[key] = modulePath
-			// go.mod require lines want "module version"; if no @version
-			// was given, use v0.0.0 as a placeholder (only meaningful when
-			// a [replace] points at a local dir).
-			if version == "" {
-				version = "v0.0.0"
+			if version != "" {
+				cfg.Deps = append(cfg.Deps, modulePath+" "+version)
 			}
-			cfg.Deps = append(cfg.Deps, modulePath+" "+version)
 			continue
 		}
 
@@ -407,17 +413,6 @@ func loadZincToml(path string) (*zincConfig, error) {
 		// parsing, since [deps] may come after [replace] in the file.
 		if section == "replace" {
 			replaceByAlias[key] = val
-			continue
-		}
-
-		// [imports] — alias → Go import path. Unlike [deps] this does NOT
-		// emit a go.mod require line, so it's how you alias a subpackage
-		// of a module already declared in [deps] (e.g. hambaOcf →
-		// github.com/hamba/avro/v2/ocf when [deps] already requires
-		// github.com/hamba/avro/v2). The codegen-side import-map only
-		// cares about the alias→path mapping.
-		if section == "imports" {
-			cfg.Imports[key] = val
 			continue
 		}
 
@@ -443,6 +438,14 @@ func loadZincToml(path string) (*zincConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Track which module paths already have a require line so we don't
+	// emit duplicates when promoting a [replace]-only entry.
+	requiredModules := make(map[string]bool)
+	for _, dep := range cfg.Deps {
+		if i := strings.Index(dep, " "); i > 0 {
+			requiredModules[dep[:i]] = true
+		}
+	}
 	for alias, localPath := range replaceByAlias {
 		modulePath, ok := cfg.Imports[alias]
 		if !ok {
@@ -452,6 +455,13 @@ func loadZincToml(path string) (*zincConfig, error) {
 			localPath = filepath.Join(manifestDir, localPath)
 		}
 		cfg.Replaces[modulePath] = localPath
+		// go.mod requires every replace target to also appear in require.
+		// If the [deps] entry didn't carry an @version, synthesize a
+		// v0.0.0 placeholder so the replace lands.
+		if !requiredModules[modulePath] {
+			cfg.Deps = append(cfg.Deps, modulePath+" v0.0.0")
+			requiredModules[modulePath] = true
+		}
 	}
 	return cfg, nil
 }

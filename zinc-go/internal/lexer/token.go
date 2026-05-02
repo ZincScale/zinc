@@ -30,9 +30,7 @@ const (
 	// Keywords
 	TOKEN_CLASS
 	TOKEN_INTERFACE
-	TOKEN_CONSTRUCT
 	TOKEN_NEW
-	TOKEN_FN
 	TOKEN_RETURN
 	TOKEN_IF
 	TOKEN_ELSE
@@ -65,7 +63,6 @@ const (
 	TOKEN_USE
 	TOKEN_READONLY // read (read-only field)
 	TOKEN_OVERRIDE // override (method override)
-	TOKEN_END      // end (block closer)
 	TOKEN_USING    // using (resource acquisition, defer .Close())
 	TOKEN_NOT   // not (boolean negation)
 	TOKEN_AND   // and (boolean and)
@@ -101,8 +98,6 @@ const (
 	TOKEN_PIPE_PIPE // ||
 	TOKEN_EQ        // ==
 	TOKEN_NEQ       // !=
-	TOKEN_REF_EQ    // ===
-	TOKEN_REF_NEQ   // !==
 	TOKEN_LT        // <
 	TOKEN_LTE       // <=
 	TOKEN_GT        // >
@@ -112,16 +107,13 @@ const (
 	TOKEN_STAR_EQ    // *=
 	TOKEN_SLASH_EQ   // /=
 	TOKEN_ARROW              // ->
-	TOKEN_CHAN_ARROW         // <- (channel send/receive)
 	TOKEN_QUESTION           // ?
 	TOKEN_QUESTION_DOT       // ?.
-	TOKEN_QUESTION_QUESTION  // ??
 	TOKEN_RAW_STRING         // `raw string`
 	TOKEN_AT                 // @
 	TOKEN_DOTDOT             // ..
 	TOKEN_DOTDOTEQ           // ..=
 	TOKEN_DOTDOTDOT          // ...
-	TOKEN_COLONASSIGN        // :=
 	TOKEN_STAR_STAR          // **
 
 	TOKEN_EOF
@@ -139,9 +131,7 @@ var tokenNames = map[TokenType]string{
 
 	TOKEN_CLASS:     "class",
 	TOKEN_INTERFACE: "interface",
-	TOKEN_CONSTRUCT: "construct",
 	TOKEN_NEW:       "new",
-	TOKEN_FN:        "fn",
 	TOKEN_RETURN:    "return",
 	TOKEN_IF:        "if",
 	TOKEN_ELSE:      "else",
@@ -174,7 +164,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_USE:       "use",
 	TOKEN_READONLY:  "readonly",
 	TOKEN_OVERRIDE:  "override",
-	TOKEN_END:       "end",
 	TOKEN_USING:     "using",
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
@@ -206,8 +195,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_PIPE_PIPE: "||",
 	TOKEN_EQ:        "==",
 	TOKEN_NEQ:       "!=",
-	TOKEN_REF_EQ:    "===",
-	TOKEN_REF_NEQ:   "!==",
 	TOKEN_LT:        "<",
 	TOKEN_LTE:       "<=",
 	TOKEN_GT:        ">",
@@ -217,16 +204,13 @@ var tokenNames = map[TokenType]string{
 	TOKEN_STAR_EQ:   "*=",
 	TOKEN_SLASH_EQ:  "/=",
 	TOKEN_ARROW:             "->",
-	TOKEN_CHAN_ARROW:         "<-",
 	TOKEN_QUESTION:          "?",
 	TOKEN_QUESTION_DOT:      "?.",
-	TOKEN_QUESTION_QUESTION: "??",
 	TOKEN_RAW_STRING:        "RAW_STRING",
 	TOKEN_AT:                "@",
 	TOKEN_DOTDOT:            "..",
 	TOKEN_DOTDOTEQ:          "..=",
 	TOKEN_DOTDOTDOT:         "...",
-	TOKEN_COLONASSIGN:       ":=",
 	TOKEN_STAR_STAR:         "**",
 
 	TOKEN_EOF:     "EOF",
@@ -252,9 +236,7 @@ type Token struct {
 var keywords = map[string]TokenType{
 	"class":     TOKEN_CLASS,
 	"interface": TOKEN_INTERFACE,
-	"construct": TOKEN_CONSTRUCT,
 	"new":       TOKEN_NEW,
-	"fn":        TOKEN_FN,
 	"return":    TOKEN_RETURN,
 	"if":        TOKEN_IF,
 	"else":      TOKEN_ELSE,
@@ -288,7 +270,6 @@ var keywords = map[string]TokenType{
 	"use":       TOKEN_USE,
 	"readonly":  TOKEN_READONLY,
 	"override":  TOKEN_OVERRIDE,
-	"end":       TOKEN_END,
 	"using":     TOKEN_USING,
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,

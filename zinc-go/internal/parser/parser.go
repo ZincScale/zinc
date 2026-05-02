@@ -202,19 +202,49 @@ func (p *Parser) parseLambdaParam() *ParamDecl {
 }
 
 // parseTypeParams parses optional <T, U> type parameter list.
+// Spec §4.1: each param accepts an optional bound clause `T : Bound1 + Bound2`.
+// Returns the names; bounds are populated separately via parseTypeParamsWithBounds.
 func (p *Parser) parseTypeParams() []string {
+	names, _ := p.parseTypeParamsWithBounds()
+	return names
+}
+
+// parseTypeParamsWithBounds is parseTypeParams + bound capture. Spec §4.1:
+//
+//	<T>                          // bare, implicit `any`
+//	<T : Comparable>             // single bound
+//	<T : Comparable + Hashable>  // intersection of bounds
+//	<T, U : Hashable>            // multiple params, only U bounded
+func (p *Parser) parseTypeParamsWithBounds() ([]string, map[string][]TypeExpr) {
 	if !p.check(lexer.TOKEN_LT) {
-		return nil
+		return nil, nil
 	}
 	p.advance() // <
-	var params []string
-	params = append(params, p.expect(lexer.TOKEN_IDENT).Literal)
-	for p.check(lexer.TOKEN_COMMA) {
-		p.advance()
-		params = append(params, p.expect(lexer.TOKEN_IDENT).Literal)
+	var names []string
+	var bounds map[string][]TypeExpr
+	for {
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		names = append(names, name)
+		if p.check(lexer.TOKEN_COLON) {
+			p.advance() // :
+			var paramBounds []TypeExpr
+			paramBounds = append(paramBounds, p.v2ParseType())
+			for p.check(lexer.TOKEN_PLUS) {
+				p.advance() // +
+				paramBounds = append(paramBounds, p.v2ParseType())
+			}
+			if bounds == nil {
+				bounds = make(map[string][]TypeExpr)
+			}
+			bounds[name] = paramBounds
+		}
+		if !p.check(lexer.TOKEN_COMMA) {
+			break
+		}
+		p.advance() // ,
 	}
 	p.expect(lexer.TOKEN_GT)
-	return params
+	return names, bounds
 }
 
 // looksLikeTypeArgs peeks ahead to determine if '<' starts type arguments

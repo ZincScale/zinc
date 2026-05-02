@@ -1,0 +1,13 @@
+// Generic bounds: <T : Comparable> means T must satisfy the Comparable
+// built-in. Primitive types (int, String, ...) satisfy Comparable per
+// spec §4.3. Calling max(int, int) should typecheck.
+
+T max<T : Comparable>(T a, T b) {
+    if (a > b) { return a }
+    return b
+}
+
+void main() {
+    print(max(3, 5))
+    print(max("alpha", "beta"))
+}

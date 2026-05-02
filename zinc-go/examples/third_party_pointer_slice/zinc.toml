@@ -8,6 +8,3 @@ version = "1.26"
 
 [deps]
 fsnotify = "github.com/fsnotify/fsnotify@v1.7.0"
-
-[imports]
-fsnotify = "github.com/fsnotify/fsnotify"

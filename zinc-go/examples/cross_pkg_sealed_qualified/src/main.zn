@@ -1,0 +1,26 @@
+// Match on a sealed type using qualified `pkg.Variant` patterns.
+// Verifies bind + exhaustivity + codegen for the fully-qualified form
+// even when same-name unqualified would also resolve.
+
+import lib
+
+void main() {
+    var r1 = lib.success(42)
+    var r2 = lib.failure("boom")
+
+    describe(r1)
+    describe(r2)
+
+    print("cross_pkg_sealed_qualified OK")
+}
+
+void describe(lib.Result r) {
+    match (r) {
+        case lib.Ok(v) {
+            print("ok: ${v}")
+        }
+        case lib.Err(msg) {
+            print("err: ${msg}")
+        }
+    }
+}

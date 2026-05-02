@@ -264,9 +264,13 @@ func (p *Parser) v2ParseErrHandler() *OrHandler {
 	if !p.check(lexer.TOKEN_OR) {
 		return nil
 	}
-	p.advance() // consume "or"
+	tok := p.advance() // consume "or"
 	if p.check(lexer.TOKEN_MATCH) {
-		return p.v2ParseOrMatch()
+		// `or match err { case T -> ... }` form was removed 2026-05-01.
+		// Use `or { match (err) { ... } }` instead.
+		p.errorf("'or match' was removed; use 'or { match (err) { ... } }' instead "+
+			"(line %d)", tok.Line)
+		return nil
 	}
 	if p.check(lexer.TOKEN_LBRACE) {
 		body := p.v2ParseBlock()
@@ -277,55 +281,6 @@ func (p *Parser) v2ParseErrHandler() *OrHandler {
 	// path in emitOrAssignment can recognise it.
 	expr := p.v2ParseExpr()
 	return &OrHandler{Body: &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}}
-}
-
-// v2ParseOrMatch: or match err { case Type -> body ... case _ -> body }
-func (p *Parser) v2ParseOrMatch() *OrHandler {
-	p.advance() // consume "match"
-
-	// Parse the error variable name (e.g. "err")
-	matchVar := "err"
-	if p.check(lexer.TOKEN_IDENT) {
-		matchVar = p.advance().Literal
-	}
-
-	p.expect(lexer.TOKEN_LBRACE)
-	var cases []*OrMatchCase
-
-	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
-		p.expect(lexer.TOKEN_CASE)
-
-		errType := ""
-		if p.check(lexer.TOKEN_IDENT) {
-			lit := p.peek().Literal
-			if lit == "_" {
-				p.advance() // wildcard
-			} else {
-				errType = p.advance().Literal
-			}
-		}
-
-		p.expect(lexer.TOKEN_ARROW) // ->
-
-		// Parse body: a brace-block, a bare control-flow statement
-		// (return / break / continue), or a single expression.
-		var body *BlockStmt
-		if p.check(lexer.TOKEN_LBRACE) {
-			body = p.v2ParseBlock()
-		} else if p.check(lexer.TOKEN_RETURN) ||
-			p.check(lexer.TOKEN_BREAK) || p.check(lexer.TOKEN_CONTINUE) {
-			stmt := p.v2ParseStmt()
-			body = &BlockStmt{Stmts: []Stmt{stmt}}
-		} else {
-			expr := p.v2ParseExpr()
-			body = &BlockStmt{Stmts: []Stmt{&ExprStmt{Expr: expr}}}
-		}
-
-		cases = append(cases, &OrMatchCase{Type: errType, Body: body})
-	}
-	p.expect(lexer.TOKEN_RBRACE)
-
-	return &OrHandler{MatchCases: cases, MatchVar: matchVar}
 }
 
 func (p *Parser) v2ParseReturnStmt() *ReturnStmt {
