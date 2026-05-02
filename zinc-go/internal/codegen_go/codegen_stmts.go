@@ -372,7 +372,6 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 		// Typed generic: List<int>, Map<K,V>
 		if genType, ok := v.Type.(*parser.GenericType); ok {
-			g.varTypeExprs[v.Name] = genType
 			if listLit, ok := v.Value.(*parser.ListLit); ok {
 				goType := g.formatType(genType)
 				if strings.HasPrefix(goType, "[]") {
@@ -421,9 +420,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 							if st, ok := m.ReturnType.(*parser.SimpleType); ok && g.isClassType(st.Name) {
 								g.varStructTypes[v.Name] = st.Name
 							}
-							if gt, ok := m.ReturnType.(*parser.GenericType); ok {
-								g.varTypeExprs[v.Name] = gt
-							}
+							_ = m // gt-tracking removed (Phase 3.7.2): side-map covers it
 						}
 					}
 				}
@@ -460,17 +457,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// for the store-then-use shape).
 		if call, ok := v.Value.(*parser.CallExpr); ok && v.Type == nil {
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if outerClass := g.resolveReceiverClassName(sel.Object); outerClass != "" {
-					if cls := g.lookupClassDecl(outerClass); cls != nil {
-						for _, m := range cls.Methods {
-							if m.Name == sel.Field && m.ReturnType != nil {
-								if gt, ok := m.ReturnType.(*parser.GenericType); ok {
-									g.varTypeExprs[v.Name] = gt
-								}
-							}
-						}
-					}
-				}
+				_ = sel // gt-tracking removed (Phase 3.7.2): side-map covers it
 			}
 		}
 
@@ -479,49 +466,6 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			elemType := inferListLitElemType(listLit.Elements)
 			if elemType != "interface{}" {
 				g.varTypes[v.Name] = elemType
-			}
-			// Track explicit generic type from typed literal: var x = List<int>[]
-			if listLit.ExplicitType != nil {
-				g.varTypeExprs[v.Name] = listLit.ExplicitType
-			}
-		}
-
-		// Track explicit generic type from typed map literal: var x = Map<String, String>{}
-		if mapLit, ok := v.Value.(*parser.MapLit); ok && v.Type == nil {
-			if mapLit.ExplicitType != nil {
-				g.varTypeExprs[v.Name] = mapLit.ExplicitType
-			}
-		}
-
-		// Track type from a map-index expression: `var x = m[k]` where m is
-		// Map<K,V> → x has type V. Without this propagation, `x.keys()` on a
-		// nested-map value (where x itself is a Map<K2,V2>) falls back to
-		// []interface{} (ZCA-11b). Covers both local-var and class-field m.
-		// Stores V whatever its kind — GenericType, SimpleType (for type
-		// aliases like `type Factory = Fn<...>`), FuncTypeExpr, etc. —
-		// so callReturnsError can later resolve through the alias to
-		// detect Fn-typed throwers stored in a registry map.
-		if idx, ok := v.Value.(*parser.IndexExpr); ok && v.Type == nil {
-			if gt := g.resolveReceiverGenericType(idx.Object); gt != nil && gt.Name == "Map" && len(gt.TypeArgs) >= 2 {
-				g.varTypeExprs[v.Name] = gt.TypeArgs[1]
-			}
-		}
-
-		// Explicit Fn-typed local: `Fn<(A), R> f = expr` — register the
-		// declared type so a later `f(args)` call can resolve through
-		// callReturnsError's varTypeExprs lookup. Mirrors the Map-index
-		// tracker above; without this, only Fn values pulled out of a
-		// Map were seen as throwers.
-		if v.Type != nil {
-			if _, ok := v.Type.(*parser.FuncTypeExpr); ok {
-				g.varTypeExprs[v.Name] = v.Type
-			} else if simple, ok := v.Type.(*parser.SimpleType); ok {
-				// Type-alias case: `Factory f = …` where Factory is an
-				// alias to `Fn<...>`. Register the SimpleType — alias
-				// peeling happens at call time via resolveFuncTypeExpr.
-				if _, hasAlias := g.typeAliases[simple.Name]; hasAlias {
-					g.varTypeExprs[v.Name] = v.Type
-				}
 			}
 		}
 
@@ -545,10 +489,6 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				(ident.Name == "Channel" || ident.Name == "Chan") &&
 				len(call.TypeArgs) >= 1 {
 				elemType := &parser.SimpleType{Name: call.TypeArgs[0]}
-				g.varTypeExprs[v.Name] = &parser.GenericType{
-					Name:     "Channel",
-					TypeArgs: []parser.TypeExpr{elemType},
-				}
 				g.varTypes[v.Name] = "chan " + g.formatType(elemType)
 			}
 		}
@@ -1054,11 +994,6 @@ func (g *Generator) isMapVar(e parser.Expr) bool {
 				return true
 			}
 		}
-		if te, ok := g.varTypeExprs[ident.Name]; ok {
-			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Map" {
-				return true
-			}
-		}
 		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "map[") {
 			return true
 		}
@@ -1079,11 +1014,6 @@ func (g *Generator) isListVar(e parser.Expr) bool {
 				}
 			}
 		}
-		if te, ok := g.varTypeExprs[ident.Name]; ok {
-			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "List" {
-				return true
-			}
-		}
 		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "[]") {
 			return true
 		}
@@ -1096,11 +1026,6 @@ func (g *Generator) isChannelVar(e parser.Expr) bool {
 	if ident, ok := e.(*parser.Ident); ok {
 		if g.bound != nil {
 			if t, ok := g.bound.NodeTypes[ident]; ok && t.Name == "Channel" {
-				return true
-			}
-		}
-		if te, ok := g.varTypeExprs[ident.Name]; ok {
-			if gt, ok := te.(*parser.GenericType); ok && gt.Name == "Channel" {
 				return true
 			}
 		}
@@ -1829,12 +1754,10 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 		// Fn-typed local invoked by name: `var fac = registry[name]; fac(ctx, cfg)`.
-		// 3-tier consultation (Phase 3.7.2):
-		//   1. Symbol.DeclType — explicit `var fac: Fn<...> = ...`
-		//   2. NodeTypes[useIdent].TypeExpr — inferred via Map<K, V> → V
-		//   3. legacy varTypeExprs — codegen-time tracking, covers
-		//      class-field-access chains the typechecker doesn't yet
-		//      fully resolve through method scope/type-alias propagation.
+		// Side-map only (Phase 3.7.2): Symbol.DeclType for explicit
+		// `var fac: Fn<...> = ...`, then NodeTypes[useIdent].TypeExpr
+		// for inferred locals. Both Map-index and class-field paths
+		// now flow through V2Type.TypeExpr / classFields.
 		var declType parser.TypeExpr
 		if g.bound != nil {
 			if sym, ok := g.bound.Bindings[callee]; ok && sym.DeclType != nil {
@@ -1844,11 +1767,6 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 				if t, ok := g.bound.NodeTypes[callee]; ok && t.TypeExpr != nil {
 					declType = t.TypeExpr
 				}
-			}
-		}
-		if declType == nil {
-			if t, ok := g.varTypeExprs[callee.Name]; ok {
-				declType = t
 			}
 		}
 		if declType != nil {
@@ -2045,7 +1963,7 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 		// Fn-typed local: a bare-`error` slot like `Fn<(...), error>`
 		// dispatches to the void destructure form (`_err := f()`).
-		// Same 3-tier ladder as callReturnsError.
+		// Side-map only; same shape as callReturnsError.
 		var declType parser.TypeExpr
 		if g.bound != nil {
 			if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
@@ -2055,11 +1973,6 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 				if t, ok := g.bound.NodeTypes[ident]; ok && t.TypeExpr != nil {
 					declType = t.TypeExpr
 				}
-			}
-		}
-		if declType == nil {
-			if t, ok := g.varTypeExprs[ident.Name]; ok {
-				declType = t
 			}
 		}
 		if declType != nil {

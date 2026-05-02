@@ -101,7 +101,6 @@ type Generator struct {
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
-	varTypeExprs        map[string]parser.TypeExpr // variable name → original AST type (for generics)
 	varGoTypes          map[string]types.Type   // variable name → Go type (from stdlib call returns)
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
 	funcReturnsOptional map[string]bool       // functions that return T? (optional)
@@ -227,7 +226,6 @@ func New() *Generator {
 		errorFuncs:          make(map[string]bool),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
-		varTypeExprs:        make(map[string]parser.TypeExpr),
 		varGoTypes:          make(map[string]types.Type),
 		ptrVars:             make(map[string]bool),
 		funcReturnsOptional: make(map[string]bool),
@@ -730,7 +728,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		g.funcSigs = make(map[string][]*parser.ParamDecl)
 	}
 	g.varTypes = make(map[string]string)
-	g.varTypeExprs = make(map[string]parser.TypeExpr)
 	g.varGoTypes = make(map[string]types.Type)
 	g.varStructTypes = make(map[string]string)
 	// Preserve dataClasses, interfaces, structs, and pubNames

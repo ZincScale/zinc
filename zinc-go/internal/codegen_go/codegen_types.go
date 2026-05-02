@@ -118,14 +118,11 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	params := g.formatParams(fn.Params)
 
-	// Register parameter type expressions for type-aware codegen
+	// Register class-typed params: track so `param.field.keys()`
+	// chains resolve. Generic-typed param tracking has moved to the
+	// bind side-map (Symbol.DeclType) per Phase 3.7.2.
 	var paramNameBackup []string
 	for _, p := range fn.Params {
-		if genType, ok := p.Type.(*parser.GenericType); ok {
-			g.varTypeExprs[p.Name] = genType
-			paramNameBackup = append(paramNameBackup, p.Name)
-		}
-		// Class-typed params: track so `param.field.keys()` chains resolve.
 		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
 			g.varStructTypes[p.Name] = simpleType.Name
 			paramNameBackup = append(paramNameBackup, p.Name)
@@ -173,7 +170,6 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	// Clear param-scoped tracking so it doesn't leak into sibling functions.
 	for _, pn := range paramNameBackup {
-		delete(g.varTypeExprs, pn)
 		delete(g.varStructTypes, pn)
 	}
 
@@ -336,21 +332,9 @@ func (g *Generator) emitClassDecl(cls *parser.ClassDecl) {
 		g.writeln("")
 	}
 
-	// Register field type expressions for type-aware codegen (e.g. map.keys())
-	for _, f := range cls.Fields {
-		fieldExpr := recvName + "." + goName(f.Name, f.IsPub || !g.isSubpackage())
-		if f.Type != nil {
-			if genType, ok := f.Type.(*parser.GenericType); ok {
-				g.varTypeExprs[fieldExpr] = genType
-			}
-		} else if f.Default != nil {
-			if listLit, ok := f.Default.(*parser.ListLit); ok && listLit.ExplicitType != nil {
-				g.varTypeExprs[fieldExpr] = listLit.ExplicitType
-			} else if mapLit, ok := f.Default.(*parser.MapLit); ok && mapLit.ExplicitType != nil {
-				g.varTypeExprs[fieldExpr] = mapLit.ExplicitType
-			}
-		}
-	}
+	// Field type-expression tracking moved to the bind side-map
+	// (classFields + V2Type.TypeExpr) per Phase 3.7.2.
+	_ = cls
 
 	// Methods
 	for _, m := range cls.Methods {
@@ -695,10 +679,6 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	var methodParamBackup []string
 	var ptrParamBackup []string
 	for _, p := range m.Params {
-		if genType, ok := p.Type.(*parser.GenericType); ok {
-			g.varTypeExprs[p.Name] = genType
-			methodParamBackup = append(methodParamBackup, p.Name)
-		}
 		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
 			g.varStructTypes[p.Name] = simpleType.Name
 			methodParamBackup = append(methodParamBackup, p.Name)
@@ -717,7 +697,6 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		g.currentParams = nil
 		g.currentClass = ""
 		for _, pn := range methodParamBackup {
-			delete(g.varTypeExprs, pn)
 			delete(g.varStructTypes, pn)
 		}
 		for _, pn := range ptrParamBackup {

@@ -636,8 +636,7 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	if !ok {
 		return nil
 	}
-	// 3-tier (Phase 3.7.2): Symbol.DeclType, then NodeTypes.TypeExpr,
-	// then legacy varTypeExprs for cases the side-map doesn't cover.
+	// Side-map only (Phase 3.7.2): Symbol.DeclType then NodeTypes.TypeExpr.
 	if g.bound != nil {
 		if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
 			if gt, ok := sym.DeclType.(*parser.GenericType); ok {
@@ -648,11 +647,6 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 			if gt, ok := t.TypeExpr.(*parser.GenericType); ok {
 				return gt
 			}
-		}
-	}
-	if te, ok := g.varTypeExprs[ident.Name]; ok {
-		if gt, ok := te.(*parser.GenericType); ok {
-			return gt
 		}
 	}
 	// Current-class field.
@@ -721,9 +715,6 @@ func (g *Generator) isUserScopeShadow(name string) bool {
 		return true
 	}
 	if _, ok := g.varGoTypes[name]; ok {
-		return true
-	}
-	if _, ok := g.varTypeExprs[name]; ok {
 		return true
 	}
 	return false

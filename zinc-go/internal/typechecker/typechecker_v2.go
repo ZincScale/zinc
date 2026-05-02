@@ -312,11 +312,19 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 		}
 		// 3.7.2: register field types so SelectorExpr can resolve
 		// `obj.field` without falling back to the codegen's emit-time
-		// tracking maps.
+		// tracking maps. When a field has no explicit type, infer
+		// from its default expression so chains like `var x = field[k]`
+		// can flow through the side-map.
 		if len(d.Fields) > 0 {
 			fields := make(map[string]V2Type, len(d.Fields))
 			for _, f := range d.Fields {
-				fields[f.Name] = c.resolveTypeExpr(f.Type)
+				if f.Type != nil {
+					fields[f.Name] = c.resolveTypeExpr(f.Type)
+				} else if f.Default != nil {
+					fields[f.Name] = c.inferType(f.Default)
+				} else {
+					fields[f.Name] = typeAny
+				}
 			}
 			c.classFields[d.Name] = fields
 		}
@@ -453,9 +461,19 @@ func (c *V2Checker) checkClassDecl(d *parser.ClassDecl) {
 
 func (c *V2Checker) checkMethodDecl(m *parser.MethodDecl, fields []*parser.FieldDecl) {
 	inner := newV2Scope(c.scope)
-	// Add fields to scope
+	// Add fields to scope. Fields without explicit types infer from
+	// their default expression so the side-map carries the same
+	// shape codegen needs (e.g. `Map<K, V>` from `field = Map{}`).
 	for _, f := range fields {
-		inner.set(f.Name, c.resolveTypeExpr(f.Type))
+		var ft V2Type
+		if f.Type != nil {
+			ft = c.resolveTypeExpr(f.Type)
+		} else if f.Default != nil {
+			ft = c.inferType(f.Default)
+		} else {
+			ft = typeAny
+		}
+		inner.set(f.Name, ft)
 	}
 	// Add params
 	for _, p := range m.Params {
@@ -922,11 +940,20 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		for _, el := range e.Elements {
 			c.inferType(el)
 		}
+		// 3.7.2: when the literal carries an explicit `List<T>[]` /
+		// `T[]` annotation, propagate it so subsequent index access
+		// can recover T via the side-map.
+		if e.ExplicitType != nil {
+			return c.resolveTypeExpr(e.ExplicitType)
+		}
 		return V2Type{Name: "List"}
 	case *parser.MapLit:
 		for i := range e.Keys {
 			c.inferType(e.Keys[i])
 			c.inferType(e.Values[i])
+		}
+		if e.ExplicitType != nil {
+			return c.resolveTypeExpr(e.ExplicitType)
 		}
 		return V2Type{Name: "Map"}
 	case *parser.LambdaExpr:
