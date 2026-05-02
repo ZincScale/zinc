@@ -137,11 +137,13 @@ type GoFFIResolver interface {
 type V2Checker struct {
 	errors       []V2Error
 	scope        *V2Scope
-	fnReturnType *V2Type            // current function's return type
-	fnSigs       map[string]V2FnSig // function signatures for call checking
+	fnReturnType *V2Type                       // current function's return type
+	fnSigs       map[string]V2FnSig            // function signatures for call checking
 	methodSigs   map[string]map[string]V2FnSig // type → method → signature
-	parentTypes  map[string][]string // class → parent types (interfaces, superclasses)
-	inLoop       bool               // tracking if inside a loop for break/continue
+	parentTypes  map[string][]string           // class → parent types (interfaces, superclasses)
+	classFields  map[string]map[string]V2Type  // class → field name → field type (3.7.2: SelectorExpr inference)
+	currentClass string                        // enclosing class name during method/ctor checking, "" outside (3.7.2: `this` typing)
+	inLoop       bool                          // tracking if inside a loop for break/continue
 
 	// nodeTypes side-map keyed by parser.Expr pointer identity. inferType
 	// populates this during the type walk. Codegen consumes via the
@@ -198,6 +200,7 @@ func newCheckerForProgram(externalSigs *CollectedSigs) *V2Checker {
 		fnSigs:      make(map[string]V2FnSig),
 		methodSigs:  make(map[string]map[string]V2FnSig),
 		parentTypes: make(map[string][]string),
+		classFields: make(map[string]map[string]V2Type),
 	}
 
 	// Pre-populate with cross-file signatures
@@ -245,6 +248,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		fnSigs:      make(map[string]V2FnSig),
 		methodSigs:  make(map[string]map[string]V2FnSig),
 		parentTypes: make(map[string][]string),
+		classFields: make(map[string]map[string]V2Type),
 	}
 	for _, d := range prog.Decls {
 		c.registerDecl(d)
@@ -306,8 +310,25 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 			}
 			c.parentTypes[d.Name] = names
 		}
+		// 3.7.2: register field types so SelectorExpr can resolve
+		// `obj.field` without falling back to the codegen's emit-time
+		// tracking maps.
+		if len(d.Fields) > 0 {
+			fields := make(map[string]V2Type, len(d.Fields))
+			for _, f := range d.Fields {
+				fields[f.Name] = c.resolveTypeExpr(f.Type)
+			}
+			c.classFields[d.Name] = fields
+		}
 	case *parser.DataClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
+		if len(d.Params) > 0 {
+			fields := make(map[string]V2Type, len(d.Params))
+			for _, p := range d.Params {
+				fields[p.Name] = c.resolveTypeExpr(p.Type)
+			}
+			c.classFields[d.Name] = fields
+		}
 	case *parser.EnumDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 	case *parser.InterfaceDecl:
@@ -422,9 +443,12 @@ func (c *V2Checker) checkClassDecl(d *parser.ClassDecl) {
 			c.errorf(d.Line, "field %q needs a type annotation or default value", f.Name)
 		}
 	}
+	prevClass := c.currentClass
+	c.currentClass = d.Name
 	for _, m := range d.Methods {
 		c.checkMethodDecl(m, d.Fields)
 	}
+	c.currentClass = prevClass
 }
 
 func (c *V2Checker) checkMethodDecl(m *parser.MethodDecl, fields []*parser.FieldDecl) {
@@ -673,9 +697,21 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		return typeBool
 	case *parser.NullLit:
 		return typeNull
+	case *parser.ThisExpr:
+		// 3.7.2: `this` resolves to the enclosing class's type, so
+		// `this.field` lookups can drive SelectorExpr inference.
+		if c.currentClass != "" {
+			return V2Type{Name: c.currentClass}
+		}
+		return typeAny
 	case *parser.Ident:
 		if t, found := c.scope.lookup(e.Name); found {
 			return t
+		}
+		// `this` is sometimes parsed as a bare Ident rather than a
+		// ThisExpr depending on surrounding statement shape.
+		if e.Name == "this" && c.currentClass != "" {
+			return V2Type{Name: c.currentClass}
 		}
 		// Built-in functions — don't error
 		return typeAny
@@ -840,7 +876,19 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		return typeAny
 	case *parser.SelectorExpr:
 		objType := c.inferType(e.Object)
-		// Try to resolve field/method type from Java class
+		// 3.7.2: resolve field access against the class's declared
+		// fields. Carries the field's TypeExpr forward so codegen
+		// can walk into Fn types stored as fields. Skip Go-FFI values
+		// — those follow Go's method-set, not Zinc class fields, and
+		// the codegen handles them via NodeTypes[ident].GoType.
+		if objType.Name != "" && objType.Name != "go-ffi" && objType.GoType == nil {
+			if fields, ok := c.classFields[objType.Name]; ok {
+				if ft, ok := fields[e.Field]; ok {
+					return ft
+				}
+			}
+		}
+		// Built-in method-return resolution (String, List, Map).
 		if objType.Name != "" && objType.Name != "any" {
 			var typeArgStrs []string
 			for _, a := range objType.Args {

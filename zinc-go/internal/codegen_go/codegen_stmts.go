@@ -1829,11 +1829,12 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 		// Fn-typed local invoked by name: `var fac = registry[name]; fac(ctx, cfg)`.
-		// Side-map first (Phase 3.7.2): try Symbol.DeclType (explicit
-		// `var fac: Fn<...> = ...`), then NodeTypes[useIdent].TypeExpr
-		// (inferred via Map<K, V> → V). Falls back to legacy
-		// varTypeExprs for cases the side-map didn't reach (e.g. field
-		// access chains the typechecker doesn't fully resolve).
+		// 3-tier consultation (Phase 3.7.2):
+		//   1. Symbol.DeclType — explicit `var fac: Fn<...> = ...`
+		//   2. NodeTypes[useIdent].TypeExpr — inferred via Map<K, V> → V
+		//   3. legacy varTypeExprs — codegen-time tracking, covers
+		//      class-field-access chains the typechecker doesn't yet
+		//      fully resolve through method scope/type-alias propagation.
 		var declType parser.TypeExpr
 		if g.bound != nil {
 			if sym, ok := g.bound.Bindings[callee]; ok && sym.DeclType != nil {
@@ -2044,7 +2045,7 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 		// Fn-typed local: a bare-`error` slot like `Fn<(...), error>`
 		// dispatches to the void destructure form (`_err := f()`).
-		// Side-map first; same fallback ladder as callReturnsError.
+		// Same 3-tier ladder as callReturnsError.
 		var declType parser.TypeExpr
 		if g.bound != nil {
 			if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {

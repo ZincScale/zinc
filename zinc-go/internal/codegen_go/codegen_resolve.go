@@ -636,9 +636,8 @@ func (g *Generator) resolveReceiverGenericType(e parser.Expr) *parser.GenericTyp
 	if !ok {
 		return nil
 	}
-	// Side-map first (Phase 3.7.2): Symbol.DeclType for explicit
-	// declarations, then NodeTypes[useIdent].TypeExpr for inferred
-	// locals (via Map<K, V> → V on a Map<...,Box<T>>).
+	// 3-tier (Phase 3.7.2): Symbol.DeclType, then NodeTypes.TypeExpr,
+	// then legacy varTypeExprs for cases the side-map doesn't cover.
 	if g.bound != nil {
 		if sym, ok := g.bound.Bindings[ident]; ok && sym.DeclType != nil {
 			if gt, ok := sym.DeclType.(*parser.GenericType); ok {
