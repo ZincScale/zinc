@@ -1,0 +1,44 @@
+// Avro round-trip perf workload — 10k records of a 3-field schema.
+// Encodes + decodes via hamba/avro through Zinc's FFI. Emit wall time
+// for comparison against hand-rolled Go in /home/vrjoshi/proj/zinc/perf/avro_go.
+
+import hambaAvro
+import time
+
+data Record(
+    @Avro("id") long id,
+    @Avro("name") String name,
+    @Avro("value") double value
+)
+
+void main() {
+    var schemaJson = `{"type":"record","name":"R","fields":[{"name":"id","type":"long"},{"name":"name","type":"string"},{"name":"value","type":"double"}]}`
+    var schema, sErr = hambaAvro.Parse(schemaJson)
+    if (sErr != nil) {
+        print("schema parse failed: ${sErr.Error()}")
+        return
+    }
+
+    var n = 10000
+    var records = List<Record>[]
+    for (i in 0..n) {
+        records.add(Record(long(i), "name-${i}", float64(i) * 1.5))
+    }
+
+    var start = time.Now()
+    for (rec in records) {
+        var bytes, mErr = hambaAvro.Marshal(schema, rec)
+        if (mErr != nil) {
+            print("marshal failed: ${mErr.Error()}")
+            return
+        }
+        var got = Record(long(0), "", 0.0)
+        hambaAvro.Unmarshal(schema, bytes, &got) or {
+            print("unmarshal failed: ${err.Error()}")
+            return
+        }
+    }
+    var elapsed = time.Since(start)
+
+    print("zinc avro round-trip: ${n} records in ${elapsed}")
+}

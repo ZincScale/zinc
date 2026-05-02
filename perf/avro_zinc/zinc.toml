@@ -1,0 +1,10 @@
+[project]
+name = "avro_perf"
+version = "0.1.0"
+main = "main.zn"
+
+[go]
+version = "1.26"
+
+[deps]
+hambaAvro = "github.com/hamba/avro/v2@v2.25.0"

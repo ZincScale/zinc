@@ -1,0 +1,27 @@
+// CPU-bound loop perf — sum-of-squares of even numbers in 1M ints.
+// Stresses codegen for arithmetic, branch, and slice access.
+
+import time
+
+void main() {
+    var n = 1000000
+    var data = List<long>[]
+    for (i in 0..n) {
+        data.add(long(i))
+    }
+
+    // Warm caches.
+    var warm = long(0)
+    for (x in data) { warm = warm + x }
+
+    var start = time.Now()
+    var sum = long(0)
+    for (x in data) {
+        if (x % 2 == 0) {
+            sum = sum + x * x
+        }
+    }
+    var elapsed = time.Since(start)
+
+    print("zinc loop: ${n} ints in ${elapsed} sum=${sum}")
+}
