@@ -106,7 +106,6 @@ type Generator struct {
 	funcReturnsOptional map[string]bool       // functions that return T? (optional)
 	funcReturnTypes     map[string]string     // function name → Go return type string
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
-	varStructTypes      map[string]string     // variable name → struct type name
 	dataClasses         map[string]bool       // data class names that have NewType constructors
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
 	typeAliases         map[string]parser.TypeExpr // type alias name → underlying type
@@ -231,7 +230,6 @@ func New() *Generator {
 		funcReturnsOptional: make(map[string]bool),
 		funcReturnTypes:     make(map[string]string),
 		renamedVars:         make(map[string]string),
-		varStructTypes:      make(map[string]string),
 		dataClasses:         make(map[string]bool),
 		typeAliases:         make(map[string]parser.TypeExpr),
 		goResolver:          NewGoTypeResolver(),
@@ -729,7 +727,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	}
 	g.varTypes = make(map[string]string)
 	g.varGoTypes = make(map[string]types.Type)
-	g.varStructTypes = make(map[string]string)
 	// Preserve dataClasses, interfaces, structs, and pubNames
 	// pre-populated by SetSiblingExports (sibling file awareness).
 	if g.dataClasses == nil {

@@ -124,7 +124,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	var paramNameBackup []string
 	for _, p := range fn.Params {
 		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
-			g.varStructTypes[p.Name] = simpleType.Name
+			_ = simpleType.Name // varStructTypes write removed
 			paramNameBackup = append(paramNameBackup, p.Name)
 		}
 	}
@@ -168,10 +168,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.indent--
 	g.writeln("}")
 
-	// Clear param-scoped tracking so it doesn't leak into sibling functions.
-	for _, pn := range paramNameBackup {
-		delete(g.varStructTypes, pn)
-	}
+	_ = paramNameBackup // varStructTypes drained Phase 3.7.2
 
 	g.currentReturnType = prevRetType
 	g.currentOuterReturnType = prevOuterRetType
@@ -680,7 +677,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	var ptrParamBackup []string
 	for _, p := range m.Params {
 		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
-			g.varStructTypes[p.Name] = simpleType.Name
+			_ = simpleType.Name // varStructTypes write removed
 			methodParamBackup = append(methodParamBackup, p.Name)
 		}
 		// Pointer-typed params (T? for non-collection T) — same auto-deref
@@ -696,9 +693,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		g.currentMethods = nil
 		g.currentParams = nil
 		g.currentClass = ""
-		for _, pn := range methodParamBackup {
-			delete(g.varStructTypes, pn)
-		}
+		_ = methodParamBackup // varStructTypes drained Phase 3.7.2
 		for _, pn := range ptrParamBackup {
 			delete(g.ptrVars, pn)
 		}

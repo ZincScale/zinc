@@ -331,12 +331,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if call.IsNew {
 					if g.isClassType(ident.Name) {
-						g.varStructTypes[v.Name] = ident.Name
+						_ = ident.Name // varStructTypes write removed
 					}
 				} else if strings.HasPrefix(ident.Name, "New") {
 					structName := ident.Name[3:]
 					if g.isClassType(structName) {
-						g.varStructTypes[v.Name] = structName
+						_ = structName // varStructTypes write removed
 					}
 				}
 			}
@@ -344,14 +344,14 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				if pkg, ok := sel.Object.(*parser.Ident); ok {
 					if exports, ok := g.subpkgExports[pkg.Name]; ok {
 						if kind := exports[sel.Field]; kind == "class" || kind == "data" {
-							g.varStructTypes[v.Name] = sel.Field
+							_ = sel.Field // varStructTypes write removed
 						}
 					}
 				}
 				// Track method call return type
 				retType := g.resolveMethodReturnType(sel)
 				if retType != "" && g.isClassType(retType) {
-					g.varStructTypes[v.Name] = retType
+					_ = retType // varStructTypes write removed
 				}
 			}
 		}
@@ -398,15 +398,15 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if call.IsNew {
 					if g.isClassType(ident.Name) {
-						g.varStructTypes[v.Name] = ident.Name
+						_ = ident.Name // varStructTypes write removed
 					}
 				} else if strings.HasPrefix(ident.Name, "New") {
 					structName := ident.Name[3:]
 					if g.isClassType(structName) {
-						g.varStructTypes[v.Name] = structName
+						_ = structName // varStructTypes write removed
 					}
 				} else if g.isClassType(ident.Name) {
-					g.varStructTypes[v.Name] = ident.Name
+					_ = ident.Name // varStructTypes write removed
 				} else if g.currentClass != "" {
 					// Bare call inside a class method: may be a self-method
 					// call like `var g = snapshotGraph()`. If the current
@@ -418,7 +418,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 								continue
 							}
 							if st, ok := m.ReturnType.(*parser.SimpleType); ok && g.isClassType(st.Name) {
-								g.varStructTypes[v.Name] = st.Name
+								_ = st.Name // varStructTypes write removed
 							}
 							_ = m // gt-tracking removed (Phase 3.7.2): side-map covers it
 						}
@@ -431,7 +431,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 					if exports, ok := g.subpkgExports[pkg.Name]; ok {
 						kind := exports[sel.Field]
 						if kind == "class" || kind == "data" {
-							g.varStructTypes[v.Name] = sel.Field
+							_ = sel.Field // varStructTypes write removed
 						}
 					}
 				}
@@ -444,7 +444,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 				retType := g.resolveMethodReturnType(sel)
 				if retType != "" && g.isClassType(retType) {
-					g.varStructTypes[v.Name] = retType
+					_ = retType // varStructTypes write removed
 				}
 			}
 		}
@@ -1610,12 +1610,6 @@ func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
 				receiverType = t.Name
 			}
 		}
-		// Check local variables (legacy fallback)
-		if receiverType == "" {
-			if st, ok := g.varStructTypes[ident.Name]; ok {
-				receiverType = st
-			}
-		}
 		// Check class fields
 		if receiverType == "" && g.currentClass != "" && g.currentFields[ident.Name] {
 			if cls, ok := g.structs[g.currentClass]; ok {
@@ -1669,10 +1663,6 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 			if t, ok := g.bound.NodeTypes[ident]; ok && g.isClassType(t.Name) {
 				return true
 			}
-		}
-		// Check local variables explicitly tracked as struct types
-		if _, ok := g.varStructTypes[name]; ok {
-			return true
 		}
 		// Check if it's a field of the current class with a class/struct type
 		if g.currentClass != "" && g.currentFields[name] {
@@ -2187,11 +2177,11 @@ func (g *Generator) emitErrorPropagatingVar(v *parser.VarStmt) {
 	if call, ok := v.Value.(*parser.CallExpr); ok {
 		if ident, ok := call.Callee.(*parser.Ident); ok {
 			if g.isClassType(ident.Name) {
-				g.varStructTypes[v.Name] = ident.Name
+				_ = ident.Name // varStructTypes write removed
 			} else if strings.HasPrefix(ident.Name, "New") {
 				structName := ident.Name[3:]
 				if g.isClassType(structName) {
-					g.varStructTypes[v.Name] = structName
+					_ = structName // varStructTypes write removed
 				}
 			}
 		}

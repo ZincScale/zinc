@@ -470,9 +470,6 @@ func (g *Generator) resolveReceiverClassName(e parser.Expr) string {
 				return t.Name
 			}
 		}
-		if st, ok := g.varStructTypes[expr.Name]; ok {
-			return st
-		}
 		if g.currentClass != "" && g.currentFields[expr.Name] {
 			if cls := g.lookupClassDecl(g.currentClass); cls != nil {
 				for _, f := range cls.Fields {
@@ -706,9 +703,6 @@ func (g *Generator) isUserScopeShadow(name string) bool {
 		return true
 	}
 	if g.currentLocals != nil && g.currentLocals[name] {
-		return true
-	}
-	if _, ok := g.varStructTypes[name]; ok {
 		return true
 	}
 	if _, ok := g.varTypes[name]; ok {

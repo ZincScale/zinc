@@ -142,6 +142,7 @@ type V2Checker struct {
 	methodSigs   map[string]map[string]V2FnSig // type → method → signature
 	parentTypes  map[string][]string           // class → parent types (interfaces, superclasses)
 	classFields  map[string]map[string]V2Type  // class → field name → field type (3.7.2: SelectorExpr inference)
+	classNames   map[string]bool               // registered class/data/interface/enum names (3.7.2: SelectorExpr `pkg.Class` inference)
 	currentClass string                        // enclosing class name during method/ctor checking, "" outside (3.7.2: `this` typing)
 	inLoop       bool                          // tracking if inside a loop for break/continue
 
@@ -201,6 +202,7 @@ func newCheckerForProgram(externalSigs *CollectedSigs) *V2Checker {
 		methodSigs:  make(map[string]map[string]V2FnSig),
 		parentTypes: make(map[string][]string),
 		classFields: make(map[string]map[string]V2Type),
+		classNames:  make(map[string]bool),
 	}
 
 	// Pre-populate with cross-file signatures
@@ -213,6 +215,15 @@ func newCheckerForProgram(externalSigs *CollectedSigs) *V2Checker {
 		}
 		for k, v := range externalSigs.ParentTypes {
 			c.parentTypes[k] = v
+		}
+		// 3.7.2: register cross-pkg class names in scope so CallExpr
+		// ctor inference fires for `Store(...)` from another file.
+		for name := range externalSigs.ClassNames {
+			c.scope.set(name, V2Type{Name: name})
+			c.classNames[name] = true
+		}
+		for k, v := range externalSigs.ClassFields {
+			c.classFields[k] = v
 		}
 	}
 	return c
@@ -235,11 +246,38 @@ func checkProgram(c *V2Checker, prog *parser.Program) {
 
 // CollectSignatures extracts function and interface method signatures from a program.
 // Used in multi-file compilation to build cross-file context.
+// MakeFnSigForMethod builds a V2FnSig from a parser MethodDecl. Used by
+// the compiler driver to register cross-package method signatures into
+// externalSigs.MethodSigs.
+func MakeFnSigForMethod(m *parser.MethodDecl) V2FnSig {
+	c := &V2Checker{
+		scope:       newV2Scope(nil),
+		classFields: make(map[string]map[string]V2Type),
+		classNames:  make(map[string]bool),
+	}
+	retType := c.resolveTypeExpr(m.ReturnType)
+	var paramTypes []V2Type
+	var paramNames []string
+	for _, p := range m.Params {
+		paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+		paramNames = append(paramNames, p.Name)
+	}
+	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+}
+
 // CollectedSigs holds both function and method signatures from a file.
 type CollectedSigs struct {
 	FnSigs      map[string]V2FnSig
 	MethodSigs  map[string]map[string]V2FnSig // type → method → sig
 	ParentTypes map[string][]string           // class → parent types
+	// ClassNames (3.7.2): class/data class/enum/interface names — fed
+	// into the receiving checker's scope so cross-pkg `Store(...)`
+	// CallExpr inference can resolve to V2Type{Name:"Store"}.
+	ClassNames map[string]bool
+	// ClassFields (3.7.2): class → field-name → V2Type, mirroring the
+	// per-checker classFields map. Lets cross-pkg field access resolve
+	// (e.g. `s.someField` where s is a Store from another package).
+	ClassFields map[string]map[string]V2Type
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -249,11 +287,31 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		methodSigs:  make(map[string]map[string]V2FnSig),
 		parentTypes: make(map[string][]string),
 		classFields: make(map[string]map[string]V2Type),
+		classNames:  make(map[string]bool),
 	}
 	for _, d := range prog.Decls {
 		c.registerDecl(d)
 	}
-	return CollectedSigs{FnSigs: c.fnSigs, MethodSigs: c.methodSigs, ParentTypes: c.parentTypes}
+	classNames := make(map[string]bool)
+	for _, d := range prog.Decls {
+		switch dd := d.(type) {
+		case *parser.ClassDecl:
+			classNames[dd.Name] = true
+		case *parser.DataClassDecl:
+			classNames[dd.Name] = true
+		case *parser.InterfaceDecl:
+			classNames[dd.Name] = true
+		case *parser.EnumDecl:
+			classNames[dd.Name] = true
+		}
+	}
+	return CollectedSigs{
+		FnSigs:      c.fnSigs,
+		MethodSigs:  c.methodSigs,
+		ParentTypes: c.parentTypes,
+		ClassNames:  classNames,
+		ClassFields: c.classFields,
+	}
 }
 
 func (c *V2Checker) errorf(line int, format string, args ...any) {
@@ -328,6 +386,45 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 			}
 			c.classFields[d.Name] = fields
 		}
+		// 3.7.2: register class method signatures so SelectorExpr /
+		// CallExpr inference can resolve `obj.method()` return types.
+		if len(d.Methods) > 0 {
+			methods := make(map[string]V2FnSig, len(d.Methods))
+			for _, m := range d.Methods {
+				retType := c.resolveTypeExpr(m.ReturnType)
+				var paramTypes []V2Type
+				var paramNames []string
+				for _, p := range m.Params {
+					paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+					paramNames = append(paramNames, p.Name)
+				}
+				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+			}
+			c.methodSigs[d.Name] = methods
+		}
+		// Sealed variants — register each variant as a subtype of the
+		// sealed class so `Shape s = Circle(...)` etc. pass
+		// compatibility. Variants are also registered as their own
+		// scope entries so CallExpr ctor inference fires.
+		if d.IsSealed {
+			for _, v := range d.Variants {
+				c.scope.set(v.Name, V2Type{Name: v.Name})
+				existing := c.parentTypes[v.Name]
+				c.parentTypes[v.Name] = append(existing, d.Name)
+				if len(v.Params) > 0 {
+					vfields := make(map[string]V2Type, len(v.Params))
+					for _, p := range v.Params {
+						vfields[p.Name] = c.resolveTypeExpr(p.Type)
+					}
+					c.classFields[v.Name] = vfields
+				} else {
+					// Marker for classFields presence (for ctor inference
+					// gate): empty map is fine. But the struct-conformance
+					// fallback also keys on classFields, so register it.
+					c.classFields[v.Name] = map[string]V2Type{}
+				}
+			}
+		}
 	case *parser.DataClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
 		// Parent registration mirrors ClassDecl so subtype compatibility
@@ -345,6 +442,20 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 				fields[p.Name] = c.resolveTypeExpr(p.Type)
 			}
 			c.classFields[d.Name] = fields
+		}
+		if len(d.Methods) > 0 {
+			methods := make(map[string]V2FnSig, len(d.Methods))
+			for _, m := range d.Methods {
+				retType := c.resolveTypeExpr(m.ReturnType)
+				var paramTypes []V2Type
+				var paramNames []string
+				for _, p := range m.Params {
+					paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+					paramNames = append(paramNames, p.Name)
+				}
+				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+			}
+			c.methodSigs[d.Name] = methods
 		}
 	case *parser.EnumDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
@@ -693,6 +804,10 @@ func (c *V2Checker) checkAssignStmt(s *parser.AssignStmt) {
 			}
 		}
 	}
+	// 3.7.2: walk Target so the side-map gets entries for the LHS.
+	// Codegen reads NodeTypes[lhs ident] for ptr-target detection
+	// (e.g. `box.name = "x"` needs to know box is a class).
+	c.inferType(s.Target)
 	c.inferType(s.Value)
 }
 
@@ -928,6 +1043,14 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				return classType
 			}
 		}
+		// 3.7.2: qualified ctor `pkg.Class(...)` — same idea but for
+		// SelectorExpr callees. classNames is populated from cross-pkg
+		// exports via externalSigs.
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
+			if c.classNames[sel.Field] {
+				return V2Type{Name: sel.Field}
+			}
+		}
 		return typeAny
 	case *parser.SelectorExpr:
 		objType := c.inferType(e.Object)
@@ -941,6 +1064,23 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				if ft, ok := fields[e.Field]; ok {
 					return ft
 				}
+			}
+			// Also check method return types — `fab.getDLQ` (no
+			// parens) refers to the method as a value; CallExpr
+			// inference handles `fab.getDLQ()`.
+			if methods, ok := c.methodSigs[objType.Name]; ok {
+				if sig, ok := methods[e.Field]; ok {
+					return sig.ReturnType
+				}
+			}
+		}
+		// 3.7.2: `pkg.Class` references — when Object is an Ident
+		// whose name doesn't resolve to a value (typeAny) and Field
+		// is a registered class name, return V2Type{Name: Field} so
+		// `var r = pkg.Class()` infers `r` as Class.
+		if objType.Name == "any" || objType.Name == "" {
+			if c.classNames[e.Field] {
+				return V2Type{Name: e.Field}
 			}
 		}
 		// Built-in method-return resolution (String, List, Map).

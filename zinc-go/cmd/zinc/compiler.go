@@ -30,7 +30,8 @@ import (
 // GoTypeResolver is constructed and supplied to CheckV2 so Go-imported
 // package calls get GoType-tagged returns in the NodeTypes side-map.
 func runTypecheck(progs []*parser.Program, importMap map[string]string,
-	crossPkgExports map[string]map[string]string, goModDir string) (
+	crossPkgExports map[string]map[string]string, goModDir string,
+	crossPkgClassDecls ...map[string]map[string]*parser.ClassDecl) (
 	map[*parser.Program]*typechecker.BoundProgram, []typechecker.V2Error) {
 	if len(progs) == 0 {
 		return nil, nil
@@ -46,6 +47,62 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	}
 	merged := mergePrograms(progs)
 	externalSigs := typechecker.CollectSignatures(merged)
+	// 3.7.2: feed cross-package class names into externalSigs so CallExpr
+	// ctor inference fires for `OtherPkg.Class(...)` (or unqualified
+	// `Class(...)` when the import didn't collide). Without this,
+	// cross-pkg class instantiation infers to typeAny and breaks
+	// downstream side-map lookups (e.g. resolveReceiverClassName).
+	if crossPkgExports != nil {
+		if externalSigs.ClassNames == nil {
+			externalSigs.ClassNames = make(map[string]bool)
+		}
+		for _, exports := range crossPkgExports {
+			for name, kind := range exports {
+				switch kind {
+				case "class", "data", "interface", "enum", "sealed_variant":
+					externalSigs.ClassNames[name] = true
+				}
+			}
+		}
+	}
+	// 3.7.2: feed cross-package parent relationships (class inheritance,
+	// sealed-variant ownership) so subtype compatibility (`Shape s = Circle(...)`)
+	// resolves across packages.
+	if len(crossPkgClassDecls) > 0 && crossPkgClassDecls[0] != nil {
+		if externalSigs.ParentTypes == nil {
+			externalSigs.ParentTypes = make(map[string][]string)
+		}
+		if externalSigs.MethodSigs == nil {
+			externalSigs.MethodSigs = make(map[string]map[string]typechecker.V2FnSig)
+		}
+		for _, classes := range crossPkgClassDecls[0] {
+			for _, cls := range classes {
+				if len(cls.Parents) > 0 {
+					names := make([]string, len(cls.Parents))
+					for i, p := range cls.Parents {
+						names[i] = p.Name
+					}
+					externalSigs.ParentTypes[cls.Name] = append(externalSigs.ParentTypes[cls.Name], names...)
+				}
+				if cls.IsSealed {
+					for _, v := range cls.Variants {
+						externalSigs.ParentTypes[v.Name] = append(externalSigs.ParentTypes[v.Name], cls.Name)
+						externalSigs.ClassNames[v.Name] = true
+					}
+				}
+				if len(cls.Methods) > 0 {
+					methods := externalSigs.MethodSigs[cls.Name]
+					if methods == nil {
+						methods = make(map[string]typechecker.V2FnSig, len(cls.Methods))
+					}
+					for _, m := range cls.Methods {
+						methods[m.Name] = typechecker.MakeFnSigForMethod(m)
+					}
+					externalSigs.MethodSigs[cls.Name] = methods
+				}
+			}
+		}
+	}
 
 	// Build the bind context: same-package siblings + cross-package imports.
 	bindCtx := typechecker.CollectBindContext(merged)
@@ -479,14 +536,28 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			// every other package's exports, keyed by the alias the
 			// importer would use (the package's last path segment).
 			crossPkg := make(map[string]map[string]string)
+			crossDecls := make(map[string]map[string]*parser.ClassDecl)
 			for otherPkg, otherExports := range allExports {
 				if otherPkg == pkg {
 					continue
 				}
 				alias := filepath.Base(otherPkg)
 				crossPkg[alias] = otherExports
+				// Walk the merged AST directly so sealed classes are
+				// included (CollectClassDecls filters them out).
+				if merged, ok := allMerged[otherPkg]; ok {
+					cls := make(map[string]*parser.ClassDecl)
+					for _, d := range merged.Decls {
+						if cd, ok := d.(*parser.ClassDecl); ok {
+							cls[cd.Name] = cd
+						}
+					}
+					if len(cls) > 0 {
+						crossDecls[alias] = cls
+					}
+				}
 			}
-			bps, errs := runTypecheck(pkgProgs, im, crossPkg, goModDir)
+			bps, errs := runTypecheck(pkgProgs, im, crossPkg, goModDir, crossDecls)
 			for prog, bp := range bps {
 				allBound[prog] = bp
 			}
@@ -616,11 +687,23 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			im = importAliases[0]
 		}
 		crossPkg := make(map[string]map[string]string)
+		crossDecls := make(map[string]map[string]*parser.ClassDecl)
 		for otherPkg, otherExports := range allExports {
 			alias := filepath.Base(otherPkg)
 			crossPkg[alias] = otherExports
+			if merged, ok := allMerged[otherPkg]; ok {
+				cls := make(map[string]*parser.ClassDecl)
+				for _, d := range merged.Decls {
+					if cd, ok := d.(*parser.ClassDecl); ok {
+						cls[cd.Name] = cd
+					}
+				}
+				if len(cls) > 0 {
+					crossDecls[alias] = cls
+				}
+			}
 		}
-		bps, errs := runTypecheck(rootProgs, im, crossPkg, goModDir)
+		bps, errs := runTypecheck(rootProgs, im, crossPkg, goModDir, crossDecls)
 		for prog, bp := range bps {
 			rootBound[prog] = bp
 		}

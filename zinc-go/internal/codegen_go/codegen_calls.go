@@ -370,9 +370,6 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 							structName = t.Name
 						}
 					}
-					if structName == "" {
-						structName = g.varStructTypes[ident.Name]
-					}
 					if cls, ok := g.structs[structName]; structName != "" && ok {
 						hasMethod := false
 						for _, m := range cls.Methods {
