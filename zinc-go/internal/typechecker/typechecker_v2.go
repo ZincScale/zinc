@@ -330,6 +330,15 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 		}
 	case *parser.DataClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
+		// Parent registration mirrors ClassDecl so subtype compatibility
+		// (Pair : Summable etc.) works for data classes too.
+		if len(d.Parents) > 0 {
+			names := make([]string, len(d.Parents))
+			for i, p := range d.Parents {
+				names[i] = p.Name
+			}
+			c.parentTypes[d.Name] = names
+		}
 		if len(d.Params) > 0 {
 			fields := make(map[string]V2Type, len(d.Params))
 			for _, p := range d.Params {
@@ -890,6 +899,15 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				}
 				return sig.ReturnType
 			}
+			// 3.7.2: ctor-style call to a class/data-class — `MyClass(...)`
+			// returns V2Type{Name:"MyClass"} so codegen can resolve
+			// `var x = MyClass(...); x.method()` via the side-map. The
+			// type was registered in scope during registerDecl for
+			// ClassDecl/DataClassDecl/EnumDecl/InterfaceDecl. Self-typing
+			// (scope[name].Name == name) discriminates types from values.
+			if classType, ok := c.scope.lookup(ident.Name); ok && classType.Name == ident.Name {
+				return classType
+			}
 		}
 		return typeAny
 	case *parser.SelectorExpr:
@@ -1156,12 +1174,31 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 		}
 		return declared.Nullable
 	}
-	// Check if actual type implements/extends declared type
+	// Check if actual type implements/extends declared type (recurse
+	// up the parent chain so multi-level inheritance reaches the root).
 	if parents, ok := c.parentTypes[actual.Name]; ok {
 		for _, p := range parents {
 			if p == declared.Name {
 				return true
 			}
+			if c.compatible(declared, V2Type{Name: p}) {
+				return true
+			}
+		}
+	}
+	// Structural conformance fallback: when `declared` is an interface
+	// (or `error`) and `actual` is a class/data class, accept the
+	// assignment without walking method sets. Go's compiler enforces
+	// the actual conformance check, so a missing method surfaces there
+	// rather than here. Mirrors the historical behavior the legacy
+	// typechecker relied on for Pair → Summable etc.
+	if actual.Name != "" {
+		_, actualIsClass := c.classFields[actual.Name]
+		if declared.Name == "error" && actualIsClass {
+			return true
+		}
+		if _, declaredIsIface := c.methodSigs[declared.Name]; declaredIsIface && actualIsClass {
+			return true
 		}
 	}
 	return false
