@@ -1360,6 +1360,15 @@ func (c *V2Checker) compatible(declared, actual V2Type) bool {
 			return true
 		}
 	}
+	// 3.7.2: Go-FFI values (V2Type{Name:"go-ffi", GoType:...}) match any
+	// declared type by deferring to the Go compiler — when the user wrote
+	// `slog.Handler h = json.NewHandler(...)`, the typechecker can't
+	// statically check that *slog.JSONHandler implements slog.Handler
+	// (the GoType is in go/types space, not Zinc), but Go's compiler
+	// will reject mismatches downstream.
+	if actual.Name == "go-ffi" {
+		return true
+	}
 	return false
 }
 

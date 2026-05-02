@@ -74,15 +74,13 @@ func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
 				}
 			}
 			// Method on tracked variable: obj.Method().
-			// Side-map first (Phase 3.4 type-tracking migration) — falls
-			// back to ad-hoc varGoTypes when bind isn't on.
+			// Side-map: bind+typecheck supplied a GoType for this Ident
+			// when it came from an FFI call slot (Phase 3.7.2 — varGoTypes
+			// fallback removed; typechecker FFI inference covers the path).
 			if g.bound != nil {
 				if t, ok := g.bound.NodeTypes[ident]; ok && t.GoType != nil {
 					return g.goResolver.ExprReturnsPointer("", sel.Field, t.GoType)
 				}
-			}
-			if goType, ok := g.varGoTypes[ident.Name]; ok {
-				return g.goResolver.ExprReturnsPointer("", sel.Field, goType)
 			}
 		}
 	}
@@ -474,17 +472,13 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 					goMethodOnFFIVar = true
 				}
 			}
-			if !goMethodOnFFIVar {
-				if _, ok := g.varGoTypes[ident.Name]; ok {
-					goMethodOnFFIVar = true
-				} else if !g.isUserScopeShadowIdent(ident) {
-					if pkgPath, ok := g.importMap[ident.Name]; ok {
-						goPkgPath = pkgPath
-						goFuncName = sel.Field
-						goExpectedParams = make([][]string, len(c.Args))
-						for i := range c.Args {
-							goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
-						}
+			if !goMethodOnFFIVar && !g.isUserScopeShadowIdent(ident) {
+				if pkgPath, ok := g.importMap[ident.Name]; ok {
+					goPkgPath = pkgPath
+					goFuncName = sel.Field
+					goExpectedParams = make([][]string, len(c.Args))
+					for i := range c.Args {
+						goExpectedParams[i] = g.goResolver.FuncParamCallbackSignature(pkgPath, sel.Field, i)
 					}
 				}
 			}

@@ -11,7 +11,6 @@ package codegen_go
 
 import (
 	"fmt"
-	"go/types"
 	"strings"
 
 	"zinc-go/internal/parser"
@@ -101,7 +100,6 @@ type Generator struct {
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
-	varGoTypes          map[string]types.Type   // variable name → Go type (from stdlib call returns)
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
 	funcReturnsOptional map[string]bool       // functions that return T? (optional)
 	funcReturnTypes     map[string]string     // function name → Go return type string
@@ -225,7 +223,6 @@ func New() *Generator {
 		errorFuncs:          make(map[string]bool),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
-		varGoTypes:          make(map[string]types.Type),
 		ptrVars:             make(map[string]bool),
 		funcReturnsOptional: make(map[string]bool),
 		funcReturnTypes:     make(map[string]string),
@@ -726,7 +723,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		g.funcSigs = make(map[string][]*parser.ParamDecl)
 	}
 	g.varTypes = make(map[string]string)
-	g.varGoTypes = make(map[string]types.Type)
 	// Preserve dataClasses, interfaces, structs, and pubNames
 	// pre-populated by SetSiblingExports (sibling file awareness).
 	if g.dataClasses == nil {

@@ -504,7 +504,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
 					if pkgPath, ok := g.importMap[ident.Name]; ok {
 						if retType := g.goResolver.FuncReturnType(pkgPath, sel.Field); retType != nil {
-							g.varGoTypes[v.Name] = retType
+							_ = retType // varGoTypes write removed (Phase 3.7.2)
 						}
 					}
 				}
@@ -2297,11 +2297,13 @@ func (g *Generator) isErrorOnlyCall(expr parser.Expr) bool {
 	}
 
 	// Case 2: Method call on a variable — obj.Method()
-	// Look up the variable's Go type and check the method signature
-	if goType, ok := g.varGoTypes[ident.Name]; ok {
-		return g.goResolver.MethodReturnsErrorOnly(goType, sel.Field)
+	// Side-map first (Phase 3.7.2): bind+typecheck supplied a GoType
+	// for this Ident's binding when it came from an FFI call slot.
+	if g.bound != nil {
+		if t, ok := g.bound.NodeTypes[ident]; ok && t.GoType != nil {
+			return g.goResolver.MethodReturnsErrorOnly(t.GoType, sel.Field)
+		}
 	}
-
 	return false
 }
 
@@ -2695,15 +2697,9 @@ func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
 	// validator and for callReturnsPointer-style introspection.
 	if call, ok := t.Value.(*parser.CallExpr); ok {
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-			if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
-				if pkgPath, ok := g.importMap[ident.Name]; ok {
-					for i, n := range t.Names {
-						if rt := g.goResolver.FuncReturnTypeAt(pkgPath, sel.Field, i); rt != nil {
-							g.varGoTypes[n] = rt
-						}
-					}
-				}
-			}
+			// Phase 3.7.2: tuple-var FFI-type tracking now flows through
+			// the bind side-map (NodeTypes[ident].GoType set by tupleSlotTypes).
+			_ = sel
 		}
 	}
 	if t.OrHandler != nil {

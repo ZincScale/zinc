@@ -206,6 +206,25 @@ func compileFile(path, goModDir string, importAliases ...map[string]string) ([]c
 		im = importAliases[0]
 		gen.SetImportAliases(im)
 	}
+	// 3.7.2: build importMap from this file's `import` directives so the
+	// typechecker's FFI resolver can resolve `pkg.Func()` for single-file
+	// scripts (compileFile path — no zinc.toml deps). The parser stores
+	// paths with dots (`encoding.json`); convert to slashes for the
+	// Go-import shape the resolver expects.
+	if im == nil {
+		im = make(map[string]string)
+	}
+	for _, imp := range prog.Imports {
+		goPath := strings.ReplaceAll(imp.Path, ".", "/")
+		alias := imp.Alias
+		if alias == "" {
+			parts := strings.Split(goPath, "/")
+			alias = parts[len(parts)-1]
+		}
+		if _, exists := im[alias]; !exists {
+			im[alias] = goPath
+		}
+	}
 	bps, tcErrors := runTypecheck([]*parser.Program{prog}, im, nil, goModDir)
 	if len(tcErrors) > 0 {
 		for _, e := range tcErrors {
@@ -532,6 +551,28 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			if len(pkgProgs) == 0 {
 				continue
 			}
+			// 3.7.2: build a per-leaf importMap that includes the project's
+			// dep aliases AND the leaf's `import` directives (paths stored
+			// with dots — convert to slashes for Go-import shape). The
+			// typechecker's FFI resolver consults this for `pkg.Func()`
+			// inference.
+			leafIm := make(map[string]string, len(im))
+			for k, v := range im {
+				leafIm[k] = v
+			}
+			for _, prog := range pkgProgs {
+				for _, imp := range prog.Imports {
+					goPath := strings.ReplaceAll(imp.Path, ".", "/")
+					alias := imp.Alias
+					if alias == "" {
+						parts := strings.Split(goPath, "/")
+						alias = parts[len(parts)-1]
+					}
+					if _, exists := leafIm[alias]; !exists {
+						leafIm[alias] = goPath
+					}
+				}
+			}
 			// Build cross-package exports for this package's bind context:
 			// every other package's exports, keyed by the alias the
 			// importer would use (the package's last path segment).
@@ -557,7 +598,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 					}
 				}
 			}
-			bps, errs := runTypecheck(pkgProgs, im, crossPkg, goModDir, crossDecls)
+			bps, errs := runTypecheck(pkgProgs, leafIm, crossPkg, goModDir, crossDecls)
 			for prog, bp := range bps {
 				allBound[prog] = bp
 			}
@@ -686,6 +727,24 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			im = importAliases[0]
 		}
+		// 3.7.2: extend importMap with root files' `import` directives.
+		rootIm := make(map[string]string, len(im))
+		for k, v := range im {
+			rootIm[k] = v
+		}
+		for _, prog := range rootProgs {
+			for _, imp := range prog.Imports {
+				goPath := strings.ReplaceAll(imp.Path, ".", "/")
+				alias := imp.Alias
+				if alias == "" {
+					parts := strings.Split(goPath, "/")
+					alias = parts[len(parts)-1]
+				}
+				if _, exists := rootIm[alias]; !exists {
+					rootIm[alias] = goPath
+				}
+			}
+		}
 		crossPkg := make(map[string]map[string]string)
 		crossDecls := make(map[string]map[string]*parser.ClassDecl)
 		for otherPkg, otherExports := range allExports {
@@ -703,7 +762,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 				}
 			}
 		}
-		bps, errs := runTypecheck(rootProgs, im, crossPkg, goModDir, crossDecls)
+		bps, errs := runTypecheck(rootProgs, rootIm, crossPkg, goModDir, crossDecls)
 		for prog, bp := range bps {
 			rootBound[prog] = bp
 		}

@@ -708,9 +708,6 @@ func (g *Generator) isUserScopeShadow(name string) bool {
 	if _, ok := g.varTypes[name]; ok {
 		return true
 	}
-	if _, ok := g.varGoTypes[name]; ok {
-		return true
-	}
 	return false
 }
 
