@@ -331,7 +331,22 @@ func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 					expr = &SliceExpr{Object: expr, Low: idx, High: high}
 				} else {
 					p.expect(lexer.TOKEN_RBRACKET)
-					expr = &IndexExpr{Object: expr, Index: idx}
+					// Range-as-index sugar: `xs[a..b]` parses as
+					// IndexExpr{Object: xs, Index: RangeExpr{a, b}}.
+					// Convert to a proper SliceExpr so codegen emits Go
+					// slice syntax `xs[a:b]` rather than indexing with a
+					// (meaningless) range value. The exclusive form
+					// matches Go's `[low:high]` natively; the inclusive
+					// form `a..=b` adds 1 to the high end.
+					if rng, isRange := idx.(*RangeExpr); isRange {
+						high := rng.End
+						if rng.Inclusive && high != nil {
+							high = &BinaryExpr{Left: high, Op: "+", Right: &IntLit{Value: "1"}}
+						}
+						expr = &SliceExpr{Object: expr, Low: rng.Start, High: high}
+					} else {
+						expr = &IndexExpr{Object: expr, Index: idx}
+					}
 				}
 			}
 		case p.check(lexer.TOKEN_LPAREN):
