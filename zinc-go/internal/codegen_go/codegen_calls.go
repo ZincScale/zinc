@@ -661,10 +661,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		chanType := "interface{}"
 		if len(c.TypeArgs) > 0 {
 			chanType = g.resolveTypeArg(c.TypeArgs[0])
+		} else if inferred, ok := g.inferredChanElem[c]; ok {
+			// Pre-walk inference (see inferChannelTypes) found a unique
+			// element type from `ch.send(x)` sites — use it instead of
+			// the `interface{}` fallback. No warning: the channel is
+			// effectively typed even though the user wrote no <T>.
+			chanType = inferred
 		} else {
-			// Untyped Channel(N) lowers to `chan interface{}`. That's legal
-			// but loses static typing — sends accept anything, recvs require
-			// a type assertion. Warn the user to write Channel<T>(N).
+			// Untyped Channel(N) with no inferable element type lowers
+			// to `chan interface{}`. Legal but loses static typing —
+			// sends accept anything, recvs require a type assertion.
 			g.compileWarning(0, "Channel(%s) without a type argument lowers to chan interface{}; prefer Channel<T>(%s) for typed channels", args, args)
 		}
 		if args != "" {

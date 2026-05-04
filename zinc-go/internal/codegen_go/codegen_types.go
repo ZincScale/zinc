@@ -20,6 +20,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	if fn.Name == "main" {
 		g.writeln("func main() {")
 		g.indent++
+		g.inferChannelTypes(fn.Body)
 		g.emitBlock(fn.Body)
 		g.indent--
 		g.writeln("}")
@@ -133,6 +134,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.trackTypeParamImports(fn.TypeParamBounds)
 	g.writeln("func %s%s(%s)%s {", name, tparams, params, ret)
 	g.indent++
+	g.inferChannelTypes(fn.Body)
 	g.emitBlock(fn.Body)
 	// Ensure all paths return. Go requires an explicit return when the
 	// last statement isn't a return — especially after a try/catch

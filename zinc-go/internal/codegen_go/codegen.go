@@ -164,6 +164,13 @@ type Generator struct {
 	// Phase 3.4 progressively migrates codegen branches from ad-hoc lookup
 	// (the 24+ tracking fields above) to side-map reads via this field.
 	bound *typechecker.BoundProgram
+
+	// inferredChanElem maps an untyped `Channel(N)` CallExpr to the Go
+	// element type inferred from `ch.send(x)` sites in the same scope.
+	// Populated by inferChannelTypes (a pre-walk over a function body)
+	// and consulted by the Channel constructor emit so we can emit
+	// `chan string` instead of falling back to `chan interface{}`.
+	inferredChanElem map[*parser.CallExpr]string
 }
 
 // wrapAsPointer formats `_zincPtr(expr)` and flags the helper for
@@ -837,6 +844,7 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	if len(prog.Stmts) > 0 && !hasExplicitMain {
 		bodyGen.writeln("func main() {")
 		bodyGen.indent++
+		bodyGen.inferChannelTypes(&parser.BlockStmt{Stmts: prog.Stmts})
 		for _, s := range prog.Stmts {
 			if line := stmtLine(s); bodyGen.sourceFile != "" && line > 0 {
 				// Go's //line directive must start at column 0 —
