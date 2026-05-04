@@ -1127,6 +1127,13 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		// literals at the use site. For non-collection types (String,
 		// Class), `*T` is retained — Go has no nil-friendly empty value
 		// for value types.
+		//
+		// Per spec table (03-type-system.md §1.3): `T?` lowers to `*T`
+		// for non-pointer T, and `*T` unchanged for pointer T. Since
+		// `formatType` on a class SimpleType/GenericType already returns
+		// `*ClassName`, we must skip the wrap when the inner already
+		// formats with a leading `*`. Otherwise `T?` on a class becomes
+		// `**ClassName` — a Go-level type error.
 		if gt, ok := typ.Inner.(*parser.GenericType); ok {
 			switch gt.Name {
 			case "List", "Map", "Channel", "Set":
@@ -1136,7 +1143,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		if _, ok := typ.Inner.(*parser.ArrayType); ok {
 			return g.formatType(typ.Inner)
 		}
-		return "*" + g.formatType(typ.Inner)
+		inner := g.formatType(typ.Inner)
+		if strings.HasPrefix(inner, "*") {
+			return inner
+		}
+		return "*" + inner
 	case *parser.FuncTypeExpr:
 		var params []string
 		for _, p := range typ.Params {
