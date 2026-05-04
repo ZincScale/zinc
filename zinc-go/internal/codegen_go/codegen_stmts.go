@@ -1363,16 +1363,14 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 		g.indent--
 	}
 
-	// If no explicit default arm was written, add one with panic("unreachable")
-	// to satisfy Go's exhaustiveness requirement on type switches.
-	hasDefault := false
-	for _, c := range m.Cases {
-		if c.Pattern == nil {
-			hasDefault = true
-			break
-		}
-	}
-	if !hasDefault {
+	// If the match isn't provably exhaustive (non-sealed subject, or sealed
+	// with missing variants and no wildcard), add a synthetic default that
+	// panics so an unmatched runtime type fails loudly. Go itself doesn't
+	// require type-switches to be exhaustive — control just falls out of
+	// the switch on no match — but for sealed-typed subjects we want the
+	// panic, and for matches that the typechecker flagged as non-exhaustive
+	// we want a visible failure rather than silent fall-through.
+	if !g.matchIsExhaustive(m) {
 		g.writeln("default:")
 		g.indent++
 		g.writeln("_ = _v")
@@ -1430,6 +1428,33 @@ func (g *Generator) sealedClassOfVariant(variantName string) *parser.ClassDecl {
 // skipped. Errors accumulate on the Generator; compileMultiFile fails the
 // build when any are present.
 func (g *Generator) checkMatchExhaustiveness(m *parser.MatchStmt) {
+	sealed, missing := g.matchSealedCoverage(m)
+	if sealed != nil && len(missing) > 0 {
+		g.compileError(m.Line,
+			"non-exhaustive match on sealed type %q: missing variant(s) %s (add case(s) or an else branch)",
+			sealed.Name, strings.Join(missing, ", "))
+	}
+}
+
+// matchIsExhaustive reports whether the match is provably exhaustive — either
+// it has a wildcard/else arm, or it covers every variant of a sealed type.
+// Used to suppress dead default + trailing-return emissions after the switch.
+// Returns false for non-sealed type-switches (matching on Object, etc.) since
+// we can't enumerate possible runtime types.
+func (g *Generator) matchIsExhaustive(m *parser.MatchStmt) bool {
+	for _, c := range m.Cases {
+		if c.Pattern == nil {
+			return true
+		}
+	}
+	sealed, missing := g.matchSealedCoverage(m)
+	return sealed != nil && len(missing) == 0
+}
+
+// matchSealedCoverage identifies the sealed class being matched (if any) and
+// returns the variants left uncovered. Returns (nil, nil) for matches that
+// don't target a sealed class. Wildcard/else arms make missing empty.
+func (g *Generator) matchSealedCoverage(m *parser.MatchStmt) (*parser.ClassDecl, []string) {
 	// Identify the sealed class from any CallExpr pattern. Match statements
 	// in Zinc mix case types (e.g. type_match.zn matches String/int/Animal
 	// against Object) — those aren't sealed, so skip when the first variant
@@ -1449,13 +1474,13 @@ func (g *Generator) checkMatchExhaustiveness(m *parser.MatchStmt) {
 		}
 	}
 	if sealed == nil {
-		return
+		return nil, nil
 	}
 
 	covered := make(map[string]bool)
 	for _, c := range m.Cases {
 		if c.Pattern == nil {
-			return // wildcard covers everything remaining
+			return sealed, nil // wildcard covers everything remaining
 		}
 		if call, ok := c.Pattern.(*parser.CallExpr); ok {
 			if id, ok := call.Callee.(*parser.Ident); ok {
@@ -1478,11 +1503,7 @@ func (g *Generator) checkMatchExhaustiveness(m *parser.MatchStmt) {
 			missing = append(missing, v.Name)
 		}
 	}
-	if len(missing) > 0 {
-		g.compileError(m.Line,
-			"non-exhaustive match on sealed type %q: missing variant(s) %s (add case(s) or an else branch)",
-			sealed.Name, strings.Join(missing, ", "))
-	}
+	return sealed, missing
 }
 
 // --- Expression statements (spawn, print, collection methods, forEach) -------
@@ -2340,34 +2361,17 @@ func (g *Generator) emitOrBlock(block *parser.BlockStmt) {
 // are absorbed normally — the panic only fires when an error would
 // otherwise escape to the launcher with nowhere to go.
 //
-// Shape when the body can propagate an error:
-//
-//	_gerr := func() error {
-//	    body   // throws → return expr; errorFunc calls → if err != nil { return err }
-//	    return nil
-//	}()
-//	if _gerr != nil { panic(_gerr) }
-//
-// When the body has no error activity, emit the block directly — no
-// wrapper. Detection is conservative: treats any throw, Error-return,
-// or call to an errorFunc as a propagation source.
+// The body is emitted with currentFuncIsThrower = false so unhandled
+// errors lower to `panic(err)` directly at the error site (see
+// emitErrReturn) rather than `return err`, which would be invalid Go
+// inside the enclosing `go func()` shell that has no return type.
+// Save/restore covers the case where the enclosing function is itself
+// a thrower.
 func (g *Generator) emitGoroutineBody(body *parser.BlockStmt) {
-	if !g.blockCanReturnError(body) {
-		g.emitBlock(body)
-		return
-	}
-	errVar := "_gerr"
-	if g.errVarCount > 0 {
-		errVar = fmt.Sprintf("_gerr%d", g.errVarCount)
-	}
-	g.errVarCount++
-	g.writeln("%s := func() error {", errVar)
-	g.indent++
+	prevIsThrower := g.currentFuncIsThrower
+	g.currentFuncIsThrower = false
+	defer func() { g.currentFuncIsThrower = prevIsThrower }()
 	g.emitBlock(body)
-	g.writeln("return nil")
-	g.indent--
-	g.writeln("}()")
-	g.writeln("if %s != nil { panic(%s) }", errVar, errVar)
 }
 
 // blockCanReturnError reports whether a block contains any construct that
@@ -2636,6 +2640,14 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 // blockEndsInReturn reports whether the final statement of a block is
 // a return. Used to decide whether a thrower function needs a synthetic
 // trailing `return nil`. Shallow check — doesn't recurse into if/else.
+//
+// Note: even when the last statement is an exhaustive sealed match where
+// every arm returns, we still emit the synthetic trailing return. Go's
+// compiler can't prove sealed-type exhaustiveness (Shape is just an
+// interface from Go's POV), so it requires either a default arm or a
+// trailing return for "all paths return." Since codegen drops the
+// synthetic default for exhaustive matches (see emitTypeSwitchMatch),
+// the trailing return is the load-bearing fallback.
 func blockEndsInReturn(block *parser.BlockStmt) bool {
 	if block == nil || len(block.Stmts) == 0 {
 		return false
