@@ -157,17 +157,28 @@ func (p *Parser) v2ParseComparison() Expr {
 		right := p.v2ParseAddSub()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}
-	// Handle "as Type" for type casting: expr as TypeName, expr as pkg.TypeName.
-	// The trailing type is parsed as IDENT (DOT IDENT)* so qualified references
-	// like `hambaAvro.RecordSchema` or `os.File` reach codegen as a single
-	// dotted string. formatType (codegen_resolve.go) already splits on `.` to
-	// resolve the package alias, so no AST or codegen change is needed here.
+	// Handle "as Type" for type casting: expr as TypeName, expr as pkg.TypeName,
+	// expr as Type[] (array type). The trailing type is parsed as
+	// IDENT (DOT IDENT)* with optional `[]` suffix; qualified references
+	// like `hambaAvro.RecordSchema` and array types like `byte[]` reach
+	// codegen as a single dotted-or-bracketed string. formatType
+	// (codegen_resolve.go) splits on `.` to resolve the package alias and
+	// recognizes a trailing `[]` as an array suffix.
 	if p.check(lexer.TOKEN_AS) {
 		p.advance() // consume as
 		typeName := p.advance().Literal
 		for p.check(lexer.TOKEN_DOT) && p.peekAt(1).Type == lexer.TOKEN_IDENT {
 			p.advance() // consume .
 			typeName += "." + p.advance().Literal
+		}
+		// Optional `[]` suffix: `as byte[]`, `as String[]`. Avro BYTES
+		// extraction (`value as byte[]`) is the motivating case; without
+		// this the parser stranded the `[]` for the next stage to misread
+		// as an IndexExpr or list-literal.
+		if p.check(lexer.TOKEN_LBRACKET) && p.peekAt(1).Type == lexer.TOKEN_RBRACKET {
+			p.advance() // [
+			p.advance() // ]
+			typeName += "[]"
 		}
 		left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: false}
 	}

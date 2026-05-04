@@ -1202,6 +1202,16 @@ func goTypeArgs(params []string) string {
 func (g *Generator) formatType(t parser.TypeExpr) string {
 	switch typ := t.(type) {
 	case *parser.SimpleType:
+		// Trailing `[]` array suffix: `byte[]` → `[]byte`, `String[]` →
+		// `[]string`. Most call sites construct ArrayType directly, but
+		// the `as` parser stores its RHS as a single string and may
+		// include a `[]` suffix when the user wrote `value as byte[]`.
+		// Stripping here (and recursing on the element type) keeps the
+		// SimpleType branch the single source of truth for that shape.
+		if strings.HasSuffix(typ.Name, "[]") {
+			elem := strings.TrimSuffix(typ.Name, "[]")
+			return "[]" + g.formatType(&parser.SimpleType{Name: elem})
+		}
 		// If it's an active generic type parameter, keep as-is
 		if g.activeTypeParams[typ.Name] {
 			return typ.Name
