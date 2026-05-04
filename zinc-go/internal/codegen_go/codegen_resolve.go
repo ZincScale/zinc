@@ -372,6 +372,212 @@ func (g *Generator) isLocalVar(name string) bool {
 	return false
 }
 
+// --- Chained package qualifier resolution ----------------------------------
+
+// registerShadowAliases walks all declarations and statement bodies
+// and finds local-var names that collide with an imported package
+// alias. For each collision, it registers a generated Go alias for
+// the import via importGoAliases, so the codegen emits the import
+// with the alias and uses that alias in references — preventing the
+// local var from masking the package in Go's name resolution.
+//
+// Two-pass shape needed because var declarations inside function
+// bodies are emitted before later code in the same function may
+// reference the import via FQN; without a pre-pass the early lines
+// would emit using the unaliased package name and Go would reject
+// them once the import alias gets set later.
+func (g *Generator) registerShadowAliases(prog *parser.Program) {
+	if len(g.importMap) == 0 {
+		return
+	}
+	shadows := make(map[string]bool)
+	collectStmtVarNames(prog.Stmts, shadows)
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.FnDecl:
+			if decl.Body != nil {
+				collectStmtVarNames(decl.Body.Stmts, shadows)
+			}
+			for _, p := range decl.Params {
+				shadows[p.Name] = true
+			}
+		case *parser.ClassDecl:
+			for _, m := range decl.Methods {
+				if m.Body != nil {
+					collectStmtVarNames(m.Body.Stmts, shadows)
+				}
+				for _, p := range m.Params {
+					shadows[p.Name] = true
+				}
+			}
+		}
+	}
+	for name := range shadows {
+		if goPath, ok := g.importMap[name]; ok {
+			if _, already := g.importGoAliases[goPath]; already {
+				continue
+			}
+			parts := strings.Split(goPath, "/")
+			alias := name + "Pkg"
+			if len(parts) >= 2 {
+				parent := parts[len(parts)-2]
+				leaf := parts[len(parts)-1]
+				if leaf != "" {
+					leaf = strings.ToUpper(leaf[:1]) + leaf[1:]
+				}
+				alias = parent + leaf
+			}
+			alias = strings.ReplaceAll(alias, "-", "_")
+			g.importGoAliases[goPath] = alias
+		}
+	}
+}
+
+// collectStmtVarNames recursively walks statements collecting names
+// declared by VarStmt (locals). Used by registerShadowAliases to
+// know which package aliases will be shadowed by user code.
+func collectStmtVarNames(stmts []parser.Stmt, out map[string]bool) {
+	for _, s := range stmts {
+		switch v := s.(type) {
+		case *parser.VarStmt:
+			out[v.Name] = true
+		case *parser.BlockStmt:
+			collectStmtVarNames(v.Stmts, out)
+		case *parser.IfStmt:
+			if v.Then != nil {
+				collectStmtVarNames(v.Then.Stmts, out)
+			}
+			if v.ElseStmt != nil {
+				collectStmtVarNames([]parser.Stmt{v.ElseStmt}, out)
+			}
+		case *parser.ForStmt:
+			if v.Body != nil {
+				collectStmtVarNames(v.Body.Stmts, out)
+			}
+		case *parser.WhileStmt:
+			if v.Body != nil {
+				collectStmtVarNames(v.Body.Stmts, out)
+			}
+		case *parser.MatchStmt:
+			for _, arm := range v.Cases {
+				if arm.Body != nil {
+					collectStmtVarNames(arm.Body.Stmts, out)
+				}
+			}
+		}
+	}
+}
+
+// chainSegments walks a SelectorExpr/Ident chain right-to-left and
+// returns segments left-to-right. Returns ok=false for shapes that
+// can't form a pure dotted path (calls, indexing, etc.). Used by
+// formatCallExpr to recognize multi-segment package qualifiers like
+// `fabric.api.SchemaRegistryApiHandler` — the leaf segment alone may
+// alias a local var, so disambiguating via the parent path matters.
+func chainSegments(e parser.Expr) ([]string, bool) {
+	switch v := e.(type) {
+	case *parser.Ident:
+		return []string{v.Name}, true
+	case *parser.SelectorExpr:
+		prefix, ok := chainSegments(v.Object)
+		if !ok {
+			return nil, false
+		}
+		return append(prefix, v.Field), true
+	}
+	return nil, false
+}
+
+// lookupImportByChain finds the import alias whose Go path's tail
+// matches the slash-joined chain. The chain must have at least 2
+// segments — single-segment lookups are handled by the existing
+// isZincSubpackage / isImportAlias path.
+//
+// Example: chain ["fabric", "api"] joined to "fabric/api" matches
+// importMap["api"] = "zinc-flow/fabric/api" (suffix match).
+func (g *Generator) lookupImportByChain(chain []string) (alias, goPath string, ok bool) {
+	if len(chain) < 2 {
+		return "", "", false
+	}
+	suffix := strings.Join(chain, "/")
+	for a, gp := range g.importMap {
+		if gp == suffix || strings.HasSuffix(gp, "/"+suffix) {
+			return a, gp, true
+		}
+	}
+	return "", "", false
+}
+
+// effectiveGoAlias returns the Go alias to use when emitting a
+// qualified call to the given import. If the natural alias (the
+// import's leaf segment) is shadowed by a user-scope name (local
+// var, param, field), a generated alias is registered in
+// importGoAliases and returned — letting the user write
+// `fabric.api.X(...)` as a deconfliction tactic when their function
+// already has `var api = ...`.
+func (g *Generator) effectiveGoAlias(alias, goPath string) string {
+	if !g.isUserScopeShadow(alias) {
+		return alias
+	}
+	if existing, ok := g.importGoAliases[goPath]; ok && existing != alias {
+		return existing
+	}
+	parts := strings.Split(goPath, "/")
+	gen := alias + "Pkg"
+	if len(parts) >= 2 {
+		parent := parts[len(parts)-2]
+		leaf := parts[len(parts)-1]
+		if leaf != "" {
+			leaf = strings.ToUpper(leaf[:1]) + leaf[1:]
+		}
+		gen = parent + leaf
+	}
+	gen = strings.ReplaceAll(gen, "-", "_")
+	g.importGoAliases[goPath] = gen
+	return gen
+}
+
+// resolveQualifiedPackage tries to interpret callee.Object as a
+// package qualifier. Returns the Zinc-side alias (the leaf, used to
+// look up subpkgExports etc.), the Go-side alias to emit (= leaf
+// unless registered in importGoAliases via shadow auto-aliasing),
+// and the goPath. Returns ok=false when the chain doesn't resolve.
+func (g *Generator) resolveQualifiedPackage(obj parser.Expr) (zincAlias, goAlias, goPath string, ok bool) {
+	// Single-Ident form: existing logic. Must not be user-scope-shadowed
+	// and must name a known subpackage or import alias. (Multi-segment
+	// FQN below skips the shadow gate since the chained form is
+	// unambiguous — the user has explicitly disambiguated.)
+	if ident, isIdent := obj.(*parser.Ident); isIdent {
+		if g.isUserScopeShadowIdent(ident) {
+			return "", "", "", false
+		}
+		if !(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
+			return "", "", "", false
+		}
+		gp := g.importMap[ident.Name]
+		return ident.Name, g.goAliasFor(ident.Name, gp), gp, true
+	}
+	// Multi-segment chain: fabric.api.X — try to match the chain
+	// against an imported Go path. The leaf alias may be shadowed; if
+	// so, effectiveGoAlias generates a fresh import alias.
+	if chain, chainOk := chainSegments(obj); chainOk && len(chain) >= 2 {
+		if alias, gp, ok := g.lookupImportByChain(chain); ok {
+			return alias, g.effectiveGoAlias(alias, gp), gp, true
+		}
+	}
+	return "", "", "", false
+}
+
+// goAliasFor returns the Go alias to emit for a Zinc-side import
+// alias. Honors any registered Go-side alias (from shadow pre-scan
+// or explicit `import X as Y`). Defaults to the alias itself.
+func (g *Generator) goAliasFor(zincAlias, goPath string) string {
+	if alias, ok := g.importGoAliases[goPath]; ok {
+		return alias
+	}
+	return zincAlias
+}
+
 // --- Package/visibility helpers ----------------------------------------------
 
 // lookupClassDecl finds a ClassDecl by name across local structs and
@@ -1027,6 +1233,15 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			// Ensure the package is imported for any qualified type reference
 			if goPath, ok := g.importMap[pkgPrefix]; ok {
 				g.needImport(goPath)
+				// If the import was auto-aliased on the Go side (shadow
+				// pre-scan or `import X as Y`), rewrite the qualified
+				// name to use the Go alias. Without this, code like
+				// `bytes.Buffer` would emit literally even though the
+				// import is `bytesPkg "bytes"`, breaking Go resolution.
+				if alias, ok := g.importGoAliases[goPath]; ok {
+					typ = &parser.SimpleType{Name: alias + "." + typeName}
+					pkgPrefix = alias
+				}
 			}
 			if g.isZincSubpackage(pkgPrefix) {
 				if goPath, ok := g.importMap[pkgPrefix]; ok {

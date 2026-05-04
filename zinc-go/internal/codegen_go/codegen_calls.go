@@ -105,40 +105,33 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// in a project with a `src/processors/` sibling would misread
 	// `processors.containsKey(...)` as a package call (ZCA-10).
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if ident, ok := sel.Object.(*parser.Ident); ok &&
-			!g.isUserScopeShadowIdent(ident) &&
-			(g.isZincSubpackage(ident.Name) || g.isImportAlias(ident.Name)) {
-			pkg := ident.Name
+		if zincAlias, goAlias, goPath, ok := g.resolveQualifiedPackage(sel.Object); ok {
 			name := sel.Field
-			goPath := ""
-			if gp, ok := g.importMap[pkg]; ok {
-				g.needImport(gp)
-				goPath = gp
+			if goPath != "" {
+				g.needImport(goPath)
 			}
 			// Auto-pointer-wrap for explicit `*T` Go params. `any`-shape
 			// sinks like avro.Unmarshal require the user to write `&x`
 			// explicitly. isFFI is true only for import-alias calls
 			// (third-party Go modules) — zinc subpackage calls don't
 			// permit `&` because they aren't going across the FFI boundary.
-			isFFI := g.isImportAlias(ident.Name) && !g.isZincSubpackage(ident.Name)
+			isFFI := g.isImportAlias(zincAlias) && !g.isZincSubpackage(zincAlias)
 			args := g.formatCallArgsWithPointerWrap(goPath, name, c.Args, isFFI)
 
 			// Check what kind of export this is
 			kind := ""
-			if exports, ok := g.subpkgExports[pkg]; ok {
+			if exports, ok := g.subpkgExports[zincAlias]; ok {
 				kind = exports[name]
 			}
 
 			// For import aliases (external deps), check Go type info.
 			// IsStruct and HasFunc fall back to AST parsing when type
 			// resolution fails (e.g., transitive deps not available).
-			if kind == "" && g.isImportAlias(ident.Name) {
-				if goPath, ok := g.importMap[pkg]; ok {
-					if g.goResolver.IsStruct(goPath, name) {
-						kind = "class"
-					} else if g.goResolver.HasFunc(goPath, "New"+name) {
-						kind = "class"
-					}
+			if kind == "" && g.isImportAlias(zincAlias) {
+				if g.goResolver.IsStruct(goPath, name) {
+					kind = "class"
+				} else if g.goResolver.HasFunc(goPath, "New"+name) {
+					kind = "class"
 				}
 			}
 
@@ -155,10 +148,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			switch kind {
 			case "data", "class":
 				// Constructor: core.FlowFile(...) → core.NewFlowFile(...)
-				return fmt.Sprintf("%s.New%s%s(%s)", pkg, name, goTypeArgStr, args)
+				return fmt.Sprintf("%s.New%s%s(%s)", goAlias, name, goTypeArgStr, args)
 			default:
 				// Function or unknown: core.greet(...) → core.Greet(...)
-				return fmt.Sprintf("%s.%s%s(%s)", pkg, exportName(name), goTypeArgStr, args)
+				return fmt.Sprintf("%s.%s%s(%s)", goAlias, exportName(name), goTypeArgStr, args)
 			}
 		}
 	}
@@ -715,10 +708,14 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				// package's factory function explicitly.
 				return fmt.Sprintf("/* new %s with args: use named-arg form pkg.Type(field=value) or pkg.NewType(args) */", callee)
 			}
-			// Auto-import the package if needed
+			// Auto-import the package if needed; also rewrite the leading
+			// segment if the import was auto-aliased on the Go side.
 			if dot := strings.Index(callee, "."); dot >= 0 {
 				if goPath, ok := g.importMap[callee[:dot]]; ok {
 					g.needImport(goPath)
+					if alias, ok := g.importGoAliases[goPath]; ok {
+						callee = alias + callee[dot:]
+					}
 				}
 			}
 			return fmt.Sprintf("&%s{}", callee+goTypeArgStr)
@@ -747,30 +744,34 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		// unqualifiedNames table when bound is unset.
 		if g.bound != nil {
 			if sym, ok := g.bound.Bindings[ident]; ok && sym.Pkg != "" {
-				if goPath, ok := g.importMap[sym.Pkg]; ok {
+				goPath := g.importMap[sym.Pkg]
+				if goPath != "" {
 					g.needImport(goPath)
 				}
+				goAlias := g.goAliasFor(sym.Pkg, goPath)
 				switch sym.Kind {
 				case typechecker.SymType, typechecker.SymClass, typechecker.SymDataClass:
 					// Constructor call: pkg.NewType(args). Both classes and
 					// data classes have NewType factories in Go.
-					ctorName := sym.Pkg + ".New" + exportName(ident.Name) + goTypeArgStr
+					ctorName := goAlias + ".New" + exportName(ident.Name) + goTypeArgStr
 					return fmt.Sprintf("%s(%s)", ctorName, args)
 				case typechecker.SymFn:
-					return fmt.Sprintf("%s.%s%s(%s)", sym.Pkg, exportName(ident.Name), goTypeArgStr, args)
+					return fmt.Sprintf("%s.%s%s(%s)", goAlias, exportName(ident.Name), goTypeArgStr, args)
 				}
 			}
 		}
 		if entry, ok := g.unqualifiedNames[ident.Name]; ok {
-			if goPath, ok := g.importMap[entry.pkg]; ok {
+			goPath := g.importMap[entry.pkg]
+			if goPath != "" {
 				g.needImport(goPath)
 			}
+			goAlias := g.goAliasFor(entry.pkg, goPath)
 			switch entry.kind {
 			case "data", "class":
-				ctorName := entry.pkg + ".New" + exportName(entry.name) + goTypeArgStr
+				ctorName := goAlias + ".New" + exportName(entry.name) + goTypeArgStr
 				return fmt.Sprintf("%s(%s)", ctorName, args)
 			case "func":
-				return fmt.Sprintf("%s.%s%s(%s)", entry.pkg, exportName(entry.name), goTypeArgStr, args)
+				return fmt.Sprintf("%s.%s%s(%s)", goAlias, exportName(entry.name), goTypeArgStr, args)
 			}
 		}
 	}

@@ -202,6 +202,18 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				return fmt.Sprintf("%s.%s", recvName, gn)
 			}
 		}
+		// Package-qualified reference (e.g. `bytes.Buffer`, `core.Schema`).
+		// When the import was auto-aliased on the Go side (shadow pre-scan
+		// or explicit `import X as Y`), emit using the Go-side alias —
+		// otherwise the reference would point to the unaliased package
+		// name that no longer resolves in Go scope.
+		if ident, isIdent := expr.Object.(*parser.Ident); isIdent && !g.isUserScopeShadowIdent(ident) {
+			if goPath, ok := g.importMap[ident.Name]; ok {
+				if alias, ok := g.importGoAliases[goPath]; ok {
+					return fmt.Sprintf("%s.%s", alias, exportName(expr.Field))
+				}
+			}
+		}
 		return fmt.Sprintf("%s.%s", g.formatExpr(expr.Object), exportName(expr.Field))
 	case *parser.IndexExpr:
 		return fmt.Sprintf("%s[%s]", g.formatExpr(expr.Object), g.formatExpr(expr.Index))

@@ -832,6 +832,14 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	// Allows writing Processor instead of lib.Processor.
 	g.buildUnqualifiedNames(prog)
 
+	// Shadow pre-scan: find all top-level var names + nested var names
+	// inside function/method bodies. Any name matching an imported
+	// package alias triggers a Go-side auto-alias for that import, so
+	// references to the import don't get masked by the local var when
+	// Go resolves the name. Lets the user write `var api = ...` plus
+	// `fabric.api.X(...)` (or even `ApiHandler(fab)`) without a clash.
+	g.registerShadowAliases(prog)
+
 	// First pass: generate body into a separate buffer to collect imports
 	bodyGen := *g
 	bodyGen.buf.Reset()
