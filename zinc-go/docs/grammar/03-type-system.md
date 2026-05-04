@@ -303,17 +303,6 @@ print(name.length)            // ERROR: name is String? — must check or unwrap
 
 The narrowing applies to the `then` branch only. After the `if`, the original nullable type is restored unless the `else` branch returned/threw.
 
-### 5.3 Forced unwrap
-
-A `T? force` (`force` is a method on `T?`) panics if the value is null and returns the underlying `T` otherwise. Use sparingly; prefer guards.
-
-```zinc
-String? maybe = lookup(id)
-String s = maybe.force()        // panics if maybe is null
-```
-
-(Open question for Phase 3: should this be a method `.force()`, an operator `!`, or an explicit cast `maybe as String`? Today's `as` already serves this; reuse it.)
-
 ### 5.4 `null`-coalescing
 
 The `??` operator was **dropped** (decision 2026-05-01). Use an `if`:
@@ -487,13 +476,12 @@ help: cast through Avro JSON: `parseHambaSchema(emitSchemaJson(recordValues))`
 
 ## 10. Open questions for Phase 3
 
-1. **Forced unwrap syntax.** §5.3: `.force()` method, `!` operator, or reuse `as T`. Pick one.
-2. **Ternary `?:`.** Today's grammar uses `if cond : a else : b` for expression-position if. Should `cond ? a : b` be sugar for the same thing? Or stay with the `if` form only?
-3. **`Stringer` automatic conformance.** Should every type implement `String()` by default (Go-style auto-derive), or require an explicit interface declaration?
-4. **Equality customization.** Today's `==` is Go-identity for class pointers. Should classes be allowed to override `==` via an `equals` method (Java/Kotlin style)? Decision impacts `Map<Class, V>` key-hashing.
-5. **`any` widening into Zinc-internal calls.** Currently the spec restricts `any` to FFI seams. If a Zinc lib needs to accept "any value" (e.g., a logging API), we'd need a widening rule. Defer or design.
-6. **Generic specialization.** Should generic functions emit one Go function per type instantiation (specialization, fast), or use Go's interface dispatch under the hood (one impl, slower)? Go's generics support both; the spec needs to commit.
-7. **Constraint inference.** When a user writes `<T> max(T a, T b)` and the body uses `<` on `T`, can the compiler infer `T : Comparable` automatically? Or is the bound declaration required? Defer to 1.x.
-8. **Cross-pkg interface satisfaction.** A Zinc class in package A can satisfy a Zinc interface in package B without explicit `: B.IFace`. Today: structural satisfaction (Go-style). Decision: keep structural, or require explicit declaration (Java-style)? Affects user expectations.
+1. **Ternary `?:`.** Today's grammar uses `if cond : a else : b` for expression-position if. Should `cond ? a : b` be sugar for the same thing? Or stay with the `if` form only?
+2. **`Stringer` automatic conformance.** Should every type implement `String()` by default (Go-style auto-derive), or require an explicit interface declaration?
+3. **Equality customization.** Today's `==` is Go-identity for class pointers. Should classes be allowed to override `==` via an `equals` method (Java/Kotlin style)? Decision impacts `Map<Class, V>` key-hashing.
+4. **`any` widening into Zinc-internal calls.** Currently the spec restricts `any` to FFI seams. If a Zinc lib needs to accept "any value" (e.g., a logging API), we'd need a widening rule. Defer or design.
+5. **Generic specialization.** Should generic functions emit one Go function per type instantiation (specialization, fast), or use Go's interface dispatch under the hood (one impl, slower)? Go's generics support both; the spec needs to commit.
+6. **Constraint inference.** When a user writes `<T> max(T a, T b)` and the body uses `<` on `T`, can the compiler infer `T : Comparable` automatically? Or is the bound declaration required? Defer to 1.x.
+7. **Cross-pkg interface satisfaction.** A Zinc class in package A can satisfy a Zinc interface in package B without explicit `: B.IFace`. Today: structural satisfaction (Go-style). Decision: keep structural, or require explicit declaration (Java-style)? Affects user expectations.
 
 These don't block Phase 2 sign-off; Phase 3 needs to answer them as the typechecker is implemented.

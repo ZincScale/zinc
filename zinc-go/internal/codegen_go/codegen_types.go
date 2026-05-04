@@ -750,6 +750,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	prevMethodRetType := g.currentMethodRetType
 	prevIsThrower := g.currentFuncIsThrower
 	prevIsTuple := g.currentReturnIsTuple
+	prevRetOpt := g.currentReturnOptional
 	prevValueGoTypes := g.currentThrowerValueGoTypes
 	prevDeclaredThrower := g.currentReturnIsDeclaredThrower
 	g.currentFuncIsThrower = canError || declaredThrower
@@ -763,6 +764,11 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	}
 	_, isTuple := m.ReturnType.(*parser.TupleType)
 	g.currentReturnIsTuple = isTuple
+	_, isOptional := m.ReturnType.(*parser.OptionalType)
+	g.currentReturnOptional = isOptional
+	if isOptional && !canError {
+		g.currentReturnType = goRetType
+	}
 	g.currentMethodRetType = goRetType
 
 	// Map Zinc method names to Go equivalents
@@ -826,6 +832,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	g.currentMethodRetType = prevMethodRetType
 	g.currentFuncIsThrower = prevIsThrower
 	g.currentReturnIsTuple = prevIsTuple
+	g.currentReturnOptional = prevRetOpt
 	g.currentThrowerValueGoTypes = prevValueGoTypes
 	g.currentReturnIsDeclaredThrower = prevDeclaredThrower
 }

@@ -539,6 +539,14 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				if returnTypeDeclaresError(m.ReturnType) {
 					g.errorFuncs[key] = true
 				}
+				// Track method-return optionality so implicit-self method
+				// calls inside another method of the same class get
+				// recognized as pointer-optional vars at the bind site.
+				// (The typechecker doesn't currently resolve method-call
+				// return types, so this codegen-side table fills the gap.)
+				if _, ok := m.ReturnType.(*parser.OptionalType); ok {
+					g.funcReturnsOptional[m.Name] = true
+				}
 			}
 			for _, f := range decl.Fields {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub

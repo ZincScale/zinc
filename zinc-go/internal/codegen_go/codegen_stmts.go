@@ -469,12 +469,30 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
-		// Track pointer vars from optional-returning functions
+		// Track pointer vars from optional-returning functions. Three paths:
+		//   1. Top-level FnDecls and class methods — `funcReturnsOptional`
+		//      was populated during collectDecls (keyed by unqualified
+		//      name; methods register their own name there too).
+		//   2. Method calls on a typed receiver — `obj.method()` where
+		//      obj's class has the method registered in funcReturnsOptional.
+		//   3. Bind side-map fallback — read the V2Type for the init
+		//      expression and check `Nullable`. Picks up paths the
+		//      codegen-side tables don't cover.
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
 				if g.funcReturnsOptional[ident.Name] {
 					g.ptrVars[v.Name] = true
 				}
+			}
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if g.funcReturnsOptional[sel.Field] {
+					g.ptrVars[v.Name] = true
+				}
+			}
+		}
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[v.Value]; ok && t.Nullable {
+				g.ptrVars[v.Name] = true
 			}
 		}
 
@@ -804,14 +822,27 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		}
 	}
 
-	// Optional return: wrap value with new() for pointer type
+	// Optional return: a function declared `T?` lowers to a `*T` Go
+	// signature (per spec §1.3). The body's return value may be any of:
+	//   - `null`             → emit `return nil`
+	//   - already a pointer   → pass through (class types format with a
+	//                          leading `*`, so no wrap; same for an
+	//                          existing `*T` ident or a function call
+	//                          whose return type is a pointer)
+	//   - a value type        → wrap with `_zincPtr(...)` so the value
+	//                          gets boxed into a heap pointer that
+	//                          satisfies the `*T` return slot
 	if g.currentReturnOptional {
 		if _, ok := r.Value.(*parser.NullLit); ok {
 			g.writeln("return nil")
 			return
 		}
 		val := g.formatExpr(r.Value)
-		g.writeln("return new(%s)", val)
+		if g.valueIsAlreadyPointer(r.Value) {
+			g.writeln("return %s", val)
+			return
+		}
+		g.writeln("return %s", g.wrapAsPointer(val))
 		return
 	}
 
@@ -2087,10 +2118,11 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		if expr.IsCheck {
 			return &parser.TypeAssertExpr{Object: g.hoistArg(expr.Object), TypeName: expr.TypeName, IsCheck: true}
 		}
-		// `as` cast — failable. Emit comma-ok + error guard, replace
-		// with an Ident pointing at the bound value. The enclosing
-		// function must declare `error` in its return tail to absorb
-		// the propagation emitted by emitErrReturn.
+		// `as` cast — failable. Emit comma-ok + error guard (or, for
+		// `T? as T` unwrap, nil-check + deref), replace with an Ident
+		// pointing at the bound value. The enclosing function must
+		// declare `error` in its return tail to absorb the propagation
+		// emitted by emitErrReturn.
 		inner := g.hoistArg(expr.Object)
 		count := g.errVarCount
 		tmpName := fmt.Sprintf("_p%d", count)
@@ -2098,7 +2130,26 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		errName := g.nextErrName() // bumps errVarCount
 		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		g.needImport("fmt")
-		g.writeln("%s, %s := %s.(%s)", tmpName, okName, g.formatExpr(inner), goType)
+		operand := g.formatExpr(inner)
+		if g.exprIsPointerOptional(inner) {
+			// Optional unwrap: `T? as T`. Operand is `*T`; nil → null
+			// unwrap error, non-nil → deref. Same propagation/handler
+			// shape as the type-assertion path.
+			g.writeln("var %s %s", tmpName, goType)
+			g.writeln("%s := %s != nil", okName, operand)
+			g.writeln("if %s {", okName)
+			g.indent++
+			g.writeln("%s = *%s", tmpName, operand)
+			g.indent--
+			g.writeln("} else {")
+			g.indent++
+			g.writeln("%s := fmt.Errorf(%q)", errName, "null unwrap (as "+expr.TypeName+")")
+			g.emitErrReturn(errName)
+			g.indent--
+			g.writeln("}")
+			return &parser.Ident{Name: tmpName}
+		}
+		g.writeln("%s, %s := %s.(%s)", tmpName, okName, operand, goType)
 		g.writeln("if !%s {", okName)
 		g.indent++
 		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+expr.TypeName)
@@ -2216,17 +2267,55 @@ func (g *Generator) emitErrorPropagatingVar(v *parser.VarStmt) {
 // assertion. On mismatch, the handler runs (if present) or the error
 // propagates via emitErrReturn. Never panics. The enclosing function
 // must declare `error` in its return tail for propagation to compile.
+//
+// `T? as T` (forced-unwrap form) takes a different shape: the operand
+// is stored as `*T` (per the T? lowering), not as an interface{}. Go
+// rejects `any(*T).(T)` for non-pointer-to-interface concretes, and
+// even where it works the runtime semantics ("does the dynamic type
+// match T?") aren't what `T? as T` means ("is the pointer non-nil,
+// then deref"). For the optional-unwrap shape we emit the nil-check
+// + deref directly, with the same `or { }` / auto-propagate handling
+// for the null case.
 func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertExpr) {
 	count := g.errVarCount
 	okName := fmt.Sprintf("_ok%d", count)
 	errName := g.nextErrName() // bumps errVarCount
 	goType := g.formatType(&parser.SimpleType{Name: ta.TypeName})
 	g.needImport("fmt")
+	operand := g.formatExpr(ta.Object)
+
+	// Optional unwrap path: operand is `*T`. Go's type-assertion shape
+	// doesn't apply here.
+	if g.exprIsPointerOptional(ta.Object) {
+		g.writeln("var %s %s", v.Name, goType)
+		g.writeln("%s := %s != nil", okName, operand)
+		g.writeln("if %s {", okName)
+		g.indent++
+		g.writeln("%s = *%s", v.Name, operand)
+		g.indent--
+		g.writeln("} else {")
+		g.indent++
+		if v.OrHandler != nil && v.OrHandler.Body != nil {
+			g.writeln("%s := fmt.Errorf(%q)", errName, "null unwrap (as "+ta.TypeName+")")
+			g.writeln("_ = %s", errName)
+			savedErrVar := g.currentErrVar
+			g.currentErrVar = errName
+			g.emitOrBlock(v.OrHandler.Body)
+			g.currentErrVar = savedErrVar
+		} else {
+			g.writeln("%s := fmt.Errorf(%q)", errName, "null unwrap (as "+ta.TypeName+")")
+			g.emitErrReturn(errName)
+		}
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
 	// Wrap operand in any() so type assertion compiles regardless of the
 	// operand's declared type. Bare `concrete.(T)` is rejected by Go when
 	// the concrete type isn't an interface, which broke `as pkg.Type`
 	// against any concrete-typed local (e.g. `r := strings.NewReader(...)`).
-	g.writeln("%s, %s := any(%s).(%s)", v.Name, okName, g.formatExpr(ta.Object), goType)
+	g.writeln("%s, %s := any(%s).(%s)", v.Name, okName, operand, goType)
 	g.writeln("if !%s {", okName)
 	g.indent++
 	if v.OrHandler != nil && v.OrHandler.Body != nil {

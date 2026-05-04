@@ -256,6 +256,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
 	case *parser.TypeAssertExpr:
 		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		operand := g.formatExpr(expr.Object)
 		if expr.IsCheck {
 			// Use Go's native comma-ok type assertion wrapped in any() so it
 			// works regardless of the operand's declared type (concrete value,
@@ -264,10 +265,18 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			// short name (e.g. "*avro.PrimitiveSchema") while the formatted
 			// type string carries the import alias (e.g. "*hambaAvro.PrimitiveSchema"),
 			// so the strings never matched and `is pkg.Type` always returned false.
-			return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return _ok }()", g.formatExpr(expr.Object), goType)
+			return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return _ok }()", operand, goType)
+		}
+		// `T? as T` — explicit null unwrap (forced unwrap form). The operand
+		// is stored as `*T` (per the T? lowering); panic on nil, deref on
+		// non-nil. Detection: the operand's static type is pointer-optional.
+		// The deref form replaces the default `any(x).(T)` shape, which Go
+		// rejects for non-interface operands (concrete pointers).
+		if g.exprIsPointerOptional(expr.Object) {
+			return fmt.Sprintf("func() %s { if %s == nil { panic(\"null unwrap (as %s)\") }; return *%s }()", goType, operand, expr.TypeName, operand)
 		}
 		// Wrap operand in any() — see emitTypeAssertVar for rationale.
-		return fmt.Sprintf("any(%s).(%s)", g.formatExpr(expr.Object), goType)
+		return fmt.Sprintf("any(%s).(%s)", operand, goType)
 	case *parser.SafeNavExpr:
 		obj := g.formatExpr(expr.Object)
 		deref := "*" + obj
