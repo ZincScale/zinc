@@ -1,0 +1,14 @@
+// Two classes in the `widgets` package — one used to shadow the
+// package alias by var name, the other built via FQN past the shadow.
+
+class Widget {
+    pub String name
+    init(String name) { this.name = name }
+    pub String describe() { return "widget(${name})" }
+}
+
+class Gadget {
+    pub String name
+    init(String name) { this.name = name }
+    pub String describe() { return "gadget(${name})" }
+}

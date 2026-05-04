@@ -1,0 +1,6 @@
+head: [10 20 30]
+tail: [30 40 50]
+prefix: [10 20]
+both: [20 30 40]
+popped: [10 20 30 40]
+mid: bcd

@@ -2161,13 +2161,19 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		operand := g.formatExpr(inner)
 		if g.exprIsPointerOptional(inner) {
 			// Optional unwrap: `T? as T`. Operand is `*T`; nil → null
-			// unwrap error, non-nil → deref. Same propagation/handler
-			// shape as the type-assertion path.
+			// unwrap error, non-nil → pass through (class target,
+			// goType already `*Tag`) or deref (value-type target,
+			// goType `string` while operand is `*string`).
+			targetIsPointer := strings.HasPrefix(goType, "*")
 			g.writeln("var %s %s", tmpName, goType)
 			g.writeln("%s := %s != nil", okName, operand)
 			g.writeln("if %s {", okName)
 			g.indent++
-			g.writeln("%s = *%s", tmpName, operand)
+			if targetIsPointer {
+				g.writeln("%s = %s", tmpName, operand)
+			} else {
+				g.writeln("%s = *%s", tmpName, operand)
+			}
 			g.indent--
 			g.writeln("} else {")
 			g.indent++
@@ -2313,13 +2319,22 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	operand := g.formatExpr(ta.Object)
 
 	// Optional unwrap path: operand is `*T`. Go's type-assertion shape
-	// doesn't apply here.
+	// doesn't apply here. For value-type T (String? → *string), the
+	// non-null branch dereferences to obtain T. For class-type T
+	// (Tag? → *Tag, since classes already lower to *Tag and T? doesn't
+	// double-pointer per the ee605e0 fix), the operand IS the *Tag and
+	// no deref is needed — the target var is also *Tag.
 	if g.exprIsPointerOptional(ta.Object) {
+		targetIsPointer := strings.HasPrefix(goType, "*")
 		g.writeln("var %s %s", v.Name, goType)
 		g.writeln("%s := %s != nil", okName, operand)
 		g.writeln("if %s {", okName)
 		g.indent++
-		g.writeln("%s = *%s", v.Name, operand)
+		if targetIsPointer {
+			g.writeln("%s = %s", v.Name, operand)
+		} else {
+			g.writeln("%s = *%s", v.Name, operand)
+		}
 		g.indent--
 		g.writeln("} else {")
 		g.indent++

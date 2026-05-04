@@ -1,0 +1,30 @@
+// Regression: `value as byte[]` parses and lowers correctly.
+// The `as` form previously accepted only IDENT (DOT IDENT)* as the
+// RHS, so the trailing `[]` was stranded — it parsed as
+// `(value as byte)` plus a stray empty list literal, producing
+// broken Go (`any(value).(byte)` and a leftover `[]interface{}{}`
+// expression). The fix accepts `[]` as a suffix on the type name
+// and codegen routes it through formatType which strips and emits
+// Go array form.
+
+void main() {
+    Object payload = "zinc".toBytes()
+    var bs = payload as byte[] or {
+        print("unreachable: payload is byte[]")
+        return
+    }
+    print("len: ${len(bs)}")
+    print("first: ${bs[0]}")
+    print("decoded: ${string(bs)}")
+
+    // Cross-cast that fails: Object holding String, asserted as byte[].
+    // The handler always returns, so the var goes unused — explicit
+    // `_ = fallback` suppresses Go's unused-variable diagnostic.
+    Object wrong = "not bytes"
+    var fallback = wrong as byte[] or {
+        print("handler ran: wrong shape")
+        return
+    }
+    _ = fallback
+    print("unreachable")
+}

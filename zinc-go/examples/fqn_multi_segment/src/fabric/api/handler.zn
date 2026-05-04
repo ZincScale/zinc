@@ -1,0 +1,15 @@
+// A class in a nested subpackage `fabric/api`. Both unqualified
+// (`Greeter()`) and fully-qualified (`fabric.api.Greeter()`) forms
+// must reach this constructor.
+
+class Greeter {
+    pub String name
+
+    init(String name) {
+        this.name = name
+    }
+
+    pub String hello() {
+        return "hello, ${name}"
+    }
+}

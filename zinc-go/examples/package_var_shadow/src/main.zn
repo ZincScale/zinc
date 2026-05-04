@@ -1,0 +1,25 @@
+// Local var name shadows imported package alias.
+// `import widgets` makes `widgets` an alias for the nested package.
+// Then we declare `var widgets = Widget(...)` which shadows that alias.
+// Without the auto-alias, the codegen would emit `widgets.NewGadget(...)`
+// for the second constructor call and Go would resolve `widgets` to
+// the local var (a *Widget) — compile error.
+//
+// Fix: zinc-go pre-scans for shadows, registers an auto-aliased Go
+// import (e.g. `widgetsPkg "..."`). Both unqualified `Gadget(...)` and
+// fully-qualified `widgets.Gadget(...)` resolve through the alias.
+
+import widgets
+
+void main() {
+    // First constructor — at this point `widgets` isn't shadowed yet
+    // (the var hasn't been declared). The shadow pre-scan still kicks
+    // in because some statement later declares `var widgets`.
+    var widgets = Widget("first")
+    print(widgets.describe())
+
+    // After the shadow, this unqualified Gadget() call must still
+    // resolve to the package's constructor — using the auto-alias.
+    var g = Gadget("gadget-via-shadow")
+    print(g.describe())
+}

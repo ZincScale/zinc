@@ -1,0 +1,35 @@
+// Regression: range-as-index `xs[a..b]` lowers to Go slice syntax
+// `xs[a:b]`. Previously parsed as IndexExpr with a RangeExpr index
+// and codegen emitted a placeholder (`xs[/* range a..b */]`) — broken
+// Go. Fix: parser converts the IndexExpr-with-range form to a
+// SliceExpr at parse time. Inclusive form `a..=b` adds 1 to the
+// upper bound to match Go's exclusive `[low:high]` semantics.
+
+void main() {
+    var xs = [10, 20, 30, 40, 50]
+
+    // Standard exclusive slice.
+    var head = xs[0..3]
+    print("head: ${head}")          // [10 20 30]
+
+    // Open-ended forms — these went through the colon-syntax path
+    // already, but exercise here for coverage.
+    var tail = xs[2:]
+    print("tail: ${tail}")          // [30 40 50]
+
+    var prefix = xs[:2]
+    print("prefix: ${prefix}")      // [10 20]
+
+    // Inclusive form: a..=b includes b. Lowers to xs[a:b+1].
+    var both = xs[1..=3]
+    print("both: ${both}")          // [20 30 40]
+
+    // Stack-style truncation — drop the last element.
+    var popped = xs[0..len(xs) - 1]
+    print("popped: ${popped}")      // [10 20 30 40]
+
+    // String slicing — strings support the same syntax.
+    var s = "abcdef"
+    var mid = s[1..4]
+    print("mid: ${mid}")            // bcd
+}

@@ -1,0 +1,13 @@
+// Regression: T? is only valid for reference types. Value types
+// (int, long, float, double, byte, bool, String) always have a value
+// and cannot be null. Allowing them would force a *T lowering and
+// leak Go pointer semantics into source — equality, interpolation,
+// and concat would all need deref-with-nil-guard plumbing.
+//
+// The right shapes for "missing" semantics on a value-type return
+// are (T, bool), (T, error), or a default-returning accessor.
+
+void main() {
+    String? s = null
+    print("should not compile")
+}

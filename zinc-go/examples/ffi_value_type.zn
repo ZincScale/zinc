@@ -1,0 +1,25 @@
+// Regression: Go stdlib structs whose factory functions return T
+// (not *T) — like time.Time — must lower as value types in Zinc, not
+// as *T. The old heuristic ("struct + has any pointer-receiver method
+// → *T") wrongly bucketed time.Time as a pointer because some methods
+// (UnmarshalJSON etc.) take pointer receivers. The factory-return-shape
+// rule looks at exported package funcs returning the type and prefers
+// the value form when any return T.
+//
+// Spec parity: time.Now() / time.Date() / time.Unix() all return
+// time.Time by value. Idiomatic Go uses time.Time as a value.
+
+import time
+
+time.Time epoch() {
+    return time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+void main() {
+    var t = epoch()
+    // Year/Month/Day are value-receiver methods; if t were *time.Time
+    // these would still work via Go auto-deref, but our auto-`&`-take
+    // would have wrapped it as `&t` somewhere on the call path.
+    print("year: ${t.Year()}")
+    print("unix: ${t.Unix()}")
+}

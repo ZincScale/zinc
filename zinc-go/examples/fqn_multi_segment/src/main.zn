@@ -1,0 +1,18 @@
+// Multi-segment fully-qualified-name (FQN) constructor calls.
+// `import fabric/api` brings in the nested package `api`. Class
+// references can use the leaf alias (Greeter) OR the dotted-path
+// form (fabric.api.Greeter). Both must lower to the same Go call.
+
+import fabric/api
+
+void main() {
+    // Unqualified — class resolves through the unqualifiedNames table.
+    var g1 = Greeter("zinc")
+    print(g1.hello())
+
+    // Multi-segment FQN — chain matches imported path "fabric/api".
+    // Used as a deconfliction tactic when a local var would otherwise
+    // shadow the leaf alias (see package_var_shadow test).
+    var g2 = fabric.api.Greeter("multi-segment")
+    print(g2.hello())
+}

@@ -280,11 +280,13 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 			return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return _ok }()", operand, goType)
 		}
 		// `T? as T` — explicit null unwrap (forced unwrap form). The operand
-		// is stored as `*T` (per the T? lowering); panic on nil, deref on
-		// non-nil. Detection: the operand's static type is pointer-optional.
-		// The deref form replaces the default `any(x).(T)` shape, which Go
-		// rejects for non-interface operands (concrete pointers).
+		// is stored as `*T` (per the T? lowering); panic on nil, otherwise
+		// pass through as-is for class targets (already *T) or deref for
+		// value-type targets (e.g. String? → *string, target string).
 		if g.exprIsPointerOptional(expr.Object) {
+			if strings.HasPrefix(goType, "*") {
+				return fmt.Sprintf("func() %s { if %s == nil { panic(\"null unwrap (as %s)\") }; return %s }()", goType, operand, expr.TypeName, operand)
+			}
 			return fmt.Sprintf("func() %s { if %s == nil { panic(\"null unwrap (as %s)\") }; return *%s }()", goType, operand, expr.TypeName, operand)
 		}
 		// Wrap operand in any() — see emitTypeAssertVar for rationale.
@@ -799,6 +801,22 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 						return isPointerOptional(f.Type)
 					}
 				}
+			}
+		}
+	case *parser.CallExpr:
+		// `f(...)` or `obj.method(...)` returning T?. Function lookup
+		// matches against funcReturnsOptional which is populated for
+		// both top-level FnDecls and class methods at collectDecls
+		// time. The check uses bare callee name; package-qualified
+		// calls (`pkg.f(...)`) are conservatively false today.
+		if ident, ok := ex.Callee.(*parser.Ident); ok {
+			if g.funcReturnsOptional[ident.Name] {
+				return true
+			}
+		}
+		if sel, ok := ex.Callee.(*parser.SelectorExpr); ok {
+			if g.funcReturnsOptional[sel.Field] {
+				return true
 			}
 		}
 	}
