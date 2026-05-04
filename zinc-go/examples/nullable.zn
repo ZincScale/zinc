@@ -1,69 +1,67 @@
 // Regression: nullable types end-to-end.
 //
-// Before this work, nullables ("T?") worked only as function returns
-// and class fields, and even there were broken at the use site:
-//   - `String? foo` as a local statement didn't parse.
-//   - Assigning a literal to a nullable field/local failed because
-//     `*T` doesn't accept `T` (no auto-address-take).
-//   - Iterating a nullable collection failed because Go can't range
-//     over `*[]T` / `*map[K]V`.
-//   - Interpolating a nullable value printed the pointer address.
+// Spec rule: T? is only valid for reference types. Value types (int,
+// long, float, double, bool, byte, String) always have a value and
+// cannot be optional. Classes, List<T>, Map<K,V> can.
 //
-// After: all the natural shapes work. Strategy B drops the pointer for
-// collection nullables (`List<T>?` → `[]T`, etc.) so iteration / size
-// just work via Go's nil zero-value. Value nullables (`String?`,
-// `Class?`) still lower to `*T` but the codegen auto-takes-address on
-// assignment / call args (via the `_zincPtr` helper) and auto-derefs
-// on read (interpolation, etc.).
+// This test exercises the natural shapes for reference-type optionals:
+// declared then assigned, with initializer, left null, as a class
+// field, as a function parameter, and iteration / size on collection
+// optionals (which lower to nil-friendly slices/maps in Go).
+
+class Tag {
+    pub String label
+    init(String label) { this.label = label }
+}
 
 class Box {
-    pub String? name
+    pub Tag? tag
     pub List<int>? items
     pub Map<String, int>? scores
     init() {}
 }
 
-void describe(String? s) {
-    if (s == null) {
+void describe(Tag? t) {
+    if (t == null) {
         print("absent")
         return
     }
-    print("got: ${s}")
+    print("got: ${t.label}")
 }
 
 void main() {
     // Local declared then assigned.
-    String? a
-    a = "alpha"
+    Tag? a
+    a = Tag("alpha")
     describe(a)
 
     // Local with initializer.
-    String? b = "beta"
+    Tag? b = Tag("beta")
     describe(b)
 
     // Left as null.
-    String? c
+    Tag? c
     describe(c)
 
-    // Field assignments — auto-take-address makes the literal RHS work.
+    // Field assignments.
     var bx = Box()
-    bx.name = "the box"
+    bx.tag = Tag("the box")
     bx.items = [10, 20, 30]
     Map<String, int> sm = {"a": 1, "b": 2}
     bx.scores = sm
 
-    // Reading nullables — interpolation auto-derefs.
-    print("box.name = ${bx.name}")
+    // Reading nullables.
+    print("box.tag = ${bx.tag.label}")
     print("items size = ${bx.items.size()}")
     for (k, v in bx.scores) {
         print("score ${k}=${v}")
     }
 
     // Reassign to null.
-    bx.name = null
-    if (bx.name == null) { print("box.name cleared") }
+    bx.tag = null
+    if (bx.tag == null) { print("box.tag cleared") }
 
-    // Iterating a null List<T>? — zero iterations under Strategy B.
+    // Iterating a null List<T>? — zero iterations, nil-safe in Go.
     List<int>? empty
     for (x in empty) {
         print("never: ${x}")

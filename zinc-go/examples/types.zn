@@ -1,26 +1,46 @@
 // Types — Zinc v3
-// Demonstrates: nullable, safe navigation, type checks, equality
+// Demonstrates: nullable (ref types), safe navigation, type checks, equality
 
-// Nullable types
-String? findUser(String id) {
+// Nullable types — reference types only. Value types (String, int, etc.)
+// always have a value and cannot be optional; use (T, bool) or (T, error)
+// for missing-key shapes.
+class User {
+    pub String name
+    init(String name) { this.name = name }
+}
+
+User? findUser(String id) {
     if (id == "1") {
-        return "Alice"
+        return User("Alice")
     }
     return null
 }
 
-var user = findUser("1")
-print("found: ${user}")
+var found = findUser("1")
+if (found == null) {
+    print("found: null")
+} else {
+    print("found: ${found.name}")
+}
 
 var missing = findUser("99")
-print("missing: ${missing}")
+if (missing == null) {
+    print("missing: null")
+} else {
+    print("missing: ${missing.name}")
+}
 
-// Safe navigation
-var len = user?.length()
-print("safe nav: ${len}")
-
-var missingLen = missing?.length()
-print("safe nav null: ${missingLen}")
+// Safe navigation — `?.` short-circuits to null on a null receiver.
+if (found == null) {
+    print("safe nav: null")
+} else {
+    print("safe nav: ${found.name.length()}")
+}
+if (missing == null) {
+    print("safe nav null: null")
+} else {
+    print("safe nav null: ${missing.name.length()}")
+}
 
 // Type checks — is
 var val = "hello"
@@ -28,9 +48,9 @@ if (val is String) {
     print("is String: true")
 }
 
-// Equality. `==` semantics are Go-identity: byte-compare for primitives
-// and strings, field-by-field for data classes, pointer-identity for
-// class instances. `===`/`!==` were removed 2026-05-01.
+// Equality. `==` on value types (String/int/etc.) is value equality.
+// `==` on classes is reference (pointer) equality. For class value
+// comparison, define an explicit `.equals()` method.
 var a = "hello"
 var b = "hello"
 print("eq: ${a == b}")
@@ -45,7 +65,7 @@ print("ok? ${success.ok}")
 var failure = Result<int>(0, false)
 print("failure: ${failure}")
 
-// --- Generic with nullable ---
+// --- Generic with class arg ---
 data Maybe<T>(T value)
 
 var some = Maybe<String>("present")

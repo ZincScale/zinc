@@ -702,6 +702,15 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 		if g.ptrVars[v.Name] {
 			return true
 		}
+		// Class-typed var: classes lower to *Class in Go, so the
+		// underlying value is already a pointer. Without this branch the
+		// auto-address-take would double-wrap class instances assigned
+		// from constructor calls.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[v]; ok && g.isClassType(t.Name) {
+				return true
+			}
+		}
 	case *parser.CallExpr:
 		// Constructor call: NewFoo() returns *Foo.
 		if ident, ok := v.Callee.(*parser.Ident); ok {
@@ -730,6 +739,15 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 					}
 				}
 			}
+		}
+	}
+	// Final fallback: any expression whose static type resolves to a
+	// class is already a `*Class` in Go (classes always lower to
+	// pointers). This catches IndexExpr (`m[k]`, `xs[i]`) and other
+	// shapes that the type-specific cases above don't cover.
+	if g.bound != nil {
+		if t, ok := g.bound.NodeTypes[value]; ok && g.isClassType(t.Name) {
+			return true
 		}
 	}
 	return false
@@ -1637,6 +1655,16 @@ func (g *Generator) isClassType(name string) bool {
 	}
 	if entry, ok := g.unqualifiedNames[name]; ok {
 		return entry.kind == "class" || entry.kind == "data"
+	}
+	// Qualified cross-package names like `core.Schema` — split on the
+	// dot and consult subpkgStructs by package.
+	if idx := strings.IndexByte(name, '.'); idx > 0 {
+		pkg, bare := name[:idx], name[idx+1:]
+		if pkgClasses, ok := g.subpkgStructs[pkg]; ok {
+			if _, ok := pkgClasses[bare]; ok {
+				return true
+			}
+		}
 	}
 	// Fallback — a `data FlowFile` imported from another package that
 	// wasn't re-exported via unqualifiedNames still needs to be recognized

@@ -659,16 +659,7 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 		}
 	case *parser.IfStmt:
 		c.inferType(s.Cond)
-		// Type narrowing: if x is Type, narrow x in then-branch
-		narrowedScope := c.tryNarrow(s.Cond)
-		if narrowedScope != nil {
-			prevScope := c.scope
-			c.scope = narrowedScope
-			c.checkBlock(s.Then)
-			c.scope = prevScope
-		} else {
-			c.checkBlock(s.Then)
-		}
+		c.checkBlock(s.Then)
 		if s.ElseStmt != nil {
 			if block, ok := s.ElseStmt.(*parser.BlockStmt); ok {
 				c.checkBlock(block)
@@ -1206,55 +1197,6 @@ func (c *V2Checker) tupleSlotTypes(e parser.Expr, arity int) []V2Type {
 	return out
 }
 
-// tryNarrow checks if a condition narrows a variable's type.
-// Supports: `x is Type` and `x != null` (smart-cast per spec §5.2).
-// Returns a new scope with the narrowed type, or nil.
-func (c *V2Checker) tryNarrow(cond parser.Expr) *V2Scope {
-	switch e := cond.(type) {
-	case *parser.BinaryExpr:
-		// x is Type → narrow x to Type
-		if e.Op == "is" {
-			if ident, ok := e.Left.(*parser.Ident); ok {
-				if typeIdent, ok := e.Right.(*parser.Ident); ok {
-					narrowed := newV2Scope(c.scope)
-					narrowed.set(ident.Name, V2Type{Name: typeIdent.Name})
-					return narrowed
-				}
-			}
-		}
-		// `x != null` (or `null != x`) narrows `x` to non-null in the
-		// then-branch.
-		if e.Op == "!=" {
-			if narrowed := c.narrowNonNull(e.Left, e.Right); narrowed != nil {
-				return narrowed
-			}
-			if narrowed := c.narrowNonNull(e.Right, e.Left); narrowed != nil {
-				return narrowed
-			}
-		}
-	}
-	return nil
-}
-
-func (c *V2Checker) narrowNonNull(identSide, nullSide parser.Expr) *V2Scope {
-	ident, ok := identSide.(*parser.Ident)
-	if !ok {
-		return nil
-	}
-	if _, isNull := nullSide.(*parser.NullLit); !isNull {
-		return nil
-	}
-	current, found := c.scope.lookup(ident.Name)
-	if !found || !current.Nullable {
-		return nil
-	}
-	narrowed := newV2Scope(c.scope)
-	nonNull := current
-	nonNull.Nullable = false
-	narrowed.set(ident.Name, nonNull)
-	return narrowed
-}
-
 // isSliceOrListType reports whether t is a List<T> or T[] type.
 func isSliceOrListType(t V2Type) bool {
 	if t.Name == "List" {
@@ -1440,6 +1382,18 @@ func (c *V2Checker) satisfiesBound(concrete V2Type, bound string) bool {
 	return false
 }
 
+// isValueType reports whether the canonical type name names a value
+// type. Value types in Zinc always have a value and cannot be null —
+// `int?`, `String?`, etc. are rejected by the typechecker. Only
+// reference types (classes, List<T>, Map<K,V>, etc.) can be optional.
+func isValueType(name string) bool {
+	switch name {
+	case "int", "long", "float", "double", "byte", "bool", "String":
+		return true
+	}
+	return false
+}
+
 // canonicalTypeName normalizes type names that have multiple spellings
 // in source code to the canonical V2Type form. Without this the
 // typechecker treats `bool` (spec canonical) and `boolean`/`Bool`/`Boolean`
@@ -1490,6 +1444,9 @@ func (c *V2Checker) resolveTypeExpr(t parser.TypeExpr) V2Type {
 		return V2Type{Name: elem.Name + "[]", Args: elem.Args, TypeExpr: t}
 	case *parser.OptionalType:
 		inner := c.resolveTypeExpr(tt.Inner)
+		if isValueType(inner.Name) {
+			c.errorf(0, "T? is only valid for reference types — %q is a value type and cannot be null; use (T, bool), (T, error), or a default-returning accessor", inner.Name)
+		}
 		inner.Nullable = true
 		inner.TypeExpr = t
 		return inner

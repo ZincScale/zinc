@@ -279,29 +279,55 @@ Variance markers (`<out T>`, `<in T>`) are deferred to 1.x.
 
 ### 5.1 The rule
 
-`T?` is the **only** nullable type in Zinc. A value of type `T` (without `?`) cannot be `null` at compile time. Assigning `null` to a `T` slot is a compile error.
+`T?` is the **only** nullable type in Zinc, and it is **only valid when `T` is a reference type**. Value types (`int`, `long`, `float`, `double`, `byte`, `bool`, `String`) always have a value and cannot be null — `int?`, `String?`, etc. are compile errors.
 
 ```zinc
 String x = null         // ERROR: String is not nullable
-String? y = null        // OK
-String z = y            // ERROR: y might be null; can't assign to non-nullable String
+String? y = null        // ERROR: String is a value type — cannot be optional
+MyClass? z = null       // OK: MyClass is a reference type
+List<int>? xs = null    // OK: List<T> is a reference type
 ```
 
-This is a **break from current behavior** — today's V2Checker allows `null` on any reference type. The rebuild enforces null safety.
-
-### 5.2 Smart-cast on null check
-
-After an `if (x != null) { ... }` guard, `x` is treated as the non-null type `T` (smart-cast):
+For "missing" semantics on a value-type return, use `(T, bool)` (presence shape), `(T, error)` (error-as-value, paired with `or { }`), or a `getXOr(key, default)` accessor that folds the miss into a default at the API.
 
 ```zinc
-String? name = lookup(id)
-if (name != null) {
-    print(name.length)        // name is String (non-null) here
+(String, bool) getString(String key) {
+    if (!values.containsKey(key)) { return "", false }
+    var v = values[key]
+    if (v == "") { return "", false }
+    return v, true
 }
-print(name.length)            // ERROR: name is String? — must check or unwrap
 ```
 
-The narrowing applies to the `then` branch only. After the `if`, the original nullable type is restored unless the `else` branch returned/threw.
+Why: `String` lowers to Go's `string` (a value type with zero value `""`, never nil). Allowing `String?` would force a `*string` lowering and leak pointer semantics — equality, interpolation, and concatenation would all need deref-with-nil-guard treatment. The `(T, bool)` / `(T, error)` shapes keep value types honest.
+
+### 5.2 Null-check on nullable reference
+
+After an `if (x == null) { return ... }` guard (or `if (x != null) { ... }`), the author can use `x` as a non-null reference. Because reference types in the Go target are already pointers, no special narrowing or codegen is needed — the author writes the guard, then accesses the value normally.
+
+```zinc
+MyClass? m = lookup(id)
+if (m == null) { return defaultValue }
+m.someMethod()              // OK: m is a non-null *MyStruct in Go
+```
+
+For an explicit unwrap without a guard (asserting non-null, panic on miss), use `as` (see §5.3).
+
+### 5.3 Forced unwrap via `as`
+
+`x as T` (where `x` is `T?` and `T` is a reference type) asserts `x` is non-null and returns it as `T`. If `x` is null, behavior depends on the call site:
+
+- **Expression position** (`var c = m as MyClass`): panics on null. Use only when the author *knows* `x` is non-null and wants the runtime to fail loud if that invariant breaks.
+- **With `or { }` handler** (`var c = m as MyClass or { return default }`): the handler runs on null. Same shape as the failable forms in §6.
+- **Inside a function with `error` in its return tail**: auto-propagates the null as a "null unwrap" error.
+
+```zinc
+MyClass? m = lookup(id)
+var c = m as MyClass                    // panics if null
+var c = m as MyClass or { return null } // graceful fallback
+```
+
+`as` reuses the type-assertion syntax already in the grammar, rather than introducing a separate `.force()` method or `!` operator.
 
 ### 5.4 `null`-coalescing
 
