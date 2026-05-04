@@ -2144,7 +2144,7 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 	case *parser.TypeAssertExpr:
 		// `is` predicate — pure expression, just descend.
 		if expr.IsCheck {
-			return &parser.TypeAssertExpr{Object: g.hoistArg(expr.Object), TypeName: expr.TypeName, IsCheck: true}
+			return &parser.TypeAssertExpr{Object: g.hoistArg(expr.Object), TypeExpr: expr.TypeExpr, TypeName: expr.TypeName, IsCheck: true}
 		}
 		// `as` cast — failable. Emit comma-ok + error guard (or, for
 		// `T? as T` unwrap, nil-check + deref), replace with an Ident
@@ -2156,7 +2156,12 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		tmpName := fmt.Sprintf("_p%d", count)
 		okName := fmt.Sprintf("_ok%d", count)
 		errName := g.nextErrName() // bumps errVarCount
-		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		var goType string
+		if expr.TypeExpr != nil {
+			goType = g.formatType(expr.TypeExpr)
+		} else {
+			goType = g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		}
 		g.needImport("fmt")
 		operand := g.formatExpr(inner)
 		if g.exprIsPointerOptional(inner) {
@@ -2314,7 +2319,12 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	count := g.errVarCount
 	okName := fmt.Sprintf("_ok%d", count)
 	errName := g.nextErrName() // bumps errVarCount
-	goType := g.formatType(&parser.SimpleType{Name: ta.TypeName})
+	var goType string
+	if ta.TypeExpr != nil {
+		goType = g.formatType(ta.TypeExpr)
+	} else {
+		goType = g.formatType(&parser.SimpleType{Name: ta.TypeName})
+	}
 	g.needImport("fmt")
 	operand := g.formatExpr(ta.Object)
 

@@ -758,8 +758,14 @@ func (m *MapLit) nodeTag() {}
 func (m *MapLit) exprTag() {}
 
 // TypeAssertExpr: x as Type  OR  x is Type
+//
+// TypeExpr carries the full parsed RHS (supports generics, arrays,
+// optionals, qualified names). TypeName is the display string used
+// in error messages and as a fallback for older codegen paths that
+// only need the bare name; populated by the parser from TypeExpr.
 type TypeAssertExpr struct {
 	Object   Expr
+	TypeExpr TypeExpr
 	TypeName string
 	IsCheck  bool // true = "is" (returns bool), false = "as" (type assertion)
 }

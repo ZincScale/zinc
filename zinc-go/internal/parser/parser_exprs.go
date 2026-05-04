@@ -157,32 +157,48 @@ func (p *Parser) v2ParseComparison() Expr {
 		right := p.v2ParseAddSub()
 		left = &BinaryExpr{Left: left, Op: op, Right: right}
 	}
-	// Handle "as Type" for type casting: expr as TypeName, expr as pkg.TypeName,
-	// expr as Type[] (array type). The trailing type is parsed as
-	// IDENT (DOT IDENT)* with optional `[]` suffix; qualified references
-	// like `hambaAvro.RecordSchema` and array types like `byte[]` reach
-	// codegen as a single dotted-or-bracketed string. formatType
-	// (codegen_resolve.go) splits on `.` to resolve the package alias and
-	// recognizes a trailing `[]` as an array suffix.
+	// Handle "as Type" for type casting. The RHS is parsed via the
+	// general type parser so it supports the full type-expression
+	// grammar — qualified names (`pkg.Type`), generics (`Map<K, V>`),
+	// arrays (`byte[]`), optionals (`T?`), and combinations. The
+	// resulting TypeExpr is stored on the node; TypeName is a display
+	// string used by older codegen paths and error messages.
 	if p.check(lexer.TOKEN_AS) {
 		p.advance() // consume as
-		typeName := p.advance().Literal
-		for p.check(lexer.TOKEN_DOT) && p.peekAt(1).Type == lexer.TOKEN_IDENT {
-			p.advance() // consume .
-			typeName += "." + p.advance().Literal
+		typ := p.v2ParseType()
+		left = &TypeAssertExpr{
+			Object:   left,
+			TypeExpr: typ,
+			TypeName: typeExprDisplayName(typ),
+			IsCheck:  false,
 		}
-		// Optional `[]` suffix: `as byte[]`, `as String[]`. Avro BYTES
-		// extraction (`value as byte[]`) is the motivating case; without
-		// this the parser stranded the `[]` for the next stage to misread
-		// as an IndexExpr or list-literal.
-		if p.check(lexer.TOKEN_LBRACKET) && p.peekAt(1).Type == lexer.TOKEN_RBRACKET {
-			p.advance() // [
-			p.advance() // ]
-			typeName += "[]"
-		}
-		left = &TypeAssertExpr{Object: left, TypeName: typeName, IsCheck: false}
 	}
 	return left
+}
+
+// typeExprDisplayName renders a TypeExpr to the dotted/bracketed
+// string form that the older parser stored as TypeAssertExpr.TypeName.
+// Codegen still uses TypeName at a few sites (error messages, fallback
+// formatType call). New sites should prefer TypeExpr directly.
+func typeExprDisplayName(t TypeExpr) string {
+	switch tt := t.(type) {
+	case *SimpleType:
+		return tt.Name
+	case *GenericType:
+		s := tt.Name + "<"
+		for i, a := range tt.TypeArgs {
+			if i > 0 {
+				s += ", "
+			}
+			s += typeExprDisplayName(a)
+		}
+		return s + ">"
+	case *ArrayType:
+		return typeExprDisplayName(tt.ElementType) + "[]"
+	case *OptionalType:
+		return typeExprDisplayName(tt.Inner) + "?"
+	}
+	return ""
 }
 
 // v2ParseRange: expr .. expr, expr ..= expr

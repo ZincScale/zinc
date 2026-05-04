@@ -267,7 +267,12 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
 	case *parser.TypeAssertExpr:
-		goType := g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		var goType string
+		if expr.TypeExpr != nil {
+			goType = g.formatType(expr.TypeExpr)
+		} else {
+			goType = g.formatType(&parser.SimpleType{Name: expr.TypeName})
+		}
 		operand := g.formatExpr(expr.Object)
 		if expr.IsCheck {
 			// Use Go's native comma-ok type assertion wrapped in any() so it

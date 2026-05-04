@@ -1,0 +1,36 @@
+// Regression: `as Map<K, V>` (and other generic types) parse and
+// lower correctly. The old `as` parser only consumed
+// IDENT (DOT IDENT)* with optional `[]`, so generic types as the
+// RHS got stranded. The fix routes through v2ParseType so the full
+// type-expression grammar is available — generics, arrays, optionals,
+// qualified names, all combinations.
+
+void main() {
+    Object payload = Map<String, int>{"a": 1, "b": 2}
+
+    var m = payload as Map<String, int> or {
+        print("unreachable: payload is a Map<String, int>")
+        return
+    }
+    print("m has 'a': ${m.containsKey(\"a\")}")
+    print("m['a']: ${m[\"a\"]}")
+    print("m['b']: ${m[\"b\"]}")
+
+    // Generic with class arg.
+    Object listOfInts = List<int>[10, 20, 30]
+    var xs = listOfInts as List<int> or {
+        print("unreachable: listOfInts is List<int>")
+        return
+    }
+    print("xs len: ${len(xs)}")
+    print("xs[1]: ${xs[1]}")
+
+    // Wrong dynamic type → handler runs.
+    Object wrongShape = "not a map"
+    var fb = wrongShape as Map<String, int> or {
+        print("handler ran: not a Map")
+        return
+    }
+    _ = fb
+    print("unreachable")
+}
