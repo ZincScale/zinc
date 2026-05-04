@@ -52,12 +52,40 @@ func (g *Generator) formatCallArgsWithPointerWrap(pkgPath, funcName string, args
 				}
 			}
 			if !alreadyPointer {
+				if g.exprIsAlreadyPointerFromFFI(arg) {
+					alreadyPointer = true
+				}
+			}
+			if !alreadyPointer {
 				formatted = "&" + formatted
 			}
 		}
 		out = append(out, formatted)
 	}
 	return strings.Join(out, ", ")
+}
+
+// exprIsAlreadyPointerFromFFI reports whether a SelectorExpr like
+// `time.UTC` references a Go package-level variable that already has
+// pointer type. The auto-address-take logic needs this to avoid
+// double-pointering when the operand is already `*T`.
+func (g *Generator) exprIsAlreadyPointerFromFFI(arg parser.Expr) bool {
+	sel, ok := arg.(*parser.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := sel.Object.(*parser.Ident)
+	if !ok {
+		return false
+	}
+	if g.isUserScopeShadowIdent(ident) {
+		return false
+	}
+	pkgPath, ok := g.importMap[ident.Name]
+	if !ok {
+		return false
+	}
+	return g.goResolver.PkgVarIsPointer(pkgPath, sel.Field)
 }
 
 // callReturnsPointer checks if a call expression returns a pointer type,
@@ -558,6 +586,11 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				}
 				if !alreadyPointer {
 					if u, ok := arg.(*parser.UnaryExpr); ok && u.Op == "&" {
+						alreadyPointer = true
+					}
+				}
+				if !alreadyPointer {
+					if g.exprIsAlreadyPointerFromFFI(arg) {
 						alreadyPointer = true
 					}
 				}

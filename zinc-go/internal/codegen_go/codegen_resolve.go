@@ -1265,13 +1265,32 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 					}
 				}
 			}
-			// Check any Go package — if the type is a struct with pointer-receiver
-			// methods, it's designed to be used as *T.
-			// Non-struct types (type Level int) stay as values.
+			// Check any Go package — decide value vs pointer for the FFI
+			// type. The signal hierarchy:
+			//
+			//   1. Package factory return shape: if any exported pkg-level
+			//      func returns T (by value), T is value-typed regardless
+			//      of pointer-receiver methods. Catches `time.Time` /
+			//      `time.Duration` / `big.Float` — value types whose
+			//      pointer-receiver methods (UnmarshalJSON etc.) would
+			//      otherwise trip the old heuristic.
+			//   2. If factories return *T, T is pointer-typed. Catches
+			//      `bytes.Buffer`, `big.Int`, `strings.Reader`.
+			//   3. Fallback: struct with any pointer-receiver method →
+			//      pointer. Catches `sync.Mutex`, `strings.Builder` —
+			//      types with no factories where Go convention still
+			//      dictates pointer use.
 			if goPath, ok := g.importMap[pkgPrefix]; ok {
-				if g.goResolver.IsStruct(goPath, typeName) &&
-					g.goResolver.HasPointerReceiverMethods(goPath, typeName) {
-					return "*" + typ.Name
+				if g.goResolver.IsStruct(goPath, typeName) {
+					switch g.goResolver.FactoryReturnShape(goPath, typeName) {
+					case "value":
+						return typ.Name
+					case "pointer":
+						return "*" + typ.Name
+					}
+					if g.goResolver.HasPointerReceiverMethods(goPath, typeName) {
+						return "*" + typ.Name
+					}
 				}
 			}
 		}

@@ -696,6 +696,87 @@ func (r *GoTypeResolver) NeedsPointerArg(pkgPath, funcName string, paramIndex in
 	return r.ParamIsPointer(pkgPath, funcName, paramIndex)
 }
 
+// PkgVarIsPointer reports whether the named exported package var has
+// a pointer type. Used by the auto-address-take logic to skip the
+// `&` prefix for vars that are already `*T` — `time.UTC` is the
+// motivating case (it's `*time.Location`, so `time.Date(..., time.UTC)`
+// must NOT get an extra `&`).
+func (r *GoTypeResolver) PkgVarIsPointer(pkgPath, varName string) bool {
+	pkg := r.loadPkg(pkgPath)
+	if pkg == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(varName)
+	if obj == nil {
+		return false
+	}
+	v, ok := obj.(*types.Var)
+	if !ok {
+		return false
+	}
+	_, isPtr := v.Type().(*types.Pointer)
+	return isPtr
+}
+
+// FactoryReturnShape inspects all exported package-level funcs and
+// reports whether any return the named type T (either by value or as
+// `*T`). Used by the value-vs-pointer FFI heuristic: if a package
+// exposes any factory `f(...) T`, T is a value type at the source
+// level even if it has pointer-receiver methods (e.g. `time.Time`,
+// where `time.Now()`/`time.Date()`/`time.Unix()` all return Time by
+// value despite some pointer-receiver methods existing for marshalling).
+//
+// Returns the first shape found:
+//   - "value" — at least one exported func returns T directly
+//   - "pointer" — at least one exported func returns *T (and none return T)
+//   - "" — neither (caller falls back to other heuristics)
+func (r *GoTypeResolver) FactoryReturnShape(pkgPath, typeName string) string {
+	pkg := r.loadPkg(pkgPath)
+	if pkg == nil {
+		return ""
+	}
+	scope := pkg.Scope()
+	sawPointer := false
+	for _, name := range scope.Names() {
+		if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+			continue
+		}
+		obj := scope.Lookup(name)
+		fn, ok := obj.(*types.Func)
+		if !ok {
+			continue
+		}
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok {
+			continue
+		}
+		results := sig.Results()
+		for i := 0; i < results.Len(); i++ {
+			rt := results.At(i).Type()
+			// Direct named match: f(...) T.
+			if named, ok := rt.(*types.Named); ok {
+				obj := named.Obj()
+				if obj != nil && obj.Name() == typeName && (obj.Pkg() == nil || obj.Pkg().Path() == pkgPath) {
+					return "value"
+				}
+			}
+			// Pointer to named: f(...) *T.
+			if ptr, ok := rt.(*types.Pointer); ok {
+				if named, ok := ptr.Elem().(*types.Named); ok {
+					obj := named.Obj()
+					if obj != nil && obj.Name() == typeName && (obj.Pkg() == nil || obj.Pkg().Path() == pkgPath) {
+						sawPointer = true
+					}
+				}
+			}
+		}
+	}
+	if sawPointer {
+		return "pointer"
+	}
+	return ""
+}
+
 // ListExports returns all exported names from a Go package with their kind.
 // Kind is "func", "type", "var", or "const".
 func (r *GoTypeResolver) ListExports(pkgPath string) map[string]string {
