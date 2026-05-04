@@ -29,9 +29,15 @@ import (
 // `goModDir` is the dir holding go.mod (or about to). When non-empty, a
 // GoTypeResolver is constructed and supplied to CheckV2 so Go-imported
 // package calls get GoType-tagged returns in the NodeTypes side-map.
+// `crossPkgFnDecls` provides cross-package top-level function decls so
+// the typechecker can resolve `pkg.func(...)` qualified calls. Bare-name
+// lookup matches (one fnSigs map shared across packages) so callers
+// pass a flat map; collisions are rare in practice and resolved by
+// last-write-wins (mirrors the codegen-side unqualifiedNames behavior).
 func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	crossPkgExports map[string]map[string]string, goModDir string,
-	crossPkgClassDecls ...map[string]map[string]*parser.ClassDecl) (
+	crossPkgClassDecls map[string]map[string]*parser.ClassDecl,
+	crossPkgFnDecls map[string]*parser.FnDecl) (
 	map[*parser.Program]*typechecker.BoundProgram, []typechecker.V2Error) {
 	if len(progs) == 0 {
 		return nil, nil
@@ -68,14 +74,14 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	// 3.7.2: feed cross-package parent relationships (class inheritance,
 	// sealed-variant ownership) so subtype compatibility (`Shape s = Circle(...)`)
 	// resolves across packages.
-	if len(crossPkgClassDecls) > 0 && crossPkgClassDecls[0] != nil {
+	if crossPkgClassDecls != nil {
 		if externalSigs.ParentTypes == nil {
 			externalSigs.ParentTypes = make(map[string][]string)
 		}
 		if externalSigs.MethodSigs == nil {
 			externalSigs.MethodSigs = make(map[string]map[string]typechecker.V2FnSig)
 		}
-		for _, classes := range crossPkgClassDecls[0] {
+		for _, classes := range crossPkgClassDecls {
 			for _, cls := range classes {
 				if len(cls.Parents) > 0 {
 					names := make([]string, len(cls.Parents))
@@ -101,6 +107,21 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 					externalSigs.MethodSigs[cls.Name] = methods
 				}
 			}
+		}
+	}
+	// Cross-pkg top-level FnDecls — register their signatures so a call
+	// like `expressions.compile(src)` from another package resolves to
+	// the proper return type (instead of falling through to typeAny and
+	// breaking the bound side-map / codegen pointer detection).
+	if len(crossPkgFnDecls) > 0 {
+		if externalSigs.FnSigs == nil {
+			externalSigs.FnSigs = make(map[string]typechecker.V2FnSig)
+		}
+		for name, fn := range crossPkgFnDecls {
+			if _, already := externalSigs.FnSigs[name]; already {
+				continue
+			}
+			externalSigs.FnSigs[name] = typechecker.MakeFnSigForFn(fn)
 		}
 	}
 
@@ -225,7 +246,7 @@ func compileFile(path, goModDir string, importAliases ...map[string]string) ([]c
 			im[alias] = goPath
 		}
 	}
-	bps, tcErrors := runTypecheck([]*parser.Program{prog}, im, nil, goModDir)
+	bps, tcErrors := runTypecheck([]*parser.Program{prog}, im, nil, goModDir, nil, nil)
 	if len(tcErrors) > 0 {
 		for _, e := range tcErrors {
 			fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
@@ -345,7 +366,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			im = importAliases[0]
 		}
-		bps, tcErrors := runTypecheck(progs, im, nil, outDir)
+		bps, tcErrors := runTypecheck(progs, im, nil, outDir, nil, nil)
 		if len(tcErrors) > 0 {
 			for _, e := range tcErrors {
 				fmt.Fprintf(os.Stderr, "typecheck: %s\n", e.String())
@@ -578,6 +599,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			// importer would use (the package's last path segment).
 			crossPkg := make(map[string]map[string]string)
 			crossDecls := make(map[string]map[string]*parser.ClassDecl)
+			crossFns := make(map[string]*parser.FnDecl)
 			for otherPkg, otherExports := range allExports {
 				if otherPkg == pkg {
 					continue
@@ -585,12 +607,17 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 				alias := filepath.Base(otherPkg)
 				crossPkg[alias] = otherExports
 				// Walk the merged AST directly so sealed classes are
-				// included (CollectClassDecls filters them out).
+				// included (CollectClassDecls filters them out). Also
+				// gather top-level FnDecls so qualified calls like
+				// `expressions.compile(...)` resolve to a real signature.
 				if merged, ok := allMerged[otherPkg]; ok {
 					cls := make(map[string]*parser.ClassDecl)
 					for _, d := range merged.Decls {
 						if cd, ok := d.(*parser.ClassDecl); ok {
 							cls[cd.Name] = cd
+						}
+						if fd, ok := d.(*parser.FnDecl); ok {
+							crossFns[fd.Name] = fd
 						}
 					}
 					if len(cls) > 0 {
@@ -598,7 +625,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 					}
 				}
 			}
-			bps, errs := runTypecheck(pkgProgs, leafIm, crossPkg, goModDir, crossDecls)
+			bps, errs := runTypecheck(pkgProgs, leafIm, crossPkg, goModDir, crossDecls, crossFns)
 			for prog, bp := range bps {
 				allBound[prog] = bp
 			}
@@ -747,6 +774,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		}
 		crossPkg := make(map[string]map[string]string)
 		crossDecls := make(map[string]map[string]*parser.ClassDecl)
+		crossFns := make(map[string]*parser.FnDecl)
 		for otherPkg, otherExports := range allExports {
 			alias := filepath.Base(otherPkg)
 			crossPkg[alias] = otherExports
@@ -756,13 +784,16 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 					if cd, ok := d.(*parser.ClassDecl); ok {
 						cls[cd.Name] = cd
 					}
+					if fd, ok := d.(*parser.FnDecl); ok {
+						crossFns[fd.Name] = fd
+					}
 				}
 				if len(cls) > 0 {
 					crossDecls[alias] = cls
 				}
 			}
 		}
-		bps, errs := runTypecheck(rootProgs, rootIm, crossPkg, goModDir, crossDecls)
+		bps, errs := runTypecheck(rootProgs, rootIm, crossPkg, goModDir, crossDecls, crossFns)
 		for prog, bp := range bps {
 			rootBound[prog] = bp
 		}

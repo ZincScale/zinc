@@ -265,6 +265,25 @@ func MakeFnSigForMethod(m *parser.MethodDecl) V2FnSig {
 	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
 }
 
+// MakeFnSigForFn builds a V2FnSig from a parser FnDecl. Companion to
+// MakeFnSigForMethod for top-level functions registered cross-package
+// via externalSigs.FnSigs.
+func MakeFnSigForFn(d *parser.FnDecl) V2FnSig {
+	c := &V2Checker{
+		scope:       newV2Scope(nil),
+		classFields: make(map[string]map[string]V2Type),
+		classNames:  make(map[string]bool),
+	}
+	retType := c.resolveTypeExpr(d.ReturnType)
+	var paramTypes []V2Type
+	var paramNames []string
+	for _, p := range d.Params {
+		paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+		paramNames = append(paramNames, p.Name)
+	}
+	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, TypeParams: d.TypeParams}
+}
+
 // CollectedSigs holds both function and method signatures from a file.
 type CollectedSigs struct {
 	FnSigs      map[string]V2FnSig
@@ -517,8 +536,12 @@ func (c *V2Checker) checkFnDecl(d *parser.FnDecl) {
 	if d.Body != nil {
 		c.checkBlock(d.Body)
 
-		// Check all paths return if function has a return type
-		if d.ReturnType != nil && retType.Name != "any" && !c.blockReturns(d.Body) {
+		// Check all paths return if function has a return type. Tuple
+		// returns (typically `(T, error)`) get exempted: codegen
+		// synthesizes the missing-tail return when the body falls
+		// through, the canonical "auto-error-tail" pattern. Strict
+		// path coverage applies to scalar returns only.
+		if d.ReturnType != nil && retType.Name != "any" && retType.Name != "tuple" && !c.blockReturns(d.Body) {
 			c.errorf(d.Line, "function %q: not all code paths return a value", d.Name)
 		}
 	}
@@ -650,9 +673,20 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 	case *parser.ReturnStmt:
 		if s.Value != nil {
 			valType := c.inferType(s.Value)
-			// Check return value matches declared return type
+			// Check return value matches declared return type. The
+			// auto-error-tail shape — function declared `(T, error)`
+			// but `return x` provides only the value half — is the
+			// canonical way to indicate success; codegen synthesizes
+			// the nil error. Accept that without a mismatch error.
 			if c.fnReturnType != nil && c.fnReturnType.Name != "any" && valType.Name != "any" {
-				if !c.compatible(*c.fnReturnType, valType) {
+				expected := *c.fnReturnType
+				// Tuple returns get a loose check — codegen handles
+				// the auto-error-tail synthesis (`return T` → fills
+				// nil error half; `return E` → fills zero T half) and
+				// callable types (Fn) flowing through tuple slots
+				// aren't strict-tracked yet. Strict mismatch checks
+				// only apply to scalar returns today.
+				if expected.Name != "tuple" && !c.compatible(expected, valType) {
 					c.errorf(s.Line, "return type mismatch: expected %s, got %s", c.fnReturnType, valType)
 				}
 			}
@@ -756,7 +790,13 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 	if s.Value != nil {
 		valType := c.inferType(s.Value)
 
-		if s.Type != nil && !c.compatible(declaredType, valType) {
+		// Tuple-typed values (e.g. function references whose return is
+		// (T, error), or multi-value calls) get a loose compat check —
+		// the existing engine doesn't strict-track Fn signatures or
+		// tuple destructuring at the var-init seam, and the strict
+		// check would surface false positives. Strict mismatch checks
+		// only apply to scalar values today.
+		if s.Type != nil && valType.Name != "tuple" && !c.compatible(declaredType, valType) {
 			c.errorf(s.Line, "type mismatch: variable %q declared as %s but assigned %s",
 				s.Name, declaredType, valType)
 		}
@@ -764,11 +804,19 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 		if s.Type != nil {
 			c.scope.set(s.Name, declaredType)
 		} else {
-			c.scope.set(s.Name, valType)
+			// `var x = call() or { }` where call returns a tuple
+			// (T, error) extracts the first slot and binds x to T.
+			// Without this, x would carry the synthetic "tuple" type
+			// name and downstream class-typed checks would miss.
+			bindType := valType
+			if s.OrHandler != nil && valType.Name == "tuple" && len(valType.Args) > 0 {
+				bindType = valType.Args[0]
+			}
+			c.scope.set(s.Name, bindType)
 			// When using var with or handler, store the resolved type name
 			// so codegen can emit the correct Java type instead of Object
-			if s.OrHandler != nil && valType.Name != "" && valType.Name != "any" {
-				s.ResolvedType = valType.Name
+			if s.OrHandler != nil && bindType.Name != "" && bindType.Name != "any" {
+				s.ResolvedType = bindType.Name
 			}
 		}
 		// Typecheck or-handler body (for type annotations inside the block)
@@ -911,6 +959,29 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 					}
 				}
 			}
+		}
+		// Zinc-subpackage qualified call: `pkg.func(...)` where `pkg`
+		// is a Zinc-side import alias and `func` is registered in
+		// the cross-file fnSigs table. Without this, calls like
+		// `expressions.compile(src)` fell through to the default
+		// `any` type, breaking the bound side-map (and downstream
+		// codegen decisions like already-pointer detection at
+		// assignment sites). Guard against shadowing: only take this
+		// path when the leading ident is NOT a local-scope name
+		// (which would make this a method call, not a package call).
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok {
+			if pkgIdent, isIdent := sel.Object.(*parser.Ident); isIdent {
+				_, isLocal := c.scope.lookup(pkgIdent.Name)
+				if !isLocal {
+					if sig, ok := c.fnSigs[sel.Field]; ok {
+						return sig.ReturnType
+					}
+				}
+			}
+		}
+		// Re-enter the FFI/method block with the original sel for
+		// the remaining method-call paths below.
+		if sel, ok := e.Callee.(*parser.SelectorExpr); ok && c.ffi != nil {
 			// (b) Method on Go-typed receiver. Walk the receiver's V2Type
 			// (already inferred earlier in this function for the method-
 			// call branch — see below). To avoid a double-infer, look up
@@ -1007,6 +1078,15 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 							continue
 						}
 						if !c.compatible(declared, argT) {
+							// Nested-thrower hoist: codegen lifts the
+							// error half of `(T, error)` into the enclosing
+							// thrower's tail and passes T to the inner call.
+							// Accept slot 0 of a tuple arg when it matches
+							// the declared param; the typechecker doesn't
+							// model the hoist directly.
+							if argT.Name == "tuple" && len(argT.Args) > 0 && c.compatible(declared, argT.Args[0]) {
+								continue
+							}
 							c.errorf(0, "argument %d of %q: expected %s, got %s",
 								i+1, ident.Name, declared, argT)
 						}
@@ -1452,6 +1532,16 @@ func (c *V2Checker) resolveTypeExpr(t parser.TypeExpr) V2Type {
 		return inner
 	case *parser.FuncTypeExpr:
 		return V2Type{Name: "Fn", TypeExpr: t}
+	case *parser.TupleType:
+		// Multi-value return like `(T, error)`. Resolve each slot and
+		// store as Args; the carrier type Name is "tuple". The
+		// var-stmt with or-handler form treats this as the first
+		// slot's type — `var c = call() or {}` binds to Args[0].
+		var args []V2Type
+		for _, slot := range tt.Elements {
+			args = append(args, c.resolveTypeExpr(slot))
+		}
+		return V2Type{Name: "tuple", Args: args, TypeExpr: t}
 	default:
 		return typeAny
 	}

@@ -1,0 +1,31 @@
+// Cross-package class plus a top-level fn returning that class. The
+// caller in another package needs the typechecker to know `compile`
+// returns `*Compiled` (not typeAny) so downstream class-typed
+// already-pointer detection works at the assignment seam.
+//
+// Local BaseError + CompileError to avoid pulling stdlib into the e2e
+// example. Same shape as stdlib's BaseError — message field, Error()
+// method.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+class CompileError : BaseError {
+    init(String msg) { super(msg) }
+}
+
+class Compiled {
+    pub String src
+    init(String src) { this.src = src }
+    pub String label() { return "compiled(${src})" }
+}
+
+pub (Compiled, error) compile(String src) {
+    if (src == "") {
+        return CompileError("empty source")
+    }
+    return Compiled(src), null
+}
