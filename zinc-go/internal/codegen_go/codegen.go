@@ -90,7 +90,6 @@ type Generator struct {
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
-	funcReturnTypes     map[string]string     // function name → Go return type string
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	dataClasses         map[string]bool       // data class names that have NewType constructors
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
@@ -225,7 +224,6 @@ func New() *Generator {
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		ptrVars:             make(map[string]bool),
-		funcReturnTypes:     make(map[string]string),
 		renamedVars:         make(map[string]string),
 		dataClasses:         make(map[string]bool),
 		typeAliases:         make(map[string]parser.TypeExpr),
@@ -617,16 +615,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			// Thrower / optional return classification flows through
-			// bound.Sigs.FnSigs (see fnReturnsError / callReturnIsPointer).
-			// funcReturnTypes is retained as a per-file Go-formatted-type
-			// cache for inferExprType — that consumer wants the
-			// pre-formatted Go string and the side-effect of registering
-			// imports happens via formatType during collectDecls, which
-			// is the right time for those side-effects.
-			if decl.ReturnType != nil {
-				g.funcReturnTypes[decl.Name] = g.formatType(decl.ReturnType)
-			}
+			// All return-type info (thrower, optional, formatted Go type
+			// string for inference) flows through bound.Sigs.FnSigs.
+			// inferExprType formats from V2Type with import-registration
+			// suppressed; callReturnLookup / fnReturnsError query the
+			// shape directly.
 		}
 	}
 }

@@ -702,10 +702,6 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 		}
 	case *parser.CallExpr:
 		if ident, ok := e.Callee.(*parser.Ident); ok {
-			if rt, ok := g.funcReturnTypes[ident.Name]; ok {
-				return rt
-			}
-			// Cross-file / cross-pkg fallback through bound.Sigs.FnSigs.
 			// Type formatting is speculative here — used only for
 			// inference, not emission — so suppress import registration
 			// to avoid pulling in types the caller doesn't actually emit.

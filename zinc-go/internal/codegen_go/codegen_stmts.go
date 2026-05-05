@@ -739,14 +739,6 @@ func (g *Generator) callReturnLookup(call *parser.CallExpr) (rt typechecker.V2Ty
 			return peelValue(fsig.ReturnType), true
 		}
 	}
-	// Legacy fallback for paths without bound.Sigs: synthesize a V2Type
-	// from the per-file funcReturnTypes string cache. Pack the formatted
-	// Go type into Name; callReturnIsPointer reads it via the prefix-*
-	// branch.
-	if formatted, ok := g.funcReturnTypes[name]; ok {
-		rt.Name = formatted
-		found = true
-	}
 	return
 }
 
@@ -2166,18 +2158,14 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 	if ident, ok := call.Callee.(*parser.Ident); ok {
 		if g.fnReturnsError(ident.Name) {
 			// Bare-error (void) thrower vs multi-value `(T, error)` —
-			// distinguish via bound.Sigs (cross-pkg + cross-file aware)
-			// first. funcReturnTypes is populated per-file; cross-file
-			// callers can't rely on its `!exists` default-to-void
-			// branch. Fall back to the codegen-side string only when
-			// bound is unavailable.
+			// distinguish via bound.Sigs.FnSigs (cross-pkg + cross-file
+			// aware via the typecheck driver's externalSigs aggregate).
 			if g.bound != nil && g.bound.Sigs != nil {
 				if fsig, found := g.bound.Sigs.FnSigs[ident.Name]; found {
 					return fsig.ReturnType.Name == "error"
 				}
 			}
-			rt, exists := g.funcReturnTypes[ident.Name]
-			return !exists || rt == "" || rt == "void" || rt == "error"
+			return false
 		}
 		// Unqualified Go stdlib — ask the resolver about return arity.
 		// Side-map first; falls back to ad-hoc unqualifiedNames.
