@@ -603,7 +603,17 @@ func (p *Parser) v2ParseUsingStmt() Stmt {
 		name := p.v2ExpectIdent()
 		p.expect(lexer.TOKEN_ASSIGN)
 		val := p.v2ParseExpr()
-		resources = append(resources, &WithResource{Name: name, Value: val})
+		// Optional `or { handler }` after the value — failable resource
+		// acquisition. Lets `using (var f = open(p) or { return err })`
+		// participate in the same error-propagation form as a plain
+		// var-stmt, instead of forcing the user to acquire then close
+		// manually.
+		var orHandler *OrHandler
+		if p.check(lexer.TOKEN_OR) {
+			p.advance()
+			orHandler = &OrHandler{Body: p.v2ParseBlock()}
+		}
+		resources = append(resources, &WithResource{Name: name, Value: val, OrHandler: orHandler})
 		if !p.check(lexer.TOKEN_COMMA) {
 			break
 		}

@@ -2739,9 +2739,7 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 			g.indent++
 			g.withLocalScope(func() {
 				for _, r := range w.Resources {
-					g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-					g.writeln("defer %s.Close()", r.Name)
-					g.declareLocal(r.Name)
+					g.emitWithResource(r)
 				}
 				g.emitBlock(w.Body)
 			})
@@ -2759,9 +2757,7 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 		g.indent++
 		g.withLocalScope(func() {
 			for _, r := range w.Resources {
-				g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-				g.writeln("defer %s.Close()", r.Name)
-				g.declareLocal(r.Name)
+				g.emitWithResource(r)
 			}
 			g.emitBlock(w.Body)
 		})
@@ -2771,12 +2767,35 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	}
 	g.withLocalScope(func() {
 		for _, r := range w.Resources {
-			g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
-			g.writeln("defer %s.Close()", r.Name)
-			g.declareLocal(r.Name)
+			g.emitWithResource(r)
 		}
 		g.emitBlock(w.Body)
 	})
+}
+
+// emitWithResource lowers a single `using` resource binding. When the
+// initializer is failable (`var r = expr or { ... }`), emits a
+// comma-ok form with the user-supplied or-handler running on the
+// error path; otherwise the simple direct-assignment form. In both
+// cases a `defer r.Close()` is added so the resource is released
+// when the enclosing block exits.
+func (g *Generator) emitWithResource(r *parser.WithResource) {
+	if r.OrHandler != nil && r.OrHandler.Body != nil {
+		errName := g.nextErrName()
+		g.writeln("%s, %s := %s", r.Name, errName, g.formatExpr(r.Value))
+		g.writeln("if %s != nil {", errName)
+		g.indent++
+		savedErrVar := g.currentErrVar
+		g.currentErrVar = errName
+		g.emitOrBlock(r.OrHandler.Body)
+		g.currentErrVar = savedErrVar
+		g.indent--
+		g.writeln("}")
+	} else {
+		g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
+	}
+	g.writeln("defer %s.Close()", r.Name)
+	g.declareLocal(r.Name)
 }
 
 // blockEndsInReturn reports whether the final statement of a block is
