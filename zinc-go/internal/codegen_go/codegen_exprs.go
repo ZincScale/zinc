@@ -502,7 +502,12 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 	g.pendingLambdaTarget = nil
 	if g.bound != nil {
 		if rt, ok := g.bound.NodeTypes[l]; ok && rt.TypeExpr != nil {
-			if ft, isFn := rt.TypeExpr.(*parser.FuncTypeExpr); isFn {
+			// Peel type aliases (e.g. `Factory = Fn<(Int), (T, error)>`)
+			// — codegen's resolveFuncTypeExpr handles both local and
+			// cross-pkg alias resolution. Without this, a lambda arg
+			// passed as a type-aliased Fn slot wouldn't recognize the
+			// underlying Fn shape.
+			if ft := g.resolveFuncTypeExpr(rt.TypeExpr); ft != nil {
 				target = ft
 			}
 		}

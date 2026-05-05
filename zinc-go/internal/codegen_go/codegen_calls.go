@@ -546,17 +546,14 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			// Lambda arg into a Fn-typed param slot: publish the param's
 			// declared Fn type as the lambda hint so the lambda body's
 			// return shape (multi-value or thrower-mode) is driven by
-			// the target slot, not by inferLambdaReturnType.
-			var prevTarget *parser.FuncTypeExpr
-			restoreTarget := false
-			if _, isLambda := arg.(*parser.LambdaExpr); isLambda &&
-				zincExpectedParams != nil && i < len(zincExpectedParams) {
-				if ft := g.resolveFuncTypeExpr(zincExpectedParams[i].Type); ft != nil {
-					prevTarget = g.pendingLambdaTarget
-					g.pendingLambdaTarget = ft
-					restoreTarget = true
-				}
-			}
+			// the target slot. After P2.3 (across all four call shapes:
+			// free-fn, method-on-class, zinc-subpackage, cross-pkg
+			// method-on-variable) CheckV2 annotates lambda args with
+			// their target Fn type via NodeTypes; formatLambdaExpr
+			// peels type aliases and reads the FuncTypeExpr directly
+			// from bound. No codegen-side pendingLambdaTarget setup
+			// is needed here.
+			//
 			// Permit `&x` at the top of an arg expression only when the
 			// call is across a Go FFI seam — either a package-level call
 			// (goPkgPath set via importMap) or a method call on a variable
@@ -566,9 +563,6 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 			formatted := g.formatExpr(arg)
 			g.addrOfAllowed = false
-			if restoreTarget {
-				g.pendingLambdaTarget = prevTarget
-			}
 			// Auto-insert & when Go function expects a pointer parameter
 			// (explicit *T in signature). Note: implicitPointerParams
 			// has been removed — `any`-typed params now require the

@@ -1017,10 +1017,8 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 									continue
 								}
 								if sig.Params[i].TypeExpr != nil {
-									if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
-										c.nodeTypes[arg] = sig.Params[i]
+																		c.nodeTypes[arg] = sig.Params[i]
 									}
-								}
 							}
 						}
 						return sig.ReturnType
@@ -1074,10 +1072,8 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 									continue
 								}
 								if sig.Params[i].TypeExpr != nil {
-									if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
-										c.nodeTypes[arg] = sig.Params[i]
+																		c.nodeTypes[arg] = sig.Params[i]
 									}
-								}
 							}
 						}
 						return sig.ReturnType
@@ -1110,11 +1106,9 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 						if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
 							continue
 						}
-						if sig.Params[i].Name == "Fn" || (sig.Params[i].TypeExpr != nil) {
-							if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
-								c.nodeTypes[arg] = sig.Params[i]
+						if sig.Params[i].TypeExpr != nil {
+														c.nodeTypes[arg] = sig.Params[i]
 							}
-						}
 					}
 				}
 				// Spread args at the call site (`f(...xs)`) make the
