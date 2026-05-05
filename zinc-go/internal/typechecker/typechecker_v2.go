@@ -1025,6 +1025,17 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 						}
 						return sig.ReturnType
 					}
+					// Cross-pkg constructor call: `pkg.ClassName(...)`.
+					// ClassName is in externalSigs.ClassNames (registered
+					// into the scope at checker construction). The
+					// resolved V2Type is just the class name — codegen
+					// emits `pkg.NewClassName(...)` which returns *T.
+					// Without this, downstream `.method()` calls on the
+					// resulting var lose their objType (resolved to
+					// `any`) and methodSigs lookup misses.
+					if c.classNames[sel.Field] {
+						return V2Type{Name: sel.Field}
+					}
 				}
 			}
 		}
