@@ -87,16 +87,6 @@ type Generator struct {
 	// instead of the single-slot currentReturnType-based fallback.
 	currentReturnIsDeclaredThrower bool
 
-	// pendingLambdaTarget carries the declared Fn<...> target type from
-	// the immediate emit site (currently VarStmt LHS) into
-	// formatLambdaExpr, so the lambda's Go return type is driven from
-	// the target slot instead of falling back to interface{} when the
-	// body contains expressions inferLambdaReturnType can't resolve
-	// statically (e.g. method calls, field accesses on `this`).
-	// Cleared on entry to formatLambdaExpr so nested lambdas don't
-	// inherit the outer hint.
-	pendingLambdaTarget *parser.FuncTypeExpr
-
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)

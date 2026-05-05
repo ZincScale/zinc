@@ -492,24 +492,15 @@ var stringMethodMapping = map[string]string{
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
-	// Consume the pending Fn<...> target hint. Phase C/P2.3 surfaced
-	// the same target via bound.NodeTypes[lambda].TypeExpr — prefer
-	// the typechecker-canonical source when set, fall back to the
-	// codegen-side pendingLambdaTarget side-channel otherwise.
-	// pendingLambdaTarget is cleared on entry so a nested lambda
-	// inside the body doesn't inherit the outer hint.
-	target := g.pendingLambdaTarget
-	g.pendingLambdaTarget = nil
+	// Find the target Fn type via bound.NodeTypes[lambda] (P2.3 +
+	// alias peeling via resolveFuncTypeExpr). When the surrounding
+	// emit site doesn't have a Fn slot context (e.g. lambda used in
+	// a non-Fn position), target stays nil and the lambda emits with
+	// its self-inferred return type.
+	var target *parser.FuncTypeExpr
 	if g.bound != nil {
 		if rt, ok := g.bound.NodeTypes[l]; ok && rt.TypeExpr != nil {
-			// Peel type aliases (e.g. `Factory = Fn<(Int), (T, error)>`)
-			// — codegen's resolveFuncTypeExpr handles both local and
-			// cross-pkg alias resolution. Without this, a lambda arg
-			// passed as a type-aliased Fn slot wouldn't recognize the
-			// underlying Fn shape.
-			if ft := g.resolveFuncTypeExpr(rt.TypeExpr); ft != nil {
-				target = ft
-			}
+			target = g.resolveFuncTypeExpr(rt.TypeExpr)
 		}
 	}
 
