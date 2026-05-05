@@ -972,6 +972,11 @@ func (g *Generator) isSubpackage() bool {
 
 // isPub checks if a name was declared with pub.
 // For qualified names like "ClassName.methodName", checks the full key.
+//
+// Note: bound.LookupSymbolByName is available (P3.x added it) but currently
+// returns IsPub=false for sibling-file fns because SiblingFns is a
+// boolean-presence map without pub status. Fix that, then this can prefer
+// the bound side-map.
 func (g *Generator) isPub(name string) bool {
 	if pub, ok := g.pubNames[name]; ok {
 		return pub

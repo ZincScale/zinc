@@ -184,6 +184,26 @@ type BoundProgram struct {
 	TypeAliases map[string]parser.TypeExpr
 }
 
+// LookupSymbolByName scans Bindings for any Ident with the given name and
+// returns the first matching Symbol. O(N) over Bindings, but typical use is
+// codegen-time pub-status / kind queries that don't run in tight loops.
+// Returns (Symbol{}, false) when no match. Pre-condition: bp != nil.
+//
+// When multiple Idents share a name (e.g. method-call site + decl), they
+// resolve to the same Symbol if they refer to the same decl, so any match
+// is correct for the kind/pub questions codegen asks. For shadowing cases
+// (a SymLocal hiding a SymFn), the first hit may be either — codegen
+// should prefer per-Ident bindings via Bindings[ident] when the AST node
+// is available.
+func (bp *BoundProgram) LookupSymbolByName(name string) (Symbol, bool) {
+	for _, sym := range bp.Bindings {
+		if sym.Name == name {
+			return sym, true
+		}
+	}
+	return Symbol{}, false
+}
+
 // BindContext supplies cross-package and cross-file information needed to
 // resolve `Ident`s correctly. The caller (compiler driver) collects this
 // from all parsed programs in a package and passes the same context to
