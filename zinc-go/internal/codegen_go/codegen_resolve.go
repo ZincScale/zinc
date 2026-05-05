@@ -1219,7 +1219,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		if mapped, ok := zincToGoType[typ.Name]; ok {
 			return mapped
 		}
-		if _, ok := g.typeAliases[typ.Name]; ok {
+		if _, ok := g.lookupTypeAlias(typ.Name); ok {
 			return typ.Name
 		}
 		if qualified, ok := g.typeImports[typ.Name]; ok {

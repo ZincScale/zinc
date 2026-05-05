@@ -2062,7 +2062,7 @@ func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr 
 		return ft
 	}
 	if simple, ok := t.(*parser.SimpleType); ok {
-		if alias, exists := g.typeAliases[simple.Name]; exists {
+		if alias, exists := g.lookupTypeAlias(simple.Name); exists {
 			return g.resolveFuncTypeExpr(alias)
 		}
 		// Cross-package: param/field types referencing an alias declared

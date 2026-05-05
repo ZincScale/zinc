@@ -442,6 +442,22 @@ func CollectTypeAliases(prog *parser.Program) map[string]parser.TypeExpr {
 	return aliases
 }
 
+// lookupTypeAlias resolves a type-alias name to its underlying TypeExpr.
+// Prefers bound.TypeAliases (the typechecker's canonical per-file table)
+// when available; falls back to the codegen-side g.typeAliases for
+// legacy paths that bypass the bound side-map.
+func (g *Generator) lookupTypeAlias(name string) (parser.TypeExpr, bool) {
+	if g.bound != nil && g.bound.TypeAliases != nil {
+		if t, ok := g.bound.TypeAliases[name]; ok {
+			return t, true
+		}
+	}
+	if t, ok := g.typeAliases[name]; ok {
+		return t, true
+	}
+	return nil, false
+}
+
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
 func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
 	if g.subpkgStructs == nil {

@@ -714,7 +714,7 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 			}
 			if t, ok := known[ident.Name]; ok {
 				resolved := t
-				if alias, ok := g.typeAliases[t]; ok {
+				if alias, ok := g.lookupTypeAlias(t); ok {
 					resolved = g.formatType(alias)
 				}
 				if strings.HasPrefix(resolved, "func(") {
