@@ -549,10 +549,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		switch decl := d.(type) {
 		case *parser.InterfaceDecl:
 			g.interfaces[decl.Name] = true
-			// Interface methods — track pub status
-			for _, m := range decl.Methods {
-				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
-			}
+			// Interface method pub status flows through
+			// bound.Sigs.MemberIsPub (codegen's isPubMember reads it).
 		case *parser.DataClassDecl:
 			g.dataClasses[decl.Name] = true
 			if g.dataClassDecls == nil {
@@ -564,10 +562,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				g.localDataFields = make(map[string][]*parser.FieldDecl)
 			}
 			g.localDataFields[decl.Name] = decl.Params
-			// Data class fields — track pub status
-			for _, f := range decl.Params {
-				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
-			}
+			// Data class field pub status flows through
+			// bound.Sigs.MemberIsPub.
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
@@ -583,9 +579,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 						g.localDataFields = make(map[string][]*parser.FieldDecl)
 					}
 					g.localDataFields[v.Name] = v.Params
-					for _, f := range v.Params {
-						g.pubNames[v.Name+"."+f.Name] = f.IsPub
-					}
+					// Sealed variant field pub status via
+					// bound.Sigs.MemberIsPub.
 				}
 			}
 			if decl.Ctor != nil {
@@ -598,16 +593,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// return type. Constructor throwers must use a factory fn
 			// with an explicit `(T, error)` return — `init` blocks no
 			// longer auto-widen.
-			for _, m := range decl.Methods {
-				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
-				// Method thrower / optional / pointer-shape lookups all
-				// flow through bound.Sigs.MethodSigs (see methodReturnsError
-				// and callReturnIsPointer). No codegen-side method-level
-				// tracking populated here.
-			}
-			for _, f := range decl.Fields {
-				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
-			}
+			// Class method/field pub status + method return-type info
+			// all flow through bound.Sigs (MemberIsPub for pub,
+			// MethodSigs for return-type classification). No codegen-
+			// side per-class tracking populated here.
 		case *parser.TypeAliasDecl:
 			g.typeAliases[decl.Name] = decl.Type
 		case *parser.ConstDecl:
