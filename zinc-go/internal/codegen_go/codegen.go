@@ -547,25 +547,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				if _, ok := m.ReturnType.(*parser.OptionalType); ok {
 					g.funcReturnsOptional[m.Name] = true
 				}
-				// Mirror funcReturnTypes for methods, but only for the
-				// pointer-return case (class returns, FFI pointer
-				// returns, T?). Used by valueIsAlreadyPointer to skip
-				// auto-address-take when assigning a method-call result
-				// to a `T?` LHS. Restricted to the prefix-* shape so
-				// inferExprType (which queries funcReturnTypes for free
-				// functions only) keeps its current behavior — and so we
-				// don't pollute the map with method-specific tuple
-				// formatter output.
-				if m.ReturnType != nil {
-					rt := m.ReturnType
-					if tup, ok := rt.(*parser.TupleType); ok && len(tup.Elements) > 0 {
-						rt = tup.Elements[0]
-					}
-					formatted := g.formatType(rt)
-					if strings.HasPrefix(formatted, "*") {
-						g.funcReturnTypes[m.Name] = formatted
-					}
-				}
+				// Method return-type lookups go through bound.Sigs.MethodSigs
+				// at the call site (see callReturnIsPointer). Codegen-side
+				// funcReturnTypes is no longer populated for methods —
+				// retained for free-function lookups only.
 			}
 			for _, f := range decl.Fields {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub

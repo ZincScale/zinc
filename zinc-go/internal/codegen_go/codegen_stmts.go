@@ -339,20 +339,19 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// take would double-wrap a class-typed local with _zincPtr,
 		// producing `**T`.
 		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok {
-				if g.funcReturnsOptional[ident.Name] {
+			// Side-effect-free pointer classification — does NOT register
+			// imports. Construct varTypes string manually for class/legacy
+			// cases so downstream valueIsAlreadyPointer's prefix-* check
+			// recognizes the local without triggering formatType.
+			if rt, isOpt, isPtr, found := g.callReturnIsPointer(call); found {
+				if isOpt {
 					g.ptrVars[v.Name] = true
-				}
-				if rt, ok := g.funcReturnTypes[ident.Name]; ok && strings.HasPrefix(rt, "*") {
-					g.varTypes[v.Name] = rt
-				}
-			}
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if g.funcReturnsOptional[sel.Field] {
-					g.ptrVars[v.Name] = true
-				}
-				if rt, ok := g.funcReturnTypes[sel.Field]; ok && strings.HasPrefix(rt, "*") {
-					g.varTypes[v.Name] = rt
+				} else if isPtr {
+					if g.isClassType(rt.Name) {
+						g.varTypes[v.Name] = "*" + rt.Name
+					} else if strings.HasPrefix(rt.Name, "*") {
+						g.varTypes[v.Name] = rt.Name
+					}
 				}
 			}
 		}
@@ -715,6 +714,107 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 	g.writeln("%s %s %s", g.formatExpr(a.Target), a.Op, g.formatExpr(a.Value))
 }
 
+// callReturnLookup finds a CallExpr's return-type V2Type from the
+// typechecker's canonical CollectedSigs (cross-pkg + cross-file aware),
+// falling back to a synthesized V2Type from the codegen-side legacy maps.
+// Side-effect-free: never calls formatType (which would register imports
+// for the resolved type's package — wrong if the caller isn't going to
+// emit an actual reference to that type).
+//
+// `(T, error)` tuple returns are peeled to the value slot.
+//
+// Returns the V2Type and whether anything was found. Callers ask
+// boolean-only questions via callReturnIsPointer below; only callers
+// that actually need the formatted Go type string should call goTypeOfV2
+// on the result, which is when import registration is appropriate.
+func (g *Generator) callReturnLookup(call *parser.CallExpr) (rt typechecker.V2Type, found bool) {
+	var name string
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		name = ident.Name
+	} else if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+		name = sel.Field
+	}
+	if name == "" {
+		return
+	}
+	peelValue := func(t typechecker.V2Type) typechecker.V2Type {
+		if t.Name == "tuple" && len(t.Args) > 0 {
+			return t.Args[0]
+		}
+		return t
+	}
+	if g.bound != nil && g.bound.Sigs != nil {
+		for _, methods := range g.bound.Sigs.MethodSigs {
+			if msig, ok := methods[name]; ok {
+				return peelValue(msig.ReturnType), true
+			}
+		}
+		if fsig, ok := g.bound.Sigs.FnSigs[name]; ok {
+			return peelValue(fsig.ReturnType), true
+		}
+	}
+	// Legacy fallback. Encode codegen-side knowledge into a synthesized
+	// V2Type the boolean checks below understand. funcReturnsOptional →
+	// Nullable; funcReturnTypes prefix-* → caller can detect via
+	// goTypeOfV2 call later if it needs the string.
+	if g.funcReturnsOptional[name] {
+		rt.Nullable = true
+		found = true
+	}
+	if formatted, ok := g.funcReturnTypes[name]; ok {
+		// Pack the formatted-string lookup result into Name. goTypeOfV2
+		// reads TypeExpr (nil here) → Nullable check → isClassType.
+		// Stash the original via a synthetic carrier so callReturnIsPointer
+		// can detect prefix-* without calling formatType.
+		rt.Name = formatted
+		found = true
+	}
+	return
+}
+
+// callReturnIsPointer returns the V2Type plus (isOptional, isPointer)
+// classification for a CallExpr — side-effect-free (does not call
+// formatType / register imports). Callers wanting a Go type string for
+// varTypes registration can use the returned V2Type directly: for the
+// simple cases that hit this path (class returns, optionals, legacy
+// formatted strings) the type lowering is "*"+rt.Name.
+func (g *Generator) callReturnIsPointer(call *parser.CallExpr) (rt typechecker.V2Type, isOptional, isPointer, found bool) {
+	rt, found = g.callReturnLookup(call)
+	if !found {
+		return
+	}
+	isOptional = rt.Nullable
+	if rt.Nullable {
+		isPointer = true
+		return
+	}
+	if g.isClassType(rt.Name) {
+		isPointer = true
+		return
+	}
+	if strings.HasPrefix(rt.Name, "*") {
+		isPointer = true
+	}
+	return
+}
+
+// goTypeOfV2 converts a typechecker V2Type to the Go type string codegen
+// needs. **Has side effects** (calls formatType which registers imports).
+// Use only when the caller will actually emit a reference to that type;
+// for boolean "is this a pointer?" checks use callReturnIsPointer.
+func (g *Generator) goTypeOfV2(t typechecker.V2Type) string {
+	if t.TypeExpr != nil {
+		return g.formatType(t.TypeExpr)
+	}
+	if t.Nullable {
+		return "*" + t.Name
+	}
+	if g.isClassType(t.Name) {
+		return "*" + t.Name
+	}
+	return t.Name
+}
+
 // targetIsPointerOptional reports whether an assignment LHS expression
 // resolves to a `*T` type — a nullable value/class field or local.
 // Used to drive auto-address-take on the RHS.
@@ -784,30 +884,10 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				return true
 			}
 		}
-		// Method call: `obj.method(...)`. Cross-file same-package method
-		// lookups go through the typechecker's package-level CollectedSigs
-		// (attached to BoundProgram as Sigs by the typecheck driver). For
-		// in-file methods, collectDecls also populated the codegen-side
-		// funcReturnsOptional / funcReturnTypes — kept as a fallback for
-		// legacy paths where bound.Sigs isn't attached.
-		if sel, ok := v.Callee.(*parser.SelectorExpr); ok {
-			if g.bound != nil && g.bound.Sigs != nil {
-				for _, methods := range g.bound.Sigs.MethodSigs {
-					if msig, found := methods[sel.Field]; found {
-						if msig.ReturnType.Nullable {
-							return true
-						}
-						if g.isClassType(msig.ReturnType.Name) {
-							return true
-						}
-						break
-					}
-				}
-			}
-			if g.funcReturnsOptional[sel.Field] {
-				return true
-			}
-			if rt, ok := g.funcReturnTypes[sel.Field]; ok && strings.HasPrefix(rt, "*") {
+		// Method call: `obj.method(...)`. Lookup goes through callReturnIsPointer
+		// (side-effect-free; bound.Sigs preferred, codegen-side legacy as fallback).
+		if _, ok := v.Callee.(*parser.SelectorExpr); ok {
+			if _, _, isPtr, found := g.callReturnIsPointer(v); found && isPtr {
 				return true
 			}
 		}
