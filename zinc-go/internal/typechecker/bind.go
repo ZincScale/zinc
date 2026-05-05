@@ -150,6 +150,12 @@ type Symbol struct {
 	// detection and into generic types for type-arg substitution.
 	// Nil when the type was inferred (`var x = expr`) or N/A.
 	DeclType parser.TypeExpr
+	// IsPub (Phase C/P1.3): set iff the declaring decl had `pub`. Carried
+	// by SymFn / SymClass / SymDataClass / SymInterface / SymConst /
+	// SymEnum and the field/method aspects of class symbols. Replaces
+	// the codegen-side g.pubNames map in a future P3 commit; today it's
+	// populated but not yet read.
+	IsPub bool
 }
 
 // BoundProgram is the bind phase's output: the parsed AST plus side-maps
@@ -472,7 +478,7 @@ func (b *binder) collectFileTopLevel(prog *parser.Program) {
 	for _, d := range prog.Decls {
 		switch decl := d.(type) {
 		case *parser.FnDecl:
-			b.declare(decl.Name, Symbol{Kind: SymFn, Name: decl.Name, DeclLine: decl.Line})
+			b.declare(decl.Name, Symbol{Kind: SymFn, Name: decl.Name, DeclLine: decl.Line, IsPub: decl.IsPub})
 		case *parser.ClassDecl:
 			kind := SymClass
 			if decl.IsSealed {
@@ -494,7 +500,7 @@ func (b *binder) collectFileTopLevel(prog *parser.Program) {
 				b.declare(v, Symbol{Kind: SymEnumVariant, Name: v, Owner: decl.Name})
 			}
 		case *parser.ConstDecl:
-			b.declare(decl.Name, Symbol{Kind: SymConst, Name: decl.Name, DeclLine: decl.Line})
+			b.declare(decl.Name, Symbol{Kind: SymConst, Name: decl.Name, DeclLine: decl.Line, IsPub: decl.IsPub})
 		case *parser.TypeAliasDecl:
 			b.declare(decl.Name, Symbol{Kind: SymTypeAlias, Name: decl.Name, DeclLine: decl.Line})
 		}
