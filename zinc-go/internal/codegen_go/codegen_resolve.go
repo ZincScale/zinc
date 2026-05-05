@@ -1517,8 +1517,28 @@ func (g *Generator) formatExprList(exprs []parser.Expr) string {
 // --- Import tracking ---------------------------------------------------------
 
 // needImport records that a Go import is required.
+//
+// Honored only outside of `suppressImports` mode — code paths that
+// format types speculatively (e.g. inferExprType on a sibling fn whose
+// return references types this file may not emit) wrap their formatType
+// calls in g.withSuppressedImports. That keeps the type-string
+// computation while preventing spurious dead-import registration.
 func (g *Generator) needImport(pkg string) {
+	if g.suppressImports {
+		return
+	}
 	g.imports[pkg] = true
+}
+
+// withSuppressedImports runs fn with import-registration disabled and
+// restores the previous state on exit. Use for speculative formatType
+// calls whose result drives type inference but whose imports the
+// caller can't guarantee will be emitted.
+func (g *Generator) withSuppressedImports(fn func() string) string {
+	prev := g.suppressImports
+	g.suppressImports = true
+	defer func() { g.suppressImports = prev }()
+	return fn()
 }
 
 // --- Zero values -------------------------------------------------------------

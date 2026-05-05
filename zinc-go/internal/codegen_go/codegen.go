@@ -132,6 +132,13 @@ type Generator struct {
 	// `String? foo = "hi"` and similar — Go disallows `&"hi"` directly.
 	needsPtrHelper bool
 
+	// suppressImports gates needImport. When true, formatType calls
+	// don't register imports — useful for speculative type formatting
+	// (e.g. inferExprType on a sibling-fn V2Type whose result drives
+	// inference but whose types this file may not actually emit).
+	// Toggled by withSuppressedImports.
+	suppressImports bool
+
 	// addrOfAllowed is true at the start of formatExpr only when the
 	// caller has just entered the top-level expression of a Go-library
 	// (FFI) call argument. The flag is consumed (cleared) on entry to
@@ -426,6 +433,22 @@ func CollectTypeAliases(prog *parser.Program) map[string]parser.TypeExpr {
 		}
 	}
 	return aliases
+}
+
+// formatV2ReturnType formats a V2Type return signature to the Go type
+// string. Mirrors formatType's TupleType handling for `(T, error)`
+// shapes — produces "(T1, T2, ...)" — and delegates to goTypeOfV2 for
+// non-tuple types. Calls formatType internally; callers that don't
+// want imports registered should wrap in g.withSuppressedImports.
+func (g *Generator) formatV2ReturnType(rt typechecker.V2Type) string {
+	if rt.Name == "tuple" {
+		parts := make([]string, 0, len(rt.Args))
+		for _, a := range rt.Args {
+			parts = append(parts, g.formatV2ReturnType(a))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	}
+	return g.goTypeOfV2(rt)
 }
 
 // v2ReturnsError reports whether a typechecker V2Type return signature

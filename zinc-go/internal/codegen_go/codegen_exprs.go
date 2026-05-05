@@ -705,6 +705,17 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 			if rt, ok := g.funcReturnTypes[ident.Name]; ok {
 				return rt
 			}
+			// Cross-file / cross-pkg fallback through bound.Sigs.FnSigs.
+			// Type formatting is speculative here — used only for
+			// inference, not emission — so suppress import registration
+			// to avoid pulling in types the caller doesn't actually emit.
+			if g.bound != nil && g.bound.Sigs != nil {
+				if fsig, found := g.bound.Sigs.FnSigs[ident.Name]; found {
+					return g.withSuppressedImports(func() string {
+						return g.formatV2ReturnType(fsig.ReturnType)
+					})
+				}
+			}
 			// Bare call to a method on the current class — `foo()` where
 			// `foo` is a method of the enclosing class. Lambdas closed
 			// over `this` capture this path: `ff -> helper(ff)` where
