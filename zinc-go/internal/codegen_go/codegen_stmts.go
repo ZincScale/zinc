@@ -508,15 +508,8 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		//      expression and check `Nullable`. Picks up paths the
 		//      codegen-side tables don't cover.
 		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok {
-				if g.funcReturnsOptional[ident.Name] {
-					g.ptrVars[v.Name] = true
-				}
-			}
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if g.funcReturnsOptional[sel.Field] {
-					g.ptrVars[v.Name] = true
-				}
+			if _, isOpt, _, _ := g.callReturnIsPointer(call); isOpt {
+				g.ptrVars[v.Name] = true
 			}
 		}
 		if g.bound != nil {
@@ -873,14 +866,10 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 			if g.isClassType(ident.Name) {
 				return true
 			}
-			if g.funcReturnsOptional[ident.Name] {
-				return true
-			}
-			// Function whose declared return type is a Go pointer — covers
-			// class returns (`(Schema, error)` lowers to `*Schema`) and FFI
-			// pointer returns. Without this, assigning the call result to
-			// a `T?` LHS double-wraps with _zincPtr.
-			if rt, ok := g.funcReturnTypes[ident.Name]; ok && strings.HasPrefix(rt, "*") {
+			// Function/method thrower-or-pointer return — class returns,
+			// FFI pointer returns, T? all qualify. callReturnIsPointer
+			// reads bound.Sigs first; legacy maps as fallback.
+			if _, _, isPtr, found := g.callReturnIsPointer(v); found && isPtr {
 				return true
 			}
 		}

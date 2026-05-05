@@ -821,15 +821,12 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 		// both top-level FnDecls and class methods at collectDecls
 		// time. The check uses bare callee name; package-qualified
 		// calls (`pkg.f(...)`) are conservatively false today.
-		if ident, ok := ex.Callee.(*parser.Ident); ok {
-			if g.funcReturnsOptional[ident.Name] {
-				return true
-			}
-		}
-		if sel, ok := ex.Callee.(*parser.SelectorExpr); ok {
-			if g.funcReturnsOptional[sel.Field] {
-				return true
-			}
+		// Lookup goes through callReturnIsPointer (bound.Sigs preferred,
+		// codegen-side legacy as fallback). Only the isOptional bit
+		// matters here — exprIsPointerOptional asks "is the result T?".
+		_ = ex.Callee
+		if _, isOpt, _, _ := g.callReturnIsPointer(ex); isOpt {
+			return true
 		}
 	}
 	return false
