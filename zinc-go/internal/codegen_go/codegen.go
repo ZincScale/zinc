@@ -42,7 +42,6 @@ type Generator struct {
 	currentClass   string          // current class name (for pub member lookups)
 
 	// Error handling
-	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values in error returns)
 	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
@@ -101,7 +100,6 @@ type Generator struct {
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
-	funcReturnsOptional map[string]bool       // functions that return T? (optional)
 	funcReturnTypes     map[string]string     // function name → Go return type string
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	dataClasses         map[string]bool       // data class names that have NewType constructors
@@ -227,11 +225,9 @@ func New() *Generator {
 		imports:             make(map[string]bool),
 		interfaces:          make(map[string]bool),
 		structs:             make(map[string]*parser.ClassDecl),
-		errorFuncs:          make(map[string]bool),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		ptrVars:             make(map[string]bool),
-		funcReturnsOptional: make(map[string]bool),
 		funcReturnTypes:     make(map[string]string),
 		renamedVars:         make(map[string]string),
 		dataClasses:         make(map[string]bool),
@@ -457,15 +453,18 @@ func v2ReturnsError(rt typechecker.V2Type) bool {
 }
 
 // fnReturnsError reports whether a top-level function (by bare name) is
-// a thrower. Prefers bound.Sigs.FnSigs (cross-pkg + cross-file aware);
-// falls back to the codegen-side errorFuncs map for legacy paths.
+// a thrower. Reads bound.Sigs.FnSigs (cross-pkg + cross-file aware).
+// Returns false when bound is unavailable — only legacy single-file paths
+// without typecheck wiring would lose detection, and runTypecheck attaches
+// Sigs on every normal compile path (compileFile, compileMultiFile,
+// compileDirWithSubpackages).
 func (g *Generator) fnReturnsError(name string) bool {
 	if g.bound != nil && g.bound.Sigs != nil {
 		if fsig, ok := g.bound.Sigs.FnSigs[name]; ok {
 			return v2ReturnsError(fsig.ReturnType)
 		}
 	}
-	return g.errorFuncs[name]
+	return false
 }
 
 // methodReturnsError reports whether a method (class + method name) is
@@ -478,7 +477,7 @@ func (g *Generator) methodReturnsError(class, method string) bool {
 			}
 		}
 	}
-	return g.errorFuncs[class+"."+method]
+	return false
 }
 
 // lookupTypeAlias resolves a type-alias name to its underlying TypeExpr.
@@ -778,7 +777,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.indent = 0
 	g.className = className
 	g.imports = make(map[string]bool)
-	g.errorFuncs = make(map[string]bool)
 	// Preserve funcSigs pre-populated by SetSiblingExports (sibling function awareness).
 	if g.funcSigs == nil {
 		g.funcSigs = make(map[string][]*parser.ParamDecl)

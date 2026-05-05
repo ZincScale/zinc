@@ -746,19 +746,11 @@ func (g *Generator) callReturnLookup(call *parser.CallExpr) (rt typechecker.V2Ty
 			return peelValue(fsig.ReturnType), true
 		}
 	}
-	// Legacy fallback. Encode codegen-side knowledge into a synthesized
-	// V2Type the boolean checks below understand. funcReturnsOptional →
-	// Nullable; funcReturnTypes prefix-* → caller can detect via
-	// goTypeOfV2 call later if it needs the string.
-	if g.funcReturnsOptional[name] {
-		rt.Nullable = true
-		found = true
-	}
+	// Legacy fallback for paths without bound.Sigs: synthesize a V2Type
+	// from the per-file funcReturnTypes string cache. Pack the formatted
+	// Go type into Name; callReturnIsPointer reads it via the prefix-*
+	// branch.
 	if formatted, ok := g.funcReturnTypes[name]; ok {
-		// Pack the formatted-string lookup result into Name. goTypeOfV2
-		// reads TypeExpr (nil here) → Nullable check → isClassType.
-		// Stash the original via a synthetic carrier so callReturnIsPointer
-		// can detect prefix-* without calling formatType.
 		rt.Name = formatted
 		found = true
 	}
@@ -927,8 +919,6 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		if g.currentReturnType != "" {
 			zv := g.zeroValueFor(g.currentReturnType)
 			g.writeln("return %s, nil", zv)
-		} else if g.currentReturnType == "" && g.errorFuncs != nil {
-			g.writeln("return")
 		} else {
 			g.writeln("return")
 		}
