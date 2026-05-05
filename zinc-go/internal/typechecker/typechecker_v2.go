@@ -297,6 +297,11 @@ type CollectedSigs struct {
 	// per-checker classFields map. Lets cross-pkg field access resolve
 	// (e.g. `s.someField` where s is a Store from another package).
 	ClassFields map[string]map[string]V2Type
+	// MemberIsPub (Phase C): class-qualified `pub` status — keyed by
+	// "ClassName.memberName" for both methods and fields. Replaces
+	// codegen-side g.pubNames dotted-key entries; codegen's
+	// isPubMember reads from here when bound.Sigs is attached.
+	MemberIsPub map[string]bool
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -312,12 +317,25 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		c.registerDecl(d)
 	}
 	classNames := make(map[string]bool)
+	memberIsPub := make(map[string]bool)
 	for _, d := range prog.Decls {
 		switch dd := d.(type) {
 		case *parser.ClassDecl:
 			classNames[dd.Name] = true
+			for _, m := range dd.Methods {
+				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
+			}
+			for _, f := range dd.Fields {
+				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.DataClassDecl:
 			classNames[dd.Name] = true
+			for _, m := range dd.Methods {
+				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
+			}
+			for _, f := range dd.Params {
+				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.InterfaceDecl:
 			classNames[dd.Name] = true
 		case *parser.EnumDecl:
@@ -330,6 +348,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		ParentTypes: c.parentTypes,
 		ClassNames:  classNames,
 		ClassFields: c.classFields,
+		MemberIsPub: memberIsPub,
 	}
 }
 
@@ -810,6 +829,21 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 				s.Name, declaredType, valType)
 		}
 
+		// Phase C/P2.3 — propagate the declared Fn target into NodeTypes
+		// for a lambda RHS. Codegen reads bound.NodeTypes[lambdaExpr] to
+		// drive the lambda's Go return-type emission; the legacy path
+		// uses pendingLambdaTarget as a side-channel. This annotation
+		// gives the bound side-map first-class access to the same
+		// information so a future codegen migration can drop
+		// pendingLambdaTarget.
+		if c.nodeTypes != nil && s.Type != nil {
+			if _, isFn := s.Type.(*parser.FuncTypeExpr); isFn {
+				if _, isLambda := s.Value.(*parser.LambdaExpr); isLambda {
+					c.nodeTypes[s.Value] = declaredType
+				}
+			}
+		}
+
 		if s.Type != nil {
 			c.scope.set(s.Name, declaredType)
 		} else {
@@ -990,7 +1024,34 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				_, isLocal := c.scope.lookup(pkgIdent.Name)
 				if !isLocal {
 					if sig, ok := c.fnSigs[sel.Field]; ok {
+						// Phase C/P2.3 (cross-pkg) — annotate lambda args
+						// in zinc-subpackage calls. Same shape as the
+						// free-function and method-call branches.
+						if c.nodeTypes != nil {
+							for i, arg := range e.Args {
+								if i >= len(sig.Params) {
+									break
+								}
+								if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+									continue
+								}
+								if sig.Params[i].TypeExpr != nil {
+																		c.nodeTypes[arg] = sig.Params[i]
+									}
+							}
+						}
 						return sig.ReturnType
+					}
+					// Cross-pkg constructor call: `pkg.ClassName(...)`.
+					// ClassName is in externalSigs.ClassNames (registered
+					// into the scope at checker construction). The
+					// resolved V2Type is just the class name — codegen
+					// emits `pkg.NewClassName(...)` which returns *T.
+					// Without this, downstream `.method()` calls on the
+					// resulting var lose their objType (resolved to
+					// `any`) and methodSigs lookup misses.
+					if c.classNames[sel.Field] {
+						return V2Type{Name: sel.Field}
 					}
 				}
 			}
@@ -1017,6 +1078,23 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				// First check Zinc-defined method signatures (interfaces, classes)
 				if methods, ok := c.methodSigs[objType.Name]; ok {
 					if sig, ok := methods[sel.Field]; ok {
+						// Phase C/P2.3 (method-call) — same lambda Fn-target
+						// annotation as the free-function path. Lets codegen
+						// retire the matching pendingLambdaTarget setter once
+						// every annotation site is covered.
+						if c.nodeTypes != nil {
+							for i, arg := range e.Args {
+								if i >= len(sig.Params) {
+									break
+								}
+								if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+									continue
+								}
+								if sig.Params[i].TypeExpr != nil {
+																		c.nodeTypes[arg] = sig.Params[i]
+									}
+							}
+						}
 						return sig.ReturnType
 					}
 				}
@@ -1034,6 +1112,24 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		// Check function call argument types against signature
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if sig, found := c.fnSigs[ident.Name]; found {
+				// Phase C/P2.3 — propagate Fn-typed param targets into
+				// NodeTypes for lambda args. Same shape as the var-decl
+				// annotation in checkVarStmt; gives codegen one canonical
+				// place (bound.NodeTypes) to read the lambda's expected
+				// Fn target instead of pendingLambdaTarget.
+				if c.nodeTypes != nil {
+					for i, arg := range e.Args {
+						if i >= len(sig.Params) {
+							break
+						}
+						if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+							continue
+						}
+						if sig.Params[i].TypeExpr != nil {
+														c.nodeTypes[arg] = sig.Params[i]
+							}
+					}
+				}
 				// Spread args at the call site (`f(...xs)`) make the
 				// effective arg count dynamic — skip arity + per-position
 				// type checks when any arg is a spread.
@@ -1251,6 +1347,25 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 			return c.inferType(e.Cases[0].Value)
 		}
 		return typeAny
+	case *parser.TypeAssertExpr:
+		// `expr is T` returns bool; `expr as T` unwraps to the
+		// non-nullable form of T. Codegen consumers (e.g. selector
+		// access on the cast result) read NodeTypes to know the
+		// post-cast type without the surrounding null-check IIFE
+		// having to be flow-analyzed.
+		if e.IsCheck {
+			return typeBool
+		}
+		var rt V2Type
+		if e.TypeExpr != nil {
+			rt = c.resolveTypeExpr(e.TypeExpr)
+		} else if e.TypeName != "" {
+			rt = c.resolveTypeExpr(&parser.SimpleType{Name: e.TypeName})
+		} else {
+			return typeAny
+		}
+		rt.Nullable = false
+		return rt
 	default:
 		return typeAny
 	}

@@ -150,6 +150,12 @@ type Symbol struct {
 	// detection and into generic types for type-arg substitution.
 	// Nil when the type was inferred (`var x = expr`) or N/A.
 	DeclType parser.TypeExpr
+	// IsPub (Phase C/P1.3): set iff the declaring decl had `pub`. Carried
+	// by SymFn / SymClass / SymDataClass / SymInterface / SymConst /
+	// SymEnum and the field/method aspects of class symbols. Replaces
+	// the codegen-side g.pubNames map in a future P3 commit; today it's
+	// populated but not yet read.
+	IsPub bool
 }
 
 // BoundProgram is the bind phase's output: the parsed AST plus side-maps
@@ -163,6 +169,39 @@ type BoundProgram struct {
 	Prog      *parser.Program
 	Bindings  map[*parser.Ident]Symbol
 	NodeTypes map[parser.Expr]V2Type
+	// Sigs (Phase C/P1): package-level CollectedSigs aggregate produced
+	// by the typecheck driver. Shared pointer across every program in
+	// the same package — gives codegen a single canonical source for
+	// FnSigs / MethodSigs / ClassFields / ClassNames / ParentTypes
+	// that previously lived in parallel codegen-side maps. nil when
+	// the typecheck driver didn't attach one (e.g. legacy single-file
+	// paths that bypass runTypecheck).
+	Sigs *CollectedSigs
+	// TypeAliases (Phase C/P1.4): file-local `type Name = TypeExpr`
+	// bindings. Replaces codegen-side g.typeAliases in a future P3
+	// commit. Populated during Bind from TypeAliasDecl nodes; map is
+	// nil when the file has no type aliases.
+	TypeAliases map[string]parser.TypeExpr
+}
+
+// LookupSymbolByName scans Bindings for any Ident with the given name and
+// returns the first matching Symbol. O(N) over Bindings, but typical use is
+// codegen-time pub-status / kind queries that don't run in tight loops.
+// Returns (Symbol{}, false) when no match. Pre-condition: bp != nil.
+//
+// When multiple Idents share a name (e.g. method-call site + decl), they
+// resolve to the same Symbol if they refer to the same decl, so any match
+// is correct for the kind/pub questions codegen asks. For shadowing cases
+// (a SymLocal hiding a SymFn), the first hit may be either — codegen
+// should prefer per-Ident bindings via Bindings[ident] when the AST node
+// is available.
+func (bp *BoundProgram) LookupSymbolByName(name string) (Symbol, bool) {
+	for _, sym := range bp.Bindings {
+		if sym.Name == name {
+			return sym, true
+		}
+	}
+	return Symbol{}, false
 }
 
 // BindContext supplies cross-package and cross-file information needed to
@@ -178,6 +217,12 @@ type BindContext struct {
 	SiblingConsts       map[string]bool
 	SiblingEnumVariants map[string]string // variant → enum type name
 	SiblingSealed       map[string]string // variant → sealed parent name
+	// SiblingFnsPub / SiblingConstsPub — pub status of sibling decls.
+	// Used by Bind to populate Symbol.IsPub for cross-file fn / const
+	// references, so codegen's isPub can read from bound.Bindings
+	// instead of a parallel codegen-side g.pubNames map.
+	SiblingFnsPub    map[string]bool
+	SiblingConstsPub map[string]bool
 
 	// ZincSubpkgExports — exported names from imported zinc subpackages.
 	// Keyed by package alias (`core`, `fabric/registry`, etc.).
@@ -299,13 +344,13 @@ func (b *binder) resolve(name string, line int) Symbol {
 
 	// 4. Same-package decls.
 	if b.ctx.SiblingFns[name] {
-		return Symbol{Kind: SymFn, Name: name}
+		return Symbol{Kind: SymFn, Name: name, IsPub: b.ctx.SiblingFnsPub[name]}
 	}
 	if b.ctx.SiblingTypes[name] {
 		return Symbol{Kind: SymType, Name: name}
 	}
 	if b.ctx.SiblingConsts[name] {
-		return Symbol{Kind: SymConst, Name: name}
+		return Symbol{Kind: SymConst, Name: name, IsPub: b.ctx.SiblingConstsPub[name]}
 	}
 	if enum, ok := b.ctx.SiblingEnumVariants[name]; ok {
 		return Symbol{Kind: SymEnumVariant, Name: name, Owner: enum}
@@ -452,9 +497,23 @@ func Bind(prog *parser.Program, ctx *BindContext) (*BoundProgram, []V2Error) {
 		b.bindStmt(s)
 	}
 
+	// Collect type aliases declared at the top level. Codegen consumers
+	// peel `type Foo = Fn<...>` aliases when resolving generic call args
+	// and Fn lambda targets.
+	var typeAliases map[string]parser.TypeExpr
+	for _, d := range prog.Decls {
+		if alias, ok := d.(*parser.TypeAliasDecl); ok {
+			if typeAliases == nil {
+				typeAliases = make(map[string]parser.TypeExpr)
+			}
+			typeAliases[alias.Name] = alias.Type
+		}
+	}
+
 	return &BoundProgram{
-		Prog:     prog,
-		Bindings: b.bindings,
+		Prog:        prog,
+		Bindings:    b.bindings,
+		TypeAliases: typeAliases,
 	}, b.errors
 }
 
@@ -464,7 +523,7 @@ func (b *binder) collectFileTopLevel(prog *parser.Program) {
 	for _, d := range prog.Decls {
 		switch decl := d.(type) {
 		case *parser.FnDecl:
-			b.declare(decl.Name, Symbol{Kind: SymFn, Name: decl.Name, DeclLine: decl.Line})
+			b.declare(decl.Name, Symbol{Kind: SymFn, Name: decl.Name, DeclLine: decl.Line, IsPub: decl.IsPub})
 		case *parser.ClassDecl:
 			kind := SymClass
 			if decl.IsSealed {
@@ -486,7 +545,7 @@ func (b *binder) collectFileTopLevel(prog *parser.Program) {
 				b.declare(v, Symbol{Kind: SymEnumVariant, Name: v, Owner: decl.Name})
 			}
 		case *parser.ConstDecl:
-			b.declare(decl.Name, Symbol{Kind: SymConst, Name: decl.Name, DeclLine: decl.Line})
+			b.declare(decl.Name, Symbol{Kind: SymConst, Name: decl.Name, DeclLine: decl.Line, IsPub: decl.IsPub})
 		case *parser.TypeAliasDecl:
 			b.declare(decl.Name, Symbol{Kind: SymTypeAlias, Name: decl.Name, DeclLine: decl.Line})
 		}
@@ -504,6 +563,8 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 		SiblingConsts:       make(map[string]bool),
 		SiblingEnumVariants: make(map[string]string),
 		SiblingSealed:       make(map[string]string),
+		SiblingFnsPub:       make(map[string]bool),
+		SiblingConstsPub:    make(map[string]bool),
 		ZincSubpkgExports:   make(map[string]map[string]string),
 		GoPkgExports:        make(map[string]map[string]string),
 		ImportAliases:       make(map[string]bool),
@@ -512,6 +573,7 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 		switch decl := d.(type) {
 		case *parser.FnDecl:
 			ctx.SiblingFns[decl.Name] = true
+			ctx.SiblingFnsPub[decl.Name] = decl.IsPub
 		case *parser.ClassDecl:
 			ctx.SiblingTypes[decl.Name] = true
 			if decl.IsSealed {
@@ -530,6 +592,7 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 			}
 		case *parser.ConstDecl:
 			ctx.SiblingConsts[decl.Name] = true
+			ctx.SiblingConstsPub[decl.Name] = decl.IsPub
 		case *parser.TypeAliasDecl:
 			ctx.SiblingTypes[decl.Name] = true
 		}

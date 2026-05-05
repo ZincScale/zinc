@@ -492,11 +492,17 @@ var stringMethodMapping = map[string]string{
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
-	// Consume the pending Fn<...> target hint set by the immediate emit
-	// site (e.g. `Fn<(A), R> f = (...) -> ...`). Cleared on entry so a
-	// nested lambda inside the body doesn't inherit the outer hint.
-	target := g.pendingLambdaTarget
-	g.pendingLambdaTarget = nil
+	// Find the target Fn type via bound.NodeTypes[lambda] (P2.3 +
+	// alias peeling via resolveFuncTypeExpr). When the surrounding
+	// emit site doesn't have a Fn slot context (e.g. lambda used in
+	// a non-Fn position), target stays nil and the lambda emits with
+	// its self-inferred return type.
+	var target *parser.FuncTypeExpr
+	if g.bound != nil {
+		if rt, ok := g.bound.NodeTypes[l]; ok && rt.TypeExpr != nil {
+			target = g.resolveFuncTypeExpr(rt.TypeExpr)
+		}
+	}
 
 	// Set up tuple-return / thrower context for the body emit when the
 	// target Fn slot's return type is a TupleType (with or without an
@@ -696,8 +702,15 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 		}
 	case *parser.CallExpr:
 		if ident, ok := e.Callee.(*parser.Ident); ok {
-			if rt, ok := g.funcReturnTypes[ident.Name]; ok {
-				return rt
+			// Type formatting is speculative here — used only for
+			// inference, not emission — so suppress import registration
+			// to avoid pulling in types the caller doesn't actually emit.
+			if g.bound != nil && g.bound.Sigs != nil {
+				if fsig, found := g.bound.Sigs.FnSigs[ident.Name]; found {
+					return g.withSuppressedImports(func() string {
+						return g.formatV2ReturnType(fsig.ReturnType)
+					})
+				}
 			}
 			// Bare call to a method on the current class — `foo()` where
 			// `foo` is a method of the enclosing class. Lambdas closed
@@ -714,7 +727,7 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 			}
 			if t, ok := known[ident.Name]; ok {
 				resolved := t
-				if alias, ok := g.typeAliases[t]; ok {
+				if alias, ok := g.lookupTypeAlias(t); ok {
 					resolved = g.formatType(alias)
 				}
 				if strings.HasPrefix(resolved, "func(") {
@@ -817,19 +830,15 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 		}
 	case *parser.CallExpr:
 		// `f(...)` or `obj.method(...)` returning T?. Function lookup
-		// matches against funcReturnsOptional which is populated for
-		// both top-level FnDecls and class methods at collectDecls
-		// time. The check uses bare callee name; package-qualified
-		// calls (`pkg.f(...)`) are conservatively false today.
-		if ident, ok := ex.Callee.(*parser.Ident); ok {
-			if g.funcReturnsOptional[ident.Name] {
-				return true
-			}
-		}
-		if sel, ok := ex.Callee.(*parser.SelectorExpr); ok {
-			if g.funcReturnsOptional[sel.Field] {
-				return true
-			}
+		// Lookup goes through callReturnIsPointer (bound.Sigs preferred,
+		// codegen-side legacy as fallback). Only the isOpt bit
+		// matters here — exprIsPointerOptional asks "is the result T?".
+		// Lookup goes through callReturnIsPointer (bound.Sigs preferred,
+		// codegen-side legacy as fallback). Only the isOptional bit
+		// matters here — exprIsPointerOptional asks "is the result T?".
+		_ = ex.Callee
+		if _, isOpt, _, _ := g.callReturnIsPointer(ex); isOpt {
+			return true
 		}
 	}
 	return false

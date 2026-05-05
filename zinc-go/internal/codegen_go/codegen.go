@@ -42,7 +42,6 @@ type Generator struct {
 	currentClass   string          // current class name (for pub member lookups)
 
 	// Error handling
-	errorFuncs            map[string]bool   // functions that can return errors
 	currentReturnType     string            // return type of current function (for zero values in error returns)
 	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
 	currentReturnOptional bool              // true if current function returns T? (pointer type)
@@ -88,21 +87,9 @@ type Generator struct {
 	// instead of the single-slot currentReturnType-based fallback.
 	currentReturnIsDeclaredThrower bool
 
-	// pendingLambdaTarget carries the declared Fn<...> target type from
-	// the immediate emit site (currently VarStmt LHS) into
-	// formatLambdaExpr, so the lambda's Go return type is driven from
-	// the target slot instead of falling back to interface{} when the
-	// body contains expressions inferLambdaReturnType can't resolve
-	// statically (e.g. method calls, field accesses on `this`).
-	// Cleared on entry to formatLambdaExpr so nested lambdas don't
-	// inherit the outer hint.
-	pendingLambdaTarget *parser.FuncTypeExpr
-
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
-	funcReturnsOptional map[string]bool       // functions that return T? (optional)
-	funcReturnTypes     map[string]string     // function name → Go return type string
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	dataClasses         map[string]bool       // data class names that have NewType constructors
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
@@ -143,6 +130,13 @@ type Generator struct {
 	// the generic helper that boxes a value into a pointer. Required for
 	// `String? foo = "hi"` and similar — Go disallows `&"hi"` directly.
 	needsPtrHelper bool
+
+	// suppressImports gates needImport. When true, formatType calls
+	// don't register imports — useful for speculative type formatting
+	// (e.g. inferExprType on a sibling-fn V2Type whose result drives
+	// inference but whose types this file may not actually emit).
+	// Toggled by withSuppressedImports.
+	suppressImports bool
 
 	// addrOfAllowed is true at the start of formatExpr only when the
 	// caller has just entered the top-level expression of a Go-library
@@ -227,12 +221,9 @@ func New() *Generator {
 		imports:             make(map[string]bool),
 		interfaces:          make(map[string]bool),
 		structs:             make(map[string]*parser.ClassDecl),
-		errorFuncs:          make(map[string]bool),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		ptrVars:             make(map[string]bool),
-		funcReturnsOptional: make(map[string]bool),
-		funcReturnTypes:     make(map[string]string),
 		renamedVars:         make(map[string]string),
 		dataClasses:         make(map[string]bool),
 		typeAliases:         make(map[string]parser.TypeExpr),
@@ -442,6 +433,80 @@ func CollectTypeAliases(prog *parser.Program) map[string]parser.TypeExpr {
 	return aliases
 }
 
+// formatV2ReturnType formats a V2Type return signature to the Go type
+// string. Mirrors formatType's TupleType handling for `(T, error)`
+// shapes — produces "(T1, T2, ...)" — and delegates to goTypeOfV2 for
+// non-tuple types. Calls formatType internally; callers that don't
+// want imports registered should wrap in g.withSuppressedImports.
+func (g *Generator) formatV2ReturnType(rt typechecker.V2Type) string {
+	if rt.Name == "tuple" {
+		parts := make([]string, 0, len(rt.Args))
+		for _, a := range rt.Args {
+			parts = append(parts, g.formatV2ReturnType(a))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	}
+	return g.goTypeOfV2(rt)
+}
+
+// v2ReturnsError reports whether a typechecker V2Type return signature
+// has trailing `error` — i.e. the function/method is a thrower. Mirrors
+// the codegen-side returnTypeDeclaresError but reads V2's tuple shape
+// (Name:"tuple", Args:[..., error]).
+func v2ReturnsError(rt typechecker.V2Type) bool {
+	if rt.Name == "error" {
+		return true
+	}
+	if rt.Name == "tuple" && len(rt.Args) > 0 {
+		return rt.Args[len(rt.Args)-1].Name == "error"
+	}
+	return false
+}
+
+// fnReturnsError reports whether a top-level function (by bare name) is
+// a thrower. Reads bound.Sigs.FnSigs (cross-pkg + cross-file aware).
+// Returns false when bound is unavailable — only legacy single-file paths
+// without typecheck wiring would lose detection, and runTypecheck attaches
+// Sigs on every normal compile path (compileFile, compileMultiFile,
+// compileDirWithSubpackages).
+func (g *Generator) fnReturnsError(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil {
+		if fsig, ok := g.bound.Sigs.FnSigs[name]; ok {
+			return v2ReturnsError(fsig.ReturnType)
+		}
+	}
+	return false
+}
+
+// methodReturnsError reports whether a method (class + method name) is
+// a thrower. Same lookup precedence as fnReturnsError.
+func (g *Generator) methodReturnsError(class, method string) bool {
+	if g.bound != nil && g.bound.Sigs != nil {
+		if methods, ok := g.bound.Sigs.MethodSigs[class]; ok {
+			if msig, ok := methods[method]; ok {
+				return v2ReturnsError(msig.ReturnType)
+			}
+		}
+	}
+	return false
+}
+
+// lookupTypeAlias resolves a type-alias name to its underlying TypeExpr.
+// Prefers bound.TypeAliases (the typechecker's canonical per-file table)
+// when available; falls back to the codegen-side g.typeAliases for
+// legacy paths that bypass the bound side-map.
+func (g *Generator) lookupTypeAlias(name string) (parser.TypeExpr, bool) {
+	if g.bound != nil && g.bound.TypeAliases != nil {
+		if t, ok := g.bound.TypeAliases[name]; ok {
+			return t, true
+		}
+	}
+	if t, ok := g.typeAliases[name]; ok {
+		return t, true
+	}
+	return nil, false
+}
+
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
 func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
 	if g.subpkgStructs == nil {
@@ -484,10 +549,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		switch decl := d.(type) {
 		case *parser.InterfaceDecl:
 			g.interfaces[decl.Name] = true
-			// Interface methods — track pub status
-			for _, m := range decl.Methods {
-				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
-			}
+			// Interface method pub status flows through
+			// bound.Sigs.MemberIsPub (codegen's isPubMember reads it).
 		case *parser.DataClassDecl:
 			g.dataClasses[decl.Name] = true
 			if g.dataClassDecls == nil {
@@ -499,10 +562,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				g.localDataFields = make(map[string][]*parser.FieldDecl)
 			}
 			g.localDataFields[decl.Name] = decl.Params
-			// Data class fields — track pub status
-			for _, f := range decl.Params {
-				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
-			}
+			// Data class field pub status flows through
+			// bound.Sigs.MemberIsPub.
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
@@ -518,9 +579,8 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 						g.localDataFields = make(map[string][]*parser.FieldDecl)
 					}
 					g.localDataFields[v.Name] = v.Params
-					for _, f := range v.Params {
-						g.pubNames[v.Name+"."+f.Name] = f.IsPub
-					}
+					// Sealed variant field pub status via
+					// bound.Sigs.MemberIsPub.
 				}
 			}
 			if decl.Ctor != nil {
@@ -533,24 +593,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// return type. Constructor throwers must use a factory fn
 			// with an explicit `(T, error)` return — `init` blocks no
 			// longer auto-widen.
-			for _, m := range decl.Methods {
-				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
-				key := decl.Name + "." + m.Name
-				if returnTypeDeclaresError(m.ReturnType) {
-					g.errorFuncs[key] = true
-				}
-				// Track method-return optionality so implicit-self method
-				// calls inside another method of the same class get
-				// recognized as pointer-optional vars at the bind site.
-				// (The typechecker doesn't currently resolve method-call
-				// return types, so this codegen-side table fills the gap.)
-				if _, ok := m.ReturnType.(*parser.OptionalType); ok {
-					g.funcReturnsOptional[m.Name] = true
-				}
-			}
-			for _, f := range decl.Fields {
-				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
-			}
+			// Class method/field pub status + method return-type info
+			// all flow through bound.Sigs (MemberIsPub for pub,
+			// MethodSigs for return-type classification). No codegen-
+			// side per-class tracking populated here.
 		case *parser.TypeAliasDecl:
 			g.typeAliases[decl.Name] = decl.Type
 		case *parser.ConstDecl:
@@ -558,17 +604,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			// Explicit `error` in declared return type — the only way
-			// a function is a thrower under the new design.
-			if returnTypeDeclaresError(decl.ReturnType) {
-				g.errorFuncs[decl.Name] = true
-			}
-			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
-				g.funcReturnsOptional[decl.Name] = true
-			}
-			if decl.ReturnType != nil {
-				g.funcReturnTypes[decl.Name] = g.formatType(decl.ReturnType)
-			}
+			// All return-type info (thrower, optional, formatted Go type
+			// string for inference) flows through bound.Sigs.FnSigs.
+			// inferExprType formats from V2Type with import-registration
+			// suppressed; callReturnLookup / fnReturnsError query the
+			// shape directly.
 		}
 	}
 }
@@ -590,7 +630,7 @@ func fieldDeclsToParams(fields []*parser.FieldDecl) []*parser.ParamDecl {
 //
 // Thrower-ness is now purely syntactic: a function is a thrower iff its
 // declared return type contains `error` (bare or as the trailing element
-// of a TupleType). errorFuncs is populated from declared signatures
+// of a TupleType). Thrower classification reads from bound.Sigs.FnSigs
 // during collectDecls; no body inspection, no cross-package fixed-point.
 
 // exprContainsNestedThrowerCall reports whether the expression tree
@@ -732,7 +772,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.indent = 0
 	g.className = className
 	g.imports = make(map[string]bool)
-	g.errorFuncs = make(map[string]bool)
 	// Preserve funcSigs pre-populated by SetSiblingExports (sibling function awareness).
 	if g.funcSigs == nil {
 		g.funcSigs = make(map[string][]*parser.ParamDecl)

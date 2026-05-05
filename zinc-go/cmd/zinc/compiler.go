@@ -157,6 +157,12 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	var allErrors []typechecker.V2Error
 	for _, prog := range progs {
 		bp, bindErrs := typechecker.Bind(prog, bindCtx)
+		// Attach the package-level CollectedSigs aggregate. Every program
+		// in the same package shares the same pointer — externalSigs is
+		// already cross-file (and cross-pkg via the additions above), so
+		// codegen reads one canonical source instead of rebuilding parallel
+		// per-file maps.
+		bp.Sigs = &externalSigs
 		bps[prog] = bp
 		allErrors = append(allErrors, bindErrs...)
 	}

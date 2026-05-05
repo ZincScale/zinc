@@ -1,0 +1,14 @@
+// Bug 1: `T? x = null` emits `x := nil` (invalid Go).
+class Box {
+    pub String name
+    init(String n) { this.name = n }
+}
+
+void main() {
+    Box? x = null
+    if (x == null) {
+        print("x is null")
+    } else {
+        print("x is not null")
+    }
+}

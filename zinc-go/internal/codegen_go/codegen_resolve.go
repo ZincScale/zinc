@@ -971,8 +971,19 @@ func (g *Generator) isSubpackage() bool {
 }
 
 // isPub checks if a name was declared with pub.
-// For qualified names like "ClassName.methodName", checks the full key.
+// Prefers bound.LookupSymbolByName (typechecker-canonical via Symbol.IsPub
+// — P1.3 set it for in-file decls; sibling-fn / sibling-const flow it
+// through SiblingFnsPub / SiblingConstsPub). Falls back to g.pubNames
+// for legacy single-file paths and for cross-pkg names.
 func (g *Generator) isPub(name string) bool {
+	if g.bound != nil {
+		if sym, ok := g.bound.LookupSymbolByName(name); ok {
+			switch sym.Kind {
+			case typechecker.SymFn, typechecker.SymConst:
+				return sym.IsPub
+			}
+		}
+	}
 	if pub, ok := g.pubNames[name]; ok {
 		return pub
 	}
@@ -981,8 +992,15 @@ func (g *Generator) isPub(name string) bool {
 }
 
 // isPubField checks if a field/method on a class is pub.
+// Prefers bound.Sigs.MemberIsPub (typechecker-canonical); falls back
+// to g.pubNames for legacy paths and same-pkg sibling-class members.
 func (g *Generator) isPubMember(className, memberName string) bool {
 	key := className + "." + memberName
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.MemberIsPub != nil {
+		if pub, ok := g.bound.Sigs.MemberIsPub[key]; ok {
+			return pub
+		}
+	}
 	if pub, ok := g.pubNames[key]; ok {
 		return pub
 	}
@@ -1219,7 +1237,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		if mapped, ok := zincToGoType[typ.Name]; ok {
 			return mapped
 		}
-		if _, ok := g.typeAliases[typ.Name]; ok {
+		if _, ok := g.lookupTypeAlias(typ.Name); ok {
 			return typ.Name
 		}
 		if qualified, ok := g.typeImports[typ.Name]; ok {
@@ -1506,8 +1524,28 @@ func (g *Generator) formatExprList(exprs []parser.Expr) string {
 // --- Import tracking ---------------------------------------------------------
 
 // needImport records that a Go import is required.
+//
+// Honored only outside of `suppressImports` mode — code paths that
+// format types speculatively (e.g. inferExprType on a sibling fn whose
+// return references types this file may not emit) wrap their formatType
+// calls in g.withSuppressedImports. That keeps the type-string
+// computation while preventing spurious dead-import registration.
 func (g *Generator) needImport(pkg string) {
+	if g.suppressImports {
+		return
+	}
 	g.imports[pkg] = true
+}
+
+// withSuppressedImports runs fn with import-registration disabled and
+// restores the previous state on exit. Use for speculative formatType
+// calls whose result drives type inference but whose imports the
+// caller can't guarantee will be emitted.
+func (g *Generator) withSuppressedImports(fn func() string) string {
+	prev := g.suppressImports
+	g.suppressImports = true
+	defer func() { g.suppressImports = prev }()
+	return fn()
 }
 
 // --- Zero values -------------------------------------------------------------

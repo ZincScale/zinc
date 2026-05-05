@@ -27,10 +27,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		return
 	}
 
-	// errorFuncs is keyed by zinc name (collectDecls populates with
-	// decl.Name). Top-level fns in subpackages get exported via
-	// exportIfSubpackage, so look up by fn.Name not by the exported name.
-	canError := g.errorFuncs[fn.Name]
+	// Thrower lookup: prefer bound.Sigs.FnSigs (cross-pkg + cross-file
+	// aware via the typecheck driver's externalSigs aggregate).
+	canError := g.fnReturnsError(fn.Name)
 	declaredThrower := returnTypeDeclaresError(fn.ReturnType)
 	goRetType := g.goReturnTypeStr(fn.ReturnType)
 	var ret string
@@ -450,7 +449,7 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 	tpDecl := goTypeParams(cls.TypeParams)
 	tpArgs := goTypeArgs(cls.TypeParams)
 	params := g.formatParams(ctor.Params)
-	ctorThrows := g.errorFuncs["New"+typeName]
+	ctorThrows := g.fnReturnsError("New" + typeName)
 	if ctorThrows {
 		g.writeln("func New%s%s(%s) (*%s%s, error) {", typeName, tpDecl, params, typeName, tpArgs)
 	} else {
@@ -701,8 +700,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		}
 	}()
 
-	methodKey := receiver + "." + m.Name
-	canError := g.errorFuncs[methodKey]
+	canError := g.methodReturnsError(receiver, m.Name)
 	declaredThrower := returnTypeDeclaresError(m.ReturnType)
 	goRetType := g.goReturnTypeStr(m.ReturnType)
 

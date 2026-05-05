@@ -330,6 +330,31 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	}
 
 	if v.OrHandler != nil && v.Value != nil {
+		// `var x = call() or { ... }` short-circuits to emitOrAssignment
+		// without running the ptrVar / varTypes registration that the
+		// no-OrHandler path performs further below. Mirror those tracks
+		// here so subsequent `lhs = x` assignments to a `T?` LHS can
+		// recognize x as already-pointer (class return, FFI pointer,
+		// nullable return). Without this, the assignment auto-address-
+		// take would double-wrap a class-typed local with _zincPtr,
+		// producing `**T`.
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			// Side-effect-free pointer classification — does NOT register
+			// imports. Construct varTypes string manually for class/legacy
+			// cases so downstream valueIsAlreadyPointer's prefix-* check
+			// recognizes the local without triggering formatType.
+			if rt, isOpt, isPtr, found := g.callReturnIsPointer(call); found {
+				if isOpt {
+					g.ptrVars[v.Name] = true
+				} else if isPtr {
+					if g.isClassType(rt.Name) {
+						g.varTypes[v.Name] = "*" + rt.Name
+					} else if strings.HasPrefix(rt.Name, "*") {
+						g.varTypes[v.Name] = rt.Name
+					}
+				}
+			}
+		}
 		// var x = call() or default → error handling
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
@@ -474,24 +499,17 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 
 		// Track pointer vars from optional-returning functions. Three paths:
-		//   1. Top-level FnDecls and class methods — `funcReturnsOptional`
-		//      was populated during collectDecls (keyed by unqualified
-		//      name; methods register their own name there too).
+		//   1. Top-level FnDecls and class methods — return-type info
+		//      flows through bound.Sigs (FnSigs / MethodSigs) since the
+		//      typechecker's CollectedSigs is the canonical source.
 		//   2. Method calls on a typed receiver — `obj.method()` where
-		//      obj's class has the method registered in funcReturnsOptional.
+		//      obj's class has the method in MethodSigs.
 		//   3. Bind side-map fallback — read the V2Type for the init
 		//      expression and check `Nullable`. Picks up paths the
 		//      codegen-side tables don't cover.
 		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok {
-				if g.funcReturnsOptional[ident.Name] {
-					g.ptrVars[v.Name] = true
-				}
-			}
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if g.funcReturnsOptional[sel.Field] {
-					g.ptrVars[v.Name] = true
-				}
+			if _, isOpt, _, _ := g.callReturnIsPointer(call); isOpt {
+				g.ptrVars[v.Name] = true
 			}
 		}
 		if g.bound != nil {
@@ -561,22 +579,33 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
-		// LHS is Fn<...> and RHS is a lambda literal: publish the target
-		// Fn type so formatLambdaExpr can drive the lambda's Go return
-		// type from the slot, instead of defaulting to interface{} when
-		// the body has expressions inferLambdaReturnType can't resolve.
-		if _, isLambda := v.Value.(*parser.LambdaExpr); isLambda && v.Type != nil {
-			if ft := g.resolveFuncTypeExpr(v.Type); ft != nil {
-				prev := g.pendingLambdaTarget
-				g.pendingLambdaTarget = ft
-				defer func() { g.pendingLambdaTarget = prev }()
-			}
+		// `T x = null` — Go's `:=` can't infer type from untyped nil, so
+		// any null-initialized declaration with explicit type must use
+		// the `var x T = nil` form. Covers `Box? x = null`, `String? s =
+		// null`, etc. Without this, codegen emits `x := nil` and Go
+		// rejects with "use of untyped nil in assignment".
+		if _, isNull := v.Value.(*parser.NullLit); isNull && v.Type != nil {
+			useExplicitType = true
 		}
+		// LHS is Fn<...> and RHS is a lambda literal: the typechecker
+		// already wrote NodeTypes[lambdaRHS] = declaredFnType (P2.3),
+		// so formatLambdaExpr reads the target from bound directly.
+		// No codegen-side pendingLambdaTarget setup needed here.
 		if useExplicitType {
 			typeName := g.formatType(v.Type)
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
 		} else {
 			g.writeln("%s := %s", varName, g.formatExpr(v.Value))
+		}
+		// Mirror the no-init branch: a `T? x = null` (or any explicit
+		// pointer-optional decl with init) needs the same ptr-var
+		// tracking the bare `T? x` form gets, so downstream
+		// auto-address-take / auto-deref / `as` unwrap recognize it as
+		// a nullable pointer. Without this, `x as T` falls through to
+		// the comma-ok type assertion path, which Go rejects on a
+		// concrete `*T` operand.
+		if isPointerOptional(v.Type) {
+			g.ptrVars[v.Name] = true
 		}
 	} else {
 		typeName := "interface{}"
@@ -671,6 +700,91 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 	g.writeln("%s %s %s", g.formatExpr(a.Target), a.Op, g.formatExpr(a.Value))
 }
 
+// callReturnLookup finds a CallExpr's return-type V2Type from the
+// typechecker's canonical CollectedSigs (cross-pkg + cross-file aware),
+// falling back to a synthesized V2Type from the codegen-side legacy maps.
+// Side-effect-free: never calls formatType (which would register imports
+// for the resolved type's package — wrong if the caller isn't going to
+// emit an actual reference to that type).
+//
+// `(T, error)` tuple returns are peeled to the value slot.
+//
+// Returns the V2Type and whether anything was found. Callers ask
+// boolean-only questions via callReturnIsPointer below; only callers
+// that actually need the formatted Go type string should call goTypeOfV2
+// on the result, which is when import registration is appropriate.
+func (g *Generator) callReturnLookup(call *parser.CallExpr) (rt typechecker.V2Type, found bool) {
+	var name string
+	if ident, ok := call.Callee.(*parser.Ident); ok {
+		name = ident.Name
+	} else if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+		name = sel.Field
+	}
+	if name == "" {
+		return
+	}
+	peelValue := func(t typechecker.V2Type) typechecker.V2Type {
+		if t.Name == "tuple" && len(t.Args) > 0 {
+			return t.Args[0]
+		}
+		return t
+	}
+	if g.bound != nil && g.bound.Sigs != nil {
+		for _, methods := range g.bound.Sigs.MethodSigs {
+			if msig, ok := methods[name]; ok {
+				return peelValue(msig.ReturnType), true
+			}
+		}
+		if fsig, ok := g.bound.Sigs.FnSigs[name]; ok {
+			return peelValue(fsig.ReturnType), true
+		}
+	}
+	return
+}
+
+// callReturnIsPointer returns the V2Type plus (isOptional, isPointer)
+// classification for a CallExpr — side-effect-free (does not call
+// formatType / register imports). Callers wanting a Go type string for
+// varTypes registration can use the returned V2Type directly: for the
+// simple cases that hit this path (class returns, optionals, legacy
+// formatted strings) the type lowering is "*"+rt.Name.
+func (g *Generator) callReturnIsPointer(call *parser.CallExpr) (rt typechecker.V2Type, isOptional, isPointer, found bool) {
+	rt, found = g.callReturnLookup(call)
+	if !found {
+		return
+	}
+	isOptional = rt.Nullable
+	if rt.Nullable {
+		isPointer = true
+		return
+	}
+	if g.isClassType(rt.Name) {
+		isPointer = true
+		return
+	}
+	if strings.HasPrefix(rt.Name, "*") {
+		isPointer = true
+	}
+	return
+}
+
+// goTypeOfV2 converts a typechecker V2Type to the Go type string codegen
+// needs. **Has side effects** (calls formatType which registers imports).
+// Use only when the caller will actually emit a reference to that type;
+// for boolean "is this a pointer?" checks use callReturnIsPointer.
+func (g *Generator) goTypeOfV2(t typechecker.V2Type) string {
+	if t.TypeExpr != nil {
+		return g.formatType(t.TypeExpr)
+	}
+	if t.Nullable {
+		return "*" + t.Name
+	}
+	if g.isClassType(t.Name) {
+		return "*" + t.Name
+	}
+	return t.Name
+}
+
 // targetIsPointerOptional reports whether an assignment LHS expression
 // resolves to a `*T` type — a nullable value/class field or local.
 // Used to drive auto-address-take on the RHS.
@@ -715,13 +829,31 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				return true
 			}
 		}
+		// Fallback: codegen-side type tracking for locals bound from
+		// pointer-returning expressions (class returns, FFI pointers).
+		// Picks up the case where bound.NodeTypes doesn't annotate the
+		// Ident reference site but inferExprType + funcReturnTypes
+		// resolved the local's Go type at the bind point.
+		if vt, ok := g.varTypes[v.Name]; ok && strings.HasPrefix(vt, "*") {
+			return true
+		}
 	case *parser.CallExpr:
 		// Constructor call: NewFoo() returns *Foo.
 		if ident, ok := v.Callee.(*parser.Ident); ok {
 			if g.isClassType(ident.Name) {
 				return true
 			}
-			if g.funcReturnsOptional[ident.Name] {
+			// Function/method thrower-or-pointer return — class returns,
+			// FFI pointer returns, T? all qualify. callReturnIsPointer
+			// reads bound.Sigs first; legacy maps as fallback.
+			if _, _, isPtr, found := g.callReturnIsPointer(v); found && isPtr {
+				return true
+			}
+		}
+		// Method call: `obj.method(...)`. Lookup goes through callReturnIsPointer
+		// (side-effect-free; bound.Sigs preferred, codegen-side legacy as fallback).
+		if _, ok := v.Callee.(*parser.SelectorExpr); ok {
+			if _, _, isPtr, found := g.callReturnIsPointer(v); found && isPtr {
 				return true
 			}
 		}
@@ -772,8 +904,6 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		if g.currentReturnType != "" {
 			zv := g.zeroValueFor(g.currentReturnType)
 			g.writeln("return %s, nil", zv)
-		} else if g.currentReturnType == "" && g.errorFuncs != nil {
-			g.writeln("return")
 		} else {
 			g.writeln("return")
 		}
@@ -1785,7 +1915,7 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 // `if err != nil { return err }` at call sites inside try bodies or
 // thrower functions, replacing the old explicit `or { }` handler.
 //
-// Today this covers Zinc functions tracked in errorFuncs. Method calls
+// Today this covers Zinc functions classified via bound.Sigs.FnSigs. Method calls
 // on classes with a throwing method are detected via the class's method
 // list. Go stdlib calls fall back to goResolver.ReturnsError.
 func (g *Generator) callReturnsError(expr parser.Expr) bool {
@@ -1795,14 +1925,14 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 	}
 	switch callee := call.Callee.(type) {
 	case *parser.Ident:
-		if g.errorFuncs[callee.Name] {
+		if g.fnReturnsError(callee.Name) {
 			return true
 		}
 		// Constructor call shape: `Port(8080)` where Port is a class
 		// with a throwing ctor. The actual Go call will be NewPort(...),
 		// so look up the widened key.
 		if _, isClass := g.structs[callee.Name]; isClass {
-			if g.errorFuncs["New"+callee.Name] {
+			if g.fnReturnsError("New" + callee.Name) {
 				return true
 			}
 		}
@@ -1851,10 +1981,10 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 	case *parser.SelectorExpr:
-		// Method on a class: Class.method key in errorFuncs, or the
-		// method declaration in a sibling/subpackage class.
+		// Method on a class: classified via bound.Sigs.MethodSigs, or
+		// the method declaration in a sibling/subpackage class.
 		if recv := g.resolveReceiverClassName(callee.Object); recv != "" {
-			if g.errorFuncs[recv+"."+callee.Field] {
+			if g.methodReturnsError(recv, callee.Field) {
 				return true
 			}
 			if g.methodBodyThrows(recv, callee.Field) {
@@ -1896,7 +2026,7 @@ func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr 
 		return ft
 	}
 	if simple, ok := t.(*parser.SimpleType); ok {
-		if alias, exists := g.typeAliases[simple.Name]; exists {
+		if alias, exists := g.lookupTypeAlias(simple.Name); exists {
 			return g.resolveFuncTypeExpr(alias)
 		}
 		// Cross-package: param/field types referencing an alias declared
@@ -1914,7 +2044,7 @@ func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr 
 
 // methodBodyThrows walks the method declaration (from either local
 // structs or subpackage-declared structs) to see whether it can throw
-// or return an error. Cross-package thrower detection — errorFuncs
+// or return an error. Cross-package thrower detection — bound.Sigs.FnSigs
 // only gets populated for the current generator's decls, so we need
 // to consult the AST directly for sibling/subpackage classes. Walks
 // the inheritance chain too so inherited throwers are detected.
@@ -2026,12 +2156,16 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		return false
 	}
 	if ident, ok := call.Callee.(*parser.Ident); ok {
-		if g.errorFuncs[ident.Name] {
-			rt, exists := g.funcReturnTypes[ident.Name]
-			// "error" is the bare-error declared form (`pub error f()`)
-			// — no value slot, so it's a void thrower for call-site
-			// destructure purposes.
-			return !exists || rt == "" || rt == "void" || rt == "error"
+		if g.fnReturnsError(ident.Name) {
+			// Bare-error (void) thrower vs multi-value `(T, error)` —
+			// distinguish via bound.Sigs.FnSigs (cross-pkg + cross-file
+			// aware via the typecheck driver's externalSigs aggregate).
+			if g.bound != nil && g.bound.Sigs != nil {
+				if fsig, found := g.bound.Sigs.FnSigs[ident.Name]; found {
+					return fsig.ReturnType.Name == "error"
+				}
+			}
+			return false
 		}
 		// Unqualified Go stdlib — ask the resolver about return arity.
 		// Side-map first; falls back to ad-hoc unqualifiedNames.
@@ -2071,7 +2205,7 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 		if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
-			if g.errorFuncs[recv+"."+sel.Field] {
+			if g.methodReturnsError(recv, sel.Field) {
 				// Unknown method return arity — conservative false;
 				// class methods declared void are rare in existing code.
 				return false
