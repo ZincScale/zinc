@@ -2181,11 +2181,19 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		return false
 	}
 	if ident, ok := call.Callee.(*parser.Ident); ok {
-		if g.errorFuncs[ident.Name] {
+		if g.fnReturnsError(ident.Name) {
+			// Bare-error (void) thrower vs multi-value `(T, error)` —
+			// distinguish via bound.Sigs (cross-pkg + cross-file aware)
+			// first. funcReturnTypes is populated per-file; cross-file
+			// callers can't rely on its `!exists` default-to-void
+			// branch. Fall back to the codegen-side string only when
+			// bound is unavailable.
+			if g.bound != nil && g.bound.Sigs != nil {
+				if fsig, found := g.bound.Sigs.FnSigs[ident.Name]; found {
+					return fsig.ReturnType.Name == "error"
+				}
+			}
 			rt, exists := g.funcReturnTypes[ident.Name]
-			// "error" is the bare-error declared form (`pub error f()`)
-			// — no value slot, so it's a void thrower for call-site
-			// destructure purposes.
 			return !exists || rt == "" || rt == "void" || rt == "error"
 		}
 		// Unqualified Go stdlib — ask the resolver about return arity.
@@ -2226,7 +2234,7 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
 		if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
-			if g.errorFuncs[recv+"."+sel.Field] {
+			if g.methodReturnsError(recv, sel.Field) {
 				// Unknown method return arity — conservative false;
 				// class methods declared void are rare in existing code.
 				return false

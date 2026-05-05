@@ -590,14 +590,10 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// longer auto-widen.
 			for _, m := range decl.Methods {
 				g.pubNames[decl.Name+"."+m.Name] = m.IsPub
-				key := decl.Name + "." + m.Name
-				if returnTypeDeclaresError(m.ReturnType) {
-					g.errorFuncs[key] = true
-				}
-				// Method return-type info (optional, pointer-shape, thrower)
-				// flows through bound.Sigs.MethodSigs at the call site
-				// via callReturnIsPointer / methodReturnsError. No
-				// codegen-side method tracking populated here.
+				// Method thrower / optional / pointer-shape lookups all
+				// flow through bound.Sigs.MethodSigs (see methodReturnsError
+				// and callReturnIsPointer). No codegen-side method-level
+				// tracking populated here.
 			}
 			for _, f := range decl.Fields {
 				g.pubNames[decl.Name+"."+f.Name] = f.IsPub
@@ -609,14 +605,13 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 		case *parser.FnDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 			g.funcSigs[decl.Name] = decl.Params
-			// Explicit `error` in declared return type — the only way
-			// a function is a thrower under the new design.
-			if returnTypeDeclaresError(decl.ReturnType) {
-				g.errorFuncs[decl.Name] = true
-			}
-			if _, ok := decl.ReturnType.(*parser.OptionalType); ok {
-				g.funcReturnsOptional[decl.Name] = true
-			}
+			// Thrower / optional return classification flows through
+			// bound.Sigs.FnSigs (see fnReturnsError / callReturnIsPointer).
+			// funcReturnTypes is retained as a per-file Go-formatted-type
+			// cache for inferExprType — that consumer wants the
+			// pre-formatted Go string and the side-effect of registering
+			// imports happens via formatType during collectDecls, which
+			// is the right time for those side-effects.
 			if decl.ReturnType != nil {
 				g.funcReturnTypes[decl.Name] = g.formatType(decl.ReturnType)
 			}
