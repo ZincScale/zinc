@@ -1005,6 +1005,24 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				_, isLocal := c.scope.lookup(pkgIdent.Name)
 				if !isLocal {
 					if sig, ok := c.fnSigs[sel.Field]; ok {
+						// Phase C/P2.3 (cross-pkg) — annotate lambda args
+						// in zinc-subpackage calls. Same shape as the
+						// free-function and method-call branches.
+						if c.nodeTypes != nil {
+							for i, arg := range e.Args {
+								if i >= len(sig.Params) {
+									break
+								}
+								if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+									continue
+								}
+								if sig.Params[i].TypeExpr != nil {
+									if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
+										c.nodeTypes[arg] = sig.Params[i]
+									}
+								}
+							}
+						}
 						return sig.ReturnType
 					}
 				}
