@@ -772,7 +772,16 @@ func (c *V2Checker) checkStmt(s parser.Stmt) {
 	case *parser.WithStmt:
 		inner := newV2Scope(c.scope)
 		for _, r := range s.Resources {
-			inner.set(r.Name, typeAny)
+			// Infer the resource's type from its value so method calls
+			// against it (`gw.Write(data)`) can resolve through the
+			// bind side-map and trigger FFI auto-propagation. Tuple
+			// returns extract slot 0 (the resource); single-value
+			// returns are just the value itself.
+			t := c.inferType(r.Value)
+			if t.Name == "tuple" && len(t.Args) > 0 {
+				t = t.Args[0]
+			}
+			inner.set(r.Name, t)
 		}
 		prevScope := c.scope
 		c.scope = inner

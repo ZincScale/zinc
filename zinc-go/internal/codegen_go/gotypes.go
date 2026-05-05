@@ -349,6 +349,40 @@ func (r *GoTypeResolver) MethodReturnTypeAt(typ types.Type, methodName string, i
 	return results.At(idx).Type()
 }
 
+// MethodReturnsError reports whether the named method on a Go-resolved
+// receiver type returns an `error` in its last return slot. Used by
+// callReturnsError to detect FFI-receiver method calls that throw —
+// `gw.Write(data)` where `gw` is `*gzip.Writer` etc.
+func (r *GoTypeResolver) MethodReturnsError(typ types.Type, methodName string) bool {
+	if typ == nil {
+		return false
+	}
+	mset := types.NewMethodSet(typ)
+	sel := mset.Lookup(nil, methodName)
+	if sel == nil {
+		if _, isPtr := typ.(*types.Pointer); !isPtr {
+			mset = types.NewMethodSet(types.NewPointer(typ))
+			sel = mset.Lookup(nil, methodName)
+		}
+	}
+	if sel == nil {
+		return false
+	}
+	fn, ok := sel.Obj().(*types.Func)
+	if !ok {
+		return false
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	results := sig.Results()
+	if results.Len() == 0 {
+		return false
+	}
+	return isErrorType(results.At(results.Len() - 1).Type())
+}
+
 func (r *GoTypeResolver) MethodReturnsErrorOnly(typ types.Type, methodName string) bool {
 	if typ == nil {
 		return false

@@ -319,8 +319,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	// Exception pivot: `var x = call(...)` where call() is a Zinc function
 	// that throws (or transitively calls a thrower) auto-propagates the
 	// error. Inside a try body this returns from the IIFE; otherwise it
-	// returns from the enclosing thrower function.
-	if v.OrHandler == nil && v.Value != nil && g.callReturnsError(v.Value) {
+	// returns from the enclosing thrower function. Skip for void throwers
+	// (call returns just `error`) — there the user is explicitly binding
+	// the error to the var, the value IS the error, and auto-propagation
+	// would destructure into a slot that doesn't exist.
+	if v.OrHandler == nil && v.Value != nil &&
+		g.callReturnsError(v.Value) && !g.callIsVoidThrower(v.Value) {
 		g.emitErrorPropagatingVar(v)
 		return
 	}
@@ -1865,6 +1869,18 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 				}
 			}
 		}
+		// FFI-receiver method call: `gw.Write(data)` where `gw` is a
+		// Go-typed local (e.g. *gzip.Writer). Look up the receiver's
+		// GoType from the bind side-map and ask the resolver whether
+		// the method returns error in its last slot. Without this,
+		// auto-propagation skips method calls on Go FFI locals.
+		if g.bound != nil {
+			if t, ok := g.bound.NodeTypes[callee.Object]; ok && t.GoType != nil {
+				if g.goResolver.MethodReturnsError(t.GoType, callee.Field) {
+					return true
+				}
+			}
+		}
 	}
 	return false
 }
@@ -2727,7 +2743,22 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	// block exit. If the body can throw, the IIFE also returns error
 	// and propagates outward via emitErrReturn. With user returns,
 	// fall back to function-scoped defer.
-	if !blockContainsReturn(w.Body) {
+	// Resource init throws (e.g. `using (var f = open(p))` where open
+	// returns (T, error)) — emit directly at the enclosing function's
+	// scope so the auto-propagation `return zero, err` matches the
+	// enclosing return shape. defer scopes to the function rather than
+	// the using block, which is fine for the typical short-function
+	// shape (compression helpers, file readers); larger bodies that
+	// genuinely need block-scoped defer should bind the resource via
+	// an `or { return err }` handler instead.
+	resourcesMayThrow := false
+	for _, r := range w.Resources {
+		if r.OrHandler == nil && g.callReturnsError(r.Value) {
+			resourcesMayThrow = true
+			break
+		}
+	}
+	if !blockContainsReturn(w.Body) && !resourcesMayThrow {
 		canThrow := g.blockCanReturnError(w.Body)
 		if canThrow {
 			errVar := "_uerr"
@@ -2773,14 +2804,21 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 	})
 }
 
-// emitWithResource lowers a single `using` resource binding. When the
-// initializer is failable (`var r = expr or { ... }`), emits a
-// comma-ok form with the user-supplied or-handler running on the
-// error path; otherwise the simple direct-assignment form. In both
-// cases a `defer r.Close()` is added so the resource is released
-// when the enclosing block exits.
+// emitWithResource lowers a single `using` resource binding. Three
+// shapes:
+//
+//   1. `var r = expr or { handler }` — comma-ok form, handler runs on
+//      the error path.
+//   2. `var r = thrower()` (no handler) — comma-ok form with the error
+//      auto-propagating through emitErrReturn (matches the bare
+//      ExprStmt thrower-call shape elsewhere in the codegen).
+//   3. `var r = expr` (no handler, non-thrower) — direct assignment.
+//
+// In all three cases a `defer r.Close()` is added so the resource is
+// released when the enclosing block exits.
 func (g *Generator) emitWithResource(r *parser.WithResource) {
-	if r.OrHandler != nil && r.OrHandler.Body != nil {
+	switch {
+	case r.OrHandler != nil && r.OrHandler.Body != nil:
 		errName := g.nextErrName()
 		g.writeln("%s, %s := %s", r.Name, errName, g.formatExpr(r.Value))
 		g.writeln("if %s != nil {", errName)
@@ -2791,7 +2829,15 @@ func (g *Generator) emitWithResource(r *parser.WithResource) {
 		g.currentErrVar = savedErrVar
 		g.indent--
 		g.writeln("}")
-	} else {
+	case g.callReturnsError(r.Value) && !g.callIsVoidThrower(r.Value):
+		errName := g.nextErrName()
+		g.writeln("%s, %s := %s", r.Name, errName, g.formatExpr(r.Value))
+		g.writeln("if %s != nil {", errName)
+		g.indent++
+		g.emitErrReturn(errName)
+		g.indent--
+		g.writeln("}")
+	default:
 		g.writeln("%s := %s", r.Name, g.formatExpr(r.Value))
 	}
 	g.writeln("defer %s.Close()", r.Name)
@@ -2827,37 +2873,86 @@ func blockContainsReturn(block *parser.BlockStmt) bool {
 		return false
 	}
 	for _, s := range block.Stmts {
-		switch st := s.(type) {
-		case *parser.ReturnStmt:
+		if stmtContainsReturn(s) {
 			return true
-		case *parser.IfStmt:
-			if blockContainsReturn(st.Then) {
+		}
+	}
+	return false
+}
+
+// stmtContainsReturn reports whether a single statement (or any
+// nested block / handler within it) issues a return that should
+// propagate to the enclosing function. Walks into or-handler bodies
+// of VarStmt, TupleVarStmt, AssignStmt, ExprStmt, ForStmt, and
+// WithResource — without this the using-IIFE wrap silently swallows
+// `gw.Write(data) or { return ... }` returns.
+func stmtContainsReturn(s parser.Stmt) bool {
+	switch st := s.(type) {
+	case *parser.ReturnStmt:
+		return true
+	case *parser.IfStmt:
+		if blockContainsReturn(st.Then) {
+			return true
+		}
+		if elseBlock, ok := st.ElseStmt.(*parser.BlockStmt); ok {
+			if blockContainsReturn(elseBlock) {
 				return true
 			}
-			if elseBlock, ok := st.ElseStmt.(*parser.BlockStmt); ok {
-				if blockContainsReturn(elseBlock) {
-					return true
-				}
-			}
-			if elseIf, ok := st.ElseStmt.(*parser.IfStmt); ok {
-				if blockContainsReturn(elseIf.Then) {
-					return true
-				}
-			}
-		case *parser.ForStmt:
-			if blockContainsReturn(st.Body) {
+		}
+		if elseIf, ok := st.ElseStmt.(*parser.IfStmt); ok {
+			if stmtContainsReturn(elseIf) {
 				return true
 			}
-		case *parser.WhileStmt:
-			if blockContainsReturn(st.Body) {
+		}
+	case *parser.ForStmt:
+		if blockContainsReturn(st.Body) {
+			return true
+		}
+	case *parser.ParallelForStmt:
+		if blockContainsReturn(st.Body) {
+			return true
+		}
+		if st.OrHandler != nil && blockContainsReturn(st.OrHandler.Body) {
+			return true
+		}
+	case *parser.WhileStmt:
+		if blockContainsReturn(st.Body) {
+			return true
+		}
+	case *parser.MatchStmt:
+		for _, c := range st.Cases {
+			if blockContainsReturn(c.Body) {
 				return true
 			}
-		case *parser.MatchStmt:
-			for _, c := range st.Cases {
-				if blockContainsReturn(c.Body) {
-					return true
-				}
+		}
+	case *parser.VarStmt:
+		if st.OrHandler != nil && blockContainsReturn(st.OrHandler.Body) {
+			return true
+		}
+	case *parser.TupleVarStmt:
+		if st.OrHandler != nil && blockContainsReturn(st.OrHandler.Body) {
+			return true
+		}
+	case *parser.AssignStmt:
+		if st.OrHandler != nil && blockContainsReturn(st.OrHandler.Body) {
+			return true
+		}
+	case *parser.ExprStmt:
+		if st.OrHandler != nil && blockContainsReturn(st.OrHandler.Body) {
+			return true
+		}
+	case *parser.WithStmt:
+		for _, r := range st.Resources {
+			if r.OrHandler != nil && blockContainsReturn(r.OrHandler.Body) {
+				return true
 			}
+		}
+		if blockContainsReturn(st.Body) {
+			return true
+		}
+	case *parser.BlockStmt:
+		if blockContainsReturn(st) {
+			return true
 		}
 	}
 	return false
