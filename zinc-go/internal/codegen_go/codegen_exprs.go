@@ -266,6 +266,13 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return recvName
 	case *parser.SuperCallExpr:
 		return fmt.Sprintf("/* super(%s) */", g.formatExprList(expr.Args))
+	case *parser.DefaultExpr:
+		// default(T) — emit Go's zero value for the resolved Go type.
+		// Reuses zeroValueFor which already handles every shape: ints,
+		// floats, bool, string, classes/pointers, slices, maps, chans,
+		// interfaces, FFI struct/value types, and qualified externals.
+		goType := g.formatType(expr.Type)
+		return g.zeroValueFor(goType)
 	case *parser.TypeAssertExpr:
 		var goType string
 		if expr.TypeExpr != nil {

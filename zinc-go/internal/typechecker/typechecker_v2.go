@@ -897,6 +897,13 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		return typeBool
 	case *parser.NullLit:
 		return typeNull
+	case *parser.DefaultExpr:
+		// default(T) — resolves to T. The legality check (non-nullable
+		// reference classes can't have a "zero value" because nil
+		// pointer would violate non-null guarantees) lives in
+		// checkDefaultExpr below, called from checkStmt walks; the
+		// type inference itself just returns the resolved type.
+		return c.resolveTypeExpr(e.Type)
 	case *parser.ThisExpr:
 		// 3.7.2: `this` resolves to the enclosing class's type, so
 		// `this.field` lookups can drive SelectorExpr inference.

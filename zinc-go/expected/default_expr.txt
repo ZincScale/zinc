@@ -1,0 +1,7 @@
+int: 0
+str: ''
+bool: false
+user: null
+pair: (0, 0)
+time year (zero): 1
+conditional: 42

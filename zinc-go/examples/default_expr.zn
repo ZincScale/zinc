@@ -1,0 +1,46 @@
+// `default(T)` — Go's zero value for any type T, in expression
+// position. Useful where a bare var-decl's auto-zero doesn't apply:
+// function args, returns, ternary branches, generic bodies.
+
+import time
+
+class User {
+    pub String name
+    init(String name) { this.name = name }
+}
+
+data Pair(int x, int y)
+
+// Sink that consumes a typed value — proves default(T) flows
+// correctly through an argument position.
+void describeInt(int v)    { print("int: ${v}") }
+void describeStr(String s) { print("str: '${s}'") }
+void describeBool(bool b)  { print("bool: ${b}") }
+void describeUser(User? u) {
+    if (u == null) { print("user: null") }
+    else { print("user: ${u.name}") }
+}
+void describePair(Pair p) {
+    print("pair: (${p.x}, ${p.y})")
+}
+
+void main() {
+    // Primitives — same as the auto-zero a var-decl would give.
+    describeInt(default(int))
+    describeStr(default(String))
+    describeBool(default(bool))
+
+    // Nullable class reference — zero is nil.
+    describeUser(default(User?))
+
+    // Data class — zero is the all-fields-zero struct.
+    describePair(default(Pair))
+
+    // FFI value type — zero is the Go struct zero value.
+    var t = default(time.Time)
+    print("time year (zero): ${t.Year()}")
+
+    // Use in a conditional initializer.
+    var n = if (true) : 42 else : default(int)
+    print("conditional: ${n}")
+}

@@ -489,6 +489,16 @@ func (p *Parser) v2ParsePrimary() Expr {
 	case lexer.TOKEN_NULL:
 		p.advance()
 		return &NullLit{}
+	case lexer.TOKEN_DEFAULT:
+		// default(T) — Go's zero value for type T. The RHS uses the
+		// full type-expression grammar (generics, arrays, optionals,
+		// qualified names) so codegen can resolve it via formatType
+		// and pick the appropriate zero literal.
+		p.advance()
+		p.expect(lexer.TOKEN_LPAREN)
+		typ := p.v2ParseType()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &DefaultExpr{Type: typ}
 	case lexer.TOKEN_SPAWN:
 		line := tok.Line
 		p.advance()

@@ -757,6 +757,17 @@ type MapLit struct {
 func (m *MapLit) nodeTag() {}
 func (m *MapLit) exprTag() {}
 
+// DefaultExpr: default(T) — Go's zero value for type T. Useful in
+// expression positions where a bare var-decl's auto-zero doesn't
+// apply (function args, returns, ternary branches, generic bodies).
+// Codegen consults zeroValueFor on the resolved Go type.
+type DefaultExpr struct {
+	Type TypeExpr
+}
+
+func (*DefaultExpr) nodeTag() {}
+func (*DefaultExpr) exprTag() {}
+
 // TypeAssertExpr: x as Type  OR  x is Type
 //
 // TypeExpr carries the full parsed RHS (supports generics, arrays,

@@ -72,6 +72,7 @@ const (
 	TOKEN_TIMEOUT    // timeout(dur) { }
 	TOKEN_TYPE       // type (type alias)
 	TOKEN_SELECT     // select (multiplex over channel ops)
+	TOKEN_DEFAULT    // default(T) — Go zero value of any type
 
 	// Symbols
 	TOKEN_LPAREN    // (
@@ -173,6 +174,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_TIMEOUT:    "timeout",
 	TOKEN_SELECT:     "select",
 	TOKEN_TYPE:       "type",
+	TOKEN_DEFAULT:    "default",
 
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",
@@ -279,6 +281,7 @@ var keywords = map[string]TokenType{
 	"timeout":    TOKEN_TIMEOUT,
 	"type":       TOKEN_TYPE,
 	"select":     TOKEN_SELECT,
+	"default":    TOKEN_DEFAULT,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.
