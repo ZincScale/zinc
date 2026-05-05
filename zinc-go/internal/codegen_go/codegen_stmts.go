@@ -587,17 +587,10 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		if _, isNull := v.Value.(*parser.NullLit); isNull && v.Type != nil {
 			useExplicitType = true
 		}
-		// LHS is Fn<...> and RHS is a lambda literal: publish the target
-		// Fn type so formatLambdaExpr can drive the lambda's Go return
-		// type from the slot, instead of defaulting to interface{} when
-		// the body has expressions inferLambdaReturnType can't resolve.
-		if _, isLambda := v.Value.(*parser.LambdaExpr); isLambda && v.Type != nil {
-			if ft := g.resolveFuncTypeExpr(v.Type); ft != nil {
-				prev := g.pendingLambdaTarget
-				g.pendingLambdaTarget = ft
-				defer func() { g.pendingLambdaTarget = prev }()
-			}
-		}
+		// LHS is Fn<...> and RHS is a lambda literal: the typechecker
+		// already wrote NodeTypes[lambdaRHS] = declaredFnType (P2.3),
+		// so formatLambdaExpr reads the target from bound directly.
+		// No codegen-side pendingLambdaTarget setup needed here.
 		if useExplicitType {
 			typeName := g.formatType(v.Type)
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
