@@ -163,6 +163,14 @@ type BoundProgram struct {
 	Prog      *parser.Program
 	Bindings  map[*parser.Ident]Symbol
 	NodeTypes map[parser.Expr]V2Type
+	// Sigs (Phase C/P1): package-level CollectedSigs aggregate produced
+	// by the typecheck driver. Shared pointer across every program in
+	// the same package — gives codegen a single canonical source for
+	// FnSigs / MethodSigs / ClassFields / ClassNames / ParentTypes
+	// that previously lived in parallel codegen-side maps. nil when
+	// the typecheck driver didn't attach one (e.g. legacy single-file
+	// paths that bypass runTypecheck).
+	Sigs      *CollectedSigs
 }
 
 // BindContext supplies cross-package and cross-file information needed to

@@ -784,11 +784,26 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				return true
 			}
 		}
-		// Method call: `obj.method(...)`. Methods register their
-		// unqualified name in funcReturnsOptional / funcReturnTypes during
-		// collectDecls (in-file) and via RegisterSiblingMethods (other
-		// files in the same package) so the bare-name lookup works here.
+		// Method call: `obj.method(...)`. Cross-file same-package method
+		// lookups go through the typechecker's package-level CollectedSigs
+		// (attached to BoundProgram as Sigs by the typecheck driver). For
+		// in-file methods, collectDecls also populated the codegen-side
+		// funcReturnsOptional / funcReturnTypes — kept as a fallback for
+		// legacy paths where bound.Sigs isn't attached.
 		if sel, ok := v.Callee.(*parser.SelectorExpr); ok {
+			if g.bound != nil && g.bound.Sigs != nil {
+				for _, methods := range g.bound.Sigs.MethodSigs {
+					if msig, found := methods[sel.Field]; found {
+						if msig.ReturnType.Nullable {
+							return true
+						}
+						if g.isClassType(msig.ReturnType.Name) {
+							return true
+						}
+						break
+					}
+				}
+			}
 			if g.funcReturnsOptional[sel.Field] {
 				return true
 			}
