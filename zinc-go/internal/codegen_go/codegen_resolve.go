@@ -992,8 +992,15 @@ func (g *Generator) isPub(name string) bool {
 }
 
 // isPubField checks if a field/method on a class is pub.
+// Prefers bound.Sigs.MemberIsPub (typechecker-canonical); falls back
+// to g.pubNames for legacy paths and same-pkg sibling-class members.
 func (g *Generator) isPubMember(className, memberName string) bool {
 	key := className + "." + memberName
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.MemberIsPub != nil {
+		if pub, ok := g.bound.Sigs.MemberIsPub[key]; ok {
+			return pub
+		}
+	}
 	if pub, ok := g.pubNames[key]; ok {
 		return pub
 	}

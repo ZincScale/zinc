@@ -297,6 +297,11 @@ type CollectedSigs struct {
 	// per-checker classFields map. Lets cross-pkg field access resolve
 	// (e.g. `s.someField` where s is a Store from another package).
 	ClassFields map[string]map[string]V2Type
+	// MemberIsPub (Phase C): class-qualified `pub` status — keyed by
+	// "ClassName.memberName" for both methods and fields. Replaces
+	// codegen-side g.pubNames dotted-key entries; codegen's
+	// isPubMember reads from here when bound.Sigs is attached.
+	MemberIsPub map[string]bool
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -312,12 +317,25 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		c.registerDecl(d)
 	}
 	classNames := make(map[string]bool)
+	memberIsPub := make(map[string]bool)
 	for _, d := range prog.Decls {
 		switch dd := d.(type) {
 		case *parser.ClassDecl:
 			classNames[dd.Name] = true
+			for _, m := range dd.Methods {
+				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
+			}
+			for _, f := range dd.Fields {
+				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.DataClassDecl:
 			classNames[dd.Name] = true
+			for _, m := range dd.Methods {
+				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
+			}
+			for _, f := range dd.Params {
+				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
+			}
 		case *parser.InterfaceDecl:
 			classNames[dd.Name] = true
 		case *parser.EnumDecl:
@@ -330,6 +348,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		ParentTypes: c.parentTypes,
 		ClassNames:  classNames,
 		ClassFields: c.classFields,
+		MemberIsPub: memberIsPub,
 	}
 }
 
