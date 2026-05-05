@@ -1961,14 +1961,14 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 	}
 	switch callee := call.Callee.(type) {
 	case *parser.Ident:
-		if g.errorFuncs[callee.Name] {
+		if g.fnReturnsError(callee.Name) {
 			return true
 		}
 		// Constructor call shape: `Port(8080)` where Port is a class
 		// with a throwing ctor. The actual Go call will be NewPort(...),
 		// so look up the widened key.
 		if _, isClass := g.structs[callee.Name]; isClass {
-			if g.errorFuncs["New"+callee.Name] {
+			if g.fnReturnsError("New" + callee.Name) {
 				return true
 			}
 		}
@@ -2020,7 +2020,7 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 		// Method on a class: Class.method key in errorFuncs, or the
 		// method declaration in a sibling/subpackage class.
 		if recv := g.resolveReceiverClassName(callee.Object); recv != "" {
-			if g.errorFuncs[recv+"."+callee.Field] {
+			if g.methodReturnsError(recv, callee.Field) {
 				return true
 			}
 			if g.methodBodyThrows(recv, callee.Field) {

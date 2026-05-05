@@ -442,6 +442,45 @@ func CollectTypeAliases(prog *parser.Program) map[string]parser.TypeExpr {
 	return aliases
 }
 
+// v2ReturnsError reports whether a typechecker V2Type return signature
+// has trailing `error` — i.e. the function/method is a thrower. Mirrors
+// the codegen-side returnTypeDeclaresError but reads V2's tuple shape
+// (Name:"tuple", Args:[..., error]).
+func v2ReturnsError(rt typechecker.V2Type) bool {
+	if rt.Name == "error" {
+		return true
+	}
+	if rt.Name == "tuple" && len(rt.Args) > 0 {
+		return rt.Args[len(rt.Args)-1].Name == "error"
+	}
+	return false
+}
+
+// fnReturnsError reports whether a top-level function (by bare name) is
+// a thrower. Prefers bound.Sigs.FnSigs (cross-pkg + cross-file aware);
+// falls back to the codegen-side errorFuncs map for legacy paths.
+func (g *Generator) fnReturnsError(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil {
+		if fsig, ok := g.bound.Sigs.FnSigs[name]; ok {
+			return v2ReturnsError(fsig.ReturnType)
+		}
+	}
+	return g.errorFuncs[name]
+}
+
+// methodReturnsError reports whether a method (class + method name) is
+// a thrower. Same lookup precedence as fnReturnsError.
+func (g *Generator) methodReturnsError(class, method string) bool {
+	if g.bound != nil && g.bound.Sigs != nil {
+		if methods, ok := g.bound.Sigs.MethodSigs[class]; ok {
+			if msig, ok := methods[method]; ok {
+				return v2ReturnsError(msig.ReturnType)
+			}
+		}
+	}
+	return g.errorFuncs[class+"."+method]
+}
+
 // lookupTypeAlias resolves a type-alias name to its underlying TypeExpr.
 // Prefers bound.TypeAliases (the typechecker's canonical per-file table)
 // when available; falls back to the codegen-side g.typeAliases for
