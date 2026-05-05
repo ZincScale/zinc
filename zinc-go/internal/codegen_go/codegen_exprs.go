@@ -492,11 +492,21 @@ var stringMethodMapping = map[string]string{
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
-	// Consume the pending Fn<...> target hint set by the immediate emit
-	// site (e.g. `Fn<(A), R> f = (...) -> ...`). Cleared on entry so a
-	// nested lambda inside the body doesn't inherit the outer hint.
+	// Consume the pending Fn<...> target hint. Phase C/P2.3 surfaced
+	// the same target via bound.NodeTypes[lambda].TypeExpr — prefer
+	// the typechecker-canonical source when set, fall back to the
+	// codegen-side pendingLambdaTarget side-channel otherwise.
+	// pendingLambdaTarget is cleared on entry so a nested lambda
+	// inside the body doesn't inherit the outer hint.
 	target := g.pendingLambdaTarget
 	g.pendingLambdaTarget = nil
+	if g.bound != nil {
+		if rt, ok := g.bound.NodeTypes[l]; ok && rt.TypeExpr != nil {
+			if ft, isFn := rt.TypeExpr.(*parser.FuncTypeExpr); isFn {
+				target = ft
+			}
+		}
+	}
 
 	// Set up tuple-return / thrower context for the body emit when the
 	// target Fn slot's return type is a TupleType (with or without an
