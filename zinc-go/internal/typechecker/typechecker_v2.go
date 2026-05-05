@@ -1049,6 +1049,26 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		// Check function call argument types against signature
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if sig, found := c.fnSigs[ident.Name]; found {
+				// Phase C/P2.3 — propagate Fn-typed param targets into
+				// NodeTypes for lambda args. Same shape as the var-decl
+				// annotation in checkVarStmt; gives codegen one canonical
+				// place (bound.NodeTypes) to read the lambda's expected
+				// Fn target instead of pendingLambdaTarget.
+				if c.nodeTypes != nil {
+					for i, arg := range e.Args {
+						if i >= len(sig.Params) {
+							break
+						}
+						if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+							continue
+						}
+						if sig.Params[i].Name == "Fn" || (sig.Params[i].TypeExpr != nil) {
+							if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
+								c.nodeTypes[arg] = sig.Params[i]
+							}
+						}
+					}
+				}
 				// Spread args at the call site (`f(...xs)`) make the
 				// effective arg count dynamic — skip arity + per-position
 				// type checks when any arg is a spread.
