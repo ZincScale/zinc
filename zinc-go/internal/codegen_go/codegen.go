@@ -625,7 +625,7 @@ func fieldDeclsToParams(fields []*parser.FieldDecl) []*parser.ParamDecl {
 //
 // Thrower-ness is now purely syntactic: a function is a thrower iff its
 // declared return type contains `error` (bare or as the trailing element
-// of a TupleType). errorFuncs is populated from declared signatures
+// of a TupleType). Thrower classification reads from bound.Sigs.FnSigs
 // during collectDecls; no body inspection, no cross-package fixed-point.
 
 // exprContainsNestedThrowerCall reports whether the expression tree

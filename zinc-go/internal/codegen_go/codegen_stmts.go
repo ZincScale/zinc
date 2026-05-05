@@ -499,11 +499,11 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		}
 
 		// Track pointer vars from optional-returning functions. Three paths:
-		//   1. Top-level FnDecls and class methods — `funcReturnsOptional`
-		//      was populated during collectDecls (keyed by unqualified
-		//      name; methods register their own name there too).
+		//   1. Top-level FnDecls and class methods — return-type info
+		//      flows through bound.Sigs (FnSigs / MethodSigs) since the
+		//      typechecker's CollectedSigs is the canonical source.
 		//   2. Method calls on a typed receiver — `obj.method()` where
-		//      obj's class has the method registered in funcReturnsOptional.
+		//      obj's class has the method in MethodSigs.
 		//   3. Bind side-map fallback — read the V2Type for the init
 		//      expression and check `Nullable`. Picks up paths the
 		//      codegen-side tables don't cover.
@@ -1923,7 +1923,7 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 // `if err != nil { return err }` at call sites inside try bodies or
 // thrower functions, replacing the old explicit `or { }` handler.
 //
-// Today this covers Zinc functions tracked in errorFuncs. Method calls
+// Today this covers Zinc functions classified via bound.Sigs.FnSigs. Method calls
 // on classes with a throwing method are detected via the class's method
 // list. Go stdlib calls fall back to goResolver.ReturnsError.
 func (g *Generator) callReturnsError(expr parser.Expr) bool {
@@ -1989,8 +1989,8 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 			}
 		}
 	case *parser.SelectorExpr:
-		// Method on a class: Class.method key in errorFuncs, or the
-		// method declaration in a sibling/subpackage class.
+		// Method on a class: classified via bound.Sigs.MethodSigs, or
+		// the method declaration in a sibling/subpackage class.
 		if recv := g.resolveReceiverClassName(callee.Object); recv != "" {
 			if g.methodReturnsError(recv, callee.Field) {
 				return true
@@ -2052,7 +2052,7 @@ func (g *Generator) resolveFuncTypeExpr(t parser.TypeExpr) *parser.FuncTypeExpr 
 
 // methodBodyThrows walks the method declaration (from either local
 // structs or subpackage-declared structs) to see whether it can throw
-// or return an error. Cross-package thrower detection — errorFuncs
+// or return an error. Cross-package thrower detection — bound.Sigs.FnSigs
 // only gets populated for the current generator's decls, so we need
 // to consult the AST directly for sibling/subpackage classes. Walks
 // the inheritance chain too so inherited throwers are detected.

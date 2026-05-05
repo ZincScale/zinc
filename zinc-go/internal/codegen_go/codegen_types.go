@@ -28,7 +28,7 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	}
 
 	// Thrower lookup: prefer bound.Sigs.FnSigs (cross-pkg + cross-file
-	// aware) and fall back to codegen-side errorFuncs for legacy paths.
+	// aware via the typecheck driver's externalSigs aggregate).
 	canError := g.fnReturnsError(fn.Name)
 	declaredThrower := returnTypeDeclaresError(fn.ReturnType)
 	goRetType := g.goReturnTypeStr(fn.ReturnType)

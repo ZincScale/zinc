@@ -823,10 +823,9 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 		}
 	case *parser.CallExpr:
 		// `f(...)` or `obj.method(...)` returning T?. Function lookup
-		// matches against funcReturnsOptional which is populated for
-		// both top-level FnDecls and class methods at collectDecls
-		// time. The check uses bare callee name; package-qualified
-		// calls (`pkg.f(...)`) are conservatively false today.
+		// Lookup goes through callReturnIsPointer (bound.Sigs preferred,
+		// codegen-side legacy as fallback). Only the isOpt bit
+		// matters here — exprIsPointerOptional asks "is the result T?".
 		// Lookup goes through callReturnIsPointer (bound.Sigs preferred,
 		// codegen-side legacy as fallback). Only the isOptional bit
 		// matters here — exprIsPointerOptional asks "is the result T?".
