@@ -176,7 +176,12 @@ type BoundProgram struct {
 	// that previously lived in parallel codegen-side maps. nil when
 	// the typecheck driver didn't attach one (e.g. legacy single-file
 	// paths that bypass runTypecheck).
-	Sigs      *CollectedSigs
+	Sigs *CollectedSigs
+	// TypeAliases (Phase C/P1.4): file-local `type Name = TypeExpr`
+	// bindings. Replaces codegen-side g.typeAliases in a future P3
+	// commit. Populated during Bind from TypeAliasDecl nodes; map is
+	// nil when the file has no type aliases.
+	TypeAliases map[string]parser.TypeExpr
 }
 
 // BindContext supplies cross-package and cross-file information needed to
@@ -466,9 +471,23 @@ func Bind(prog *parser.Program, ctx *BindContext) (*BoundProgram, []V2Error) {
 		b.bindStmt(s)
 	}
 
+	// Collect type aliases declared at the top level. Codegen consumers
+	// peel `type Foo = Fn<...>` aliases when resolving generic call args
+	// and Fn lambda targets.
+	var typeAliases map[string]parser.TypeExpr
+	for _, d := range prog.Decls {
+		if alias, ok := d.(*parser.TypeAliasDecl); ok {
+			if typeAliases == nil {
+				typeAliases = make(map[string]parser.TypeExpr)
+			}
+			typeAliases[alias.Name] = alias.Type
+		}
+	}
+
 	return &BoundProgram{
-		Prog:     prog,
-		Bindings: b.bindings,
+		Prog:        prog,
+		Bindings:    b.bindings,
+		TypeAliases: typeAliases,
 	}, b.errors
 }
 
