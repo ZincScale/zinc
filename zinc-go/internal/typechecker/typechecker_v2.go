@@ -1032,6 +1032,25 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 				// First check Zinc-defined method signatures (interfaces, classes)
 				if methods, ok := c.methodSigs[objType.Name]; ok {
 					if sig, ok := methods[sel.Field]; ok {
+						// Phase C/P2.3 (method-call) — same lambda Fn-target
+						// annotation as the free-function path. Lets codegen
+						// retire the matching pendingLambdaTarget setter once
+						// every annotation site is covered.
+						if c.nodeTypes != nil {
+							for i, arg := range e.Args {
+								if i >= len(sig.Params) {
+									break
+								}
+								if _, isLambda := arg.(*parser.LambdaExpr); !isLambda {
+									continue
+								}
+								if sig.Params[i].TypeExpr != nil {
+									if _, isFn := sig.Params[i].TypeExpr.(*parser.FuncTypeExpr); isFn {
+										c.nodeTypes[arg] = sig.Params[i]
+									}
+								}
+							}
+						}
 						return sig.ReturnType
 					}
 				}
