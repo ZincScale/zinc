@@ -387,6 +387,7 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 		gen.SetGoModDir(outDir)
 		gen.SetSiblingExports(allExports)
 		gen.SetSiblingPubs(allPubs)
+		gen.RegisterSiblingMethods(codegen.CollectClassDecls(merged))
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
 		}
@@ -674,6 +675,9 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			gen.SetZincSubpackages(subpackages)
 			gen.SetSiblingExports(siblingExports)
 			gen.SetSiblingPubs(siblingPubs)
+			if classes, ok := allClassDecls[pkg]; ok {
+				gen.RegisterSiblingMethods(classes)
+			}
 			if len(importAliases) > 0 && importAliases[0] != nil {
 				gen.SetImportAliases(importAliases[0])
 			}

@@ -450,6 +450,38 @@ func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.
 	g.subpkgStructs[pkg] = classes
 }
 
+// RegisterSiblingMethods makes return-type info from sibling-class methods
+// visible to this Generator. Called after SetSiblingExports has populated
+// g.structs with placeholders so formatType can resolve class names. Without
+// this, cross-file same-package method calls miss the funcReturnsOptional /
+// funcReturnTypes lookup, defeating valueIsAlreadyPointer at the call site
+// and triggering an erroneous _zincPtr wrap on assignments to `T?` LHS.
+//
+// Methods register by unqualified name; same-name collisions across classes
+// resolve to the last one seen — mirrors collectDecls' in-file behavior.
+func (g *Generator) RegisterSiblingMethods(classes map[string]*parser.ClassDecl) {
+	for _, decl := range classes {
+		if decl == nil {
+			continue
+		}
+		for _, m := range decl.Methods {
+			if _, ok := m.ReturnType.(*parser.OptionalType); ok {
+				g.funcReturnsOptional[m.Name] = true
+			}
+			if m.ReturnType != nil {
+				rt := m.ReturnType
+				if tup, ok := rt.(*parser.TupleType); ok && len(tup.Elements) > 0 {
+					rt = tup.Elements[0]
+				}
+				formatted := g.formatType(rt)
+				if strings.HasPrefix(formatted, "*") {
+					g.funcReturnTypes[m.Name] = formatted
+				}
+			}
+		}
+	}
+}
+
 // SetSubpackageTypeAliases registers `type Name = ...` aliases from a
 // subpackage so cross-package callers can peel them via
 // resolveFuncTypeExpr. Without this, a `Factory` param declared in
@@ -546,6 +578,25 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				// return types, so this codegen-side table fills the gap.)
 				if _, ok := m.ReturnType.(*parser.OptionalType); ok {
 					g.funcReturnsOptional[m.Name] = true
+				}
+				// Mirror funcReturnTypes for methods, but only for the
+				// pointer-return case (class returns, FFI pointer
+				// returns, T?). Used by valueIsAlreadyPointer to skip
+				// auto-address-take when assigning a method-call result
+				// to a `T?` LHS. Restricted to the prefix-* shape so
+				// inferExprType (which queries funcReturnTypes for free
+				// functions only) keeps its current behavior — and so we
+				// don't pollute the map with method-specific tuple
+				// formatter output.
+				if m.ReturnType != nil {
+					rt := m.ReturnType
+					if tup, ok := rt.(*parser.TupleType); ok && len(tup.Elements) > 0 {
+						rt = tup.Elements[0]
+					}
+					formatted := g.formatType(rt)
+					if strings.HasPrefix(formatted, "*") {
+						g.funcReturnTypes[m.Name] = formatted
+					}
 				}
 			}
 			for _, f := range decl.Fields {

@@ -330,6 +330,32 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 	}
 
 	if v.OrHandler != nil && v.Value != nil {
+		// `var x = call() or { ... }` short-circuits to emitOrAssignment
+		// without running the ptrVar / varTypes registration that the
+		// no-OrHandler path performs further below. Mirror those tracks
+		// here so subsequent `lhs = x` assignments to a `T?` LHS can
+		// recognize x as already-pointer (class return, FFI pointer,
+		// nullable return). Without this, the assignment auto-address-
+		// take would double-wrap a class-typed local with _zincPtr,
+		// producing `**T`.
+		if call, ok := v.Value.(*parser.CallExpr); ok {
+			if ident, ok := call.Callee.(*parser.Ident); ok {
+				if g.funcReturnsOptional[ident.Name] {
+					g.ptrVars[v.Name] = true
+				}
+				if rt, ok := g.funcReturnTypes[ident.Name]; ok && strings.HasPrefix(rt, "*") {
+					g.varTypes[v.Name] = rt
+				}
+			}
+			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
+				if g.funcReturnsOptional[sel.Field] {
+					g.ptrVars[v.Name] = true
+				}
+				if rt, ok := g.funcReturnTypes[sel.Field]; ok && strings.HasPrefix(rt, "*") {
+					g.varTypes[v.Name] = rt
+				}
+			}
+		}
 		// var x = call() or default → error handling
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			if ident, ok := call.Callee.(*parser.Ident); ok {
@@ -561,6 +587,14 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
+		// `T x = null` — Go's `:=` can't infer type from untyped nil, so
+		// any null-initialized declaration with explicit type must use
+		// the `var x T = nil` form. Covers `Box? x = null`, `String? s =
+		// null`, etc. Without this, codegen emits `x := nil` and Go
+		// rejects with "use of untyped nil in assignment".
+		if _, isNull := v.Value.(*parser.NullLit); isNull && v.Type != nil {
+			useExplicitType = true
+		}
 		// LHS is Fn<...> and RHS is a lambda literal: publish the target
 		// Fn type so formatLambdaExpr can drive the lambda's Go return
 		// type from the slot, instead of defaulting to interface{} when
@@ -577,6 +611,16 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			g.writeln("var %s %s = %s", varName, typeName, g.formatExpr(v.Value))
 		} else {
 			g.writeln("%s := %s", varName, g.formatExpr(v.Value))
+		}
+		// Mirror the no-init branch: a `T? x = null` (or any explicit
+		// pointer-optional decl with init) needs the same ptr-var
+		// tracking the bare `T? x` form gets, so downstream
+		// auto-address-take / auto-deref / `as` unwrap recognize it as
+		// a nullable pointer. Without this, `x as T` falls through to
+		// the comma-ok type assertion path, which Go rejects on a
+		// concrete `*T` operand.
+		if isPointerOptional(v.Type) {
+			g.ptrVars[v.Name] = true
 		}
 	} else {
 		typeName := "interface{}"
@@ -715,6 +759,14 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				return true
 			}
 		}
+		// Fallback: codegen-side type tracking for locals bound from
+		// pointer-returning expressions (class returns, FFI pointers).
+		// Picks up the case where bound.NodeTypes doesn't annotate the
+		// Ident reference site but inferExprType + funcReturnTypes
+		// resolved the local's Go type at the bind point.
+		if vt, ok := g.varTypes[v.Name]; ok && strings.HasPrefix(vt, "*") {
+			return true
+		}
 	case *parser.CallExpr:
 		// Constructor call: NewFoo() returns *Foo.
 		if ident, ok := v.Callee.(*parser.Ident); ok {
@@ -722,6 +774,25 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				return true
 			}
 			if g.funcReturnsOptional[ident.Name] {
+				return true
+			}
+			// Function whose declared return type is a Go pointer — covers
+			// class returns (`(Schema, error)` lowers to `*Schema`) and FFI
+			// pointer returns. Without this, assigning the call result to
+			// a `T?` LHS double-wraps with _zincPtr.
+			if rt, ok := g.funcReturnTypes[ident.Name]; ok && strings.HasPrefix(rt, "*") {
+				return true
+			}
+		}
+		// Method call: `obj.method(...)`. Methods register their
+		// unqualified name in funcReturnsOptional / funcReturnTypes during
+		// collectDecls (in-file) and via RegisterSiblingMethods (other
+		// files in the same package) so the bare-name lookup works here.
+		if sel, ok := v.Callee.(*parser.SelectorExpr); ok {
+			if g.funcReturnsOptional[sel.Field] {
+				return true
+			}
+			if rt, ok := g.funcReturnTypes[sel.Field]; ok && strings.HasPrefix(rt, "*") {
 				return true
 			}
 		}
