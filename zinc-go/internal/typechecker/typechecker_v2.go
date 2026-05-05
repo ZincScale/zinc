@@ -1251,6 +1251,25 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 			return c.inferType(e.Cases[0].Value)
 		}
 		return typeAny
+	case *parser.TypeAssertExpr:
+		// `expr is T` returns bool; `expr as T` unwraps to the
+		// non-nullable form of T. Codegen consumers (e.g. selector
+		// access on the cast result) read NodeTypes to know the
+		// post-cast type without the surrounding null-check IIFE
+		// having to be flow-analyzed.
+		if e.IsCheck {
+			return typeBool
+		}
+		var rt V2Type
+		if e.TypeExpr != nil {
+			rt = c.resolveTypeExpr(e.TypeExpr)
+		} else if e.TypeName != "" {
+			rt = c.resolveTypeExpr(&parser.SimpleType{Name: e.TypeName})
+		} else {
+			return typeAny
+		}
+		rt.Nullable = false
+		return rt
 	default:
 		return typeAny
 	}
