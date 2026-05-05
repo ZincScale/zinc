@@ -217,6 +217,12 @@ type BindContext struct {
 	SiblingConsts       map[string]bool
 	SiblingEnumVariants map[string]string // variant → enum type name
 	SiblingSealed       map[string]string // variant → sealed parent name
+	// SiblingFnsPub / SiblingConstsPub — pub status of sibling decls.
+	// Used by Bind to populate Symbol.IsPub for cross-file fn / const
+	// references, so codegen's isPub can read from bound.Bindings
+	// instead of a parallel codegen-side g.pubNames map.
+	SiblingFnsPub    map[string]bool
+	SiblingConstsPub map[string]bool
 
 	// ZincSubpkgExports — exported names from imported zinc subpackages.
 	// Keyed by package alias (`core`, `fabric/registry`, etc.).
@@ -338,13 +344,13 @@ func (b *binder) resolve(name string, line int) Symbol {
 
 	// 4. Same-package decls.
 	if b.ctx.SiblingFns[name] {
-		return Symbol{Kind: SymFn, Name: name}
+		return Symbol{Kind: SymFn, Name: name, IsPub: b.ctx.SiblingFnsPub[name]}
 	}
 	if b.ctx.SiblingTypes[name] {
 		return Symbol{Kind: SymType, Name: name}
 	}
 	if b.ctx.SiblingConsts[name] {
-		return Symbol{Kind: SymConst, Name: name}
+		return Symbol{Kind: SymConst, Name: name, IsPub: b.ctx.SiblingConstsPub[name]}
 	}
 	if enum, ok := b.ctx.SiblingEnumVariants[name]; ok {
 		return Symbol{Kind: SymEnumVariant, Name: name, Owner: enum}
@@ -557,6 +563,8 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 		SiblingConsts:       make(map[string]bool),
 		SiblingEnumVariants: make(map[string]string),
 		SiblingSealed:       make(map[string]string),
+		SiblingFnsPub:       make(map[string]bool),
+		SiblingConstsPub:    make(map[string]bool),
 		ZincSubpkgExports:   make(map[string]map[string]string),
 		GoPkgExports:        make(map[string]map[string]string),
 		ImportAliases:       make(map[string]bool),
@@ -565,6 +573,7 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 		switch decl := d.(type) {
 		case *parser.FnDecl:
 			ctx.SiblingFns[decl.Name] = true
+			ctx.SiblingFnsPub[decl.Name] = decl.IsPub
 		case *parser.ClassDecl:
 			ctx.SiblingTypes[decl.Name] = true
 			if decl.IsSealed {
@@ -583,6 +592,7 @@ func CollectBindContext(merged *parser.Program) *BindContext {
 			}
 		case *parser.ConstDecl:
 			ctx.SiblingConsts[decl.Name] = true
+			ctx.SiblingConstsPub[decl.Name] = decl.IsPub
 		case *parser.TypeAliasDecl:
 			ctx.SiblingTypes[decl.Name] = true
 		}
