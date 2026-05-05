@@ -810,6 +810,21 @@ func (c *V2Checker) checkVarStmt(s *parser.VarStmt) {
 				s.Name, declaredType, valType)
 		}
 
+		// Phase C/P2.3 — propagate the declared Fn target into NodeTypes
+		// for a lambda RHS. Codegen reads bound.NodeTypes[lambdaExpr] to
+		// drive the lambda's Go return-type emission; the legacy path
+		// uses pendingLambdaTarget as a side-channel. This annotation
+		// gives the bound side-map first-class access to the same
+		// information so a future codegen migration can drop
+		// pendingLambdaTarget.
+		if c.nodeTypes != nil && s.Type != nil {
+			if _, isFn := s.Type.(*parser.FuncTypeExpr); isFn {
+				if _, isLambda := s.Value.(*parser.LambdaExpr); isLambda {
+					c.nodeTypes[s.Value] = declaredType
+				}
+			}
+		}
+
 		if s.Type != nil {
 			c.scope.set(s.Name, declaredType)
 		} else {
