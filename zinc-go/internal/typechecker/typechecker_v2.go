@@ -324,6 +324,11 @@ type CollectedSigs struct {
 	// inside ClassNames. Codegen uses this to skip pointer-receiver
 	// detection on parents and to pick correct downcast/upcast shapes.
 	InterfaceNames map[string]bool
+	// EnumNames (Phase C): names declared as `enum`. Distinguishes them
+	// from class-like entries inside ClassNames so codegen can decide
+	// "regular class → pointer-typed in Go" vs "enum → value-typed
+	// (just an integer alias)".
+	EnumNames map[string]bool
 	// CtorSigs (Phase C): constructor signatures keyed by class name.
 	// For data classes the ctor params are the data fields; for
 	// regular classes with `init`/`new` the params are taken from
@@ -348,6 +353,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 	classNames := make(map[string]bool)
 	dataClassNames := make(map[string]bool)
 	interfaceNames := make(map[string]bool)
+	enumNames := make(map[string]bool)
 	memberIsPub := make(map[string]bool)
 	ctorSigs := make(map[string]V2FnSig)
 	mkCtorSig := func(params []*parser.FieldDecl) V2FnSig {
@@ -421,6 +427,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			}
 		case *parser.EnumDecl:
 			classNames[dd.Name] = true
+			enumNames[dd.Name] = true
 		}
 	}
 	return CollectedSigs{
@@ -432,6 +439,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		MemberIsPub:    memberIsPub,
 		DataClassNames: dataClassNames,
 		InterfaceNames: interfaceNames,
+		EnumNames:      enumNames,
 		CtorSigs:       ctorSigs,
 	}
 }

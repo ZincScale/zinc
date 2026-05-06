@@ -65,6 +65,9 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 		if externalSigs.InterfaceNames == nil {
 			externalSigs.InterfaceNames = make(map[string]bool)
 		}
+		if externalSigs.EnumNames == nil {
+			externalSigs.EnumNames = make(map[string]bool)
+		}
 		for _, exports := range crossPkgExports {
 			for name, kind := range exports {
 				switch kind {
@@ -73,6 +76,9 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 				}
 				if kind == "interface" {
 					externalSigs.InterfaceNames[name] = true
+				}
+				if kind == "enum" {
+					externalSigs.EnumNames[name] = true
 				}
 			}
 		}

@@ -462,6 +462,18 @@ func (g *Generator) lookupCallableParams(name string) ([]*parser.ParamDecl, bool
 	return nil, false
 }
 
+// isEnum reports whether `name` was declared as an `enum`. Backed by
+// bound.Sigs.EnumNames — typechecker-canonical, populated by
+// CollectSignatures + cross-pkg merge. Used to distinguish enum
+// names from regular classes inside ClassNames (enums are
+// value-typed in Go; regular classes are pointer-typed).
+func (g *Generator) isEnum(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.EnumNames != nil {
+		return g.bound.Sigs.EnumNames[name]
+	}
+	return false
+}
+
 // isInterface reports whether `name` was declared as an `interface`,
 // or as a sealed-parent class (which lowers to a Go interface).
 // Backed by bound.Sigs.InterfaceNames — the typechecker's canonical

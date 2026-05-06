@@ -232,11 +232,10 @@ func (g *Generator) resolveTypeArg(ta string) string {
 				} else {
 					goName = resolved
 				}
-			} else if cls, isStruct := g.structs[name]; isStruct {
-				// Same-package class: check if it's a pointer-typed class
-				if !g.isDataClass(name) && cls != nil && !cls.IsSealed {
-					ptrPrefix = "*"
-				}
+			} else if g.isClassType(name) && !g.isDataClass(name) && !g.isInterface(name) && !g.isEnum(name) {
+				// Same-package class (regular: not data, not sealed-
+				// parent / interface, not enum) — pointer-typed in Go.
+				ptrPrefix = "*"
 			}
 			return ptrPrefix + goName + "[" + strings.Join(goArgs, ", ") + "]"
 		}
@@ -1322,12 +1321,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				}
 			}
 		}
-		// Classes (non-data, non-sealed) are always pointers in Go.
-		// Sealed classes and interfaces are Go interfaces — no pointer.
-		if cls, isStruct := g.structs[typ.Name]; isStruct {
-			if !g.isDataClass(typ.Name) && cls != nil && !cls.IsSealed {
-				return "*" + typ.Name
-			}
+		// Classes (non-data, non-sealed, non-enum) are always pointers in Go.
+		// Sealed parents and interfaces are Go interfaces — no pointer.
+		// Enums are integer-typed value types — no pointer.
+		if g.isClassType(typ.Name) && !g.isDataClass(typ.Name) && !g.isInterface(typ.Name) && !g.isEnum(typ.Name) {
+			return "*" + typ.Name
 		}
 		return typ.Name
 	case *parser.GenericType:
@@ -1370,10 +1368,8 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			// in Zinc's Go backend, so a generic class used as a nested type
 			// arg must be emitted as *ClassName[args] too.
 			ptrPrefix := ""
-			if cls, isStruct := g.structs[typ.Name]; isStruct {
-				if !g.isDataClass(typ.Name) && cls != nil && !cls.IsSealed {
-					ptrPrefix = "*"
-				}
+			if g.isClassType(typ.Name) && !g.isDataClass(typ.Name) && !g.isInterface(typ.Name) && !g.isEnum(typ.Name) {
+				ptrPrefix = "*"
 			}
 			return fmt.Sprintf("%s%s[%s]", ptrPrefix, baseName, strings.Join(args, ", "))
 		}
