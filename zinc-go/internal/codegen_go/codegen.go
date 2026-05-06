@@ -86,7 +86,6 @@ type Generator struct {
 
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
-	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
 	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
@@ -215,7 +214,6 @@ func New() *Generator {
 		imports:             make(map[string]bool),
 		structs:             make(map[string]*parser.ClassDecl),
 		varTypes:            make(map[string]string),
-		ptrVars:             make(map[string]bool),
 		renamedVars:         make(map[string]string),
 		goResolver:          NewGoTypeResolver(),
 		importMap:           make(map[string]string),

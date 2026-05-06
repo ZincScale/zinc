@@ -820,7 +820,7 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 				return true
 			}
 		}
-		return g.ptrVars[ex.Name]
+		return false
 	case *parser.SelectorExpr:
 		// `obj.field` — look up the field's declared type on the
 		// receiver class.

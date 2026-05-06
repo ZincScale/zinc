@@ -673,26 +673,15 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		}
 	}
 	g.currentClass = receiver
-	// Track class/generic-typed method params so `param.field.method()` and
-	// `param.method().keys()` chains resolve. Entries are removed on exit.
-	var methodParamBackup []string
-	var ptrParamBackup []string
-	for _, p := range m.Params {
-		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
-			_ = simpleType.Name // varStructTypes write removed
-			methodParamBackup = append(methodParamBackup, p.Name)
-		}
-		// Pointer-optional params answered via bound.NodeTypes (see
-		// emitFn for the rationale).
-	}
+	// Pointer-optional and class-typed params are answered via
+	// bound.NodeTypes — checkFnDecl populates the inner scope, so
+	// every Ident reference inside the body sees the right V2Type.
 	defer func() {
 		g.currentFields = nil
 		g.currentFieldGoName = nil
 		g.currentMethods = nil
 		g.currentParams = nil
 		g.currentClass = ""
-		_ = methodParamBackup // varStructTypes drained Phase 3.7.2
-		_ = ptrParamBackup    // ptrVars param tagging retired
 	}()
 
 	canError := g.methodReturnsError(receiver, m.Name)

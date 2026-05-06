@@ -340,13 +340,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// producing `**T`.
 		if call, ok := v.Value.(*parser.CallExpr); ok {
 			// Side-effect-free pointer classification — does NOT register
-			// imports. Construct varTypes string manually for class/legacy
-			// cases so downstream valueIsAlreadyPointer's prefix-* check
-			// recognizes the local without triggering formatType.
-			if rt, isOpt, isPtr, found := g.callReturnIsPointer(call); found {
-				if isOpt {
-					g.ptrVars[v.Name] = true
-				} else if isPtr {
+			// imports. The Optional case is covered by bound.NodeTypes
+			// (Nullable propagates through scope.set into the side-map);
+			// only the non-optional class-pointer path needs varTypes
+			// tagging so prefix-* shape checks fire downstream.
+			if rt, isOpt, isPtr, found := g.callReturnIsPointer(call); found && !isOpt {
+				if isPtr {
 					if g.isClassType(rt.Name) {
 						g.varTypes[v.Name] = "*" + rt.Name
 					} else if strings.HasPrefix(rt.Name, "*") {
@@ -507,14 +506,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		//   3. Bind side-map fallback — read the V2Type for the init
 		//      expression and check `Nullable`. Picks up paths the
 		//      codegen-side tables don't cover.
-		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if _, isOpt, _, _ := g.callReturnIsPointer(call); isOpt {
-				g.ptrVars[v.Name] = true
-			}
-		}
-		// bound.NodeTypes[ident-of-v]: scope.set(v.Name, valType) inside
-		// the typechecker propagates Nullable into the side-map for
-		// downstream Ident references, so no codegen-side write needed.
+		// Optional-returning call results flow into the var binding via
+		// scope.set: checkVarStmt peels the tuple (T, error) → T from
+		// or-handler shapes, and resolveTypeExpr's OptionalType branch
+		// already marks T?. The downstream Ident references see
+		// Nullable=true through bound.NodeTypes; no codegen-side ptrVars
+		// write needed here.
 
 		// Track Channel-typed locals from `var ch = Channel<T>(N)` so that
 		// downstream codegen (for-range, isChannelVar, isCollectionVar) can
@@ -782,7 +779,7 @@ func (g *Generator) targetIsPointerOptional(target parser.Expr) bool {
 				return true
 			}
 		}
-		return g.ptrVars[t.Name]
+		return false
 	case *parser.SelectorExpr:
 		// `box.name` — look up the field's type on the receiver class.
 		if recv := g.resolveReceiverClassName(t.Object); recv != "" {
@@ -808,21 +805,15 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 	}
 	switch v := value.(type) {
 	case *parser.Ident:
-		if g.bound != nil {
-			if vt, ok := g.bound.NodeTypes[v]; ok && vt.Nullable {
-				return true
-			}
-		}
-		if g.ptrVars[v.Name] {
-			return true
-		}
 		// Class-typed var: classes lower to *Class in Go, so the
-		// underlying value is already a pointer. Without this branch the
-		// auto-address-take would double-wrap class instances assigned
-		// from constructor calls.
+		// underlying value is already a pointer. Nullable cases (T?
+		// for value types or non-class refs) carry the pointer via
+		// .Nullable; class-typed refs carry it via the type's class-ness.
 		if g.bound != nil {
-			if t, ok := g.bound.NodeTypes[v]; ok && g.isClassType(t.Name) {
-				return true
+			if vt, ok := g.bound.NodeTypes[v]; ok {
+				if vt.Nullable || g.isClassType(vt.Name) {
+					return true
+				}
 			}
 		}
 		// Fallback: codegen-side type tracking for locals bound from
