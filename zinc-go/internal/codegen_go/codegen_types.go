@@ -510,12 +510,32 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 					if gn, ok := g.currentFieldGoName[sel.Field]; ok {
 						fieldGoName = gn
 					}
-					if _, isThis := sel.Object.(*parser.ThisExpr); isThis {
-						litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, g.formatExpr(assign.Value)))
-						continue
+					_, isThis := sel.Object.(*parser.ThisExpr)
+					if !isThis {
+						if ident, isIdent := sel.Object.(*parser.Ident); isIdent && ident.Name == "this" {
+							isThis = true
+						}
 					}
-					if ident, isIdent := sel.Object.(*parser.Ident); isIdent && ident.Name == "this" {
-						litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, g.formatExpr(assign.Value)))
+					if isThis {
+						val := g.formatExpr(assign.Value)
+						// Auto-address-take a value-form struct literal when
+						// the field is auto-pointerized (e.g.
+						// `this.client = http.Client{...}` lands in a
+						// *http.Client slot). Same rationale as the
+						// emitAssignStmt branch — but the constructor folds
+						// init-body assigns into the struct literal directly
+						// and bypasses that path.
+						if _, isStructLit := assign.Value.(*parser.StructLit); isStructLit {
+							for _, fld := range cls.Fields {
+								if fld.Name == sel.Field {
+									if _, ok := g.isAutoPointerizedGoStructField(fld.Type); ok {
+										val = "&" + val
+									}
+									break
+								}
+							}
+						}
+						litFields = append(litFields, fmt.Sprintf("%s: %s", fieldGoName, val))
 						continue
 					}
 				}

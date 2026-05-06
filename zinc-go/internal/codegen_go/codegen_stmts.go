@@ -558,7 +558,50 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 			return
 		}
 	}
+	// Auto-address-take into auto-pointerized Go-stdlib struct fields.
+	// `class Foo { http.Client client }` lowers `client` to `*http.Client`
+	// (because http.Client has pointer-receiver methods). Assigning a
+	// value-form struct literal `this.client = http.Client{...}` would
+	// otherwise fail with "cannot use http.Client value as *http.Client".
+	// Prepend & to the StructLit so the assignment matches.
+	if a.Op == "=" {
+		if _, isStructLit := a.Value.(*parser.StructLit); isStructLit {
+			if g.targetIsAutoPointerizedField(a.Target) {
+				g.writeln("%s = &%s", g.formatExpr(a.Target), g.formatExpr(a.Value))
+				return
+			}
+		}
+	}
 	g.writeln("%s %s %s", g.formatExpr(a.Target), a.Op, g.formatExpr(a.Value))
+}
+
+// targetIsAutoPointerizedField reports whether an assignment LHS is a
+// class field whose declared type is a Go-stdlib struct that codegen
+// auto-pointerizes (sync.Mutex, http.Client, bytes.Buffer, ...). When
+// true, value-form RHS expressions of the same type need `&`-prefix to
+// type-check against the `*T` field slot.
+func (g *Generator) targetIsAutoPointerizedField(target parser.Expr) bool {
+	sel, ok := target.(*parser.SelectorExpr)
+	if !ok {
+		return false
+	}
+	recv := g.resolveReceiverClassName(sel.Object)
+	if recv == "" {
+		return false
+	}
+	cls, ok := g.structs[recv]
+	if !ok {
+		return false
+	}
+	for _, f := range cls.Fields {
+		if f.Name != sel.Field {
+			continue
+		}
+		if _, ok := g.isAutoPointerizedGoStructField(f.Type); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // callReturnLookup finds a CallExpr's return-type V2Type from the
