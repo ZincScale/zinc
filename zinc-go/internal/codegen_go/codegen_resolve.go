@@ -1491,3 +1491,167 @@ func (g *Generator) isAutoPointerizedGoStructField(t parser.TypeExpr) (string, b
 	}
 	return st.Name, true
 }
+
+// --- Self-member resolution -------------------------------------------------
+//
+// Inside a method/ctor body, an unqualified bare name can refer to: a
+// local var, a method param, a same-class field, a same-class method,
+// or a top-level function. Idiomatic Zinc lets the user drop `this.`
+// for class members — the parser still produces a bare Ident, and
+// codegen has to distinguish.
+//
+// resolveSelfMemberField / resolveSelfMemberMethod centralize that
+// distinction so all the "is this LHS / RHS / call target a class
+// member?" sites get the same answer. They handle three input shapes:
+//
+//   - `this.field` / `this.method` (SelectorExpr with ThisExpr or
+//     Ident("this") as the object)
+//   - bare `field` / `method` (Ident, not shadowed by a local or param)
+//
+// The ad-hoc per-site checks (currentFields[name] && !currentParams &&
+// !currentLocals; resolveReceiverClassName(sel.Object)+lookup) live in
+// many places — formatExpr, formatCallExpr, emitAssignStmt,
+// targetIsAutoPointerizedField. New cases used to require touching
+// each site separately. These helpers make the resolution one-stop.
+
+// isSelfMemberField reports whether an expression names a field of
+// the current class via implicit-self or explicit `this.X`. Backed by
+// the flat currentFields map (populated at class-emit entry with the
+// full set including inherited fields) so subclass field references
+// resolve through their parent chain.
+func (g *Generator) isSelfMemberField(e parser.Expr) bool {
+	_, name, ok := g.selfMemberLookup(e)
+	if !ok {
+		return false
+	}
+	return g.currentFields != nil && g.currentFields[name]
+}
+
+// isSelfMemberMethod — symmetric helper for methods. Backed by the
+// flat currentMethods map.
+func (g *Generator) isSelfMemberMethod(e parser.Expr) bool {
+	_, name, ok := g.selfMemberLookup(e)
+	if !ok {
+		return false
+	}
+	return g.currentMethods != nil && g.currentMethods[name]
+}
+
+// resolveSelfMemberField returns the FieldDecl for an expression that
+// references a field of the current class. Walks the current class
+// then its parent chain so inherited fields resolve. ok=false when
+// the expression isn't self-rooted, the name isn't a known field,
+// or the field's declaring class isn't in g.structs.
+func (g *Generator) resolveSelfMemberField(e parser.Expr) (*parser.FieldDecl, bool) {
+	if !g.isSelfMemberField(e) {
+		return nil, false
+	}
+	_, name, _ := g.selfMemberLookup(e)
+	return g.lookupFieldInChain(g.currentClass, name)
+}
+
+// lookupFieldInChain walks the class hierarchy (current → parent →
+// grandparent → ...) returning the first FieldDecl whose name matches.
+// Used for field-type queries that need the declared TypeExpr (e.g.
+// auto-pointerize detection on field assignment).
+func (g *Generator) lookupFieldInChain(className, fieldName string) (*parser.FieldDecl, bool) {
+	for className != "" {
+		cls, ok := g.structs[className]
+		if !ok {
+			return nil, false
+		}
+		for _, f := range cls.Fields {
+			if f.Name == fieldName {
+				return f, true
+			}
+		}
+		// Walk to parent. Multi-parent classes only count the first
+		// non-interface parent for field-inheritance; mirrors how
+		// emitClass populates currentFields.
+		if len(cls.Parents) == 0 {
+			return nil, false
+		}
+		next := ""
+		for _, p := range cls.Parents {
+			if !g.isInterface(p.Name) {
+				next = p.Name
+				break
+			}
+		}
+		if next == "" || next == className {
+			return nil, false
+		}
+		className = next
+	}
+	return nil, false
+}
+
+// selfMemberLookup peels the (className, memberName) pair out of a
+// SelectorExpr/Ident pair iff the expression names a member of the
+// current class. Common shape extractor for the public helpers above.
+func (g *Generator) selfMemberLookup(e parser.Expr) (string, string, bool) {
+	switch t := e.(type) {
+	case *parser.SelectorExpr:
+		if isThisRoot(t.Object) {
+			if g.currentClass == "" {
+				return "", "", false
+			}
+			return g.currentClass, t.Field, true
+		}
+	case *parser.Ident:
+		// Bare ident: only counts as a self-member when it isn't a
+		// local or param shadow, and the current class actually has
+		// a same-named member. We check membership in the caller.
+		if t.Name == "this" {
+			return "", "", false
+		}
+		if g.currentLocals != nil && g.currentLocals[t.Name] {
+			return "", "", false
+		}
+		if g.currentParams != nil && g.currentParams[t.Name] {
+			return "", "", false
+		}
+		if g.currentClass == "" {
+			return "", "", false
+		}
+		return g.currentClass, t.Name, true
+	}
+	return "", "", false
+}
+
+// isThisRoot reports whether an expression is `this` — either a
+// ThisExpr node or a bare Ident whose name is literally "this".
+// Some parser paths emit one form, some the other; codegen-side
+// equality treats them as the same root.
+func isThisRoot(e parser.Expr) bool {
+	if _, ok := e.(*parser.ThisExpr); ok {
+		return true
+	}
+	if id, ok := e.(*parser.Ident); ok && id.Name == "this" {
+		return true
+	}
+	return false
+}
+
+// selfMemberFieldGoName returns the Go-side name of a self-member
+// field, honoring explicit-pub renames (currentFieldGoName) and
+// pub-aware casing for subpackages. Caller has already checked that
+// the field exists; this just produces the receiver-prefixed Go ref.
+func (g *Generator) selfMemberFieldGoName(fieldName string) string {
+	if gn, ok := g.currentFieldGoName[fieldName]; ok {
+		return recvName + "." + gn
+	}
+	return recvName + "." + exportName(fieldName)
+}
+
+// selfMemberMethodGoName returns the Go-side name of a self-member
+// method, honoring pub-flag-driven casing in subpackages. Mirrors
+// the call-site rewrite in formatCallExpr but exposed for non-call
+// references (passing a method as a value).
+func (g *Generator) selfMemberMethodGoName(methodName string) string {
+	gn := exportName(methodName)
+	if g.isSubpackage() && g.currentClass != "" {
+		gn = goName(methodName, g.isPubMember(g.currentClass, methodName))
+	}
+	return recvName + "." + gn
+}

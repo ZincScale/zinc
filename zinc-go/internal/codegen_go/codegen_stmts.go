@@ -580,28 +580,17 @@ func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 // auto-pointerizes (sync.Mutex, http.Client, bytes.Buffer, ...). When
 // true, value-form RHS expressions of the same type need `&`-prefix to
 // type-check against the `*T` field slot.
+//
+// Routes through resolveSelfMemberField so both explicit `this.field`
+// (SelectorExpr) and implicit-self bare `field` (Ident inside a method
+// body) reach the same auto-pointerize check.
 func (g *Generator) targetIsAutoPointerizedField(target parser.Expr) bool {
-	sel, ok := target.(*parser.SelectorExpr)
+	field, ok := g.resolveSelfMemberField(target)
 	if !ok {
 		return false
 	}
-	recv := g.resolveReceiverClassName(sel.Object)
-	if recv == "" {
-		return false
-	}
-	cls, ok := g.structs[recv]
-	if !ok {
-		return false
-	}
-	for _, f := range cls.Fields {
-		if f.Name != sel.Field {
-			continue
-		}
-		if _, ok := g.isAutoPointerizedGoStructField(f.Type); ok {
-			return true
-		}
-	}
-	return false
+	_, isAuto := g.isAutoPointerizedGoStructField(field.Type)
+	return isAuto
 }
 
 // callReturnLookup finds a CallExpr's return-type V2Type from the

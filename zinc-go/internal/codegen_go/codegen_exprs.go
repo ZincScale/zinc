@@ -76,15 +76,19 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				}
 			}
 		}
-		// Implicit self: bare field name → this.Field in method/ctor
-		// context. Skip when the name is shadowed by a method param OR
-		// a local var declared earlier in the body — Zinc follows Go's
-		// lexical scoping.
-		if g.currentFields != nil && g.currentFields[expr.Name] && !g.currentParams[expr.Name] && !g.currentLocals[expr.Name] {
-			if goField, ok := g.currentFieldGoName[expr.Name]; ok {
-				return recvName + "." + goField
-			}
-			return recvName + "." + exportName(expr.Name)
+		// Implicit self: bare name → `this.X` when the name resolves
+		// to a member of the current class (field or method). Routes
+		// through isSelfMember* so the same membership predicate that
+		// drives `this.X` SelectorExpr emit and assign-LHS auto-
+		// pointer detection also drives bare-name emission. Without
+		// one canonical resolver these three sites drift: bare idents
+		// would resolve fields-only, `this.X` would blindly
+		// capitalize methods, assign-LHS only saw SelectorExpr.
+		if g.isSelfMemberField(expr) {
+			return g.selfMemberFieldGoName(expr.Name)
+		}
+		if g.isSelfMemberMethod(expr) {
+			return g.selfMemberMethodGoName(expr.Name)
 		}
 		if g.renamedVars != nil {
 			if renamed, ok := g.renamedVars[expr.Name]; ok {
@@ -189,14 +193,17 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		// ctor body already respected this via currentFieldGoName; the
 		// sub-statement path (inside `if`, `for`, nested blocks) fell
 		// back to exportName and lost the declared casing.
-		if _, isThis := expr.Object.(*parser.ThisExpr); isThis {
-			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
-				return fmt.Sprintf("%s.%s", recvName, gn)
+		// `this.X` — route through the unified self-member resolver
+		// so explicit-this references emit the same Go-side name a
+		// bare implicit-self ident would. Field path honors
+		// currentFieldGoName (declared casing); method path honors
+		// the pub flag in subpackages.
+		if isThisRoot(expr.Object) {
+			if g.isSelfMemberField(expr) {
+				return g.selfMemberFieldGoName(expr.Field)
 			}
-		}
-		if ident, isIdent := expr.Object.(*parser.Ident); isIdent && ident.Name == "this" {
-			if gn, ok := g.currentFieldGoName[expr.Field]; ok {
-				return fmt.Sprintf("%s.%s", recvName, gn)
+			if g.isSelfMemberMethod(expr) {
+				return g.selfMemberMethodGoName(expr.Field)
 			}
 		}
 		// Package-qualified reference (e.g. `bytes.Buffer`, `core.Schema`).
