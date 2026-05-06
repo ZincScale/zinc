@@ -257,6 +257,8 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		keyType, valType := inferMapLitType(expr.Keys, expr.Values)
 		return fmt.Sprintf("map[%s]%s{%s}", keyType, valType, strings.Join(pairs, ", "))
+	case *parser.StructLit:
+		return g.formatStructLit(expr)
 	case *parser.LambdaExpr:
 		return g.formatLambdaExpr(expr)
 	case *parser.ThisExpr:
@@ -486,6 +488,21 @@ var stringMethodMapping = map[string]string{
 
 // --- Call expressions are in codegen_calls.go --------------------------------
 
+// formatStructLit renders TypeName{Field: value, ...} as a Go struct
+// literal. The type expression is rendered via formatExpr so it works
+// for both bare idents (`Foo`) and selectors (`http.Client`).
+func (g *Generator) formatStructLit(s *parser.StructLit) string {
+	typeName := g.formatExpr(s.Type)
+	if len(s.Fields) == 0 {
+		return typeName + "{}"
+	}
+	var pairs []string
+	for _, f := range s.Fields {
+		pairs = append(pairs, fmt.Sprintf("%s: %s", f.Name, g.formatExpr(f.Value)))
+	}
+	return fmt.Sprintf("%s{%s}", typeName, strings.Join(pairs, ", "))
+}
+
 // --- Lambda expressions ------------------------------------------------------
 
 func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
@@ -614,22 +631,26 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 			}
 		}
 
-		var stmts []string
-		for _, s := range l.Body.Stmts {
-			stmts = append(stmts, g.formatStmtInline(s))
-		}
+		// Capture the body via emitBlock so every stmt kind (for, while,
+		// match, lock, with, tuple-var, ...) gets full codegen — not the
+		// formatStmtInline subset, which silently dropped any unsupported
+		// stmt as "/* inline stmt */".
+		body := g.captureEmit(func() {
+			g.emitBlock(l.Body)
+		})
+		body = strings.TrimRight(body, "\n")
 
 		if blockRetType != "" && blockRetType != "interface{}" {
-			return fmt.Sprintf("func(%s) %s { %s }", paramStr, blockRetType, strings.Join(stmts, "; "))
+			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, blockRetType, body)
 		}
 		// Same target-driven fallback as the expression-form path: when
 		// the target Fn declares a return type, prefer it over emitting
 		// a void signature (which would drop the return value).
 		if target != nil && target.ReturnType != nil {
 			retType := g.formatType(target.ReturnType)
-			return fmt.Sprintf("func(%s) %s { %s }", paramStr, retType, strings.Join(stmts, "; "))
+			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, retType, body)
 		}
-		return fmt.Sprintf("func(%s) { %s }", paramStr, strings.Join(stmts, "; "))
+		return fmt.Sprintf("func(%s) {\n%s\n}", paramStr, body)
 	}
 	return fmt.Sprintf("func(%s) {}", paramStr)
 }

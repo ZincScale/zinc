@@ -1062,4 +1062,26 @@ func (g *Generator) write(format string, args ...interface{}) {
 	fmt.Fprintf(&g.buf, format, args...)
 }
 
+// captureEmit redirects subsequent writeln/write/emit* calls to a fresh
+// buffer for the duration of fn, returns what was emitted, then restores
+// the prior buffer contents and indent. Used for emitting nested code
+// (lambda bodies) into an expression-position string. Preserves the
+// emitter's full statement-handling capability — formatStmtInline only
+// supports a handful of stmt kinds, so older lambda-body code dropped
+// for/lock/match/tuple-var statements as a "/* inline stmt */"
+// placeholder.
+func (g *Generator) captureEmit(fn func()) string {
+	saved := g.buf.String()
+	savedIndent := g.indent
+	g.buf.Reset()
+	g.indent = 0
+	defer func() {
+		g.buf.Reset()
+		g.buf.WriteString(saved)
+		g.indent = savedIndent
+	}()
+	fn()
+	return g.buf.String()
+}
+
 // Name helpers (exportName, goName, isPub, etc.) are in codegen_resolve.go.
