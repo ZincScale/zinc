@@ -166,11 +166,22 @@ func (p *Parser) v2ParseComparison() Expr {
 	if p.check(lexer.TOKEN_AS) {
 		p.advance() // consume as
 		typ := p.v2ParseType()
+		// Optional `or { fallback }` — lets `expr as T or { fallback }`
+		// be used in expression position (function arg, return value,
+		// etc.) instead of forcing a `var x = ... or { ... }` temp.
+		// Statement-level forms (var-decl, assign) still consume their
+		// own or-handler at the stmt parser; expression-attached
+		// handlers are owned by this node.
+		var handler *OrHandler
+		if p.check(lexer.TOKEN_OR) {
+			handler = p.v2ParseErrHandler()
+		}
 		left = &TypeAssertExpr{
-			Object:   left,
-			TypeExpr: typ,
-			TypeName: typeExprDisplayName(typ),
-			IsCheck:  false,
+			Object:    left,
+			TypeExpr:  typ,
+			TypeName:  typeExprDisplayName(typ),
+			IsCheck:   false,
+			OrHandler: handler,
 		}
 	}
 	return left

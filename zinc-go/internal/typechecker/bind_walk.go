@@ -516,6 +516,14 @@ func (b *binder) bindExpr(e parser.Expr) {
 		}
 	case *parser.TypeAssertExpr:
 		b.bindExpr(expr.Object)
+		// Expression-attached or-handler (parsed onto the as-cast at line
+		// position): its body is real Zinc code and needs to be walked
+		// so identifier references inside resolve through Bindings —
+		// otherwise calls inside `expr as T or { return foo() }` lose
+		// pub-function exportName resolution and emit lowercase.
+		if expr.OrHandler != nil {
+			b.bindOrHandler(expr.OrHandler)
+		}
 	case *parser.CapacityExpr:
 		b.bindExpr(expr.Capacity)
 	case *parser.SizedArrayExpr:

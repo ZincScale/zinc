@@ -2264,8 +2264,27 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		g.writeln("%s, %s := %s.(%s)", tmpName, okName, operand, goType)
 		g.writeln("if !%s {", okName)
 		g.indent++
-		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+expr.TypeName)
-		g.emitErrReturn(errName)
+		// Expression-attached `or { fallback }` (parsed onto the
+		// TypeAssertExpr at line-position): on bad-cast, write the
+		// fallback expression to the temp instead of propagating.
+		// Block-form handlers (with return/break/continue) emit
+		// normally so their control flow exits the surrounding
+		// function as the user wrote.
+		if expr.OrHandler != nil && expr.OrHandler.Body != nil {
+			if isSingleExprHandler(expr.OrHandler) {
+				g.writeln("%s = %s", tmpName, g.formatExpr(handlerSingleExpr(expr.OrHandler)))
+			} else {
+				g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+expr.TypeName)
+				g.writeln("_ = %s", errName)
+				savedErrVar := g.currentErrVar
+				g.currentErrVar = errName
+				g.emitOrBlock(expr.OrHandler.Body)
+				g.currentErrVar = savedErrVar
+			}
+		} else {
+			g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+expr.TypeName)
+			g.emitErrReturn(errName)
+		}
 		g.indent--
 		g.writeln("}")
 		return &parser.Ident{Name: tmpName}
@@ -2389,6 +2408,16 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	g.needImport("fmt")
 	operand := g.formatExpr(ta.Object)
 
+	// Two attachment points: the var-decl can carry an OrHandler from
+	// the statement parser (`var x = ... or { ... }`), and the
+	// expression parser can attach one to the TypeAssertExpr itself
+	// (`f(x as T or { ... })` and friends). Either binds to this
+	// var-decl's bad-cast branch.
+	handler := v.OrHandler
+	if handler == nil {
+		handler = ta.OrHandler
+	}
+
 	// Optional unwrap path: operand is `*T`. Go's type-assertion shape
 	// doesn't apply here. For value-type T (String? → *string), the
 	// non-null branch dereferences to obtain T. For class-type T
@@ -2409,12 +2438,12 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 		g.indent--
 		g.writeln("} else {")
 		g.indent++
-		if v.OrHandler != nil && v.OrHandler.Body != nil {
+		if handler != nil && handler.Body != nil {
 			g.writeln("%s := fmt.Errorf(%q)", errName, "null unwrap (as "+ta.TypeName+")")
 			g.writeln("_ = %s", errName)
 			savedErrVar := g.currentErrVar
 			g.currentErrVar = errName
-			g.emitOrBlock(v.OrHandler.Body)
+			g.emitOrBlock(handler.Body)
 			g.currentErrVar = savedErrVar
 		} else {
 			g.writeln("%s := fmt.Errorf(%q)", errName, "null unwrap (as "+ta.TypeName+")")
@@ -2432,14 +2461,21 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	g.writeln("%s, %s := any(%s).(%s)", v.Name, okName, operand, goType)
 	g.writeln("if !%s {", okName)
 	g.indent++
-	if v.OrHandler != nil && v.OrHandler.Body != nil {
-		// `or { handler }` — bind err for the handler body to reference.
-		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+ta.TypeName)
-		g.writeln("_ = %s", errName)
-		savedErrVar := g.currentErrVar
-		g.currentErrVar = errName
-		g.emitOrBlock(v.OrHandler.Body)
-		g.currentErrVar = savedErrVar
+	if handler != nil && handler.Body != nil {
+		// Single-expression handler is a fallback-value form
+		// (`or { 0 }`, `or { "" }`, ...) — assign the value to the
+		// declared target. Otherwise it's a control-flow handler
+		// block, emit normally so its return/break/continue fires.
+		if isSingleExprHandler(handler) {
+			g.writeln("%s = %s", v.Name, g.formatExpr(handlerSingleExpr(handler)))
+		} else {
+			g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+ta.TypeName)
+			g.writeln("_ = %s", errName)
+			savedErrVar := g.currentErrVar
+			g.currentErrVar = errName
+			g.emitOrBlock(handler.Body)
+			g.currentErrVar = savedErrVar
+		}
 	} else {
 		// Auto-propagate.
 		g.writeln("%s := fmt.Errorf(%q)", errName, "type assertion failed: expected "+ta.TypeName)
@@ -2447,6 +2483,25 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	}
 	g.indent--
 	g.writeln("}")
+}
+
+// isSingleExprHandler reports whether an or-handler body is the
+// fallback-value form: a one-statement block whose only statement is
+// an expression. Used by as-cast and similar comma-ok-style codegen
+// to distinguish `or { 42 }` (assign 42) from `or { return err }`
+// (control-flow exit).
+func isSingleExprHandler(h *parser.OrHandler) bool {
+	if h == nil || h.Body == nil || len(h.Body.Stmts) != 1 {
+		return false
+	}
+	_, ok := h.Body.Stmts[0].(*parser.ExprStmt)
+	return ok
+}
+
+// handlerSingleExpr extracts the expression from a single-expression
+// or-handler body. Caller must verify shape via isSingleExprHandler.
+func handlerSingleExpr(h *parser.OrHandler) parser.Expr {
+	return h.Body.Stmts[0].(*parser.ExprStmt).Expr
 }
 
 // emitOrAssignment handles: target = call() or default / or { block }

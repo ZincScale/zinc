@@ -793,10 +793,11 @@ func (*DefaultExpr) exprTag() {}
 // in error messages and as a fallback for older codegen paths that
 // only need the bare name; populated by the parser from TypeExpr.
 type TypeAssertExpr struct {
-	Object   Expr
-	TypeExpr TypeExpr
-	TypeName string
-	IsCheck  bool // true = "is" (returns bool), false = "as" (type assertion)
+	Object    Expr
+	TypeExpr  TypeExpr
+	TypeName  string
+	IsCheck   bool       // true = "is" (returns bool), false = "as" (type assertion)
+	OrHandler *OrHandler // optional fallback handler attached at expression position
 }
 
 func (*TypeAssertExpr) nodeTag() {}
