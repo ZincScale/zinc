@@ -205,7 +205,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		// struct variable).
 		recvIsClassName := false
 		if id, ok := sel.Object.(*parser.Ident); ok {
-			if g.isClassType(id.Name) || g.interfaces[id.Name] {
+			if g.isClassType(id.Name) || g.isInterface(id.Name) {
 				recvIsClassName = true
 			}
 		}

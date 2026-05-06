@@ -62,11 +62,17 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 		if externalSigs.ClassNames == nil {
 			externalSigs.ClassNames = make(map[string]bool)
 		}
+		if externalSigs.InterfaceNames == nil {
+			externalSigs.InterfaceNames = make(map[string]bool)
+		}
 		for _, exports := range crossPkgExports {
 			for name, kind := range exports {
 				switch kind {
 				case "class", "data", "interface", "enum", "sealed_variant":
 					externalSigs.ClassNames[name] = true
+				}
+				if kind == "interface" {
+					externalSigs.InterfaceNames[name] = true
 				}
 			}
 		}

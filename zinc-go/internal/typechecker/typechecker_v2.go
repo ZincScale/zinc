@@ -310,6 +310,12 @@ type CollectedSigs struct {
 	// shapes — data classes are emitted as values, regular classes as
 	// pointers.
 	DataClassNames map[string]bool
+	// InterfaceNames (Phase C): names that were declared as
+	// `interface` (or sealed parent classes, which lower to Go
+	// interfaces). Distinguishes interfaces from concrete classes
+	// inside ClassNames. Codegen uses this to skip pointer-receiver
+	// detection on parents and to pick correct downcast/upcast shapes.
+	InterfaceNames map[string]bool
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -326,11 +332,17 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 	}
 	classNames := make(map[string]bool)
 	dataClassNames := make(map[string]bool)
+	interfaceNames := make(map[string]bool)
 	memberIsPub := make(map[string]bool)
 	for _, d := range prog.Decls {
 		switch dd := d.(type) {
 		case *parser.ClassDecl:
 			classNames[dd.Name] = true
+			if dd.IsSealed {
+				// Sealed parents lower to Go interfaces; their variants
+				// are concrete data classes.
+				interfaceNames[dd.Name] = true
+			}
 			for _, m := range dd.Methods {
 				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
 			}
@@ -356,6 +368,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			}
 		case *parser.InterfaceDecl:
 			classNames[dd.Name] = true
+			interfaceNames[dd.Name] = true
 			for _, m := range dd.Methods {
 				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
 			}
@@ -371,6 +384,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		ClassFields:    c.classFields,
 		MemberIsPub:    memberIsPub,
 		DataClassNames: dataClassNames,
+		InterfaceNames: interfaceNames,
 	}
 }
 

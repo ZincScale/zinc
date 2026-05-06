@@ -515,6 +515,20 @@ func (g *Generator) isDataClass(name string) bool {
 	return g.dataClasses[name]
 }
 
+// isInterface reports whether `name` was declared as an `interface`,
+// or as a sealed-parent class (which lowers to a Go interface).
+// Prefers bound.Sigs.InterfaceNames (typechecker-canonical, populated
+// by CollectSignatures + cross-pkg merge); falls back to the
+// codegen-side g.interfaces for legacy paths.
+func (g *Generator) isInterface(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.InterfaceNames != nil {
+		if g.bound.Sigs.InterfaceNames[name] {
+			return true
+		}
+	}
+	return g.interfaces[name]
+}
+
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
 func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
 	if g.subpkgStructs == nil {

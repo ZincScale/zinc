@@ -1580,7 +1580,7 @@ func (g *Generator) zeroValueFor(goType string) string {
 			return "nil"
 		}
 		// Interface types cannot be instantiated — use nil
-		if g.interfaces[goType] || g.isImportedInterface(goType) {
+		if g.isInterface(goType) || g.isImportedInterface(goType) {
 			return "nil"
 		}
 		// Qualified external type (pkg.Name) — ask goResolver.

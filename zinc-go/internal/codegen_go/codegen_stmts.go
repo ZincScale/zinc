@@ -568,7 +568,7 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		useExplicitType := false
 		if v.Type != nil {
 			if st, ok := v.Type.(*parser.SimpleType); ok {
-				if g.interfaces[st.Name] {
+				if g.isInterface(st.Name) {
 					useExplicitType = true
 				}
 				// Check unqualified names for cross-package interfaces
