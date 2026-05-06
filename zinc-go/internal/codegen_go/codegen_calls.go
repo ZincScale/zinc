@@ -238,18 +238,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 					(gt.Name == "Channel" || gt.Name == "Chan") && len(gt.TypeArgs) >= 1 {
 					isTypedChannel = true
 				}
-				// Fallback: scalar-type tracking for simple local vars.
-				// Side-map first; ad-hoc varTypes when bind isn't on.
 				if !isTypedChannel {
 					if ident, ok := sel.Object.(*parser.Ident); ok {
 						if g.bound != nil {
 							if t, ok := g.bound.NodeTypes[ident]; ok && t.Name != "" && t.Name != "any" {
-								isTypedChannel = true
-							}
-						}
-						if !isTypedChannel {
-							elt := g.varTypes[ident.Name]
-							if elt != "" && elt != "interface{}" {
 								isTypedChannel = true
 							}
 						}
@@ -629,7 +621,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		// If the argument is a string literal or known string type, use strconv.Atoi.
 		// Otherwise, emit a Go type conversion: int(expr).
 		if len(c.Args) == 1 {
-			argType := g.inferExprType(c.Args[0], g.varTypes)
+			argType := g.inferExprType(c.Args[0])
 			if argType == "string" {
 				g.needImport("strconv")
 				return fmt.Sprintf("strconv.Atoi(%s)", args)
@@ -638,7 +630,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("int(%s)", args)
 	case "float":
 		if len(c.Args) == 1 {
-			argType := g.inferExprType(c.Args[0], g.varTypes)
+			argType := g.inferExprType(c.Args[0])
 			if argType == "string" {
 				g.needImport("strconv")
 				return fmt.Sprintf("strconv.ParseFloat(%s, 64)", args)
@@ -647,7 +639,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("float64(%s)", args)
 	case "long":
 		if len(c.Args) == 1 {
-			argType := g.inferExprType(c.Args[0], g.varTypes)
+			argType := g.inferExprType(c.Args[0])
 			if argType == "string" {
 				g.needImport("strconv")
 				return fmt.Sprintf("strconv.ParseInt(%s, 10, 64)", args)
@@ -656,7 +648,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		return fmt.Sprintf("int64(%s)", args)
 	case "double":
 		if len(c.Args) == 1 {
-			argType := g.inferExprType(c.Args[0], g.varTypes)
+			argType := g.inferExprType(c.Args[0])
 			if argType == "string" {
 				g.needImport("strconv")
 				return fmt.Sprintf("strconv.ParseFloat(%s, 64)", args)

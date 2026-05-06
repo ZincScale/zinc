@@ -368,10 +368,6 @@ func (g *Generator) isLocalVar(name string) bool {
 	if g.bound != nil && g.bound.HasSymbolKind(name, typechecker.SymLocal, typechecker.SymParam) {
 		return true
 	}
-	// Fallback for callers that bypass runTypecheck (no bound).
-	if _, ok := g.varTypes[name]; ok {
-		return true
-	}
 	return false
 }
 
@@ -915,9 +911,6 @@ func (g *Generator) isUserScopeShadow(name string) bool {
 		return true
 	}
 	if g.bound != nil && g.bound.HasSymbolKind(name, typechecker.SymLocal, typechecker.SymParam) {
-		return true
-	}
-	if _, ok := g.varTypes[name]; ok {
 		return true
 	}
 	return false

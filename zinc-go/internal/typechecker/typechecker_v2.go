@@ -1094,6 +1094,17 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		//      the method-set on `*ocf.Decoder`.
 		// In both cases, the codegen reads the resulting V2Type.GoType to
 		// drive pointer-vs-value emission and method-set lookups.
+
+		// Built-in Channel constructor: `Channel<T>(N)` / `Chan<T>(N)`
+		// — recognize so the result has V2Type{Name:"Channel", Args:[T]}
+		// in the side-map. Codegen's isChannelVar / for-range emission
+		// consults this without a parallel codegen-side type cache.
+		if ident, ok := e.Callee.(*parser.Ident); ok && (ident.Name == "Channel" || ident.Name == "Chan") {
+			if len(e.TypeArgs) >= 1 {
+				return V2Type{Name: "Channel", Args: []V2Type{{Name: e.TypeArgs[0]}}}
+			}
+			return V2Type{Name: "Channel"}
+		}
 		if sel, ok := e.Callee.(*parser.SelectorExpr); ok && c.ffi != nil {
 			if pkgIdent, ok := sel.Object.(*parser.Ident); ok {
 				if pkgPath, isPkg := c.importMap[pkgIdent.Name]; isPkg {

@@ -1229,7 +1229,7 @@ func (g *Generator) inferFieldType(expr parser.Expr) string {
 		}
 	}
 	// Fall back to general expression type inference
-	t := g.inferExprType(expr, g.varTypes)
+	t := g.inferExprType(expr)
 	if t != "" && t != "interface{}" {
 		return t
 	}

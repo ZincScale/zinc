@@ -274,15 +274,10 @@ func inferMapLitType(keys []parser.Expr, values []parser.Expr) (string, string) 
 func (g *Generator) inferSliceElemType(expr parser.Expr) string {
 	switch e := expr.(type) {
 	case *parser.Ident:
-		// Side-map first (Phase 3.4 type-tracking migration) — falls back
-		// to ad-hoc varTypes when bind isn't on.
 		if g.bound != nil {
 			if t, ok := g.bound.NodeTypes[e]; ok && t.Name != "" && t.Name != "any" {
 				return t.Name
 			}
-		}
-		if t, ok := g.varTypes[e.Name]; ok {
-			return t
 		}
 	case *parser.ListLit:
 		return inferListLitElemType(e.Elements)
@@ -368,7 +363,6 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			if listLit, ok := v.Value.(*parser.ListLit); ok {
 				elemType := g.formatType(arrType.ElementType)
 				elems := g.formatExprList(listLit.Elements)
-				g.varTypes[v.Name] = elemType
 				g.writeln("%s := []%s{%s}", v.Name, elemType, elems)
 				return
 			}
@@ -377,16 +371,12 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		if genType, ok := v.Type.(*parser.GenericType); ok {
 			if listLit, ok := v.Value.(*parser.ListLit); ok {
 				goType := g.formatType(genType)
-				if strings.HasPrefix(goType, "[]") {
-					g.varTypes[v.Name] = goType[2:]
-				}
 				elems := g.formatExprList(listLit.Elements)
 				g.writeln("%s := %s{%s}", v.Name, goType, elems)
 				return
 			}
 			if mapLit, ok := v.Value.(*parser.MapLit); ok {
 				goType := g.formatType(genType)
-				g.varTypes[v.Name] = goType
 				var pairs []string
 				for i := range mapLit.Keys {
 					pairs = append(pairs, fmt.Sprintf("%s: %s", g.formatExpr(mapLit.Keys[i]), g.formatExpr(mapLit.Values[i])))
@@ -406,13 +396,8 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// typechecker resolves SelectorExpr method returns into V2Type
 		// during inferType and writes them per-Ident).
 
-		// Infer type from list literal
-		if listLit, ok := v.Value.(*parser.ListLit); ok && v.Type == nil {
-			elemType := inferListLitElemType(listLit.Elements)
-			if elemType != "interface{}" {
-				g.varTypes[v.Name] = elemType
-			}
-		}
+		// List-literal element-type tracking flows through bound.NodeTypes
+		// (V2Type{Name:"List", Args:[T]}); no codegen-side write needed.
 
 		// Track pointer vars from optional-returning functions. Three paths:
 		//   1. Top-level FnDecls and class methods — return-type info
@@ -430,20 +415,11 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// Nullable=true through bound.NodeTypes; no codegen-side ptrVars
 		// write needed here.
 
-		// Track Channel-typed locals from `var ch = Channel<T>(N)` so that
-		// downstream codegen (for-range, isChannelVar, isCollectionVar) can
-		// identify them. Without this, only explicitly-typed declarations
-		// (`Channel<T> ch = …`) were recognized; the bare-init form is the
-		// idiomatic one used throughout zinc-flow-go.
-		// (Field-level synthesis already exists in fieldGenericType.)
-		if call, ok := v.Value.(*parser.CallExpr); ok && v.Type == nil {
-			if ident, ok := call.Callee.(*parser.Ident); ok &&
-				(ident.Name == "Channel" || ident.Name == "Chan") &&
-				len(call.TypeArgs) >= 1 {
-				elemType := &parser.SimpleType{Name: call.TypeArgs[0]}
-				g.varTypes[v.Name] = "chan " + g.formatType(elemType)
-			}
-		}
+		// Channel-typed locals from `var ch = Channel<T>(N)` flow through
+		// bound.NodeTypes — the typechecker's CallExpr inferType returns
+		// V2Type{Name:"Channel", Args:[T]} for the Channel/Chan
+		// constructors, which scope.set propagates per-Ident.
+
 		// SafeNavExpr (`var x = a?.b`) — typechecker now returns
 		// V2Type{Nullable:true} for it, which scope.set propagates
 		// into NodeTypes for downstream Ident reads.
@@ -452,10 +428,8 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// flows through bound.NodeTypes — V2Type carries GoType for FFI
 		// return slots via the typechecker's CheckV2 pass.
 
-		// Track scalar variable types
-		if scalarType := g.inferExprType(v.Value, g.varTypes); scalarType != "" && scalarType != "interface{}" {
-			g.varTypes[v.Name] = scalarType
-		}
+		// Scalar variable type tracking flows through bound.NodeTypes
+		// (V2Type Name carries the inferred scalar type per-Ident).
 
 		varName := v.Name
 		if goBuiltins[varName] {
@@ -722,11 +696,11 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 				}
 			}
 		}
-		// Fallback: codegen-side type tracking for locals bound from
-		// pointer-returning expressions (class returns, FFI pointers).
-		// Picks up the case where bound.NodeTypes doesn't annotate the
-		// Ident reference site but inferExprType + funcReturnTypes
-		// resolved the local's Go type at the bind point.
+		// Codegen-side fallback for cross-pkg class returns where the
+		// V2Type.Name doesn't carry the package-qualified form bound's
+		// NodeTypes path expects. callReturnIsPointer + the var-decl
+		// writer at emitVarStmt populate g.varTypes[name] = "*T" for
+		// these cases.
 		if vt, ok := g.varTypes[v.Name]; ok && strings.HasPrefix(vt, "*") {
 			return true
 		}
@@ -1070,12 +1044,6 @@ func (g *Generator) isMapVar(e parser.Expr) bool {
 				return true
 			}
 		}
-		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "map[") {
-			return true
-		}
-		if t, ok := g.varTypes[ident.Name]; ok && t == "map" {
-			return true
-		}
 	}
 	return false
 }
@@ -1090,9 +1058,6 @@ func (g *Generator) isListVar(e parser.Expr) bool {
 				}
 			}
 		}
-		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "[]") {
-			return true
-		}
 	}
 	return false
 }
@@ -1104,9 +1069,6 @@ func (g *Generator) isChannelVar(e parser.Expr) bool {
 			if t, ok := g.bound.NodeTypes[ident]; ok && t.Name == "Channel" {
 				return true
 			}
-		}
-		if t, ok := g.varTypes[ident.Name]; ok && strings.HasPrefix(t, "chan ") {
-			return true
 		}
 	}
 	return false

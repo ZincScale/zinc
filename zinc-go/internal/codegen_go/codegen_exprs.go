@@ -331,8 +331,8 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		return "/* spawn */"
 	case *parser.IfExpr:
 		retType := "interface{}"
-		thenType := g.inferExprType(expr.Then, g.varTypes)
-		elseType := g.inferExprType(expr.Else, g.varTypes)
+		thenType := g.inferExprType(expr.Then)
+		elseType := g.inferExprType(expr.Else)
 		if thenType != "" && thenType == elseType {
 			retType = thenType
 		} else if thenType != "" && thenType != "interface{}" {
@@ -436,7 +436,7 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		left := g.formatExpr(b.Left)
 		right := g.formatExpr(b.Right)
 		goType := g.formatType(&parser.SimpleType{Name: right})
-		knownType := g.inferExprType(b.Left, g.varTypes)
+		knownType := g.inferExprType(b.Left)
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
 			return fmt.Sprintf("func() bool { _ = %s; return true }()", left)
 		}
@@ -450,7 +450,7 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		left := g.formatExpr(b.Left)
 		right := g.formatExpr(b.Right)
 		goType := g.formatType(&parser.SimpleType{Name: right})
-		knownType := g.inferExprType(b.Left, g.varTypes)
+		knownType := g.inferExprType(b.Left)
 		if knownType != "" && knownType != "interface{}" && knownType == goType {
 			return fmt.Sprintf("func() bool { _ = %s; return false }()", left)
 		}
@@ -653,8 +653,18 @@ func (g *Generator) inferLambdaReturnType(expr parser.Expr, params []*parser.Par
 	return g.inferExprType(expr, paramTypes)
 }
 
-// inferExprType infers the Go type of an expression given known variable types.
-func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) string {
+// inferExprType infers the Go type of an expression. Backed by
+// bound.NodeTypes (per-Ident V2Type from the typechecker) and
+// bound.Sigs.FnSigs (callable return types). The optional `known`
+// argument carries name→Go-type bindings that the typechecker
+// doesn't surface — currently only lambda-param scope, since
+// the typechecker doesn't walk lambda bodies and therefore has
+// no NodeTypes entries for lambda-local Idents.
+func (g *Generator) inferExprType(expr parser.Expr, known ...map[string]string) string {
+	var lookup map[string]string
+	if len(known) > 0 {
+		lookup = known[0]
+	}
 	switch e := expr.(type) {
 	case *parser.IntLit:
 		return "int"
@@ -665,9 +675,6 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 	case *parser.BoolLit:
 		return "bool"
 	case *parser.Ident:
-		// Phase 3.7.2 — prefer the bind side-map when available.
-		// `known` (g.varTypes) remains the legacy fallback while writes
-		// to the codegen tracking maps are still drained.
 		if g.bound != nil {
 			if t, ok := g.bound.NodeTypes[e]; ok {
 				if gt := g.goTypeFromV2(t); gt != "" {
@@ -675,12 +682,12 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 				}
 			}
 		}
-		if t, ok := known[e.Name]; ok {
+		if t, ok := lookup[e.Name]; ok {
 			return t
 		}
 	case *parser.BinaryExpr:
-		lt := g.inferExprType(e.Left, known)
-		rt := g.inferExprType(e.Right, known)
+		lt := g.inferExprType(e.Left, lookup)
+		rt := g.inferExprType(e.Right, lookup)
 		if lt == rt && lt != "" {
 			switch e.Op {
 			case "+", "-", "*", "/", "%":
@@ -725,7 +732,35 @@ func (g *Generator) inferExprType(expr parser.Expr, known map[string]string) str
 					}
 				}
 			}
-			if t, ok := known[ident.Name]; ok {
+			// Local var holding a Fn-typed value (e.g. `var f = factory()`).
+			// bound.NodeTypes carries the FuncTypeExpr via V2Type.TypeExpr;
+			// peel through any local type aliases.
+			if g.bound != nil {
+				if t, ok := g.bound.NodeTypes[ident]; ok {
+					var fnExpr *parser.FuncTypeExpr
+					if fn, isFn := t.TypeExpr.(*parser.FuncTypeExpr); isFn {
+						fnExpr = fn
+					} else if simple, isSimple := t.TypeExpr.(*parser.SimpleType); isSimple {
+						if alias, ok := g.lookupTypeAlias(simple.Name); ok {
+							if fn, isFn := alias.(*parser.FuncTypeExpr); isFn {
+								fnExpr = fn
+							}
+						}
+					}
+					if fnExpr != nil && fnExpr.ReturnType != nil {
+						return g.withSuppressedImports(func() string {
+							return g.formatType(fnExpr.ReturnType)
+						})
+					}
+				}
+			}
+			// Lookup-table fallback for lambda-param callees:
+			// inside a lambda body the typechecker doesn't populate
+			// NodeTypes, so a `next(path)` callee where `next` is a
+			// lambda param resolves through the paramTypes map the
+			// caller passed in. Parses out the return type from the
+			// formatted Go func signature.
+			if t, ok := lookup[ident.Name]; ok {
 				resolved := t
 				if alias, ok := g.lookupTypeAlias(t); ok {
 					resolved = g.formatType(alias)
