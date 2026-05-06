@@ -58,6 +58,9 @@ func (b *binder) bindDecl(d parser.TopLevelDecl) {
 }
 
 func (b *binder) bindFnDecl(decl *parser.FnDecl) {
+	prevThrower := b.currentFnIsThrower
+	b.currentFnIsThrower = returnDeclaresError(decl.ReturnType)
+	defer func() { b.currentFnIsThrower = prevThrower }()
 	b.push()
 	for _, p := range decl.Params {
 		b.declare(p.Name, Symbol{Kind: SymParam, Name: p.Name, DeclType: p.Type})
@@ -69,6 +72,30 @@ func (b *binder) bindFnDecl(decl *parser.FnDecl) {
 		b.bindBlock(decl.Body)
 	}
 	b.pop()
+}
+
+// returnDeclaresError mirrors codegen's returnTypeDeclaresError —
+// a function is a thrower iff its declared return type is a bare
+// `error` or a TupleType whose last element is `error`. Local copy
+// here so the typechecker binder doesn't reach into codegen_go.
+func returnDeclaresError(retType parser.TypeExpr) bool {
+	if retType == nil {
+		return false
+	}
+	if isErrorType(retType) {
+		return true
+	}
+	if tup, ok := retType.(*parser.TupleType); ok && len(tup.Elements) > 0 {
+		return isErrorType(tup.Elements[len(tup.Elements)-1])
+	}
+	return false
+}
+
+func isErrorType(t parser.TypeExpr) bool {
+	if st, ok := t.(*parser.SimpleType); ok {
+		return st.Name == "error"
+	}
+	return false
 }
 
 func (b *binder) bindClassDecl(decl *parser.ClassDecl) {
@@ -112,6 +139,15 @@ func (b *binder) bindClassDecl(decl *parser.ClassDecl) {
 }
 
 func (b *binder) bindCtor(c *parser.CtorDecl) {
+	// Ctors are non-throwers in zinc's current AST — the parser doesn't
+	// carry a Throws flag. If a ctor body uses catch with a bare
+	// return, it lands in the non-thrower branch (no propagation
+	// contract; bare return just stops construction). The downstream
+	// codegen-side throwing-ctor inference happens via body walk and
+	// runs after bind, so the bare-return check here would race it.
+	prevThrower := b.currentFnIsThrower
+	b.currentFnIsThrower = false
+	defer func() { b.currentFnIsThrower = prevThrower }()
 	b.push()
 	for _, p := range c.Params {
 		b.declare(p.Name, Symbol{Kind: SymParam, Name: p.Name, DeclType: p.Type})
@@ -129,6 +165,9 @@ func (b *binder) bindCtor(c *parser.CtorDecl) {
 }
 
 func (b *binder) bindMethodDecl(m *parser.MethodDecl) {
+	prevThrower := b.currentFnIsThrower
+	b.currentFnIsThrower = returnDeclaresError(m.ReturnType)
+	defer func() { b.currentFnIsThrower = prevThrower }()
 	b.push()
 	for _, p := range m.Params {
 		b.declare(p.Name, Symbol{Kind: SymParam, Name: p.Name, DeclType: p.Type})
@@ -472,12 +511,81 @@ func (b *binder) bindOrHandler(h *parser.OrHandler) {
 		return
 	}
 	b.push()
-	// `err` is implicitly available inside an or-block.
+	// `err` is implicitly available inside a catch-block.
 	b.declare("err", Symbol{Kind: SymLocal, Name: "err"})
 	for _, s := range h.Body.Stmts {
 		b.bindStmt(s)
+		// In a thrower, bare `return` inside catch silently swallows
+		// the error (lowers to `return zero, nil`). Force the user
+		// to be explicit: `return err` to propagate, `return v..., err`
+		// for a multi-slot return, or a fallback expression. In a
+		// non-thrower, bare `return` just exits the function — the
+		// error is just an `err` local with no propagation contract,
+		// so it's fine.
+		if b.currentFnIsThrower {
+			checkBareReturnInCatch(s, &b.errors)
+		}
 	}
 	b.pop()
+}
+
+// checkBareReturnInCatch walks a statement looking for ReturnStmts
+// with nil Value (bare `return`). Recurses through nested if / for /
+// while / block / with constructs, but stops at lambda or fn
+// boundaries — bare `return` inside a lambda body is the lambda's
+// return, not the catch's, and that's fine.
+func checkBareReturnInCatch(s parser.Stmt, errors *[]V2Error) {
+	switch n := s.(type) {
+	case *parser.ReturnStmt:
+		if n.Value == nil {
+			*errors = append(*errors, V2Error{
+				Line: n.Line,
+				Message: "bare `return` inside `catch { }` is not allowed — " +
+					"use `return err` to propagate, `return v..., err` for an explicit " +
+					"multi-slot return, or a fallback expression " +
+					"(`catch { 0 }`). bare return would silently swallow the error.",
+			})
+		}
+	case *parser.IfStmt:
+		if n.Then != nil {
+			for _, sub := range n.Then.Stmts {
+				checkBareReturnInCatch(sub, errors)
+			}
+		}
+		if n.ElseStmt != nil {
+			checkBareReturnInCatch(n.ElseStmt, errors)
+		}
+	case *parser.ForStmt:
+		if n.Body != nil {
+			for _, sub := range n.Body.Stmts {
+				checkBareReturnInCatch(sub, errors)
+			}
+		}
+	case *parser.WhileStmt:
+		if n.Body != nil {
+			for _, sub := range n.Body.Stmts {
+				checkBareReturnInCatch(sub, errors)
+			}
+		}
+	case *parser.BlockStmt:
+		for _, sub := range n.Stmts {
+			checkBareReturnInCatch(sub, errors)
+		}
+	case *parser.WithStmt:
+		if n.Body != nil {
+			for _, sub := range n.Body.Stmts {
+				checkBareReturnInCatch(sub, errors)
+			}
+		}
+	case *parser.MatchStmt:
+		for _, c := range n.Cases {
+			if c.Body != nil {
+				for _, sub := range c.Body.Stmts {
+					checkBareReturnInCatch(sub, errors)
+				}
+			}
+		}
+	}
 }
 
 // --- Expression walk -------------------------------------------------------

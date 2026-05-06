@@ -1,0 +1,24 @@
+// Bare `return` inside a catch handler is rejected when the enclosing
+// function is a thrower. Bare return there silently swallows the
+// error (lowers to `return zero, nil`), turning a propagation site
+// into a hidden no-op. The typechecker rejects with a remediation
+// hint.
+
+import stdlib/errors
+
+(int, error) parseAndDouble(String s) {
+    var n = parseNum(s) catch {
+        // Bug: this loses the error. Should be `return err`.
+        return
+    }
+    return n * 2, null
+}
+
+(int, error) parseNum(String s) {
+    return 42, null
+}
+
+void main() {
+    var v, _ = parseAndDouble("123")
+    print("v: ${v}")
+}

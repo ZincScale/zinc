@@ -378,6 +378,15 @@ type binder struct {
 	currentClassMethods     map[string]bool
 	currentClassMemberPub   map[string]bool
 
+	// currentFnIsThrower — true while walking the body of a function /
+	// method / ctor whose return signature ends in `error`. Drives the
+	// catch-handler bare-return check: in a thrower, bare `return`
+	// silently swallows the error (lowers to `return zero, nil`); in
+	// a non-thrower the error is just an `err` local with no mandatory
+	// propagation, so bare `return` is fine. Only the thrower form is
+	// rejected.
+	currentFnIsThrower bool
+
 	// reportedCollisions dedups collision errors per (line, name) so repeated
 	// uses don't produce repeated errors.
 	reportedCollisions map[string]bool

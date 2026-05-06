@@ -1,0 +1,1 @@
+bare `return` inside `catch { }` is not allowed
