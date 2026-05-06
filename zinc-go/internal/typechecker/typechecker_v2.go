@@ -328,6 +328,13 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			for _, f := range dd.Fields {
 				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
 			}
+			// Sealed variants — data classes nested in the parent.
+			for _, v := range dd.Variants {
+				classNames[v.Name] = true
+				for _, f := range v.Params {
+					memberIsPub[v.Name+"."+f.Name] = f.IsPub
+				}
+			}
 		case *parser.DataClassDecl:
 			classNames[dd.Name] = true
 			for _, m := range dd.Methods {
@@ -338,6 +345,9 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			}
 		case *parser.InterfaceDecl:
 			classNames[dd.Name] = true
+			for _, m := range dd.Methods {
+				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
+			}
 		case *parser.EnumDecl:
 			classNames[dd.Name] = true
 		}
