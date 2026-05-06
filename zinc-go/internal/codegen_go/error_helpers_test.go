@@ -4,7 +4,15 @@ import (
 	"testing"
 
 	"zinc-go/internal/parser"
+	"zinc-go/internal/typechecker"
 )
+
+// boundWithAliases builds a minimal BoundProgram exposing the given
+// type aliases, suitable for unit-testing alias-driven codegen helpers
+// without spinning up the full Bind pipeline.
+func boundWithAliases(aliases map[string]parser.TypeExpr) *typechecker.BoundProgram {
+	return &typechecker.BoundProgram{TypeAliases: aliases}
+}
 
 // Pure-function tests for the explicit-error helpers introduced in
 // the redesign. They have no Generator state, so the tests stay
@@ -118,7 +126,7 @@ func TestResolveFuncTypeExpr(t *testing.T) {
 	})
 	t.Run("local alias is peeled", func(t *testing.T) {
 		g := &Generator{
-			typeAliases: map[string]parser.TypeExpr{"Factory": directFn},
+			bound: boundWithAliases(map[string]parser.TypeExpr{"Factory": directFn}),
 		}
 		got := g.resolveFuncTypeExpr(&parser.SimpleType{Name: "Factory"})
 		if got != directFn {
@@ -127,7 +135,6 @@ func TestResolveFuncTypeExpr(t *testing.T) {
 	})
 	t.Run("subpackage alias is peeled", func(t *testing.T) {
 		g := &Generator{
-			typeAliases: map[string]parser.TypeExpr{},
 			subpkgTypeAliases: map[string]map[string]parser.TypeExpr{
 				"lib": {"Factory": directFn},
 			},
@@ -139,10 +146,10 @@ func TestResolveFuncTypeExpr(t *testing.T) {
 	})
 	t.Run("alias chain (alias → alias → fn)", func(t *testing.T) {
 		g := &Generator{
-			typeAliases: map[string]parser.TypeExpr{
+			bound: boundWithAliases(map[string]parser.TypeExpr{
 				"Outer": &parser.SimpleType{Name: "Inner"},
 				"Inner": directFn,
-			},
+			}),
 		}
 		got := g.resolveFuncTypeExpr(&parser.SimpleType{Name: "Outer"})
 		if got != directFn {
@@ -151,7 +158,7 @@ func TestResolveFuncTypeExpr(t *testing.T) {
 	})
 	t.Run("non-function alias returns nil", func(t *testing.T) {
 		g := &Generator{
-			typeAliases: map[string]parser.TypeExpr{"Name": &parser.SimpleType{Name: "string"}},
+			bound: boundWithAliases(map[string]parser.TypeExpr{"Name": &parser.SimpleType{Name: "string"}}),
 		}
 		if got := g.resolveFuncTypeExpr(&parser.SimpleType{Name: "Name"}); got != nil {
 			t.Fatalf("expected nil for non-fn alias, got %v", got)

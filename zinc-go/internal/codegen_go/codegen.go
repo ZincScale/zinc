@@ -93,7 +93,6 @@ type Generator struct {
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
 	dataClasses         map[string]bool       // data class names that have NewType constructors
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
-	typeAliases         map[string]parser.TypeExpr // type alias name → underlying type
 	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
 	importMap           map[string]string     // import prefix → full Go package path
 	typeImports         map[string]string     // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
@@ -226,7 +225,6 @@ func New() *Generator {
 		ptrVars:             make(map[string]bool),
 		renamedVars:         make(map[string]string),
 		dataClasses:         make(map[string]bool),
-		typeAliases:         make(map[string]parser.TypeExpr),
 		goResolver:          NewGoTypeResolver(),
 		importMap:           make(map[string]string),
 		typeImports:         make(map[string]string),
@@ -492,17 +490,13 @@ func (g *Generator) methodReturnsError(class, method string) bool {
 }
 
 // lookupTypeAlias resolves a type-alias name to its underlying TypeExpr.
-// Prefers bound.TypeAliases (the typechecker's canonical per-file table)
-// when available; falls back to the codegen-side g.typeAliases for
-// legacy paths that bypass the bound side-map.
+// Backed by bound.TypeAliases — the typechecker's canonical per-file
+// alias table, populated by Bind.
 func (g *Generator) lookupTypeAlias(name string) (parser.TypeExpr, bool) {
 	if g.bound != nil && g.bound.TypeAliases != nil {
 		if t, ok := g.bound.TypeAliases[name]; ok {
 			return t, true
 		}
-	}
-	if t, ok := g.typeAliases[name]; ok {
-		return t, true
 	}
 	return nil, false
 }
