@@ -84,6 +84,15 @@ type Generator struct {
 	// instead of the single-slot currentReturnType-based fallback.
 	currentReturnIsDeclaredThrower bool
 
+	// usingIIFE* — active while emitting a using-body wrapped in an
+	// IIFE so block-scoped defer fires at body exit. Returns inside the
+	// body get rewritten to `<flag> = true; <v0> = X; <v1> = Y; return`
+	// (a bare return out of the IIFE) so the outer function can detect
+	// and re-propagate.
+	usingIIFEActive       bool
+	usingIIFEReturnedFlag string
+	usingIIFEValueSlots   []string
+
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)

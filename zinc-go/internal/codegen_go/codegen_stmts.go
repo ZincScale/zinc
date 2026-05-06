@@ -808,6 +808,33 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		return
 	}
 
+	// Inside a using-IIFE body, user `return X, Y` doesn't exit the
+	// outer function — it has to leave the IIFE first so deferred
+	// Close fires, then signal the outer function to re-propagate.
+	// Rewrite as: `<slots> = <expr>; <flag> = true; return` so the
+	// IIFE returns void and the outer code reads the flag/slots.
+	if g.usingIIFEActive {
+		if r.Value != nil && len(g.usingIIFEValueSlots) > 0 {
+			// `return TupleLit(a, b, c)` — slot-by-slot assignment.
+			if tup, ok := r.Value.(*parser.TupleLit); ok && len(tup.Elements) == len(g.usingIIFEValueSlots) {
+				for i, el := range tup.Elements {
+					g.writeln("%s = %s", g.usingIIFEValueSlots[i], g.formatExpr(el))
+				}
+			} else if len(g.usingIIFEValueSlots) > 1 {
+				// `return call()` where call returns a multi-value
+				// tuple — Go's multi-return assigns all slots in one
+				// shot from a single RHS.
+				g.writeln("%s = %s", strings.Join(g.usingIIFEValueSlots, ", "), g.formatExpr(r.Value))
+			} else {
+				// Single slot — direct assign.
+				g.writeln("%s = %s", g.usingIIFEValueSlots[0], g.formatExpr(r.Value))
+			}
+		}
+		g.writeln("%s = true", g.usingIIFEReturnedFlag)
+		g.writeln("return")
+		return
+	}
+
 	if r.Value == nil {
 		if g.currentReturnType != "" {
 			zv := g.zeroValueFor(g.currentReturnType)
@@ -2884,12 +2911,94 @@ func (g *Generator) emitWithStmt(w *parser.WithStmt) {
 		g.writeln("}()")
 		return
 	}
+
+	// Body has user returns AND/OR the resource init may throw with no
+	// or-handler. Wrap the body in an IIFE so deferred Close fires at
+	// body exit (block-scoped semantics). User `return X, Y` inside
+	// the body gets rewritten to assign-and-bare-return — see
+	// emitReturnStmt's usingIIFEActive branch — so the IIFE exits,
+	// Close runs, and the outer code reads the captured slots and
+	// re-propagates.
+	if blockContainsReturn(w.Body) && !resourcesMayThrow {
+		flag := fmt.Sprintf("_uret%d", g.errVarCount)
+		g.errVarCount++
+		var slots []string
+		// Outer return shape: declared-thrower carries per-slot Go
+		// types in currentThrowerValueGoTypes (value slots, error tail
+		// peeled). For non-throwers, currentOuterReturnType holds the
+		// single Go return type (struct, primitive, etc.).
+		valueGoTypes := g.currentThrowerValueGoTypes
+		if len(valueGoTypes) == 0 && g.currentOuterReturnType != "" && g.currentOuterReturnType != "error" {
+			valueGoTypes = []string{g.currentOuterReturnType}
+		}
+		for i, vt := range valueGoTypes {
+			slot := fmt.Sprintf("_uval%d_%d", g.errVarCount, i)
+			slots = append(slots, slot)
+			g.writeln("var %s %s", slot, vt)
+		}
+		var errSlot string
+		if g.currentReturnIsDeclaredThrower || g.currentFuncIsThrower || g.currentOuterReturnType == "error" {
+			errSlot = fmt.Sprintf("_uerr%d", g.errVarCount)
+			g.writeln("var %s error", errSlot)
+			slots = append(slots, errSlot)
+		}
+		g.writeln("var %s bool", flag)
+
+		savedActive := g.usingIIFEActive
+		savedFlag := g.usingIIFEReturnedFlag
+		savedSlots := g.usingIIFEValueSlots
+		g.usingIIFEActive = true
+		g.usingIIFEReturnedFlag = flag
+		g.usingIIFEValueSlots = slots
+
+		g.writeln("func() {")
+		g.indent++
+		g.withLocalScope(func() {
+			for _, r := range w.Resources {
+				g.emitWithResource(r)
+			}
+			g.emitBlock(w.Body)
+		})
+		g.indent--
+		g.writeln("}()")
+
+		g.usingIIFEActive = savedActive
+		g.usingIIFEReturnedFlag = savedFlag
+		g.usingIIFEValueSlots = savedSlots
+
+		g.writeln("if %s {", flag)
+		g.indent++
+		if len(slots) > 0 {
+			g.writeln("return %s", strings.Join(slots, ", "))
+		} else {
+			g.writeln("return")
+		}
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
 	g.withLocalScope(func() {
 		for _, r := range w.Resources {
 			g.emitWithResource(r)
 		}
 		g.emitBlock(w.Body)
 	})
+}
+
+// flattenReturnValueSlots breaks a return value expression into
+// per-slot Go expressions matching the outer function's declared
+// return shape. A bare TupleLit becomes its element list; a single
+// expression is returned as-is.
+func (g *Generator) flattenReturnValueSlots(value parser.Expr) []string {
+	if tup, ok := value.(*parser.TupleLit); ok {
+		out := make([]string, 0, len(tup.Elements))
+		for _, el := range tup.Elements {
+			out = append(out, g.formatExpr(el))
+		}
+		return out
+	}
+	return []string{g.formatExpr(value)}
 }
 
 // emitWithResource lowers a single `using` resource binding. Three
