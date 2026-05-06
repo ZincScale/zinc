@@ -791,6 +791,11 @@ func (g *Generator) goTypeOfV2(t typechecker.V2Type) string {
 func (g *Generator) targetIsPointerOptional(target parser.Expr) bool {
 	switch t := target.(type) {
 	case *parser.Ident:
+		if g.bound != nil {
+			if vt, ok := g.bound.NodeTypes[t]; ok && vt.Nullable {
+				return true
+			}
+		}
 		return g.ptrVars[t.Name]
 	case *parser.SelectorExpr:
 		// `box.name` — look up the field's type on the receiver class.
@@ -817,6 +822,11 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 	}
 	switch v := value.(type) {
 	case *parser.Ident:
+		if g.bound != nil {
+			if vt, ok := g.bound.NodeTypes[v]; ok && vt.Nullable {
+				return true
+			}
+		}
 		if g.ptrVars[v.Name] {
 			return true
 		}

@@ -815,6 +815,11 @@ func (g *Generator) formatPrintf(s *parser.StringInterpLit) (string, []string) {
 func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 	switch ex := e.(type) {
 	case *parser.Ident:
+		if g.bound != nil {
+			if vt, ok := g.bound.NodeTypes[ex]; ok && vt.Nullable {
+				return true
+			}
+		}
 		return g.ptrVars[ex.Name]
 	case *parser.SelectorExpr:
 		// `obj.field` — look up the field's declared type on the
