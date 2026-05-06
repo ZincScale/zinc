@@ -602,9 +602,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// table; lookupTypeAlias prefers it. No codegen-side write.
 			_ = decl
 		case *parser.ConstDecl:
-			g.pubNames[decl.Name] = decl.IsPub
+			// Symbol.IsPub (set by bind for SymConst) is the canonical
+			// pub-status source via isPub() → bound.LookupSymbolByName.
 		case *parser.FnDecl:
-			g.pubNames[decl.Name] = decl.IsPub
+			// Symbol.IsPub flows through bound for SymFn; isPub() reads
+			// it. funcSigs still needed for default-arg ParamDecl access.
 			g.funcSigs[decl.Name] = decl.Params
 			// All return-type info (thrower, optional, formatted Go type
 			// string for inference) flows through bound.Sigs.FnSigs.
