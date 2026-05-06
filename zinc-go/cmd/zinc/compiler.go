@@ -370,7 +370,6 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 	// Collect exports from all files for sibling awareness
 	merged := mergePrograms(progs)
 	allExports := codegen.CollectExports(merged)
-	allPubs := codegen.CollectPubs(merged)
 
 	// Bind + typecheck pass. Bind() resolves every Ident to a Symbol via
 	// the 5-level order in the spec; CheckV2 then runs with shared
@@ -402,7 +401,6 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 		gen.SetSourceFile(prog.SourceFile)
 		gen.SetGoModDir(outDir)
 		gen.SetSiblingExports(allExports)
-		gen.SetSiblingPubs(allPubs)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
 		}
@@ -535,7 +533,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
 	allExports := make(map[string]map[string]string)            // pkg → name → kind
-	allPubs := make(map[string]map[string]bool)                 // pkg → name → isPub
 	allDataFields := make(map[string]map[string][]*parser.FieldDecl)  // pkg → data class name → fields
 	allClassDecls := make(map[string]map[string]*parser.ClassDecl)   // pkg → class name → full decl
 	allTypeAliases := make(map[string]map[string]parser.TypeExpr)    // pkg → alias name → underlying TypeExpr
@@ -565,7 +562,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		allZnFiles[pkg] = znFiles
 		allProgs[pkg] = progs
 		allExports[pkg] = codegen.CollectExports(merged)
-		allPubs[pkg] = codegen.CollectPubs(merged)
 		allDataFields[pkg] = codegen.CollectDataClassFields(merged)
 		allClassDecls[pkg] = codegen.CollectClassDecls(merged)
 		allTypeAliases[pkg] = codegen.CollectTypeAliases(merged)
@@ -669,7 +665,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		goPkgName := filepath.Base(pkg)
 		znFiles := allZnFiles[pkg]
 		siblingExports := allExports[pkg] // exports from all files in this package
-		siblingPubs := allPubs[pkg]       // pub-ness of those exports
 		pkgProgs := allProgs[pkg]         // per-file ASTs (parsed in step 3)
 
 		// Use the per-file ASTs from step 3 instead of re-parsing — the
@@ -689,7 +684,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			gen.SetGoModDir(goModDir)
 			gen.SetZincSubpackages(subpackages)
 			gen.SetSiblingExports(siblingExports)
-			gen.SetSiblingPubs(siblingPubs)
 			if len(importAliases) > 0 && importAliases[0] != nil {
 				gen.SetImportAliases(importAliases[0])
 			}
@@ -759,7 +753,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 	}
 	rootMerged := mergePrograms(rootProgs)
 	rootExports := codegen.CollectExports(rootMerged)
-	rootPubs := codegen.CollectPubs(rootMerged)
 
 	// Bind + typecheck root files. Cross-package exports surface every
 	// leaf subpackage so root code can reference `core.Foo` etc. through
@@ -832,7 +825,6 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		gen.SetGoModDir(goModDir)
 		gen.SetZincSubpackages(subpackages)
 		gen.SetSiblingExports(rootExports)
-		gen.SetSiblingPubs(rootPubs)
 		if len(importAliases) > 0 && importAliases[0] != nil {
 			gen.SetImportAliases(importAliases[0])
 		}

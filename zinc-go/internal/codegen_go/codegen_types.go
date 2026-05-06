@@ -16,7 +16,13 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 		g.writeln("//line %s:%d", g.sourceFile, fn.Line)
 	}
 
-	name := g.exportIfSubpackage(fn.Name)
+	// Use the FnDecl's own IsPub directly — the FnDecl is in hand, no
+	// need to round-trip through bound.LookupSymbolByNameAndKind to
+	// recover what we already know.
+	name := fn.Name
+	if g.isSubpackage() {
+		name = goName(fn.Name, fn.IsPub)
+	}
 	if fn.Name == "main" {
 		g.writeln("func main() {")
 		g.indent++

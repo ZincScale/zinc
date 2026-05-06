@@ -989,25 +989,20 @@ func (g *Generator) isPub(name string) bool {
 			return sym.IsPub
 		}
 	}
-	if pub, ok := g.pubNames[name]; ok {
-		return pub
-	}
 	// In main package, everything is accessible (no export needed)
 	return g.packageName == "" || g.packageName == "main"
 }
 
-// isPubField checks if a field/method on a class is pub.
-// Prefers bound.Sigs.MemberIsPub (typechecker-canonical); falls back
-// to g.pubNames for legacy paths and same-pkg sibling-class members.
+// isPubMember checks if a field/method on a class is pub.
+// Backed by bound.Sigs.MemberIsPub (typechecker-canonical, populated
+// by CollectSignatures over data classes, regular classes, sealed
+// variants, and interface methods).
 func (g *Generator) isPubMember(className, memberName string) bool {
 	key := className + "." + memberName
 	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.MemberIsPub != nil {
 		if pub, ok := g.bound.Sigs.MemberIsPub[key]; ok {
 			return pub
 		}
-	}
-	if pub, ok := g.pubNames[key]; ok {
-		return pub
 	}
 	// Default: in main package everything is accessible
 	return g.packageName == "" || g.packageName == "main"

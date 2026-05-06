@@ -95,7 +95,6 @@ type Generator struct {
 	activeTypeParams    map[string]bool       // currently-in-scope generic type parameter names
 
 	// Visibility tracking
-	pubNames         map[string]bool   // names declared with pub (functions, methods, fields, consts)
 
 	// Subpackage support
 	packageName      string            // Go package name (default: "main")
@@ -221,7 +220,6 @@ func New() *Generator {
 		goResolver:          NewGoTypeResolver(),
 		importMap:           make(map[string]string),
 		typeImports:         make(map[string]string),
-		pubNames:            make(map[string]bool),
 		addrOfReported:      make(map[*parser.UnaryExpr]bool),
 	}
 }
@@ -274,11 +272,8 @@ func (g *Generator) SetImportAliases(aliases map[string]string) {
 // SetSiblingExports registers names from sibling files in the same package.
 // These are types, functions, etc. declared in other .zn files in the same directory.
 // Go handles cross-file visibility natively within a package via package-level
-// scoping. The codegen records the names so it can route calls correctly, but
-// the `pub` bit must be plumbed separately via SetSiblingPubs because exports
-// alone don't tell us which decls were `pub`-declared. Per the 2026-05-01 spec
-// decision, only user-declared `pub` modifiers belong in `g.pubNames` —
-// same-package access does not require `pub`.
+// scoping. The codegen records the names so it can resolve constructor calls
+// for placeholder structs; everything else flows through bound.Sigs.
 func (g *Generator) SetSiblingExports(exports map[string]string) {
 	for name, kind := range exports {
 		switch kind {
@@ -296,36 +291,6 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 			// fn is already registered with full ParamDecl info).
 		}
 	}
-}
-
-// SetSiblingPubs registers which sibling-file names were `pub`-declared.
-// Companion to SetSiblingExports. The user-pub bit can't be inferred from
-// exports alone (`CollectExports` returns name→kind without pub-ness).
-func (g *Generator) SetSiblingPubs(pubs map[string]bool) {
-	for name, isPub := range pubs {
-		if isPub {
-			g.pubNames[name] = true
-		}
-	}
-}
-
-// CollectPubs returns the names of `pub`-declared top-level decls.
-// Companion to CollectExports. Used by SetSiblingPubs in compileMultiFile.
-func CollectPubs(prog *parser.Program) map[string]bool {
-	pubs := make(map[string]bool)
-	for _, d := range prog.Decls {
-		switch decl := d.(type) {
-		case *parser.FnDecl:
-			if decl.IsPub {
-				pubs[decl.Name] = true
-			}
-		case *parser.ConstDecl:
-			if decl.IsPub {
-				pubs[decl.Name] = true
-			}
-		}
-	}
-	return pubs
 }
 
 // SetSubpackageExports registers exported names from a subpackage.
@@ -775,13 +740,10 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.className = className
 	g.imports = make(map[string]bool)
 	g.varTypes = make(map[string]string)
-	// Preserve structs and pubNames pre-populated by SetSiblingExports
-	// (sibling file awareness). data-class-ness and interface-ness flow
-	// through bound.Sigs.{DataClass,Interface}Names.
+	// structs is preserved across calls (pre-populated by
+	// SetSiblingExports for sibling-file class names). Pub status,
+	// data-class-ness, and interface-ness all flow through bound.Sigs.
 	g.typeImports = make(map[string]string)
-	if g.pubNames == nil {
-		g.pubNames = make(map[string]bool)
-	}
 	g.importGoAliases = make(map[string]string)
 	g.collectDecls(prog.Decls)
 
