@@ -403,8 +403,12 @@ func (l *Lexer) readLiteralString(line, col int) Token {
 				sb.WriteRune('\n')
 			case 't':
 				sb.WriteRune('\t')
+			case 'r':
+				sb.WriteRune('\r')
 			case '\'':
 				sb.WriteRune('\'')
+			case '"':
+				sb.WriteRune('"')
 			case '\\':
 				sb.WriteRune('\\')
 			default:

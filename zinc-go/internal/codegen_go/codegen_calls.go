@@ -6,11 +6,34 @@ package codegen_go
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"zinc-go/internal/parser"
 	"zinc-go/internal/typechecker"
 )
+
+// singleRuneStringLit returns a Go-source rune literal (e.g. `'['`) and
+// true when args is exactly one StringLit holding a single rune. Used by
+// int/byte/rune builtins to emit a rune-typed conversion (`int('[')` →
+// `int('[')`) instead of a string-targeting helper (`strconv.Atoi("[")`).
+// Mirrors Go's natural conversion semantics: int('[') == 91.
+func singleRuneStringLit(args []parser.Expr) (string, bool) {
+	if len(args) != 1 {
+		return "", false
+	}
+	lit, ok := args[0].(*parser.StringLit)
+	if !ok {
+		return "", false
+	}
+	runes := []rune(lit.Value)
+	if len(runes) != 1 {
+		return "", false
+	}
+	// strconv.QuoteRune escapes special chars and quotes with single quotes,
+	// matching Go's source-form rune literal.
+	return strconv.QuoteRune(runes[0]), true
+}
 
 // formatCallArgsWithPointerWrap formats a positional argument list,
 // prepending `&` to any arg whose target Go param has an explicit `*T`
@@ -618,6 +641,12 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		g.needImport("fmt")
 		return fmt.Sprintf("fmt.Sprint(%s)", args)
 	case "int":
+		// Single-rune string literal → Go rune-literal conversion. Lets
+		// `int('[')` produce 91 instead of `strconv.Atoi("[")` which would
+		// fail at runtime. Same for byte/rune below.
+		if lit, ok := singleRuneStringLit(c.Args); ok {
+			return fmt.Sprintf("int(%s)", lit)
+		}
 		// If the argument is a string literal or known string type, use strconv.Atoi.
 		// Otherwise, emit a Go type conversion: int(expr).
 		if len(c.Args) == 1 {
@@ -628,6 +657,16 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			}
 		}
 		return fmt.Sprintf("int(%s)", args)
+	case "byte":
+		if lit, ok := singleRuneStringLit(c.Args); ok {
+			return fmt.Sprintf("byte(%s)", lit)
+		}
+		return fmt.Sprintf("byte(%s)", args)
+	case "rune":
+		if lit, ok := singleRuneStringLit(c.Args); ok {
+			return fmt.Sprintf("rune(%s)", lit)
+		}
+		return fmt.Sprintf("rune(%s)", args)
 	case "float":
 		if len(c.Args) == 1 {
 			argType := g.inferExprType(c.Args[0])

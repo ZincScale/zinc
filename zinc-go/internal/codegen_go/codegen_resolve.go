@@ -1412,11 +1412,17 @@ func (g *Generator) withSuppressedImports(fn func() string) string {
 // Interface types get "nil" since Go interfaces cannot be instantiated with {}.
 func (g *Generator) zeroValueFor(goType string) string {
 	switch goType {
-	case "int", "int8", "int16", "int32", "int64",
+	case "int":
+		return "0"
+	case "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64",
 		"byte", "rune":
-		return "0"
-	case "float32", "float64":
+		// Typed zero so `var x = default(byte)` lands in `var x byte`,
+		// not Go's untyped-int default which gets assigned `int`.
+		return goType + "(0)"
+	case "float32":
+		return "float32(0)"
+	case "float64":
 		return "0.0"
 	case "string":
 		return `""`
