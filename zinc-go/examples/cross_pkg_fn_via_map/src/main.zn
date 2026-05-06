@@ -18,12 +18,12 @@ void main() {
         return "pos=${x}", null
     })
 
-    var ok = reg.create("dbl", 7) or { print("dbl err: ${err}"); return }
+    var ok = reg.create("dbl", 7) catch { print("dbl err: ${err}"); return }
     print("dbl: ${ok}")
 
-    var pos = reg.create("pos", 3) or { print("pos err: ${err}"); return }
+    var pos = reg.create("pos", 3) catch { print("pos err: ${err}"); return }
     print("pos: ${pos}")
 
-    var bad = reg.create("pos", -1) or { print("pos rejected: ${err}"); return }
+    var bad = reg.create("pos", -1) catch { print("pos rejected: ${err}"); return }
     print("should not reach: ${bad}")
 }

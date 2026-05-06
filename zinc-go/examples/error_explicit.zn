@@ -38,10 +38,10 @@ pub error validate(String input) {
 }
 
 void main() {
-    // Single-value or { }
-    var ok = parseNum("hello") or { print("caught: ${err}"); return }
+    // Single-value catch { }
+    var ok = parseNum("hello") catch { print("caught: ${err}"); return }
     print("ok: ${ok}")
 
-    var fail = parseNum("") or { print("caught: ${err}"); return }
+    var fail = parseNum("") catch { print("caught: ${err}"); return }
     print("should not reach: ${fail}")
 }

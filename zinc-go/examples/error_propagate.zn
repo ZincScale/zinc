@@ -1,5 +1,5 @@
 // Explicit error propagation: calling a thrower from inside another
-// thrower uses `or { return err }` to forward the error up. The new
+// thrower uses `catch { return err }` to forward the error up. The new
 // design replaces implicit auto-widen with explicit declared throwers.
 
 class BaseError {
@@ -19,15 +19,15 @@ class ParseError : BaseError {
     return 42, null
 }
 
-// Caller is also declared as a thrower; propagates via `or { return err }`.
+// Caller is also declared as a thrower; propagates via `catch { return err }`.
 (int, error) doubleIt(String s) {
-    var n = parseNum(s) or { return err }
+    var n = parseNum(s) catch { return err }
     return n * 2, null
 }
 
 void main() {
-    var x = doubleIt("hello") or { print("unexpected: ${err}"); return }
+    var x = doubleIt("hello") catch { print("unexpected: ${err}"); return }
     print("x: ${x}")
-    var y = doubleIt("") or { print("caught: ${err}"); return }
+    var y = doubleIt("") catch { print("caught: ${err}"); return }
     print("should not reach: ${y}")
 }

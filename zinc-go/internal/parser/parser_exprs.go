@@ -173,7 +173,7 @@ func (p *Parser) v2ParseComparison() Expr {
 		// own or-handler at the stmt parser; expression-attached
 		// handlers are owned by this node.
 		var handler *OrHandler
-		if p.check(lexer.TOKEN_OR) {
+		if p.check(lexer.TOKEN_CATCH) {
 			handler = p.v2ParseErrHandler()
 		}
 		left = &TypeAssertExpr{
@@ -549,7 +549,7 @@ func (p *Parser) v2ParsePrimary() Expr {
 		p.advance()
 		body := p.v2ParseBlock()
 		spawn := &SpawnExpr{Line: line, Body: body}
-		if p.check(lexer.TOKEN_OR) {
+		if p.check(lexer.TOKEN_CATCH) {
 			p.advance()
 			spawn.OrHandler = &OrHandler{Body: p.v2ParseBlock()}
 		}

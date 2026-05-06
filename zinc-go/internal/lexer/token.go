@@ -39,7 +39,7 @@ const (
 	TOKEN_BREAK
 	TOKEN_CONTINUE
 	TOKEN_GO
-	TOKEN_OR
+	TOKEN_CATCH
 	TOKEN_PRINT
 	TOKEN_VAR
 	TOKEN_PUB
@@ -141,7 +141,7 @@ var tokenNames = map[TokenType]string{
 	TOKEN_BREAK:     "break",
 	TOKEN_CONTINUE:  "continue",
 	TOKEN_GO:        "go",
-	TOKEN_OR:        "or",
+	TOKEN_CATCH:     "catch",
 	TOKEN_PRINT:     "print",
 	TOKEN_VAR:       "var",
 	TOKEN_PUB:       "pub",
@@ -247,7 +247,8 @@ var keywords = map[string]TokenType{
 	"break":     TOKEN_BREAK,
 	"continue":  TOKEN_CONTINUE,
 	// "go" removed — use "spawn" instead
-	"or":        TOKEN_OR,
+	// "or" removed — use "||" for boolean OR; error handler is "catch"
+	"catch":     TOKEN_CATCH,
 	"print":     TOKEN_PRINT,
 	"var":       TOKEN_VAR,
 	"pub":       TOKEN_PUB,

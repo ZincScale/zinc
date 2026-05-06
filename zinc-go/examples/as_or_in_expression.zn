@@ -1,6 +1,6 @@
-// `expr as T or { fallback }` works in expression position (function
+// `expr as T catch { fallback }` works in expression position (function
 // arg, return value, etc.), not just in var-decl. Pre-fix the parser
-// only consumed `or { ... }` after a var-decl/assign, forcing a temp
+// only consumed `catch { ... }` after a var-decl/assign, forcing a temp
 // var anywhere `as` was used inline.
 
 void useStr(String s, String label) {
@@ -15,14 +15,14 @@ void main() {
     var anyVal = "hello" as Object
     var anyNum = 42 as Object
 
-    // Inline `as T or { fallback }` in arg position — was forced to
-    // a `var t = ... or {...}; useStr(t, ...)` two-step.
-    useStr(anyVal as String or { "fallback" }, "string-cast")
-    useStr(anyNum as String or { "fallback" }, "wrong-cast")
-    useInt(anyNum as int or { -1 }, "int-cast")
-    useInt(anyVal as int or { -1 }, "wrong-int-cast")
+    // Inline `as T catch { fallback }` in arg position — was forced to
+    // a `var t = ... catch {...}; useStr(t, ...)` two-step.
+    useStr(anyVal as String catch { "fallback" }, "string-cast")
+    useStr(anyNum as String catch { "fallback" }, "wrong-cast")
+    useInt(anyNum as int catch { -1 }, "int-cast")
+    useInt(anyVal as int catch { -1 }, "wrong-int-cast")
 
     // Inline as part of a larger expression.
-    var sum = (anyNum as int or { 0 }) + (anyVal as int or { 5 })
+    var sum = (anyNum as int catch { 0 }) + (anyVal as int catch { 5 })
     print("sum: ${sum}")  // 42 + 5 = 47
 }

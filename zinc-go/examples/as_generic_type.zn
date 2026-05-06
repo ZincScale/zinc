@@ -8,7 +8,7 @@
 void main() {
     Object payload = Map<String, int>{"a": 1, "b": 2}
 
-    var m = payload as Map<String, int> or {
+    var m = payload as Map<String, int> catch {
         print("unreachable: payload is a Map<String, int>")
         return
     }
@@ -18,7 +18,7 @@ void main() {
 
     // Generic with class arg.
     Object listOfInts = List<int>[10, 20, 30]
-    var xs = listOfInts as List<int> or {
+    var xs = listOfInts as List<int> catch {
         print("unreachable: listOfInts is List<int>")
         return
     }
@@ -27,7 +27,7 @@ void main() {
 
     // Wrong dynamic type → handler runs.
     Object wrongShape = "not a map"
-    var fb = wrongShape as Map<String, int> or {
+    var fb = wrongShape as Map<String, int> catch {
         print("handler ran: not a Map")
         return
     }

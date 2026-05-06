@@ -90,18 +90,18 @@ class Source {
 // without short-circuiting the rest of the audit.
 void runOuter(Int x) {
     var outer = Outer()
-    var m = outer.handle(x) or { print("Outer.handle(${x}) err: ${err}"); return }
+    var m = outer.handle(x) catch { print("Outer.handle(${x}) err: ${err}"); return }
     print("Outer.handle(${x}): ${m}")
 }
 
 void runFnLocal() {
-    var k = callViaFnLocal() or { print("callViaFnLocal err: ${err}"); return }
+    var k = callViaFnLocal() catch { print("callViaFnLocal err: ${err}"); return }
     print("callViaFnLocal: ${k}")
 }
 
 void runSource(Bool fail) {
     var src = Source(fail)
-    var v = src.read() or { print("src(${fail}) err: ${err}"); return }
+    var v = src.read() catch { print("src(${fail}) err: ${err}"); return }
     print("src(${fail}): ${v}")
 }
 

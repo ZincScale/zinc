@@ -1,4 +1,4 @@
-// Bug 2: assigning a class-returning function's `or { }` result to a `T?`
+// Bug 2: assigning a class-returning function's `catch { }` result to a `T?`
 // local double-wraps with _zincPtr.
 class Box {
     pub String name
@@ -11,7 +11,7 @@ class Box {
 
 void main() {
     Box? x
-    var v = makeBox("hello") or { return }
+    var v = makeBox("hello") catch { return }
     x = v   // BUG: emits `x = _zincPtr(v)` which is **Box, not *Box.
     if (x != null) {
         print((x as Box).name)

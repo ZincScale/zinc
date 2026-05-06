@@ -25,8 +25,8 @@ class NetworkError : AppError {
 }
 
 void main() {
-    var body = fetch("api.com") or { print("fetch fail: ${err}"); return }
+    var body = fetch("api.com") catch { print("fetch fail: ${err}"); return }
     print("body: ${body}")
-    var bad = fetch("") or { print("caught: ${err}"); return }
+    var bad = fetch("") catch { print("caught: ${err}"); return }
     print("should not reach: ${bad}")
 }

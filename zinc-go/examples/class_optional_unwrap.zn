@@ -2,7 +2,7 @@
 // Spec §5.3 — `as` reuses the type-assertion syntax for the explicit
 // non-null assertion. Three call-site shapes:
 //   - expression position: panic on null
-//   - with `or { }` handler: handler runs on null
+//   - with `catch { }` handler: handler runs on null
 //   - inside an error-returning function: auto-propagates as
 //     "null unwrap" error (covered separately)
 //
@@ -23,7 +23,7 @@ Tag? lookup(String key) {
 
 void main() {
     // Variable form with `or` handler on null.
-    var t1 = lookup("found") as Tag or {
+    var t1 = lookup("found") as Tag catch {
         print("unreachable: found is non-null")
         return
     }
@@ -31,7 +31,7 @@ void main() {
 
     // Variable form, null path runs the handler. Suppress unused-var
     // diagnostic for t2 — the handler always returns.
-    var t2 = lookup("missing") as Tag or {
+    var t2 = lookup("missing") as Tag catch {
         print("missing: handler ran")
         return
     }

@@ -30,18 +30,18 @@ void main() {
     u.emailAddr = ""              // omitempty drops empty string
     u.internalCounter = 999       // @Json("-") drops entirely
     u.age = 30                    // no tag — emitted as "Age"
-    var ub = json.Marshal(u) or { print("err: ${err}"); return }
+    var ub = json.Marshal(u) catch { print("err: ${err}"); return }
     print(string(ub))
 
     // Multi-tag — Json should fire on Marshal, others verified by codegen.
     var s = Server()
     s.hostName = "localhost"
     s.portNumber = 0              // omitempty drops zero
-    var sb = json.Marshal(s) or { print("err: ${err}"); return }
+    var sb = json.Marshal(s) catch { print("err: ${err}"); return }
     print(string(sb))
 
     // Data class params with @Json.
     var p = Position(10, 5)
-    var pb = json.Marshal(p) or { print("err: ${err}"); return }
+    var pb = json.Marshal(p) catch { print("err: ${err}"); return }
     print(string(pb))
 }

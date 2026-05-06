@@ -9,7 +9,7 @@
 
 void main() {
     Object payload = "zinc".toBytes()
-    var bs = payload as byte[] or {
+    var bs = payload as byte[] catch {
         print("unreachable: payload is byte[]")
         return
     }
@@ -21,7 +21,7 @@ void main() {
     // The handler always returns, so the var goes unused — explicit
     // `_ = fallback` suppresses Go's unused-variable diagnostic.
     Object wrong = "not bytes"
-    var fallback = wrong as byte[] or {
+    var fallback = wrong as byte[] catch {
         print("handler ran: wrong shape")
         return
     }

@@ -1,4 +1,4 @@
-// Regression: `timeout(d) { body } [or { fallback }]` lowers to
+// Regression: `timeout(d) { body } [catch { fallback }]` lowers to
 // select+time.After. Without an or-handler an exceeded deadline panics;
 // with one, the handler runs.
 //
@@ -11,7 +11,7 @@ void main() {
     // Body finishes before the deadline — body output is visible.
     timeout(50 * time.Millisecond) {
         print("fast done")
-    } or {
+    } catch {
         print("should not see fast timeout")
     }
 
@@ -19,7 +19,7 @@ void main() {
     timeout(20 * time.Millisecond) {
         time.Sleep(200 * time.Millisecond)
         print("should not see slow body")
-    } or {
+    } catch {
         print("slow timed out")
     }
 

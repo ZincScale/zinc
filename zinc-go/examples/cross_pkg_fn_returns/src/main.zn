@@ -1,7 +1,7 @@
 // Cross-package qualified call to a fn returning (T, error).
 // Without the typechecker fix, `parsers.compile(...)` would resolve
 // to `any` (because cross-pkg fnSigs weren't propagated), and the
-// var binding `var c = parsers.compile(...) or { ... }` would NOT
+// var binding `var c = parsers.compile(...) catch { ... }` would NOT
 // recognize `c` as a class-typed value at the assignment seam —
 // codegen would double-pointer it via _zincPtr at later assignment
 // sites.
@@ -9,7 +9,7 @@
 import parsers
 
 void main() {
-    var c = parsers.compile("first") or {
+    var c = parsers.compile("first") catch {
         print("unreachable: 'first' is non-empty")
         return
     }
@@ -21,7 +21,7 @@ void main() {
     }
 
     // Error path runs the handler.
-    var bad = parsers.compile("") or {
+    var bad = parsers.compile("") catch {
         print("error: ${err.Error()}")
         return
     }

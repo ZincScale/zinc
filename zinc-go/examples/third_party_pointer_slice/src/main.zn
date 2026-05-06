@@ -16,9 +16,9 @@ void main() {
     // Build a small slice of *fsnotify.Watcher. We don't actually use
     // the watchers — the test is whether codegen accepts the shape.
     var watchers = List<fsnotify.Watcher>[]
-    var w1 = fsnotify.NewWatcher() or { print("err1: ${err}"); return }
+    var w1 = fsnotify.NewWatcher() catch { print("err1: ${err}"); return }
     watchers = append(watchers, w1)
-    var w2 = fsnotify.NewWatcher() or { print("err2: ${err}"); return }
+    var w2 = fsnotify.NewWatcher() catch { print("err2: ${err}"); return }
     watchers = append(watchers, w2)
 
     print("watchers: ${len(watchers)}")

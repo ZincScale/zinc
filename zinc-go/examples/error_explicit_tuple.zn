@@ -1,4 +1,4 @@
-// Multi-value thrower destructured at the call site via `or { }`.
+// Multi-value thrower destructured at the call site via `catch { }`.
 // Companion to error_explicit.zn — separated to keep the two cases
 // easy to triage if either path regresses.
 
@@ -20,9 +20,9 @@ pub (Int, String, error) lookup(String key) {
 }
 
 void main() {
-    var (n, msg) = lookup("foo") or { print("err: ${err}"); return }
+    var (n, msg) = lookup("foo") catch { print("err: ${err}"); return }
     print("got: ${n}/${msg}")
 
-    var (n2, msg2) = lookup("") or { print("err: ${err}"); return }
+    var (n2, msg2) = lookup("") catch { print("err: ${err}"); return }
     print("should not reach: ${n2}/${msg2}")
 }

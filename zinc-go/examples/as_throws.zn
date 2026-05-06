@@ -1,10 +1,10 @@
 // Regression: `as` is a failable cast, not a panicking one.
 //
 // On type mismatch the cast returns an error. Enclosing functions
-// must declare `error` in the return tail to propagate. `or { }` at
+// must declare `error` in the return tail to propagate. `catch { }` at
 // the call site consumes the error locally; otherwise the function
 // declares the failure in its signature and propagates with
-// `or { return err }`.
+// `catch { return err }`.
 
 interface Stmt {
     String describe()
@@ -22,15 +22,15 @@ class ForStmt : Stmt {
     pub String describe() { return "for(${item})" }
 }
 
-// 1. Declared thrower — propagation via `or { return err }`.
+// 1. Declared thrower — propagation via `catch { return err }`.
 (String, error) castAndDescribe(Stmt s) {
-    var i = s as IfStmt or { return err }
+    var i = s as IfStmt catch { return err }
     return "got an if: ${i.cond}", null
 }
 
 // 2. Local handling — or-handler consumes; function does NOT throw.
 String safeDescribe(Stmt s) {
-    var i = s as IfStmt or {
+    var i = s as IfStmt catch {
         return "(handled: ${err})"
     }
     return "got an if: ${i.cond}"
@@ -46,10 +46,10 @@ void main() {
     Stmt bad = ForStmt("i in 0..10")
 
     // Direct cast — happy path.
-    var r1 = castAndDescribe(good) or { print("propagated 1: ${err}"); return }
+    var r1 = castAndDescribe(good) catch { print("propagated 1: ${err}"); return }
     print(r1)
 
-    // Direct cast — error propagates up to main's `or { }`.
-    var r2 = castAndDescribe(bad) or { print("propagated 2: ${err}"); return }
+    // Direct cast — error propagates up to main's `catch { }`.
+    var r2 = castAndDescribe(bad) catch { print("propagated 2: ${err}"); return }
     print("should not reach: ${r2}")
 }

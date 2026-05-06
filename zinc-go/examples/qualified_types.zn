@@ -29,7 +29,7 @@ slog.Handler makeHandler(io.Writer w) {
 
 // Accept io.Reader as a parameter — tests qualified interface from different package
 String readAll(io.Reader r) {
-    var data = io.ReadAll(r) or { return "error" }
+    var data = io.ReadAll(r) catch { return "error" }
     return string(data)
 }
 

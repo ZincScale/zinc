@@ -261,14 +261,14 @@ func (p *Parser) v2ParseTypedVarStmt() *VarStmt {
 // propagate, or compute a fallback value — the codegen lowers both to
 // `x, err := call(); if err != nil { <handler> }`.
 func (p *Parser) v2ParseErrHandler() *OrHandler {
-	if !p.check(lexer.TOKEN_OR) {
+	if !p.check(lexer.TOKEN_CATCH) {
 		return nil
 	}
-	tok := p.advance() // consume "or"
+	tok := p.advance() // consume "catch"
 	if p.check(lexer.TOKEN_MATCH) {
-		// `or match err { case T -> ... }` form was removed 2026-05-01.
-		// Use `or { match (err) { ... } }` instead.
-		p.errorf("'or match' was removed; use 'or { match (err) { ... } }' instead "+
+		// `catch match err { case T -> ... }` form was removed.
+		// Use `catch { match (err) { ... } }` instead.
+		p.errorf("'catch match' was removed; use 'catch { match (err) { ... } }' instead "+
 			"(line %d)", tok.Line)
 		return nil
 	}
@@ -276,7 +276,7 @@ func (p *Parser) v2ParseErrHandler() *OrHandler {
 		body := p.v2ParseBlock()
 		return &OrHandler{Body: body}
 	}
-	// Short form: `or <expr>` — fallback value if the call errors.
+	// Short form: `catch <expr>` — fallback value if the call errors.
 	// Wrap as a single-statement block so codegen's short-default fast
 	// path in emitOrAssignment can recognise it.
 	expr := p.v2ParseExpr()
@@ -609,7 +609,7 @@ func (p *Parser) v2ParseUsingStmt() Stmt {
 		// var-stmt, instead of forcing the user to acquire then close
 		// manually.
 		var orHandler *OrHandler
-		if p.check(lexer.TOKEN_OR) {
+		if p.check(lexer.TOKEN_CATCH) {
 			p.advance()
 			orHandler = &OrHandler{Body: p.v2ParseBlock()}
 		}
@@ -631,7 +631,7 @@ func (p *Parser) v2ParseSpawnStmt() Stmt {
 	spawn := &SpawnExpr{Line: line, Body: body}
 	// Optional: spawn { } or { handler }
 	var orHandler *OrHandler
-	if p.check(lexer.TOKEN_OR) {
+	if p.check(lexer.TOKEN_CATCH) {
 		p.advance()
 		orHandler = &OrHandler{Body: p.v2ParseBlock()}
 		spawn.OrHandler = orHandler

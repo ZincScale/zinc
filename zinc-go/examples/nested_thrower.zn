@@ -44,23 +44,23 @@ error check(String s) {
 
 // Nested in string interpolation (which compiles to a call):
 (String, error) describe(String s) {
-    var n = parseNum(s) or { return err }
+    var n = parseNum(s) catch { return err }
     return "got ${n} from ${s}", null
 }
 
 void main() {
-    var a = doubled("hi") or { print("a err: ${err}"); return }
+    var a = doubled("hi") catch { print("a err: ${err}"); return }
     print("doubled: ${a}")
 
-    var b = labeled("ok") or { print("b err: ${err}"); return }
+    var b = labeled("ok") catch { print("b err: ${err}"); return }
     print("labeled: ${b}")
 
-    check("yes") or { print("check err: ${err}"); return }
-    check("") or { print("caught check: ${err}"); return }
+    check("yes") catch { print("check err: ${err}"); return }
+    check("") catch { print("caught check: ${err}"); return }
 
-    var d = describe("hi") or { print("d err: ${err}"); return }
+    var d = describe("hi") catch { print("d err: ${err}"); return }
     print(d)
 
-    var e = doubled("") or { print("caught doubled: ${err}"); return }
+    var e = doubled("") catch { print("caught doubled: ${err}"); return }
     print("unreachable e: ${e}")
 }

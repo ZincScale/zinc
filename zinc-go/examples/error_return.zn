@@ -19,8 +19,8 @@ class ParseError : BaseError {
 }
 
 void main() {
-    var ok = parseNum("hello") or { print("shouldn't happen: ${err}"); return }
+    var ok = parseNum("hello") catch { print("shouldn't happen: ${err}"); return }
     print("ok: ${ok}")
-    var fail = parseNum("") or { print("caught: ${err}"); return }
+    var fail = parseNum("") catch { print("caught: ${err}"); return }
     print("should not reach: ${fail}")
 }

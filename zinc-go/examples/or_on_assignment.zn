@@ -1,6 +1,6 @@
-// `or { fallback }` on assignment statements (not just var-decls).
+// `catch { fallback }` on assignment statements (not just var-decls).
 // Pre-fix the parser only consumed `or` after `var X = ...`, forcing
-// a `var tmp = call() or {...}; target = tmp` two-step every time
+// a `var tmp = call() catch {...}; target = tmp` two-step every time
 // the user wanted to update an existing local from a failable call.
 
 import strconv
@@ -10,8 +10,8 @@ void main() {
     var m = 0
 
     // Direct assignment with or-fallback (single-expression form).
-    n = strconv.Atoi("42") or { 0 }
-    m = strconv.Atoi("not a number") or { -1 }
+    n = strconv.Atoi("42") catch { 0 }
+    m = strconv.Atoi("not a number") catch { -1 }
 
     print("n: ${n}")    // 42
     print("m: ${m}")    // -1
@@ -21,7 +21,7 @@ void main() {
     var total = 0
     var add = 0
     for (s in List<String>["10", "20", "bogus", "30"]) {
-        add = strconv.Atoi(s) or { 0 }
+        add = strconv.Atoi(s) catch { 0 }
         total = total + add
     }
     print("total: ${total}")  // 60

@@ -12,29 +12,29 @@ data Person(String name, int age)
 void main() {
     // Marshal a struct to JSON
     var p = Person("Alice", 30)
-    var data = json.Marshal(p) or { return }
+    var data = json.Marshal(p) catch { return }
     print("json: ${string(data)}")
 
     // Unmarshal back — explicit `&` since json.Unmarshal's second
     // param is statically `any`.
     var p2 = Person("", 0)
-    json.Unmarshal(data, &p2) or { return }
+    json.Unmarshal(data, &p2) catch { return }
     print("name: ${p2.name}")
     print("age: ${p2.age}")
 
     // Test with a map
     var m = Map<String, String>{"key": "value"}
-    var mData = json.Marshal(m) or { return }
+    var mData = json.Marshal(m) catch { return }
     print("map json: ${string(mData)}")
 
     var m2 = Map<String, String>{}
-    json.Unmarshal(mData, &m2) or { return }
+    json.Unmarshal(mData, &m2) catch { return }
     var val = m2["key"]
     print("map key: ${val}")
 
     // Test method-level error-only: exec.Cmd.Start() returns only error
     var proc = exec.Command("echo", "hello")
-    proc.Start() or { return }
-    proc.Wait() or { return }
+    proc.Start() catch { return }
+    proc.Wait() catch { return }
     print("exec done")
 }
