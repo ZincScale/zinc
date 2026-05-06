@@ -2353,7 +2353,17 @@ func (g *Generator) hoistPropagates(e parser.Expr) parser.Expr {
 		} else {
 			goType = g.formatType(&parser.SimpleType{Name: expr.TypeName})
 		}
-		g.needImport("fmt")
+		// fmt is only needed when this as-cast emits a fmt.Errorf for
+		// the auto-propagate or block-form-handler paths. The single-
+		// expression-fallback path (`as T catch { 0 }`) writes the
+		// fallback to the temp directly with no fmt usage. Register
+		// the import lazily so non-fmt-using paths don't pull a
+		// "fmt imported and not used" Go-side error.
+		needsFmt := expr.OrHandler == nil ||
+			(expr.OrHandler.Body != nil && !isSingleExprHandler(expr.OrHandler))
+		if needsFmt {
+			g.needImport("fmt")
+		}
 		operand := g.formatExpr(inner)
 		if g.exprIsPointerOptional(inner) {
 			// Optional unwrap: `T? as T`. Operand is `*T`; nil → null
@@ -2523,7 +2533,6 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	} else {
 		goType = g.formatType(&parser.SimpleType{Name: ta.TypeName})
 	}
-	g.needImport("fmt")
 	operand := g.formatExpr(ta.Object)
 
 	// Two attachment points: the var-decl can carry an OrHandler from
@@ -2534,6 +2543,15 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 	handler := v.OrHandler
 	if handler == nil {
 		handler = ta.OrHandler
+	}
+
+	// fmt only needed on paths that emit fmt.Errorf — auto-propagate
+	// and block-form catch handlers. The single-expression fallback
+	// path writes directly to the var with no fmt call, so eagerly
+	// registering fmt produced spurious "imported and not used" Go
+	// errors.
+	if handler == nil || (handler.Body != nil && !isSingleExprHandler(handler)) {
+		g.needImport("fmt")
 	}
 
 	// Optional unwrap path: operand is `*T`. Go's type-assertion shape

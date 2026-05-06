@@ -516,12 +516,13 @@ func (b *binder) bindOrHandler(h *parser.OrHandler) {
 	for _, s := range h.Body.Stmts {
 		b.bindStmt(s)
 		// In a thrower, bare `return` inside catch silently swallows
-		// the error (lowers to `return zero, nil`). Force the user
-		// to be explicit: `return err` to propagate, `return v..., err`
-		// for a multi-slot return, or a fallback expression. In a
-		// non-thrower, bare `return` just exits the function — the
-		// error is just an `err` local with no propagation contract,
-		// so it's fine.
+		// the error (`return zero, nil`) — force `return err` (or
+		// `return v..., err` for a multi-slot return) so propagation
+		// is explicit. In a non-thrower (most importantly void
+		// functions like HTTP handlers), bare return is the natural
+		// "log the error and bail" pattern: there's no error slot in
+		// the signature to propagate to, and `return err` would be a
+		// type mismatch. Allow it there.
 		if b.currentFnIsThrower {
 			checkBareReturnInCatch(s, &b.errors)
 		}
