@@ -404,7 +404,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 							structName = t.Name
 						}
 					}
-					if cls, ok := g.structs[structName]; structName != "" && ok {
+					if cls := g.lookupClassDecl(structName); structName != "" && cls != nil {
 						hasMethod := false
 						for _, m := range cls.Methods {
 							if m.Name == sel.Field {

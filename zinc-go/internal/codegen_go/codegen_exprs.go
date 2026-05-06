@@ -168,7 +168,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		// Const field access: Config.VERSION → Config_VERSION
 		if ident, ok := expr.Object.(*parser.Ident); ok {
-			if cls, ok := g.structs[ident.Name]; ok {
+			if cls := g.lookupClassDecl(ident.Name); cls != nil {
 				for _, f := range cls.Fields {
 					if f.IsConst && f.Name == expr.Field {
 						return fmt.Sprintf("%s_%s", ident.Name, exportName(expr.Field))
@@ -749,7 +749,7 @@ func (g *Generator) inferExprType(expr parser.Expr, known ...map[string]string) 
 			// over `this` capture this path: `ff -> helper(ff)` where
 			// `helper` is a class method.
 			if g.currentClass != "" && g.currentMethods[ident.Name] {
-				if cls, ok := g.structs[g.currentClass]; ok {
+				if cls := g.lookupClassDecl(g.currentClass); cls != nil {
 					for _, m := range cls.Methods {
 						if m.Name == ident.Name && m.ReturnType != nil {
 							return g.formatType(m.ReturnType)
@@ -885,7 +885,7 @@ func (g *Generator) exprIsPointerOptional(e parser.Expr) bool {
 		// `obj.field` — look up the field's declared type on the
 		// receiver class.
 		if recv := g.resolveReceiverClassName(ex.Object); recv != "" {
-			if cls, ok := g.structs[recv]; ok {
+			if cls := g.lookupClassDecl(recv); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == ex.Field {
 						return isPointerOptional(f.Type)

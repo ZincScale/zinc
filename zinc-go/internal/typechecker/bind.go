@@ -196,6 +196,20 @@ type BoundProgram struct {
 	// Codegen needs a name-keyed lookup that doesn't depend on a
 	// referencing Ident existing.
 	UnqualifiedImports map[string]Symbol
+
+	// Classes / DataClasses — class and data-class AST registries for
+	// THIS package's program. Codegen consumes these for AST-level
+	// access (field default exprs, method bodies, sealed variants)
+	// instead of maintaining a parallel codegen-side g.structs map.
+	// Same-package only: cross-pkg classes have their metadata in
+	// Sigs.* (ClassFields, MethodSigs, ParentTypes) and don't need
+	// AST access from codegen since the call site qualifies them
+	// via SymClass / SymDataClass through the bind side-map.
+	//
+	// Populated by Bind from prog.Decls; nil-safe (empty map for
+	// programs with no class declarations).
+	Classes     map[string]*parser.ClassDecl
+	DataClasses map[string]*parser.DataClassDecl
 }
 
 // LookupSymbolByName scans Bindings for any Ident with the given name and
@@ -620,12 +634,39 @@ func Bind(prog *parser.Program, ctx *BindContext) (*BoundProgram, []V2Error) {
 		}
 	}
 
+	classes, dataClasses := collectClassDecls(prog)
+
 	return &BoundProgram{
 		Prog:               prog,
 		Bindings:           b.bindings,
 		TypeAliases:        typeAliases,
 		UnqualifiedImports: computeUnqualifiedImports(b, ctx, prog),
+		Classes:            classes,
+		DataClasses:        dataClasses,
 	}, b.errors
+}
+
+// collectClassDecls walks prog.Decls once and indexes every ClassDecl
+// and DataClassDecl by name. Includes sealed variants (which are
+// DataClassDecls hanging off a sealed parent's ClassDecl.Variants
+// list) so codegen can look them up uniformly.
+func collectClassDecls(prog *parser.Program) (map[string]*parser.ClassDecl, map[string]*parser.DataClassDecl) {
+	classes := map[string]*parser.ClassDecl{}
+	dataClasses := map[string]*parser.DataClassDecl{}
+	for _, d := range prog.Decls {
+		switch decl := d.(type) {
+		case *parser.ClassDecl:
+			classes[decl.Name] = decl
+			if decl.IsSealed {
+				for _, v := range decl.Variants {
+					dataClasses[v.Name] = v
+				}
+			}
+		case *parser.DataClassDecl:
+			dataClasses[decl.Name] = decl
+		}
+	}
+	return classes, dataClasses
 }
 
 // computeUnqualifiedImports builds the up-front cross-pkg unqualified-

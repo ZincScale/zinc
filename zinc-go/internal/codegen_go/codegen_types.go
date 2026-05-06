@@ -379,7 +379,7 @@ func (g *Generator) classExtendsError(className string, visited map[string]bool)
 		return false
 	}
 	var hit *parser.ClassDecl
-	if cls, ok := g.structs[className]; ok && cls != nil {
+	if cls := g.lookupClassDecl(className); cls != nil {
 		if check(cls) {
 			return true
 		}
@@ -646,7 +646,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		tps = typeParams[0]
 	}
 	// Set current fields/methods for implicit self resolution
-	if cls, ok := g.structs[receiver]; ok {
+	if cls := g.lookupClassDecl(receiver); cls != nil {
 		g.currentFields = make(map[string]bool)
 		g.currentFieldGoName = make(map[string]string)
 		g.currentMethods = make(map[string]bool)
@@ -835,7 +835,7 @@ func (g *Generator) collectParentFields(cls *parser.ClassDecl, fields map[string
 		if g.isInterface(p.Name) {
 			continue
 		}
-		if parentCls, ok := g.structs[p.Name]; ok {
+		if parentCls := g.lookupClassDecl(p.Name); parentCls != nil {
 			for _, f := range parentCls.Fields {
 				fields[f.Name] = true
 			}
@@ -850,7 +850,7 @@ func (g *Generator) collectParentMethods(cls *parser.ClassDecl, methods map[stri
 		if g.isInterface(p.Name) {
 			continue
 		}
-		if parentCls, ok := g.structs[p.Name]; ok {
+		if parentCls := g.lookupClassDecl(p.Name); parentCls != nil {
 			for _, m := range parentCls.Methods {
 				methods[m.Name] = true
 			}

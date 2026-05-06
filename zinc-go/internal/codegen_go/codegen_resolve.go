@@ -450,7 +450,17 @@ func (g *Generator) goAliasFor(zincAlias, goPath string) string {
 
 // lookupClassDecl finds a ClassDecl by name across local structs and
 // all registered subpackage exports. Returns nil on miss.
+// lookupClassDecl returns the ClassDecl AST for `name`. Typechecker-
+// owned bound.Classes is the source of truth for same-package
+// classes; codegen-side g.structs and g.subpkgStructs are consulted
+// as fallbacks for cross-pkg names (sibling-export stubs without
+// full AST) and for legacy paths that bypass bind.
 func (g *Generator) lookupClassDecl(name string) *parser.ClassDecl {
+	if g.bound != nil && g.bound.Classes != nil {
+		if cls, ok := g.bound.Classes[name]; ok {
+			return cls
+		}
+	}
 	if cls, ok := g.structs[name]; ok {
 		return cls
 	}
@@ -1696,8 +1706,8 @@ func (g *Generator) resolveSelfMemberField(e parser.Expr) (*parser.FieldDecl, bo
 // auto-pointerize detection on field assignment).
 func (g *Generator) lookupFieldInChain(className, fieldName string) (*parser.FieldDecl, bool) {
 	for className != "" {
-		cls, ok := g.structs[className]
-		if !ok {
+		cls := g.lookupClassDecl(className)
+		if cls == nil {
 			return nil, false
 		}
 		for _, f := range cls.Fields {

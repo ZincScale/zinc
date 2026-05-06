@@ -693,7 +693,7 @@ func (g *Generator) targetIsPointerOptional(target parser.Expr) bool {
 	case *parser.SelectorExpr:
 		// `box.name` — look up the field's type on the receiver class.
 		if recv := g.resolveReceiverClassName(t.Object); recv != "" {
-			if cls, ok := g.structs[recv]; ok {
+			if cls := g.lookupClassDecl(recv); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == t.Field {
 						return isPointerOptional(f.Type)
@@ -765,7 +765,7 @@ func (g *Generator) valueIsAlreadyPointer(value parser.Expr) bool {
 	case *parser.SelectorExpr:
 		// Reading `box.name` where name is *string.
 		if recv := g.resolveReceiverClassName(v.Object); recv != "" {
-			if cls, ok := g.structs[recv]; ok {
+			if cls := g.lookupClassDecl(recv); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == v.Field {
 						return isPointerOptional(f.Type)
@@ -1140,7 +1140,7 @@ func (g *Generator) isCollectionVar(e parser.Expr) bool {
 	// Check class fields for collection types
 	if ident, ok := e.(*parser.Ident); ok {
 		if g.currentClass != "" && g.currentFields[ident.Name] {
-			if cls, ok := g.structs[g.currentClass]; ok {
+			if cls := g.lookupClassDecl(g.currentClass); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == ident.Name {
 						// Check explicit type annotation
@@ -1327,7 +1327,7 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 							typeName = "*" + typeName
 						}
 						isDataClass = kind == "data"
-					} else if _, ok := g.structs[ident.Name]; ok {
+					} else if g.isRegularClass(ident.Name) {
 						typeName = "*" + exportName(ident.Name)
 					}
 				}
@@ -1738,7 +1738,7 @@ func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
 		}
 		// Check class fields
 		if receiverType == "" && g.currentClass != "" && g.currentFields[ident.Name] {
-			if cls, ok := g.structs[g.currentClass]; ok {
+			if cls := g.lookupClassDecl(g.currentClass); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == ident.Name {
 						if st, ok := f.Type.(*parser.SimpleType); ok {
@@ -1753,7 +1753,7 @@ func (g *Generator) resolveMethodReturnType(sel *parser.SelectorExpr) string {
 		return ""
 	}
 	// Look up the method's return type — check local structs first, then imported
-	if cls, ok := g.structs[receiverType]; ok {
+	if cls := g.lookupClassDecl(receiverType); cls != nil {
 		for _, m := range cls.Methods {
 			if m.Name == sel.Field && m.ReturnType != nil {
 				if st, ok := m.ReturnType.(*parser.SimpleType); ok {
@@ -1792,7 +1792,7 @@ func (g *Generator) isStructVar(e parser.Expr) bool {
 		}
 		// Check if it's a field of the current class with a class/struct type
 		if g.currentClass != "" && g.currentFields[name] {
-			if cls, ok := g.structs[g.currentClass]; ok {
+			if cls := g.lookupClassDecl(g.currentClass); cls != nil {
 				for _, f := range cls.Fields {
 					if f.Name == name {
 						if st, ok := f.Type.(*parser.SimpleType); ok {
@@ -1986,7 +1986,7 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 	}
 
 	var match *parser.ClassDecl
-	if cls, ok := g.structs[className]; ok && cls != nil {
+	if cls := g.lookupClassDecl(className); cls != nil {
 		if lookup(cls) {
 			return true
 		}
