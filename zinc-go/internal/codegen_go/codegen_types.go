@@ -790,7 +790,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		// This keeps Pair (value) satisfying interfaces, addressable in maps,
 		// and consistent with Go conventions for record types.
 		recvPrefix := "*"
-		if g.dataClasses[receiver] {
+		if g.isDataClass(receiver) {
 			recvPrefix = ""
 		}
 		g.writeln("func (%s %s%s) %s(%s)%s {", recvName, recvPrefix, receiverTA, vis, params, ret)

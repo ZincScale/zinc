@@ -115,7 +115,7 @@ func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
 	// Zinc constructors (NewType) return pointers for classes
 	if ident, ok := c.Callee.(*parser.Ident); ok {
 		if _, isStruct := g.structs[ident.Name]; isStruct {
-			if !g.dataClasses[ident.Name] {
+			if !g.isDataClass(ident.Name) {
 				return true // zinc class constructors return *Type
 			}
 		}
@@ -759,7 +759,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)
 		}
-		if g.dataClasses[ident.Name] {
+		if g.isDataClass(ident.Name) {
 			ctorName := "New" + ident.Name + goTypeArgStr
 			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)

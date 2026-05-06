@@ -501,6 +501,20 @@ func (g *Generator) lookupTypeAlias(name string) (parser.TypeExpr, bool) {
 	return nil, false
 }
 
+// isDataClass reports whether `name` was declared as a `data` class
+// (including sealed-variant data classes). Prefers bound.Sigs.DataClassNames
+// (typechecker-canonical, populated by CollectSignatures + cross-pkg
+// merge); falls back to the codegen-side g.dataClasses for legacy paths
+// that bypass bound.Sigs.
+func (g *Generator) isDataClass(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.DataClassNames != nil {
+		if g.bound.Sigs.DataClassNames[name] {
+			return true
+		}
+	}
+	return g.dataClasses[name]
+}
+
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
 func (g *Generator) SetSubpackageStructs(pkg string, classes map[string]*parser.ClassDecl) {
 	if g.subpkgStructs == nil {

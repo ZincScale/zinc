@@ -234,7 +234,7 @@ func (g *Generator) resolveTypeArg(ta string) string {
 				}
 			} else if cls, isStruct := g.structs[name]; isStruct {
 				// Same-package class: check if it's a pointer-typed class
-				if !g.dataClasses[name] && cls != nil && !cls.IsSealed {
+				if !g.isDataClass(name) && cls != nil && !cls.IsSealed {
 					ptrPrefix = "*"
 				}
 			}
@@ -1332,7 +1332,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 		// Classes (non-data, non-sealed) are always pointers in Go.
 		// Sealed classes and interfaces are Go interfaces — no pointer.
 		if cls, isStruct := g.structs[typ.Name]; isStruct {
-			if !g.dataClasses[typ.Name] && cls != nil && !cls.IsSealed {
+			if !g.isDataClass(typ.Name) && cls != nil && !cls.IsSealed {
 				return "*" + typ.Name
 			}
 		}
@@ -1378,7 +1378,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			// arg must be emitted as *ClassName[args] too.
 			ptrPrefix := ""
 			if cls, isStruct := g.structs[typ.Name]; isStruct {
-				if !g.dataClasses[typ.Name] && cls != nil && !cls.IsSealed {
+				if !g.isDataClass(typ.Name) && cls != nil && !cls.IsSealed {
 					ptrPrefix = "*"
 				}
 			}

@@ -1319,7 +1319,7 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 					}
 				}
 				// Data classes (sealed variants)
-				if g.dataClasses[ident.Name] {
+				if g.isDataClass(ident.Name) {
 					return true
 				}
 				// Cross-package data classes
@@ -1439,7 +1439,7 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 				// Local class
 				typeName = "*" + exportName(ident.Name)
 			}
-			if g.dataClasses[ident.Name] {
+			if g.isDataClass(ident.Name) {
 				isDataClass = true
 				typeName = exportName(ident.Name)
 			}
@@ -1784,7 +1784,7 @@ func (g *Generator) isClassType(name string) bool {
 		return true
 	}
 	// Local data classes — `data FlowLike(...)` in the same file.
-	if g.dataClasses[name] {
+	if g.isDataClass(name) {
 		return true
 	}
 	if entry, ok := g.unqualifiedNames[name]; ok {

@@ -70,6 +70,10 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 				}
 			}
 		}
+		// Note: deliberately NOT merging cross-pkg data-class names into
+		// DataClassNames — that set drives the implicit-ctor branch
+		// (Type(args) → NewType(args), unqualified). Cross-pkg names
+		// must always emit through the qualified path (pkg.NewType).
 	}
 	// 3.7.2: feed cross-package parent relationships (class inheritance,
 	// sealed-variant ownership) so subtype compatibility (`Shape s = Circle(...)`)

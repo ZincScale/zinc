@@ -302,6 +302,14 @@ type CollectedSigs struct {
 	// codegen-side g.pubNames dotted-key entries; codegen's
 	// isPubMember reads from here when bound.Sigs is attached.
 	MemberIsPub map[string]bool
+	// DataClassNames (Phase C): names that were declared as `data`
+	// classes, including sealed-variant data classes. Distinguishes
+	// data classes from regular classes/interfaces (which all live
+	// together in ClassNames). Codegen uses this to choose between
+	// value-typed `Foo{...}` and pointer-typed `&Foo{...}` constructor
+	// shapes — data classes are emitted as values, regular classes as
+	// pointers.
+	DataClassNames map[string]bool
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -317,6 +325,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		c.registerDecl(d)
 	}
 	classNames := make(map[string]bool)
+	dataClassNames := make(map[string]bool)
 	memberIsPub := make(map[string]bool)
 	for _, d := range prog.Decls {
 		switch dd := d.(type) {
@@ -331,12 +340,14 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			// Sealed variants — data classes nested in the parent.
 			for _, v := range dd.Variants {
 				classNames[v.Name] = true
+				dataClassNames[v.Name] = true
 				for _, f := range v.Params {
 					memberIsPub[v.Name+"."+f.Name] = f.IsPub
 				}
 			}
 		case *parser.DataClassDecl:
 			classNames[dd.Name] = true
+			dataClassNames[dd.Name] = true
 			for _, m := range dd.Methods {
 				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
 			}
@@ -353,12 +364,13 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		}
 	}
 	return CollectedSigs{
-		FnSigs:      c.fnSigs,
-		MethodSigs:  c.methodSigs,
-		ParentTypes: c.parentTypes,
-		ClassNames:  classNames,
-		ClassFields: c.classFields,
-		MemberIsPub: memberIsPub,
+		FnSigs:         c.fnSigs,
+		MethodSigs:     c.methodSigs,
+		ParentTypes:    c.parentTypes,
+		ClassNames:     classNames,
+		ClassFields:    c.classFields,
+		MemberIsPub:    memberIsPub,
+		DataClassNames: dataClassNames,
 	}
 }
 
