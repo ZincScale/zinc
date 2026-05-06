@@ -119,17 +119,9 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 
 	params := g.formatParams(fn.Params)
 
-	// Register class-typed params: track so `param.field.keys()`
-	// chains resolve. Generic-typed param tracking has moved to the
-	// bind side-map (Symbol.DeclType) per Phase 3.7.2.
-	var paramNameBackup []string
-	for _, p := range fn.Params {
-		if simpleType, ok := p.Type.(*parser.SimpleType); ok && g.isClassType(simpleType.Name) {
-			_ = simpleType.Name // varStructTypes write removed
-			paramNameBackup = append(paramNameBackup, p.Name)
-		}
-	}
-
+	// Class-typed param tracking flows through bound.Bindings /
+	// bound.NodeTypes — checkFnDecl populates the inner scope so each
+	// Ident reference inside the body resolves to the right V2Type.
 	tparams := goTypeParamsWithBounds(fn.TypeParams, fn.TypeParamBounds)
 	g.trackTypeParamImports(fn.TypeParamBounds)
 	g.writeln("func %s%s(%s)%s {", name, tparams, params, ret)
@@ -169,8 +161,6 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	}
 	g.indent--
 	g.writeln("}")
-
-	_ = paramNameBackup // varStructTypes drained Phase 3.7.2
 
 	g.currentReturnType = prevRetType
 	g.currentOuterReturnType = prevOuterRetType

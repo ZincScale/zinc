@@ -112,12 +112,12 @@ func (g *Generator) callReturnsPointer(c *parser.CallExpr) bool {
 			}
 		}
 	}
-	// Zinc constructors (NewType) return pointers for classes
+	// Zinc constructors (NewType) return pointers for regular classes.
+	// Data classes (incl. sealed variants), sealed parents (interfaces),
+	// and enums use value-typed shapes.
 	if ident, ok := c.Callee.(*parser.Ident); ok {
-		if _, isStruct := g.structs[ident.Name]; isStruct {
-			if !g.isDataClass(ident.Name) {
-				return true // zinc class constructors return *Type
-			}
+		if g.isClassType(ident.Name) && !g.isDataClass(ident.Name) && !g.isInterface(ident.Name) && !g.isEnum(ident.Name) {
+			return true
 		}
 	}
 	return false

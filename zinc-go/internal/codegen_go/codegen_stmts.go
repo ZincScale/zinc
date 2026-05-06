@@ -354,35 +354,10 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				}
 			}
 		}
-		// var x = call() or default → error handling
-		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok {
-				if call.IsNew {
-					if g.isClassType(ident.Name) {
-						_ = ident.Name // varStructTypes write removed
-					}
-				} else if strings.HasPrefix(ident.Name, "New") {
-					structName := ident.Name[3:]
-					if g.isClassType(structName) {
-						_ = structName // varStructTypes write removed
-					}
-				}
-			}
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if pkg, ok := sel.Object.(*parser.Ident); ok {
-					if exports, ok := g.subpkgExports[pkg.Name]; ok {
-						if kind := exports[sel.Field]; kind == "class" || kind == "data" {
-							_ = sel.Field // varStructTypes write removed
-						}
-					}
-				}
-				// Track method call return type
-				retType := g.resolveMethodReturnType(sel)
-				if retType != "" && g.isClassType(retType) {
-					_ = retType // varStructTypes write removed
-				}
-			}
-		}
+		// var x = call() or default → error handling.
+		// Pointer/class typing of x flows through bound.NodeTypes for
+		// downstream readers; the per-shape codegen-side tracking
+		// previously done here was retired with varStructTypes.
 		g.emitOrAssignment(v.Name, v.Value, v.OrHandler)
 		return
 	}
@@ -421,73 +396,15 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			}
 		}
 
-		// Track class types from constructor calls
-		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if ident, ok := call.Callee.(*parser.Ident); ok {
-				if call.IsNew {
-					if g.isClassType(ident.Name) {
-						_ = ident.Name // varStructTypes write removed
-					}
-				} else if strings.HasPrefix(ident.Name, "New") {
-					structName := ident.Name[3:]
-					if g.isClassType(structName) {
-						_ = structName // varStructTypes write removed
-					}
-				} else if g.isClassType(ident.Name) {
-					_ = ident.Name // varStructTypes write removed
-				} else if g.currentClass != "" {
-					// Bare call inside a class method: may be a self-method
-					// call like `var g = snapshotGraph()`. If the current
-					// class declares `snapshotGraph` with a class/generic
-					// return type, propagate it.
-					if cls, ok := g.structs[g.currentClass]; ok {
-						for _, m := range cls.Methods {
-							if m.Name != ident.Name || m.ReturnType == nil {
-								continue
-							}
-							if st, ok := m.ReturnType.(*parser.SimpleType); ok && g.isClassType(st.Name) {
-								_ = st.Name // varStructTypes write removed
-							}
-							_ = m // gt-tracking removed (Phase 3.7.2): side-map covers it
-						}
-					}
-				}
-			}
-			// Qualified constructor: core.MemoryContentStore() → SelectorExpr
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if pkg, ok := sel.Object.(*parser.Ident); ok {
-					if exports, ok := g.subpkgExports[pkg.Name]; ok {
-						kind := exports[sel.Field]
-						if kind == "class" || kind == "data" {
-							_ = sel.Field // varStructTypes write removed
-						}
-					}
-				}
-			}
-		}
+		// Class-typed var tracking from constructor calls and method
+		// returns now flows through bound.NodeTypes — the typechecker's
+		// per-Ident V2Type carries the class name + Nullable, which
+		// downstream readers consult directly.
 
-		// Track struct type from method call return on known struct instances
-		// e.g., var dlq = fab.getDLQ() where fab:Fabric and getDLQ returns DLQ
-		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				retType := g.resolveMethodReturnType(sel)
-				if retType != "" && g.isClassType(retType) {
-					_ = retType // varStructTypes write removed
-				}
-			}
-		}
-
-		// Track generic type from method-call return:
-		// `var conns = fab.getConnections()` where getConnections is declared
-		// to return `Map<String, Map<String, List<String>>>`. Without this,
-		// subsequent `conns.keys()` / `conns[k]` lose their type and fall
-		// back to []interface{} (ZCA-11c — sibling of the receiver-shape fix,
-		// for the store-then-use shape).
-		if call, ok := v.Value.(*parser.CallExpr); ok && v.Type == nil {
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				_ = sel // gt-tracking removed (Phase 3.7.2): side-map covers it
-			}
-		}
+		// Method-call return type tracking and generic-arg propagation
+		// for var-decls now flow through bound.NodeTypes (the
+		// typechecker resolves SelectorExpr method returns into V2Type
+		// during inferType and writes them per-Ident).
 
 		// Infer type from list literal
 		if listLit, ok := v.Value.(*parser.ListLit); ok && v.Type == nil {
@@ -531,20 +448,9 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		// V2Type{Nullable:true} for it, which scope.set propagates
 		// into NodeTypes for downstream Ident reads.
 
-		// Track Go types from stdlib function calls (e.g. exec.Command → *exec.Cmd).
-		// Guard against user-scope shadow: a field/param/local named the same
-		// as an import must not be treated as a package here (ZCA-10).
-		if call, ok := v.Value.(*parser.CallExpr); ok {
-			if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-				if ident, ok := sel.Object.(*parser.Ident); ok && !g.isUserScopeShadowIdent(ident) {
-					if pkgPath, ok := g.importMap[ident.Name]; ok {
-						if retType := g.goResolver.FuncReturnType(pkgPath, sel.Field); retType != nil {
-							_ = retType // varGoTypes write removed (Phase 3.7.2)
-						}
-					}
-				}
-			}
-		}
+		// Go-stdlib FFI return-type tracking (e.g. exec.Command → *exec.Cmd)
+		// flows through bound.NodeTypes — V2Type carries GoType for FFI
+		// return slots via the typechecker's CheckV2 pass.
 
 		// Track scalar variable types
 		if scalarType := g.inferExprType(v.Value, g.varTypes); scalarType != "" && scalarType != "interface{}" {
@@ -1305,19 +1211,10 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 						}
 					}
 				}
-				// Data classes (sealed variants)
-				if g.isDataClass(ident.Name) {
-					return true
-				}
-				// Cross-package data classes
-				if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "data" {
-					return true
-				}
-				// Any known type: class, interface, primitive
-				if _, ok := g.structs[ident.Name]; ok {
-					return true
-				}
-				if entry, ok := g.unqualifiedNames[ident.Name]; ok && (entry.kind == "class" || entry.kind == "interface") {
+				// Class-like type (regular, data, sealed parent, interface,
+				// or sealed variant) reachable via bound.Sigs.ClassNames
+				// or the codegen-side g.structs / unqualifiedNames fallbacks.
+				if g.isClassType(ident.Name) {
 					return true
 				}
 				if _, ok := zincToGoType[ident.Name]; ok {
@@ -2428,21 +2325,9 @@ func (g *Generator) emitErrorPropagatingVar(v *parser.VarStmt) {
 	g.indent--
 	g.writeln("}")
 
-	// Track type information for subsequent references, mirroring what
-	// the main emitVarStmt path does for constructor/call-returning
-	// shapes. Conservative — only the forms the smoke tests need.
-	if call, ok := v.Value.(*parser.CallExpr); ok {
-		if ident, ok := call.Callee.(*parser.Ident); ok {
-			if g.isClassType(ident.Name) {
-				_ = ident.Name // varStructTypes write removed
-			} else if strings.HasPrefix(ident.Name, "New") {
-				structName := ident.Name[3:]
-				if g.isClassType(structName) {
-					_ = structName // varStructTypes write removed
-				}
-			}
-		}
-	}
+	// Type tracking for subsequent references flows through
+	// bound.NodeTypes — the typechecker resolves call return types
+	// per-Ident during inferType.
 }
 
 // --- Error handling (or expressions) -----------------------------------------

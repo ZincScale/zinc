@@ -649,7 +649,7 @@ func (g *Generator) lookupFieldTypeExpr(className, fieldName string) parser.Type
 // resolveReceiverClassName returns the class/struct type name that an
 // expression evaluates to, or "" if unknown. Walks:
 //
-//   - Ident             — local var (varStructTypes) or current-class field
+//   - Ident             — local var (bound.NodeTypes) or current-class field
 //   - SelectorExpr      — `a.b`: resolve a's class, look up b's declared type
 //   - CallExpr          — `a.method()`: resolve a's class, look up method's
 //                         return type
