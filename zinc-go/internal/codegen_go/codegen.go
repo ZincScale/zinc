@@ -31,7 +31,6 @@ type Generator struct {
 	indent         int
 	className      string // derived from filename or "main"
 	imports        map[string]bool
-	interfaces     map[string]bool
 	structs        map[string]*parser.ClassDecl
 	sourceFile     string // for //line directives
 	currentFields      map[string]bool   // field names of current class (for implicit self)
@@ -91,7 +90,6 @@ type Generator struct {
 	varTypes            map[string]string       // variable name → element type
 	ptrVars             map[string]bool         // variables that are pointers (*T from T? returns)
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
-	dataClasses         map[string]bool       // data class names that have NewType constructors
 	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
 	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
 	importMap           map[string]string     // import prefix → full Go package path
@@ -218,13 +216,11 @@ func (g *Generator) compileWarning(line int, format string, args ...any) {
 func New() *Generator {
 	return &Generator{
 		imports:             make(map[string]bool),
-		interfaces:          make(map[string]bool),
 		structs:             make(map[string]*parser.ClassDecl),
 		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		ptrVars:             make(map[string]bool),
 		renamedVars:         make(map[string]string),
-		dataClasses:         make(map[string]bool),
 		goResolver:          NewGoTypeResolver(),
 		importMap:           make(map[string]string),
 		typeImports:         make(map[string]string),
@@ -290,13 +286,13 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 	for name, kind := range exports {
 		switch kind {
 		case "data":
-			g.dataClasses[name] = true
+			// data-class-ness flows through bound.Sigs.DataClassNames.
 		case "class":
 			// Mark as known struct with a placeholder ClassDecl (not nil)
 			// so codegen can resolve constructor calls (NewType) and pointer types.
 			g.structs[name] = &parser.ClassDecl{Name: name}
 		case "interface":
-			g.interfaces[name] = true
+			// interface-ness flows through bound.Sigs.InterfaceNames.
 		case "func":
 			// Register sibling functions so the codegen knows about them.
 			// Casing at call sites is determined by `pubNames` membership.
@@ -502,31 +498,25 @@ func (g *Generator) lookupTypeAlias(name string) (parser.TypeExpr, bool) {
 }
 
 // isDataClass reports whether `name` was declared as a `data` class
-// (including sealed-variant data classes). Prefers bound.Sigs.DataClassNames
-// (typechecker-canonical, populated by CollectSignatures + cross-pkg
-// merge); falls back to the codegen-side g.dataClasses for legacy paths
-// that bypass bound.Sigs.
+// (including sealed-variant data classes). Backed by
+// bound.Sigs.DataClassNames — the typechecker's canonical
+// per-package set, populated by CollectSignatures.
 func (g *Generator) isDataClass(name string) bool {
 	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.DataClassNames != nil {
-		if g.bound.Sigs.DataClassNames[name] {
-			return true
-		}
+		return g.bound.Sigs.DataClassNames[name]
 	}
-	return g.dataClasses[name]
+	return false
 }
 
 // isInterface reports whether `name` was declared as an `interface`,
 // or as a sealed-parent class (which lowers to a Go interface).
-// Prefers bound.Sigs.InterfaceNames (typechecker-canonical, populated
-// by CollectSignatures + cross-pkg merge); falls back to the
-// codegen-side g.interfaces for legacy paths.
+// Backed by bound.Sigs.InterfaceNames — the typechecker's canonical
+// set, populated by CollectSignatures + cross-pkg merge.
 func (g *Generator) isInterface(name string) bool {
 	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.InterfaceNames != nil {
-		if g.bound.Sigs.InterfaceNames[name] {
-			return true
-		}
+		return g.bound.Sigs.InterfaceNames[name]
 	}
-	return g.interfaces[name]
+	return false
 }
 
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.
@@ -557,11 +547,6 @@ func (g *Generator) SetSubpackageDataFields(pkg string, fields map[string][]*par
 	g.subpkgDataFields[pkg] = fields
 }
 
-// RegisterInterface allows external callers to register interface names.
-func (g *Generator) RegisterInterface(name string) {
-	g.interfaces[name] = true
-}
-
 // --- Declaration scanning ----------------------------------------------------
 
 // collectDecls scans declarations to build lookup tables for types,
@@ -570,11 +555,11 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 	for _, d := range decls {
 		switch decl := d.(type) {
 		case *parser.InterfaceDecl:
-			g.interfaces[decl.Name] = true
-			// Interface method pub status flows through
-			// bound.Sigs.MemberIsPub (codegen's isPubMember reads it).
+			// Interface-ness flows through bound.Sigs.InterfaceNames;
+			// method pub status through bound.Sigs.MemberIsPub.
 		case *parser.DataClassDecl:
-			g.dataClasses[decl.Name] = true
+			// data-class-ness flows through bound.Sigs.DataClassNames;
+			// field pub status through bound.Sigs.MemberIsPub.
 			if g.dataClassDecls == nil {
 				g.dataClassDecls = make(map[string]*parser.DataClassDecl)
 			}
@@ -584,14 +569,13 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 				g.localDataFields = make(map[string][]*parser.FieldDecl)
 			}
 			g.localDataFields[decl.Name] = decl.Params
-			// Data class field pub status flows through
-			// bound.Sigs.MemberIsPub.
 		case *parser.ClassDecl:
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
-				g.interfaces[decl.Name] = true
+				// Sealed-parent interface-ness flows through
+				// bound.Sigs.InterfaceNames; variants flow through
+				// bound.Sigs.DataClassNames.
 				for _, v := range decl.Variants {
-					g.dataClasses[v.Name] = true
 					if g.dataClassDecls == nil {
 						g.dataClassDecls = make(map[string]*parser.DataClassDecl)
 					}
@@ -601,8 +585,6 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 						g.localDataFields = make(map[string][]*parser.FieldDecl)
 					}
 					g.localDataFields[v.Name] = v.Params
-					// Sealed variant field pub status via
-					// bound.Sigs.MemberIsPub.
 				}
 			}
 			if decl.Ctor != nil {
@@ -803,11 +785,9 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		g.funcSigs = make(map[string][]*parser.ParamDecl)
 	}
 	g.varTypes = make(map[string]string)
-	// Preserve dataClasses, interfaces, structs, and pubNames
-	// pre-populated by SetSiblingExports (sibling file awareness).
-	if g.dataClasses == nil {
-		g.dataClasses = make(map[string]bool)
-	}
+	// Preserve structs and pubNames pre-populated by SetSiblingExports
+	// (sibling file awareness). data-class-ness and interface-ness flow
+	// through bound.Sigs.{DataClass,Interface}Names.
 	g.typeImports = make(map[string]string)
 	if g.pubNames == nil {
 		g.pubNames = make(map[string]bool)

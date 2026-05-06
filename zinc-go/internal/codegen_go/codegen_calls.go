@@ -714,7 +714,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// 1. Zinc class — `new Stats()` → `NewStats()`. The Zinc compiler
 	//    generates a NewT() factory for every class/data declaration.
 	//    Same-package detection: callee has no dot AND name is in
-	//    g.structs / g.dataClasses / g.unqualifiedNames.
+	//    g.structs / bound.Sigs.DataClassNames / g.unqualifiedNames.
 	//
 	// 2. Foreign Go-stdlib type — `new bytes.Buffer` → `&bytes.Buffer{}`.
 	//    Detected by the dotted callee (`pkg.Type`). Always pointerized
