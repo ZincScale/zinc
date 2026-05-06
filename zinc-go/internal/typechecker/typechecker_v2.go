@@ -1438,6 +1438,13 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 		// access on the cast result) read NodeTypes to know the
 		// post-cast type without the surrounding null-check IIFE
 		// having to be flow-analyzed.
+		// Walk the operand so the side-map gets a NodeTypes entry
+		// for the inner Ident — codegen's exprIsPointerOptional /
+		// valueIsAlreadyPointer reads that to decide between the
+		// Go pointer-deref unwrap path and the `any(x).(T)` path.
+		if e.Object != nil {
+			c.inferType(e.Object)
+		}
 		if e.IsCheck {
 			return typeBool
 		}

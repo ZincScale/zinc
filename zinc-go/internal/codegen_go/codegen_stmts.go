@@ -512,11 +512,9 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				g.ptrVars[v.Name] = true
 			}
 		}
-		if g.bound != nil {
-			if t, ok := g.bound.NodeTypes[v.Value]; ok && t.Nullable {
-				g.ptrVars[v.Name] = true
-			}
-		}
+		// bound.NodeTypes[ident-of-v]: scope.set(v.Name, valType) inside
+		// the typechecker propagates Nullable into the side-map for
+		// downstream Ident references, so no codegen-side write needed.
 
 		// Track Channel-typed locals from `var ch = Channel<T>(N)` so that
 		// downstream codegen (for-range, isChannelVar, isCollectionVar) can
@@ -597,16 +595,9 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 		} else {
 			g.writeln("%s := %s", varName, g.formatExpr(v.Value))
 		}
-		// Mirror the no-init branch: a `T? x = null` (or any explicit
-		// pointer-optional decl with init) needs the same ptr-var
-		// tracking the bare `T? x` form gets, so downstream
-		// auto-address-take / auto-deref / `as` unwrap recognize it as
-		// a nullable pointer. Without this, `x as T` falls through to
-		// the comma-ok type assertion path, which Go rejects on a
-		// concrete `*T` operand.
-		if isPointerOptional(v.Type) {
-			g.ptrVars[v.Name] = true
-		}
+		// Pointer-optional decl tracking flows through bound.NodeTypes:
+		// scope.set(v.Name, declaredType) keeps Nullable into the
+		// side-map for downstream Ident references.
 	} else {
 		typeName := "interface{}"
 		if v.Type != nil {
@@ -619,14 +610,9 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 			varName = safe
 		}
 		g.writeln("var %s %s", varName, typeName)
-		// Track ptr-typed locals so subsequent assignments and reads
-		// can apply auto-address-take / auto-deref. Only for shapes that
-		// actually lower to *T — collection nullables (List<T>?, Map?,
-		// Channel?) drop the pointer under Strategy B and don't need
-		// this.
-		if isPointerOptional(v.Type) {
-			g.ptrVars[v.Name] = true
-		}
+		// Pointer-typed locals (T?) are answered via bound.NodeTypes
+		// .Nullable on each Ident reference (the no-init branch's
+		// scope.set propagates this just like the with-init branch).
 	}
 }
 

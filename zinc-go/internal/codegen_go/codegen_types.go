@@ -98,15 +98,10 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	g.errVarCount = 0
 	g.currentFuncParams = fn.Params
 
-	// Register pointer-typed params (those with `T?` where T isn't a
-	// collection) so the implicit-deref pass treats them as `*T`. Without
-	// this, `String? s` parameters fall through to the default `%v`
-	// printer that emits the pointer address instead of the string.
-	for _, p := range fn.Params {
-		if isPointerOptional(p.Type) {
-			g.ptrVars[p.Name] = true
-		}
-	}
+	// Pointer-optional params are answered via bound.NodeTypes[ident]
+	// .Nullable in the body — checkFnDecl adds each param to the inner
+	// scope with its resolved type, and inferType writes that V2Type to
+	// the side-map for every Ident reference.
 
 	// Set active type params for generic functions
 	if len(fn.TypeParams) > 0 {
@@ -681,12 +676,8 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			_ = simpleType.Name // varStructTypes write removed
 			methodParamBackup = append(methodParamBackup, p.Name)
 		}
-		// Pointer-typed params (T? for non-collection T) — same auto-deref
-		// handling as locals declared with `T?`.
-		if isPointerOptional(p.Type) {
-			g.ptrVars[p.Name] = true
-			ptrParamBackup = append(ptrParamBackup, p.Name)
-		}
+		// Pointer-optional params answered via bound.NodeTypes (see
+		// emitFn for the rationale).
 	}
 	defer func() {
 		g.currentFields = nil
@@ -695,9 +686,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 		g.currentParams = nil
 		g.currentClass = ""
 		_ = methodParamBackup // varStructTypes drained Phase 3.7.2
-		for _, pn := range ptrParamBackup {
-			delete(g.ptrVars, pn)
-		}
+		_ = ptrParamBackup    // ptrVars param tagging retired
 	}()
 
 	canError := g.methodReturnsError(receiver, m.Name)
