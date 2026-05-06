@@ -1602,6 +1602,81 @@ func (g *Generator) lookupClassMemberInChain(className, name string, kind classM
 	return false
 }
 
+// isRegularClass reports whether `name` is a same-package regular
+// class — a ClassDecl that emits a `NewT()` factory in Go and lowers
+// to `*T` pointer instances. Distinct from data classes (value types
+// via NewT-but-different-shape), interfaces and sealed parents (Go
+// interface types, no NewT factory), enums (integer-alias types),
+// AND cross-package classes (which need a package-qualified call
+// like `pkg.NewT(...)` and are handled through the bind side-map's
+// SymClass / SymDataClass paths in formatCallExpr).
+//
+// Replaces the literal `if _, ok := g.structs[name]; ok` pattern
+// across the codegen with a named predicate so future migrations to
+// a typechecker-backed registry have a single point to update.
+//
+// Backed by g.structs today; Sigs.ClassNames isn't used here because
+// it merges cross-pkg classes (intentionally — for cross-pkg type-
+// resolution queries) and would over-match for the same-pkg-factory
+// question these call sites are asking.
+func (g *Generator) isRegularClass(name string) bool {
+	_, ok := g.structs[name]
+	return ok
+}
+
+// classFieldType returns the typechecker-resolved V2Type of a class
+// field by walking ParentTypes upward. Replaces the codegen pattern
+// of fishing through `g.structs[name].Fields` to find a TypeExpr —
+// Sigs.ClassFields already has the resolved V2Type, so codegen can
+// consume that directly without re-walking the AST.
+func (g *Generator) classFieldType(className, fieldName string) (typechecker.V2Type, bool) {
+	if g.bound == nil || g.bound.Sigs == nil || className == "" {
+		return typechecker.V2Type{}, false
+	}
+	sigs := g.bound.Sigs
+	seen := map[string]bool{}
+	queue := []string{className}
+	for len(queue) > 0 {
+		cls := queue[0]
+		queue = queue[1:]
+		if seen[cls] {
+			continue
+		}
+		seen[cls] = true
+		if t, ok := sigs.ClassFields[cls][fieldName]; ok {
+			return t, true
+		}
+		queue = append(queue, sigs.ParentTypes[cls]...)
+	}
+	return typechecker.V2Type{}, false
+}
+
+// classMethodSig returns the typechecker-resolved method signature
+// for a class method, walking ParentTypes upward. Same shape and
+// rationale as classFieldType — codegen reads Sigs.MethodSigs
+// directly instead of fishing through `g.structs[name].Methods`.
+func (g *Generator) classMethodSig(className, methodName string) (typechecker.V2FnSig, bool) {
+	if g.bound == nil || g.bound.Sigs == nil || className == "" {
+		return typechecker.V2FnSig{}, false
+	}
+	sigs := g.bound.Sigs
+	seen := map[string]bool{}
+	queue := []string{className}
+	for len(queue) > 0 {
+		cls := queue[0]
+		queue = queue[1:]
+		if seen[cls] {
+			continue
+		}
+		seen[cls] = true
+		if sig, ok := sigs.MethodSigs[cls][methodName]; ok {
+			return sig, true
+		}
+		queue = append(queue, sigs.ParentTypes[cls]...)
+	}
+	return typechecker.V2FnSig{}, false
+}
+
 // resolveSelfMemberField returns the FieldDecl for an expression that
 // references a field of the current class. Walks the current class
 // then its parent chain so inherited fields resolve. ok=false when

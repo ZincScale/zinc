@@ -1338,7 +1338,7 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 					typeName = "*" + typeName
 				}
 				isDataClass = kind == "data"
-			} else if _, ok := g.structs[ident.Name]; ok {
+			} else if g.isRegularClass(ident.Name) {
 				// Local class
 				typeName = "*" + exportName(ident.Name)
 			}
@@ -1843,7 +1843,7 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 		// Constructor call shape: `Port(8080)` where Port is a class
 		// with a throwing ctor. The actual Go call will be NewPort(...),
 		// so look up the widened key.
-		if _, isClass := g.structs[callee.Name]; isClass {
+		if g.isRegularClass(callee.Name) {
 			if g.fnReturnsError("New" + callee.Name) {
 				return true
 			}
@@ -2815,7 +2815,7 @@ func (g *Generator) exprIsErrorCtor(e parser.Expr) bool {
 	}
 	switch callee := call.Callee.(type) {
 	case *parser.Ident:
-		if _, ok := g.structs[callee.Name]; ok {
+		if g.isRegularClass(callee.Name) {
 			return g.classExtendsError(callee.Name, map[string]bool{})
 		}
 	case *parser.SelectorExpr:

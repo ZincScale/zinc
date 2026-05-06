@@ -701,7 +701,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 	// If the return type is a known class (not data class), return *Type
 	// to match constructor return types (NewType() returns *Type).
 	if simpleType, ok := m.ReturnType.(*parser.SimpleType); ok {
-		if _, isStruct := g.structs[simpleType.Name]; isStruct {
+		if g.isRegularClass(simpleType.Name) {
 			goRetType = "*" + simpleType.Name
 		}
 	}
@@ -721,7 +721,7 @@ func (g *Generator) emitMethodDecl(receiver string, m *parser.MethodDecl, typePa
 			valueGoTypes = []string{goRetType}
 		}
 	} else if simpleType, ok := m.ReturnType.(*parser.SimpleType); ok {
-		if _, isStruct := g.structs[simpleType.Name]; isStruct {
+		if g.isRegularClass(simpleType.Name) {
 			ret = " *" + simpleType.Name
 		} else {
 			ret = g.formatReturnType(m.ReturnType, m.Body)

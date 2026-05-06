@@ -785,7 +785,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 
 	// Implicit constructor: Type(args) → NewType(args) when Type is known
 	if ident, ok := c.Callee.(*parser.Ident); ok {
-		if _, isStruct := g.structs[ident.Name]; isStruct {
+		if g.isRegularClass(ident.Name) {
 			ctorName := "New" + ident.Name + goTypeArgStr
 			args = g.fillDefaultArgs("New"+ident.Name, c.Args, c.NamedArgs, args)
 			return fmt.Sprintf("%s(%s)", ctorName, args)
