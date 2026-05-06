@@ -1,0 +1,3 @@
+first: 20
+idx: 3
+odd-sum 1..6: 9

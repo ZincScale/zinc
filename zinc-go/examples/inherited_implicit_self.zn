@@ -1,0 +1,54 @@
+// Inherited members resolve via implicit-self bare name. Pre-fix the
+// binder's currentClassFields/currentClassMethods only carried the
+// CURRENT class's own members, so a subclass method calling an
+// inherited method (or reading an inherited field) by bare name fell
+// through unresolved. The typechecker move (binder walks
+// Sigs.ParentTypes at class entry) populates the inheritance chain
+// so bare names resolve correctly.
+
+class Animal {
+    pub String sound
+    init(String sound) {
+        this.sound = sound
+    }
+    pub String describe() {
+        return "${kind()} that ${sound}s"
+    }
+    pub String kind() {
+        return "animal"
+    }
+}
+
+class Dog : Animal {
+    init() {
+        super("bark")
+    }
+    pub String kind() {
+        return "dog"
+    }
+    pub String selfDescribe() {
+        // `kind()` and `sound` resolve via implicit-self. `kind()`
+        // is overridden locally; `sound` is inherited from Animal.
+        // Pre-fix the binder didn't see `sound` as a field in Dog's
+        // scope (no inheritance walk), so the bare reference was
+        // unresolved and codegen emitted broken Go.
+        return "${kind()}: ${sound}"
+    }
+    pub String reachParent() {
+        // Bare `describe()` — inherited method — must resolve to
+        // `this.Describe()` via the typechecker's parent-chain walk.
+        return describe()
+    }
+}
+
+void main() {
+    var d = Dog()
+    print(d.selfDescribe())   // "dog: bark"
+    // Dog.reachParent() calls bare `describe()` which resolves via
+    // implicit-self to the inherited Animal.describe(). Inside
+    // Animal.describe(), bare `kind()` and `sound` resolve to
+    // Animal's own members (no virtual dispatch — static binding,
+    // same as Go's struct embedding). So the result threads through
+    // Animal's view, not Dog's.
+    print(d.reachParent())    // "animal that barks"
+}

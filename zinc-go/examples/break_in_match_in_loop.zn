@@ -1,0 +1,45 @@
+// `break` inside a `match` case body that's nested in a for/while
+// targets the enclosing LOOP, not the match's switch. Pre-fix the
+// generated Go's plain `break` exited the switch and the loop kept
+// running — silent miscompile of every "scan until I find what I
+// want" pattern that wraps a match.
+
+import strconv
+
+void main() {
+    var firstFound = ""
+    var firstIdx = -1
+    var inputs = List<String>["", "  ", "ten", "  20  ", "30"]
+
+    var i = 0
+    while (i < len(inputs)) {
+        var s = strings.TrimSpace(inputs[i])
+        match (len(s) > 0) {
+            case true {
+                var n = strconv.Atoi(s) catch { -1 }
+                if (n > 0) {
+                    firstFound = s
+                    firstIdx = i
+                    break
+                }
+            }
+            case false {}
+        }
+        i = i + 1
+    }
+    print("first: ${firstFound}")
+    print("idx: ${firstIdx}")  // 3 — the "20" entry, not the trailing "30"
+
+    // Same shape with continue inside match — should advance the
+    // outer loop, not just exit the inner switch.
+    var sum = 0
+    for (x in 1..6) {
+        match (x % 2 == 0) {
+            case true { continue }
+            case false { sum = sum + x }
+        }
+    }
+    print("odd-sum 1..6: ${sum}")  // 1+3+5 = 9
+}
+
+import strings
