@@ -455,8 +455,8 @@ func (g *Generator) formatBinaryExpr(b *parser.BinaryExpr) string {
 		}
 		return fmt.Sprintf("func() bool { _, _ok := any(%s).(%s); return !_ok }()", left, goType)
 	default:
-		left := g.formatExpr(b.Left)
-		right := g.formatExpr(b.Right)
+		left := g.wrapIfLowerPrec(b.Left, b.Op)
+		right := g.wrapIfLowerPrec(b.Right, b.Op)
 		return fmt.Sprintf("%s %s %s", left, b.Op, right)
 	}
 }
