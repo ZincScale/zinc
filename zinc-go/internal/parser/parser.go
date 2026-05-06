@@ -286,6 +286,25 @@ func (p *Parser) looksLikeTypeArgs() bool {
 	return false
 }
 
+// looksLikeStructLit returns true if the current `{` opens a struct
+// literal — i.e. `{IDENT COLON ...}`. Used by the postfix loop to
+// disambiguate `T{Field: v}` from a following block statement or a map
+// literal (which is string-keyed, not ident-keyed). Caller must be
+// positioned on the `{`.
+//
+// Empty struct literals `T{}` are deliberately NOT recognized here:
+// they collide with match-case body openers like `case DRAINING {}`,
+// where DRAINING is a bare Ident pattern followed by an empty body.
+// For that use the explicit `default(T)` form which lowers to T's zero
+// value.
+func (p *Parser) looksLikeStructLit() bool {
+	if p.peek().Type != lexer.TOKEN_LBRACE {
+		return false
+	}
+	return p.peekAt(1).Type == lexer.TOKEN_IDENT &&
+		p.peekAt(2).Type == lexer.TOKEN_COLON
+}
+
 // looksLikeCapacityAt checks if <Type, ...>(capacity) follows — for List<T>(cap) and Map<K,V>(cap).
 func (p *Parser) looksLikeCapacityAt(base int) bool {
 	off := base + 1

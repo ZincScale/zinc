@@ -757,6 +757,24 @@ type MapLit struct {
 func (m *MapLit) nodeTag() {}
 func (m *MapLit) exprTag() {}
 
+// StructLit: TypeName{Field: value, Field: value, ...}
+// Constructs a Go struct (typically an FFI Go-package type) with named
+// field initializers. Distinct from MapLit because the keys are field
+// identifiers, not arbitrary expressions, and the resulting Go code is
+// `Type{Field: v}` rather than `map[K]V{...}`.
+type StructLit struct {
+	Type   Expr // SelectorExpr (e.g. http.Client) or Ident
+	Fields []*StructFieldInit
+}
+
+type StructFieldInit struct {
+	Name  string
+	Value Expr
+}
+
+func (s *StructLit) nodeTag() {}
+func (s *StructLit) exprTag() {}
+
 // DefaultExpr: default(T) — Go's zero value for type T. Useful in
 // expression positions where a bare var-decl's auto-zero doesn't
 // apply (function args, returns, ternary branches, generic bodies).

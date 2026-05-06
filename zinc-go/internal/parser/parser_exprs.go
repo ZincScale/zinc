@@ -380,10 +380,43 @@ func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 			} else {
 				return expr
 			}
+		case p.check(lexer.TOKEN_LBRACE):
+			// Struct literal: TypeName{Field: value, ...}. Only triggers
+			// when the prefix is an Ident or SelectorExpr (i.e. a type
+			// reference like `http.Client`) AND the brace contents look
+			// like `IDENT COLON ...` or are empty. This avoids consuming
+			// statement-block braces (whose first token is a keyword like
+			// `var`/`if`) or map literals (string-keyed).
+			_, isIdent := expr.(*Ident)
+			_, isSel := expr.(*SelectorExpr)
+			if (isIdent || isSel) && p.looksLikeStructLit() {
+				expr = p.parseStructLitBody(expr)
+			} else {
+				return expr
+			}
 		default:
 			return expr
 		}
 	}
+}
+
+// parseStructLitBody parses `{Field: value, Field: value, ...}` as a
+// StructLit attached to the given type expression. Caller must already
+// have confirmed via looksLikeStructLit() that this is a struct literal.
+func (p *Parser) parseStructLitBody(typ Expr) Expr {
+	p.expect(lexer.TOKEN_LBRACE)
+	var fields []*StructFieldInit
+	for !p.check(lexer.TOKEN_RBRACE) && !p.check(lexer.TOKEN_EOF) {
+		name := p.expect(lexer.TOKEN_IDENT).Literal
+		p.expect(lexer.TOKEN_COLON)
+		val := p.v2ParseExpr()
+		fields = append(fields, &StructFieldInit{Name: name, Value: val})
+		if p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &StructLit{Type: typ, Fields: fields}
 }
 
 // v2ParseCallArgs: callee(args)
