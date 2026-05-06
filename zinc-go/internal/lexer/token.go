@@ -38,7 +38,6 @@ const (
 	TOKEN_WHILE
 	TOKEN_BREAK
 	TOKEN_CONTINUE
-	TOKEN_GO
 	TOKEN_CATCH
 	TOKEN_PRINT
 	TOKEN_VAR
@@ -55,18 +54,15 @@ const (
 	TOKEN_CASE
 	TOKEN_PACKAGE
 	TOKEN_CONST
-	TOKEN_DEFER
 	TOKEN_IS
 	TOKEN_WITH
 	TOKEN_DATA
 	TOKEN_SPAWN
-	TOKEN_USE
 	TOKEN_READONLY // read (read-only field)
 	TOKEN_OVERRIDE // override (method override)
 	TOKEN_USING    // using (resource acquisition, defer .Close())
-	TOKEN_NOT   // not (boolean negation)
-	TOKEN_AND   // and (boolean and)
-	TOKEN_FROM  // from (import support)
+	TOKEN_NOT   // not (boolean negation, "not in", "is not")
+	TOKEN_AND   // and (boolean and, alias for &&)
 	TOKEN_PARALLEL   // parallel (parallel for)
 	TOKEN_INIT       // init (constructor-set immutable field)
 	TOKEN_TIMEOUT    // timeout(dur) { }
@@ -140,7 +136,6 @@ var tokenNames = map[TokenType]string{
 	TOKEN_WHILE:     "while",
 	TOKEN_BREAK:     "break",
 	TOKEN_CONTINUE:  "continue",
-	TOKEN_GO:        "go",
 	TOKEN_CATCH:     "catch",
 	TOKEN_PRINT:     "print",
 	TOKEN_VAR:       "var",
@@ -157,18 +152,15 @@ var tokenNames = map[TokenType]string{
 	TOKEN_CASE:      "case",
 	TOKEN_PACKAGE:   "package",
 	TOKEN_CONST:     "const",
-	TOKEN_DEFER:     "defer",
 	TOKEN_IS:        "is",
 	TOKEN_WITH:      "with",
 	TOKEN_DATA:      "data",
 	TOKEN_SPAWN:     "spawn",
-	TOKEN_USE:       "use",
 	TOKEN_READONLY:  "readonly",
 	TOKEN_OVERRIDE:  "override",
 	TOKEN_USING:     "using",
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
-	TOKEN_FROM:      "from",
 	TOKEN_PARALLEL:   "parallel",
 	TOKEN_INIT:       "init",
 	TOKEN_TIMEOUT:    "timeout",
@@ -246,8 +238,12 @@ var keywords = map[string]TokenType{
 	"while":     TOKEN_WHILE,
 	"break":     TOKEN_BREAK,
 	"continue":  TOKEN_CONTINUE,
-	// "go" removed — use "spawn" instead
-	// "or" removed — use "||" for boolean OR; error handler is "catch"
+	// Removed keywords (do not re-add without a real use site):
+	//   go    — use spawn { } instead
+	//   or    — use || for boolean OR; error handler is "catch"
+	//   from  — was reserved for "from X import Y" syntax that never landed
+	//   defer — handled by `using` (deterministic resource cleanup)
+	//   use   — supplanted by `using`
 	"catch":     TOKEN_CATCH,
 	"print":     TOKEN_PRINT,
 	"var":       TOKEN_VAR,
@@ -265,18 +261,15 @@ var keywords = map[string]TokenType{
 	"case":      TOKEN_CASE,
 	"package":   TOKEN_PACKAGE,
 	"const":     TOKEN_CONST,
-	"defer":     TOKEN_DEFER,
 	"is":        TOKEN_IS,
 	"with":      TOKEN_WITH,
 	"data":      TOKEN_DATA,
 	"spawn":     TOKEN_SPAWN,
-	"use":       TOKEN_USE,
 	"readonly":  TOKEN_READONLY,
 	"override":  TOKEN_OVERRIDE,
 	"using":     TOKEN_USING,
 	"not":       TOKEN_NOT,
 	"and":       TOKEN_AND,
-	"from":      TOKEN_FROM,
 	"parallel":   TOKEN_PARALLEL,
 	"init":       TOKEN_INIT,
 	"timeout":    TOKEN_TIMEOUT,

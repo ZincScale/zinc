@@ -1129,6 +1129,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			pkgPrefix := strings.SplitN(typ.Name, ".", 2)[0]
 			typeName := strings.SplitN(typ.Name, ".", 2)[1]
 			_ = typeName // used in subpackage/alias checks below
+			// originalPrefix is the Zinc-side import name (key into importMap,
+			// subpkgExports, importAliases). pkgPrefix may get rewritten to the
+			// Go alias below for shadow-avoidance, but the lookups still need
+			// the original key.
+			originalPrefix := pkgPrefix
 			// Ensure the package is imported for any qualified type reference
 			if goPath, ok := g.importMap[pkgPrefix]; ok {
 				g.needImport(goPath)
@@ -1142,20 +1147,20 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 					pkgPrefix = alias
 				}
 			}
-			if g.isZincSubpackage(pkgPrefix) {
-				if goPath, ok := g.importMap[pkgPrefix]; ok {
+			if g.isZincSubpackage(originalPrefix) {
+				if goPath, ok := g.importMap[originalPrefix]; ok {
 					g.needImport(goPath)
 				}
 				// Check if it's a class (not data class) from a subpackage → needs pointer
-				if exports, ok := g.subpkgExports[pkgPrefix]; ok {
+				if exports, ok := g.subpkgExports[originalPrefix]; ok {
 					if exports[typeName] == "class" {
 						return "*" + typ.Name
 					}
 				}
 			}
 			// Check import aliases — if it's a class from an external zinc package
-			if g.isImportAlias(pkgPrefix) {
-				if goPath, ok := g.importMap[pkgPrefix]; ok {
+			if g.isImportAlias(originalPrefix) {
+				if goPath, ok := g.importMap[originalPrefix]; ok {
 					g.needImport(goPath)
 					if g.goResolver.IsStruct(goPath, typeName) {
 						if g.goResolver.HasFunc(goPath, "New"+typeName) {
@@ -1179,7 +1184,7 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 			//      pointer. Catches `sync.Mutex`, `strings.Builder` —
 			//      types with no factories where Go convention still
 			//      dictates pointer use.
-			if goPath, ok := g.importMap[pkgPrefix]; ok {
+			if goPath, ok := g.importMap[originalPrefix]; ok {
 				if g.goResolver.IsStruct(goPath, typeName) {
 					switch g.goResolver.FactoryReturnShape(goPath, typeName) {
 					case "value":
