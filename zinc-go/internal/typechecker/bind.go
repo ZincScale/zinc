@@ -312,6 +312,16 @@ type BindContext struct {
 	// file's `import` declarations. Names from steps 5/6 only count if the
 	// alias is actually imported.
 	ImportAliases map[string]bool
+
+	// Sigs — package-level signature aggregate (CollectSignatures
+	// output). Used for inheritance walks at bind time: when entering
+	// a class body the binder walks Sigs.ParentTypes to seed
+	// currentClassFields / currentClassMethods with inherited members,
+	// so a bare ident inside a subclass method resolves to a
+	// SymField/SymMethod for the inherited member instead of falling
+	// past as unknown. nil-safe — pre-Sigs callers built BindContext
+	// without it, and the inheritance walk no-ops when Sigs is nil.
+	Sigs *CollectedSigs
 }
 
 // goBuiltinNames mirrors the codegen's set; bind phase needs the same list
@@ -343,8 +353,16 @@ type binder struct {
 	scopes []map[string]Symbol
 
 	// currentClass tracks the class context for resolving `this`/field refs.
-	currentClass     string
-	currentClassFields map[string]bool
+	// currentClassFields / currentClassMethods include inherited members
+	// (walked via ctx.Sigs.ParentTypes at class-entry) — so a bare ident
+	// inside a subclass method resolves to the right SymField / SymMethod
+	// even when the member came from a parent. currentClassMemberPub
+	// records the IsPub flag for each member so the bound Symbol can
+	// carry it through to codegen's casing logic.
+	currentClass            string
+	currentClassFields      map[string]bool
+	currentClassMethods     map[string]bool
+	currentClassMemberPub   map[string]bool
 
 	// reportedCollisions dedups collision errors per (line, name) so repeated
 	// uses don't produce repeated errors.
@@ -413,7 +431,25 @@ func (b *binder) resolve(name string, line int) Symbol {
 		return sym
 	}
 	if b.currentClass != "" && b.currentClassFields[name] {
-		return Symbol{Kind: SymField, Name: name, Pkg: b.currentClass}
+		return Symbol{
+			Kind:  SymField,
+			Name:  name,
+			Pkg:   b.currentClass,
+			IsPub: b.currentClassMemberPub[name],
+		}
+	}
+	// Bare method ref on the current class — same shape as SymField,
+	// distinct kind so codegen / formatExpr can pick the call vs
+	// value-passing emit shape (and so the renderer of `this.X` can
+	// disambiguate field-vs-method without a separate currentMethods
+	// map).
+	if b.currentClass != "" && b.currentClassMethods[name] {
+		return Symbol{
+			Kind:  SymMethod,
+			Name:  name,
+			Owner: b.currentClass,
+			IsPub: b.currentClassMemberPub[name],
+		}
 	}
 
 	// 4. Same-package decls.

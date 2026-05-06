@@ -1515,26 +1515,91 @@ func (g *Generator) isAutoPointerizedGoStructField(t parser.TypeExpr) (string, b
 // each site separately. These helpers make the resolution one-stop.
 
 // isSelfMemberField reports whether an expression names a field of
-// the current class via implicit-self or explicit `this.X`. Backed by
-// the flat currentFields map (populated at class-emit entry with the
-// full set including inherited fields) so subclass field references
-// resolve through their parent chain.
+// the current class via implicit-self or explicit `this.X`.
+//
+// Resolution order (typechecker-first):
+//   1. Bare Ident → bound.Bindings[ident].Kind == SymField. The binder
+//      walks Sigs.ParentTypes at class entry so inherited fields are
+//      already covered.
+//   2. SelectorExpr `this.X` → walk Sigs.ClassFields starting at
+//      currentClass and following ParentTypes. The Field is a string
+//      (no Ident node) so the bind side-map can't resolve it; the
+//      class member tables in CollectedSigs are the natural source.
+//   3. Codegen-side currentFields fallback for legacy paths that
+//      bypass bind+Sigs (single-file scripts, tests).
 func (g *Generator) isSelfMemberField(e parser.Expr) bool {
+	if id, ok := e.(*parser.Ident); ok && g.bound != nil {
+		if sym, ok := g.bound.Bindings[id]; ok {
+			return sym.Kind == typechecker.SymField
+		}
+	}
 	_, name, ok := g.selfMemberLookup(e)
 	if !ok {
 		return false
+	}
+	if g.lookupClassMemberInChain(g.currentClass, name, classMemberField) {
+		return true
 	}
 	return g.currentFields != nil && g.currentFields[name]
 }
 
-// isSelfMemberMethod — symmetric helper for methods. Backed by the
-// flat currentMethods map.
+// isSelfMemberMethod — symmetric helper for methods.
 func (g *Generator) isSelfMemberMethod(e parser.Expr) bool {
+	if id, ok := e.(*parser.Ident); ok && g.bound != nil {
+		if sym, ok := g.bound.Bindings[id]; ok {
+			return sym.Kind == typechecker.SymMethod
+		}
+	}
 	_, name, ok := g.selfMemberLookup(e)
 	if !ok {
 		return false
 	}
+	if g.lookupClassMemberInChain(g.currentClass, name, classMemberMethod) {
+		return true
+	}
 	return g.currentMethods != nil && g.currentMethods[name]
+}
+
+type classMemberKind int
+
+const (
+	classMemberField classMemberKind = iota
+	classMemberMethod
+)
+
+// lookupClassMemberInChain walks Sigs.ParentTypes from className
+// upwards looking for the named member. Returns false when Sigs is
+// nil or the chain doesn't contain the member. Same shape as the
+// binder's populateInheritedMembers walk; mirrored here for the
+// SelectorExpr `this.X` case where the field name doesn't have an
+// Ident node to carry a Symbol through.
+func (g *Generator) lookupClassMemberInChain(className, name string, kind classMemberKind) bool {
+	if g.bound == nil || g.bound.Sigs == nil || className == "" {
+		return false
+	}
+	sigs := g.bound.Sigs
+	seen := map[string]bool{}
+	queue := []string{className}
+	for len(queue) > 0 {
+		cls := queue[0]
+		queue = queue[1:]
+		if seen[cls] {
+			continue
+		}
+		seen[cls] = true
+		switch kind {
+		case classMemberField:
+			if _, ok := sigs.ClassFields[cls][name]; ok {
+				return true
+			}
+		case classMemberMethod:
+			if _, ok := sigs.MethodSigs[cls][name]; ok {
+				return true
+			}
+		}
+		queue = append(queue, sigs.ParentTypes[cls]...)
+	}
+	return false
 }
 
 // resolveSelfMemberField returns the FieldDecl for an expression that

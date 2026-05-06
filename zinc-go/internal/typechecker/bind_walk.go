@@ -72,13 +72,21 @@ func (b *binder) bindFnDecl(decl *parser.FnDecl) {
 }
 
 func (b *binder) bindClassDecl(decl *parser.ClassDecl) {
-	prevClass := b.currentClass
-	prevFields := b.currentClassFields
-	b.currentClass = decl.Name
-	b.currentClassFields = make(map[string]bool)
+	prev := b.pushClassContext(decl.Name)
 	for _, f := range decl.Fields {
 		b.currentClassFields[f.Name] = true
+		b.currentClassMemberPub[f.Name] = f.IsPub
 	}
+	for _, m := range decl.Methods {
+		b.currentClassMethods[m.Name] = true
+		b.currentClassMemberPub[m.Name] = m.IsPub
+	}
+	// Walk parent chain — Sigs.ParentTypes drives inheritance lookup
+	// so a bare ident inside a subclass method resolves to the
+	// inherited field/method's Symbol. nil-safe: pre-Sigs callers
+	// just lose inheritance resolution at bind time (codegen's
+	// existing currentFields fallback covers them as before).
+	b.populateInheritedMembers(decl.Name)
 
 	for _, f := range decl.Fields {
 		if f.Default != nil {
@@ -100,8 +108,7 @@ func (b *binder) bindClassDecl(decl *parser.ClassDecl) {
 		}
 	}
 
-	b.currentClass = prevClass
-	b.currentClassFields = prevFields
+	b.popClassContext(prev)
 }
 
 func (b *binder) bindCtor(c *parser.CtorDecl) {
@@ -136,13 +143,17 @@ func (b *binder) bindMethodDecl(m *parser.MethodDecl) {
 }
 
 func (b *binder) bindDataClassDecl(decl *parser.DataClassDecl) {
-	prevClass := b.currentClass
-	prevFields := b.currentClassFields
-	b.currentClass = decl.Name
-	b.currentClassFields = make(map[string]bool)
+	prev := b.pushClassContext(decl.Name)
 	for _, f := range decl.Params {
 		b.currentClassFields[f.Name] = true
+		b.currentClassMemberPub[f.Name] = f.IsPub
 	}
+	for _, m := range decl.Methods {
+		b.currentClassMethods[m.Name] = true
+		b.currentClassMemberPub[m.Name] = m.IsPub
+	}
+	b.populateInheritedMembers(decl.Name)
+
 	for _, f := range decl.Params {
 		if f.Default != nil {
 			b.bindExpr(f.Default)
@@ -151,8 +162,77 @@ func (b *binder) bindDataClassDecl(decl *parser.DataClassDecl) {
 	for _, m := range decl.Methods {
 		b.bindMethodDecl(m)
 	}
-	b.currentClass = prevClass
-	b.currentClassFields = prevFields
+	b.popClassContext(prev)
+}
+
+// classCtxFrame captures the per-class binder fields so nested class
+// declarations restore correctly on exit. push/popClassContext are
+// the entry/exit pair used by both bindClassDecl and bindDataClassDecl.
+type classCtxFrame struct {
+	className string
+	fields    map[string]bool
+	methods   map[string]bool
+	memberPub map[string]bool
+}
+
+func (b *binder) pushClassContext(name string) classCtxFrame {
+	prev := classCtxFrame{
+		className: b.currentClass,
+		fields:    b.currentClassFields,
+		methods:   b.currentClassMethods,
+		memberPub: b.currentClassMemberPub,
+	}
+	b.currentClass = name
+	b.currentClassFields = make(map[string]bool)
+	b.currentClassMethods = make(map[string]bool)
+	b.currentClassMemberPub = make(map[string]bool)
+	return prev
+}
+
+func (b *binder) popClassContext(prev classCtxFrame) {
+	b.currentClass = prev.className
+	b.currentClassFields = prev.fields
+	b.currentClassMethods = prev.methods
+	b.currentClassMemberPub = prev.memberPub
+}
+
+// populateInheritedMembers walks the parent chain via Sigs.ParentTypes
+// and adds each ancestor's fields + methods to the binder's flat
+// member maps. Fields are looked up in Sigs.ClassFields, methods in
+// Sigs.MethodSigs, and per-member pub status in Sigs.MemberIsPub.
+//
+// Cycles are broken by a `seen` set so a malformed inheritance graph
+// can't loop the binder forever (the typechecker reports the cycle
+// separately; bind shouldn't crash).
+func (b *binder) populateInheritedMembers(className string) {
+	if b.ctx.Sigs == nil {
+		return
+	}
+	seen := map[string]bool{className: true}
+	queue := append([]string{}, b.ctx.Sigs.ParentTypes[className]...)
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		if seen[parent] {
+			continue
+		}
+		seen[parent] = true
+		for fName := range b.ctx.Sigs.ClassFields[parent] {
+			if _, already := b.currentClassFields[fName]; already {
+				continue // local override wins for shadowing
+			}
+			b.currentClassFields[fName] = true
+			b.currentClassMemberPub[fName] = b.ctx.Sigs.MemberIsPub[parent+"."+fName]
+		}
+		for mName := range b.ctx.Sigs.MethodSigs[parent] {
+			if _, already := b.currentClassMethods[mName]; already {
+				continue
+			}
+			b.currentClassMethods[mName] = true
+			b.currentClassMemberPub[mName] = b.ctx.Sigs.MemberIsPub[parent+"."+mName]
+		}
+		queue = append(queue, b.ctx.Sigs.ParentTypes[parent]...)
+	}
 }
 
 // --- Statement walk --------------------------------------------------------

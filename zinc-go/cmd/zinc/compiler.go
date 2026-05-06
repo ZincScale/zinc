@@ -146,6 +146,7 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	// — it's per-file and gets cloned + populated from each prog's
 	// own Imports below.
 	pkgBindCtx := typechecker.CollectBindContext(merged)
+	pkgBindCtx.Sigs = &externalSigs
 	if crossPkgExports != nil {
 		for alias, exports := range crossPkgExports {
 			pkgBindCtx.ZincSubpkgExports[alias] = exports
