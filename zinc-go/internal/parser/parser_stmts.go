@@ -729,7 +729,14 @@ func (p *Parser) v2ParseExprOrAssignStmt() Stmt {
 		lexer.TOKEN_STAR_EQ, lexer.TOKEN_SLASH_EQ) {
 		op := p.advance().Literal
 		val := p.v2ParseExpr()
-		return &AssignStmt{Line: line, Target: expr, Op: op, Value: val}
+		// Optional `or { }` handler — same shape as VarStmt's, lets
+		// `target = call() or { fallback }` write the fallback when
+		// the call fails (or terminate via return/break/continue).
+		// Without this the `or` binding was strictly tied to fresh
+		// var-decls, forcing a `var tmp = ... or {...}; target = tmp`
+		// dance for every reuse-an-existing-LHS error path.
+		handler := p.v2ParseErrHandler()
+		return &AssignStmt{Line: line, Target: expr, Op: op, Value: val, OrHandler: handler}
 	}
 
 	// Check for or handler on expression statements: call() or { ... }

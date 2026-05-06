@@ -518,7 +518,7 @@ func isPointerOptional(t parser.TypeExpr) bool {
 func (g *Generator) emitAssignStmt(a *parser.AssignStmt) {
 	if a.OrHandler != nil {
 		targetStr := g.formatExpr(a.Target)
-		g.emitOrAssignment(targetStr, a.Value, a.OrHandler)
+		g.emitOrAssignmentForExisting(targetStr, a.Value, a.OrHandler)
 		return
 	}
 	// Nested failable expr on RHS: hoist any `as` cast or nested
@@ -2423,7 +2423,25 @@ func (g *Generator) emitTypeAssertVar(v *parser.VarStmt, ta *parser.TypeAssertEx
 }
 
 // emitOrAssignment handles: target = call() or default / or { block }
+//
+// The var-decl path (`var x = call() or { ... }`) lowers to a Go
+// short-var-decl `x, _err := call()` because `x` is fresh. The
+// already-declared assignment path (`x = call() or { ... }` where x
+// exists in scope) routes through emitOrAssignmentForExisting below
+// — using `:=` there would shadow the outer binding.
 func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *parser.OrHandler) {
+	g.emitOrAssignmentImpl(target, value, handler, false)
+}
+
+// emitOrAssignmentForExisting is the assign-form variant: target is an
+// already-declared LHS (typically `field` or `local`), so we use a
+// temp for the call's value slot and write the result with `=` rather
+// than `:=`.
+func (g *Generator) emitOrAssignmentForExisting(target string, value parser.Expr, handler *parser.OrHandler) {
+	g.emitOrAssignmentImpl(target, value, handler, true)
+}
+
+func (g *Generator) emitOrAssignmentImpl(target string, value parser.Expr, handler *parser.OrHandler, existing bool) {
 	callExpr := g.formatExpr(value)
 
 	errVar := "_err"
@@ -2442,6 +2460,25 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 
 	if !errorOnly && handler.Body != nil && len(handler.Body.Stmts) == 1 {
 		if es, ok := handler.Body.Stmts[0].(*parser.ExprStmt); ok && target != "_" {
+			if existing {
+				// `target = call() or { fallback_expr }` where target
+				// is already declared. Capture the call into a fresh
+				// pair, then write target either from the value slot
+				// or from the fallback expression.
+				tmpName := fmt.Sprintf("_v%d", g.errVarCount)
+				g.writeln("%s, %s := %s", tmpName, errVar, callExpr)
+				g.writeln("if %s != nil {", errVar)
+				g.indent++
+				g.writeln("%s = %s", target, g.formatExpr(es.Expr))
+				g.indent--
+				g.writeln("} else {")
+				g.indent++
+				g.writeln("%s = %s", target, tmpName)
+				g.indent--
+				g.writeln("}")
+				g.currentErrVar = savedErrVar
+				return
+			}
 			g.writeln("%s, %s := %s", target, errVar, callExpr)
 			g.writeln("if %s != nil {", errVar)
 			g.indent++
@@ -2451,6 +2488,39 @@ func (g *Generator) emitOrAssignment(target string, value parser.Expr, handler *
 			g.currentErrVar = savedErrVar
 			return
 		}
+	}
+
+	if existing {
+		// Block-form handler against an already-declared target.
+		// Write to target only on success; let the handler block run
+		// on error (it terminates via return/break/continue).
+		if errorOnly {
+			g.writeln("%s := %s", errVar, callExpr)
+			g.writeln("if %s != nil {", errVar)
+			g.indent++
+			if handler.Body != nil {
+				g.emitOrBlock(handler.Body)
+			}
+			g.indent--
+			g.writeln("}")
+			g.currentErrVar = savedErrVar
+			return
+		}
+		tmpName := fmt.Sprintf("_v%d", g.errVarCount)
+		g.writeln("%s, %s := %s", tmpName, errVar, callExpr)
+		g.writeln("if %s != nil {", errVar)
+		g.indent++
+		if handler.Body != nil {
+			g.emitOrBlock(handler.Body)
+		}
+		g.indent--
+		g.writeln("} else {")
+		g.indent++
+		g.writeln("%s = %s", target, tmpName)
+		g.indent--
+		g.writeln("}")
+		g.currentErrVar = savedErrVar
+		return
 	}
 
 	if errorOnly {
