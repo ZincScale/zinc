@@ -978,17 +978,15 @@ func (g *Generator) isSubpackage() bool {
 }
 
 // isPub checks if a name was declared with pub.
-// Prefers bound.LookupSymbolByName (typechecker-canonical via Symbol.IsPub
-// — P1.3 set it for in-file decls; sibling-fn / sibling-const flow it
-// through SiblingFnsPub / SiblingConstsPub). Falls back to g.pubNames
-// for legacy single-file paths and for cross-pkg names.
+// Reads Symbol.IsPub via bound.LookupSymbolByNameAndKind — the kind
+// filter prevents an unrelated SymLocal binding sharing the name from
+// masking the actual SymFn/SymConst answer. Symbol.IsPub is set by
+// Bind for in-file decls and propagated to sibling-fn / sibling-const
+// references via BindContext.SiblingFnsPub / SiblingConstsPub.
 func (g *Generator) isPub(name string) bool {
 	if g.bound != nil {
-		if sym, ok := g.bound.LookupSymbolByName(name); ok {
-			switch sym.Kind {
-			case typechecker.SymFn, typechecker.SymConst:
-				return sym.IsPub
-			}
+		if sym, ok := g.bound.LookupSymbolByNameAndKind(name, typechecker.SymFn, typechecker.SymConst); ok {
+			return sym.IsPub
 		}
 	}
 	if pub, ok := g.pubNames[name]; ok {
