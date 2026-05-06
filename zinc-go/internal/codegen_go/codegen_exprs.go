@@ -93,7 +93,7 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 		}
 		// Function references as values (e.g. passing addAttributeFactory to register)
 		if g.isSubpackage() {
-			if _, ok := g.funcSigs[expr.Name]; ok {
+			if _, ok := g.lookupCallableParams(expr.Name); ok {
 				return g.exportIfSubpackage(expr.Name)
 			}
 		}

@@ -511,7 +511,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// shape as the goResolver path above but for user-declared funcs.
 	var zincExpectedParams []*parser.ParamDecl
 	if ident, ok := c.Callee.(*parser.Ident); ok {
-		if sig, ok := g.funcSigs[ident.Name]; ok {
+		if sig, ok := g.lookupCallableParams(ident.Name); ok {
 			zincExpectedParams = sig
 		}
 	}
@@ -806,7 +806,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 	// In subpackages, apply pub visibility to plain function calls (same-package)
 	if g.isSubpackage() {
 		if ident, ok := c.Callee.(*parser.Ident); ok {
-			if _, ok := g.funcSigs[ident.Name]; ok {
+			if _, ok := g.lookupCallableParams(ident.Name); ok {
 				callee = g.exportIfSubpackage(ident.Name)
 			}
 		}
@@ -820,7 +820,7 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 // adaptCallback generates an adapter for a Zinc function being passed to a Go
 // function that expects a specific callback signature.
 func (g *Generator) adaptCallback(funcName string, goExpectedTypes []string) string {
-	zincParams, ok := g.funcSigs[funcName]
+	zincParams, ok := g.lookupCallableParams(funcName)
 	if !ok || len(zincParams) != len(goExpectedTypes) {
 		return funcName
 	}
@@ -891,9 +891,10 @@ func (g *Generator) adaptCallback(funcName string, goExpectedTypes []string) str
 		strings.Join(callArgs, ", "))
 }
 
-// fillDefaultArgs fills in missing positional args with defaults from funcSigs.
+// fillDefaultArgs fills in missing positional args with defaults from
+// the callable's ParamDecls (looked up via lookupCallableParams).
 func (g *Generator) fillDefaultArgs(funcName string, posArgs []parser.Expr, namedArgs []parser.NamedArg, currentArgs string) string {
-	sig, ok := g.funcSigs[funcName]
+	sig, ok := g.lookupCallableParams(funcName)
 	if !ok {
 		return currentArgs
 	}

@@ -48,8 +48,6 @@ type Generator struct {
 	currentMethodRetType  string            // Go return type of current method (for channel recv type assertions)
 
 	// Default parameters
-	funcSigs map[string][]*parser.ParamDecl // function name → param list
-
 	// Stream operations
 	chainCounter int // counter for _chain variables
 
@@ -217,7 +215,6 @@ func New() *Generator {
 	return &Generator{
 		imports:             make(map[string]bool),
 		structs:             make(map[string]*parser.ClassDecl),
-		funcSigs:            make(map[string][]*parser.ParamDecl),
 		varTypes:            make(map[string]string),
 		ptrVars:             make(map[string]bool),
 		renamedVars:         make(map[string]string),
@@ -294,14 +291,9 @@ func (g *Generator) SetSiblingExports(exports map[string]string) {
 		case "interface":
 			// interface-ness flows through bound.Sigs.InterfaceNames.
 		case "func":
-			// Register sibling functions so the codegen knows about them.
-			// Casing at call sites is determined by `pubNames` membership.
-			if g.funcSigs == nil {
-				g.funcSigs = make(map[string][]*parser.ParamDecl)
-			}
-			if _, exists := g.funcSigs[name]; !exists {
-				g.funcSigs[name] = nil // mark as known function (no param info)
-			}
+			// Sibling fn sigs flow through bound.Sigs.FnSigs (CollectSignatures
+			// runs over the merged same-package program, so every same-pkg
+			// fn is already registered with full ParamDecl info).
 		}
 	}
 }
@@ -508,6 +500,29 @@ func (g *Generator) isDataClass(name string) bool {
 	return false
 }
 
+// lookupCallableParams resolves a callable name to its ParamDecl list.
+// Backed by bound.Sigs:
+//   - "NewT" (synthesized ctor name) → bound.Sigs.CtorSigs[T]
+//   - any other name → bound.Sigs.FnSigs[name]
+//
+// Returns (params, true) on hit. The slice may be nil if the sig was
+// registered without ParamDecl pointers (cross-pkg sibling-fn
+// registrations via MakeFnSigForFn keep ParamDecls; some synthesized
+// paths may not).
+func (g *Generator) lookupCallableParams(name string) ([]*parser.ParamDecl, bool) {
+	if g.bound != nil && g.bound.Sigs != nil {
+		if strings.HasPrefix(name, "New") {
+			if sig, ok := g.bound.Sigs.CtorSigs[name[3:]]; ok {
+				return sig.ParamDecls, true
+			}
+		}
+		if sig, ok := g.bound.Sigs.FnSigs[name]; ok {
+			return sig.ParamDecls, true
+		}
+	}
+	return nil, false
+}
+
 // isInterface reports whether `name` was declared as an `interface`,
 // or as a sealed-parent class (which lowers to a Go interface).
 // Backed by bound.Sigs.InterfaceNames — the typechecker's canonical
@@ -559,12 +574,12 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// method pub status through bound.Sigs.MemberIsPub.
 		case *parser.DataClassDecl:
 			// data-class-ness flows through bound.Sigs.DataClassNames;
-			// field pub status through bound.Sigs.MemberIsPub.
+			// field pub status through bound.Sigs.MemberIsPub; ctor
+			// param info through bound.Sigs.CtorSigs.
 			if g.dataClassDecls == nil {
 				g.dataClassDecls = make(map[string]*parser.DataClassDecl)
 			}
 			g.dataClassDecls[decl.Name] = decl
-			g.funcSigs["New"+decl.Name] = fieldDeclsToParams(decl.Params)
 			if g.localDataFields == nil {
 				g.localDataFields = make(map[string][]*parser.FieldDecl)
 			}
@@ -573,25 +588,21 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			g.structs[decl.Name] = decl
 			if decl.IsSealed {
 				// Sealed-parent interface-ness flows through
-				// bound.Sigs.InterfaceNames; variants flow through
-				// bound.Sigs.DataClassNames.
+				// bound.Sigs.InterfaceNames; variants through
+				// bound.Sigs.DataClassNames; variant ctors via
+				// bound.Sigs.CtorSigs.
 				for _, v := range decl.Variants {
 					if g.dataClassDecls == nil {
 						g.dataClassDecls = make(map[string]*parser.DataClassDecl)
 					}
 					g.dataClassDecls[v.Name] = v
-					g.funcSigs["New"+v.Name] = fieldDeclsToParams(v.Params)
 					if g.localDataFields == nil {
 						g.localDataFields = make(map[string][]*parser.FieldDecl)
 					}
 					g.localDataFields[v.Name] = v.Params
 				}
 			}
-			if decl.Ctor != nil {
-				g.funcSigs["New"+decl.Name] = decl.Ctor.Params
-			} else if len(decl.Ctors) > 0 {
-				g.funcSigs["New"+decl.Name] = decl.Ctors[0].Params
-			}
+			// Ctor param info flows through bound.Sigs.CtorSigs.
 			// Class methods and fields — track pub status. Thrower-ness
 			// is purely syntactic now: explicit `error` in the declared
 			// return type. Constructor throwers must use a factory fn
@@ -609,29 +620,12 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// Symbol.IsPub (set by bind for SymConst) is the canonical
 			// pub-status source via isPub() → bound.LookupSymbolByName.
 		case *parser.FnDecl:
-			// Symbol.IsPub flows through bound for SymFn; isPub() reads
-			// it. funcSigs still needed for default-arg ParamDecl access.
-			g.funcSigs[decl.Name] = decl.Params
-			// All return-type info (thrower, optional, formatted Go type
-			// string for inference) flows through bound.Sigs.FnSigs.
-			// inferExprType formats from V2Type with import-registration
-			// suppressed; callReturnLookup / fnReturnsError query the
-			// shape directly.
+			// Symbol.IsPub flows through bound for SymFn (isPub reads it).
+			// ParamDecls, return-type info, thrower flag — all via
+			// bound.Sigs.FnSigs (V2FnSig.ParamDecls, ReturnType).
+			_ = decl
 		}
 	}
-}
-
-// fieldDeclsToParams converts FieldDecl slice to ParamDecl slice for funcSigs.
-func fieldDeclsToParams(fields []*parser.FieldDecl) []*parser.ParamDecl {
-	var params []*parser.ParamDecl
-	for _, f := range fields {
-		params = append(params, &parser.ParamDecl{
-			Name:    f.Name,
-			Type:    f.Type,
-			Default: f.Default,
-		})
-	}
-	return params
 }
 
 // --- Error detection ---------------------------------------------------------
@@ -780,10 +774,6 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 	g.indent = 0
 	g.className = className
 	g.imports = make(map[string]bool)
-	// Preserve funcSigs pre-populated by SetSiblingExports (sibling function awareness).
-	if g.funcSigs == nil {
-		g.funcSigs = make(map[string][]*parser.ParamDecl)
-	}
 	g.varTypes = make(map[string]string)
 	// Preserve structs and pubNames pre-populated by SetSiblingExports
 	// (sibling file awareness). data-class-ness and interface-ness flow

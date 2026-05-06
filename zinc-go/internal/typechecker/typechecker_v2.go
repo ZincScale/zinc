@@ -116,6 +116,14 @@ type V2FnSig struct {
 	// TypeParamBounds (3.6.1): per-param bound list. Each bound is a
 	// type name that the inferred concrete must satisfy.
 	TypeParamBounds map[string][]string
+	// ParamDecls (Phase C): the original ParamDecl pointers backing
+	// this signature. Carried so codegen can read default-value
+	// expressions (`fn foo(x = 1, y = 2)`) and trailing-named-arg
+	// info without keeping a parallel codegen-side funcSigs map.
+	// Populated by MakeFnSigForFn / MakeFnSigForMethod and the
+	// in-checker FnDecl pass; nil for synthesized sigs (e.g. cross-
+	// pkg sibling registrations that only know names + types).
+	ParamDecls []*parser.ParamDecl
 }
 
 // GoFFIResolver provides Go-imported-package type information to the
@@ -262,7 +270,7 @@ func MakeFnSigForMethod(m *parser.MethodDecl) V2FnSig {
 		paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
 		paramNames = append(paramNames, p.Name)
 	}
-	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, ParamDecls: m.Params}
 }
 
 // MakeFnSigForFn builds a V2FnSig from a parser FnDecl. Companion to
@@ -281,7 +289,7 @@ func MakeFnSigForFn(d *parser.FnDecl) V2FnSig {
 		paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
 		paramNames = append(paramNames, p.Name)
 	}
-	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, TypeParams: d.TypeParams}
+	return V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, TypeParams: d.TypeParams, ParamDecls: d.Params}
 }
 
 // CollectedSigs holds both function and method signatures from a file.
@@ -316,6 +324,13 @@ type CollectedSigs struct {
 	// inside ClassNames. Codegen uses this to skip pointer-receiver
 	// detection on parents and to pick correct downcast/upcast shapes.
 	InterfaceNames map[string]bool
+	// CtorSigs (Phase C): constructor signatures keyed by class name.
+	// For data classes the ctor params are the data fields; for
+	// regular classes with `init`/`new` the params are taken from
+	// ClassDecl.Ctor (or Ctors[0] when overloaded). Codegen reads
+	// this to fill default args for `Foo(...)` calls without keeping
+	// a parallel codegen-side map.
+	CtorSigs map[string]V2FnSig
 }
 
 func CollectSignatures(prog *parser.Program) CollectedSigs {
@@ -334,6 +349,31 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 	dataClassNames := make(map[string]bool)
 	interfaceNames := make(map[string]bool)
 	memberIsPub := make(map[string]bool)
+	ctorSigs := make(map[string]V2FnSig)
+	mkCtorSig := func(params []*parser.FieldDecl) V2FnSig {
+		paramDecls := make([]*parser.ParamDecl, 0, len(params))
+		paramTypes := make([]V2Type, 0, len(params))
+		paramNames := make([]string, 0, len(params))
+		for _, f := range params {
+			paramDecls = append(paramDecls, &parser.ParamDecl{
+				Name:    f.Name,
+				Type:    f.Type,
+				Default: f.Default,
+			})
+			paramTypes = append(paramTypes, c.resolveTypeExpr(f.Type))
+			paramNames = append(paramNames, f.Name)
+		}
+		return V2FnSig{Params: paramTypes, ParamNames: paramNames, ParamDecls: paramDecls}
+	}
+	mkCtorSigFromParams := func(params []*parser.ParamDecl) V2FnSig {
+		paramTypes := make([]V2Type, 0, len(params))
+		paramNames := make([]string, 0, len(params))
+		for _, p := range params {
+			paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
+			paramNames = append(paramNames, p.Name)
+		}
+		return V2FnSig{Params: paramTypes, ParamNames: paramNames, ParamDecls: params}
+	}
 	for _, d := range prog.Decls {
 		switch dd := d.(type) {
 		case *parser.ClassDecl:
@@ -349,10 +389,16 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 			for _, f := range dd.Fields {
 				memberIsPub[dd.Name+"."+f.Name] = f.IsPub
 			}
+			if dd.Ctor != nil {
+				ctorSigs[dd.Name] = mkCtorSigFromParams(dd.Ctor.Params)
+			} else if len(dd.Ctors) > 0 {
+				ctorSigs[dd.Name] = mkCtorSigFromParams(dd.Ctors[0].Params)
+			}
 			// Sealed variants — data classes nested in the parent.
 			for _, v := range dd.Variants {
 				classNames[v.Name] = true
 				dataClassNames[v.Name] = true
+				ctorSigs[v.Name] = mkCtorSig(v.Params)
 				for _, f := range v.Params {
 					memberIsPub[v.Name+"."+f.Name] = f.IsPub
 				}
@@ -360,6 +406,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		case *parser.DataClassDecl:
 			classNames[dd.Name] = true
 			dataClassNames[dd.Name] = true
+			ctorSigs[dd.Name] = mkCtorSig(dd.Params)
 			for _, m := range dd.Methods {
 				memberIsPub[dd.Name+"."+m.Name] = m.IsPub
 			}
@@ -385,6 +432,7 @@ func CollectSignatures(prog *parser.Program) CollectedSigs {
 		MemberIsPub:    memberIsPub,
 		DataClassNames: dataClassNames,
 		InterfaceNames: interfaceNames,
+		CtorSigs:       ctorSigs,
 	}
 }
 
@@ -432,6 +480,7 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 			Variadic:        variadic,
 			TypeParams:      d.TypeParams,
 			TypeParamBounds: boundsByName,
+			ParamDecls:      d.Params,
 		}
 	case *parser.ClassDecl:
 		c.scope.set(d.Name, V2Type{Name: d.Name})
@@ -472,7 +521,7 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 					paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
 					paramNames = append(paramNames, p.Name)
 				}
-				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, ParamDecls: m.Params}
 			}
 			c.methodSigs[d.Name] = methods
 		}
@@ -527,7 +576,7 @@ func (c *V2Checker) registerDecl(d parser.TopLevelDecl) {
 					paramTypes = append(paramTypes, c.resolveTypeExpr(p.Type))
 					paramNames = append(paramNames, p.Name)
 				}
-				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType}
+				methods[m.Name] = V2FnSig{Params: paramTypes, ParamNames: paramNames, ReturnType: retType, ParamDecls: m.Params}
 			}
 			c.methodSigs[d.Name] = methods
 		}
