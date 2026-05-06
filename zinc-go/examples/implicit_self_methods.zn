@@ -1,0 +1,48 @@
+// Implicit-self for class members: bare `member` and `this.member`
+// resolve uniformly through the unified resolver. Pre-fix:
+//   - bare `method` ref (passing as a value) didn't get implicit-self
+//     and emitted a Go ident the receiver couldn't see;
+//   - `this.method` blindly capitalized the method name in Go output,
+//     ignoring the field's pub flag — private methods (lowercase Go
+//     name) became unreachable;
+//   - `field = T{...}` (bare-Ident LHS) skipped the auto-pointerize
+//     check for auto-pointerized field types.
+
+class Counter {
+    int value
+
+    init() {
+        // Bare-ident LHS — assigning to a current-class field through
+        // implicit-self. Both var-decl-default and explicit init reach
+        // the same resolver now.
+        value = 1
+    }
+
+    int privateAdd(int n) {
+        return value + n
+    }
+
+    pub int doublePrivate(int n) {
+        // Bare method ref — implicit-self should resolve.
+        return privateAdd(n) * 2
+    }
+
+    pub int doublePrivateExplicit(int n) {
+        // Explicit `this.privateAdd(...)` — must NOT capitalize
+        // `privateAdd` since it's private (lowercase Go name).
+        return this.privateAdd(n) * 2
+    }
+
+    pub int applyTwice(Fn<(int), int> fn, int x) {
+        return fn(fn(x))
+    }
+}
+
+void main() {
+    var c = Counter()
+    print("doublePrivate(3) = ${c.doublePrivate(3)}")          // 6
+    print("doublePrivateExplicit(5) = ${c.doublePrivateExplicit(5)}")  // 10
+    // Method as value via implicit-self — `privateAdd` (bare) inside
+    // a method body resolves as `this.privateAdd`.
+    print("applyTwice = ${c.applyTwice(c.privateAdd, 10)}")    // 20
+}

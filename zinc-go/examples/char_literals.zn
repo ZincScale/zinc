@@ -1,0 +1,23 @@
+// Char-literal conversions: int/byte/rune of a single-rune string
+// literal emit a Go rune-literal conversion (int('[') → 91) instead
+// of strconv.Atoi("[") which would fail at runtime.
+//
+// Also covers single-quoted '\r' and '\"' escapes — pre-fix the
+// literal-string lexer didn't process those, so '\r' was 2 chars
+// (backslash, r) and the rune-conversion bailed out.
+
+void main() {
+    print("lbracket: ${int('[')}")     // 91
+    print("lbrace: ${int('{')}")       // 123
+    print("a: ${int('a')}")            // 97
+
+    print("space: ${int(byte(' '))}")  // 32
+    print("tab: ${int(byte('\t'))}")   // 9
+    print("nl: ${int(byte('\n'))}")    // 10
+    print("cr: ${int(byte('\r'))}")    // 13
+
+    // \" escape inside a single-quoted string — pre-fix this was 2
+    // chars (backslash, ").
+    var q = '\"'
+    print("dquote-len: ${len(q)}")     // 1
+}

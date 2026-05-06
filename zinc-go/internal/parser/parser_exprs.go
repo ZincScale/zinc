@@ -392,15 +392,16 @@ func (p *Parser) v2ParsePostfixFrom(expr Expr) Expr {
 				return expr
 			}
 		case p.check(lexer.TOKEN_LBRACE):
-			// Struct literal: TypeName{Field: value, ...}. Only triggers
-			// when the prefix is an Ident or SelectorExpr (i.e. a type
-			// reference like `http.Client`) AND the brace contents look
-			// like `IDENT COLON ...` or are empty. This avoids consuming
-			// statement-block braces (whose first token is a keyword like
-			// `var`/`if`) or map literals (string-keyed).
+			// Struct literal: TypeName{Field: value, ...}. Triggers
+			// when the prefix is a SelectorExpr (qualified type, can't
+			// be a match pattern) OR a bare Ident with `IDENT COLON`
+			// brace contents (distinguishes from `case BARE {}` match
+			// patterns where the body is an empty block).
 			_, isIdent := expr.(*Ident)
 			_, isSel := expr.(*SelectorExpr)
-			if (isIdent || isSel) && p.looksLikeStructLit() {
+			if isSel && p.looksLikeStructLitSelector() {
+				expr = p.parseStructLitBody(expr)
+			} else if isIdent && p.looksLikeStructLit() {
 				expr = p.parseStructLitBody(expr)
 			} else {
 				return expr

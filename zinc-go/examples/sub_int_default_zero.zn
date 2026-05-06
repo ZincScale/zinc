@@ -1,0 +1,23 @@
+// default(byte) and other sub-int integer types now emit a typed zero
+// (`byte(0)`, `int32(0)`, ...) instead of bare `0`. Without this,
+// `var x = default(byte)` lands as Go's untyped-int default which
+// inferred `int` and broke later byte-typed assignments.
+
+void main() {
+    var b = default(byte)
+    var data = "hello".toBytes()
+    // The assignment compiles iff `b` is byte-typed, not int-typed.
+    for (x in data) {
+        if (x != b) {
+            b = x
+            break
+        }
+    }
+    print("first non-zero: ${int(b)}")  // 104 ('h')
+
+    var r = default(rune)
+    print("rune zero: ${int(r)}")  // 0
+
+    var i32 = default(int32)
+    print("int32 zero: ${int(i32)}")  // 0
+}

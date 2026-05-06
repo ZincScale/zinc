@@ -1,0 +1,31 @@
+// Auto-address-take into auto-pointerized class fields. Class fields
+// typed as Go-stdlib structs with pointer-receiver methods (sync.Mutex,
+// http.Client, bytes.Buffer, ...) lower to *T in Go. Assigning a
+// value-form struct literal `this.X = T{...}` would otherwise fail
+// with "cannot use T value as *T value" — the fix prepends `&` at
+// codegen, both in init-body folding and in regular method bodies.
+
+import bytes
+
+class Holder {
+    bytes.Buffer buf
+
+    init() {
+        this.buf = bytes.Buffer{}
+    }
+
+    pub void writeIn(String s) {
+        this.buf = bytes.Buffer{}
+        this.buf.WriteString(s)
+    }
+
+    pub String contents() {
+        return this.buf.String()
+    }
+}
+
+void main() {
+    var h = Holder()
+    h.writeIn("hello")
+    print("contents: ${h.contents()}")
+}

@@ -1,0 +1,4 @@
+doublePrivate(3) = 8
+doublePrivateExplicit(5) = 12
+applyTwice = 12
+

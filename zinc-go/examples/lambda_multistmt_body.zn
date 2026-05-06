@@ -1,0 +1,27 @@
+// Multi-statement lambda body — block-form lambdas now go through
+// emitBlock so every stmt kind (var, for, while, with, match, ...)
+// emits correctly. Pre-fix only var/assign/return/expr/if statements
+// survived; everything else lowered to a "/* inline stmt */" comment
+// that silently dropped the work.
+
+void apply(Fn<()> fn) {
+    fn()
+}
+
+void main() {
+    var total = 0
+
+    // for-loop and while-loop inside a lambda body — both were
+    // dropped by the pre-fix formatStmtInline path.
+    apply(() -> {
+        for (i in 0..3) {
+            total = total + i
+        }
+        var i = 0
+        while (i < 2) {
+            total = total + 100
+            i = i + 1
+        }
+    })
+    print("total: ${total}") // 0+1+2 = 3, +200 = 203
+}

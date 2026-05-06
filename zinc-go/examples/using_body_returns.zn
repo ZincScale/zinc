@@ -1,0 +1,45 @@
+// `using (...) { body }` body-scoped Close even when the body
+// contains user `return X, Y` statements. Pre-fix using-bodies with
+// returns fell back to function-scoped defer, so Close fired AFTER
+// any subsequent statement — broke patterns like Encoder + Close +
+// buf.Bytes() where Close has to flush before reading the buffer.
+//
+// New codegen wraps the using-body in an IIFE that captures user
+// returns via outer-scope flag/value slots, runs deferred Close at
+// IIFE exit, then re-propagates the captured return.
+
+class Resource {
+    pub String name
+    init(String n) { this.name = n }
+    pub void Close() { print("close ${name}") }
+}
+
+(int, error) okFlow() {
+    using (var r = Resource("ok")) {
+        var x = 1 + 1
+        // Important: Close must run BEFORE this return is observed
+        // by the caller. Pre-fix the deferred Close fired at
+        // outer-function exit, AFTER caller observed the return.
+        return x, null
+    }
+    return 0, null
+}
+
+(int, error) earlyReturnFlow(bool fail) {
+    using (var r = Resource("early")) {
+        if (fail) {
+            return -1, null
+        }
+        return 7, null
+    }
+    return 0, null
+}
+
+void main() {
+    var v, _ = okFlow()
+    print("ok value: ${v}")
+    var ev, _ = earlyReturnFlow(true)
+    print("early value: ${ev}")
+    var lv, _ = earlyReturnFlow(false)
+    print("late value: ${lv}")
+}

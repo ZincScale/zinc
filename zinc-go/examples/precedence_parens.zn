@@ -1,0 +1,23 @@
+// Precedence-paren preservation in arithmetic BinaryExpr emission.
+// Pre-fix the default arm of formatBinaryExpr emitted `left op right`
+// directly, with no precedence-driven wrapping around child binary
+// expressions. So `x * (a - b)` emitted as `x*a - b`, which Go then
+// evaluated under its own precedence rules — silently miscompiling
+// every `*`/`/`/`%` over a parenthesized `+`/`-`.
+
+void main() {
+    var price = 9.99
+    var pct = 0.2
+
+    // The fix: parens around `(1.0 - pct)` survive into the Go output.
+    var discounted = price * (1.0 - pct)
+    print("discount: ${discounted}")  // 9.99 * 0.8 = 7.992
+
+    // % over (a + b) — same class.
+    var remainder = 100 % (3 + 4)
+    print("remainder: ${remainder}")  // 100 % 7 = 2
+
+    // Nested: ((a - b) * c) + d. Three levels of parens.
+    var nested = ((10 - 2) * 3) + 1
+    print("nested: ${nested}")  // 25
+}

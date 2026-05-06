@@ -287,19 +287,31 @@ func (p *Parser) looksLikeTypeArgs() bool {
 }
 
 // looksLikeStructLit returns true if the current `{` opens a struct
-// literal — i.e. `{IDENT COLON ...}`. Used by the postfix loop to
-// disambiguate `T{Field: v}` from a following block statement or a map
-// literal (which is string-keyed, not ident-keyed). Caller must be
-// positioned on the `{`.
-//
-// Empty struct literals `T{}` are deliberately NOT recognized here:
-// they collide with match-case body openers like `case DRAINING {}`,
-// where DRAINING is a bare Ident pattern followed by an empty body.
-// For that use the explicit `default(T)` form which lowers to T's zero
-// value.
+// literal whose prefix is a bare Ident — i.e. `{IDENT COLON ...}`.
+// Empty `T{}` is deliberately NOT recognized for bare-Ident prefixes
+// because it collides with match-case body openers (`case DRAINING {}`,
+// where DRAINING is a bare Ident pattern followed by an empty body).
+// Use `default(T)` for zero-valued construction.
 func (p *Parser) looksLikeStructLit() bool {
 	if p.peek().Type != lexer.TOKEN_LBRACE {
 		return false
+	}
+	return p.peekAt(1).Type == lexer.TOKEN_IDENT &&
+		p.peekAt(2).Type == lexer.TOKEN_COLON
+}
+
+// looksLikeStructLitSelector is the SelectorExpr-prefix variant. Since
+// match-case patterns are bare Idents (or qualified-enum like Color.Red,
+// which doesn't form a brace block at the same syntactic position), a
+// SelectorExpr prefix can never be a pattern. So empty `pkg.T{}` is
+// safe — and useful, since Go-stdlib struct types are commonly
+// constructed empty-then-mutated.
+func (p *Parser) looksLikeStructLitSelector() bool {
+	if p.peek().Type != lexer.TOKEN_LBRACE {
+		return false
+	}
+	if p.peekAt(1).Type == lexer.TOKEN_RBRACE {
+		return true // empty struct literal
 	}
 	return p.peekAt(1).Type == lexer.TOKEN_IDENT &&
 		p.peekAt(2).Type == lexer.TOKEN_COLON

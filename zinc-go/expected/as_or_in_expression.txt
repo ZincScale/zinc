@@ -1,0 +1,5 @@
+string-cast: hello
+wrong-cast: fallback
+int-cast: 42
+wrong-int-cast: -1
+sum: 47

@@ -1,0 +1,15 @@
+// `T{Field: value}` typed-struct literal with named field initializers.
+// Pre-fix the brace contents parsed as a MapLit of type
+// map[interface{}]interface{} and failed to compile against the type's
+// field set. The new StructLit AST node fires when the postfix `{`
+// after an Ident or SelectorExpr looks like `IDENT COLON ...`.
+
+import net/url
+
+void main() {
+    var u = url.URL{Scheme: "https", Host: "example.com", Path: "/foo"}
+    print("scheme: ${u.Scheme}")
+    print("host: ${u.Host}")
+    print("path: ${u.Path}")
+    print("string: ${u.String()}")
+}

@@ -1,0 +1,8 @@
+lbracket: 91
+lbrace: 123
+a: 97
+space: 32
+tab: 9
+nl: 10
+cr: 13
+dquote-len: 1
