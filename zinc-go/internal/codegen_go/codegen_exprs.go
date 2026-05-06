@@ -97,16 +97,13 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 				return g.exportIfSubpackage(expr.Name)
 			}
 		}
-		// Unqualified import: bare name like EQ → router.EQ, formatItem → lib.FormatItem
+		// Unqualified import: bare name like EQ → router.EQ, formatItem → lib.FormatItem.
+		// Collisions across imports surface as typechecker errors via
+		// resolveIdent's reportCollision — the codegen no longer
+		// emits a duplicate "ambiguous bare name" error here.
 		if !g.isLocalVar(expr.Name) {
 			if resolved, ok := g.resolveUnqualifiedExpr(expr.Name); ok {
 				return resolved
-			}
-			// Collision: name was excluded from unqualifiedNames because two
-			// or more imports export it. Surface a Zinc-level error rather
-			// than letting Go's compiler emit `undefined: X`.
-			if pkgs, ok := g.unqualifiedCollisions[expr.Name]; ok {
-				g.reportCollision(0, expr.Name, pkgs)
 			}
 		}
 		return expr.Name

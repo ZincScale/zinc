@@ -139,6 +139,12 @@ type GoFFIResolver interface {
 	// `methodName` on the Go-resolved receiver type. nil when the method
 	// doesn't exist on either the value or *value method-set.
 	MethodReturnTypeAt(recv types.Type, methodName string, idx int) types.Type
+	// ListExports enumerates a Go package's exported names + kinds
+	// (e.g. "ResponseWriter" → "interface", "Request" → "class",
+	// "Fprintf" → "func"). Used to populate BindContext.GoPkgExports
+	// so cross-pkg unqualified imports of Go names resolve through
+	// bound at the same level as zinc-subpkg imports.
+	ListExports(pkgPath string) map[string]string
 }
 
 // V2Checker performs type checking on a v2 AST.

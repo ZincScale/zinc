@@ -141,38 +141,56 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 		}
 	}
 
-	// Build the bind context: same-package siblings + cross-package imports.
-	bindCtx := typechecker.CollectBindContext(merged)
+	// Build the package-level bind context: same-package siblings +
+	// cross-package zinc/Go exports. ImportAliases is left empty here
+	// — it's per-file and gets cloned + populated from each prog's
+	// own Imports below.
+	pkgBindCtx := typechecker.CollectBindContext(merged)
 	if crossPkgExports != nil {
 		for alias, exports := range crossPkgExports {
-			bindCtx.ZincSubpkgExports[alias] = exports
+			pkgBindCtx.ZincSubpkgExports[alias] = exports
 		}
 	}
+	// Populate GoPkgExports so cross-pkg unqualified imports of Go
+	// names (`net/http.ResponseWriter`, `time.Duration`, etc.) resolve
+	// through the typechecker's UnqualifiedImports table at the same
+	// level as zinc-subpkg imports. Skips importMap entries that
+	// resolve to zinc subpackages (those go through ZincSubpkgExports
+	// already, fed from crossPkgExports above).
+	if ffi != nil && importMap != nil {
+		for alias, goPath := range importMap {
+			if _, isZinc := pkgBindCtx.ZincSubpkgExports[alias]; isZinc {
+				continue
+			}
+			exports := ffi.ListExports(goPath)
+			if len(exports) == 0 {
+				continue
+			}
+			pkgBindCtx.GoPkgExports[alias] = exports
+		}
+	}
+
+	bps := make(map[*parser.Program]*typechecker.BoundProgram)
+	var allErrors []typechecker.V2Error
 	for _, prog := range progs {
-		// Each file's own ImportAliases set: aliases used in `import alias`
-		// declarations. We mark every imported alias as "in use" so the
-		// bind resolver considers cross-pkg matches under that alias.
+		// Per-file ImportAliases: only the aliases this file actually
+		// imports. resolveIdent's collision detection at step 5+6 must
+		// match what's lexically visible in THIS file; a sibling file
+		// importing hambaAvro doesn't make hambaAvro names ambiguous
+		// in a file that only imports core.
+		fileBindCtx := *pkgBindCtx
+		fileBindCtx.ImportAliases = make(map[string]bool)
 		for _, imp := range prog.Imports {
 			alias := imp.Alias
 			if alias == "" {
-				// Last segment of the import path is the implicit alias.
 				parts := strings.Split(imp.Path, "/")
 				alias = parts[len(parts)-1]
 				parts = strings.Split(alias, ".")
 				alias = parts[len(parts)-1]
 			}
-			bindCtx.ImportAliases[alias] = true
+			fileBindCtx.ImportAliases[alias] = true
 		}
-	}
-	// Phase 3.3 stub: GoPkgExports left empty. Go-imported package symbols
-	// (hambaAvro.Schema, etc.) aren't yet introspected at the bind layer.
-	// Phase 3.5 wires this through `goResolver`.
-	_ = importMap
-
-	bps := make(map[*parser.Program]*typechecker.BoundProgram)
-	var allErrors []typechecker.V2Error
-	for _, prog := range progs {
-		bp, bindErrs := typechecker.Bind(prog, bindCtx)
+		bp, bindErrs := typechecker.Bind(prog, &fileBindCtx)
 		// Attach the package-level CollectedSigs aggregate. Every program
 		// in the same package shares the same pointer — externalSigs is
 		// already cross-file (and cross-pkg via the additions above), so

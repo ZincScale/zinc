@@ -447,10 +447,8 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 					useExplicitType = true
 				}
 				// Check unqualified names for cross-package interfaces
-				if entry, ok := g.unqualifiedNames[st.Name]; ok {
-					if entry.kind == "interface" {
-						useExplicitType = true
-					}
+				if _, kind, ok := g.lookupUnqualified(st.Name); ok && kind == "interface" {
+					useExplicitType = true
 				}
 			}
 		}
@@ -1264,23 +1262,23 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 					}
 				}
 				if !handled {
-					if entry, ok := g.unqualifiedNames[ident.Name]; ok {
-						typeName = entry.pkg + "." + exportName(ident.Name)
-						if entry.kind == "class" || entry.kind == "interface" {
+					if pkg, kind, ok := g.lookupUnqualified(ident.Name); ok {
+						typeName = pkg + "." + exportName(ident.Name)
+						if kind == "class" || kind == "interface" {
 							typeName = "*" + typeName
 						}
-						isDataClass = entry.kind == "data"
+						isDataClass = kind == "data"
 					} else if _, ok := g.structs[ident.Name]; ok {
 						typeName = "*" + exportName(ident.Name)
 					}
 				}
-			} else if entry, ok := g.unqualifiedNames[ident.Name]; ok {
+			} else if pkg, kind, ok := g.lookupUnqualified(ident.Name); ok {
 				// Cross-package: resolve to Go-qualified form
-				typeName = entry.pkg + "." + exportName(ident.Name)
-				if entry.kind == "class" || entry.kind == "interface" {
+				typeName = pkg + "." + exportName(ident.Name)
+				if kind == "class" || kind == "interface" {
 					typeName = "*" + typeName
 				}
-				isDataClass = entry.kind == "data"
+				isDataClass = kind == "data"
 			} else if _, ok := g.structs[ident.Name]; ok {
 				// Local class
 				typeName = "*" + exportName(ident.Name)
@@ -1337,8 +1335,8 @@ func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 					}
 				}
 				if fieldParams == nil {
-					if entry, ok := g.unqualifiedNames[callerIdent.Name]; ok {
-						if pkgFields, ok := g.subpkgDataFields[entry.pkg]; ok {
+					if pkg, _, ok := g.lookupUnqualified(callerIdent.Name); ok {
+						if pkgFields, ok := g.subpkgDataFields[pkg]; ok {
 							fieldParams = pkgFields[callerIdent.Name]
 						}
 					}
@@ -1642,8 +1640,8 @@ func (g *Generator) isClassType(name string) bool {
 	if g.isDataClass(name) {
 		return true
 	}
-	if entry, ok := g.unqualifiedNames[name]; ok {
-		return entry.kind == "class" || entry.kind == "data"
+	if _, kind, ok := g.lookupUnqualified(name); ok {
+		return kind == "class" || kind == "data"
 	}
 	// Qualified cross-package names like `core.Schema` — split on the
 	// dot and consult subpkgStructs by package.
@@ -1805,9 +1803,9 @@ func (g *Generator) callReturnsError(expr parser.Expr) bool {
 				}
 			}
 		}
-		if entry, ok := g.unqualifiedNames[callee.Name]; ok && entry.kind == "func" {
-			if pkgPath, ok := g.importMap[entry.pkg]; ok {
-				if g.goResolver.ReturnsError(pkgPath, entry.name) {
+		if pkg, kind, ok := g.lookupUnqualified(callee.Name); ok && kind == "func" {
+			if pkgPath, ok := g.importMap[pkg]; ok {
+				if g.goResolver.ReturnsError(pkgPath, callee.Name) {
 					return true
 				}
 			}
@@ -2031,9 +2029,9 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 				}
 			}
 		}
-		if entry, ok := g.unqualifiedNames[ident.Name]; ok && entry.kind == "func" {
-			if pkgPath, ok := g.importMap[entry.pkg]; ok {
-				return g.goResolver.ReturnsErrorOnly(pkgPath, entry.name)
+		if pkg, kind, ok := g.lookupUnqualified(ident.Name); ok && kind == "func" {
+			if pkgPath, ok := g.importMap[pkg]; ok {
+				return g.goResolver.ReturnsErrorOnly(pkgPath, ident.Name)
 			}
 		}
 		// Fn-typed local: a bare-`error` slot like `Fn<(...), error>`

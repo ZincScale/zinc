@@ -182,6 +182,20 @@ type BoundProgram struct {
 	// commit. Populated during Bind from TypeAliasDecl nodes; map is
 	// nil when the file has no type aliases.
 	TypeAliases map[string]parser.TypeExpr
+	// UnqualifiedImports (Phase C): up-front table of cross-package
+	// unqualified-import resolutions for THIS program. Built by
+	// computeUnqualifiedImports during Bind from BindContext —
+	// (ImportAliases ∩ ZincSubpkgExports/GoPkgExports), filtered for
+	// collisions, with same-package decls excluded. Replaces the
+	// codegen-side g.unqualifiedNames table.
+	//
+	// Why this lives on BoundProgram and not in resolveIdent's per-
+	// Ident bindings: type-position names (`Item process(Item item)`
+	// where Item is a class from another package) are SimpleType.Name
+	// strings, not *parser.Ident, so resolveIdent never sees them.
+	// Codegen needs a name-keyed lookup that doesn't depend on a
+	// referencing Ident existing.
+	UnqualifiedImports map[string]Symbol
 }
 
 // LookupSymbolByName scans Bindings for any Ident with the given name and
@@ -225,6 +239,20 @@ func (bp *BoundProgram) HasSymbolKind(name string, kinds ...SymbolKind) bool {
 		}
 	}
 	return false
+}
+
+// LookupUnqualifiedImport returns the cross-package unqualified-import
+// resolution for `name` (Symbol with Pkg = source-package alias and
+// Kind = export kind). Backed by the up-front UnqualifiedImports table
+// computed once during Bind from BindContext (covers every export of
+// every imported package, including names that have no Ident reference
+// in this file). Returns (Symbol{}, false) when `name` isn't an
+// unqualified cross-pkg name in this program. Pre-condition: bp != nil.
+func (bp *BoundProgram) LookupUnqualifiedImport(name string) (Symbol, bool) {
+	if sym, ok := bp.UnqualifiedImports[name]; ok {
+		return sym, true
+	}
+	return Symbol{}, false
 }
 
 // LookupSymbolByNameAndKind scans Bindings for any Ident with the given
@@ -557,10 +585,126 @@ func Bind(prog *parser.Program, ctx *BindContext) (*BoundProgram, []V2Error) {
 	}
 
 	return &BoundProgram{
-		Prog:        prog,
-		Bindings:    b.bindings,
-		TypeAliases: typeAliases,
+		Prog:               prog,
+		Bindings:           b.bindings,
+		TypeAliases:        typeAliases,
+		UnqualifiedImports: computeUnqualifiedImports(b, ctx, prog),
 	}, b.errors
+}
+
+// computeUnqualifiedImports builds the up-front cross-pkg unqualified-
+// import table for a program. Same logic as resolveIdent step 5+6 but
+// applied to every export of every imported package, not just to the
+// names that appear as Idents in the file.
+//
+// Returns name → Symbol where Symbol.Pkg is the import alias and
+// Symbol.Kind is the export kind. Excludes:
+//   - same-package decls (would collide with own-file resolution)
+//   - Go builtins (never shadowable)
+//   - cross-pkg collisions (same name from multiple imported packages)
+func computeUnqualifiedImports(b *binder, ctx *BindContext, prog *parser.Program) map[string]Symbol {
+	if ctx == nil {
+		return nil
+	}
+	// First pass: count how many imported packages export each name.
+	counts := make(map[string]int)
+	for alias, exports := range ctx.ZincSubpkgExports {
+		if !ctx.ImportAliases[alias] {
+			continue
+		}
+		for name := range exports {
+			counts[name]++
+		}
+	}
+	for alias, exports := range ctx.GoPkgExports {
+		if !ctx.ImportAliases[alias] {
+			continue
+		}
+		for name := range exports {
+			counts[name]++
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	// Same-package siblings shadow imports. Collect their names.
+	siblingNames := map[string]bool{}
+	for n := range ctx.SiblingFns {
+		siblingNames[n] = true
+	}
+	for n := range ctx.SiblingTypes {
+		siblingNames[n] = true
+	}
+	for n := range ctx.SiblingConsts {
+		siblingNames[n] = true
+	}
+	for n := range ctx.SiblingEnumVariants {
+		siblingNames[n] = true
+	}
+	for _, d := range prog.Decls {
+		switch dd := d.(type) {
+		case *parser.FnDecl:
+			siblingNames[dd.Name] = true
+		case *parser.ClassDecl:
+			siblingNames[dd.Name] = true
+			for _, v := range dd.Variants {
+				siblingNames[v.Name] = true
+			}
+		case *parser.DataClassDecl:
+			siblingNames[dd.Name] = true
+		case *parser.InterfaceDecl:
+			siblingNames[dd.Name] = true
+		case *parser.EnumDecl:
+			siblingNames[dd.Name] = true
+			for _, v := range dd.Variants {
+				siblingNames[v] = true
+			}
+		case *parser.ConstDecl:
+			siblingNames[dd.Name] = true
+		case *parser.TypeAliasDecl:
+			siblingNames[dd.Name] = true
+		}
+	}
+	out := make(map[string]Symbol)
+	for alias, exports := range ctx.ZincSubpkgExports {
+		if !ctx.ImportAliases[alias] {
+			continue
+		}
+		for name, kind := range exports {
+			if counts[name] > 1 {
+				continue // collision
+			}
+			if siblingNames[name] {
+				continue // shadowed by same-pkg
+			}
+			if goBuiltinNames[name] {
+				continue
+			}
+			out[name] = Symbol{Kind: kindFromExport(kind), Name: name, Pkg: alias}
+		}
+	}
+	for alias, exports := range ctx.GoPkgExports {
+		if !ctx.ImportAliases[alias] {
+			continue
+		}
+		for name, kind := range exports {
+			if counts[name] > 1 {
+				continue
+			}
+			if siblingNames[name] {
+				continue
+			}
+			if goBuiltinNames[name] {
+				continue
+			}
+			out[name] = Symbol{Kind: kindFromExport(kind), Name: name, Pkg: alias}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	_ = b // reserved for future error reporting via b
+	return out
 }
 
 // collectFileTopLevel adds this file's top-level decls to the file scope.

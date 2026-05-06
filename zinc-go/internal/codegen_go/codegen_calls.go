@@ -779,18 +779,18 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				}
 			}
 		}
-		if entry, ok := g.unqualifiedNames[ident.Name]; ok {
-			goPath := g.importMap[entry.pkg]
+		if pkg, kind, ok := g.lookupUnqualified(ident.Name); ok {
+			goPath := g.importMap[pkg]
 			if goPath != "" {
 				g.needImport(goPath)
 			}
-			goAlias := g.goAliasFor(entry.pkg, goPath)
-			switch entry.kind {
+			goAlias := g.goAliasFor(pkg, goPath)
+			switch kind {
 			case "data", "class":
-				ctorName := goAlias + ".New" + exportName(entry.name) + goTypeArgStr
+				ctorName := goAlias + ".New" + exportName(ident.Name) + goTypeArgStr
 				return fmt.Sprintf("%s(%s)", ctorName, args)
 			case "func":
-				return fmt.Sprintf("%s.%s%s(%s)", goAlias, exportName(entry.name), goTypeArgStr, args)
+				return fmt.Sprintf("%s.%s%s(%s)", goAlias, exportName(ident.Name), goTypeArgStr, args)
 			}
 		}
 	}

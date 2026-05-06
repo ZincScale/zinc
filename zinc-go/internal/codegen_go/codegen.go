@@ -107,13 +107,6 @@ type Generator struct {
 	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
 	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
 
-	// Unqualified import resolution: bare name → package + kind
-	// Built from subpkgExports after import processing. Allows writing
-	// Processor instead of lib.Processor when import lib is declared.
-	unqualifiedNames      map[string]unqualifiedEntry
-	unqualifiedCollisions map[string][]string // name → list of packages that export it
-	collisionsReported    map[string]bool     // dedup key "line:name" for collision errors
-
 	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
 	// Checked by the caller after GenerateFiles returns.
 	compileErrors   []string
@@ -460,6 +453,51 @@ func (g *Generator) lookupCallableParams(name string) ([]*parser.ParamDecl, bool
 		}
 	}
 	return nil, false
+}
+
+// lookupUnqualified returns the (pkg, kind) for an unqualified
+// cross-package name. Backed by bound.LookupUnqualifiedImport —
+// resolveIdent populates Symbol.Pkg + Kind for every unambiguous
+// unqualified cross-pkg reference at bind step 5+6, so this is the
+// single typechecker-canonical answer.
+//
+// `kind` is the legacy decl-kind string the codegen branches on:
+// "data", "class", "interface", "enum", "func", "const", "type",
+// "enum_variant", "sealed_variant".
+func (g *Generator) lookupUnqualified(name string) (pkg, kind string, ok bool) {
+	if g.bound != nil {
+		if sym, found := g.bound.LookupUnqualifiedImport(name); found {
+			return sym.Pkg, kindStringForSymbol(sym.Kind), true
+		}
+	}
+	return "", "", false
+}
+
+// kindStringForSymbol maps the typechecker SymbolKind back to the
+// legacy decl-kind string the codegen branches on. Inverse of
+// typechecker.kindFromExport — keeps the two in sync.
+func kindStringForSymbol(k typechecker.SymbolKind) string {
+	switch k {
+	case typechecker.SymFn:
+		return "func"
+	case typechecker.SymDataClass:
+		return "data"
+	case typechecker.SymClass:
+		return "class"
+	case typechecker.SymInterface:
+		return "interface"
+	case typechecker.SymEnum:
+		return "enum"
+	case typechecker.SymTypeAlias:
+		return "type"
+	case typechecker.SymConst:
+		return "const"
+	case typechecker.SymEnumVariant:
+		return "enum_variant"
+	case typechecker.SymSealedVariant:
+		return "sealed_variant"
+	}
+	return ""
 }
 
 // isEnum reports whether `name` was declared as an `enum`. Backed by
@@ -824,9 +862,11 @@ func (g *Generator) Generate(prog *parser.Program, className string) string {
 		}
 	}
 
-	// Build unqualified name resolution from subpackage exports.
-	// Allows writing Processor instead of lib.Processor.
-	g.buildUnqualifiedNames(prog)
+	// Unqualified name resolution flows through bound.UnqualifiedImports —
+	// computed once during typechecker Bind from per-file ImportAliases ∩
+	// (ZincSubpkgExports / GoPkgExports). The codegen-side parallel
+	// table (g.unqualifiedNames) is gone; lookupUnqualified reads from
+	// bound directly.
 
 	// Shadow pre-scan: find all top-level var names + nested var names
 	// inside function/method bodies. Any name matching an imported
