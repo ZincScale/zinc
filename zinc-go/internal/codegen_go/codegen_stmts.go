@@ -77,6 +77,17 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		} else if call, ok := cond.(*parser.CallExpr); ok && g.callReturnsError(call) && !g.callIsVoidThrower(call) {
 			cond = g.hoistArg(cond)
 		}
+		// Loop-label gating mirrors emitForStmt's: emit a label only
+		// when the body contains a match with a break/continue, so the
+		// inner match's switch doesn't swallow the user's break.
+		prevLabel := g.loopBreakLabel
+		if blockHasMatchWithBreak(stmt.Body) {
+			g.loopBreakCounter++
+			g.loopBreakLabel = fmt.Sprintf("_loop%d", g.loopBreakCounter)
+			g.writeln("%s:", g.loopBreakLabel)
+		} else {
+			g.loopBreakLabel = ""
+		}
 		// `while (true) { ... }` lowers to Go's idiomatic infinite-loop
 		// form `for { ... }` rather than `for true { ... }`. Both compile,
 		// but bare `for {}` is what a Go dev would write.
@@ -89,6 +100,7 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 		g.emitBlock(stmt.Body)
 		g.indent--
 		g.writeln("}")
+		g.loopBreakLabel = prevLabel
 	case *parser.MatchStmt:
 		g.emitMatchStmt(stmt)
 	case *parser.ExprStmt:
@@ -107,9 +119,22 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 			g.writeln("fmt.Println(%s)", g.formatExpr(stmt.Value))
 		}
 	case *parser.BreakStmt:
-		g.writeln("break")
+		// Inside a match block that's nested in a for/while, plain
+		// `break` would exit the Go-side `switch` (match's lowering)
+		// instead of the loop the user intended. Emit a labeled break
+		// targeting the enclosing loop label set by emitForStmt /
+		// emitWhileStmt.
+		if g.matchInLoopDepth > 0 && g.loopBreakLabel != "" {
+			g.writeln("break %s", g.loopBreakLabel)
+		} else {
+			g.writeln("break")
+		}
 	case *parser.ContinueStmt:
-		g.writeln("continue")
+		if g.matchInLoopDepth > 0 && g.loopBreakLabel != "" {
+			g.writeln("continue %s", g.loopBreakLabel)
+		} else {
+			g.writeln("continue")
+		}
 	case *parser.BlockStmt:
 		g.emitBlock(stmt)
 	case *parser.FnDecl:
@@ -1026,7 +1051,102 @@ func (g *Generator) emitIfStmt(s *parser.IfStmt) {
 	g.writeln("}")
 }
 
+// blockHasMatchWithBreak reports whether `block` (or any nested
+// non-loop block within it) contains a `match` whose body holds a
+// `break` or `continue`. Used to decide whether emitForStmt /
+// emitWhileStmt should emit a label so break-inside-match can
+// target the loop instead of the inner switch. Loop boundaries
+// stop the recursion — a break inside an inner for/while targets
+// THAT loop, not the outer.
+func blockHasMatchWithBreak(block *parser.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, s := range block.Stmts {
+		if stmtHasMatchWithBreak(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtHasMatchWithBreak(s parser.Stmt) bool {
+	switch n := s.(type) {
+	case *parser.MatchStmt:
+		for _, c := range n.Cases {
+			if blockHasBreakOrContinue(c.Body) {
+				return true
+			}
+			if blockHasMatchWithBreak(c.Body) {
+				return true
+			}
+		}
+	case *parser.IfStmt:
+		if blockHasMatchWithBreak(n.Then) {
+			return true
+		}
+		if n.ElseStmt != nil {
+			if stmtHasMatchWithBreak(n.ElseStmt) {
+				return true
+			}
+		}
+	case *parser.BlockStmt:
+		return blockHasMatchWithBreak(n)
+	case *parser.WithStmt:
+		return blockHasMatchWithBreak(n.Body)
+	}
+	return false
+}
+
+func blockHasBreakOrContinue(block *parser.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, s := range block.Stmts {
+		if stmtHasBreakOrContinue(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtHasBreakOrContinue(s parser.Stmt) bool {
+	switch n := s.(type) {
+	case *parser.BreakStmt:
+		return true
+	case *parser.ContinueStmt:
+		return true
+	case *parser.IfStmt:
+		if blockHasBreakOrContinue(n.Then) {
+			return true
+		}
+		if n.ElseStmt != nil {
+			return stmtHasBreakOrContinue(n.ElseStmt)
+		}
+	case *parser.BlockStmt:
+		return blockHasBreakOrContinue(n)
+	case *parser.WithStmt:
+		return blockHasBreakOrContinue(n.Body)
+	}
+	return false
+}
+
 func (g *Generator) emitForStmt(f *parser.ForStmt) {
+	// Emit a Go label on the loop iff its body contains a match with
+	// a break/continue. Inside a match case, plain Go `break` exits
+	// the switch (match's lowering), not the for; the labeled form
+	// targets the loop. emitBreakStmt / emitContinueStmt consult
+	// loopBreakLabel + matchInLoopDepth to pick the right form.
+	prevLabel := g.loopBreakLabel
+	if blockHasMatchWithBreak(f.Body) {
+		g.loopBreakCounter++
+		g.loopBreakLabel = fmt.Sprintf("_loop%d", g.loopBreakCounter)
+		g.writeln("%s:", g.loopBreakLabel)
+	} else {
+		g.loopBreakLabel = ""
+	}
+	defer func() { g.loopBreakLabel = prevLabel }()
+
 	if f.IsRange {
 		if rangeExpr, ok := f.Range.(*parser.RangeExpr); ok {
 			start := g.formatExpr(rangeExpr.Start)
@@ -1192,6 +1312,15 @@ func (g *Generator) emitMatchStmt(m *parser.MatchStmt) {
 	if g.isTypeSwitchMatch(m) {
 		g.emitTypeSwitchMatch(m)
 		return
+	}
+
+	// Track match-in-loop nesting so emitBreakStmt can tell whether
+	// `break` should target the enclosing loop label or the match's
+	// own switch. Only fires when there's a known loop label —
+	// outside a loop, plain `break` is a parse error anyway.
+	if g.loopBreakLabel != "" {
+		g.matchInLoopDepth++
+		defer func() { g.matchInLoopDepth-- }()
 	}
 
 	g.writeln("switch %s {", g.formatExpr(m.Subject))

@@ -93,6 +93,17 @@ type Generator struct {
 	usingIIFEReturnedFlag string
 	usingIIFEValueSlots   []string
 
+	// loopBreakLabel — name of the label on the enclosing for/while
+	// loop, set when the loop body contains a match-block with a
+	// `break`. Inside a match case body, `break` lowers to Go's
+	// `break LABEL` to exit the loop rather than the surrounding
+	// switch. matchInLoopDepth is the nesting count: only the
+	// outermost match-in-loop sees the label, since inner match
+	// blocks inside outer matches still target the same loop.
+	loopBreakLabel    string
+	matchInLoopDepth  int
+	loopBreakCounter  int
+
 	// Variable type tracking
 	varTypes            map[string]string       // variable name → element type
 	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
