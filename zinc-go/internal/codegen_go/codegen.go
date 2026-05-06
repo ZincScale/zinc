@@ -598,7 +598,9 @@ func (g *Generator) collectDecls(decls []parser.TopLevelDecl) {
 			// MethodSigs for return-type classification). No codegen-
 			// side per-class tracking populated here.
 		case *parser.TypeAliasDecl:
-			g.typeAliases[decl.Name] = decl.Type
+			// bound.TypeAliases (set by Bind) is the canonical alias
+			// table; lookupTypeAlias prefers it. No codegen-side write.
+			_ = decl
 		case *parser.ConstDecl:
 			g.pubNames[decl.Name] = decl.IsPub
 		case *parser.FnDecl:

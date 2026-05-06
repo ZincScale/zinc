@@ -204,6 +204,29 @@ func (bp *BoundProgram) LookupSymbolByName(name string) (Symbol, bool) {
 	return Symbol{}, false
 }
 
+// HasSymbolKind reports whether any binding resolves to a Symbol with the
+// given name AND one of the given kinds. Used by codegen for cheap
+// presence checks ("is this name a known local var anywhere in the
+// program?") without forcing it to maintain a parallel codegen-side
+// map. O(N) scan over Bindings; same scaling story as LookupSymbolByName.
+// Pre-condition: bp != nil. Returns false if `kinds` is empty.
+func (bp *BoundProgram) HasSymbolKind(name string, kinds ...SymbolKind) bool {
+	if len(kinds) == 0 {
+		return false
+	}
+	for _, sym := range bp.Bindings {
+		if sym.Name != name {
+			continue
+		}
+		for _, k := range kinds {
+			if sym.Kind == k {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // BindContext supplies cross-package and cross-file information needed to
 // resolve `Ident`s correctly. The caller (compiler driver) collects this
 // from all parsed programs in a package and passes the same context to
