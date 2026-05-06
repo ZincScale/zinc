@@ -530,9 +530,9 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				g.varTypes[v.Name] = "chan " + g.formatType(elemType)
 			}
 		}
-		if _, ok := v.Value.(*parser.SafeNavExpr); ok {
-			g.ptrVars[v.Name] = true
-		}
+		// SafeNavExpr (`var x = a?.b`) — typechecker now returns
+		// V2Type{Nullable:true} for it, which scope.set propagates
+		// into NodeTypes for downstream Ident reads.
 
 		// Track Go types from stdlib function calls (e.g. exec.Command → *exec.Cmd).
 		// Guard against user-scope shadow: a field/param/local named the same

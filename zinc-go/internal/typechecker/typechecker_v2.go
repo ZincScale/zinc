@@ -1432,6 +1432,18 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 			return c.inferType(e.Cases[0].Value)
 		}
 		return typeAny
+	case *parser.SafeNavExpr:
+		// `obj?.field` / `obj?.method(args)` — result is the field/method
+		// return type lifted to nullable (the safe-nav short-circuits to
+		// nil when obj is nil). Walk Object so its Ident gets a side-map
+		// entry, then return any-with-Nullable so codegen recognizes
+		// the result as a pointer-typed value.
+		if e.Object != nil {
+			c.inferType(e.Object)
+		}
+		t := typeAny
+		t.Nullable = true
+		return t
 	case *parser.TypeAssertExpr:
 		// `expr is T` returns bool; `expr as T` unwraps to the
 		// non-nullable form of T. Codegen consumers (e.g. selector
