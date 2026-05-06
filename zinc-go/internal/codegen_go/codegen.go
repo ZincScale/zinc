@@ -267,30 +267,6 @@ func (g *Generator) SetImportAliases(aliases map[string]string) {
 	g.importAliases = aliases
 }
 
-// SetSiblingExports registers names from sibling files in the same package.
-// These are types, functions, etc. declared in other .zn files in the same directory.
-// Go handles cross-file visibility natively within a package via package-level
-// scoping. The codegen records the names so it can resolve constructor calls
-// for placeholder structs; everything else flows through bound.Sigs.
-func (g *Generator) SetSiblingExports(exports map[string]string) {
-	for name, kind := range exports {
-		switch kind {
-		case "data":
-			// data-class-ness flows through bound.Sigs.DataClassNames.
-		case "class":
-			// Mark as known struct with a placeholder ClassDecl (not nil)
-			// so codegen can resolve constructor calls (NewType) and pointer types.
-			g.structs[name] = &parser.ClassDecl{Name: name}
-		case "interface":
-			// interface-ness flows through bound.Sigs.InterfaceNames.
-		case "func":
-			// Sibling fn sigs flow through bound.Sigs.FnSigs (CollectSignatures
-			// runs over the merged same-package program, so every same-pkg
-			// fn is already registered with full ParamDecl info).
-		}
-	}
-}
-
 // SetSubpackageExports registers exported names from a subpackage.
 func (g *Generator) SetSubpackageExports(pkg string, exports map[string]string) {
 	if g.subpkgExports == nil {
@@ -495,6 +471,19 @@ func (g *Generator) isInterface(name string) bool {
 		return g.bound.Sigs.InterfaceNames[name]
 	}
 	return false
+}
+
+// SetSiblingExports registers names from sibling files in the same package.
+// Most kinds (data / interface / func) flow through bound.Sigs aggregates;
+// only class-kind needs a codegen-side placeholder ClassDecl in g.structs
+// so cross-file class refs preserve pointer-typed shape and pick up the
+// non-sealed branch in resolveUnqualifiedType / pointer-class probing.
+func (g *Generator) SetSiblingExports(exports map[string]string) {
+	for name, kind := range exports {
+		if kind == "class" {
+			g.structs[name] = &parser.ClassDecl{Name: name}
+		}
+	}
 }
 
 // SetSubpackageStructs registers class declarations from a subpackage for method lookups.

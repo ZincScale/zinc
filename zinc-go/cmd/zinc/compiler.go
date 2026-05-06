@@ -367,7 +367,6 @@ func compileMultiFile(znFiles []string, outDir string, quiet bool, importAliases
 		progs = append(progs, prog)
 	}
 
-	// Collect exports from all files for sibling awareness
 	merged := mergePrograms(progs)
 	allExports := codegen.CollectExports(merged)
 

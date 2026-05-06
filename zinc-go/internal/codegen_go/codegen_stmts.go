@@ -1764,9 +1764,18 @@ func (g *Generator) emitExprStmt(es *parser.ExprStmt) {
 	g.writeln("%s", g.formatExpr(es.Expr))
 }
 
-// isClassType returns true if the given name is a known class type,
-// checking both local structs and cross-package unqualified names.
+// isClassType returns true if the given name is a known class-like
+// type (regular class, data class, sealed parent, or sealed variant).
+// Prefers bound.Sigs.ClassNames — typechecker-canonical, populated by
+// CollectSignatures + cross-pkg merge — which captures every class
+// reachable in the current package without codegen having to round-
+// trip through g.structs / unqualifiedNames.
 func (g *Generator) isClassType(name string) bool {
+	if g.bound != nil && g.bound.Sigs != nil && g.bound.Sigs.ClassNames != nil {
+		if g.bound.Sigs.ClassNames[name] {
+			return true
+		}
+	}
 	if _, exists := g.structs[name]; exists {
 		return true
 	}
