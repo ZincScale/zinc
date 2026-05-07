@@ -3,14 +3,18 @@ name: zinc-go
 on:
   push:
     paths:
-      - 'zinc-go/**'
+      - 'compilers/zinc-go/**'
+      - '.github/workflows/zinc-go.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
-      - 'zinc-go/**'
+      - 'compilers/zinc-go/**'
+      - '.github/workflows/zinc-go.yml'
 
 defaults:
   run:
-    working-directory: zinc-go
+    working-directory: compilers/zinc-go
 
 jobs:
   test:
@@ -56,6 +60,6 @@ jobs:
         with:
           version: latest
           args: release --clean
-          workdir: zinc-go
+          workdir: compilers/zinc-go
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -75,7 +75,7 @@ fi
 
 TMP=$(mktemp -d)
 git clone --depth 1 "https://github.com/$REPO.git" "$TMP/zinc"
-cd "$TMP/zinc/zinc-go"
+cd "$TMP/zinc/compilers/zinc-go"
 go build -ldflags "-s -w" -o "$INSTALL_DIR/zinc-go" ./cmd/zinc/
 rm -rf "$TMP"
 
