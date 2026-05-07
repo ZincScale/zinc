@@ -88,6 +88,35 @@ class Config {
         viper.Set(key, value)
     }
 
+    // --- Writing ---
+
+    // writeConfig persists the in-memory state back to the file Viper
+    // last loaded from. Returns Viper's error when the file path can't
+    // be determined or the write fails.
+    pub error writeConfig() {
+        return viper.WriteConfig()
+    }
+
+    // writeConfigAs writes to an explicit path, choosing the file format
+    // by extension. Used by `/api/flow/save` to persist the runtime
+    // graph back to config.yaml.
+    pub error writeConfigAs(String path) {
+        return viper.WriteConfigAs(path)
+    }
+
+    // configFileUsed reports the path Viper resolved on load (empty
+    // string when no file was loaded — defaults-only configurations).
+    pub String configFileUsed() {
+        return viper.ConfigFileUsed()
+    }
+
+    // allSettings returns the merged-down configuration view as a
+    // nested map. Surface area for export/round-trip helpers that
+    // walk every populated key without knowing the schema.
+    pub Map<String, any> allSettings() {
+        return viper.AllSettings()
+    }
+
     // --- Query ---
 
     pub boolean has(String key) {

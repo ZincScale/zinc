@@ -2245,11 +2245,27 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-		if recv := g.resolveReceiverClassName(sel.Object); recv != "" {
-			if g.methodReturnsError(recv, sel.Field) {
-				// Unknown method return arity — conservative false;
-				// class methods declared void are rare in existing code.
-				return false
+		// Look up the receiver's class name via the existing helper
+		// (handles `this`, fields, same-pkg locals) AND, when that
+		// returns "", fall back to bound.NodeTypes for a qualified
+		// type name like "Config" pulled from `var fresh = config.Config()`.
+		// Cross-package class methods don't fire isClassType today, so
+		// the helper alone misses them.
+		recv := g.resolveReceiverClassName(sel.Object)
+		if recv == "" && g.bound != nil {
+			if obj, ok := sel.Object.(*parser.Ident); ok {
+				if t, found := g.bound.NodeTypes[obj]; found && t.Name != "" && t.Name != "any" {
+					recv = t.Name
+				}
+			}
+		}
+		if recv != "" && g.bound != nil && g.bound.Sigs != nil {
+			if methods, ok := g.bound.Sigs.MethodSigs[recv]; ok {
+				if msig, ok := methods[sel.Field]; ok {
+					if msig.ReturnType.Name == "error" {
+						return true
+					}
+				}
 			}
 		}
 	}
