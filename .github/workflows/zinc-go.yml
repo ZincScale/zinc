@@ -2,15 +2,10 @@ name: zinc-go
 
 on:
   push:
-    paths:
-      - 'compilers/zinc-go/**'
-      - '.github/workflows/zinc-go.yml'
-    tags:
-      - 'v*'
+    branches: [master]
+    tags: ['v*']
   pull_request:
-    paths:
-      - 'compilers/zinc-go/**'
-      - '.github/workflows/zinc-go.yml'
+    branches: [master]
 
 defaults:
   run:
