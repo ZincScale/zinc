@@ -18,6 +18,7 @@ The repo groups projects by what they actually do:
 - **`compilers/`** — Zinc-language transpilers. Currently `zinc-go`.
 - **`dialects/`** — Other source languages in the Zinc family — different surface syntax, same "fix the warts, emit readable output" ethos.
 - **`build-tools/`** — Project-scaffold + build CLIs for native targets. These read `zinc.toml` but don't transpile from Zinc; they wrap the target's native toolchain.
+- **`experiments/`** — Exploratory work that may or may not graduate to a stable category. Currently [`pluto-zig`](experiments/pluto-zig/), a Pluto-Lang on Zig + bdwgc runtime spike — the "fast scripty prototype tier above Zinc" idea fleshed out as a parallel runtime.
 
 ## License
 
