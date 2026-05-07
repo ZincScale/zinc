@@ -1,45 +1,61 @@
-//! Phase 0 allocator stub for pluto-zig.
+//! Phase 0.5 allocator for pluto-zig.
 //!
-//! Exposes the C ABI the Zig side will consume. The implementation is
-//! malloc-backed (via libc) for now — the point of phase 0 is to prove
-//! the Zig <-> Rust plumbing, not to ship a real GC. Phase 0.5 replaces
-//! the bodies with mmtk-core calls; the C ABI does not change.
+//! Backed by the Boehm-Demers-Weiser conservative GC (libgc.so).
+//! Same C ABI as phase 0 — Zig side untouched. Phase 0.7 swaps the
+//! bodies for mmtk-core's GenImmix; bdwgc holds the real-GC fort
+//! until then.
 //!
-//! `#![no_std]` keeps the static archive free of std::fs / std::net /
-//! backtrace_rs / glibc-CSU symbols Zig's linker would otherwise have
-//! to resolve. The mmtk swap lives entirely on the C ABI surface.
+//! bdwgc is conservative: it scans the stack and registers for
+//! pointer-shaped values to find roots, and walks heap memory the
+//! same way for tracing. We don't need to enumerate roots or scan
+//! objects — the GC infers everything from memory contents. That's
+//! the headline tradeoff: zero binding work, modest retention bugs
+//! at scale.
 
 #![no_std]
 
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+// libgc (Boehm GC) C API. We declare only what we use; the full
+// surface is in /usr/include/gc.h on systems with gc-devel installed.
 extern "C" {
-    fn malloc(size: usize) -> *mut c_void;
-    fn free(ptr: *mut c_void);
-    fn aligned_alloc(alignment: usize, size: usize) -> *mut c_void;
+    fn GC_init();
+    fn GC_malloc(size: usize) -> *mut c_void;
+    // Pointer-free variant — phase 1 will use this for leaf objects
+    // (strings, byte buffers) so the collector doesn't waste cycles
+    // scanning their interior for pointers that aren't there.
+    #[allow(dead_code)]
+    fn GC_malloc_atomic(size: usize) -> *mut c_void;
+    fn GC_get_heap_size() -> usize;
+    fn GC_get_total_bytes() -> usize;
+    fn GC_get_gc_no() -> usize;
+    fn GC_gcollect();
     fn abort() -> !;
 }
 
-// Simple stats so the spike can prove allocations are flowing.
-static BYTES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+// Per-allocator-call counters (visible on the Zig side as a sanity
+// check that calls are flowing). bdwgc has its own stats too which
+// we expose separately below.
 static OBJECTS_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 pub struct PlutoHeap {
-    // Phase 0: opaque sentinel. Phase 0.5: holds the MMTK<VM> handle.
     sentinel: usize,
 }
 
-/// Initialize the heap with `heap_bytes` of capacity. Returns an
-/// opaque heap handle — the Zig side passes this back on every call.
-///
-/// Phase 0: capacity is informational (malloc has no hard cap).
-/// Phase 0.5: this is where mmtk_init + plan selection happens.
+/// Initialize the GC. `heap_bytes` is informational — bdwgc grows on
+/// demand and ignores the hint at this layer (you can preset the
+/// initial heap size via GC_set_initial_heap_size on a real binding).
 #[no_mangle]
 pub extern "C" fn pluto_heap_init(_heap_bytes: usize) -> *mut PlutoHeap {
     unsafe {
-        let p = malloc(core::mem::size_of::<PlutoHeap>()) as *mut PlutoHeap;
+        GC_init();
+        // Allocate the handle through the GC itself — it'll never be
+        // freed in phase 0.5 because the Zig side holds the reference
+        // for the program's lifetime, but threading it through GC_malloc
+        // proves the path is alive even before the first object alloc.
+        let p = GC_malloc(core::mem::size_of::<PlutoHeap>()) as *mut PlutoHeap;
         if !p.is_null() {
             (*p).sentinel = 0xC0DE_DEAD_BEEF_F00Dusize;
         }
@@ -47,62 +63,65 @@ pub extern "C" fn pluto_heap_init(_heap_bytes: usize) -> *mut PlutoHeap {
     }
 }
 
-/// Tear down the heap. Frees the handle.
+/// bdwgc has no concept of teardown. The handle drops with the
+/// process. Kept as an FFI symbol so the Zig side doesn't have to
+/// know which collector backs it.
 #[no_mangle]
-pub extern "C" fn pluto_heap_shutdown(heap: *mut PlutoHeap) {
-    if !heap.is_null() {
-        unsafe { free(heap as *mut c_void) };
-    }
+pub extern "C" fn pluto_heap_shutdown(_heap: *mut PlutoHeap) {
+    // no-op
 }
 
-/// Allocate `size` bytes with `align` alignment. Returns a raw pointer
-/// the caller must initialize before the next safepoint.
+/// Allocate a GC-managed block. Pointer is heap-tracked; release is
+/// automatic at the next collection cycle once nothing points at it.
 ///
-/// Phase 0: aligned_alloc + bookkeeping.
-/// Phase 0.5: routes to mmtk_alloc with a chosen Allocator + AllocSemantics.
+/// Note: we use GC_malloc (the scanning variant) so any pointers we
+/// later store inside this object are followed during marking. For
+/// leaf objects with no internal pointers (strings, byte buffers),
+/// GC_malloc_atomic is faster — but phase 0.5 doesn't distinguish
+/// yet. Phase 1 (when TValue + Table arrive) will pick per-type.
 #[no_mangle]
 pub extern "C" fn pluto_alloc(
     _heap: *mut PlutoHeap,
     size: usize,
-    align: usize,
+    _align: usize,
 ) -> *mut c_void {
-    let align = if align == 0 { 8 } else { align };
-    // aligned_alloc requires size % align == 0.
-    let rounded = (size + align - 1) & !(align - 1);
-    let ptr = unsafe { aligned_alloc(align, rounded) };
+    let ptr = unsafe { GC_malloc(size) };
     if !ptr.is_null() {
-        BYTES_ALLOCATED.fetch_add(rounded, Ordering::Relaxed);
         OBJECTS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
     }
     ptr
 }
 
-/// Post-allocation hook. mmtk requires this after every alloc so the
-/// collector can install GC headers / register the object with the
-/// right space. Phase 0 is a no-op; phase 0.5 calls mmtk_post_alloc.
+/// bdwgc has no post-alloc hook. mmtk does — keep the symbol so the
+/// API shape is stable across collectors.
 #[no_mangle]
 pub extern "C" fn pluto_post_alloc(
     _heap: *mut PlutoHeap,
     _obj: *mut c_void,
     _size: usize,
 ) {
-    // Intentionally empty in phase 0. Keep the symbol so the Zig side
-    // codes against the eventual mmtk shape and the swap is invisible.
+    // no-op
 }
 
-/// Free a single object. Only meaningful in the stub allocator —
-/// once mmtk is wired in, the collector reclaims memory and this
-/// becomes a no-op.
+/// Phase-0 vestige. bdwgc reclaims via marking, not explicit free —
+/// the symbol stays for ABI compat but does nothing.
 #[no_mangle]
-pub extern "C" fn pluto_dealloc_stub(obj: *mut c_void, _size: usize, _align: usize) {
-    if !obj.is_null() {
-        unsafe { free(obj) };
-    }
+pub extern "C" fn pluto_dealloc_stub(_obj: *mut c_void, _size: usize, _align: usize) {
+    // no-op — bdwgc owns reclamation
+}
+
+/// Force a full GC cycle. Useful for tests / spike demos that want
+/// to observe collection behavior. Real workloads should never call
+/// this; the collector triggers itself.
+#[no_mangle]
+pub extern "C" fn pluto_force_gc() {
+    unsafe { GC_gcollect() };
 }
 
 #[no_mangle]
 pub extern "C" fn pluto_stat_bytes_allocated() -> usize {
-    BYTES_ALLOCATED.load(Ordering::Relaxed)
+    // bdwgc's own counter — total bytes ever allocated through the GC.
+    unsafe { GC_get_total_bytes() }
 }
 
 #[no_mangle]
@@ -110,30 +129,30 @@ pub extern "C" fn pluto_stat_objects_allocated() -> usize {
     OBJECTS_ALLOCATED.load(Ordering::Relaxed)
 }
 
-// no_std requires a panic handler. abort() is fine — phase 0 has no
-// recoverable failure modes and panic = "abort" in Cargo.toml means
-// nothing in the crate panics today anyway.
+/// Current heap size as reported by bdwgc. Reflects actual reserved
+/// memory; shrinks after collection of unreachable objects.
+#[no_mangle]
+pub extern "C" fn pluto_stat_heap_size() -> usize {
+    unsafe { GC_get_heap_size() }
+}
+
+/// Number of full GC cycles that have run since GC_init.
+#[no_mangle]
+pub extern "C" fn pluto_stat_gc_count() -> usize {
+    unsafe { GC_get_gc_no() }
+}
+
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { abort() }
 }
 
-// Glibc + linker compatibility shims.
-//
-// Older crt1.o (RHEL 8 ships gcc 8 with crt1 that references these
-// symbols) calls into __libc_csu_init / __libc_csu_fini, which glibc
-// 2.34+ inlined into _start and stopped exporting. Providing no-op
-// stubs satisfies the linker without changing runtime behavior on
-// glibcs that still carry them (the system's are picked first via
-// symbol resolution order).
+// Glibc / linker compatibility shims. Same rationale as phase 0.
 #[no_mangle]
 pub extern "C" fn __libc_csu_init() {}
 
 #[no_mangle]
 pub extern "C" fn __libc_csu_fini() {}
 
-// compiler_builtins keeps a DWARF reference to rust_eh_personality
-// even with panic = "abort". The symbol is never actually invoked at
-// runtime (no panics, no unwinding), so a no-op stub is enough.
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() {}

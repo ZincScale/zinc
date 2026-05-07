@@ -48,6 +48,13 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("dl", .{});
     exe.root_module.linkSystemLibrary("m", .{});
     exe.root_module.linkSystemLibrary("gcc_s", .{});
+    // bdwgc — the actual collector behind pluto_alloc in phase 0.5.
+    // vendor/lib/libgc.so is a symlink to whatever's available on the
+    // system (typically /lib64/libgc.so.1). The symlink avoids needing
+    // the gc-devel package installed (which is what would normally
+    // provide the unversioned libgc.so name).
+    exe.root_module.addLibraryPath(b.path("vendor/lib"));
+    exe.root_module.linkSystemLibrary("gc", .{});
 
     // The executable's compile step depends on cargo finishing.
     exe.step.dependOn(&cargo_cmd.step);
