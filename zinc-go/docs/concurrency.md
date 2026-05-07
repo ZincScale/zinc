@@ -20,7 +20,7 @@ Goroutines have no return channel to their launcher. If `doRiskyWork()` can fail
 
 ```zinc
 spawn {
-    var ok = doRiskyWork() or {
+    var ok = doRiskyWork() catch {
         logging.error("worker failed", "err", err)
         return
     }
@@ -34,7 +34,7 @@ For fan-in, pass errors out over a channel:
 var errCh = Channel<error>(len(items))
 
 parallel for (item in items) {
-    process(item) or { errCh.send(err); return }
+    process(item) catch { errCh.send(err); return }
 }
 ```
 

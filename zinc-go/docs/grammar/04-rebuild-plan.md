@@ -1,5 +1,7 @@
 # Zinc — rebuild plan (Phase 3 sequencing)
 
+> **Keyword note (2026-05):** the error-handler keyword is now `catch` (was `or`). The bare `or` token was removed in favour of `||` for boolean OR. Examples and grammar in this doc have been updated to `catch { ... }`; commit history retains the original `or { ... }` rationale.
+
 **Status:** Phase 3 deliverable. Sequenced commit-by-commit roadmap for re-architecting the compiler against the spec (`01-grammar.md` + `02-semantics.md` + `03-type-system.md`). No code edits land until this sequencing has user sign-off.
 
 **Pacing rule.** Every numbered step below is a single coherent commit. Each commit:
@@ -53,7 +55,7 @@ The original §8.13 decision (newline-only) was reversed: `;` stays as an option
 ### 3.1.7 — Drop `OrHandler.MatchCases`
 - Remove `MatchCases []*OrMatchCase` and `MatchVar string` fields from `OrHandler` in `parser/ast.go`.
 - Remove `OrMatchCase` type entirely.
-- Update parser (`v2ParseErrHandler` etc.) to reject `or match err { ... }` form with: `"'or match' is not supported; use 'or { match (err) { ... } }' instead"`.
+- Update parser (`v2ParseErrHandler` etc.) to reject the inline `or match err { ... }` form (kept for completeness — `or` itself was later renamed to `catch`, see §X) with: `"'catch match' is not supported; use 'catch { match (err) { ... } }' instead"`.
 - Update codegen (`emitOrMatch`) — delete the function.
 - **Verify:** e2e green; new fail test `examples-fail/or_match_form.zn` errors correctly.
 

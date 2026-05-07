@@ -1,5 +1,11 @@
 # Language Guide
 
+> **Note:** this is the older language reference. The current
+> feature-by-feature walk-through lives at
+> [language-tour.md](language-tour.md) — please use that instead.
+> This file's `or { }` examples reflect a pre-pivot syntax; the
+> current error handler keyword is `catch`.
+
 Zinc is a clean-syntax language that transpiles to Go. It removes Go's syntax warts while producing readable, idiomatic Go output.
 
 ## Variables

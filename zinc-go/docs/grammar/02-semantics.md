@@ -1,5 +1,7 @@
 # Zinc — semantics (1.0 target)
 
+> **Keyword note (2026-05):** the error-handler keyword is now `catch` (was `or`). The bare `or` token was removed in favour of `||` for boolean OR. Examples and grammar in this doc have been updated to `catch { ... }`; commit history retains the original `or { ... }` rationale.
+
 **Status:** Phase 2 deliverable. Static and dynamic semantics for the syntactic productions defined in `01-grammar.md`. The type system has its own doc (`03-type-system.md`) — this one covers everything else: scoping, visibility, name resolution, error handling, control flow, concurrency, FFI, annotations, and the runtime model.
 
 **Authority order.** When `01-grammar.md`, `02-semantics.md`, and `03-type-system.md` disagree, the conflict is itself a bug. None of these docs override the others — they describe different aspects of the same language and must agree.
@@ -170,13 +172,13 @@ var x, err = parseNum(s)
 if (err != null) { return ... }
 
 // Form B: inline or-handler — handler runs on err != null
-var x = parseNum(s) or {
+var x = parseNum(s) catch {
     return 0, err
 }
 
 // Form C: same-package re-throw — caller is itself a thrower
 (int, error) wrap(String s) {
-    var x = parseNum(s) or { return 0, err }
+    var x = parseNum(s) catch { return 0, err }
     return x, null
 }
 ```
@@ -202,25 +204,25 @@ class ParseError : BaseError {
 
 `return X` where `X` satisfies the error interface, in a thrower whose return is `(T1, ..., Tn, error)`, lowers to `return zero1, ..., zeroN, X`. This is the **only** automatic widening.
 
-### 5.4 `or { }` semantics
+### 5.4 `catch { }` semantics
 
-The `or { }` block runs when the failable expression yields a non-null error. Inside the handler:
+The `catch { }` block runs when the failable expression yields a non-null error. Inside the handler:
 - `err` is bound to the error value.
-- The handler may `return ...err...`, `continue`, `break`, supply a default value (single-statement `or { default }` form), or `match (err) { ... }` to type-switch.
+- The handler may `return ...err...`, `continue`, `break`, supply a default value (single-statement `catch { default }` form), or `match (err) { ... }` to type-switch.
 - The handler is **not** a closure capturing the original call site's value slot — value bindings happen only on the success path.
 
 ```zinc
-var content = readFile(path) or {
+var content = readFile(path) catch {
     log.warn("read failed: ${err}")
     return null
 }
 // `content` is bound only when readFile succeeded.
 ```
 
-### 5.5 `as T or { }` for cast failure
+### 5.5 `as T catch { }` for cast failure
 
 ```zinc
-var t = v as Target or { return null }
+var t = v as Target catch { return null }
 ```
 
 If the runtime cast fails, the handler runs with `err` bound to a `CastError` describing the failure. Same semantics as the throw path.
@@ -307,17 +309,17 @@ A void function (no declared return type) is exempt.
 
 ### 7.1 `spawn`
 
-`spawn { body } [or { handler }]` runs `body` in a new goroutine. Returns immediately. There is no thread handle; goroutines exit on `return` from the body or end-of-block.
+`spawn { body } [catch { handler }]` runs `body` in a new goroutine. Returns immediately. There is no thread handle; goroutines exit on `return` from the body or end-of-block.
 
 ```zinc
 spawn {
     process(item)
-} or {
+} catch {
     log.error("spawn failed: ${err}")
 }
 ```
 
-The `or { }` handler runs only if a panic propagates out of the body. Routine errors are handled inside the body via standard `or { }` shape.
+The `catch { }` handler runs only if a panic propagates out of the body. Routine errors are handled inside the body via standard `catch { }` shape.
 
 `spawn` is also valid as an expression (`spawn_expr`), but the current 1.0 use is statement-position.
 
@@ -330,7 +332,7 @@ parallel(max: 8) for item in items { body }           // bounded by N concurrent
 
 Iterates `items`, running each `body` in a goroutine. Bounded form uses a semaphore for max concurrent execution. The whole construct returns when all goroutines finish.
 
-`or { }` handler at the end catches panics from any iteration. There is no per-iteration error aggregation by default; if you need that, use a channel.
+`catch { }` handler at the end catches panics from any iteration. There is no per-iteration error aggregation by default; if you need that, use a channel.
 
 ### 7.3 `select`
 
@@ -368,10 +370,10 @@ Multiple resources in `with`: deferred in reverse declaration order (Go's `defer
 ### 7.5 `timeout`
 
 ```zinc
-timeout(duration) { body } [or { fallback }]
+timeout(duration) { body } [catch { fallback }]
 ```
 
-Runs `body` with a deadline. If the deadline elapses before `body` completes, the goroutine is signaled via the deadline context; `or { }` runs with `err` bound to a deadline-exceeded error.
+Runs `body` with a deadline. If the deadline elapses before `body` completes, the goroutine is signaled via the deadline context; `catch { }` runs with `err` bound to a deadline-exceeded error.
 
 Implementation: lowers to a `context.WithTimeout` + goroutine + select. The `body` should respect cancellation (check ctx.Done()) for the timeout to be observed.
 
@@ -414,7 +416,7 @@ When `var a, b = pkg.Func(args)` (or `var a, b = recv.Method(args)`) is a multi-
 ```zinc
 var dec, derr = hambaOcf.NewDecoder(rdr)
 //   ^ *ocf.Decoder    ^ error
-dec.Decode(&got) or { ... }    // dec.Decode is "method on Go-typed receiver"; & permitted
+dec.Decode(&got) catch { ... }    // dec.Decode is "method on Go-typed receiver"; & permitted
 ```
 
 ### 8.4 The `&` validator
@@ -500,7 +502,7 @@ What's deliberately **not** Go-native:
 3. **Module graph.** How are zinc-subpackage dependencies reflected in the bind phase? Currently `cmd/zinc/compiler.go` does ad-hoc multi-pass; phase 3 wants a proper module graph.
 4. **Error types catalog.** Stdlib defines `BaseError` and subclasses. The catalog of error subclasses (`ParseError`, `ConfigError`, `IOError`, etc.) is currently scattered. 1.0 should curate the set.
 5. **Runtime panic policy.** When does the runtime panic vs return an error? (Today: assertion failures, integer divide-by-zero, out-of-bounds index — all panic. Channel-on-closed-channel — panic. Map-key-not-present — returns zero value. These should be explicit in the spec.)
-6. **`defer` interaction with `or { }`.** A deferred call inside an `or { }` handler — when does it run? Spec needs to nail down.
-7. **Smart-cast preservation across `or { }`.** If `x is T` narrows `x` in the then-branch, does the narrowing survive into a subsequent `or { }`? Today: probably not; spec should be explicit.
+6. **`defer` interaction with `catch { }`.** A deferred call inside an `catch { }` handler — when does it run? Spec needs to nail down.
+7. **Smart-cast preservation across `catch { }`.** If `x is T` narrows `x` in the then-branch, does the narrowing survive into a subsequent `catch { }`? Today: probably not; spec should be explicit.
 
 These are all things to nail down during the Phase 3 rebuild, not before.

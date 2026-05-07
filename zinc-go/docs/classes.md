@@ -72,7 +72,7 @@ pub (Server, error) NewValidatedServer(String host, int port) {
     return Server(host, port), null
 }
 
-var s = NewValidatedServer("localhost", 99999) or {
+var s = NewValidatedServer("localhost", 99999) catch {
     print("bad config: ${err}")
     return
 }

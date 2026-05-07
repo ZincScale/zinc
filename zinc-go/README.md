@@ -7,103 +7,16 @@
 [![Build](https://github.com/ZincScale/zinc/actions/workflows/ci.yml/badge.svg)](https://github.com/ZincScale/zinc/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../LICENSE)
 
-**Zinc** removes Go's syntax warts. Write clean, expressive code — get readable Go output and native binaries.
-
-```zinc
-class Server {
-    pub String host
-    pub int port
-
-    init(String host, int port = 8080) {
-        this.host = host
-        this.port = port
-    }
-
-    pub String address() {
-        return "${host}:${port}"
-    }
-}
-
-var s = Server("localhost")
-print(s.address())    // localhost:8080
-```
-
-## Why Zinc?
-
-Go is fast, simple, and compiles everywhere. But its syntax has rough edges — verbose error handling, no classes, no generics sugar, no string interpolation. Zinc fixes these while keeping everything that makes Go great:
-
-- **Classes & inheritance** — familiar OO syntax compiled to Go structs with embedding
-- **Errors as values, declared in the signature** — `pub (T, error) foo()` (or bare `error` for void throwers) is purely syntactic; handle with `or { ... }` at call sites, propagate with `or { return err }`
-- **String interpolation** — `"Hello, ${name}!"` just works
-- **Concurrency** — `spawn { }`, `Channel<T>`, `parallel for`, full `select { case ... }`
-- **Sealed classes + match** — algebraic data types with exhaustive pattern matching
-- **Generics** — type parameters on functions and classes, mapped to Go generics
-- **Nullable types** — `String?` with safe navigation `?.`
-- **Default & variadic params** — `void serve(int port = 8080)`, `int sum(int... xs)`
-- **Type-first declarations** — `int add(int a, int b)` / `void main()` (Java/C#/Dart shape)
-- **Clean output** — generated Go is readable and editable
-
-## Install
-
-```bash
-curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-go/install.sh | bash
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/ZincScale/zinc.git
-cd zinc/zinc-go
-make build && sudo make install
-```
-
-## Quick start
-
-```bash
-# Hello world
-echo 'print("Hello, World!")' > hello.zn
-zinc-go run hello.zn
-
-# Create a project
-zinc-go init myapp && cd myapp
-zinc-go run
-
-# Build a native binary
-zinc-go build
-./zinc-out/myapp
-
-# Cross-compile
-zinc-go build --cross linux/arm64
-```
-
-## Feature highlights
-
-### Errors are values — no `if err != nil` boilerplate
+**Zinc is a typed, OO language that compiles to Go.** The same shape Kotlin
+has to the JVM, TypeScript has to JavaScript, Crystal has to Ruby — Zinc
+brings to Go.
 
 ```zinc
 import stdlib/errors
 
-pub (int, error) parseInt(String s) {
-    if (s == "") {
-        return errors.IllegalArgumentError("empty input")
-    }
-    return 42, null
-}
-
-void main() {
-    var n = parseInt(input) or { print("bad input: ${err}"); return }
-    use(n)
-}
-```
-
-A function declared with `error` in the trailing position is a thrower — Go signature `(T, error)`. Callers handle the error inline with `or { ... }` (where `err` is bound) or, from inside another thrower, propagate with `or { return err }`. Detection is purely syntactic: the declared `error` is the only marker.
-
-### Sealed classes & pattern matching
-
-```zinc
 sealed class Shape {
     data Circle(double radius)
-    data Rect(double width, double height)
+    data Rect(double w, double h)
 }
 
 pub double area(Shape s) {
@@ -113,11 +26,184 @@ pub double area(Shape s) {
     }
     return 0.0
 }
+
+pub (int, error) parseSide(String s) {
+    if (s == "") { return errors.IllegalArgumentError("empty") }
+    return 4, null
+}
+
+void main() {
+    var n = parseSide("4") catch { print("bad: ${err}"); return }
+    var shapes = [Circle(1.0), Rect(2.0, 3.0)]
+    for (s in shapes) { print("area = ${area(s)}") }
+    print("n = ${n}")
+}
 ```
 
-Match is exhaustive on sealed types — missing variants are a compile error.
+One static binary out, no runtime, no GC layer to babysit. Reads like Kotlin
+or TypeScript; runs like Go.
 
-### Concurrency
+## Why Zinc
+
+Every other major language has acquired a typed, ergonomic successor that
+targets it natively:
+
+| Host | Successor | Brought |
+|---|---|---|
+| JVM | **Kotlin** | classes, sealed types, null safety, data classes |
+| JavaScript | **TypeScript** | static types, classes, generics |
+| Ruby | **Crystal** | static types, AOT compilation |
+| Python | **Mojo / Cython** | static types, AOT path for hot code |
+| Go | — | (this is the gap Zinc fills) |
+
+Go is excellent for systems work but deliberately minimal: no class
+inheritance, no sealed/ADT types, no proper error syntax beyond
+`if err != nil`, no resource-cleanup expression, no implicit-self, no
+pattern matching, no string interpolation. Developers coming from
+Kotlin, TypeScript, or C# feel the friction immediately.
+
+Zinc closes the gap *without* abandoning anything that makes Go great.
+
+- **You keep OO.** Four of the TIOBE top five languages are OO. Telling
+  most working developers "give up classes to get a static binary" is
+  asking too much. Zinc gives them classes, inheritance, sealed types,
+  data classes, *and* the Go binary.
+- **You keep AOT.** Single static binary. Tens-of-milliseconds startup.
+  Sub-10MB executables. Cross-compile to anything Go targets. Drops
+  straight into Kubernetes, Lambda, scratch containers — no runtime
+  layer.
+- **You keep the Go ecosystem.** `import net/http`, `import sync`,
+  `import github.com/spf13/viper` — Go packages import directly into
+  Zinc and call natively. No wrappers, no FFI shims, no JNI. The
+  generated Go code is readable; you can audit, debug, or hand-edit it.
+- **You keep Go's runtime.** Goroutines, channels, the GC, the stdlib —
+  battle-tested at scale, reused as-is. Zinc surfaces them as `spawn`,
+  `Channel<T>`, `select { }`, `parallel for`.
+
+See [docs/why-zinc.md](docs/why-zinc.md) for the long version.
+
+## Feature highlights
+
+### Errors are values, declared in the signature
+
+```zinc
+import stdlib/errors
+
+pub (int, error) parseInt(String s) {
+    if (s == "") { return errors.IllegalArgumentError("empty input") }
+    return 42, null
+}
+
+void main() {
+    var n = parseInt(input) catch { print("bad input: ${err}"); return }
+    use(n)
+}
+```
+
+A function whose declared return type ends in `error` is a thrower —
+`error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Callers handle
+inline with `catch { ... }` (where `err` is bound), propagate with
+`catch { return err }`, or supply a fallback with `catch { default }`. No
+auto-widening. No `?` operator. No `if err != nil` ladder.
+
+### Classes, inheritance, and sealed types
+
+```zinc
+class Animal {
+    String name
+    init(String name) { this.name = name }
+    String speak() { return "${name} speaks" }
+}
+
+class Dog : Animal {
+    init(String name) { super(name) }
+    String speak() { return "${name} says Woof" }
+}
+
+Animal a = Dog("Rex")
+print(a.speak())    // Rex says Woof
+```
+
+Sealed types give you exhaustive pattern matching:
+
+```zinc
+sealed class Result<T> {
+    data Ok(T value)
+    data Err(String message)
+}
+```
+
+Missing variants in a `match` are a compile error.
+
+### `using` — deterministic resource cleanup
+
+```zinc
+using (var f = openFile("config.toml")) {
+    var contents = f.readAll()
+    return parse(contents)        // Close() runs before the caller observes the return
+}
+```
+
+Multi-resource form closes in reverse order:
+
+```zinc
+using (var a = Resource("a"), var b = Resource("b")) {
+    a.work()
+    b.work()
+}
+```
+
+This is what `defer` wishes it were — block-scoped, runs *before* a return
+value escapes the block (so a `bytes.Buffer.Close()` flushes before the
+caller reads the buffer).
+
+### Implicit-self in methods
+
+```zinc
+class Counter {
+    int value
+
+    init() { value = 0 }                // bare ident, resolves to this.value
+
+    int privateAdd(int n) { return value + n }
+
+    pub int doublePrivate(int n) {
+        return privateAdd(n) * 2        // bare method call, resolves to this.privateAdd
+    }
+}
+```
+
+No more `c.value, c.value, c.value` clutter — bare names resolve through
+the receiver.
+
+### Auto-pointerization for Go FFI
+
+Zinc fields typed as a Go stdlib struct with pointer-receiver methods
+auto-pointerize to `*T` in the generated Go, *and* the constructor
+initializes them so they're usable on day one.
+
+```zinc
+import sync
+
+class Counter {
+    sync.Mutex mu          // becomes *sync.Mutex, init'd to &sync.Mutex{}
+    int n
+
+    pub void inc() {
+        lock (mu) { n = n + 1 }
+    }
+}
+```
+
+The csharp/java equivalent needs a `Counter()` constructor body that
+news up the mutex. Zinc threads it in for you.
+
+When passing a Zinc value to a Go function that takes `*T`, the `&` is
+inserted automatically. The only place you write `&` yourself is when
+the Go signature is `any` but the runtime contract requires a pointer
+(`json.Unmarshal(data, &p)`).
+
+### Concurrency — Go's primitives, clean syntax
 
 ```zinc
 spawn { doWork() }
@@ -136,25 +222,87 @@ select {
     case _:
         print("nothing ready")
 }
+
+timeout(2 * time.Second) {
+    longRunning()
+} catch {
+    print("deadline exceeded")
+}
 ```
 
-### Classes & inheritance
+### Generics
 
 ```zinc
-class Animal {
-    String name
-    init(String name) { this.name = name }
-    String speak() { return "${name} speaks" }
+class Box<T> {
+    pub T value
+    init(T v) { this.value = v }
+    pub T get() { return value }
 }
 
-class Dog : Animal {
-    init(String name) { super(name) }
-    String speak() { return "${name} says Woof" }
-}
+pub T first<T>(List<T> xs) = xs[0]
 
-Animal a = Dog("Rex")
-print(a.speak())    // Rex says Woof
+data Pair<A, B>(A first, B second)
 ```
+
+Maps directly to Go generics — no monomorphization tax beyond what `go
+build` already does.
+
+### Lambdas
+
+```zinc
+var doubled = (int x) -> x * 2
+
+apply(() -> {
+    for (i in 0..3) { total = total + i }
+})
+```
+
+### `print()`, string interpolation, ranges
+
+```zinc
+var name = "World"
+print("Hello, ${name}!")
+print("2 + 2 = ${2 + 2}")
+
+for (i in 0..10)  { ... }       // exclusive
+for (i in 0..=10) { ... }       // inclusive
+```
+
+## Quick start
+
+Install:
+
+```bash
+curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-go/install.sh | bash
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/ZincScale/zinc.git
+cd zinc/zinc-go
+make build && sudo make install
+```
+
+Hello world:
+
+```bash
+echo 'print("Hello, World!")' > hello.zn
+zinc-go run hello.zn
+```
+
+Project workflow:
+
+```bash
+zinc-go init myapp && cd myapp
+zinc-go run                       # transpile + run
+zinc-go test                      # run *_test.zn through go test
+zinc-go build                     # native binary into zinc-out/
+zinc-go build --cross linux/arm64
+```
+
+See [docs/getting-started.md](docs/getting-started.md) for the full
+workflow.
 
 ## CLI
 
@@ -169,63 +317,27 @@ print(a.speak())    // Rex says Woof
 | `zinc-go add <pkg@version>` | Add a Go dependency |
 | `zinc-go deps` | List dependencies |
 
-Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`.
+Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, `windows/amd64`, `windows/arm64`.
 
-## Project layout
+## Where to read more
 
-```
-myapp/
-  zinc.toml              project config (name, deps, replaces)
-  src/
-    main.zn              entry point
-    lib/                 subpackages
-  tests/                 sibling test directory (or *_test.zn alongside src)
-    main_test.zn
-```
-
-## Syntax essentials
-
-```zinc
-// Variable forms — var infers, drop var when you write the type
-var name = "Alice"              // inferred
-String greeting = "Hello"       // explicit + init
-String host                     // explicit, no init
-const PI = 3.14159              // constants
-
-// Control flow requires parens on the header
-if (x > 0) { ... } else if (x == 0) { ... } else { ... }
-for (i in 0..10) { ... }        // exclusive
-for (i in 0..=10) { ... }       // inclusive
-while (cond) { ... }
-match (x) { case 1 { ... } case _ { ... } }
-
-// Expression if
-var label = if x > 0: "positive" else: "non-positive"
-
-// Type-first function declarations — no `fn` keyword.
-// `pub` exports the function (capitalized Go name); without it,
-// the function is package-private.
-pub int add(int a, int b) { return a + b }
-pub int doubled(int x) = x * 2      // single-expression form
-void main() { ... }                 // entry point — never `pub`
-pub String? find(String id) { ... } // nullable return
-pub int sum(int... xs) { ... }      // variadic
-
-// Class fields — declared as Type name, default via =. Same `pub`
-// rule on the class itself, fields, and methods.
-pub class Counter {
-    pub int value = 0
-    pub void inc() { value = value + 1 }
-}
-```
-
-## Documentation
-
-- [Getting Started](docs/getting-started.md)
-- [Language Guide](docs/language-guide.md)
+- [Why Zinc](docs/why-zinc.md) — the rationale, in long form
+- [Getting Started](docs/getting-started.md) — install, project layout, workflow
+- [Language Tour](docs/language-tour.md) — every feature with runnable examples
+- [Interop with Go](docs/interop-with-go.md) — calling Go from Zinc
 - [Classes & Inheritance](docs/classes.md)
 - [Error Handling](docs/error-handling.md)
 - [Concurrency](docs/concurrency.md)
+
+## Status
+
+Zinc is at 1.0 maturity. The full e2e suite is green (126 examples), and
+the language is in production use as the implementation language for
+[zinc-flow](https://github.com/ZincScale/zinc-flow), a NiFi-class data
+flow engine. The grammar surface is stabilized as `v2-2026-05-01`
+(reported by `zinc-go version`); editor plugins and build tools can pin
+on it.
 
 ## Architecture
 

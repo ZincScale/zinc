@@ -1,10 +1,10 @@
 # Error handling
 
-Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. A function is a thrower iff its **declared return type contains `error` in the trailing position** — `error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Callers handle errors at the call site with `or { ... }`. There is no `try / catch / throw / finally`, no auto-widening, no `?` operator.
+Zinc uses **errors as values**, modelled on Go but with the boilerplate removed. A function is a thrower iff its **declared return type contains `error` in the trailing position** — `error` (bare), `(T, error)`, or `(T1, ..., Tn, error)`. Callers handle errors at the call site with `catch { ... }`. There is no `try / throw / finally`, no auto-widening, no `?` operator.
 
 ## The model in one paragraph
 
-A function whose declared return type ends in `error` becomes a Go function with `error` as the trailing result. The match is 1:1 with Go's native `(T, error)` shape — no wrapper types, no inference. At the call site, write `var x = call(...) or { ... }` to handle the error (`err` is bound inside the block) or destructure a multi-value thrower with `var (a, b) = call(...) or { ... }`. To propagate from inside another thrower, the canonical form is `or { return err }`. The `BaseError` base class in `stdlib/errors` has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
+A function whose declared return type ends in `error` becomes a Go function with `error` as the trailing result. The match is 1:1 with Go's native `(T, error)` shape — no wrapper types, no inference. At the call site, write `var x = call(...) catch { ... }` to handle the error (`err` is bound inside the block) or destructure a multi-value thrower with `var (a, b) = call(...) catch { ... }`. To propagate from inside another thrower, the canonical form is `catch { return err }`. The `BaseError` base class in `stdlib/errors` has an `Error() string` method, so values satisfy Go's `error` interface and compose with `errors.Is`, `errors.As`, and `fmt.Errorf("%w", ...)` wrapping.
 
 ## Declaring a thrower
 
@@ -100,11 +100,11 @@ class NetworkError : errors.BaseError {
 
 Subclass chains work — anything transitively extending `BaseError` is an error.
 
-## Handling at the call site: `or { }`
+## Handling at the call site: `catch { }`
 
 ```zinc
 void main() {
-    var n = parseInt(input) or {
+    var n = parseInt(input) catch {
         print("bad input: ${err}")
         return
     }
@@ -112,7 +112,7 @@ void main() {
 }
 ```
 
-Inside the `or { }` block:
+Inside the `catch { }` block:
 
 - `err` is bound to the error value (always typed as `error`).
 - The block must terminate the binding's scope — typically `return`, `break`, `continue`, or a fallback assignment. Otherwise control would fall through with `n` undefined.
@@ -121,26 +121,28 @@ A few common patterns:
 
 ```zinc
 // Fallback value via single-expression block
-var port = parsePort(s) or { 8080 }
+var port = parsePort(s) catch { 8080 }
 
 // Wrap and re-throw (works inside a thrower function)
-var cfg = loadConfig(path) or {
+var cfg = loadConfig(path) catch {
     return errors.ConfigError("loading ${path} failed: ${err}")
 }
 
-// Type-dispatched handling
-var x = call() or match err {
-    case errors.IOError    -> { logging.warn("io"); return }
-    case errors.ConfigError -> { logging.warn("config"); return }
+// Type-dispatched handling — compose with match inside the catch block
+var x = call() catch {
+    match (err) {
+        case errors.IOError     { logging.warn("io"); return }
+        case errors.ConfigError { logging.warn("config"); return }
+    }
 }
 ```
 
-## Multi-value destructure with `or { }`
+## Multi-value destructure with `catch { }`
 
 A thrower whose return is `(T1, ..., Tn, error)` destructures into N value names — the error slot is captured in the implicit `err` binding:
 
 ```zinc
-var (n, label) = lookup("foo") or {
+var (n, label) = lookup("foo") catch {
     print("lookup err: ${err}")
     return
 }
@@ -149,13 +151,13 @@ print("got: ${n}/${label}")
 
 The compiler emits `n, label, _err := lookup("foo"); if _err != nil { ... }`.
 
-## Propagation: `or { return err }`
+## Propagation: `catch { return err }`
 
 There is no implicit propagation and no `?` operator. To forward an error to your caller, the calling function must itself be a declared thrower, and the call site spells out the propagation:
 
 ```zinc
 pub (int, error) doubleIt(String s) {
-    var n = parseInt(s) or { return err }
+    var n = parseInt(s) catch { return err }
     return n * 2
 }
 ```
@@ -228,7 +230,7 @@ Because `BaseError.Error()` exists, every `BaseError`-extending class is a Go `e
 
 ```zinc
 spawn {
-    var ok = doRiskyWork() or {
+    var ok = doRiskyWork() catch {
         logging.error("worker failed", "err", err)
         return
     }
@@ -241,7 +243,7 @@ For error fan-in, send errors over an explicit channel:
 ```zinc
 var errCh = Channel<error>(len(items))
 parallel for (item in items) {
-    process(item) or { errCh.send(err); return }
+    process(item) catch { errCh.send(err); return }
 }
 ```
 
@@ -252,15 +254,15 @@ If you have older Zinc code that relied on the auto-widen design (returning a `B
 | Old (auto-widen) | New (explicit) |
 |---|---|
 | `int parse(String s) { return ParseError(...) }` | `(int, error) parse(String s) { return ParseError(...) }` |
-| `int wrap(String s) { var n = parse(s); return n*2 }` | `(int, error) wrap(String s) { var n = parse(s) or { return err }; return n*2 }` |
+| `int wrap(String s) { var n = parse(s); return n*2 }` | `(int, error) wrap(String s) { var n = parse(s) catch { return err }; return n*2 }` |
 | `error validate(...) { return null }` | unchanged — bare `error` was always valid |
-| `var x = thrower()` (implicit propagate) | `var x = thrower() or { return err }` |
+| `var x = thrower()` (implicit propagate) | `var x = thrower() catch { return err }` |
 
 Earlier drafts also had `try / catch / throw / finally` and an experimental `Result<T, E>` wrapper. Both are gone:
 
 | Older form | New form |
 |---|---|
 | `throw FooError("msg")` | `return errors.FooError("msg")` |
-| `try { var x = call() } catch (e) { handle }` | `var x = call() or { handle }` (where `err` replaces `e`) |
+| `try { var x = call() } catch (e) { handle }` | `var x = call() catch { handle }` (where `err` replaces `e`) |
 | `Result<T, E> foo()` | `(T, error) foo()` (`E` collapses to the single `error` interface — use a class hierarchy on top of `BaseError` if you need typed dispatch) |
 | `Ok(v)` / `Err(e)` | `return v, null` / `return e` |

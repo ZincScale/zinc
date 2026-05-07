@@ -1,5 +1,7 @@
 # Zinc — type system (1.0 target)
 
+> **Keyword note (2026-05):** the error-handler keyword is now `catch` (was `or`). The bare `or` token was removed in favour of `||` for boolean OR. Examples and grammar in this doc have been updated to `catch { ... }`; commit history retains the original `or { ... }` rationale.
+
 **Status:** Phase 2 deliverable (companion to `02-semantics.md`). Defines the type universe, compatibility rules, inference, generics with bounds, null safety, FFI bridging, and equality semantics.
 
 **Authority order.** Type-system rules in this doc are normative. When `01-grammar.md` (syntax) describes a form, this doc gives it meaning at the type level. When `02-semantics.md` describes runtime/scoping behavior, the type rules here constrain what those forms can mean statically.
@@ -78,7 +80,7 @@ A 1-element tuple `(T)` is unwrapped to `T` at parse time. There is no zero-elem
 
 **Restrictions:**
 - User code may not declare `any T` as a top-level variable type or struct field type **except** through `Object` (which is the Zinc-level alias). The bind phase rejects bare `any` outside the FFI seam.
-- A value of static type `any` can only be cast to a concrete type via `as T or { ... }` or pattern-matched via `match (v) { case ... }`.
+- A value of static type `any` can only be cast to a concrete type via `as T catch { ... }` or pattern-matched via `match (v) { case ... }`.
 
 This restriction prevents `any` from becoming a "anything goes" type-evasion hatch. It exists for FFI; that's the only excuse.
 
@@ -144,7 +146,7 @@ A value of any type is compatible with an `any` slot **at an FFI call site**. An
 
 `var x = expr` — `x`'s type is the static type of `expr`.
 
-`var x = call() or { return null }` — `x`'s type is the **success-slot** type of `call()`. The handler's return is checked separately against the enclosing function's return type.
+`var x = call() catch { return null }` — `x`'s type is the **success-slot** type of `call()`. The handler's return is checked separately against the enclosing function's return type.
 
 `var x, y, err = f()` — each name binds to the corresponding tuple slot type.
 
@@ -288,7 +290,7 @@ MyClass? z = null       // OK: MyClass is a reference type
 List<int>? xs = null    // OK: List<T> is a reference type
 ```
 
-For "missing" semantics on a value-type return, use `(T, bool)` (presence shape), `(T, error)` (error-as-value, paired with `or { }`), or a `getXOr(key, default)` accessor that folds the miss into a default at the API.
+For "missing" semantics on a value-type return, use `(T, bool)` (presence shape), `(T, error)` (error-as-value, paired with `catch { }`), or a `getXOr(key, default)` accessor that folds the miss into a default at the API.
 
 ```zinc
 (String, bool) getString(String key) {
@@ -318,13 +320,13 @@ For an explicit unwrap without a guard (asserting non-null, panic on miss), use 
 `x as T` (where `x` is `T?` and `T` is a reference type) asserts `x` is non-null and returns it as `T`. If `x` is null, behavior depends on the call site:
 
 - **Expression position** (`var c = m as MyClass`): panics on null. Use only when the author *knows* `x` is non-null and wants the runtime to fail loud if that invariant breaks.
-- **With `or { }` handler** (`var c = m as MyClass or { return default }`): the handler runs on null. Same shape as the failable forms in §6.
+- **With `catch { }` handler** (`var c = m as MyClass catch { return default }`): the handler runs on null. Same shape as the failable forms in §6.
 - **Inside a function with `error` in its return tail**: auto-propagates the null as a "null unwrap" error.
 
 ```zinc
 MyClass? m = lookup(id)
 var c = m as MyClass                    // panics if null
-var c = m as MyClass or { return null } // graceful fallback
+var c = m as MyClass catch { return null } // graceful fallback
 ```
 
 `as` reuses the type-assertion syntax already in the grammar, rather than introducing a separate `.force()` method or `!` operator.

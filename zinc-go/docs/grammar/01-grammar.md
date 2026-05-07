@@ -1,5 +1,7 @@
 # Zinc — formal grammar (1.0 target)
 
+> **Keyword note (2026-05):** the error-handler keyword is now `catch` (was `or`). The bare `or` token was removed in favour of `||` for boolean OR. Examples and grammar in this doc have been updated to `catch { ... }`; commit history retains the original `or { ... }` rationale.
+
 **Status:** Phase 1 deliverable. Formal grammar applying the 22 decisions in `00-lessons-learned.md`. Drafted from the v2 parser; validated against `examples/`, `examples-fail/`, and `zinc-flow-go/src/`.
 
 **This is the syntactic ground truth for the rebuild.** Static and dynamic semantics live in `02-semantics.md`. Type system lives in `03-type-system.md`.
@@ -363,7 +365,7 @@ return_stmt      = 'return' [ expr_list ] newline ;
 expr_list        = expr { ',' expr } ;
 ```
 
-`Type x = call() or { ... }` is allowed (decided 2026-05-01).
+`Type x = call() catch { ... }` is allowed (decided 2026-05-01).
 
 ### 5.2 Control flow
 
@@ -423,10 +425,10 @@ defer_stmt       = 'defer' expr newline ;
 or_handler       = 'or' block ;                     // body has `err` in scope
 ```
 
-The `or match err { case T -> ... }` form is **dropped 2026-05-01**. To switch on error type, use:
+The `catch { match (err) { case T -> ... }` form is **dropped 2026-05-01**. To switch on error type, use:
 
 ```zinc
-var x = call() or {
+var x = call() catch {
     match (err) {
         case ParseError(_) { ... }
         case _             { ... }

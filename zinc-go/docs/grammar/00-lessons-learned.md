@@ -1,5 +1,7 @@
 # Zinc — lessons learned from the implementation
 
+> **Keyword note (2026-05):** the error-handler keyword is now `catch` (was `or`). The bare `or` token was removed in favour of `||` for boolean OR. Examples and grammar in this doc have been updated to `catch { ... }`; commit history retains the original `or { ... }` rationale.
+
 **Status:** Phase 0 deliverable. Read-only synthesis of the current parser, lexer, AST, codegen tracking surface, design-churn commits, and bug archaeology. **This is not the spec.** This is the input the spec will be drafted against.
 
 **What this captures:**
@@ -92,12 +94,12 @@ end      ⟨reserved: hint? brace closer in some forms⟩
 | `while (cond) { }` | `WhileStmt` | parens required |
 | `match expr { case ... { } }` | `MatchStmt` | exhaustive over sealed types (codegen errors otherwise) |
 | `select { case ... }` | `SelectStmt` | channel multiplex, Go-style |
-| `spawn { body } [or { handler }]` | `SpawnExpr` (in stmt position) | virtual thread |
+| `spawn { body } [catch { handler }]` | `SpawnExpr` (in stmt position) | virtual thread |
 | `parallel for ... { }` | `ParallelForStmt` | bounded with `parallel(max:N) for ... { }` |
 | `with (var r = expr, ...) { }` | `WithStmt` | each resource's `.Close()` is deferred |
 | `using (var r = expr) { }` | `WithStmt` (overloaded) | resource acquisition shape |
 | `lock (mu) { }` | `WithStmt` (overloaded, `Resources[0].Name == "_lock"`) | mutex acquire+release |
-| `timeout(dur) { } [or { }]` | `TimeoutStmt` | deadline-bound block |
+| `timeout(dur) { } [catch { }]` | `TimeoutStmt` | deadline-bound block |
 | `defer expr` | `DeferStmt` | runs at function return |
 | `assert cond [, "msg"]` | `AssertStmt` | runtime check |
 | `break` / `continue` | `BreakStmt` / `ContinueStmt` | inside loops only |
@@ -140,13 +142,13 @@ Each rule has a *why* — a commit, bug, or design conversation that produced it
 
 **How to apply.** Declaring a thrower: `pub (Int, error) parseNum(String s) { ... }`. Returning success: `return 42, null`. Returning error: `return ParseError("...")` (codegen widens to multi-value).
 
-### 2.2 `or { }` handlers consume errors and cast failures
+### 2.2 `catch { }` handlers consume errors and cast failures
 
-**Rule.** `var x = call() or { ... }` runs the handler if the call returns a non-nil error. The handler has `err` in scope and may `return ...err...`, `continue`, `break`, or supply a default value. Same shape applies to `as T or { ... }` for cast failures.
+**Rule.** `var x = call() catch { ... }` runs the handler if the call returns a non-nil error. The handler has `err` in scope and may `return ...err...`, `continue`, `break`, or supply a default value. Same shape applies to `as T catch { ... }` for cast failures.
 
-**Why.** `or { }` survived all three error-handling pivots. Generalized to value-returning calls in `commit d6ab3b2` (2026-04-16, "v2 slice 2"). Generalized to `as` in `7542e68` (2026-04-28, "as returns an error instead of panicking").
+**Why.** `catch { }` survived all three error-handling pivots. Generalized to value-returning calls in `commit d6ab3b2` (2026-04-16, "v2 slice 2"). Generalized to `as` in `7542e68` (2026-04-28, "as returns an error instead of panicking").
 
-**Variant.** `or match err { case ErrType -> { ... } case _ -> { ... } }` for type-switching errors. Less common; spec needs to confirm if this stays.
+**Variant.** `catch { match (err) { case ErrType -> { ... } case _ -> { ... } }` for type-switching errors. Less common; spec needs to confirm if this stays.
 
 ### 2.3 Explicit `&` at FFI seams; rejected elsewhere
 
@@ -416,10 +418,10 @@ Each bug here is a rule the spec needs to make explicit.
 All 15 walkthrough decisions below. Each becomes an entry in the decision log (§ end).
 
 1. **`fn` keyword** → **drop entirely.**
-2. **`OrMatchCase` (`or match err { case T -> ... }`)** → **drop.** Removes `OrHandler.MatchCases` field; users compose via `var x = f() or { match err { ... } }`.
+2. **`OrMatchCase` (`catch { match (err) { case T -> ... }`)** → **drop.** Removes `OrHandler.MatchCases` field; users compose via `var x = f() catch { match err { ... } }`.
 3. **`?` (postfix)** → **stays as optional-type marker only.** `??` token **dropped**.
 4. **`===` / `!==`** → **dropped.** Plain `==` / `!=` are the only equality operators. **`==` semantics: Go-identity** — pointer-compare for class instances, field-by-field for data classes, byte-equal for primitives, **compile error for maps and slices**.
-5. **`Type x = call() or { ... }`** → **allowed.** Symmetric with `var x = call() or { ... }`; handler runs on err, value slot binds to `x`.
+5. **`Type x = call() catch { ... }`** → **allowed.** Symmetric with `var x = call() catch { ... }`; handler runs on err, value slot binds to `x`.
 6. **Sealed-variant syntax** → **nested data classes inside the sealed parent body, newline-separated:**
    ```
    sealed class Result<T> {
@@ -451,7 +453,7 @@ Based on §1-8, the spec needs at minimum:
    - Name resolution (unqualified vs qualified, collision behavior).
    - Type system (compatibility, inference, generics).
    - FFI rules (`&` placement, Go-typed receivers, pointer-vs-value classes).
-   - Error-handling shape (explicit-error tail, `or { }`).
+   - Error-handling shape (explicit-error tail, `catch { }`).
 4. **Dynamic semantics** — how each construct behaves at runtime (mostly delegated to Go's runtime; spec just needs to document what's exposed).
 5. **Compatibility commitments** — what's stable post-1.0, what's experimental, what can change.
 
@@ -488,11 +490,11 @@ After sign-off, Phase 1 is the formal EBNF grammar drafted from §1, validated a
 | 2026-05-01 | Bare-name resolution order: local scope → same-pkg → zinc subpkg → Go imports → Go builtins | §5.1 |
 | 2026-05-01 | §7.2 confirmed (FFI `&` rule, restatement of §4); §7.3 confirmed (collision rule, =§2.4); §7.4: `zinc --version` with parser-feature tag **required for 1.0** | §7 |
 | 2026-05-01 | `fn` keyword **dropped entirely** | §1.1, §8.1 |
-| 2026-05-01 | `OrMatchCase` / `or match err { case T -> ... }` **dropped**; `OrHandler.MatchCases` field deletes | §8.2, ast.go:418 |
+| 2026-05-01 | `OrMatchCase` / `catch { match (err) { case T -> ... }` **dropped**; `OrHandler.MatchCases` field deletes | §8.2, ast.go:418 |
 | 2026-05-01 | `??` (null-coalesce) **dropped**; token removed from lexer | §1.2, §8.3 |
 | 2026-05-01 | `===` / `!==` **dropped**; only `==` / `!=` for equality | §1.2, §8.4 |
 | 2026-05-01 | `==` semantics: **Go-identity** — pointer-compare for class instances, field-by-field for data classes, byte-equal for primitives, compile error for maps/slices | §8.4 follow-up |
-| 2026-05-01 | `Type x = call() or { ... }` **allowed** (named-type var with or-handler); symmetric with `var` form | §8.5 |
+| 2026-05-01 | `Type x = call() catch { ... }` **allowed** (named-type var with or-handler); symmetric with `var` form | §8.5 |
 | 2026-05-01 | Sealed-variant syntax: nested data classes inside the sealed parent body, **newline-separated** | §8.6 |
 | 2026-05-01 | `with`/`using`/`lock` **keep one `WithStmt` node**; document the overload | §8.8 |
 | 2026-05-01 | Generic **bounds added**: `<T : Comparable, U : Hashable>`. Constraint solver required | §8.9 |
