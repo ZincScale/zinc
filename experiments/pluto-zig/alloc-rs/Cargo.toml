@@ -1,0 +1,30 @@
+[package]
+name = "pluto_alloc"
+version = "0.0.1"
+edition = "2021"
+
+# Static archive for Zig to link, plus cdylib for ad-hoc inspection.
+[lib]
+name = "pluto_alloc"
+crate-type = ["staticlib", "cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# panic=abort in dev too — keeps the static archive free of the
+# _Unwind_* symbols Zig's linker can't resolve without libunwind.
+[profile.dev]
+panic = "abort"
+
+# Phase 0 deliberately ships a stub allocator (malloc-backed) so we can
+# prove the Zig <-> Rust FFI plumbing end-to-end without taking on the
+# mmtk VMBinding work (which is its own multi-week effort).
+#
+# Phase 0.5 swaps this dep in:
+#   mmtk = { version = "0.30", default-features = false }
+# and the staticlib re-exposes the same C symbols on top of mmtk's plan
+# manager + GenImmix collector. The Zig side stays untouched.
