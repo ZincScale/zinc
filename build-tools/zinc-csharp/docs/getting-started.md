@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/build-tools/zinc-csharp/install.sh | bash
 ```
 
 The installer:

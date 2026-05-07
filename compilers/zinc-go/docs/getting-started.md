@@ -8,7 +8,7 @@ minutes.
 One-line install (Linux / macOS):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-go/install.sh | bash
+curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/compilers/zinc-go/install.sh | bash
 ```
 
 Or build from source (requires Go 1.26+):

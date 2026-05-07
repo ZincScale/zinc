@@ -40,7 +40,7 @@ if __name__ == "__main__":
 ## Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-python/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/dialects/zinc-python/install.sh | bash
 ```
 
 This installs [uv](https://github.com/astral-sh/uv), Python 3.14t (free-threading), and the zinc-python compiler. Everything goes into `~/.zinc-python/`.

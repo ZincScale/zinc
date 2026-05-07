@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-python/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/dialects/zinc-python/install.sh | bash
 ```
 
 The installer puts everything under `~/.zinc-python/`:

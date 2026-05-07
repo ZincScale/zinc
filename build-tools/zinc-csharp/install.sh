@@ -10,7 +10,7 @@
 # zinc-csharp installer — one-stop shop for C# Zinc development
 #
 # Usage:
-#   curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/install.sh | bash
+#   curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/build-tools/zinc-csharp/install.sh | bash
 #
 # Installs:
 #   1. .NET 10 SDK (if not present)
@@ -73,7 +73,7 @@ if [[ -f "$SCRIPT_DIR/build-tool/zinc-csharp" ]]; then
     cp "$SCRIPT_DIR/build-tool/zinc-csharp" "$ZINC_BIN/zinc-csharp"
     echo "       copied from local clone"
 else
-    curl -sSL "https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/build-tool/zinc-csharp" \
+    curl -sSL "https://raw.githubusercontent.com/ZincScale/zinc/master/build-tools/zinc-csharp/build-tool/zinc-csharp" \
         -o "$ZINC_BIN/zinc-csharp"
     echo "       downloaded from GitHub"
 fi

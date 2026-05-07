@@ -6,7 +6,7 @@ C# / .NET 10 build backend for Zinc projects. One-stop shop: installs .NET, read
 
 ```bash
 # One command — installs .NET 10 SDK + zinc-csharp build tool + sets up PATH
-curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/zinc-csharp/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/ZincScale/zinc/master/build-tools/zinc-csharp/install.sh | bash
 ```
 
 Or from a local clone:
