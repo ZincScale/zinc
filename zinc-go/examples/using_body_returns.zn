@@ -20,19 +20,19 @@ class Resource {
         // Important: Close must run BEFORE this return is observed
         // by the caller. Pre-fix the deferred Close fired at
         // outer-function exit, AFTER caller observed the return.
-        return x, null
+        return x
     }
-    return 0, null
+    return 0
 }
 
 (int, error) earlyReturnFlow(bool fail) {
     using (var r = Resource("early")) {
         if (fail) {
-            return -1, null
+            return -1
         }
-        return 7, null
+        return 7
     }
-    return 0, null
+    return 0
 }
 
 void main() {

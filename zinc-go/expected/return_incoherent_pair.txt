@@ -1,0 +1,1 @@
+incoherent return: a non-null error must be returned as `return errExpr`

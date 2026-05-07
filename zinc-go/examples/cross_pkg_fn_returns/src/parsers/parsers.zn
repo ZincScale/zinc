@@ -27,5 +27,5 @@ pub (Compiled, error) compile(String src) {
     if (src == "") {
         return CompileError("empty source")
     }
-    return Compiled(src), null
+    return Compiled(src)
 }

@@ -16,13 +16,13 @@ class ParseError : BaseError {
     if (s == "") {
         return ParseError("empty input")
     }
-    return 42, null
+    return 42
 }
 
 // Caller is also declared as a thrower; propagates via `catch { return err }`.
 (int, error) doubleIt(String s) {
     var n = parseNum(s) catch { return err }
-    return n * 2, null
+    return n * 2
 }
 
 void main() {

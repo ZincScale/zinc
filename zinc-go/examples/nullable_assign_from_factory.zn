@@ -6,7 +6,7 @@ class Box {
 }
 
 (Box, error) makeBox(String n) {
-    return Box(n), null
+    return Box(n)
 }
 
 void main() {

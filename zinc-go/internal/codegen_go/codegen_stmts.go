@@ -835,10 +835,32 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 					g.writeln("%s = %s", g.usingIIFEValueSlots[i], g.formatExpr(el))
 				}
 			} else if len(g.usingIIFEValueSlots) > 1 {
-				// `return call()` where call returns a multi-value
-				// tuple — Go's multi-return assigns all slots in one
-				// shot from a single RHS.
-				g.writeln("%s = %s", strings.Join(g.usingIIFEValueSlots, ", "), g.formatExpr(r.Value))
+				// Returning an error ctor or err var inside the using-body
+				// of a thrower: zero-fill value slots, assign to err slot.
+				// Same shape as the function-level error-ctor branch.
+				if g.currentReturnIsDeclaredThrower &&
+					len(g.usingIIFEValueSlots) == len(g.currentThrowerValueGoTypes)+1 &&
+					(g.exprIsErrorCtor(r.Value) || g.exprIsErrorVar(r.Value)) {
+					for i, vt := range g.currentThrowerValueGoTypes {
+						g.writeln("%s = %s", g.usingIIFEValueSlots[i], g.zeroValueFor(vt))
+					}
+					g.writeln("%s = %s",
+						g.usingIIFEValueSlots[len(g.usingIIFEValueSlots)-1],
+						g.formatExpr(r.Value))
+				} else if g.currentReturnIsDeclaredThrower &&
+					len(g.usingIIFEValueSlots) == len(g.currentThrowerValueGoTypes)+1 &&
+					!g.callReturnsError(r.Value) {
+					// Bare `return v` for a `(T, error)` using-body:
+					// auto-null the error slot. Mirrors the function-
+					// level auto-null contract.
+					g.writeln("%s = %s", g.usingIIFEValueSlots[0], g.formatExpr(r.Value))
+					g.writeln("%s = nil", g.usingIIFEValueSlots[len(g.usingIIFEValueSlots)-1])
+				} else {
+					// `return call()` where call returns a multi-value
+					// tuple — Go's multi-return assigns all slots in one
+					// shot from a single RHS.
+					g.writeln("%s = %s", strings.Join(g.usingIIFEValueSlots, ", "), g.formatExpr(r.Value))
+				}
 			} else {
 				// Single slot — direct assign.
 				g.writeln("%s = %s", g.usingIIFEValueSlots[0], g.formatExpr(r.Value))
@@ -895,17 +917,52 @@ func (g *Generator) emitReturnStmt(r *parser.ReturnStmt) {
 		// Single-value thrower (`(T, error)`) returning a non-error,
 		// non-tuple value: auto-fill the error slot with nil. Lets the
 		// user write `return v` instead of `return v, null` in the
-		// success path. Multi-value throwers must spell out all slots.
+		// success path.
 		if len(valueTypes) == 1 {
 			if _, isTup := r.Value.(*parser.TupleLit); !isTup {
 				g.writeln("return %s, nil", g.formatExpr(r.Value))
 				return
 			}
 		}
-		// TupleLit with all slots — fall through to the existing
-		// currentReturnIsTuple branch, which emits comma-separated.
+		// Multi-value thrower (`(T1, ..., Tn, error)`) returning a
+		// TupleLit with exactly N value slots: auto-fill the error slot
+		// with nil. Same ergonomic as the single-value case — users
+		// write `return v1, v2` for the success path, the codegen
+		// appends `, nil` for the error slot. Avoids the footgun where
+		// the user has to spell out a trailing `null` they're never
+		// going to set to anything else.
+		if len(valueTypes) >= 2 {
+			if tup, isTup := r.Value.(*parser.TupleLit); isTup && len(tup.Elements) == len(valueTypes) {
+				parts := make([]string, 0, len(valueTypes)+1)
+				for _, el := range tup.Elements {
+					parts = append(parts, g.formatExpr(el))
+				}
+				parts = append(parts, "nil")
+				g.writeln("return %s", strings.Join(parts, ", "))
+				return
+			}
+		}
+		// TupleLit with the full slot count (value(s) + explicit error/null
+		// in the trailing position) is a footgun — either redundant
+		// (`return v, null` when auto-null does the same) or incoherent
+		// (`return v, errs.X()` pairs a non-zero success value with a
+		// non-null error, defying the errors-as-values contract that
+		// "error means the value is invalid"). Reject with a clear
+		// directive instead of letting Go silently accept either shape.
+		if tup, isTup := r.Value.(*parser.TupleLit); isTup && len(tup.Elements) == len(valueTypes)+1 {
+			last := tup.Elements[len(tup.Elements)-1]
+			_, isNull := last.(*parser.NullLit)
+			if isNull {
+				g.compileError(r.Line, "redundant `, null` in success return — drop the null; the codegen auto-fills the error slot")
+				return
+			}
+			if g.exprIsErrorCtor(last) || g.exprIsErrorVar(last) {
+				g.compileError(r.Line, "incoherent return: a non-null error must be returned as `return errExpr` (success slots auto-zero), not paired with explicit value(s) — pairing both would let the caller see a non-zero value alongside a non-null error")
+				return
+			}
+		}
 		// Anything else (single non-error value into a multi-value
-		// thrower) is malformed — let Go surface the type error.
+		// thrower, etc.) is malformed — let Go surface the type error.
 	}
 
 	// Multi-value return: function declared with TupleType return type

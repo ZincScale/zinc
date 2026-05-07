@@ -18,7 +18,7 @@ pub (Int, error) parseNum(String s) {
     if (s == "") {
         return ParseError("empty input")
     }
-    return 42, null
+    return 42
 }
 
 // Multi-value thrower: `(Int, String, error)`.
@@ -26,7 +26,7 @@ pub (Int, String, error) lookup(String key) {
     if (key == "") {
         return ParseError("missing key")
     }
-    return 7, "found", null
+    return 7, "found"
 }
 
 // Naked `error` — void thrower.

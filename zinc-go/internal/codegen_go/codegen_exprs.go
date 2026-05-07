@@ -630,14 +630,6 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 			}
 		}
 
-		blockRetType := ""
-		for _, s := range l.Body.Stmts {
-			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
-				blockRetType = g.inferExprType(ret.Value, paramTypes)
-				break
-			}
-		}
-
 		// Capture the body via emitBlock so every stmt kind (for, while,
 		// match, lock, with, tuple-var, ...) gets full codegen — not the
 		// formatStmtInline subset, which silently dropped any unsupported
@@ -647,15 +639,26 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 		})
 		body = strings.TrimRight(body, "\n")
 
-		if blockRetType != "" && blockRetType != "interface{}" {
-			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, blockRetType, body)
-		}
-		// Same target-driven fallback as the expression-form path: when
-		// the target Fn declares a return type, prefer it over emitting
-		// a void signature (which would drop the return value).
+		// Prefer the target Fn's declared return type over inferring from
+		// the body. Inferring from the first return stmt mis-types thrower
+		// lambdas — `(Int x) -> { ... return SomeError(); return v }`
+		// would infer `SomeError` (single value) when the target signature
+		// is `(Int, error)` (tuple). Body inference stays as the fallback
+		// for cases without a declared target (rare).
 		if target != nil && target.ReturnType != nil {
 			retType := g.formatType(target.ReturnType)
 			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, retType, body)
+		}
+
+		blockRetType := ""
+		for _, s := range l.Body.Stmts {
+			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {
+				blockRetType = g.inferExprType(ret.Value, paramTypes)
+				break
+			}
+		}
+		if blockRetType != "" && blockRetType != "interface{}" {
+			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, blockRetType, body)
 		}
 		return fmt.Sprintf("func(%s) {\n%s\n}", paramStr, body)
 	}

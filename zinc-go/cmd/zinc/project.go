@@ -392,6 +392,7 @@ func loadZincToml(path string) (*zincConfig, error) {
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
+		key = strings.Trim(key, "\"")
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, "\"")
 
@@ -446,10 +447,29 @@ func loadZincToml(path string) (*zincConfig, error) {
 			requiredModules[dep[:i]] = true
 		}
 	}
-	for alias, localPath := range replaceByAlias {
-		modulePath, ok := cfg.Imports[alias]
+	for key, localPath := range replaceByAlias {
+		// Resolution order: alias match first (the canonical zinc.toml
+		// shape — `stdlib = ".."`), then full module-path match
+		// (`"github.com/ZincScale/zinc-stdlib" = ".."`) so users coming
+		// from go.mod conventions don't trip on the alias-only rule.
+		modulePath, ok := cfg.Imports[key]
 		if !ok {
-			return nil, fmt.Errorf("zinc.toml: [replace] %q has no matching [deps] entry", alias)
+			// Strip @version suffix on the [deps] value before comparing
+			// since [replace] keys are bare module paths.
+			for alias, dep := range cfg.Imports {
+				bareDep := dep
+				if at := strings.Index(dep, "@"); at >= 0 {
+					bareDep = dep[:at]
+				}
+				if bareDep == key || dep == key {
+					modulePath = cfg.Imports[alias]
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("zinc.toml: [replace] %q has no matching [deps] entry", key)
 		}
 		if !filepath.IsAbs(localPath) {
 			localPath = filepath.Join(manifestDir, localPath)

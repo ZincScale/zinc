@@ -16,7 +16,7 @@ pub (Int, String, error) lookup(String key) {
     if (key == "") {
         return LookupError("missing key")
     }
-    return 7, "found", null
+    return 7, "found"
 }
 
 void main() {

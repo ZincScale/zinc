@@ -16,7 +16,7 @@ class TagError : BaseError {
 // from a `(T1, T2, error)` signature must lower to comma-separated
 // `return v1, v2, nil`, not the slice form. Audit gap #1.
 (Int, String, error) namedPair() {
-    return 7, "seven", null
+    return 7, "seven"
 }
 
 // (2) Method call on a class field that returns a thrower tuple,
@@ -25,7 +25,7 @@ class TagError : BaseError {
 class Inner {
     pub (Int, error) compute(Int x) {
         if (x < 0) { return TagError("neg") }
-        return x * 2, null
+        return x * 2
     }
 }
 class Outer {
@@ -44,7 +44,7 @@ class Outer {
 // Audit gap #6.
 (Int, error) parseSeed(String s) {
     if (s == "") { return TagError("empty") }
-    return 42, null
+    return 42
 }
 
 (Int, error) callViaFnLocal() {
@@ -62,7 +62,7 @@ class Outer {
 // through by passing in a value that takes neither path.
 (Int, String, error) maybeBoth(Int x) {
     if (x > 0) {
-        return x, "pos", null
+        return x, "pos"
     }
     if (x < 0) {
         return TagError("neg")
@@ -82,7 +82,7 @@ class Source {
         if (this.fail) {
             return TagError("read failed")
         }
-        return "data", null
+        return "data"
     }
 }
 

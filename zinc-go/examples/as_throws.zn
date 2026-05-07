@@ -25,7 +25,7 @@ class ForStmt : Stmt {
 // 1. Declared thrower — propagation via `catch { return err }`.
 (String, error) castAndDescribe(Stmt s) {
     var i = s as IfStmt catch { return err }
-    return "got an if: ${i.cond}", null
+    return "got an if: ${i.cond}"
 }
 
 // 2. Local handling — or-handler consumes; function does NOT throw.

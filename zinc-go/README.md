@@ -29,7 +29,7 @@ pub double area(Shape s) {
 
 pub (int, error) parseSide(String s) {
     if (s == "") { return errors.IllegalArgumentError("empty") }
-    return 4, null
+    return 4
 }
 
 void main() {
@@ -91,7 +91,7 @@ import stdlib/errors
 
 pub (int, error) parseInt(String s) {
     if (s == "") { return errors.IllegalArgumentError("empty input") }
-    return 42, null
+    return 42
 }
 
 void main() {

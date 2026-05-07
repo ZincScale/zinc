@@ -21,7 +21,7 @@ class NetworkError : AppError {
     if (url == "") {
         return NetworkError("empty url")
     }
-    return "response for ${url}", null
+    return "response for ${url}"
 }
 
 void main() {

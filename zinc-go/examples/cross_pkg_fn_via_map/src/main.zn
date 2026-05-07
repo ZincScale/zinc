@@ -15,7 +15,7 @@ void main() {
         if (x < 0) {
             return lib.LookupError("negative seed")
         }
-        return "pos=${x}", null
+        return "pos=${x}"
     })
 
     var ok = reg.create("dbl", 7) catch { print("dbl err: ${err}"); return }

@@ -15,7 +15,7 @@ class ParseError : BaseError {
     if (s == "") {
         return ParseError("empty input")
     }
-    return 42, null
+    return 42
 }
 
 void main() {

@@ -1,0 +1,21 @@
+// `return v, errExpr()` from a thrower is incoherent — pairing a
+// non-null error with explicit value(s) defies the errors-as-values
+// contract that "error means the value is invalid". The canonical
+// error-path shape is `return errExpr()`; codegen auto-zeroes the
+// value slots. Reject with a directive nudging toward that shape.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+(Int, error) parseNum(String s) {
+    if (s == "") { return 0, BaseError("empty") }
+    return 42
+}
+
+void main() {
+    var n = parseNum("") catch { return }
+    print("n: ${n}")
+}

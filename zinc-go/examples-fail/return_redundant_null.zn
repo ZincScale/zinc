@@ -1,0 +1,21 @@
+// `return v, null` from a thrower is redundant — the codegen
+// auto-fills the trailing error slot with nil for the success path.
+// Reject with a directive instead of silently accepting the noisy
+// form, since there's exactly one canonical shape and nudging users
+// toward it keeps the success-path return readable.
+
+class BaseError {
+    pub String message
+    init(String msg) { this.message = msg }
+    pub String Error() { return this.message }
+}
+
+(Int, error) parseNum(String s) {
+    if (s == "") { return BaseError("empty") }
+    return 42, null
+}
+
+void main() {
+    var n = parseNum("x") catch { return }
+    print("n: ${n}")
+}

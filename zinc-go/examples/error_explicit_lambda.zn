@@ -25,7 +25,7 @@ void main() {
         if (n == 0) {
             return LookupError("zero")
         }
-        return 100 / n, null
+        return 100 / n
     }
     var (v2, e2) = safeDiv(4)
     print("block-form ok: ${v2} (err: ${e2})")

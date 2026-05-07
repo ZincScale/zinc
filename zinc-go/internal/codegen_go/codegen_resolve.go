@@ -1455,6 +1455,12 @@ func (g *Generator) zeroValueFor(goType string) string {
 		if g.isInterface(goType) || g.isImportedInterface(goType) {
 			return "nil"
 		}
+		// Enum types lower to `type Name int` in Go — composite-literal
+		// zero (`Name{}`) is invalid; use the typed-int form `Name(0)`.
+		// Same shape applies to qualified cross-package enum refs.
+		if g.isEnum(goType) {
+			return goType + "(0)"
+		}
 		// Qualified external type (pkg.Name) — ask goResolver.
 		// Go stdlib interfaces (io.Writer, io.Reader, etc.) land here.
 		if strings.Contains(goType, ".") {
@@ -1464,6 +1470,12 @@ func (g *Generator) zeroValueFor(goType string) string {
 				if g.goResolver.IsInterface(pkgPath, name) {
 					return "nil"
 				}
+			}
+			// Cross-package enum: bound.Sigs.EnumNames keys the bare
+			// type name (e.g. "FieldType"), so check by suffix when
+			// the call site has the qualified form.
+			if g.isEnum(name) {
+				return goType + "(0)"
 			}
 		}
 		return goType + "{}"

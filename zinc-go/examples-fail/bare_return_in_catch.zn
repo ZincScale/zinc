@@ -11,11 +11,11 @@ import stdlib/errors
         // Bug: this loses the error. Should be `return err`.
         return
     }
-    return n * 2, null
+    return n * 2
 }
 
 (int, error) parseNum(String s) {
-    return 42, null
+    return 42
 }
 
 void main() {

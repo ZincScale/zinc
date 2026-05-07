@@ -517,8 +517,10 @@ func (b *binder) bindOrHandler(h *parser.OrHandler) {
 		b.bindStmt(s)
 		// In a thrower, bare `return` inside catch silently swallows
 		// the error (`return zero, nil`) — force `return err` (or
-		// `return v..., err` for a multi-slot return) so propagation
-		// is explicit. In a non-thrower (most importantly void
+		// `catch { 0 }` fallback) so propagation is explicit. The
+		// `return v..., err` shape is rejected by codegen as incoherent
+		// — pairing a non-null error with explicit value(s) defies the
+		// errors-as-values contract. In a non-thrower (most importantly void
 		// functions like HTTP handlers), bare return is the natural
 		// "log the error and bail" pattern: there's no error slot in
 		// the signature to propagate to, and `return err` would be a
@@ -542,8 +544,7 @@ func checkBareReturnInCatch(s parser.Stmt, errors *[]V2Error) {
 			*errors = append(*errors, V2Error{
 				Line: n.Line,
 				Message: "bare `return` inside `catch { }` is not allowed — " +
-					"use `return err` to propagate, `return v..., err` for an explicit " +
-					"multi-slot return, or a fallback expression " +
+					"use `return err` to propagate, or a fallback expression " +
 					"(`catch { 0 }`). bare return would silently swallow the error.",
 			})
 		}

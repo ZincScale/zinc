@@ -28,7 +28,7 @@ pub (String, error) throwingHelper(bool fail) {
     if (fail) {
         return LookupError("requested failure")
     }
-    return "ok", null
+    return "ok"
 }
 
 // nonThrower — calls a thrower but consumes the error with `catch { return false }`.

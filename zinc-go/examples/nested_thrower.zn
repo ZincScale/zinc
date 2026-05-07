@@ -12,12 +12,12 @@ class BaseError {
 
 (int, error) parseNum(String s) {
     if (s == "") { return BaseError("empty") }
-    return 42, null
+    return 42
 }
 
 (bool, error) isPositive(String s) {
     if (s == "") { return BaseError("empty") }
-    return true, null
+    return true
 }
 
 String label(int n) { return "n=${n}" }
@@ -45,7 +45,7 @@ error check(String s) {
 // Nested in string interpolation (which compiles to a call):
 (String, error) describe(String s) {
     var n = parseNum(s) catch { return err }
-    return "got ${n} from ${s}", null
+    return "got ${n} from ${s}"
 }
 
 void main() {
