@@ -189,7 +189,7 @@ version = "1.26"
 	}
 
 	// src/main.zn
-	mainZn := fmt.Sprintf(`fn main() {
+	mainZn := fmt.Sprintf(`void main() {
     print("Hello from %s!")
 }
 `, baseName)
