@@ -97,8 +97,16 @@ func runTypecheck(progs []*parser.Program, importMap map[string]string,
 		if externalSigs.MethodSigs == nil {
 			externalSigs.MethodSigs = make(map[string]map[string]typechecker.V2FnSig)
 		}
+		if externalSigs.ClassNames == nil {
+			externalSigs.ClassNames = make(map[string]bool)
+		}
 		for _, classes := range crossPkgClassDecls {
 			for _, cls := range classes {
+				// Register the class name so constructor inference fires
+				// for `Foo(...)` / `pkg.Foo(...)` whose decl lives in an
+				// external dep (stdlib etc.). Same shape as crossPkgExports
+				// does for sibling-project classes (above).
+				externalSigs.ClassNames[cls.Name] = true
 				if len(cls.Parents) > 0 {
 					names := make([]string, len(cls.Parents))
 					for i, p := range cls.Parents {
@@ -661,6 +669,23 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 					}
 				}
 			}
+			// External dep class decls (stdlib etc.) — fold their methods
+			// into the typechecker's externalSigs.MethodSigs alongside
+			// same-project sibling classes so consumers can see their
+			// signatures for catch / void-thrower detection and inheritance
+			// walks. loadDepClassDecls keys alias → classes; same shape as
+			// crossDecls.
+			for alias, cls := range externalClassDecls {
+				if existing, ok := crossDecls[alias]; ok {
+					for k, v := range cls {
+						if _, present := existing[k]; !present {
+							existing[k] = v
+						}
+					}
+				} else {
+					crossDecls[alias] = cls
+				}
+			}
 			bps, errs := runTypecheck(pkgProgs, leafIm, crossPkg, goModDir, crossDecls, crossFns)
 			for prog, bp := range bps {
 				allBound[prog] = bp
@@ -824,6 +849,19 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 				if len(cls) > 0 {
 					crossDecls[alias] = cls
 				}
+			}
+		}
+		// External dep class decls (stdlib etc.) — see sibling-package
+		// branch above for rationale.
+		for alias, cls := range externalClassDecls {
+			if existing, ok := crossDecls[alias]; ok {
+				for k, v := range cls {
+					if _, present := existing[k]; !present {
+						existing[k] = v
+					}
+				}
+			} else {
+				crossDecls[alias] = cls
 			}
 		}
 		bps, errs := runTypecheck(rootProgs, rootIm, crossPkg, goModDir, crossDecls, crossFns)

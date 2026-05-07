@@ -2245,12 +2245,12 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 	}
 	if sel, ok := call.Callee.(*parser.SelectorExpr); ok {
-		// Look up the receiver's class name via the existing helper
-		// (handles `this`, fields, same-pkg locals) AND, when that
-		// returns "", fall back to bound.NodeTypes for a qualified
-		// type name like "Config" pulled from `var fresh = config.Config()`.
-		// Cross-package class methods don't fire isClassType today, so
-		// the helper alone misses them.
+		// Resolve the receiver's class name. The helper handles `this`,
+		// same-class fields, and same-pkg locals; for cross-package
+		// class instances (e.g. `var fresh = config.Config()`) it
+		// returns "" because isClassType is per-package, so fall back
+		// to bound.NodeTypes which the typechecker tags with the
+		// inferred class name regardless of declaring package.
 		recv := g.resolveReceiverClassName(sel.Object)
 		if recv == "" && g.bound != nil {
 			if obj, ok := sel.Object.(*parser.Ident); ok {
@@ -2261,10 +2261,8 @@ func (g *Generator) callIsVoidThrower(expr parser.Expr) bool {
 		}
 		if recv != "" && g.bound != nil && g.bound.Sigs != nil {
 			if methods, ok := g.bound.Sigs.MethodSigs[recv]; ok {
-				if msig, ok := methods[sel.Field]; ok {
-					if msig.ReturnType.Name == "error" {
-						return true
-					}
+				if msig, ok := methods[sel.Field]; ok && msig.ReturnType.Name == "error" {
+					return true
 				}
 			}
 		}
