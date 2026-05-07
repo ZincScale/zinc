@@ -15,7 +15,7 @@ Or build from source (requires Go 1.26+):
 
 ```bash
 git clone https://github.com/ZincScale/zinc.git
-cd zinc/zinc-go
+cd zinc/compilers/zinc-go
 make build
 sudo make install
 ```

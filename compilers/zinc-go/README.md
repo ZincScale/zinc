@@ -4,8 +4,9 @@
 
 # Zinc
 
-[![Build](https://github.com/ZincScale/zinc/actions/workflows/ci.yml/badge.svg)](https://github.com/ZincScale/zinc/actions)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../LICENSE)
+[![Build](https://github.com/ZincScale/zinc/actions/workflows/zinc-go.yml/badge.svg)](https://github.com/ZincScale/zinc/actions/workflows/zinc-go.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
+[![Release](https://img.shields.io/github/v/release/ZincScale/zinc?label=release)](https://github.com/ZincScale/zinc/releases/latest)
 
 **Zinc is a typed, OO language that compiles to Go.** The same shape Kotlin
 has to the JVM, TypeScript has to JavaScript, Crystal has to Ruby — Zinc
@@ -280,7 +281,7 @@ Or build from source:
 
 ```bash
 git clone https://github.com/ZincScale/zinc.git
-cd zinc/zinc-go
+cd zinc/compilers/zinc-go
 make build && sudo make install
 ```
 
@@ -322,6 +323,8 @@ Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
 
 ## Where to read more
 
+Full index at **[docs/](docs/README.md)**. Highlights:
+
 - [Why Zinc](docs/why-zinc.md) — the rationale, in long form
 - [Getting Started](docs/getting-started.md) — install, project layout, workflow
 - [Language Tour](docs/language-tour.md) — every feature with runnable examples
@@ -329,11 +332,15 @@ Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
 - [Classes & Inheritance](docs/classes.md)
 - [Error Handling](docs/error-handling.md)
 - [Concurrency](docs/concurrency.md)
+- [Dev Guide](docs/dev-guide.md) — for compiler contributors
 
 ## Status
 
-Zinc is at 1.0 maturity. The full e2e suite is green (126 examples), and
-the language is in production use as the implementation language for
+**Current release: [v0.7](https://github.com/ZincScale/zinc/releases/latest)** (2026-05-07).
+
+The full e2e suite is green (128 tests across positive, negative, and
+project regression suites), and the language is in production use as
+the implementation language for
 [zinc-flow](https://github.com/ZincScale/zinc-flow), a NiFi-class data
 flow engine. The grammar surface is stabilized as `v2-2026-05-01`
 (reported by `zinc-go version`); editor plugins and build tools can pin
@@ -342,7 +349,7 @@ on it.
 ## Architecture
 
 ```
-zinc-go/
+compilers/zinc-go/
   cmd/zinc/           CLI (build, run, init, test, fmt, add, deps)
   internal/
     lexer/            Tokenizer
