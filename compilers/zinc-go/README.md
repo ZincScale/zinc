@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../logo.png" alt="Zinc" width="320">
+  <img src="../../logo.png" alt="Zinc" width="320">
 </p>
 
 # Zinc
