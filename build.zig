@@ -78,6 +78,7 @@ pub fn build(b: *std.Build) void {
         "src/value.zig",
         "src/string.zig",
         "src/table.zig",
+        "src/lexer.zig",
     };
     const test_step = b.step("test", "Run tests");
     for (test_files) |path| {

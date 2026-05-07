@@ -18,6 +18,7 @@ const alloc = @import("alloc.zig");
 const v = @import("value.zig");
 const String = @import("string.zig").String;
 const Table = @import("table.zig").Table;
+const lexer = @import("lexer.zig");
 
 const TValue = v.TValue;
 
@@ -104,8 +105,46 @@ pub fn main(init: std.process.Init) !void {
     try out.print("  t2['key_500'] -> {} (expected 3500)\n", .{probe_val.integer});
 
     try printStats(out, "final");
-    try out.print("\n[pluto-zig] phase-1 OK\n", .{});
+
+    // --- Phase 3.0 lexer demo ------------------------------------------
+    try out.print("\n[pluto-zig] phase-3.0 lexer demo\n", .{});
+    const sample =
+        \\local function fib(n)
+        \\    if n < 2 then return n end
+        \\    return fib(n - 1) + fib(n - 2)
+        \\end
+        \\
+        \\class Greeter
+        \\    function __new(name)
+        \\        self.name = name
+        \\    end
+        \\    function greet()
+        \\        return "Hello, " .. self.name
+        \\    end
+        \\end
+    ;
+    try lexAndDump(out, sample);
+
+    try out.print("\n[pluto-zig] phase-1 + phase-3.0 OK\n", .{});
     try out.flush();
+}
+
+fn lexAndDump(out: anytype, src: []const u8) !void {
+    var lex = lexer.Lexer.init(src);
+    var n: u32 = 0;
+    while (true) {
+        const tok = lex.next() catch |err| {
+            try out.print("  lex error: {s}\n", .{@errorName(err)});
+            return;
+        };
+        if (tok.kind == .eof) break;
+        const text = tok.lexeme(src);
+        const kw = lexer.keywordFor(text);
+        const tag = if (kw != null) "keyword" else @tagName(tok.kind);
+        try out.print("  L{d:>2}  {s:<14}  '{s}'\n", .{ tok.line, tag, text });
+        n += 1;
+    }
+    try out.print("  ({d} tokens)\n", .{n});
 }
 
 fn dumpTable(out: anytype, t: *Table) !void {
