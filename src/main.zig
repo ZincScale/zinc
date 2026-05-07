@@ -1,93 +1,142 @@
-//! pluto-zig phase-0.5 spike.
+//! pluto-zig phase-1 spike — TValue, String, Table.
 //!
-//! Same FFI plumbing as phase 0, but the allocator is now backed by
-//! bdwgc (Boehm-Demers-Weiser conservative GC). Demonstrates that:
+//! Building on phase 0.5's bdwgc-backed allocator, phase 1 adds the
+//! Lua data model: a tagged-union TValue, heap-allocated immutable
+//! Strings, and an open-addressed hash Table that resizes on demand.
+//! All three are GC-managed; the demo allocates a table holding
+//! mixed-type keys and values, looks them back up, then forces a
+//! collection cycle to verify the live table survives.
 //!
-//!   1. Allocations flow through a real GC, not malloc
-//!   2. Forcing a collection cycle actually reclaims unreachable memory
-//!   3. The heap-size stat shrinks when objects are dropped
-//!
-//! Phase 0.7 will replace bdwgc with mmtk-core. The API surface stays
-//! identical, so this file won't change.
+//! NaN-boxing was the original phase-1 plan but combines poorly with
+//! conservative GC (see comments in value.zig). Tagged unions ship
+//! today; NaN-boxing returns when phase 0.7 brings precise GC.
 
 const std = @import("std");
 const Io = std.Io;
+
 const alloc = @import("alloc.zig");
+const v = @import("value.zig");
+const String = @import("string.zig").String;
+const Table = @import("table.zig").Table;
 
-const ObjectTag = enum(u8) {
-    nil = 0,
-    boolean = 1,
-    int = 2,
-    str_short = 3,
-    blob = 4,
-};
-
-const ObjectHeader = extern struct {
-    tag: ObjectTag,
-    _pad: [7]u8 = .{0} ** 7,
-    payload: u64 = 0,
-};
+const TValue = v.TValue;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
-    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_buffer: [2048]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const out = &stdout_file_writer.interface;
 
-    try out.print("[pluto-zig] phase-0.5 spike — bdwgc-backed\n", .{});
+    try out.print("[pluto-zig] phase-1 spike — TValue + String + Table\n", .{});
 
     const heap = try alloc.init(64 * 1024 * 1024);
     defer alloc.shutdown(heap);
-    try out.print("[pluto-zig] heap initialized\n", .{});
 
-    // Stage 1: a few small typed objects (the phase-0 demo).
-    try printStats(out, heap, "before any allocations");
+    try printStats(out, "fresh heap");
 
-    const sz = @sizeOf(ObjectHeader);
-    const align_to: usize = @alignOf(ObjectHeader);
+    // --- Strings ---------------------------------------------------------
+    const k_name = try String.create(heap, "name");
+    const k_age = try String.create(heap, "age");
+    const k_role = try String.create(heap, "role");
+    const v_alice = try String.create(heap, "Alice");
+    const v_engineer = try String.create(heap, "Engineer");
 
-    const a = try alloc.alloc(heap, sz, align_to);
-    const ah: *ObjectHeader = @ptrCast(@alignCast(a));
-    ah.* = .{ .tag = .int, .payload = 42 };
+    try out.print("\n[pluto-zig] strings:\n", .{});
+    try out.print("  k_name='{s}' (hash=0x{x})\n", .{ k_name.slice(), k_name.hash });
+    try out.print("  v_alice='{s}' (hash=0x{x})\n", .{ v_alice.slice(), v_alice.hash });
 
-    const b = try alloc.alloc(heap, sz, align_to);
-    const bh: *ObjectHeader = @ptrCast(@alignCast(b));
-    bh.* = .{ .tag = .boolean, .payload = 1 };
+    // --- Table with mixed keys ------------------------------------------
+    const t = try Table.create(heap);
 
-    try out.print("[pluto-zig] obj a: tag={s} payload={}\n", .{ @tagName(ah.tag), ah.payload });
-    try out.print("[pluto-zig] obj b: tag={s} payload={}\n", .{ @tagName(bh.tag), bh.payload });
+    try t.set(heap, TValue.fromString(k_name), TValue.fromString(v_alice));
+    try t.set(heap, TValue.fromString(k_age), TValue.fromInt(34));
+    try t.set(heap, TValue.fromString(k_role), TValue.fromString(v_engineer));
+    try t.set(heap, TValue.fromInt(1), TValue.fromString(v_alice)); // mixed key types
+    try t.set(heap, TValue.TRUE, TValue.fromFloat(3.14));
 
-    try printStats(out, heap, "after 2 small objects");
+    try out.print("\n[pluto-zig] table after 5 inserts (count={}, cap={}):\n", .{ t.len(), t.cap });
+    try dumpTable(out, t);
 
-    // Stage 2: allocate a wave of larger objects in a scope, then
-    // drop the references. After GC, those bytes should be reclaimed.
-    try out.print("\n[pluto-zig] allocating 10000 x 256-byte blobs...\n", .{});
-    {
-        var i: usize = 0;
-        while (i < 10_000) : (i += 1) {
-            const blob = try alloc.alloc(heap, 256, 8);
-            // Touch the memory so it's actually committed.
-            blob[0] = @truncate(i);
-        }
-        // No reference kept — the loop's local `blob` doesn't escape.
-    }
-    try printStats(out, heap, "after wave of blobs (refs dropped)");
+    // --- Lookups exercising every value type ----------------------------
+    try out.print("\n[pluto-zig] lookups:\n", .{});
+    const got_name = t.get(TValue.fromString(k_name));
+    try out.print("  t['name'] -> '{s}'\n", .{got_name.string.slice()});
+    const got_age = t.get(TValue.fromString(k_age));
+    try out.print("  t['age']  -> {}\n", .{got_age.integer});
+    const got_int_key = t.get(TValue.fromInt(1));
+    try out.print("  t[1]      -> '{s}'\n", .{got_int_key.string.slice()});
+    const got_bool_key = t.get(TValue.TRUE);
+    try out.print("  t[true]   -> {d}\n", .{got_bool_key.number});
+    const got_missing = t.get(TValue.fromString(k_role));
+    try out.print("  t['role'] -> '{s}'\n", .{got_missing.string.slice()});
 
-    // Stage 3: force a GC cycle and re-read stats. bdwgc finds nothing
-    // pointing at the blobs and reclaims them.
+    try printStats(out, "after table built");
+
+    // --- Force GC, prove table + strings survive ------------------------
+    // The Zig stack still holds `t`, `k_name`, etc. — bdwgc finds
+    // these via stack scanning, so nothing should be reclaimed.
     try out.print("\n[pluto-zig] forcing GC cycle...\n", .{});
     alloc.forceGc();
-    try printStats(out, heap, "after forced collection");
+    try printStats(out, "after forced GC");
 
-    try out.print("\n[pluto-zig] phase-0.5 OK\n", .{});
+    // Re-read all five values post-GC. If anything was wrongly
+    // reclaimed, this would crash or return garbage.
+    try out.print("\n[pluto-zig] re-reading post-GC:\n", .{});
+    try out.print("  t['name'] -> '{s}'\n", .{t.get(TValue.fromString(k_name)).string.slice()});
+    try out.print("  t['age']  -> {}\n", .{t.get(TValue.fromString(k_age)).integer});
+    try out.print("  t['role'] -> '{s}'\n", .{t.get(TValue.fromString(k_role)).string.slice()});
+
+    // --- Stress: 1000 string-keyed inserts to exercise resize -----------
+    try out.print("\n[pluto-zig] stress: 1000 string-keyed inserts...\n", .{});
+    const t2 = try Table.create(heap);
+    var i: i64 = 0;
+    var key_buf: [32]u8 = undefined;
+    while (i < 1000) : (i += 1) {
+        const key_str = try std.fmt.bufPrint(&key_buf, "key_{d}", .{i});
+        const ks = try String.create(heap, key_str);
+        try t2.set(heap, TValue.fromString(ks), TValue.fromInt(i * 7));
+    }
+    try out.print("  t2 size: count={} cap={}\n", .{ t2.len(), t2.cap });
+
+    // Spot-check a handful of entries.
+    const probe_str = try String.create(heap, "key_500");
+    const probe_val = t2.get(TValue.fromString(probe_str));
+    try out.print("  t2['key_500'] -> {} (expected 3500)\n", .{probe_val.integer});
+
+    try printStats(out, "final");
+    try out.print("\n[pluto-zig] phase-1 OK\n", .{});
     try out.flush();
 }
 
-fn printStats(out: anytype, heap: *alloc.Heap, label: []const u8) !void {
-    _ = heap;
+fn dumpTable(out: anytype, t: *Table) !void {
+    const Ctx = struct { out: @TypeOf(out) };
+    const ctx = Ctx{ .out = out };
+    try t.forEach(ctx, struct {
+        fn entry(c: Ctx, key: TValue, value: TValue) anyerror!void {
+            try printSlot(c.out, key);
+            try c.out.print(" = ", .{});
+            try printSlot(c.out, value);
+            try c.out.print("\n", .{});
+        }
+    }.entry);
+}
+
+fn printSlot(out: anytype, val: TValue) !void {
+    try out.print("  ", .{});
+    switch (val) {
+        .nil => try out.print("nil", .{}),
+        .boolean => |b| try out.print("{}", .{b}),
+        .integer => |i| try out.print("{}", .{i}),
+        .number => |f| try out.print("{d}", .{f}),
+        .string => |s| try out.print("'{s}'", .{s.slice()}),
+        .table => |tt| try out.print("<table {*}>", .{tt}),
+    }
+}
+
+fn printStats(out: anytype, label: []const u8) !void {
     const s = alloc.stats();
     try out.print(
-        "  [stats] {s}: gc_cycles={} heap={} KiB bytes_allocated={} KiB objects={}\n",
+        "  [stats] {s}: gc_cycles={} heap={} KiB lifetime={} KiB objects={}\n",
         .{
             label,
             s.gc_cycles,

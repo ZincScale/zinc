@@ -69,9 +69,35 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the phase-0 spike");
     run_step.dependOn(&run_cmd.step);
 
-    // --- test step (placeholder) -----------------------------------------
-    const exe_tests = b.addTest(.{ .root_module = exe.root_module });
-    const run_exe_tests = b.addRunArtifact(exe_tests);
+    // --- test step --------------------------------------------------------
+    // Tests live alongside the modules they exercise (value.zig,
+    // string.zig, table.zig). One test artifact per module so a
+    // failure points at the file. Each links the same Rust archive
+    // because string/table tests call into the GC.
+    const test_files = [_][]const u8{
+        "src/value.zig",
+        "src/string.zig",
+        "src/table.zig",
+    };
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_exe_tests.step);
+    for (test_files) |path| {
+        const test_mod = b.createModule(.{
+            .root_source_file = b.path(path),
+            .target = target,
+            .optimize = optimize,
+        });
+        test_mod.addObjectFile(b.path(archive_path));
+        test_mod.link_libc = true;
+        test_mod.linkSystemLibrary("pthread", .{});
+        test_mod.linkSystemLibrary("dl", .{});
+        test_mod.linkSystemLibrary("m", .{});
+        test_mod.linkSystemLibrary("gcc_s", .{});
+        test_mod.addLibraryPath(b.path("vendor/lib"));
+        test_mod.linkSystemLibrary("gc", .{});
+
+        const t = b.addTest(.{ .root_module = test_mod });
+        t.step.dependOn(&cargo_cmd.step);
+        const run_t = b.addRunArtifact(t);
+        test_step.dependOn(&run_t.step);
+    }
 }
