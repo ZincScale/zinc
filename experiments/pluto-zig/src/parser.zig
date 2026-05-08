@@ -147,12 +147,13 @@ pub const Parser = struct {
             return ast.Stmt{ .local_function = .{ .name = name, .func = func } };
         }
 
-        // local namelist [= exprlist]
-        var names = std.ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
-        try names.append(self.arena, try self.expectIdentLexeme());
+        // local namelist [= exprlist] — each name optionally has a
+        // type annotation `: type` between the name and any comma/eq.
+        var names = std.ArrayList(ast.NameWithType){ .items = &.{}, .capacity = 0 };
+        try names.append(self.arena, try self.parseNameWithType());
         while (self.cur.kind == .comma) {
             try self.advance();
-            try names.append(self.arena, try self.expectIdentLexeme());
+            try names.append(self.arena, try self.parseNameWithType());
         }
 
         var values = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
@@ -165,6 +166,28 @@ pub const Parser = struct {
             .names = try names.toOwnedSlice(self.arena),
             .values = try values.toOwnedSlice(self.arena),
         } };
+    }
+
+    fn parseNameWithType(self: *Parser) ParseError!ast.NameWithType {
+        const name = try self.expectIdentLexeme();
+        if (self.cur.kind != .colon) return .{ .name = name, .type_annot = null };
+        try self.advance();
+        const ty = try self.parseTypeExpr();
+        return .{ .name = name, .type_annot = ty };
+    }
+
+    fn parseTypeExpr(self: *Parser) ParseError!ast.TypeExpr {
+        // Atomic: an identifier matching one of the known type names.
+        if (self.cur.kind != .ident) return error.ExpectedExpr;
+        const lex = self.cur.lexeme(self.src);
+        const atom = ast.AtomicType.fromLexeme(lex) orelse {
+            std.debug.print("strict-pluto: unknown type name `{s}` (allowed: any, nil, boolean, number, integer, string, table, function)\n", .{lex});
+            return error.StrictPlutoViolation;
+        };
+        try self.advance();
+        // Atomic types only for now. Optional/nullable types `T?`
+        // need a `?` token (phase 4.x); union types `T | U` similar.
+        return ast.TypeExpr{ .atom = atom };
     }
 
     fn parseIf(self: *Parser) ParseError!ast.Stmt {

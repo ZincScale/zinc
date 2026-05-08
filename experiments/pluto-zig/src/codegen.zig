@@ -29,6 +29,9 @@ pub const CompileError = error{
     StackOverflow,
     UnknownIdentifier,
     InvalidAssignmentTarget,
+    /// strict-Pluto: type annotation rejected the value at compile
+    /// time (literal RHS doesn't match the declared type).
+    TypeAnnotationMismatch,
     OutOfMemory,
 };
 
@@ -403,29 +406,73 @@ pub const Compiler = struct {
         self.code.items[jump_pc] = Instruction.isJ(.jmp, offset);
     }
 
-    /// `local a, b, ... = e1, e2, ...` — evaluate values into the
-    /// next-available registers, then bind the names to those
-    /// registers (in order). Extra names get nil.
+    /// `local a: T1, b: T2, ... = e1, e2, ...` — evaluate values into
+    /// the next-available registers, then bind names + check types.
+    /// Extra names get nil. Type annotations are enforced:
+    /// - Literal RHS whose static type doesn't match → compile error
+    /// - Non-literal RHS → emit TYPECHECK opcode (runtime assert)
+    /// - Missing value (padded with nil) → must allow nil (the type
+    ///   either is `any` or, in phase 4.x, optional `T?`)
     fn emitLocal(self: *Compiler, l: ast.Stmt.Local) CompileError!void {
         const base = self.next_reg;
-        // Evaluate each value into the next free register. exprToReg
-        // bumps next_reg, so values land at base, base+1, base+2, ...
         for (l.values) |val| _ = try self.exprToReg(val);
+
         // Pad with nil for names without matching values.
         var i: usize = l.values.len;
         while (i < l.names.len) : (i += 1) {
             const r = self.allocReg();
             try self.emit(Instruction.iABC(.loadnil, r, 0, 0, 0));
         }
-        // Bind the names. The registers we just filled become locals
-        // and stay reserved for the rest of the chunk (no scope exit
-        // in 3.2.1 — that's the job of phase 3.2.x when blocks land).
-        for (l.names, 0..) |name, idx| {
-            try self.locals.append(self.arena, .{
-                .name = name,
-                .reg = @intCast(base + idx),
-            });
+
+        // Bind names + emit type checks.
+        for (l.names, 0..) |nt, idx| {
+            const reg: u8 = @intCast(base + idx);
+            try self.locals.append(self.arena, .{ .name = nt.name, .reg = reg });
+
+            // Type enforcement.
+            if (nt.type_annot) |annot| {
+                const value: ?*const ast.Expr = if (idx < l.values.len) l.values[idx] else null;
+                try self.enforceType(annot, value, reg);
+            }
         }
+    }
+
+    /// Enforce that the value at `reg` matches `annot`. Tries
+    /// compile-time check against the literal expression first; if
+    /// the value's type can't be determined statically, emits a
+    /// runtime TYPECHECK opcode.
+    fn enforceType(self: *Compiler, annot: ast.TypeExpr, value: ?*const ast.Expr, reg: u8) CompileError!void {
+        const atom = switch (annot) {
+            .atom => |a| a,
+            .optional => return, // future phase
+        };
+        if (atom == .any) return; // `any` disables checking
+
+        // Compile-time check: if RHS is a literal whose type we can
+        // pin down, verify directly.
+        if (value) |v_expr| {
+            if (literalType(v_expr.*)) |lit_atom| {
+                if (!atomicAccepts(atom, lit_atom)) {
+                    std.debug.print(
+                        "strict-pluto: type mismatch — expected `{s}`, got literal of type `{s}`\n",
+                        .{ atom.name(), lit_atom.name() },
+                    );
+                    return error.TypeAnnotationMismatch;
+                }
+                return; // verified statically, no runtime check needed
+            }
+        } else {
+            // No value given (padded nil). Only `any` (handled above)
+            // or eventually `T?` should accept this.
+            std.debug.print(
+                "strict-pluto: type mismatch — expected `{s}`, got nil (no initializer)\n",
+                .{atom.name()},
+            );
+            return error.TypeAnnotationMismatch;
+        }
+
+        // Fallback: emit a runtime TYPECHECK against the atom ordinal.
+        try self.emit(Instruction.iABC(.typecheck, reg, 0, @intFromEnum(atom), 0));
     }
 
     /// Single-target assignment. Targets supported: ident (local or
@@ -787,6 +834,32 @@ pub const Compiler = struct {
         return @intCast(idx);
     }
 };
+
+/// If `e` is a syntactic literal whose runtime type we can pin down
+/// at compile time, return the AtomicType. Idents, calls, and
+/// binary/unary ops return null (we don't track types through
+/// expressions yet — the runtime TYPECHECK opcode covers those).
+fn literalType(e: ast.Expr) ?ast.AtomicType {
+    return switch (e) {
+        .nil => .nil_,
+        .boolean => .boolean,
+        .integer => .integer,
+        .number => .number,
+        .string => .string,
+        .table => .table,
+        .function => .function,
+        else => null,
+    };
+}
+
+/// Does annotation `expected` accept a value with concrete type
+/// `actual`? Numeric tower: `number` accepts both `integer` and
+/// `number`. Otherwise exact match.
+fn atomicAccepts(expected: ast.AtomicType, actual: ast.AtomicType) bool {
+    if (expected == actual) return true;
+    if (expected == .number and actual == .integer) return true;
+    return false;
+}
 
 // =============================================================================
 // Tests

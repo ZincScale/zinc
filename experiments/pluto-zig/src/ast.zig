@@ -88,6 +88,68 @@ pub const Expr = union(enum) {
     };
 };
 
+/// Optional type annotation on locals + function params.
+///
+/// strict-Pluto enforces these: when present, values are checked
+/// against the annotation at compile time (literal RHS) or runtime
+/// (computed RHS via TYPECHECK opcode). Annotations are *optional*
+/// — `local x = 5` works fine, `local x: number = 5` adds a check.
+pub const TypeExpr = union(enum) {
+    atom: AtomicType,
+    /// T? — value may be of type T or nil.
+    optional: *TypeExpr,
+};
+
+pub const AtomicType = enum {
+    any, // disables checking — explicit "I don't want a check here"
+    nil_,
+    boolean,
+    number, // covers int + float (Lua 5.4 numeric tower)
+    integer, // strict integer subtype
+    string,
+    table,
+    function,
+
+    pub fn fromLexeme(lex: []const u8) ?AtomicType {
+        const std_ = @import("std");
+        const map = .{
+            .{ "any", .any },
+            .{ "nil", .nil_ },
+            .{ "boolean", .boolean },
+            .{ "bool", .boolean }, // accept both nominal forms
+            .{ "number", .number },
+            .{ "integer", .integer },
+            .{ "int", .integer },
+            .{ "string", .string },
+            .{ "table", .table },
+            .{ "function", .function },
+        };
+        inline for (map) |entry| {
+            if (std_.mem.eql(u8, lex, entry[0])) return entry[1];
+        }
+        return null;
+    }
+
+    pub fn name(self: AtomicType) []const u8 {
+        return switch (self) {
+            .any => "any",
+            .nil_ => "nil",
+            .boolean => "boolean",
+            .number => "number",
+            .integer => "integer",
+            .string => "string",
+            .table => "table",
+            .function => "function",
+        };
+    }
+};
+
+/// A local variable declaration: name + optional type annotation.
+pub const NameWithType = struct {
+    name: []const u8,
+    type_annot: ?TypeExpr = null,
+};
+
 pub const Stmt = union(enum) {
     /// Multi-target assignment: `a, b = e1, e2`. Targets are
     /// restricted to ident / index / field at parse time.
@@ -113,7 +175,7 @@ pub const Stmt = union(enum) {
     expr_stmt: *Expr,
 
     pub const Assign = struct { targets: []const *Expr, values: []const *Expr };
-    pub const Local = struct { names: []const []const u8, values: []const *Expr };
+    pub const Local = struct { names: []const NameWithType, values: []const *Expr };
     pub const If = struct {
         // Pairs of (cond, then_block) — the first is the `if`, rest
         // are `elseif`s. Optional `else_block` is the trailing else.
@@ -164,9 +226,13 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
         },
         .local => |l| {
             try out.writeAll("(local ");
-            for (l.names, 0..) |name, i| {
+            for (l.names, 0..) |nt, i| {
                 if (i > 0) try out.writeAll(",");
-                try out.writeAll(name);
+                try out.writeAll(nt.name);
+                if (nt.type_annot) |ta| {
+                    try out.writeAll(":");
+                    try dumpType(out, ta);
+                }
             }
             if (l.values.len > 0) {
                 try out.writeAll(" = ");
@@ -323,6 +389,16 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
                 try dumpExpr(out, fld.value);
             }
             try out.writeAll("}");
+        },
+    }
+}
+
+pub fn dumpType(out: anytype, t: TypeExpr) anyerror!void {
+    switch (t) {
+        .atom => |a| try out.writeAll(a.name()),
+        .optional => |inner| {
+            try dumpType(out, inner.*);
+            try out.writeAll("?");
         },
     }
 }

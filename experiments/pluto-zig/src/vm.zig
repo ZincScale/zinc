@@ -26,6 +26,9 @@ pub const RuntimeError = error{
     InvalidUnaryOperand,
     NotImplemented,
     UnknownOpcode,
+    /// strict-Pluto: TYPECHECK opcode failed — value's runtime type
+    /// doesn't match the declared annotation.
+    TypeAssertionFailed,
     OutOfMemory,
 };
 
@@ -330,6 +333,23 @@ pub const VM = struct {
                 // results. Push a new frame and dispatch into it.
                 .call => try self.handleCall(instr.a, instr.b, instr.c),
 
+                // TYPECHECK A B: assert runtime type of R[A] matches
+                // the AtomicType ordinal B; raise on mismatch.
+                .typecheck => {
+                    const ast_mod = @import("ast.zig");
+                    const expected: ast_mod.AtomicType = @enumFromInt(instr.b);
+                    const actual = atomicTypeOf(self.reg(instr.a).*);
+                    const ok = expected == actual or
+                        (expected == .number and actual == .integer);
+                    if (!ok) {
+                        std.debug.print(
+                            "strict-pluto runtime: type assertion failed — expected `{s}`, got `{s}`\n",
+                            .{ expected.name(), actual.name() },
+                        );
+                        return error.TypeAssertionFailed;
+                    }
+                },
+
                 .return0 => if (try self.handleReturn(0, 0)) |r| return r,
                 .return1 => if (try self.handleReturn(instr.a, 1)) |r| return r,
                 .return_ => {
@@ -624,6 +644,19 @@ fn unary(op: UnaryArith, x: TValue) RuntimeError!TValue {
 
 fn unaryNot(x: TValue) TValue {
     return TValue.fromBool(!x.isTruthy());
+}
+
+/// Map a runtime TValue to its AtomicType for type-check dispatch.
+fn atomicTypeOf(t: TValue) @import("ast.zig").AtomicType {
+    return switch (t) {
+        .nil => .nil_,
+        .boolean => .boolean,
+        .integer => .integer,
+        .number => .number,
+        .string => .string,
+        .table => .table,
+        .closure, .native => .function,
+    };
 }
 
 fn unaryLen(x: TValue) RuntimeError!TValue {
@@ -1588,6 +1621,126 @@ test "stdlib: closures + globals + print together" {
         \\print("fib(15) =", fib(15))
     );
     try testing.expectEqualStrings("fib(10) =\t55\nfib(15) =\t610\n", r.output);
+}
+
+// === Phase 4.1: enforced type annotations =====================================
+
+test "type: literal RHS matches annotation — no error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "local x: number = 42\nreturn x");
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "type: literal RHS mismatch — compile error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `local foo: string = 0.0` — number literal can't satisfy a
+    // string annotation. Caught at compile time, no bytecode emitted.
+    try testing.expectError(error.TypeAnnotationMismatch, runSrc(arena,
+        \\local foo: string = 0.0
+        \\return foo
+    ));
+}
+
+test "type: integer accepted for `number` annotation (numeric tower)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "local x: number = 42\nreturn x");
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "type: float NOT accepted for `integer` annotation" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.TypeAnnotationMismatch, runSrc(arena,
+        \\local x: integer = 3.14
+        \\return x
+    ));
+}
+
+test "type: `any` disables checking" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local x: any = "string"
+        \\return x
+    );
+    try testing.expectEqualStrings("string", r[0].string.slice());
+}
+
+test "type: function call result enforced at runtime" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Call result type isn't statically known → TYPECHECK opcode
+    // verifies at runtime. Here the runtime value matches; passes.
+    const r = try runSrc(arena,
+        \\local f = function() return 99 end
+        \\local x: number = f()
+        \\return x
+    );
+    try testing.expectEqual(@as(i64, 99), r[0].integer);
+}
+
+test "type: function call result mismatch fails at runtime" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Call returns a string, annotation says number → TYPECHECK
+    // raises at runtime. Static check can't reject this because
+    // we don't track types through expressions yet.
+    try testing.expectError(error.TypeAssertionFailed, runSrc(arena,
+        \\local f = function() return "not a number" end
+        \\local x: number = f()
+        \\return x
+    ));
+}
+
+test "type: missing initializer rejected for non-any annotation" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `local x: string` with no initializer → x would be nil,
+    // doesn't satisfy `string`. Compile error.
+    try testing.expectError(error.TypeAnnotationMismatch, runSrc(arena, "local x: string"));
+}
+
+test "type: unknown type name rejected" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.StrictPlutoViolation, runSrc(arena,
+        \\local x: Banana = 5
+        \\return x
+    ));
+}
+
+test "type: per-name annotations in multi-local" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local a: integer, b: string = 1, "two"
+        \\return a, b
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+    try testing.expectEqualStrings("two", r[1].string.slice());
 }
 
 test "vm: indexing non-table is a type error" {

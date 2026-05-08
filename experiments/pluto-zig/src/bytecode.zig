@@ -118,6 +118,12 @@ pub const OpCode = enum(u8) {
     varargprep,
     extraarg,
     in_,
+    /// strict-Pluto: TYPECHECK A B — assert that R[A]'s runtime type
+    /// matches AtomicType ordinal B; raise a runtime error otherwise.
+    /// Emitted by the codegen at typed-local assignments where the
+    /// RHS can't be statically verified. Not a Lua/mainline-Pluto
+    /// opcode (their type hints are warnings only); ours enforces.
+    typecheck,
 
     pub fn name(self: OpCode) []const u8 {
         return @tagName(self);
