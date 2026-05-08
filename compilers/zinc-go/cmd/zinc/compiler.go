@@ -30,10 +30,12 @@ import (
 // GoTypeResolver is constructed and supplied to CheckV2 so Go-imported
 // package calls get GoType-tagged returns in the NodeTypes side-map.
 // `crossPkgFnDecls` provides cross-package top-level function decls so
-// the typechecker can resolve `pkg.func(...)` qualified calls. Bare-name
-// lookup matches (one fnSigs map shared across packages) so callers
-// pass a flat map; collisions are rare in practice and resolved by
-// last-write-wins (mirrors the codegen-side unqualifiedNames behavior).
+// the typechecker can resolve qualified calls; bare-name lookup matches
+// the same flat map. Callers MUST drop any name that appears in two or
+// more packages before passing it here — qualified `pkg.Func` resolution
+// still works through `crossPkgExports`, but ambiguous bare references
+// fall through (and become typeAny / unresolved at the call site)
+// instead of silently binding to whichever package wins map iteration.
 func runTypecheck(progs []*parser.Program, importMap map[string]string,
 	crossPkgExports map[string]map[string]string, goModDir string,
 	crossPkgClassDecls map[string]map[string]*parser.ClassDecl,
@@ -644,6 +646,11 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 			crossPkg := make(map[string]map[string]string)
 			crossDecls := make(map[string]map[string]*parser.ClassDecl)
 			crossFns := make(map[string]*parser.FnDecl)
+			// fnOrigin tracks the first package to claim each bare name.
+			// A second package claiming the same name drops it from the
+			// bare-name map (qualified `pkg.Func` still resolves via
+			// crossPkg). See runTypecheck doc above.
+			fnOrigin := make(map[string]string)
 			for otherPkg, otherExports := range allExports {
 				if otherPkg == pkg {
 					continue
@@ -661,6 +668,14 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 							cls[cd.Name] = cd
 						}
 						if fd, ok := d.(*parser.FnDecl); ok {
+							if fd.Name == "" {
+								continue
+							}
+							if prev, seen := fnOrigin[fd.Name]; seen && prev != otherPkg {
+								delete(crossFns, fd.Name)
+								continue
+							}
+							fnOrigin[fd.Name] = otherPkg
 							crossFns[fd.Name] = fd
 						}
 					}
@@ -833,6 +848,7 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 		crossPkg := make(map[string]map[string]string)
 		crossDecls := make(map[string]map[string]*parser.ClassDecl)
 		crossFns := make(map[string]*parser.FnDecl)
+		fnOrigin := make(map[string]string)
 		for otherPkg, otherExports := range allExports {
 			alias := filepath.Base(otherPkg)
 			crossPkg[alias] = otherExports
@@ -843,6 +859,14 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 						cls[cd.Name] = cd
 					}
 					if fd, ok := d.(*parser.FnDecl); ok {
+						if fd.Name == "" {
+							continue
+						}
+						if prev, seen := fnOrigin[fd.Name]; seen && prev != otherPkg {
+							delete(crossFns, fd.Name)
+							continue
+						}
+						fnOrigin[fd.Name] = otherPkg
 						crossFns[fd.Name] = fd
 					}
 				}
