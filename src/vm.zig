@@ -2716,6 +2716,87 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.5: string interpolation =======================================
+
+test "vm: interp — single value with surrounding text" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local name = "world"
+        \\return $"hello, {name}!"
+    );
+    try testing.expectEqualStrings("hello, world!", r[0].string.slice());
+}
+
+test "vm: interp — multiple placeholders + computed expression" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local a = 2
+        \\local b = 3
+        \\return $"{a} + {b} = {a + b}"
+    );
+    try testing.expectEqualStrings("2 + 3 = 5", r[0].string.slice());
+}
+
+test "vm: interp — empty and no-placeholder forms" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\return $"", $"plain"
+    );
+    try testing.expectEqualStrings("", r[0].string.slice());
+    try testing.expectEqualStrings("plain", r[1].string.slice());
+}
+
+test "vm: interp — adjacent placeholders" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // No literal text between {a} and {b} — both tostring()'d and
+    // joined directly.
+    const r = try runSrc(arena,
+        \\local a = "ab"
+        \\local b = "cd"
+        \\return $"{a}{b}"
+    );
+    try testing.expectEqualStrings("abcd", r[0].string.slice());
+}
+
+test "vm: interp — non-string values get tostring'd" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\return $"int={42} bool={true} nil={nil}"
+    );
+    try testing.expectEqualStrings("int=42 bool=true nil=nil", r[0].string.slice());
+}
+
+test "vm: interp — works inside class methods" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Greeter
+        \\  public name = ""
+        \\  function __construct(n) this.name = n end
+        \\  public function hello() return $"Hi, {this.name}!" end
+        \\end
+        \\return new Greeter("Alice"):hello()
+    );
+    try testing.expectEqualStrings("Hi, Alice!", r[0].string.slice());
+}
+
 // === Phase 4.4d: static members ============================================
 
 test "vm: static method called via ClassName.method()" {
