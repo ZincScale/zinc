@@ -144,6 +144,7 @@ pub const Parser = struct {
         if (self.isKeyword("for")) return self.parseFor();
         if (self.isKeyword("switch")) return self.parseSwitch();
         if (self.isKeyword("class")) return self.parseClassDecl();
+        if (self.isKeyword("enum")) return self.parseEnumDecl();
         if (self.isKeyword("function")) return self.parseFunctionDecl();
         if (self.isKeyword("return")) return self.parseReturn();
         if (self.isKeyword("break")) {
@@ -322,6 +323,54 @@ pub const Parser = struct {
         const body = try self.parseBlock();
         try self.expectKeyword("end");
         return ast.Stmt{ .while_stmt = .{ .cond = cond, .body = body } };
+    }
+
+    /// `enum Name { Var1, Var2, ... }` — strict-Pluto enum. Lowers
+    /// at parse time to a regular assignment of a table constructor:
+    ///
+    ///   enum Color { Red, Green, Blue }
+    ///   →  Color = { Red = 0, Green = 1, Blue = 2 }
+    ///
+    /// Variants are 0-indexed integers (matching the C / Rust feel).
+    /// Each variant is just a string-keyed table entry; no special
+    /// runtime type. Trailing comma allowed. Empty enums (`enum E {}`)
+    /// are rejected — strictly more useful as a parse error than a
+    /// silently-empty constant.
+    fn parseEnumDecl(self: *Parser) ParseError!ast.Stmt {
+        try self.expectKeyword("enum");
+        const name = try self.expectIdentLexeme();
+        try self.expect(.lbrace);
+
+        var fields = std.ArrayList(ast.Expr.TableField){ .items = &.{}, .capacity = 0 };
+        var idx: i64 = 0;
+        while (self.cur.kind != .rbrace) {
+            const variant = try self.expectIdentLexeme();
+            const value = try self.alloc(ast.Expr, .{ .integer = idx });
+            try fields.append(self.arena, .{
+                .key = .{ .named = variant },
+                .value = value,
+            });
+            idx += 1;
+            if (self.cur.kind != .comma) break;
+            try self.advance();
+        }
+        try self.expect(.rbrace);
+
+        if (fields.items.len == 0) {
+            std.debug.print("strict-pluto: empty enum is not useful — declare at least one variant\n", .{});
+            return error.StrictPlutoViolation;
+        }
+
+        // Synthesize: `Name = { ...fields }`
+        const tbl = try self.alloc(ast.Expr, .{ .table = .{
+            .fields = try fields.toOwnedSlice(self.arena),
+        } });
+        const target = try self.alloc(ast.Expr, .{ .ident = name });
+        const targets = try self.arena.alloc(*ast.Expr, 1);
+        targets[0] = target;
+        const values = try self.arena.alloc(*ast.Expr, 1);
+        values[0] = tbl;
+        return ast.Stmt{ .assign = .{ .targets = targets, .values = values } };
     }
 
     /// `class Name [extends Parent] <members> end`

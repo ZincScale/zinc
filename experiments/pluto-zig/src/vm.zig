@@ -2787,6 +2787,64 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.12: enums =====================================================
+
+test "vm: enum — variants are 0-indexed integers" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\enum Color { Red, Green, Blue }
+        \\return Color.Red, Color.Green, Color.Blue
+    );
+    try testing.expectEqual(@as(i64, 0), r[0].integer);
+    try testing.expectEqual(@as(i64, 1), r[1].integer);
+    try testing.expectEqual(@as(i64, 2), r[2].integer);
+}
+
+test "vm: enum — usable as switch discriminant" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\enum Op { Add, Sub, Mul }
+        \\local function apply(op, a, b)
+        \\  switch op
+        \\    case Op.Add: return a + b
+        \\    case Op.Sub: return a - b
+        \\    case Op.Mul: return a * b
+        \\  end
+        \\end
+        \\return apply(Op.Add, 3, 4), apply(Op.Sub, 10, 7), apply(Op.Mul, 5, 6)
+    );
+    try testing.expectEqual(@as(i64, 7), r[0].integer);
+    try testing.expectEqual(@as(i64, 3), r[1].integer);
+    try testing.expectEqual(@as(i64, 30), r[2].integer);
+}
+
+test "vm: enum — trailing comma allowed" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\enum Direction { North, East, South, West, }
+        \\return Direction.West
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: enum — empty body rejected at parse time" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var p = try parser.Parser.init(arena, "enum E {}");
+    try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
+}
+
 // === Phase 4.11: default arguments ========================================
 
 test "vm: default args — fills in for omitted params" {
