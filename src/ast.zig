@@ -65,6 +65,7 @@ pub const Expr = union(enum) {
     method_call: MethodCall, // obj:method(args) — implicit self
     function: Function,  // function(...) body end
     table: Table,        // { ... }
+    new_expr: NewExpr,   // new ClassExpr(args) — strict-Pluto class instantiation
 
     pub const Binary = struct { op: BinaryOp, lhs: *Expr, rhs: *Expr };
     pub const Unary = struct { op: UnaryOp, operand: *Expr };
@@ -74,6 +75,14 @@ pub const Expr = union(enum) {
     pub const MethodCall = struct {
         receiver: *Expr,
         method: []const u8,
+        args: []const *Expr,
+    };
+    pub const NewExpr = struct {
+        /// The class to instantiate. Currently restricted to a primary
+        /// expression (typically an ident — `new Foo(...)`); arbitrary
+        /// expressions like `new (compute_class())(...)` are rejected
+        /// at parse time for clarity.
+        class: *Expr,
         args: []const *Expr,
     };
     pub const Function = struct {
@@ -175,6 +184,10 @@ pub const Stmt = union(enum) {
     /// implicitly). `break` inside a case is the canonical early-exit;
     /// it just lands at the end of the switch like any unterminated case.
     switch_stmt: Switch,
+    /// `class Name [extends Parent] <members> end` — strict-Pluto class
+    /// declaration. Lowers to a synthesized table with metatable wiring
+    /// for inheritance. See codegen.emitClassDecl.
+    class_decl: ClassDecl,
     /// `function name.path(args) body end`. Sugar for
     /// `name.path = function(args) body end`. Stored expanded.
     function_decl: FunctionDecl,
@@ -211,6 +224,26 @@ pub const Stmt = union(enum) {
         values: []const *Expr,
         body: *Block,
     };
+    pub const ClassDecl = struct {
+        name: []const u8,
+        /// `extends Parent` — single inheritance only. The parent
+        /// becomes the class's `__index` so methods inherit through
+        /// the metatable chain we already implement.
+        parent: ?[]const u8,
+        members: []const ClassMember,
+    };
+    pub const ClassMember = union(enum) {
+        method: Method,
+        field: Field,
+    };
+    pub const Method = struct {
+        name: []const u8,
+        /// The function as written by the user. Codegen prepends a
+        /// `this` first parameter so method bodies can refer to the
+        /// receiver as `this`.
+        func: Expr.Function,
+    };
+    pub const Field = struct { name: []const u8, value: *Expr };
     pub const FunctionDecl = struct {
         /// Function name as a path: `a.b.c.d` -> ["a","b","c","d"].
         /// Single-element path is the common `function name(...)`.
@@ -292,6 +325,37 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             try dumpExpr(out, w.cond);
             try out.writeAll("\n");
             try dumpBlock(out, w.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .class_decl => |cd| {
+            try out.writeAll("(class ");
+            try out.writeAll(cd.name);
+            if (cd.parent) |p| {
+                try out.writeAll(" extends ");
+                try out.writeAll(p);
+            }
+            try out.writeAll("\n");
+            for (cd.members) |m| {
+                try writeIndent(out, indent + 1);
+                switch (m) {
+                    .method => |mm| {
+                        try out.writeAll("method ");
+                        try out.writeAll(mm.name);
+                        try out.writeAll("(");
+                        try dumpParams(out, mm.func.params, mm.func.has_vararg);
+                        try out.writeAll(")\n");
+                        try dumpBlock(out, mm.func.body, indent + 2);
+                    },
+                    .field => |f| {
+                        try out.writeAll("field ");
+                        try out.writeAll(f.name);
+                        try out.writeAll(" = ");
+                        try dumpExpr(out, f.value);
+                        try out.writeAll("\n");
+                    },
+                }
+            }
             try writeIndent(out, indent);
             try out.writeAll(")\n");
         },
@@ -408,6 +472,15 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
             try out.writeAll("(");
             for (c.args, 0..) |a, i| {
                 if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, a);
+            }
+            try out.writeAll(")");
+        },
+        .new_expr => |ne| {
+            try out.writeAll("(new ");
+            try dumpExpr(out, ne.class);
+            for (ne.args) |a| {
+                try out.writeAll(" ");
                 try dumpExpr(out, a);
             }
             try out.writeAll(")");

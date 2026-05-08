@@ -142,6 +142,7 @@ pub const Parser = struct {
         if (self.isKeyword("if")) return self.parseIf();
         if (self.isKeyword("while")) return self.parseWhile();
         if (self.isKeyword("switch")) return self.parseSwitch();
+        if (self.isKeyword("class")) return self.parseClassDecl();
         if (self.isKeyword("function")) return self.parseFunctionDecl();
         if (self.isKeyword("return")) return self.parseReturn();
         if (self.isKeyword("break")) {
@@ -244,6 +245,60 @@ pub const Parser = struct {
         const body = try self.parseBlock();
         try self.expectKeyword("end");
         return ast.Stmt{ .while_stmt = .{ .cond = cond, .body = body } };
+    }
+
+    /// `class Name [extends Parent] <members> end`
+    ///
+    /// Members are either methods (`function NAME(args) body end`) or
+    /// field defaults (`NAME = expr`). Methods get an implicit `this`
+    /// first param prepended so the body can refer to the receiver
+    /// as `this` (the strict-Pluto convention; mainline Pluto/Lua use
+    /// `self`).
+    fn parseClassDecl(self: *Parser) ParseError!ast.Stmt {
+        try self.expectKeyword("class");
+        const name = try self.expectIdentLexeme();
+
+        var parent: ?[]const u8 = null;
+        if (self.isKeyword("extends")) {
+            try self.advance();
+            parent = try self.expectIdentLexeme();
+        }
+
+        var members = std.ArrayList(ast.Stmt.ClassMember){ .items = &.{}, .capacity = 0 };
+        while (!self.isKeyword("end")) {
+            if (self.cur.kind == .eof) return error.ExpectedToken;
+            if (self.cur.kind == .semicolon) {
+                try self.advance();
+                continue;
+            }
+            if (self.isKeyword("function")) {
+                try self.advance();
+                const m_name = try self.expectIdentLexeme();
+                var func = try self.parseFunctionBody();
+                // Prepend implicit `this` parameter. Strict-Pluto uses
+                // `this` (not `self`) for the receiver — pinned by the
+                // user 2026-05-08, see project memory.
+                const params = try self.arena.alloc(ast.NameWithType, func.params.len + 1);
+                params[0] = .{ .name = "this", .type_annot = null };
+                for (func.params, 0..) |p, i| params[i + 1] = p;
+                func.params = params;
+                try members.append(self.arena, .{ .method = .{ .name = m_name, .func = func } });
+            } else if (self.cur.kind == .ident) {
+                // Field default: `NAME = expr`. Reject anything else
+                // (no nested classes / no inline statements yet).
+                const f_name = try self.expectIdentLexeme();
+                try self.expect(.eq);
+                const value = try self.parseExpr();
+                try members.append(self.arena, .{ .field = .{ .name = f_name, .value = value } });
+            } else return error.UnexpectedToken;
+        }
+        try self.expectKeyword("end");
+
+        return ast.Stmt{ .class_decl = .{
+            .name = name,
+            .parent = parent,
+            .members = try members.toOwnedSlice(self.arena),
+        } };
     }
 
     /// `switch <expr> case v1[, v2, ...]: <body> [case ...:]* [default: <body>]? end`
@@ -632,6 +687,14 @@ pub const Parser = struct {
                     const f = try self.parseFunctionBody();
                     return self.alloc(ast.Expr, .{ .function = f });
                 }
+                // `new ClassName(args)` — strict-Pluto class instantiation.
+                // Disambiguates from a plain `new` ident by peeking at
+                // next_tok: if it's an identifier, this is a new-expr.
+                // (`local new = 5; return new` works because `new` is
+                // followed by EOF, not an ident.)
+                if (std.mem.eql(u8, text, "new") and self.next_tok.kind == .ident) {
+                    return self.parseNewExpr();
+                }
                 // Plain identifier reference.
                 try self.advance();
                 return self.alloc(ast.Expr, .{ .ident = text });
@@ -671,6 +734,48 @@ pub const Parser = struct {
             },
             else => return error.ExpectedExpr,
         }
+    }
+
+    /// `new ClassName(args)`. Class is restricted to a primary-suffixed
+    /// expression so we don't ambiguously parse `new f() + 1` as a
+    /// new-expression of `(f() + 1)`. Typical forms: `new Foo()`,
+    /// `new mod.Foo()`, `new arr[0]()`.
+    fn parseNewExpr(self: *Parser) ParseError!*ast.Expr {
+        try self.advance(); // consume `new`
+        const class = try self.parseSuffixedNoCall();
+        try self.expect(.lparen);
+        var args = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
+        if (self.cur.kind != .rparen) try self.parseExprList(&args);
+        try self.expect(.rparen);
+        return self.alloc(ast.Expr, .{ .new_expr = .{
+            .class = class,
+            .args = try args.toOwnedSlice(self.arena),
+        } });
+    }
+
+    /// Like parseSuffixed but stops at `(` — used by `new` so that the
+    /// argument list belongs to the new-expression, not to a call on
+    /// the class expression. (Matters for `new Foo()`: we want `Foo`
+    /// as the class and `()` as the new-args, not `Foo()` as the class.)
+    fn parseSuffixedNoCall(self: *Parser) ParseError!*ast.Expr {
+        var e = try self.parsePrimary();
+        while (true) {
+            switch (self.cur.kind) {
+                .dot => {
+                    try self.advance();
+                    const name = try self.expectIdentLexeme();
+                    e = try self.alloc(ast.Expr, .{ .field = .{ .object = e, .name = name } });
+                },
+                .lbracket => {
+                    try self.advance();
+                    const key = try self.parseExpr();
+                    try self.expect(.rbracket);
+                    e = try self.alloc(ast.Expr, .{ .index = .{ .object = e, .key = key } });
+                },
+                else => break,
+            }
+        }
+        return e;
     }
 
     fn parseTable(self: *Parser) ParseError!*ast.Expr {
@@ -1218,6 +1323,88 @@ test "parse: method call as a statement" {
 
     const out = try parseAndDump(arena, "obj:run()");
     try testing.expectEqualStrings("(stmt obj:run())\n", out);
+}
+
+test "parse: empty class declaration" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "class Foo end");
+    try testing.expectEqualStrings(
+        \\(class Foo
+        \\)
+        \\
+    , out);
+}
+
+test "parse: class with method gets implicit `this` first param" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The user wrote `function greet()` with zero params; the parser
+    // injects `this` so the dump shows `(this)`.
+    const out = try parseAndDump(arena,
+        \\class Foo
+        \\  function greet() return "hi" end
+        \\end
+    );
+    try testing.expectEqualStrings(
+        \\(class Foo
+        \\  method greet(this)
+        \\    (return "hi")
+        \\)
+        \\
+    , out);
+}
+
+test "parse: class with extends + field default + ctor" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena,
+        \\class Dog extends Animal
+        \\  kind = "dog"
+        \\  function __construct(name) this.name = name end
+        \\  function bark() return "woof" end
+        \\end
+    );
+    try testing.expectEqualStrings(
+        \\(class Dog extends Animal
+        \\  field kind = "dog"
+        \\  method __construct(this,name)
+        \\    (assign this.name = name)
+        \\  method bark(this)
+        \\    (return "woof")
+        \\)
+        \\
+    , out);
+}
+
+test "parse: new expression" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return new Foo(1, 2)");
+    try testing.expectEqualStrings("(return (new Foo 1 2))\n", out);
+}
+
+test "parse: `new` followed by non-ident is a plain identifier" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `local new = 5; return new + 1` — `new` here is just an ident,
+    // because what follows it isn't an identifier (it's `+`).
+    const out = try parseAndDump(arena, "local new = 5\nreturn new + 1");
+    try testing.expectEqualStrings(
+        \\(local new = 5)
+        \\(return (+ new 1))
+        \\
+    , out);
 }
 
 test "parse: error - missing expression in `if = end`" {
