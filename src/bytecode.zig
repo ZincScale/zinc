@@ -124,6 +124,12 @@ pub const OpCode = enum(u8) {
     /// RHS can't be statically verified. Not a Lua/mainline-Pluto
     /// opcode (their type hints are warnings only); ours enforces.
     typecheck,
+    /// strict-Pluto: MARK_METHOD A B — set R[A].class_owner = R[B].
+    /// R[A] must be a closure; R[B] must be a table. Emitted by
+    /// emitClassDecl right after CLOSURE for each class method, so
+    /// the runtime visibility check can see "this closure is a method
+    /// of class X" when the method runs. No-op if R[A] isn't a closure.
+    mark_method,
 
     pub fn name(self: OpCode) []const u8 {
         return @tagName(self);

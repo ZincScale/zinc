@@ -23,6 +23,12 @@ const bc = @import("bytecode.zig");
 pub const Closure = struct {
     proto: *const bc.Proto,
     upvalues: []*UpvalueCell,
+    /// The class table that owns this closure as a method, or null
+    /// for non-method closures. Set by the `mark_method` opcode at
+    /// class declaration time. Used by the runtime visibility check
+    /// (vm.checkVisibility) to decide whether the current frame is
+    /// "inside" a class for the purposes of private/protected access.
+    class_owner: ?*Table = null,
 };
 
 /// One captured upvalue. Models Lua's open/closed transition:

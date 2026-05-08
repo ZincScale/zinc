@@ -271,6 +271,20 @@ pub const Parser = struct {
                 try self.advance();
                 continue;
             }
+            // Optional visibility modifier — defaults to private
+            // (strict-Pluto: opt-in to external access, not opt-out).
+            var visibility: ast.Stmt.Visibility = .private;
+            if (self.isKeyword("public")) {
+                visibility = .public;
+                try self.advance();
+            } else if (self.isKeyword("protected")) {
+                visibility = .protected;
+                try self.advance();
+            } else if (self.isKeyword("private")) {
+                visibility = .private;
+                try self.advance();
+            }
+
             if (self.isKeyword("function")) {
                 try self.advance();
                 const m_name = try self.expectIdentLexeme();
@@ -282,14 +296,22 @@ pub const Parser = struct {
                 params[0] = .{ .name = "this", .type_annot = null };
                 for (func.params, 0..) |p, i| params[i + 1] = p;
                 func.params = params;
-                try members.append(self.arena, .{ .method = .{ .name = m_name, .func = func } });
+                try members.append(self.arena, .{ .method = .{
+                    .name = m_name,
+                    .func = func,
+                    .visibility = visibility,
+                } });
             } else if (self.cur.kind == .ident) {
                 // Field default: `NAME = expr`. Reject anything else
                 // (no nested classes / no inline statements yet).
                 const f_name = try self.expectIdentLexeme();
                 try self.expect(.eq);
                 const value = try self.parseExpr();
-                try members.append(self.arena, .{ .field = .{ .name = f_name, .value = value } });
+                try members.append(self.arena, .{ .field = .{
+                    .name = f_name,
+                    .value = value,
+                    .visibility = visibility,
+                } });
             } else return error.UnexpectedToken;
         }
         try self.expectKeyword("end");
@@ -1352,7 +1374,7 @@ test "parse: class with method gets implicit `this` first param" {
     );
     try testing.expectEqualStrings(
         \\(class Foo
-        \\  method greet(this)
+        \\  private method greet(this)
         \\    (return "hi")
         \\)
         \\
@@ -1366,17 +1388,17 @@ test "parse: class with extends + field default + ctor" {
 
     const out = try parseAndDump(arena,
         \\class Dog extends Animal
-        \\  kind = "dog"
-        \\  function __construct(name) this.name = name end
-        \\  function bark() return "woof" end
+        \\  public kind = "dog"
+        \\  public function __construct(name) this.name = name end
+        \\  public function bark() return "woof" end
         \\end
     );
     try testing.expectEqualStrings(
         \\(class Dog extends Animal
-        \\  field kind = "dog"
-        \\  method __construct(this,name)
+        \\  public field kind = "dog"
+        \\  public method __construct(this,name)
         \\    (assign this.name = name)
-        \\  method bark(this)
+        \\  public method bark(this)
         \\    (return "woof")
         \\)
         \\

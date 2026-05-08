@@ -221,11 +221,15 @@ pub fn main(init: std.process.Init) !void {
         // Phase 4.4a: chained __index — child → parent → root
         "local root = {tag = \"root\"}\nlocal mid = setmetatable({}, {__index = root})\nlocal leaf = setmetatable({}, {__index = mid})\nreturn leaf.tag",
         // Phase 4.4b: class with constructor + method, instantiated via `new`
-        "class Greeter\nfunction __construct(name) this.name = name end\nfunction hello() return \"Hi, \" .. this.name end\nend\nreturn new Greeter(\"Alice\"):hello()",
+        "class Greeter\nfunction __construct(name) this.name = name end\npublic function hello() return \"Hi, \" .. this.name end\nend\nreturn new Greeter(\"Alice\"):hello()",
         // Phase 4.4b: class with field defaults (no ctor needed)
-        "class Config\nport = 8080\nhost = \"localhost\"\nend\nlocal c = new Config()\nreturn c.host, c.port",
+        "class Config\npublic port = 8080\npublic host = \"localhost\"\nend\nlocal c = new Config()\nreturn c.host, c.port",
         // Phase 4.4b: extends — chained inheritance, override + super-method
-        "class Animal\nfunction __construct(name) this.name = name end\nfunction describe() return this.name end\nend\nclass Dog extends Animal\nfunction bark() return this.name .. \" says woof\" end\nend\nlocal d = new Dog(\"Rex\")\nreturn d:describe(), d:bark()",
+        "class Animal\nprotected name = \"\"\nfunction __construct(n) this.name = n end\npublic function describe() return this.name end\nend\nclass Dog extends Animal\npublic function bark() return this.name .. \" says woof\" end\nend\nlocal d = new Dog(\"Rex\")\nreturn d:describe(), d:bark()",
+        // Phase 4.4c: visibility — private members hidden behind a public method
+        "class Counter\nprivate count = 0\npublic function inc() this.count = this.count + 1 end\npublic function value() return this.count end\nend\nlocal c = new Counter()\nc:inc() c:inc() c:inc()\nreturn c:value()",
+        // Phase 4.4c: protected — visible inside the class chain only
+        "class Base\nprotected tag = \"base\"\npublic function reveal() return this.tag end\nend\nclass Sub extends Base\npublic function altered() return this.tag .. \"!\" end\nend\nreturn new Sub():reveal(), new Sub():altered()",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
