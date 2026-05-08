@@ -55,6 +55,20 @@ pub const Table = struct {
         return t;
     }
 
+    /// VM-side variant: allocate via a regular Zig Allocator instead
+    /// of the GC heap. Used by NEWTABLE at runtime; the table lives
+    /// for the program duration (no collection in this path).
+    pub fn createWithAllocator(allocator: std.mem.Allocator) !*Table {
+        const t = try allocator.create(Table);
+        const e_raw = try allocEntriesWithAllocator(allocator, INITIAL_CAP);
+        t.* = .{
+            .cap = INITIAL_CAP,
+            .count = 0,
+            .entries = e_raw,
+        };
+        return t;
+    }
+
     fn allocEntries(heap: *alloc.Heap, cap: u32) ![*]Entry {
         const bytes = @sizeOf(Entry) * cap;
         const raw = try alloc.alloc(heap, bytes, @alignOf(Entry));
@@ -66,6 +80,15 @@ pub const Table = struct {
             arr[i] = .{ .key = TValue.NIL, .value = TValue.NIL };
         }
         return arr;
+    }
+
+    fn allocEntriesWithAllocator(allocator: std.mem.Allocator, cap: u32) ![*]Entry {
+        const arr = try allocator.alloc(Entry, cap);
+        var i: u32 = 0;
+        while (i < cap) : (i += 1) {
+            arr[i] = .{ .key = TValue.NIL, .value = TValue.NIL };
+        }
+        return arr.ptr;
     }
 
     /// Look up `key`; return its value or nil.
@@ -86,20 +109,30 @@ pub const Table = struct {
     pub fn set(self: *Table, heap: *alloc.Heap, key: TValue, value: TValue) Error!void {
         if (key == .nil) return error.NilKey;
 
-        // Resize check: do this BEFORE finding the slot so the slot
-        // index stays valid.
         if ((self.count + 1) * LOAD_FACTOR_DEN >= self.cap * LOAD_FACTOR_NUM) {
             try self.resize(heap, self.cap * 2);
         }
 
         const slot = self.findSlot(key);
         const is_new = self.entries[slot].key == .nil;
+        if (value == .nil and is_new) return;
 
-        // nil-value semantics: if writing nil to a present key, leave
-        // the slot in place (open-addressed linear probing breaks if
-        // we just empty the slot; tombstones are a future-phase
-        // refinement). For a real delete we'd insert a tombstone or
-        // shift the probe chain; skipping that for phase 1.
+        self.entries[slot] = .{ .key = key, .value = value };
+        if (is_new) self.count += 1;
+    }
+
+    /// Allocator-based set. Same shape as `set` but uses a regular
+    /// Zig Allocator for the resize path. Used by VM dispatch for
+    /// SETTABLE/SETFIELD/SETI.
+    pub fn setWithAllocator(self: *Table, allocator: std.mem.Allocator, key: TValue, value: TValue) Error!void {
+        if (key == .nil) return error.NilKey;
+
+        if ((self.count + 1) * LOAD_FACTOR_DEN >= self.cap * LOAD_FACTOR_NUM) {
+            try self.resizeWithAllocator(allocator, self.cap * 2);
+        }
+
+        const slot = self.findSlot(key);
+        const is_new = self.entries[slot].key == .nil;
         if (value == .nil and is_new) return;
 
         self.entries[slot] = .{ .key = key, .value = value };
@@ -127,17 +160,24 @@ pub const Table = struct {
         self.cap = new_cap;
         self.count = 0;
 
-        // Re-insert every live entry from the old array. set()
-        // recomputes the slot under the new mask.
         var i: u32 = 0;
         while (i < old_cap) : (i += 1) {
             const e = old_entries[i];
-            if (e.key != .nil) {
-                // Recursive call into set() is safe — load factor is
-                // halved post-resize so we won't trigger another
-                // resize during this loop.
-                try self.set(heap, e.key, e.value);
-            }
+            if (e.key != .nil) try self.set(heap, e.key, e.value);
+        }
+    }
+
+    fn resizeWithAllocator(self: *Table, allocator: std.mem.Allocator, new_cap: u32) Error!void {
+        const old_entries = self.entries;
+        const old_cap = self.cap;
+        const new_entries = try allocEntriesWithAllocator(allocator, new_cap);
+        self.entries = new_entries;
+        self.cap = new_cap;
+        self.count = 0;
+        var i: u32 = 0;
+        while (i < old_cap) : (i += 1) {
+            const e = old_entries[i];
+            if (e.key != .nil) try self.setWithAllocator(allocator, e.key, e.value);
         }
     }
 

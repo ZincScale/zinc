@@ -28,6 +28,7 @@ pub const CompileError = error{
     TooManyConstants,
     StackOverflow,
     UnknownIdentifier,
+    InvalidAssignmentTarget,
     OutOfMemory,
 };
 
@@ -386,23 +387,45 @@ pub const Compiler = struct {
         }
     }
 
-    /// Single-target assignment to a known local or upvalue. Index/
-    /// field/multi-target forms are deferred (need GETTABUP for
-    /// globals, SETTABLE/SETI for index, etc.).
+    /// Single-target assignment. Targets supported: ident (local or
+    /// upvalue), field (`obj.name`), index (`obj[key]`). Multi-target
+    /// is deferred until we sort out evaluation order semantics.
     fn emitAssign(self: *Compiler, a: ast.Stmt.Assign) CompileError!void {
         if (a.targets.len != 1 or a.values.len != 1) return error.Unimplemented;
         const target = a.targets[0];
-        if (target.* != .ident) return error.Unimplemented;
-        const res = try self.resolveIdent(target.ident) orelse return error.UnknownIdentifier;
-        switch (res) {
-            .local => |r| try self.emitExprToDest(a.values[0], r),
-            .upvalue => |idx| {
-                // Materialize the value into a temp, then SETUPVAL it.
+        switch (target.*) {
+            .ident => |name| {
+                const res = try self.resolveIdent(name) orelse return error.UnknownIdentifier;
+                switch (res) {
+                    .local => |r| try self.emitExprToDest(a.values[0], r),
+                    .upvalue => |idx| {
+                        const reg_before = self.next_reg;
+                        const tmp = try self.exprToReg(a.values[0]);
+                        try self.emit(Instruction.iABC(.setupval, tmp, 0, idx, 0));
+                        self.next_reg = reg_before;
+                    },
+                }
+            },
+            .field => |f| {
+                // obj.name = value -> SETFIELD obj_reg, k_idx, val_reg
                 const reg_before = self.next_reg;
-                const tmp = try self.exprToReg(a.values[0]);
-                try self.emit(Instruction.iABC(.setupval, tmp, 0, idx, 0));
+                const obj_reg = try self.exprToReg(f.object);
+                const val_reg = try self.exprToReg(a.values[0]);
+                const k_idx = try self.addConstant(.{ .string = f.name });
+                if (k_idx > 255) return error.TooManyConstants;
+                try self.emit(Instruction.iABC(.setfield, obj_reg, 0, @intCast(k_idx), val_reg));
                 self.next_reg = reg_before;
             },
+            .index => |idx| {
+                // obj[key] = value -> SETTABLE obj_reg, key_reg, val_reg
+                const reg_before = self.next_reg;
+                const obj_reg = try self.exprToReg(idx.object);
+                const key_reg = try self.exprToReg(idx.key);
+                const val_reg = try self.exprToReg(a.values[0]);
+                try self.emit(Instruction.iABC(.settable, obj_reg, 0, key_reg, val_reg));
+                self.next_reg = reg_before;
+            },
+            else => return error.InvalidAssignmentTarget,
         }
     }
 
@@ -469,8 +492,87 @@ pub const Compiler = struct {
             .unary => |u| try self.emitUnary(u, dest),
             .function => |f| try self.emitFunctionExpr(f, dest),
             .call => |c| try self.emitCall(c, dest, 1), // expression context wants 1 result
+            .table => |t| try self.emitTableExpr(t, dest),
+            .field => |f| try self.emitFieldGet(f, dest),
+            .index => |i| try self.emitIndexGet(i, dest),
             else => return error.Unimplemented,
         }
+    }
+
+    /// Table constructor: `{1, 2, 3}`, `{a = 1}`, `{[k] = v}`, mixed.
+    /// Strategy: emit NEWTABLE, then evaluate positional ("array part")
+    /// fields into consecutive registers above `dest` and bulk-set
+    /// them with SETLIST. Named/computed fields get their own SETFIELD
+    /// or SETTABLE per field. Order is preserved.
+    fn emitTableExpr(self: *Compiler, t: ast.Expr.Table, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        try self.emit(Instruction.iABC(.newtable, dest, 0, 0, 0));
+
+        // First pass: positional values into R[dest+1], R[dest+2], ...
+        var pos_count: u8 = 0;
+        for (t.fields) |f| {
+            if (f.key == null) {
+                // Force the value into the next contiguous register.
+                const target = dest + 1 + pos_count;
+                if (target >= self.next_reg) self.next_reg = target + 1;
+                if (target + 1 > self.max_reg) self.max_reg = target + 1;
+                try self.emitExprToDest(f.value, target);
+                pos_count += 1;
+            }
+        }
+
+        // SETLIST t[1..pos_count] = R[dest+1..dest+pos_count].
+        if (pos_count > 0) {
+            try self.emit(Instruction.iABC(.setlist, dest, 0, pos_count, 0));
+        }
+
+        // Second pass: keyed fields. For named keys we use SETFIELD
+        // (B = string-constant index). For computed keys, SETTABLE.
+        for (t.fields) |f| {
+            if (f.key) |k| switch (k) {
+                .named => |name| {
+                    const k_idx = try self.addConstant(.{ .string = name });
+                    if (k_idx > 255) return error.TooManyConstants;
+                    const val_reg_before = self.next_reg;
+                    const val_reg = try self.exprToReg(f.value);
+                    try self.emit(Instruction.iABC(.setfield, dest, 0, @intCast(k_idx), val_reg));
+                    self.next_reg = val_reg_before;
+                },
+                .computed => |key_expr| {
+                    const ks_before = self.next_reg;
+                    const key_reg = try self.exprToReg(key_expr);
+                    const val_reg = try self.exprToReg(f.value);
+                    try self.emit(Instruction.iABC(.settable, dest, 0, key_reg, val_reg));
+                    self.next_reg = ks_before;
+                },
+            };
+        }
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    fn emitFieldGet(self: *Compiler, f: ast.Expr.Field, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+        const obj_reg = try self.exprToReg(f.object);
+        const k_idx = try self.addConstant(.{ .string = f.name });
+        if (k_idx > 255) return error.TooManyConstants;
+        try self.emit(Instruction.iABC(.getfield, dest, 0, obj_reg, @intCast(k_idx)));
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    fn emitIndexGet(self: *Compiler, i: ast.Expr.Index, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+        const obj_reg = try self.exprToReg(i.object);
+        const key_reg = try self.exprToReg(i.key);
+        try self.emit(Instruction.iABC(.gettable, dest, 0, obj_reg, key_reg));
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
     }
 
     /// Compile a `function(args) body end` expression into a sub-
