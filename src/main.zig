@@ -180,6 +180,12 @@ pub fn main(init: std.process.Init) !void {
         "local count = 0\nlocal inc = function() count = count + 1 end\ninc()\ninc()\ninc()\nreturn count",
         // Counter factory — returned closure outlives its parent frame
         "local function make_counter()\nlocal n = 0\nreturn function() n = n + 1\nreturn n end\nend\nlocal c = make_counter()\nreturn c(), c(), c()",
+        // Tables — array, keyed, mixed, indexing, mutation
+        "local t = {10, 20, 30}\nreturn t[1] + t[2] + t[3]",
+        "local p = {name = \"Alice\", age = 30}\nreturn p.name, p.age",
+        "local t = {}\nt.x = 1\nt.y = 2\nt.z = t.x + t.y\nreturn t.z",
+        // Object-oriented pattern via table + closures
+        "local function make()\nlocal self = {count = 0}\nself.inc = function() self.count = self.count + 1 end\nself.get = function() return self.count end\nreturn self\nend\nlocal c = make()\nc.inc()\nc.inc()\nc.inc()\nreturn c.get()",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

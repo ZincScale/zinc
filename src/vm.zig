@@ -195,6 +195,72 @@ pub const VM = struct {
                     cl.upvalues[instr.b].value.* = self.reg(instr.a).*;
                 },
 
+                // NEWTABLE A: R[A] = {}.
+                // (Lua's NEWTABLE encodes size hints in B/C; we ignore
+                // them — the table grows as needed.)
+                .newtable => {
+                    const t = v.Table.createWithAllocator(self.allocator) catch return error.OutOfMemory;
+                    self.reg(instr.a).* = TValue.fromTable(t);
+                },
+
+                // GETTABLE A B C: R[A] = R[B][R[C]].
+                .gettable => {
+                    const obj = self.reg(instr.b).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    const key = self.reg(instr.c).*;
+                    self.reg(instr.a).* = obj.table.get(key);
+                },
+
+                // GETFIELD A B C: R[A] = R[B][K[C]:string].
+                .getfield => {
+                    const obj = self.reg(instr.b).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    const k = self.currentProto().constants[instr.c];
+                    if (k != .string) return error.InvalidArithmeticOperand;
+                    const key = try self.constToValue(k);
+                    self.reg(instr.a).* = obj.table.get(key);
+                },
+
+                // SETTABLE A B C: R[A][R[B]] = R[C].
+                .settable => {
+                    const obj = self.reg(instr.a).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    const key = self.reg(instr.b).*;
+                    const val = self.reg(instr.c).*;
+                    obj.table.setWithAllocator(self.allocator, key, val) catch
+                        return error.OutOfMemory;
+                },
+
+                // SETFIELD A B C: R[A][K[B]:string] = R[C].
+                .setfield => {
+                    const obj = self.reg(instr.a).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    const k = self.currentProto().constants[instr.b];
+                    if (k != .string) return error.InvalidArithmeticOperand;
+                    const key = try self.constToValue(k);
+                    const val = self.reg(instr.c).*;
+                    obj.table.setWithAllocator(self.allocator, key, val) catch
+                        return error.OutOfMemory;
+                },
+
+                // SETLIST A B C: R[A][1..B] = R[A+1..A+B].
+                // Bulk-fill the array part of a fresh table from the
+                // contiguous registers above A. Used by table
+                // constructors with positional fields.
+                .setlist => {
+                    const obj = self.reg(instr.a).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    var i: u8 = 1;
+                    while (i <= instr.b) : (i += 1) {
+                        const val = self.reg(instr.a + i).*;
+                        obj.table.setWithAllocator(
+                            self.allocator,
+                            TValue.fromInt(i),
+                            val,
+                        ) catch return error.OutOfMemory;
+                    }
+                },
+
                 // CALL A B C: closure at R[A], B-1 args, C-1 expected
                 // results. Push a new frame and dispatch into it.
                 .call => try self.handleCall(instr.a, instr.b, instr.c),
@@ -1074,6 +1140,152 @@ test "vm: deeply nested closures chain upvalues correctly" {
         \\return outer()
     );
     try testing.expectEqual(@as(i64, 100), r[0].integer);
+}
+
+// === Phase 3.2.5 + 2.5: tables ===============================================
+
+test "vm: empty table constructor" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "return {}");
+    try testing.expect(r[0] == .table);
+    try testing.expectEqual(@as(u32, 0), r[0].table.len());
+}
+
+test "vm: array-style table" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {10, 20, 30}
+        \\return t[1], t[2], t[3]
+    );
+    try testing.expectEqual(@as(i64, 10), r[0].integer);
+    try testing.expectEqual(@as(i64, 20), r[1].integer);
+    try testing.expectEqual(@as(i64, 30), r[2].integer);
+}
+
+test "vm: keyed table with string keys" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {name = "alice", age = 30}
+        \\return t.name, t.age
+    );
+    try testing.expectEqualStrings("alice", r[0].string.slice());
+    try testing.expectEqual(@as(i64, 30), r[1].integer);
+}
+
+test "vm: computed-key table" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local k = "dynamic"
+        \\local t = {[k] = 42}
+        \\return t.dynamic, t[k]
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+    try testing.expectEqual(@as(i64, 42), r[1].integer);
+}
+
+test "vm: mixed table" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {1, 2, name = "mixed", 3}
+        \\return t[1], t[2], t[3], t.name
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+    try testing.expectEqual(@as(i64, 2), r[1].integer);
+    try testing.expectEqual(@as(i64, 3), r[2].integer);
+    try testing.expectEqualStrings("mixed", r[3].string.slice());
+}
+
+test "vm: table assignment via index" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {}
+        \\t[1] = 100
+        \\t[2] = 200
+        \\t.tag = "custom"
+        \\return t[1], t[2], t.tag
+    );
+    try testing.expectEqual(@as(i64, 100), r[0].integer);
+    try testing.expectEqual(@as(i64, 200), r[1].integer);
+    try testing.expectEqualStrings("custom", r[2].string.slice());
+}
+
+test "vm: missing table key returns nil" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {a = 1}
+        \\return t.b, t.missing
+    );
+    try testing.expect(r[0] == .nil);
+    try testing.expect(r[1] == .nil);
+}
+
+test "vm: table as function argument and return value" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local function copy_with_doubled_value(t)
+        \\    return {n = t.n * 2}
+        \\end
+        \\local result = copy_with_doubled_value({n = 21})
+        \\return result.n
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "vm: tables and closures together" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Counter object with two methods sharing state via a table.
+    const r = try runSrc(arena,
+        \\local function make()
+        \\    local self = {count = 0}
+        \\    self.inc = function() self.count = self.count + 1 end
+        \\    self.get = function() return self.count end
+        \\    return self
+        \\end
+        \\local c = make()
+        \\c.inc()
+        \\c.inc()
+        \\c.inc()
+        \\return c.get()
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: indexing non-table is a type error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.InvalidArithmeticOperand, runSrc(arena,
+        \\local x = 5
+        \\return x[1]
+    ));
 }
 
 test "vm: upvalue survives parent return (closes correctly)" {
