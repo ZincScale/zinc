@@ -192,6 +192,12 @@ pub fn main(init: std.process.Init) !void {
         "local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end\nprint(\"fib(10) =\", fib(10))\nreturn nil",
         // Globals from user code
         "score = 0\nscore = score + 10\nscore = score + 20\nprint(\"score:\", score)\nreturn score",
+        // Pluto: compound assignment
+        "local x = 10\nx += 5\nx *= 2\nx //= 3\nreturn x",
+        // Pluto: != operator
+        "local function check(a, b) if a != b then return \"differ\" else return \"same\" end end\nreturn check(1, 2), check(7, 7)",
+        // Pluto: ! operator
+        "return !nil, !false, !0, !\"x\"",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

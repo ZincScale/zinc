@@ -53,10 +53,27 @@ pub const TokenKind = enum {
     greater_greater,// >>  (bit shift right)
     eq,             // =
     eq_eq,          // ==
-    tilde_eq,       // ~=
+    bang,           // !   (logical not — strict-Pluto)
+    bang_eq,        // !=  (inequality — strict-Pluto)
+    tilde_eq,       // ~=  (in strict-Pluto: compound XOR assign only;
+                    //      Lua/Pluto-superset's inequality is rejected)
     colon_colon,    // ::  (label)
     dot_dot,        // ..  (concat)
     dot_dot_dot,    // ... (varargs)
+
+    // Compound assignment operators (Pluto, strict-mode mandatory)
+    plus_eq,            // +=
+    minus_eq,           // -=
+    star_eq,            // *=
+    slash_eq,           // /=
+    slash_slash_eq,     // //=
+    percent_eq,         // %=
+    caret_eq,           // ^=
+    amp_eq,             // &=
+    pipe_eq,            // |=
+    less_less_eq,       // <<=
+    greater_greater_eq, // >>=
+    dot_dot_eq,         // ..=
 
     // End of input
     eof,
@@ -302,20 +319,42 @@ pub const Lexer = struct {
         const c = self.peek();
         self.pos += 1;
         switch (c) {
-            '+' => return self.makeToken(.plus, start, 1),
-            '-' => return self.makeToken(.minus, start, 1),
-            '*' => return self.makeToken(.star, start, 1),
-            '%' => return self.makeToken(.percent, start, 1),
-            '^' => return self.makeToken(.caret, start, 1),
+            '+' => {
+                if (self.match('=')) return self.makeToken(.plus_eq, start, 2);
+                return self.makeToken(.plus, start, 1);
+            },
+            '-' => {
+                if (self.match('=')) return self.makeToken(.minus_eq, start, 2);
+                return self.makeToken(.minus, start, 1);
+            },
+            '*' => {
+                if (self.match('=')) return self.makeToken(.star_eq, start, 2);
+                return self.makeToken(.star, start, 1);
+            },
+            '%' => {
+                if (self.match('=')) return self.makeToken(.percent_eq, start, 2);
+                return self.makeToken(.percent, start, 1);
+            },
+            '^' => {
+                if (self.match('=')) return self.makeToken(.caret_eq, start, 2);
+                return self.makeToken(.caret, start, 1);
+            },
             '#' => return self.makeToken(.hash, start, 1),
-            '&' => return self.makeToken(.amp, start, 1),
-            '|' => return self.makeToken(.pipe, start, 1),
+            '&' => {
+                if (self.match('=')) return self.makeToken(.amp_eq, start, 2);
+                return self.makeToken(.amp, start, 1);
+            },
+            '|' => {
+                if (self.match('=')) return self.makeToken(.pipe_eq, start, 2);
+                return self.makeToken(.pipe, start, 1);
+            },
             '~' => {
-                if (!self.atEnd() and self.peek() == '=') {
-                    self.pos += 1;
-                    return self.makeToken(.tilde_eq, start, 2);
-                }
+                if (self.match('=')) return self.makeToken(.tilde_eq, start, 2);
                 return self.makeToken(.tilde, start, 1);
+            },
+            '!' => {
+                if (self.match('=')) return self.makeToken(.bang_eq, start, 2);
+                return self.makeToken(.bang, start, 1);
             },
             '(' => return self.makeToken(.lparen, start, 1),
             ')' => return self.makeToken(.rparen, start, 1),
@@ -326,61 +365,53 @@ pub const Lexer = struct {
             ',' => return self.makeToken(.comma, start, 1),
             ';' => return self.makeToken(.semicolon, start, 1),
             '/' => {
-                if (!self.atEnd() and self.peek() == '/') {
-                    self.pos += 1;
+                if (self.match('/')) {
+                    if (self.match('=')) return self.makeToken(.slash_slash_eq, start, 3);
                     return self.makeToken(.slash_slash, start, 2);
                 }
+                if (self.match('=')) return self.makeToken(.slash_eq, start, 2);
                 return self.makeToken(.slash, start, 1);
             },
             '<' => {
-                if (!self.atEnd() and self.peek() == '=') {
-                    self.pos += 1;
-                    return self.makeToken(.less_eq, start, 2);
-                }
-                if (!self.atEnd() and self.peek() == '<') {
-                    self.pos += 1;
+                if (self.match('=')) return self.makeToken(.less_eq, start, 2);
+                if (self.match('<')) {
+                    if (self.match('=')) return self.makeToken(.less_less_eq, start, 3);
                     return self.makeToken(.less_less, start, 2);
                 }
                 return self.makeToken(.less, start, 1);
             },
             '>' => {
-                if (!self.atEnd() and self.peek() == '=') {
-                    self.pos += 1;
-                    return self.makeToken(.greater_eq, start, 2);
-                }
-                if (!self.atEnd() and self.peek() == '>') {
-                    self.pos += 1;
+                if (self.match('=')) return self.makeToken(.greater_eq, start, 2);
+                if (self.match('>')) {
+                    if (self.match('=')) return self.makeToken(.greater_greater_eq, start, 3);
                     return self.makeToken(.greater_greater, start, 2);
                 }
                 return self.makeToken(.greater, start, 1);
             },
             '=' => {
-                if (!self.atEnd() and self.peek() == '=') {
-                    self.pos += 1;
-                    return self.makeToken(.eq_eq, start, 2);
-                }
+                if (self.match('=')) return self.makeToken(.eq_eq, start, 2);
                 return self.makeToken(.eq, start, 1);
             },
             ':' => {
-                if (!self.atEnd() and self.peek() == ':') {
-                    self.pos += 1;
-                    return self.makeToken(.colon_colon, start, 2);
-                }
+                if (self.match(':')) return self.makeToken(.colon_colon, start, 2);
                 return self.makeToken(.colon, start, 1);
             },
             '.' => {
-                if (!self.atEnd() and self.peek() == '.') {
-                    self.pos += 1;
-                    if (!self.atEnd() and self.peek() == '.') {
-                        self.pos += 1;
-                        return self.makeToken(.dot_dot_dot, start, 3);
-                    }
+                if (self.match('.')) {
+                    if (self.match('.')) return self.makeToken(.dot_dot_dot, start, 3);
+                    if (self.match('=')) return self.makeToken(.dot_dot_eq, start, 3);
                     return self.makeToken(.dot_dot, start, 2);
                 }
                 return self.makeToken(.dot, start, 1);
             },
             else => return error.UnexpectedChar,
         }
+    }
+
+    fn match(self: *Lexer, expected: u8) bool {
+        if (self.atEnd() or self.peek() != expected) return false;
+        self.pos += 1;
+        return true;
     }
 
     // --- helpers ---------------------------------------------------------

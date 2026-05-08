@@ -954,16 +954,16 @@ test "vm: not operator" {
     const arena = arena_state.allocator();
 
     {
-        const r = try runSrc(arena, "return not nil");
+        const r = try runSrc(arena, "return !nil");
         try testing.expect(r[0] == .boolean and r[0].boolean);
     }
     {
-        const r = try runSrc(arena, "return not 0");
+        const r = try runSrc(arena, "return !0");
         // In Lua, 0 is truthy, so `not 0` is false.
         try testing.expect(r[0] == .boolean and !r[0].boolean);
     }
     {
-        const r = try runSrc(arena, "return not false");
+        const r = try runSrc(arena, "return !false");
         try testing.expect(r[0] == .boolean and r[0].boolean);
     }
 }
@@ -1069,7 +1069,7 @@ test "vm: assignment updates local" {
 
     const r = try runSrc(arena,
         \\local x = 5
-        \\x = x + 10
+        \\x += 10
         \\return x
     );
     try testing.expectEqual(@as(i64, 15), r[0].integer);
@@ -1106,7 +1106,7 @@ test "vm: comparison materializes booleans" {
         try testing.expect(r[0].boolean);
     }
     {
-        const r = try runSrc(arena, "return 3 ~= 4");
+        const r = try runSrc(arena, "return 3 != 4");
         try testing.expect(r[0].boolean);
     }
     {
@@ -1166,8 +1166,8 @@ test "vm: while loop counts down" {
         \\local x = 10
         \\local sum = 0
         \\while x > 0 do
-        \\    sum = sum + x
-        \\    x = x - 1
+        \\    sum += x
+        \\    x -= 1
         \\end
         \\return sum
     ;
@@ -1183,7 +1183,7 @@ test "vm: while loop never enters when condition starts false" {
 
     const r = try runSrc(arena,
         \\local x = 0
-        \\while x > 0 do x = x - 1 end
+        \\while x > 0 do x -= 1 end
         \\return x
     );
     try testing.expectEqual(@as(i64, 0), r[0].integer);
@@ -1201,10 +1201,10 @@ test "vm: nested while loops" {
         \\while i <= 3 do
         \\    local j = 1
         \\    while j <= 3 do
-        \\        total = total + 1
-        \\        j = j + 1
+        \\        total += 1
+        \\        j += 1
         \\    end
-        \\    i = i + 1
+        \\    i += 1
         \\end
         \\return total
     ;
@@ -1337,7 +1337,7 @@ test "vm: closure-shared upvalue sees writes from both sides" {
     // Both closures share the same UpvalueCell.
     const r = try runSrc(arena,
         \\local count = 0
-        \\local inc = function() count = count + 1 end
+        \\local inc = function() count += 1 end
         \\local read = function() return count end
         \\inc()
         \\inc()
@@ -1613,7 +1613,7 @@ test "vm: upvalue survives parent return (closes correctly)" {
         \\local function make_counter()
         \\    local n = 0
         \\    return function()
-        \\        n = n + 1
+        \\        n += 1
         \\        return n
         \\    end
         \\end
