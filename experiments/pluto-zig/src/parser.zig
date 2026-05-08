@@ -45,12 +45,25 @@ pub const Parser = struct {
     /// 1-token lookahead. Many constructs disambiguate from the
     /// second token (e.g. `name = ...` vs `name(...)` vs `name.x = ...`).
     next_tok: Token,
+    /// When set, the `:` suffix that normally introduces a method-call
+    /// (`obj:method(...)`) is *not* taken. Used by `parseSwitch` while
+    /// parsing case-values, where `:` is the case-body separator and
+    /// must terminate the expression. Save / restore around the
+    /// scoped region; default is false (method-calls allowed).
+    disallow_colon_method: bool,
 
     pub fn init(arena: std.mem.Allocator, src: []const u8) ParseError!Parser {
         var l = lexer.Lexer.init(src);
         const t0 = try l.next();
         const t1 = try l.next();
-        return .{ .src = src, .lex = l, .arena = arena, .cur = t0, .next_tok = t1 };
+        return .{
+            .src = src,
+            .lex = l,
+            .arena = arena,
+            .cur = t0,
+            .next_tok = t1,
+            .disallow_colon_method = false,
+        };
     }
 
     /// Parse a top-level chunk. The chunk is just a block followed by EOF.
@@ -253,11 +266,16 @@ pub const Parser = struct {
                 }
                 try self.advance();
                 var values = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
+                // Case-values stop at `:` — temporarily disable the
+                // method-call suffix so the colon stays for `expect`.
+                const saved = self.disallow_colon_method;
+                self.disallow_colon_method = true;
                 try values.append(self.arena, try self.parseExpr());
                 while (self.cur.kind == .comma) {
                     try self.advance();
                     try values.append(self.arena, try self.parseExpr());
                 }
+                self.disallow_colon_method = saved;
                 try self.expect(.colon);
                 const body = try self.parseBlock();
                 try cases.append(self.arena, .{
@@ -372,8 +390,11 @@ pub const Parser = struct {
             } };
         }
 
-        // Otherwise it must be a function-call statement.
-        if (first.* != .call) return error.ExpectedStmt;
+        // Otherwise it must be a function-call statement (plain or
+        // method-call). Lua's grammar restricts statement-position
+        // expressions to call forms; everything else must reach the
+        // `=` branch above.
+        if (first.* != .call and first.* != .method_call) return error.ExpectedStmt;
         return ast.Stmt{ .expr_stmt = first };
     }
 
@@ -557,6 +578,29 @@ pub const Parser = struct {
                     try self.expect(.rparen);
                     e = try self.alloc(ast.Expr, .{ .call = .{
                         .callee = e,
+                        .args = try args.toOwnedSlice(self.arena),
+                    } });
+                },
+                .colon => {
+                    // Method-call sugar: `obj:method(args)`. Lua's
+                    // syntactic shape is strict — colon must be
+                    // followed by an identifier and a paren'd arglist
+                    // (or a string/table literal in mainline Lua, both
+                    // of which we don't accept yet — `obj:m"hi"` etc).
+                    //
+                    // Inside a switch case-value, `:` is the body
+                    // separator, not a suffix; the parser sets
+                    // `disallow_colon_method` to make this loop bail.
+                    if (self.disallow_colon_method) break;
+                    try self.advance();
+                    const name = try self.expectIdentLexeme();
+                    try self.expect(.lparen);
+                    var args = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
+                    if (self.cur.kind != .rparen) try self.parseExprList(&args);
+                    try self.expect(.rparen);
+                    e = try self.alloc(ast.Expr, .{ .method_call = .{
+                        .receiver = e,
+                        .method = name,
                         .args = try args.toOwnedSlice(self.arena),
                     } });
                 },
@@ -1147,6 +1191,33 @@ test "parse: switch error - empty switch (no clauses)" {
 
     var p = try Parser.init(arena, "switch x end");
     try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
+}
+
+test "parse: method call obj:method(args)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return obj:greet(\"world\")");
+    try testing.expectEqualStrings("(return obj:greet(\"world\"))\n", out);
+}
+
+test "parse: chained method calls" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return a:b():c(1)");
+    try testing.expectEqualStrings("(return a:b():c(1))\n", out);
+}
+
+test "parse: method call as a statement" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "obj:run()");
+    try testing.expectEqualStrings("(stmt obj:run())\n", out);
 }
 
 test "parse: error - missing expression in `if = end`" {

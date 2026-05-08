@@ -73,6 +73,10 @@ pub const VM = struct {
     /// Stdout buffer for `print`, `io.write`, etc. The demo and
     /// tests read this after run() completes.
     output: std.ArrayList(u8),
+    /// Interned `__index` string used by tableLookup's metatable
+    /// fallback. Allocated once at VM init so the metatable read
+    /// path is just a hash + slot probe.
+    index_metakey: TValue,
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
         const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
@@ -89,6 +93,8 @@ pub const VM = struct {
         const main_closure = try allocator.create(v.Closure);
         const upvals = try allocator.alloc(*v.UpvalueCell, 1);
 
+        const index_key_str = try v.String.createWithAllocator(allocator, "__index");
+
         var vm: VM = .{
             .allocator = allocator,
             .registers = regs,
@@ -98,6 +104,7 @@ pub const VM = struct {
             .env_storage = TValue.fromTable(globals),
             .env_cell = undefined,
             .output = .{ .items = &.{}, .capacity = 0 },
+            .index_metakey = TValue.fromString(index_key_str),
         };
         // Now that the VM is in its final memory location, point the
         // cell at the env_storage field. (Building this earlier and
@@ -147,6 +154,33 @@ pub const VM = struct {
 
     fn reg(self: *VM, r: u8) *TValue {
         return &self.registers[self.currentFrame().base + r];
+    }
+
+    /// Read `t[key]`, walking the `__index` metatable chain on misses.
+    ///
+    /// Lua's read-fallback rule: if the raw lookup misses *and* `t`
+    /// has a metatable *and* `mt.__index` is a table, retry the lookup
+    /// against that table (recursively). The chain is bounded — both
+    /// to avoid infinite loops on bad metatable setups and because
+    /// real-world chains are shallow (class → parent → root).
+    ///
+    /// Function-form `__index(t, key)` is deferred to phase 4.4b/c
+    /// (needs to issue a callback into the VM mid-dispatch). Today
+    /// only table-form `__index` is honored.
+    fn tableLookup(self: *VM, t: *v.Table, key: TValue) TValue {
+        var cur: *v.Table = t;
+        var hops: u32 = 0;
+        while (hops < 64) : (hops += 1) {
+            const raw = cur.get(key);
+            if (raw != .nil) return raw;
+            const mt = cur.metatable orelse return TValue.NIL;
+            const idx = mt.get(self.index_metakey);
+            switch (idx) {
+                .table => |next| cur = next,
+                else => return TValue.NIL, // missing or function-form (4.4b)
+            }
+        }
+        return TValue.NIL; // chain too deep — bail
     }
 
     /// Run until the top-level frame returns. The returned slice is
@@ -293,21 +327,23 @@ pub const VM = struct {
                 },
 
                 // GETTABLE A B C: R[A] = R[B][R[C]].
+                // Walks the __index chain on miss (phase 4.4a).
                 .gettable => {
                     const obj = self.reg(instr.b).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
                     const key = self.reg(instr.c).*;
-                    self.reg(instr.a).* = obj.table.get(key);
+                    self.reg(instr.a).* = self.tableLookup(obj.table, key);
                 },
 
                 // GETFIELD A B C: R[A] = R[B][K[C]:string].
+                // Walks the __index chain on miss (phase 4.4a).
                 .getfield => {
                     const obj = self.reg(instr.b).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
                     const k = self.currentProto().constants[instr.c];
                     if (k != .string) return error.InvalidArithmeticOperand;
                     const key = try self.constToValue(k);
-                    self.reg(instr.a).* = obj.table.get(key);
+                    self.reg(instr.a).* = self.tableLookup(obj.table, key);
                 },
 
                 // SETTABLE A B C: R[A][R[B]] = R[C].
@@ -348,6 +384,25 @@ pub const VM = struct {
                             val,
                         ) catch return error.OutOfMemory;
                     }
+                },
+
+                // SELF A B C: method-call sugar.
+                //   R[A+1] = R[B]                       (self argument)
+                //   R[A]   = R[B][K[C]:string]          (the method)
+                // Used by `obj:method(args)` so the receiver and method
+                // land contiguously for a subsequent CALL. Honors the
+                // __index chain on the lookup (so inherited methods on
+                // class-style tables resolve correctly).
+                .self_ => {
+                    const obj = self.reg(instr.b).*;
+                    if (obj != .table) return error.InvalidArithmeticOperand;
+                    const k = self.currentProto().constants[instr.c];
+                    if (k != .string) return error.InvalidArithmeticOperand;
+                    const key = try self.constToValue(k);
+                    // Order matters: write self BEFORE the method, in
+                    // case A+1 == B (self IS the method's receiver).
+                    self.reg(instr.a + 1).* = obj;
+                    self.reg(instr.a).* = self.tableLookup(obj.table, key);
                 },
 
                 // CALL A B C: closure at R[A], B-1 args, C-1 expected
@@ -763,6 +818,8 @@ fn registerBuiltins(globals: *v.Table, allocator: std.mem.Allocator) !void {
         .{ .name = "type", .fn_ptr = &builtin_type },
         .{ .name = "tonumber", .fn_ptr = &builtin_tonumber },
         .{ .name = "ipairs", .fn_ptr = &builtin_ipairs },
+        .{ .name = "setmetatable", .fn_ptr = &builtin_setmetatable },
+        .{ .name = "getmetatable", .fn_ptr = &builtin_getmetatable },
     };
     for (builtins) |b| {
         const key_str = try v.String.createWithAllocator(allocator, b.name);
@@ -775,6 +832,8 @@ const builtin_tostring: v.NativeFn = .{ .name = "tostring", .func = lua_tostring
 const builtin_type: v.NativeFn = .{ .name = "type", .func = lua_type };
 const builtin_tonumber: v.NativeFn = .{ .name = "tonumber", .func = lua_tonumber };
 const builtin_ipairs: v.NativeFn = .{ .name = "ipairs", .func = lua_ipairs };
+const builtin_setmetatable: v.NativeFn = .{ .name = "setmetatable", .func = lua_setmetatable };
+const builtin_getmetatable: v.NativeFn = .{ .name = "getmetatable", .func = lua_getmetatable };
 
 fn lua_print(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
     const vm: *VM = @ptrCast(@alignCast(vm_ptr));
@@ -836,6 +895,36 @@ fn lua_tonumber(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
         },
         else => TValue.NIL,
     };
+    return out;
+}
+
+/// `setmetatable(t, m)` — set t's metatable to m (or clear with nil),
+/// return t. Mismatches the Lua signature minimally: we don't enforce
+/// the `__metatable` protection field (mainline Lua refuses if it's
+/// set). Callers in strict-Pluto programs are typically the class
+/// runtime, which doesn't set that field.
+fn lua_setmetatable(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    if (args.len < 1 or args[0] != .table) return error.InvalidArithmeticOperand;
+    const t = args[0].table;
+    if (args.len >= 2) switch (args[1]) {
+        .nil => t.metatable = null,
+        .table => |m| t.metatable = m,
+        else => return error.InvalidArithmeticOperand,
+    };
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = args[0];
+    return out;
+}
+
+/// `getmetatable(t)` — return t's metatable or nil.
+fn lua_getmetatable(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = if (args.len >= 1 and args[0] == .table)
+        if (args[0].table.metatable) |m| TValue.fromTable(m) else TValue.NIL
+    else
+        TValue.NIL;
     return out;
 }
 
@@ -1976,6 +2065,129 @@ test "vm: function-call-as-statement (results discarded)" {
         \\return x
     );
     try testing.expectEqual(@as(i64, 0), r[0].integer);
+}
+
+// === Phase 4.4a: metatables, __index, method calls =========================
+
+test "vm: setmetatable / getmetatable round-trip" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {}
+        \\local mt = {}
+        \\setmetatable(t, mt)
+        \\return getmetatable(t) == mt
+    );
+    try testing.expectEqual(true, r[0].boolean);
+}
+
+test "vm: __index falls back to a metatable on read miss" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `t` has no `name` key directly; the metatable's __index points
+    // at a default-table that does. Lua/Pluto resolves t.name through
+    // mt.__index.name. The own-key `count = 7` is read raw.
+    const r = try runSrc(arena,
+        \\local defaults = {name = "anon", role = "guest"}
+        \\local mt = {__index = defaults}
+        \\local t = setmetatable({count = 7}, mt)
+        \\return t.name, t.role, t.count
+    );
+    try testing.expectEqualStrings("anon", r[0].string.slice());
+    try testing.expectEqualStrings("guest", r[1].string.slice());
+    try testing.expectEqual(@as(i64, 7), r[2].integer);
+}
+
+test "vm: __index chain walks transitively (parent → grandparent)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local grand = {tag = "grand"}
+        \\local parent = setmetatable({}, {__index = grand})
+        \\local child = setmetatable({}, {__index = parent})
+        \\return child.tag
+    );
+    try testing.expectEqualStrings("grand", r[0].string.slice());
+}
+
+test "vm: method call obj:method(args) passes obj as self" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `:` desugars to passing the receiver as the first arg. Define
+    // greet as `function(self, name)` so we can verify both args.
+    const r = try runSrc(arena,
+        \\local obj = {prefix = "Hi, "}
+        \\obj.greet = function(self, name) return self.prefix .. name end
+        \\return obj:greet("Alice")
+    );
+    try testing.expectEqualStrings("Hi, Alice", r[0].string.slice());
+}
+
+test "vm: method dispatch through __index (class-style)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The shape every Lua-OO tutorial uses: a "class" table holds
+    // methods, instances are tables with the class as their metatable's
+    // __index. `inst:speak()` resolves `speak` via the metatable chain
+    // and invokes it with `inst` as self.
+    const r = try runSrc(arena,
+        \\local Dog = {}
+        \\Dog.speak = function(self) return self.name .. " says woof" end
+        \\local function new_dog(name)
+        \\  return setmetatable({name = name}, {__index = Dog})
+        \\end
+        \\local d = new_dog("Rex")
+        \\return d:speak()
+    );
+    try testing.expectEqualStrings("Rex says woof", r[0].string.slice());
+}
+
+test "vm: method call evaluates receiver only once" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // If receiver were eval'd twice, calls would equal 2. SELF reads
+    // the receiver register once and reuses it for both the method
+    // lookup and the implicit self argument.
+    const r = try runSrc(arena,
+        \\local calls = 0
+        \\local obj = {}
+        \\obj.run = function(self) return "ok" end
+        \\local function get_obj() calls += 1 return obj end
+        \\local result = get_obj():run()
+        \\return calls, result
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+    try testing.expectEqualStrings("ok", r[1].string.slice());
+}
+
+test "vm: method-call statement form (discards results)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Method call as a bare statement — no assignment, results
+    // discarded. The body still runs and mutates shared state.
+    const r = try runSrc(arena,
+        \\local box = {n = 0}
+        \\box.bump = function(self) self.n = self.n + 1 end
+        \\box:bump()
+        \\box:bump()
+        \\box:bump()
+        \\return box.n
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
 }
 
 test "vm: switch — single-value cases pick the matching branch" {

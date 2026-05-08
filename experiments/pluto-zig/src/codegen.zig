@@ -322,11 +322,15 @@ pub const Compiler = struct {
     }
 
     /// Function-call statement — call but discard results. CALL with
-    /// C=1 means "no results expected".
+    /// C=1 means "no results expected". Also handles the method-call
+    /// statement form `obj:method(args)`.
     fn emitExprStmt(self: *Compiler, e: *ast.Expr) CompileError!void {
-        if (e.* != .call) return error.Unimplemented;
         const reg = self.allocReg();
-        try self.emitCall(e.call, reg, 0);
+        switch (e.*) {
+            .call => |c| try self.emitCall(c, reg, 0),
+            .method_call => |mc| try self.emitMethodCall(mc, reg, 0),
+            else => return error.Unimplemented,
+        }
         self.next_reg = reg; // free the temp
     }
 
@@ -762,6 +766,7 @@ pub const Compiler = struct {
             .unary => |u| try self.emitUnary(u, dest),
             .function => |f| try self.emitFunctionExpr(f, dest),
             .call => |c| try self.emitCall(c, dest, 1), // expression context wants 1 result
+            .method_call => |mc| try self.emitMethodCall(mc, dest, 1),
             .table => |t| try self.emitTableExpr(t, dest),
             .field => |f| try self.emitFieldGet(f, dest),
             .index => |i| try self.emitIndexGet(i, dest),
@@ -879,6 +884,42 @@ pub const Compiler = struct {
         // CALL A B C: A is closure register, B-1 is arg count,
         // C-1 is expected result count.
         const b: u8 = @intCast(c.args.len + 1);
+        const c_res: u8 = num_results + 1;
+        try self.emit(Instruction.iABC(.call, dest, 0, b, c_res));
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// `obj:method(args)` — Lua's method-call sugar. Layout is
+    ///   dest    = obj.method     (the function to call)
+    ///   dest+1  = obj             (passed as the implicit first arg)
+    ///   dest+2..= args
+    /// Both dest and dest+1 are produced atomically by the SELF
+    /// opcode, then the regular CALL handles the rest. `obj` is
+    /// evaluated only once even if it's a side-effecting expression.
+    fn emitMethodCall(self: *Compiler, mc: ast.Expr.MethodCall, dest: u8, num_results: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        // Evaluate the receiver into a temp register above dest. SELF
+        // reads from this register to write into both dest and dest+1.
+        const recv_reg = try self.exprToReg(mc.receiver);
+
+        const k_idx = try self.addConstant(.{ .string = mc.method });
+        if (k_idx > 255) return error.TooManyConstants;
+
+        // Reserve dest, dest+1 for SELF's outputs (method + self).
+        // After SELF runs, args land at dest+2, dest+3, ...
+        self.next_reg = dest + 2;
+        if (self.next_reg > self.max_reg) self.max_reg = self.next_reg;
+        try self.emit(Instruction.iABC(.self_, dest, 0, recv_reg, @intCast(k_idx)));
+
+        // Args.
+        for (mc.args) |arg| _ = try self.exprToReg(arg);
+
+        // CALL counts include the implicit self arg.
+        const b: u8 = @intCast(mc.args.len + 2); // 1 self + N args, +1 for B encoding
         const c_res: u8 = num_results + 1;
         try self.emit(Instruction.iABC(.call, dest, 0, b, c_res));
 

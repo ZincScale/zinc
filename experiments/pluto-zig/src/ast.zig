@@ -62,6 +62,7 @@ pub const Expr = union(enum) {
     index: Index,        // a[b]
     field: Field,        // a.b  (b is an Ident-like atom)
     call: Call,          // f(args)
+    method_call: MethodCall, // obj:method(args) — implicit self
     function: Function,  // function(...) body end
     table: Table,        // { ... }
 
@@ -70,6 +71,11 @@ pub const Expr = union(enum) {
     pub const Index = struct { object: *Expr, key: *Expr };
     pub const Field = struct { object: *Expr, name: []const u8 };
     pub const Call = struct { callee: *Expr, args: []const *Expr };
+    pub const MethodCall = struct {
+        receiver: *Expr,
+        method: []const u8,
+        args: []const *Expr,
+    };
     pub const Function = struct {
         params: []const NameWithType,
         has_vararg: bool,
@@ -401,6 +407,17 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
             try dumpExpr(out, c.callee);
             try out.writeAll("(");
             for (c.args, 0..) |a, i| {
+                if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, a);
+            }
+            try out.writeAll(")");
+        },
+        .method_call => |mc| {
+            try dumpExpr(out, mc.receiver);
+            try out.writeAll(":");
+            try out.writeAll(mc.method);
+            try out.writeAll("(");
+            for (mc.args, 0..) |a, i| {
                 if (i > 0) try out.writeAll(",");
                 try dumpExpr(out, a);
             }
