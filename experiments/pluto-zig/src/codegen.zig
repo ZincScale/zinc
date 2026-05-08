@@ -38,6 +38,13 @@ const Local = struct {
     reg: u8,
 };
 
+/// Where a name resolves to in the current function. Used by ident
+/// reads, assignments, and call targets.
+const Resolution = union(enum) {
+    local: u8,
+    upvalue: u8,
+};
+
 /// Map AST binary ops to Lua opcodes for the register/register form.
 /// Returns null for ops not yet implemented in 3.2.0 (logical,
 /// concat, bitwise).
@@ -73,37 +80,42 @@ fn compareOpCode(op: ast.BinaryOp) ?CompareForm {
 
 pub const Compiler = struct {
     arena: std.mem.Allocator,
+    /// Enclosing compiler when this is a nested function body. null
+    /// for the top-level chunk. Used by ident resolution to walk
+    /// outward looking for upvalue captures.
+    parent: ?*Compiler,
     code: std.ArrayList(Instruction),
     constants: std.ArrayList(Constant),
-    /// Sub-protos for nested function expressions. CLOSURE indexes
-    /// into this array.
     protos: std.ArrayList(*const bc.Proto),
-    /// Active locals — each holds the name and its assigned register.
-    /// Length grows on `local` statements and shrinks on scope exit.
+    /// Upvalue descriptors for the proto being compiled — populated
+    /// as the body references names from enclosing scopes.
+    upvalues: std.ArrayList(bc.UpvalueDesc),
     locals: std.ArrayList(Local),
-    /// Next free register index. Allocated incrementally as
-    /// expressions emit values; locals reserve the low slots.
     next_reg: u8,
-    /// High-water mark of register usage. Becomes the proto's
-    /// max_stack when we finalize.
     max_reg: u8,
-    /// Number of declared formal parameters. Stored on the Proto.
     num_params: u8,
-    /// Whether the function takes `...`.
     is_vararg: bool,
 
     pub fn init(arena: std.mem.Allocator) Compiler {
         return .{
             .arena = arena,
+            .parent = null,
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
             .protos = .{ .items = &.{}, .capacity = 0 },
+            .upvalues = .{ .items = &.{}, .capacity = 0 },
             .locals = .{ .items = &.{}, .capacity = 0 },
             .next_reg = 0,
             .max_reg = 0,
             .num_params = 0,
             .is_vararg = true, // top-level chunk is vararg
         };
+    }
+
+    fn initNested(arena: std.mem.Allocator, parent: *Compiler) Compiler {
+        var c = Compiler.init(arena);
+        c.parent = parent;
+        return c;
     }
 
     fn findLocal(self: *const Compiler, name: []const u8) ?u8 {
@@ -113,6 +125,33 @@ pub const Compiler = struct {
             i -= 1;
             const l = self.locals.items[i];
             if (std.mem.eql(u8, l.name, name)) return l.reg;
+        }
+        return null;
+    }
+
+    fn findUpvalue(self: *const Compiler, name: []const u8) ?u8 {
+        for (self.upvalues.items, 0..) |u, i| {
+            if (std.mem.eql(u8, u.name, name)) return @intCast(i);
+        }
+        return null;
+    }
+
+    /// Look the name up in this function's locals, then upvalues, then
+    /// recursively in enclosing scopes. If found in an enclosing scope,
+    /// register an upvalue descriptor in *this* function so the runtime
+    /// can wire it up at CLOSURE time.
+    fn resolveIdent(self: *Compiler, name: []const u8) CompileError!?Resolution {
+        if (self.findLocal(name)) |r| return Resolution{ .local = r };
+        if (self.findUpvalue(name)) |i| return Resolution{ .upvalue = i };
+        if (self.parent) |p| {
+            const parent_res = try p.resolveIdent(name) orelse return null;
+            const desc: bc.UpvalueDesc = switch (parent_res) {
+                .local => |reg| .{ .name = name, .in_stack = true, .idx = reg },
+                .upvalue => |i| .{ .name = name, .in_stack = false, .idx = i },
+            };
+            const new_idx = self.upvalues.items.len;
+            try self.upvalues.append(self.arena, desc);
+            return Resolution{ .upvalue = @intCast(new_idx) };
         }
         return null;
     }
@@ -163,6 +202,7 @@ pub const Compiler = struct {
             .code = try self.code.toOwnedSlice(self.arena),
             .constants = try self.constants.toOwnedSlice(self.arena),
             .protos = try self.protos.toOwnedSlice(self.arena),
+            .upvalues = try self.upvalues.toOwnedSlice(self.arena),
         };
         return proto;
     }
@@ -191,14 +231,21 @@ pub const Compiler = struct {
         self.next_reg = reg; // free the temp
     }
 
-    /// `local function f(args) body end` — sugar for
-    /// `local f = function(args) body end`. Phase 3.2.3 doesn't yet
-    /// support recursion (body referencing f) — that needs upvalues.
+    /// `local function f(args) body end`. Lua's spec: declare the
+    /// local *before* compiling the body so the body can reference
+    /// `f` recursively (it becomes an upvalue capture in our model).
+    /// Sequence:
+    ///   1. allocate a register, register `f` as a local at that reg
+    ///   2. emit LOADNIL into the register (initial value while the
+    ///      body compiles — the open upvalue points here)
+    ///   3. compile body (body's references to f register as upvalues)
+    ///   4. emit CLOSURE into the same register; the open upvalue
+    ///      now sees the closure value
     fn emitLocalFunction(self: *Compiler, lf: ast.Stmt.LocalFunction) CompileError!void {
-        const reg = self.next_reg;
-        try self.emitFunctionExpr(lf.func, reg);
-        _ = self.allocReg();
+        const reg = self.allocReg();
         try self.locals.append(self.arena, .{ .name = lf.name, .reg = reg });
+        try self.emit(Instruction.iABC(.loadnil, reg, 0, 0, 0));
+        try self.emitFunctionExpr(lf.func, reg);
     }
 
     /// `if c1 then b1 elseif c2 then b2 else eb end`. Compiles to:
@@ -339,15 +386,24 @@ pub const Compiler = struct {
         }
     }
 
-    /// Single-target assignment to a known local. Index/field/multi-
-    /// target forms are deferred to later phases (need GETTABUP for
+    /// Single-target assignment to a known local or upvalue. Index/
+    /// field/multi-target forms are deferred (need GETTABUP for
     /// globals, SETTABLE/SETI for index, etc.).
     fn emitAssign(self: *Compiler, a: ast.Stmt.Assign) CompileError!void {
         if (a.targets.len != 1 or a.values.len != 1) return error.Unimplemented;
         const target = a.targets[0];
         if (target.* != .ident) return error.Unimplemented;
-        const target_reg = self.findLocal(target.ident) orelse return error.UnknownIdentifier;
-        try self.emitExprToDest(a.values[0], target_reg);
+        const res = try self.resolveIdent(target.ident) orelse return error.UnknownIdentifier;
+        switch (res) {
+            .local => |r| try self.emitExprToDest(a.values[0], r),
+            .upvalue => |idx| {
+                // Materialize the value into a temp, then SETUPVAL it.
+                const reg_before = self.next_reg;
+                const tmp = try self.exprToReg(a.values[0]);
+                try self.emit(Instruction.iABC(.setupval, tmp, 0, idx, 0));
+                self.next_reg = reg_before;
+            },
+        }
     }
 
     fn emitReturn(self: *Compiler, r: ast.Stmt.Return) CompileError!void {
@@ -401,11 +457,13 @@ pub const Compiler = struct {
                 try self.emit(Instruction.iABx(.loadk, dest, k));
             },
             .ident => |name| {
-                const local_reg = self.findLocal(name) orelse return error.UnknownIdentifier;
-                if (local_reg != dest) {
-                    try self.emit(Instruction.iABC(.move, dest, 0, local_reg, 0));
+                const res = try self.resolveIdent(name) orelse return error.UnknownIdentifier;
+                switch (res) {
+                    .local => |r| {
+                        if (r != dest) try self.emit(Instruction.iABC(.move, dest, 0, r, 0));
+                    },
+                    .upvalue => |idx| try self.emit(Instruction.iABC(.getupval, dest, 0, idx, 0)),
                 }
-                // local_reg == dest is a self-MOVE; skip it.
             },
             .binary => |b| try self.emitBinary(b, dest),
             .unary => |u| try self.emitUnary(u, dest),
@@ -416,12 +474,13 @@ pub const Compiler = struct {
     }
 
     /// Compile a `function(args) body end` expression into a sub-
-    /// Proto, register it on the parent, and emit CLOSURE A Bx so
-    /// the runtime can build the closure value at execution time.
-    /// Phase 3.2.3 has no upvalue capture — closures see only their
-    /// own params + locals, nothing from the enclosing scope.
+    /// Proto, register it on the parent, and emit CLOSURE A Bx. The
+    /// nested compiler resolves names by walking up to `self`, so
+    /// any reference to an enclosing local registers as an upvalue
+    /// descriptor on the sub-Proto. The runtime CLOSURE handler reads
+    /// those descriptors to wire the cells.
     fn emitFunctionExpr(self: *Compiler, f: ast.Expr.Function, dest: u8) CompileError!void {
-        var nested = Compiler.init(self.arena);
+        var nested = Compiler.initNested(self.arena, self);
         const sub_proto = try nested.compileFunctionBody(f.params, f.has_vararg, f.body);
         const proto_idx: u17 = @intCast(self.protos.items.len);
         try self.protos.append(self.arena, sub_proto);

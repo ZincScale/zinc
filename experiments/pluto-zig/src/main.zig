@@ -174,6 +174,12 @@ pub fn main(init: std.process.Init) !void {
         "local function abs(x) if x < 0 then return -x else return x end end\nreturn abs(-7), abs(11)",
         // Nested same-scope calls (no upvalues needed)
         "local sq = function(x) return x * x end\nreturn sq(sq(3))",
+        // Recursive fib via upvalue self-reference — the holy grail
+        "local function fib(n)\nif n < 2 then return n end\nreturn fib(n - 1) + fib(n - 2)\nend\nreturn fib(10)",
+        // Closure that mutates a shared upvalue
+        "local count = 0\nlocal inc = function() count = count + 1 end\ninc()\ninc()\ninc()\nreturn count",
+        // Counter factory — returned closure outlives its parent frame
+        "local function make_counter()\nlocal n = 0\nreturn function() n = n + 1\nreturn n end\nend\nlocal c = make_counter()\nreturn c(), c(), c()",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
