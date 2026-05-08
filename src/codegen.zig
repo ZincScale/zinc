@@ -306,6 +306,7 @@ pub const Compiler = struct {
             .if_stmt => |if_s| try self.emitIf(if_s),
             .while_stmt => |w| try self.emitWhile(w),
             .numeric_for => |fr| try self.emitNumericFor(fr),
+            .generic_for => |gf| try self.emitGenericFor(gf),
             .switch_stmt => |sw| try self.emitSwitch(sw),
             .class_decl => |cd| try self.emitClassDecl(cd),
             .break_stmt => |bs| try self.emitBreak(bs.level),
@@ -605,6 +606,127 @@ pub const Compiler = struct {
         br_frame.deinit(self.arena);
 
         // Drop the loop variable from scope; free the regs.
+        self.locals.shrinkRetainingCapacity(locals_before);
+        self.next_reg = reg_before;
+    }
+
+    /// `for IDENT [, IDENT2...] in iter_expr [, ...] do body end` — the
+    /// generic-for form. Lua's iterator protocol:
+    ///
+    ///   <eval iter_exprs into iter, state, ctrl>
+    ///   loop_start:
+    ///     <call_base..call_base+nvars-1> = iter(state, ctrl)
+    ///     if call_base[0] is nil, goto loop_end
+    ///     copy call_base[0..nvars-1] into the loop var locals
+    ///     ctrl = call_base[0]                  ; first result is the new control
+    ///     body
+    ///   continue_target → loop_start
+    ///   loop_end:
+    ///
+    /// We don't have TFORCALL/TFORLOOP, so we manually copy iter/
+    /// state/ctrl into a contiguous call block each iteration (CALL
+    /// clobbers its A reg with the first result). The cost is 3
+    /// MOVEs per iteration — acceptable for now; TFORCALL is a
+    /// future optimization.
+    fn emitGenericFor(self: *Compiler, gf: ast.Stmt.GenericFor) CompileError!void {
+        const reg_before = self.next_reg;
+        const locals_before = self.locals.items.len;
+
+        // Layout (contiguous):
+        //   iter_reg, state_reg, ctrl_reg, var_regs[..nvars], call_base..
+        const iter_reg = self.next_reg;
+        const state_reg = iter_reg + 1;
+        const ctrl_reg = iter_reg + 2;
+
+        // Evaluate the iterator expression list into iter/state/ctrl.
+        // Special case: a single call expression spreads — pairs(t)
+        // returns 3 values that fill all three slots in one shot.
+        // The call needs callee+args in adjacent slots, so we let
+        // emitCall manage its own scratch above iter_reg by leaving
+        // next_reg = iter_reg here (so emitCall's allocReg starts
+        // there and stays contiguous for the CALL opcode).
+        if (gf.iter_exprs.len == 1 and gf.iter_exprs[0].* == .call) {
+            try self.emitCall(gf.iter_exprs[0].call, iter_reg, 3);
+        } else {
+            var i: usize = 0;
+            while (i < gf.iter_exprs.len and i < 3) : (i += 1) {
+                try self.emitExprToDest(gf.iter_exprs[i], @intCast(iter_reg + @as(u8, @intCast(i))));
+            }
+            while (i < 3) : (i += 1) {
+                try self.emit(Instruction.iABC(.loadnil, @intCast(iter_reg + @as(u8, @intCast(i))), 0, 0, 0));
+            }
+        }
+        // Reserve iter/state/ctrl regs for the rest of this loop.
+        self.next_reg = ctrl_reg + 1;
+        if (self.next_reg > self.max_reg) self.max_reg = self.next_reg;
+
+        // Loop variable slots — locals visible to the body.
+        const var_base = self.next_reg;
+        const nvars: u8 = @intCast(gf.var_names.len);
+        for (gf.var_names) |n| {
+            const r = self.allocReg();
+            try self.locals.append(self.arena, .{ .name = n, .reg = r });
+        }
+
+        // Scratch block for the per-iteration call: callee + 2 args
+        // at call_base..call_base+2; CALL writes results back into
+        // call_base+0..call_base+nvars-1.
+        const call_base = self.next_reg;
+        // Reserve enough slots for max(3 args, nvars results). Both are
+        // populated mid-instruction; the body can reuse them after.
+        const scratch_count: u8 = if (nvars > 3) nvars else 3;
+        var s: u8 = 0;
+        while (s < scratch_count) : (s += 1) _ = self.allocReg();
+
+        const loop_start = self.code.items.len;
+
+        // MOVE call_base+0 = iter, +1 = state, +2 = ctrl
+        try self.emit(Instruction.iABC(.move, call_base, 0, iter_reg, 0));
+        try self.emit(Instruction.iABC(.move, call_base + 1, 0, state_reg, 0));
+        try self.emit(Instruction.iABC(.move, call_base + 2, 0, ctrl_reg, 0));
+
+        // CALL: 2 args (B = 3 = args+1), nvars results (C = nvars+1).
+        try self.emit(Instruction.iABC(.call, call_base, 0, 3, nvars + 1));
+
+        // If first result is nil, exit. TEST k=0: pc++ iff R[A] is
+        // truthy → skip JMP. Falsy (nil) → run JMP-to-end.
+        try self.emit(Instruction.iABC(.test_, call_base, 0, 0, 0));
+        const jump_to_end = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // patched at exit
+
+        // Copy results into the loop-var locals so user code sees
+        // them under the names they declared.
+        var v_i: u8 = 0;
+        while (v_i < nvars) : (v_i += 1) {
+            try self.emit(Instruction.iABC(.move, var_base + v_i, 0, call_base + v_i, 0));
+        }
+        // Update ctrl = first result so the next iteration's call
+        // advances. (Reads from var_base[0] — same value, but the
+        // local won't be mutated by user code unless they reassign.)
+        try self.emit(Instruction.iABC(.move, ctrl_reg, 0, var_base, 0));
+
+        // Push break/continue frames before the body. Continue target
+        // = loop_start so the next iteration re-runs the call.
+        try self.break_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+        try self.continue_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+
+        try self.emitBlock(gf.body);
+
+        // continue → loop_start (the call site).
+        var cont_frame = self.continue_jumps.pop().?;
+        for (cont_frame.items) |jpc| self.patchJump(jpc, loop_start);
+        cont_frame.deinit(self.arena);
+
+        try self.emitJump(loop_start);
+
+        const loop_end = self.code.items.len;
+        self.patchJump(jump_to_end, loop_end);
+
+        var br_frame = self.break_jumps.pop().?;
+        for (br_frame.items) |jpc| self.patchJump(jpc, loop_end);
+        br_frame.deinit(self.arena);
+
+        // Pop loop var locals; free everything we allocated.
         self.locals.shrinkRetainingCapacity(locals_before);
         self.next_reg = reg_before;
     }

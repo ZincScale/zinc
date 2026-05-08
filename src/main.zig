@@ -244,6 +244,10 @@ pub fn main(init: std.process.Init) !void {
         "local i = 0\nlocal hit = 0\nwhile i < 10 do i += 1 local j = 0 while j < 10 do j += 1 if i == 3 then if j == 4 then hit = i * 100 + j break 2 end end end end\nreturn hit",
         // Phase 4.8: numeric for-loop (ascending, step, descending)
         "local sum = 0\nfor i = 1, 10 do sum = sum + i end\nlocal last = 0\nfor j = 10, 1, -1 do last = j end\nreturn sum, last",
+        // Phase 4.9: generic for via pairs() — iterate a string-keyed table
+        "local config = {host = \"localhost\", port = 8080, retries = 3}\nlocal n = 0\nfor k, v in pairs(config) do n = n + 1 end\nreturn n",
+        // Phase 4.9: ipairs walks the dense integer prefix
+        "local items = {\"alpha\", \"beta\", \"gamma\"}\nlocal joined = \"\"\nfor i, v in ipairs(items) do joined = joined .. v end\nreturn joined",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

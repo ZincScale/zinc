@@ -149,7 +149,9 @@ pub const Table = struct {
 
     /// Linear-probe to find either an existing entry for `key` or the
     /// first empty slot. Caller checks .key == .nil to distinguish.
-    fn findSlot(self: *Table, key: TValue) u32 {
+    /// Public for the runtime's `next()` iterator builtin — given a
+    /// known-present key, it locates the slot to resume scanning from.
+    pub fn findSlot(self: *Table, key: TValue) u32 {
         const mask = self.cap - 1;
         var i: u32 = @intCast(key.hash() & mask);
         while (true) {

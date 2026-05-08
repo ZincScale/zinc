@@ -971,6 +971,8 @@ fn registerBuiltins(globals: *v.Table, allocator: std.mem.Allocator) !void {
         .{ .name = "type", .fn_ptr = &builtin_type },
         .{ .name = "tonumber", .fn_ptr = &builtin_tonumber },
         .{ .name = "ipairs", .fn_ptr = &builtin_ipairs },
+        .{ .name = "next", .fn_ptr = &builtin_next },
+        .{ .name = "pairs", .fn_ptr = &builtin_pairs },
         .{ .name = "setmetatable", .fn_ptr = &builtin_setmetatable },
         .{ .name = "getmetatable", .fn_ptr = &builtin_getmetatable },
         .{ .name = "__pluto_alloc", .fn_ptr = &builtin_pluto_alloc },
@@ -986,6 +988,8 @@ const builtin_tostring: v.NativeFn = .{ .name = "tostring", .func = lua_tostring
 const builtin_type: v.NativeFn = .{ .name = "type", .func = lua_type };
 const builtin_tonumber: v.NativeFn = .{ .name = "tonumber", .func = lua_tonumber };
 const builtin_ipairs: v.NativeFn = .{ .name = "ipairs", .func = lua_ipairs };
+const builtin_next: v.NativeFn = .{ .name = "next", .func = lua_next };
+const builtin_pairs: v.NativeFn = .{ .name = "pairs", .func = lua_pairs };
 const builtin_setmetatable: v.NativeFn = .{ .name = "setmetatable", .func = lua_setmetatable };
 const builtin_getmetatable: v.NativeFn = .{ .name = "getmetatable", .func = lua_getmetatable };
 const builtin_pluto_alloc: v.NativeFn = .{ .name = "__pluto_alloc", .func = lua_pluto_alloc };
@@ -1102,18 +1106,85 @@ fn lua_pluto_alloc(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
     return out;
 }
 
-/// Phase 3.5 stub: ipairs is supposed to return an iterator triple
-/// (iterator function, table, control). Real iteration support
-/// requires generic-for codegen (deferred). For now we just make the
-/// symbol resolvable so demo programs don't crash on `ipairs(t)` —
-/// returning nil triple disables iteration cleanly.
+/// `next(t, k)` — Lua's primitive table iterator. With k=nil starts
+/// at the first occupied slot; otherwise returns the slot just past
+/// k's. When the table runs out, returns nil so generic-for knows
+/// to stop. Slot order matches the open-addressed hash layout — not
+/// stable across resizes, but consistent within a single iteration.
+fn lua_next(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    if (args.len < 1 or args[0] != .table) return error.InvalidArithmeticOperand;
+    const t = args[0].table;
+    const k: TValue = if (args.len >= 2) args[1] else TValue.NIL;
+
+    // Where to resume scanning. nil-k means "start from the
+    // beginning"; any other key locates its slot via findSlot, then
+    // we step one past it. (The protocol relies on the caller passing
+    // the same control value we returned last time, so the slot is
+    // guaranteed to still hold that key — no concurrent mutation
+    // assumed mid-iteration.)
+    var slot: u32 = if (k == .nil) 0 else t.findSlot(k) + 1;
+
+    while (slot < t.cap) : (slot += 1) {
+        const e = t.entries[slot];
+        if (e.key != .nil) {
+            const out = try vm.allocator.alloc(TValue, 2);
+            out[0] = e.key;
+            out[1] = e.value;
+            return out;
+        }
+    }
+
+    // No more entries — return single nil. Generic-for treats the
+    // first nil as the loop terminator.
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = TValue.NIL;
+    return out;
+}
+
+/// `pairs(t)` — returns the iterator triple `(next, t, nil)`. Used
+/// as `for k, v in pairs(t) do ... end`. The control variable starts
+/// at nil and gets replaced by each iteration's first return value.
+fn lua_pairs(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    if (args.len < 1 or args[0] != .table) return error.InvalidArithmeticOperand;
+    const out = try vm.allocator.alloc(TValue, 3);
+    out[0] = TValue.fromNative(&builtin_next);
+    out[1] = args[0];
+    out[2] = TValue.NIL;
+    return out;
+}
+
+/// `ipairs(t)` — integer-keyed iteration. Returns `(int_next, t, 0)`;
+/// each call advances control by 1, returns `(i, t[i])` until t[i]
+/// is nil. Pluto/Lua's intended ipairs semantics — only the dense
+/// 1..n integer prefix.
 fn lua_ipairs(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
     const vm: *VM = @ptrCast(@alignCast(vm_ptr));
-    _ = args;
+    if (args.len < 1 or args[0] != .table) return error.InvalidArithmeticOperand;
     const out = try vm.allocator.alloc(TValue, 3);
-    out[0] = TValue.NIL;
-    out[1] = TValue.NIL;
-    out[2] = TValue.NIL;
+    out[0] = TValue.fromNative(&builtin_int_next);
+    out[1] = args[0];
+    out[2] = TValue.fromInt(0);
+    return out;
+}
+
+const builtin_int_next: v.NativeFn = .{ .name = "<ipairs-iter>", .func = lua_int_next };
+
+fn lua_int_next(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    if (args.len < 2 or args[0] != .table or args[1] != .integer) return error.InvalidArithmeticOperand;
+    const t = args[0].table;
+    const next_i = args[1].integer + 1;
+    const val = t.get(TValue.fromInt(next_i));
+    if (val == .nil) {
+        const out = try vm.allocator.alloc(TValue, 1);
+        out[0] = TValue.NIL;
+        return out;
+    }
+    const out = try vm.allocator.alloc(TValue, 2);
+    out[0] = TValue.fromInt(next_i);
+    out[1] = val;
     return out;
 }
 
@@ -2714,6 +2785,104 @@ test "vm: visibility — __construct is always public (`new` works on private-de
         \\return new C("hi"):get()
     );
     try testing.expectEqualStrings("hi", r[0].string.slice());
+}
+
+// === Phase 4.9: generic-for + pairs() / ipairs() ===========================
+
+test "vm: generic for — pairs walks all keys, summing values" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {a = 1, b = 2, c = 3, d = 4}
+        \\local total = 0
+        \\for k, v in pairs(t) do total = total + v end
+        \\return total
+    );
+    try testing.expectEqual(@as(i64, 10), r[0].integer);
+}
+
+test "vm: generic for — single-var form gets the key" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // With one loop variable, the second value (the table value)
+    // is silently discarded — only the key (first iter result) binds.
+    const r = try runSrc(arena,
+        \\local t = {x = 10, y = 20, z = 30}
+        \\local count = 0
+        \\for k in pairs(t) do count = count + 1 end
+        \\return count
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: generic for — break exits early" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {1, 2, 3, 4, 5, 6, 7, 8}
+        \\local count = 0
+        \\for k, v in pairs(t) do
+        \\  count = count + 1
+        \\  if count >= 3 then break end
+        \\end
+        \\return count
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: generic for — continue skips an iteration" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local t = {a = 1, b = 2, c = 3, d = 4}
+        \\local odd_sum = 0
+        \\for k, v in pairs(t) do
+        \\  if v % 2 == 0 then continue end
+        \\  odd_sum = odd_sum + v
+        \\end
+        \\return odd_sum
+    );
+    // 1 + 3 = 4
+    try testing.expectEqual(@as(i64, 4), r[0].integer);
+}
+
+test "vm: generic for — ipairs walks the dense integer prefix" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // ipairs stops at the first nil hole — only 1, 2, 3 contribute,
+    // not the 5 (which is at integer key 5 with no key 4 between).
+    const r = try runSrc(arena,
+        \\local t = {10, 20, 30}
+        \\t[5] = 99
+        \\local total = 0
+        \\for i, v in ipairs(t) do total = total + v end
+        \\return total
+    );
+    // 10 + 20 + 30 = 60 (skips 99 at index 5 because there's a hole at 4)
+    try testing.expectEqual(@as(i64, 60), r[0].integer);
+}
+
+test "vm: generic for — empty table doesn't run the body" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local hits = 0
+        \\for k, v in pairs({}) do hits = hits + 1 end
+        \\return hits
+    );
+    try testing.expectEqual(@as(i64, 0), r[0].integer);
 }
 
 // === Phase 4.8: numeric for-loop ===========================================

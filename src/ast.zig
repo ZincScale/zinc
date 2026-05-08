@@ -188,6 +188,10 @@ pub const Stmt = union(enum) {
     /// `for IDENT = start, stop[, step] do body end` — numeric for.
     /// Lowers to a while-style loop in codegen; no new opcodes.
     numeric_for: NumericFor,
+    /// `for IDENT [, IDENT2, ...] in iter_expr [, ...] do body end`.
+    /// Lua/Pluto's generic-for. Codegen lowers to a loop calling the
+    /// iterator triple per Lua's protocol — no new opcodes.
+    generic_for: GenericFor,
     /// `switch expr case v1[,v2]: body case v3: body [default: body] end`
     /// Strict-Pluto choice: cases never fall through (each case ends
     /// implicitly). `break` inside a case is the canonical early-exit;
@@ -236,6 +240,15 @@ pub const Stmt = union(enum) {
         /// direction (ascending vs descending). Variable steps are
         /// always treated as ascending (caller's responsibility).
         step: ?*Expr,
+        body: *Block,
+    };
+    pub const GenericFor = struct {
+        var_names: []const []const u8,
+        /// The expressions evaluated once at loop entry to produce
+        /// the iterator triple `(iter_fn, state, control)`. Typically
+        /// a single `pairs(t)` call, but Lua's grammar accepts up to
+        /// three expressions for advanced iterator factories.
+        iter_exprs: []const *Expr,
         body: *Block,
     };
     pub const Switch = struct {
@@ -398,6 +411,22 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             }
             try out.writeAll("\n");
             try dumpBlock(out, fr.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .generic_for => |gf| {
+            try out.writeAll("(for ");
+            for (gf.var_names, 0..) |n, i| {
+                if (i > 0) try out.writeAll(",");
+                try out.writeAll(n);
+            }
+            try out.writeAll(" in ");
+            for (gf.iter_exprs, 0..) |ex, i| {
+                if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, ex);
+            }
+            try out.writeAll("\n");
+            try dumpBlock(out, gf.body, indent + 1);
             try writeIndent(out, indent);
             try out.writeAll(")\n");
         },
