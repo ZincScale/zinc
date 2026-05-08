@@ -168,6 +168,12 @@ pub fn main(init: std.process.Init) !void {
         "local x = 10\nlocal sum = 0\nwhile x > 0 do sum = sum + x\nx = x - 1\nend\nreturn sum",
         // Nested loops: 3*3 = 9 increments.
         "local i = 1\nlocal total = 0\nwhile i <= 3 do local j = 1\nwhile j <= 3 do total = total + 1\nj = j + 1\nend\ni = i + 1\nend\nreturn total",
+        // Anonymous function expression
+        "local double = function(x) return x * 2 end\nreturn double(21)",
+        // local function declaration
+        "local function abs(x) if x < 0 then return -x else return x end end\nreturn abs(-7), abs(11)",
+        // Nested same-scope calls (no upvalues needed)
+        "local sq = function(x) return x * x end\nreturn sq(sq(3))",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
@@ -219,6 +225,7 @@ fn printValue(out: anytype, val: v.TValue) !void {
         .number => |f| try out.print("{d}", .{f}),
         .string => |s| try out.print("\"{s}\"", .{s.slice()}),
         .table => |t| try out.print("<table {*}>", .{t}),
+        .closure => |c| try out.print("<function {*}>", .{c}),
     }
 }
 
@@ -291,6 +298,7 @@ fn printSlot(out: anytype, val: TValue) !void {
         .number => |f| try out.print("{d}", .{f}),
         .string => |s| try out.print("'{s}'", .{s.slice()}),
         .table => |tt| try out.print("<table {*}>", .{tt}),
+        .closure => |c| try out.print("<function {*}>", .{c}),
     }
 }
 

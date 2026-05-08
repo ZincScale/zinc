@@ -15,6 +15,16 @@ const std = @import("std");
 
 pub const String = @import("string.zig").String;
 pub const Table = @import("table.zig").Table;
+const bc = @import("bytecode.zig");
+
+/// A Lua closure — a function value at runtime. Holds a reference to
+/// the compiled Proto, plus any captured upvalues (none yet — upvalue
+/// capture is the next phase). Defined here alongside TValue so the
+/// `.closure` variant doesn't pull a forward declaration headache.
+pub const Closure = struct {
+    proto: *const bc.Proto,
+    // upvalues: []TValue,  // populated when CLOSURE captures
+};
 
 pub const Tag = enum(u8) {
     nil,
@@ -23,6 +33,7 @@ pub const Tag = enum(u8) {
     number, // f64 — Lua's "number" subtype
     string,
     table,
+    closure,
 };
 
 pub const TValue = union(Tag) {
@@ -32,6 +43,7 @@ pub const TValue = union(Tag) {
     number: f64,
     string: *String,
     table: *Table,
+    closure: *Closure,
 
     pub const NIL: TValue = .{ .nil = {} };
     pub const TRUE: TValue = .{ .boolean = true };
@@ -55,6 +67,10 @@ pub const TValue = union(Tag) {
 
     pub fn fromTable(t: *Table) TValue {
         return .{ .table = t };
+    }
+
+    pub fn fromClosure(c: *Closure) TValue {
+        return .{ .closure = c };
     }
 
     /// Lua truthiness: only `nil` and `false` are falsy.
@@ -93,6 +109,10 @@ pub const TValue = union(Tag) {
                 .table => |bv| av == bv, // identity, like Lua
                 else => false,
             },
+            .closure => |av| switch (b) {
+                .closure => |bv| av == bv, // identity
+                else => false,
+            },
         };
     }
 
@@ -106,6 +126,7 @@ pub const TValue = union(Tag) {
             .number => |f| std.hash.Wyhash.hash(0, std.mem.asBytes(&f)),
             .string => |s| s.hash,
             .table => |t| @intFromPtr(t),
+            .closure => |c| @intFromPtr(c),
         };
     }
 
