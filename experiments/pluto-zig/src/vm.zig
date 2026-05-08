@@ -820,6 +820,7 @@ fn registerBuiltins(globals: *v.Table, allocator: std.mem.Allocator) !void {
         .{ .name = "ipairs", .fn_ptr = &builtin_ipairs },
         .{ .name = "setmetatable", .fn_ptr = &builtin_setmetatable },
         .{ .name = "getmetatable", .fn_ptr = &builtin_getmetatable },
+        .{ .name = "__pluto_alloc", .fn_ptr = &builtin_pluto_alloc },
     };
     for (builtins) |b| {
         const key_str = try v.String.createWithAllocator(allocator, b.name);
@@ -834,6 +835,7 @@ const builtin_tonumber: v.NativeFn = .{ .name = "tonumber", .func = lua_tonumber
 const builtin_ipairs: v.NativeFn = .{ .name = "ipairs", .func = lua_ipairs };
 const builtin_setmetatable: v.NativeFn = .{ .name = "setmetatable", .func = lua_setmetatable };
 const builtin_getmetatable: v.NativeFn = .{ .name = "getmetatable", .func = lua_getmetatable };
+const builtin_pluto_alloc: v.NativeFn = .{ .name = "__pluto_alloc", .func = lua_pluto_alloc };
 
 fn lua_print(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
     const vm: *VM = @ptrCast(@alignCast(vm_ptr));
@@ -925,6 +927,25 @@ fn lua_getmetatable(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue 
         if (args[0].table.metatable) |m| TValue.fromTable(m) else TValue.NIL
     else
         TValue.NIL;
+    return out;
+}
+
+/// `__pluto_alloc(class)` — allocate a fresh instance table whose
+/// metatable's `__index` points at the class. The runtime equivalent
+/// of the Lua idiom `setmetatable({}, {__index = class})`. Used by
+/// `new Foo(args)` codegen to materialize an instance before calling
+/// the constructor. Internal builtin (the leading underscore signals
+/// "not for direct user invocation"), but technically callable.
+fn lua_pluto_alloc(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    if (args.len < 1 or args[0] != .table) return error.InvalidArithmeticOperand;
+    const class = args[0].table;
+    const inst = try v.Table.createWithAllocator(vm.allocator);
+    const mt = try v.Table.createWithAllocator(vm.allocator);
+    try mt.setWithAllocator(vm.allocator, vm.index_metakey, TValue.fromTable(class));
+    inst.metatable = mt;
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = TValue.fromTable(inst);
     return out;
 }
 
@@ -2188,6 +2209,157 @@ test "vm: method-call statement form (discards results)" {
         \\return box.n
     );
     try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+// === Phase 4.4b: classes ===================================================
+
+test "vm: class with method, instantiate via new, dispatch" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Greeter
+        \\  function __construct(name) this.name = name end
+        \\  function hello() return "Hi, " .. this.name end
+        \\end
+        \\local g = new Greeter("Alice")
+        \\return g:hello()
+    );
+    try testing.expectEqualStrings("Hi, Alice", r[0].string.slice());
+}
+
+test "vm: class with no constructor — auto-injected no-op works with no args" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // No `__construct` written — codegen should auto-inject an empty
+    // one. `new Bare()` should succeed and produce an instance whose
+    // method dispatch via __index works.
+    const r = try runSrc(arena,
+        \\class Bare
+        \\  function tag() return "bare" end
+        \\end
+        \\return new Bare():tag()
+    );
+    try testing.expectEqualStrings("bare", r[0].string.slice());
+}
+
+test "vm: class with field defaults visible on instances via __index" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Config
+        \\  port = 8080
+        \\  host = "localhost"
+        \\end
+        \\local c = new Config()
+        \\return c.host, c.port
+    );
+    try testing.expectEqualStrings("localhost", r[0].string.slice());
+    try testing.expectEqual(@as(i64, 8080), r[1].integer);
+}
+
+test "vm: class extends — child inherits parent's method" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Animal
+        \\  function __construct(name) this.name = name end
+        \\  function describe() return this.name .. " (animal)" end
+        \\end
+        \\class Dog extends Animal
+        \\  function bark() return this.name .. " says woof" end
+        \\end
+        \\local d = new Dog("Rex")
+        \\return d:describe(), d:bark()
+    );
+    try testing.expectEqualStrings("Rex (animal)", r[0].string.slice());
+    try testing.expectEqualStrings("Rex says woof", r[1].string.slice());
+}
+
+test "vm: class extends — child inherits parent's __construct" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Child has no own __construct; the parent's runs via __index.
+    const r = try runSrc(arena,
+        \\class Animal
+        \\  function __construct(name) this.name = name end
+        \\end
+        \\class Dog extends Animal
+        \\end
+        \\local d = new Dog("Rex")
+        \\return d.name
+    );
+    try testing.expectEqualStrings("Rex", r[0].string.slice());
+}
+
+test "vm: class — child's method overrides parent's" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Animal
+        \\  function speak() return "generic" end
+        \\end
+        \\class Dog extends Animal
+        \\  function speak() return "woof" end
+        \\end
+        \\return new Dog():speak()
+    );
+    try testing.expectEqualStrings("woof", r[0].string.slice());
+}
+
+test "vm: class — `this` mutates instance fields, not the class" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Two independent instances must not share their `count`. If the
+    // implementation accidentally wrote to the class table instead of
+    // the instance, both counts would alias.
+    const r = try runSrc(arena,
+        \\class Counter
+        \\  function __construct() this.count = 0 end
+        \\  function inc() this.count = this.count + 1 end
+        \\end
+        \\local a = new Counter()
+        \\local b = new Counter()
+        \\a:inc() a:inc() a:inc()
+        \\b:inc()
+        \\return a.count, b.count
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+    try testing.expectEqual(@as(i64, 1), r[1].integer);
+}
+
+test "vm: class — chained inheritance (grandparent → parent → child)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class A
+        \\  function __construct() this.label = "from A" end
+        \\  function root() return "A.root" end
+        \\end
+        \\class B extends A
+        \\end
+        \\class C extends B
+        \\end
+        \\local c = new C()
+        \\return c.label, c:root()
+    );
+    try testing.expectEqualStrings("from A", r[0].string.slice());
+    try testing.expectEqualStrings("A.root", r[1].string.slice());
 }
 
 test "vm: switch — single-value cases pick the matching branch" {

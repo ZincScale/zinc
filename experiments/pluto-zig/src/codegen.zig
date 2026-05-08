@@ -299,6 +299,7 @@ pub const Compiler = struct {
             .if_stmt => |if_s| try self.emitIf(if_s),
             .while_stmt => |w| try self.emitWhile(w),
             .switch_stmt => |sw| try self.emitSwitch(sw),
+            .class_decl => |cd| try self.emitClassDecl(cd),
             .break_stmt => try self.emitBreak(),
             .expr_stmt => |e| try self.emitExprStmt(e),
             .local_function => |lf| try self.emitLocalFunction(lf),
@@ -767,6 +768,7 @@ pub const Compiler = struct {
             .function => |f| try self.emitFunctionExpr(f, dest),
             .call => |c| try self.emitCall(c, dest, 1), // expression context wants 1 result
             .method_call => |mc| try self.emitMethodCall(mc, dest, 1),
+            .new_expr => |ne| try self.emitNewExpr(ne, dest),
             .table => |t| try self.emitTableExpr(t, dest),
             .field => |f| try self.emitFieldGet(f, dest),
             .index => |i| try self.emitIndexGet(i, dest),
@@ -889,6 +891,178 @@ pub const Compiler = struct {
 
         self.next_reg = reg_before;
         if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// `class Name [extends Parent] members end` — strict-Pluto class
+    /// declaration. Lowers to:
+    ///   class_table = {}
+    ///   [if extends] setmetatable(class_table, {__index = parent})
+    ///   class_table.field = value      ; for each field default
+    ///   class_table.method = function(this, ...) body end  ; per method
+    ///   [if no extends and no user __construct] auto-inject empty
+    ///     class_table.__construct = function(this) end
+    ///   <bind class_table to `Name` via local/upvalue/global assign>
+    ///
+    /// The assignment target is resolved via the standard ident-
+    /// resolution chain — so `class Name end` at the top level writes
+    /// to `_ENV.Name` (a global), and at function scope it writes to
+    /// whichever local/upvalue `Name` resolves to. (Pre-declaring
+    /// `local Name` before `class Name end` is the way to keep classes
+    /// out of globals.)
+    fn emitClassDecl(self: *Compiler, cd: ast.Stmt.ClassDecl) CompileError!void {
+        const reg_before = self.next_reg;
+
+        // 1. class table.
+        const class_reg = self.allocReg();
+        try self.emit(Instruction.iABC(.newtable, class_reg, 0, 0, 0));
+
+        // 2. extends Parent → setmetatable(class, {__index = parent}).
+        if (cd.parent) |parent_name| {
+            const mt_reg = self.allocReg();
+            try self.emit(Instruction.iABC(.newtable, mt_reg, 0, 0, 0));
+
+            // mt.__index = parent
+            const parent_reg = self.allocReg();
+            try self.emitIdentToReg(parent_name, parent_reg);
+            const idx_k = try self.addConstant(.{ .string = "__index" });
+            if (idx_k > 255) return error.TooManyConstants;
+            try self.emit(Instruction.iABC(.setfield, mt_reg, 0, @intCast(idx_k), parent_reg));
+
+            // setmetatable(class, mt). Lay out call as
+            //   [callee, arg1, arg2] in fresh contiguous registers.
+            const sm_reg = self.allocReg();
+            try self.emitIdentToReg("setmetatable", sm_reg);
+            const arg1 = self.allocReg();
+            try self.emit(Instruction.iABC(.move, arg1, 0, class_reg, 0));
+            const arg2 = self.allocReg();
+            try self.emit(Instruction.iABC(.move, arg2, 0, mt_reg, 0));
+            // CALL sm_reg, 3 (= 2 args + 1), 1 (= 0 results + 1).
+            try self.emit(Instruction.iABC(.call, sm_reg, 0, 3, 1));
+
+            // Reclaim everything above class_reg. The metatable lives
+            // on the heap referenced from class.metatable; the temps
+            // here are only needed long enough to wire the call.
+            self.next_reg = class_reg + 1;
+        }
+
+        // 3. members — methods and field defaults.
+        var has_user_ctor = false;
+        for (cd.members) |m| switch (m) {
+            .method => |mm| {
+                if (std.mem.eql(u8, mm.name, "__construct")) has_user_ctor = true;
+                const closure_reg = self.allocReg();
+                try self.emitFunctionExpr(mm.func, closure_reg);
+                const k = try self.addConstant(.{ .string = mm.name });
+                if (k > 255) return error.TooManyConstants;
+                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
+                self.next_reg = class_reg + 1;
+            },
+            .field => |f| {
+                const val_reg = self.allocReg();
+                try self.emitExprToDest(f.value, val_reg);
+                const k = try self.addConstant(.{ .string = f.name });
+                if (k > 255) return error.TooManyConstants;
+                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), val_reg));
+                self.next_reg = class_reg + 1;
+            },
+        };
+
+        // 4. Auto-inject empty __construct iff no parent AND user didn't
+        //    write one. Skipping when there's a parent lets the
+        //    inherited __construct flow through __index transparently.
+        if (cd.parent == null and !has_user_ctor) {
+            const empty_body = try self.arena.create(ast.Block);
+            empty_body.* = .{ .stmts = &.{} };
+            const params = try self.arena.alloc(ast.NameWithType, 1);
+            params[0] = .{ .name = "this", .type_annot = null };
+            const empty_fn = ast.Expr.Function{
+                .params = params,
+                .has_vararg = false,
+                .return_type = null,
+                .body = empty_body,
+            };
+            const closure_reg = self.allocReg();
+            try self.emitFunctionExpr(empty_fn, closure_reg);
+            const k = try self.addConstant(.{ .string = "__construct" });
+            if (k > 255) return error.TooManyConstants;
+            try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
+            self.next_reg = class_reg + 1;
+        }
+
+        // 5. Bind class_reg to `Name`. Mirrors the assignment-to-ident
+        //    path in emitAssign: local → MOVE, upvalue → SETUPVAL,
+        //    global → SETTABUP via the resolved _ENV upvalue.
+        const res = try self.resolveIdent(cd.name);
+        switch (res) {
+            .local => |r| try self.emit(Instruction.iABC(.move, r, 0, class_reg, 0)),
+            .upvalue => |idx| try self.emit(Instruction.iABC(.setupval, class_reg, 0, idx, 0)),
+            .global => |g| try self.emit(Instruction.iABC(.settabup, g.env_upvalue, 0, g.name_const, class_reg)),
+        }
+
+        self.next_reg = reg_before;
+    }
+
+    /// `new ClassExpr(args)` — instantiate a class. Compiles to:
+    ///   dest      = __pluto_alloc(class)             ; instance with mt
+    ///   dest+1    = inst.__construct  (via SELF)     ; method + self
+    ///   dest+2    = inst                              ; (SELF wrote both)
+    ///   dest+3..  = args
+    ///   CALL dest+1, nargs+2, 1                       ; __construct(inst, args)
+    ///   dest unchanged → holds the instance.
+    ///
+    /// __construct is always invoked: the class declaration auto-injects
+    /// an empty one when needed (no parent, no user ctor), and otherwise
+    /// the chain inherits the parent's. Calling nil here would mean a
+    /// genuine missing-ctor bug, which we let surface as a runtime
+    /// error rather than papering over.
+    fn emitNewExpr(self: *Compiler, ne: ast.Expr.NewExpr, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        // 1. dest = __pluto_alloc(class). Layout call in [dest, dest+1].
+        try self.emitIdentToReg("__pluto_alloc", dest);
+        // class arg goes at dest+1.
+        self.next_reg = dest + 1;
+        const class_reg = self.allocReg();
+        try self.emitExprToDest(ne.class, class_reg);
+        // CALL dest, 2 (1 arg + 1), 2 (1 result + 1) — result at dest.
+        try self.emit(Instruction.iABC(.call, dest, 0, 2, 2));
+        self.next_reg = dest + 1;
+
+        // 2. SELF dest+1, dest, K["__construct"].
+        const ctor_k = try self.addConstant(.{ .string = "__construct" });
+        if (ctor_k > 255) return error.TooManyConstants;
+        // Reserve dest+1 (method) and dest+2 (self) — SELF writes both.
+        self.next_reg = dest + 3;
+        if (self.next_reg > self.max_reg) self.max_reg = self.next_reg;
+        try self.emit(Instruction.iABC(.self_, dest + 1, 0, dest, @intCast(ctor_k)));
+
+        // 3. evaluate args into dest+3, dest+4, ...
+        for (ne.args) |arg| _ = try self.exprToReg(arg);
+
+        // 4. CALL dest+1, b=(nargs+1+1), c=1 — call __construct(self, args),
+        //    discard the result. dest is untouched, still holds the
+        //    instance.
+        const b: u8 = @intCast(ne.args.len + 2);
+        try self.emit(Instruction.iABC(.call, dest + 1, 0, b, 1));
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// Emit code that materializes an identifier's value into `dest`.
+    /// Identical effect to `emitExprToDest(&Expr{.ident = name}, dest)`
+    /// but without allocating an AST node — used by codegen-synthesized
+    /// helpers (class decl's parent lookup, new-expr's class lookup).
+    fn emitIdentToReg(self: *Compiler, name: []const u8, dest: u8) CompileError!void {
+        const res = try self.resolveIdent(name);
+        switch (res) {
+            .local => |r| {
+                if (r != dest) try self.emit(Instruction.iABC(.move, dest, 0, r, 0));
+            },
+            .upvalue => |idx| try self.emit(Instruction.iABC(.getupval, dest, 0, idx, 0)),
+            .global => |g| try self.emit(Instruction.iABC(.gettabup, dest, 0, g.env_upvalue, g.name_const)),
+        }
     }
 
     /// `obj:method(args)` — Lua's method-call sugar. Layout is
