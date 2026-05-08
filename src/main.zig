@@ -252,6 +252,8 @@ pub fn main(init: std.process.Init) !void {
         "local function get(name) return name or \"anon\" end\nlocal function in_range(n) return n > 0 and n < 10 end\nreturn get(nil), get(\"alice\"), in_range(5), in_range(-1)",
         // Phase 4.11: default arguments
         "local function greet(name, greeting = \"Hi\") return greeting .. \", \" .. name end\nreturn greet(\"Alice\"), greet(\"Bob\", \"Hello\")",
+        // Phase 4.12: enums — strict-Pluto's tagged-table sugar
+        "enum Op { Add, Sub, Mul }\nlocal function apply(op, a, b) switch op case Op.Add: return a + b case Op.Sub: return a - b case Op.Mul: return a * b end end\nreturn apply(Op.Add, 3, 4), apply(Op.Mul, 7, 6)",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
