@@ -242,8 +242,34 @@ pub const Stmt = union(enum) {
         /// `this` first parameter so method bodies can refer to the
         /// receiver as `this`.
         func: Expr.Function,
+        visibility: Visibility = .private,
     };
-    pub const Field = struct { name: []const u8, value: *Expr };
+    pub const Field = struct {
+        name: []const u8,
+        value: *Expr,
+        visibility: Visibility = .private,
+    };
+
+    /// Strict-Pluto class member visibility. Default is `private` —
+    /// you have to explicitly opt members into being externally
+    /// accessible. The runtime checks every member access against
+    /// these tags (see vm.checkVisibility). The numeric values are
+    /// load-bearing: codegen serializes them as integers into the
+    /// class's `__visibility` sub-table, and the VM compares those
+    /// integers directly without re-mapping.
+    pub const Visibility = enum(u8) {
+        public = 0,
+        protected = 1,
+        private = 2,
+
+        pub fn name(self: Visibility) []const u8 {
+            return switch (self) {
+                .public => "public",
+                .protected => "protected",
+                .private => "private",
+            };
+        }
+    };
     pub const FunctionDecl = struct {
         /// Function name as a path: `a.b.c.d` -> ["a","b","c","d"].
         /// Single-element path is the common `function name(...)`.
@@ -340,7 +366,8 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
                 try writeIndent(out, indent + 1);
                 switch (m) {
                     .method => |mm| {
-                        try out.writeAll("method ");
+                        try out.writeAll(mm.visibility.name());
+                        try out.writeAll(" method ");
                         try out.writeAll(mm.name);
                         try out.writeAll("(");
                         try dumpParams(out, mm.func.params, mm.func.has_vararg);
@@ -348,7 +375,8 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
                         try dumpBlock(out, mm.func.body, indent + 2);
                     },
                     .field => |f| {
-                        try out.writeAll("field ");
+                        try out.writeAll(f.visibility.name());
+                        try out.writeAll(" field ");
                         try out.writeAll(f.name);
                         try out.writeAll(" = ");
                         try dumpExpr(out, f.value);

@@ -916,7 +916,63 @@ pub const Compiler = struct {
         const class_reg = self.allocReg();
         try self.emit(Instruction.iABC(.newtable, class_reg, 0, 0, 0));
 
-        // 2. extends Parent → setmetatable(class, {__index = parent}).
+        // 2. members — methods and field defaults.
+        //
+        // Ordering note: write members BEFORE wiring the metatable
+        // (extends), and BEFORE attaching __visibility. Otherwise a
+        // parent's private member with the same name would surface
+        // through __index and the visibility check would reject the
+        // codegen-internal SETFIELD. Postponing the chain wiring lets
+        // the class assemble itself in isolation.
+        var has_user_ctor = false;
+        for (cd.members) |m| switch (m) {
+            .method => |mm| {
+                if (std.mem.eql(u8, mm.name, "__construct")) has_user_ctor = true;
+                const closure_reg = self.allocReg();
+                try self.emitFunctionExpr(mm.func, closure_reg);
+                // MARK_METHOD attaches class_owner to this closure so
+                // the runtime visibility check can see "we're inside
+                // class X" when the method runs.
+                try self.emit(Instruction.iABC(.mark_method, closure_reg, 0, class_reg, 0));
+                const k = try self.addConstant(.{ .string = mm.name });
+                if (k > 255) return error.TooManyConstants;
+                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
+                self.next_reg = class_reg + 1;
+            },
+            .field => |f| {
+                const val_reg = self.allocReg();
+                try self.emitExprToDest(f.value, val_reg);
+                const k = try self.addConstant(.{ .string = f.name });
+                if (k > 255) return error.TooManyConstants;
+                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), val_reg));
+                self.next_reg = class_reg + 1;
+            },
+        };
+
+        // 3. Auto-inject empty __construct iff no parent AND user didn't
+        //    write one. Skipping when there's a parent lets the
+        //    inherited __construct flow through __index transparently.
+        if (cd.parent == null and !has_user_ctor) {
+            const empty_body = try self.arena.create(ast.Block);
+            empty_body.* = .{ .stmts = &.{} };
+            const params = try self.arena.alloc(ast.NameWithType, 1);
+            params[0] = .{ .name = "this", .type_annot = null };
+            const empty_fn = ast.Expr.Function{
+                .params = params,
+                .has_vararg = false,
+                .return_type = null,
+                .body = empty_body,
+            };
+            const closure_reg = self.allocReg();
+            try self.emitFunctionExpr(empty_fn, closure_reg);
+            try self.emit(Instruction.iABC(.mark_method, closure_reg, 0, class_reg, 0));
+            const k = try self.addConstant(.{ .string = "__construct" });
+            if (k > 255) return error.TooManyConstants;
+            try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
+            self.next_reg = class_reg + 1;
+        }
+
+        // 4. extends Parent → setmetatable(class, {__index = parent}).
         if (cd.parent) |parent_name| {
             const mt_reg = self.allocReg();
             try self.emit(Instruction.iABC(.newtable, mt_reg, 0, 0, 0));
@@ -945,51 +1001,13 @@ pub const Compiler = struct {
             self.next_reg = class_reg + 1;
         }
 
-        // 3. members — methods and field defaults.
-        var has_user_ctor = false;
-        for (cd.members) |m| switch (m) {
-            .method => |mm| {
-                if (std.mem.eql(u8, mm.name, "__construct")) has_user_ctor = true;
-                const closure_reg = self.allocReg();
-                try self.emitFunctionExpr(mm.func, closure_reg);
-                const k = try self.addConstant(.{ .string = mm.name });
-                if (k > 255) return error.TooManyConstants;
-                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
-                self.next_reg = class_reg + 1;
-            },
-            .field => |f| {
-                const val_reg = self.allocReg();
-                try self.emitExprToDest(f.value, val_reg);
-                const k = try self.addConstant(.{ .string = f.name });
-                if (k > 255) return error.TooManyConstants;
-                try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), val_reg));
-                self.next_reg = class_reg + 1;
-            },
-        };
+        // 5. Build and attach the __visibility sub-table — a map from
+        //    member-name to visibility tag (0=public, 1=protected,
+        //    2=private). The runtime checkVisibility helper walks this
+        //    on every member access.
+        try self.emitVisibilityTable(class_reg, cd.members, cd.parent == null and !has_user_ctor);
 
-        // 4. Auto-inject empty __construct iff no parent AND user didn't
-        //    write one. Skipping when there's a parent lets the
-        //    inherited __construct flow through __index transparently.
-        if (cd.parent == null and !has_user_ctor) {
-            const empty_body = try self.arena.create(ast.Block);
-            empty_body.* = .{ .stmts = &.{} };
-            const params = try self.arena.alloc(ast.NameWithType, 1);
-            params[0] = .{ .name = "this", .type_annot = null };
-            const empty_fn = ast.Expr.Function{
-                .params = params,
-                .has_vararg = false,
-                .return_type = null,
-                .body = empty_body,
-            };
-            const closure_reg = self.allocReg();
-            try self.emitFunctionExpr(empty_fn, closure_reg);
-            const k = try self.addConstant(.{ .string = "__construct" });
-            if (k > 255) return error.TooManyConstants;
-            try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(k), closure_reg));
-            self.next_reg = class_reg + 1;
-        }
-
-        // 5. Bind class_reg to `Name`. Mirrors the assignment-to-ident
+        // 6. Bind class_reg to `Name`. Mirrors the assignment-to-ident
         //    path in emitAssign: local → MOVE, upvalue → SETUPVAL,
         //    global → SETTABUP via the resolved _ENV upvalue.
         const res = try self.resolveIdent(cd.name);
@@ -1000,6 +1018,57 @@ pub const Compiler = struct {
         }
 
         self.next_reg = reg_before;
+    }
+
+    /// Build a fresh `__visibility` table on the class register and
+    /// populate it with one entry per declared member. `__construct`
+    /// is always recorded as public — it's invoked by the `new`
+    /// keyword which is by definition external to the class, so
+    /// privatizing it would be a footgun. (A user who really wants a
+    /// non-instantiable class can write `private __construct` and
+    /// accept that mismatch; we still record public here to keep
+    /// `new` working uniformly.)
+    fn emitVisibilityTable(
+        self: *Compiler,
+        class_reg: u8,
+        members: []const ast.Stmt.ClassMember,
+        injected_ctor: bool,
+    ) CompileError!void {
+        const vis_reg = self.allocReg();
+        try self.emit(Instruction.iABC(.newtable, vis_reg, 0, 0, 0));
+
+        for (members) |m| {
+            const name = switch (m) { .method => |mm| mm.name, .field => |f| f.name };
+            const declared_vis = switch (m) { .method => |mm| mm.visibility, .field => |f| f.visibility };
+            const effective_vis: ast.Stmt.Visibility = if (std.mem.eql(u8, name, "__construct"))
+                .public
+            else
+                declared_vis;
+            try self.emitVisibilityEntry(vis_reg, name, effective_vis);
+        }
+
+        if (injected_ctor) {
+            try self.emitVisibilityEntry(vis_reg, "__construct", .public);
+        }
+
+        const vis_k = try self.addConstant(.{ .string = "__visibility" });
+        if (vis_k > 255) return error.TooManyConstants;
+        try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(vis_k), vis_reg));
+        self.next_reg = vis_reg + 1;
+    }
+
+    fn emitVisibilityEntry(
+        self: *Compiler,
+        vis_reg: u8,
+        name: []const u8,
+        vis: ast.Stmt.Visibility,
+    ) CompileError!void {
+        const k = try self.addConstant(.{ .string = name });
+        if (k > 255) return error.TooManyConstants;
+        const tag_reg = self.allocReg();
+        try self.emitLoadInt(tag_reg, @intCast(@intFromEnum(vis)));
+        try self.emit(Instruction.iABC(.setfield, vis_reg, 0, @intCast(k), tag_reg));
+        self.next_reg = vis_reg + 1;
     }
 
     /// `new ClassExpr(args)` — instantiate a class. Compiles to:

@@ -29,12 +29,36 @@ pub const RuntimeError = error{
     /// strict-Pluto: TYPECHECK opcode failed — value's runtime type
     /// doesn't match the declared annotation.
     TypeAssertionFailed,
+    /// strict-Pluto: visibility check failed — code outside the class
+    /// (or its descendants for `protected`) tried to read or write a
+    /// non-public member.
+    VisibilityViolation,
     OutOfMemory,
 };
 
 pub const RunResult = struct {
     values: []TValue,
 };
+
+/// True iff `descendant` is reachable from itself by walking the
+/// `__index` chain up to (and including) `ancestor`. Used by the
+/// `protected` visibility check: the calling closure's class must be
+/// the same as or a descendant of the owning class. Bounded by the
+/// same hop limit as tableLookup so a malformed chain can't hang.
+fn isClassDescendantOrSelf(vm: *VM, descendant: *v.Table, ancestor: *v.Table) bool {
+    var cur: *v.Table = descendant;
+    var hops: u32 = 0;
+    while (hops < 64) : (hops += 1) {
+        if (cur == ancestor) return true;
+        const mt = cur.metatable orelse return false;
+        const idx = mt.get(vm.index_metakey);
+        switch (idx) {
+            .table => |next| cur = next,
+            else => return false,
+        }
+    }
+    return false;
+}
 
 /// One stack frame on the call stack. `base` is the index into the
 /// VM's shared register pool where this frame's R[0] lives, so all
@@ -77,6 +101,12 @@ pub const VM = struct {
     /// fallback. Allocated once at VM init so the metatable read
     /// path is just a hash + slot probe.
     index_metakey: TValue,
+    /// Interned `__visibility` string. Class tables carry this as a
+    /// sub-table mapping member-names to visibility tags (0=public,
+    /// 1=protected, 2=private — see ast.Visibility). The runtime
+    /// member-access path uses it to enforce strict-Pluto's runtime
+    /// visibility rule.
+    visibility_metakey: TValue,
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
         const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
@@ -94,6 +124,7 @@ pub const VM = struct {
         const upvals = try allocator.alloc(*v.UpvalueCell, 1);
 
         const index_key_str = try v.String.createWithAllocator(allocator, "__index");
+        const visibility_key_str = try v.String.createWithAllocator(allocator, "__visibility");
 
         var vm: VM = .{
             .allocator = allocator,
@@ -105,6 +136,7 @@ pub const VM = struct {
             .env_cell = undefined,
             .output = .{ .items = &.{}, .capacity = 0 },
             .index_metakey = TValue.fromString(index_key_str),
+            .visibility_metakey = TValue.fromString(visibility_key_str),
         };
         // Now that the VM is in its final memory location, point the
         // cell at the env_storage field. (Building this earlier and
@@ -181,6 +213,78 @@ pub const VM = struct {
             }
         }
         return TValue.NIL; // chain too deep — bail
+    }
+
+    /// strict-Pluto runtime visibility check. For a member access
+    /// `inst[key]` (read or write), walk the metatable chain to find
+    /// which class owns the member and read its visibility tag from
+    /// the `__visibility` sub-table. Then verify that the currently-
+    /// executing closure is allowed to access it:
+    ///
+    ///   - public → always allowed.
+    ///   - private → only the owning class's own methods.
+    ///   - protected → owning class or any of its descendants.
+    ///
+    /// Members that aren't tracked in any `__visibility` map (i.e.
+    /// instance-state fields written ad-hoc, or accesses on plain
+    /// non-class tables) skip the check entirely. Visibility is only
+    /// enforced for fields the class declared.
+    fn checkVisibility(self: *VM, t: *v.Table, key: TValue) RuntimeError!void {
+        // Walk the same chain tableLookup walks, but looking for a
+        // class along the way that has __visibility[key]. The first
+        // match wins — that class owns the member.
+        var cur: *v.Table = t;
+        var hops: u32 = 0;
+        while (hops < 64) : (hops += 1) {
+            // Class tables live as the __index of an instance's
+            // metatable. Check the current cur for a __visibility
+            // sub-table — both class tables and instances may end up
+            // here as we walk.
+            const vis_meta = cur.get(self.visibility_metakey);
+            if (vis_meta == .table) {
+                const tag = vis_meta.table.get(key);
+                if (tag == .integer) {
+                    return self.enforceVisibilityTag(cur, key, tag.integer);
+                }
+            }
+            const mt = cur.metatable orelse return; // no class chain
+            const idx = mt.get(self.index_metakey);
+            switch (idx) {
+                .table => |next| cur = next,
+                else => return,
+            }
+        }
+    }
+
+    fn enforceVisibilityTag(
+        self: *VM,
+        owning_class: *v.Table,
+        key: TValue,
+        tag: i64,
+    ) RuntimeError!void {
+        // 0=public, 1=protected, 2=private — see ast.Visibility.
+        if (tag == 0) return;
+
+        const cur_owner: ?*v.Table = blk: {
+            const fr = self.currentFrame();
+            const cl = fr.closure orelse break :blk null;
+            break :blk cl.class_owner;
+        };
+
+        const allowed = switch (tag) {
+            2 => cur_owner == owning_class, // private: same class only
+            1 => cur_owner != null and isClassDescendantOrSelf(self, cur_owner.?, owning_class),
+            else => true,
+        };
+        if (!allowed) {
+            const tag_name: []const u8 = if (tag == 2) "private" else if (tag == 1) "protected" else "public";
+            const key_name: []const u8 = if (key == .string) key.string.slice() else "<non-string key>";
+            std.debug.print(
+                "strict-pluto runtime: visibility violation — `{s}` is {s}\n",
+                .{ key_name, tag_name },
+            );
+            return error.VisibilityViolation;
+        }
     }
 
     /// Run until the top-level frame returns. The returned slice is
@@ -328,35 +432,40 @@ pub const VM = struct {
 
                 // GETTABLE A B C: R[A] = R[B][R[C]].
                 // Walks the __index chain on miss (phase 4.4a).
+                // Enforces strict-Pluto member visibility (phase 4.4c).
                 .gettable => {
                     const obj = self.reg(instr.b).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
                     const key = self.reg(instr.c).*;
+                    try self.checkVisibility(obj.table, key);
                     self.reg(instr.a).* = self.tableLookup(obj.table, key);
                 },
 
                 // GETFIELD A B C: R[A] = R[B][K[C]:string].
                 // Walks the __index chain on miss (phase 4.4a).
+                // Enforces strict-Pluto member visibility (phase 4.4c).
                 .getfield => {
                     const obj = self.reg(instr.b).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
                     const k = self.currentProto().constants[instr.c];
                     if (k != .string) return error.InvalidArithmeticOperand;
                     const key = try self.constToValue(k);
+                    try self.checkVisibility(obj.table, key);
                     self.reg(instr.a).* = self.tableLookup(obj.table, key);
                 },
 
-                // SETTABLE A B C: R[A][R[B]] = R[C].
+                // SETTABLE A B C: R[A][R[B]] = R[C]. Visibility-checked.
                 .settable => {
                     const obj = self.reg(instr.a).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
                     const key = self.reg(instr.b).*;
                     const val = self.reg(instr.c).*;
+                    try self.checkVisibility(obj.table, key);
                     obj.table.setWithAllocator(self.allocator, key, val) catch
                         return error.OutOfMemory;
                 },
 
-                // SETFIELD A B C: R[A][K[B]:string] = R[C].
+                // SETFIELD A B C: R[A][K[B]:string] = R[C]. Visibility-checked.
                 .setfield => {
                     const obj = self.reg(instr.a).*;
                     if (obj != .table) return error.InvalidArithmeticOperand;
@@ -364,6 +473,7 @@ pub const VM = struct {
                     if (k != .string) return error.InvalidArithmeticOperand;
                     const key = try self.constToValue(k);
                     const val = self.reg(instr.c).*;
+                    try self.checkVisibility(obj.table, key);
                     obj.table.setWithAllocator(self.allocator, key, val) catch
                         return error.OutOfMemory;
                 },
@@ -386,6 +496,17 @@ pub const VM = struct {
                     }
                 },
 
+                // MARK_METHOD A B: R[A].class_owner = R[B]. R[A] is a
+                // closure (just produced by CLOSURE), R[B] is a class
+                // table. Recorded so visibility checks can identify
+                // when execution is "inside" the class.
+                .mark_method => {
+                    const cls_v = self.reg(instr.b).*;
+                    const fn_v = self.reg(instr.a).*;
+                    if (fn_v != .closure or cls_v != .table) return error.InvalidArithmeticOperand;
+                    fn_v.closure.class_owner = cls_v.table;
+                },
+
                 // SELF A B C: method-call sugar.
                 //   R[A+1] = R[B]                       (self argument)
                 //   R[A]   = R[B][K[C]:string]          (the method)
@@ -399,6 +520,7 @@ pub const VM = struct {
                     const k = self.currentProto().constants[instr.c];
                     if (k != .string) return error.InvalidArithmeticOperand;
                     const key = try self.constToValue(k);
+                    try self.checkVisibility(obj.table, key);
                     // Order matters: write self BEFORE the method, in
                     // case A+1 == B (self IS the method's receiver).
                     self.reg(instr.a + 1).* = obj;
@@ -2221,7 +2343,7 @@ test "vm: class with method, instantiate via new, dispatch" {
     const r = try runSrc(arena,
         \\class Greeter
         \\  function __construct(name) this.name = name end
-        \\  function hello() return "Hi, " .. this.name end
+        \\  public function hello() return "Hi, " .. this.name end
         \\end
         \\local g = new Greeter("Alice")
         \\return g:hello()
@@ -2239,7 +2361,7 @@ test "vm: class with no constructor — auto-injected no-op works with no args" 
     // method dispatch via __index works.
     const r = try runSrc(arena,
         \\class Bare
-        \\  function tag() return "bare" end
+        \\  public function tag() return "bare" end
         \\end
         \\return new Bare():tag()
     );
@@ -2253,8 +2375,8 @@ test "vm: class with field defaults visible on instances via __index" {
 
     const r = try runSrc(arena,
         \\class Config
-        \\  port = 8080
-        \\  host = "localhost"
+        \\  public port = 8080
+        \\  public host = "localhost"
         \\end
         \\local c = new Config()
         \\return c.host, c.port
@@ -2270,11 +2392,12 @@ test "vm: class extends — child inherits parent's method" {
 
     const r = try runSrc(arena,
         \\class Animal
-        \\  function __construct(name) this.name = name end
-        \\  function describe() return this.name .. " (animal)" end
+        \\  protected name = ""
+        \\  function __construct(n) this.name = n end
+        \\  public function describe() return this.name .. " (animal)" end
         \\end
         \\class Dog extends Animal
-        \\  function bark() return this.name .. " says woof" end
+        \\  public function bark() return this.name .. " says woof" end
         \\end
         \\local d = new Dog("Rex")
         \\return d:describe(), d:bark()
@@ -2291,7 +2414,8 @@ test "vm: class extends — child inherits parent's __construct" {
     // Child has no own __construct; the parent's runs via __index.
     const r = try runSrc(arena,
         \\class Animal
-        \\  function __construct(name) this.name = name end
+        \\  public name = ""
+        \\  function __construct(n) this.name = n end
         \\end
         \\class Dog extends Animal
         \\end
@@ -2308,10 +2432,10 @@ test "vm: class — child's method overrides parent's" {
 
     const r = try runSrc(arena,
         \\class Animal
-        \\  function speak() return "generic" end
+        \\  public function speak() return "generic" end
         \\end
         \\class Dog extends Animal
-        \\  function speak() return "woof" end
+        \\  public function speak() return "woof" end
         \\end
         \\return new Dog():speak()
     );
@@ -2328,8 +2452,9 @@ test "vm: class — `this` mutates instance fields, not the class" {
     // the instance, both counts would alias.
     const r = try runSrc(arena,
         \\class Counter
+        \\  public count = 0
         \\  function __construct() this.count = 0 end
-        \\  function inc() this.count = this.count + 1 end
+        \\  public function inc() this.count = this.count + 1 end
         \\end
         \\local a = new Counter()
         \\local b = new Counter()
@@ -2348,8 +2473,9 @@ test "vm: class — chained inheritance (grandparent → parent → child)" {
 
     const r = try runSrc(arena,
         \\class A
+        \\  public label = ""
         \\  function __construct() this.label = "from A" end
-        \\  function root() return "A.root" end
+        \\  public function root() return "A.root" end
         \\end
         \\class B extends A
         \\end
@@ -2360,6 +2486,203 @@ test "vm: class — chained inheritance (grandparent → parent → child)" {
     );
     try testing.expectEqualStrings("from A", r[0].string.slice());
     try testing.expectEqualStrings("A.root", r[1].string.slice());
+}
+
+// === Phase 4.4c: visibility (public / protected / private) =================
+
+test "vm: visibility — public field readable from outside" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class C
+        \\  public name = "anon"
+        \\end
+        \\return new C().name
+    );
+    try testing.expectEqualStrings("anon", r[0].string.slice());
+}
+
+test "vm: visibility — private field rejected when read from outside" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class Box
+            \\  private secret = 42
+            \\end
+            \\local b = new Box()
+            \\return b.secret
+        ),
+    );
+}
+
+test "vm: visibility — private field allowed from in-class methods" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The reveal() method is part of the same class, so it can read
+    // the private secret. The result is then returned (a non-private
+    // value) so the top-level chunk can observe it.
+    const r = try runSrc(arena,
+        \\class Box
+        \\  private secret = 42
+        \\  public function reveal() return this.secret end
+        \\end
+        \\return new Box():reveal()
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "vm: visibility — private write rejected from outside" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class Box
+            \\  private secret = 0
+            \\end
+            \\local b = new Box()
+            \\b.secret = 99
+            \\return nil
+        ),
+    );
+}
+
+test "vm: visibility — calling a private method from outside is rejected" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class C
+            \\  private function _impl() return 1 end
+            \\end
+            \\return new C():_impl()
+        ),
+    );
+}
+
+test "vm: visibility — protected accessible from descendant" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Animal
+        \\  protected sound = "?"
+        \\end
+        \\class Dog extends Animal
+        \\  public function bark()
+        \\    this.sound = "woof"
+        \\    return this.sound
+        \\  end
+        \\end
+        \\return new Dog():bark()
+    );
+    try testing.expectEqualStrings("woof", r[0].string.slice());
+}
+
+test "vm: visibility — protected rejected from outside the class chain" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class Animal
+            \\  protected sound = "?"
+            \\end
+            \\local a = new Animal()
+            \\return a.sound
+        ),
+    );
+}
+
+test "vm: visibility — private rejected from descendant (private != protected)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Private means "this class only" — a child class can't reach
+    // into a private parent member. Use protected for that.
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class Animal
+            \\  private id = 1
+            \\end
+            \\class Dog extends Animal
+            \\  public function get_id() return this.id end
+            \\end
+            \\return new Dog():get_id()
+        ),
+    );
+}
+
+test "vm: visibility — default is private (no modifier)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // No `public` or `private` keyword on `name` — strict-Pluto
+    // defaults to private, so external read fails.
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class C
+            \\  name = "anon"
+            \\end
+            \\return new C().name
+        ),
+    );
+}
+
+test "vm: visibility — plain tables (no class) skip the check" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // A plain table has no __visibility metadata, so the check is a
+    // no-op. Existing 4.4a metatable patterns must keep working.
+    const r = try runSrc(arena,
+        \\local t = setmetatable({secret = 1}, {__index = {fallback = 2}})
+        \\return t.secret, t.fallback
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+    try testing.expectEqual(@as(i64, 2), r[1].integer);
+}
+
+test "vm: visibility — __construct is always public (`new` works on private-default class)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The user wrote `function __construct` with no modifier, which
+    // would normally default to private. `new` would then fail when
+    // it tried to look up __construct from outside. Codegen forces
+    // __construct's visibility to public regardless to keep `new`
+    // ergonomic — see emitVisibilityTable.
+    const r = try runSrc(arena,
+        \\class C
+        \\  private label = ""
+        \\  function __construct(s) this.label = s end
+        \\  public function get() return this.label end
+        \\end
+        \\return new C("hi"):get()
+    );
+    try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
 test "vm: switch — single-value cases pick the matching branch" {
