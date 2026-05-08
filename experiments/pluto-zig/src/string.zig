@@ -19,13 +19,26 @@ pub const String = extern struct {
     _pad: u32 = 0,
     // Followed inline by `len` bytes of content.
 
-    /// Allocate a new String holding a copy of `bytes`. Caller is
-    /// responsible for keeping a live reference to the returned
-    /// pointer; bdwgc reclaims when nothing reachable points at it.
+    /// Allocate a new String holding a copy of `bytes` from the GC
+    /// heap. Caller keeps a live reference; bdwgc reclaims when
+    /// nothing reachable points at it.
     pub fn create(heap: *alloc.Heap, bytes: []const u8) !*String {
         const total_size = @sizeOf(String) + bytes.len;
         const raw = try alloc.alloc(heap, total_size, @alignOf(String));
-        const s: *String = @ptrCast(@alignCast(raw));
+        return initInPlace(@ptrCast(@alignCast(raw)), bytes);
+    }
+
+    /// Allocate via a generic Zig allocator instead of the GC heap.
+    /// Used by the VM for runtime string constants — these live for
+    /// the program duration, no need to involve the collector.
+    /// Phase 0.7 (precise GC) revisits whether to unify this path.
+    pub fn createWithAllocator(allocator: std.mem.Allocator, bytes: []const u8) !*String {
+        const total_size = @sizeOf(String) + bytes.len;
+        const raw = try allocator.alignedAlloc(u8, .@"8", total_size);
+        return initInPlace(@ptrCast(@alignCast(raw.ptr)), bytes);
+    }
+
+    fn initInPlace(s: *String, bytes: []const u8) *String {
         s.* = .{
             .hash = std.hash.Wyhash.hash(0, bytes),
             .len = @intCast(bytes.len),

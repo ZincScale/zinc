@@ -27,12 +27,20 @@ pub const CompileError = error{
     Unimplemented,
     TooManyConstants,
     StackOverflow,
+    UnknownIdentifier,
     OutOfMemory,
 };
 
+/// A local variable: name → register binding. Locals occupy the
+/// lowest registers in the frame; expression temporaries go above.
+const Local = struct {
+    name: []const u8,
+    reg: u8,
+};
+
 /// Map AST binary ops to Lua opcodes for the register/register form.
-/// Returns null for ops not yet implemented in 3.2.0 (comparison,
-/// logical, concat, bitwise).
+/// Returns null for ops not yet implemented in 3.2.0 (logical,
+/// concat, bitwise).
 fn binOpCode(op: ast.BinaryOp) ?OpCode {
     return switch (op) {
         .add => .add,
@@ -46,12 +54,32 @@ fn binOpCode(op: ast.BinaryOp) ?OpCode {
     };
 }
 
+/// How to compile an AST comparison op to a Lua comparison opcode.
+/// Lua only has EQ, LT, LE — gt and gte get implemented as LT/LE
+/// with operands swapped (a > b becomes b < a). neq inverts polarity.
+const CompareForm = struct { op: OpCode, swap: bool, invert: bool };
+
+fn compareOpCode(op: ast.BinaryOp) ?CompareForm {
+    return switch (op) {
+        .eq => .{ .op = .eq, .swap = false, .invert = false },
+        .neq => .{ .op = .eq, .swap = false, .invert = true },
+        .lt => .{ .op = .lt, .swap = false, .invert = false },
+        .lte => .{ .op = .le, .swap = false, .invert = false },
+        .gt => .{ .op = .lt, .swap = true, .invert = false },
+        .gte => .{ .op = .le, .swap = true, .invert = false },
+        else => null,
+    };
+}
+
 pub const Compiler = struct {
     arena: std.mem.Allocator,
     code: std.ArrayList(Instruction),
     constants: std.ArrayList(Constant),
+    /// Active locals — each holds the name and its assigned register.
+    /// Length grows on `local` statements and shrinks on scope exit.
+    locals: std.ArrayList(Local),
     /// Next free register index. Allocated incrementally as
-    /// expressions emit values.
+    /// expressions emit values; locals reserve the low slots.
     next_reg: u8,
     /// High-water mark of register usage. Becomes the proto's
     /// max_stack when we finalize.
@@ -62,9 +90,21 @@ pub const Compiler = struct {
             .arena = arena,
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
+            .locals = .{ .items = &.{}, .capacity = 0 },
             .next_reg = 0,
             .max_reg = 0,
         };
+    }
+
+    fn findLocal(self: *const Compiler, name: []const u8) ?u8 {
+        // Search backwards so inner shadows outer.
+        var i: usize = self.locals.items.len;
+        while (i > 0) {
+            i -= 1;
+            const l = self.locals.items[i];
+            if (std.mem.eql(u8, l.name, name)) return l.reg;
+        }
+        return null;
     }
 
     /// Compile a top-level chunk into a Proto. Treats the chunk as
@@ -101,8 +141,161 @@ pub const Compiler = struct {
     fn emitStmt(self: *Compiler, s: *const ast.Stmt) CompileError!void {
         switch (s.*) {
             .return_stmt => |r| try self.emitReturn(r),
+            .local => |l| try self.emitLocal(l),
+            .assign => |a| try self.emitAssign(a),
+            .if_stmt => |if_s| try self.emitIf(if_s),
+            .while_stmt => |w| try self.emitWhile(w),
             else => return error.Unimplemented,
         }
+    }
+
+    /// `if c1 then b1 elseif c2 then b2 else eb end`. Compiles to:
+    ///
+    ///   <eval c1 into X>
+    ///   TEST X k=0           ; skip next (the JMP) if X is truthy
+    ///   JMP <else1>          ; otherwise fall through to else1
+    ///   <b1>
+    ///   JMP <after>
+    /// else1:
+    ///   <eval c2 into X>
+    ///   TEST X k=0
+    ///   JMP <else2>
+    ///   <b2>
+    ///   JMP <after>
+    /// else2:
+    ///   <eb>
+    /// after:
+    ///
+    /// Forward jumps are emitted with placeholder offsets and patched
+    /// once their targets are known.
+    fn emitIf(self: *Compiler, if_s: ast.Stmt.If) CompileError!void {
+        var jumps_to_after = std.ArrayList(usize){ .items = &.{}, .capacity = 0 };
+
+        for (if_s.branches) |br| {
+            // Evaluate condition into a temp register (freed after
+            // the test consumes it — the test only reads the value).
+            const reg_before = self.next_reg;
+            const cond_reg = try self.exprToReg(br.cond);
+
+            // TEST cond_reg k=0 — if cond_reg is truthy, skip next.
+            try self.emit(Instruction.iABC(.test_, cond_reg, 0, 0, 0));
+
+            // The jump-to-next-branch (or end). Patched later.
+            const jump_to_next_branch = self.code.items.len;
+            try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
+
+            // Free the cond register once the test+jump have it
+            // captured in PC; the body re-claims any temp regs.
+            self.next_reg = reg_before;
+
+            // Body of this branch.
+            try self.emitBlock(br.body);
+
+            // After running the body, jump unconditionally past any
+            // remaining branches and the else.
+            const jump_to_after = self.code.items.len;
+            try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
+            try jumps_to_after.append(self.arena, jump_to_after);
+
+            // Patch the jump-to-next-branch to land on the next
+            // instruction (start of the next branch or else).
+            self.patchJump(jump_to_next_branch, self.code.items.len);
+        }
+
+        // Else block (optional).
+        if (if_s.else_block) |eb| try self.emitBlock(eb);
+
+        // All "jumps to after" land here.
+        const after_pc = self.code.items.len;
+        for (jumps_to_after.items) |j| self.patchJump(j, after_pc);
+    }
+
+    /// `while cond do body end`. Compiles to:
+    ///
+    /// loop_start:
+    ///   <eval cond into X>
+    ///   TEST X k=0           ; skip next (the JMP) if X is truthy
+    ///   JMP <loop_end>       ; otherwise jump out
+    ///   <body>
+    ///   JMP <loop_start>
+    /// loop_end:
+    fn emitWhile(self: *Compiler, w: ast.Stmt.While) CompileError!void {
+        const loop_start = self.code.items.len;
+
+        const reg_before = self.next_reg;
+        const cond_reg = try self.exprToReg(w.cond);
+        try self.emit(Instruction.iABC(.test_, cond_reg, 0, 0, 0));
+        const jump_to_end = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
+        self.next_reg = reg_before;
+
+        try self.emitBlock(w.body);
+
+        // Unconditional jump back to loop_start.
+        try self.emitJump(loop_start);
+
+        const loop_end = self.code.items.len;
+        self.patchJump(jump_to_end, loop_end);
+    }
+
+    fn emitBlock(self: *Compiler, b: *const ast.Block) CompileError!void {
+        // No scope tracking yet — locals declared inside an if/while
+        // body persist after it ends. Phase 3.2.x adds proper block
+        // scoping with locals.shrink + register reclaim.
+        for (b.stmts) |s| try self.emitStmt(&s);
+    }
+
+    /// Emit a JMP whose target is already known (i.e. a backwards
+    /// jump such as while's loop-back).
+    fn emitJump(self: *Compiler, target_pc: usize) CompileError!void {
+        const here = self.code.items.len;
+        // After this JMP runs, PC will be `here + 1`. We want it to
+        // become `target_pc`. So the offset is target_pc - (here+1).
+        const offset = @as(i32, @intCast(target_pc)) - @as(i32, @intCast(here + 1));
+        try self.emit(Instruction.isJ(.jmp, offset));
+    }
+
+    /// Patch a JMP that was emitted with a placeholder offset, now
+    /// that its target PC is known.
+    fn patchJump(self: *Compiler, jump_pc: usize, target_pc: usize) void {
+        const offset = @as(i32, @intCast(target_pc)) - @as(i32, @intCast(jump_pc + 1));
+        self.code.items[jump_pc] = Instruction.isJ(.jmp, offset);
+    }
+
+    /// `local a, b, ... = e1, e2, ...` — evaluate values into the
+    /// next-available registers, then bind the names to those
+    /// registers (in order). Extra names get nil.
+    fn emitLocal(self: *Compiler, l: ast.Stmt.Local) CompileError!void {
+        const base = self.next_reg;
+        // Evaluate each value into the next free register. exprToReg
+        // bumps next_reg, so values land at base, base+1, base+2, ...
+        for (l.values) |val| _ = try self.exprToReg(val);
+        // Pad with nil for names without matching values.
+        var i: usize = l.values.len;
+        while (i < l.names.len) : (i += 1) {
+            const r = self.allocReg();
+            try self.emit(Instruction.iABC(.loadnil, r, 0, 0, 0));
+        }
+        // Bind the names. The registers we just filled become locals
+        // and stay reserved for the rest of the chunk (no scope exit
+        // in 3.2.1 — that's the job of phase 3.2.x when blocks land).
+        for (l.names, 0..) |name, idx| {
+            try self.locals.append(self.arena, .{
+                .name = name,
+                .reg = @intCast(base + idx),
+            });
+        }
+    }
+
+    /// Single-target assignment to a known local. Index/field/multi-
+    /// target forms are deferred to later phases (need GETTABUP for
+    /// globals, SETTABLE/SETI for index, etc.).
+    fn emitAssign(self: *Compiler, a: ast.Stmt.Assign) CompileError!void {
+        if (a.targets.len != 1 or a.values.len != 1) return error.Unimplemented;
+        const target = a.targets[0];
+        if (target.* != .ident) return error.Unimplemented;
+        const target_reg = self.findLocal(target.ident) orelse return error.UnknownIdentifier;
+        try self.emitExprToDest(a.values[0], target_reg);
     }
 
     fn emitReturn(self: *Compiler, r: ast.Stmt.Return) CompileError!void {
@@ -155,6 +348,13 @@ pub const Compiler = struct {
                 const k = try self.addConstant(.{ .string = s });
                 try self.emit(Instruction.iABx(.loadk, dest, k));
             },
+            .ident => |name| {
+                const local_reg = self.findLocal(name) orelse return error.UnknownIdentifier;
+                if (local_reg != dest) {
+                    try self.emit(Instruction.iABC(.move, dest, 0, local_reg, 0));
+                }
+                // local_reg == dest is a self-MOVE; skip it.
+            },
             .binary => |b| try self.emitBinary(b, dest),
             .unary => |u| try self.emitUnary(u, dest),
             else => return error.Unimplemented,
@@ -188,6 +388,10 @@ pub const Compiler = struct {
     }
 
     fn emitBinary(self: *Compiler, b: ast.Expr.Binary, dest: u8) CompileError!void {
+        // Comparison ops materialize a boolean into `dest` via the
+        // Lua idiom: cmp + LFALSESKIP + LOADTRUE.
+        if (compareOpCode(b.op)) |cmp| return self.emitCompareToReg(b, cmp, dest);
+
         const opcode = binOpCode(b.op) orelse return error.Unimplemented;
 
         // Strict stack discipline: emit lhs and rhs into temp
@@ -202,6 +406,37 @@ pub const Compiler = struct {
         const rhs_reg = try self.exprToReg(b.rhs);
         try self.emit(Instruction.iABC(opcode, dest, 0, lhs_reg, rhs_reg));
         // Free the operand temps.
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// Materialize a comparison into `dest` as a boolean. Pattern:
+    ///
+    ///   <eval lhs, rhs into temps>
+    ///   <CMP> lhs rhs k=0     ; skip next when comparison is TRUE
+    ///   LFALSESKIP dest        ; FALSE case: dest=false, skip next
+    ///   LOADTRUE dest          ; TRUE case: lands here from cmp's skip
+    ///
+    /// Trace TRUE case: CMP skips LFALSESKIP, LOADTRUE runs → dest=true.
+    /// Trace FALSE case: LFALSESKIP runs → dest=false, then skips
+    ///   the LOADTRUE → dest stays false.
+    ///
+    /// `neq`, `gt`, `gte` ride on EQ/LT/LE: neq inverts via k=1, the
+    /// >-style ops swap operands.
+    fn emitCompareToReg(self: *Compiler, b: ast.Expr.Binary, form: CompareForm, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+        const lhs = try self.exprToReg(b.lhs);
+        const rhs = try self.exprToReg(b.rhs);
+
+        const left = if (form.swap) rhs else lhs;
+        const right = if (form.swap) lhs else rhs;
+        const k: u1 = if (form.invert) 1 else 0;
+
+        try self.emit(Instruction.iABC(form.op, 0, k, left, right));
+        try self.emit(Instruction.iABC(.lfalseskip, dest, 0, 0, 0));
+        try self.emit(Instruction.iABC(.loadtrue, dest, 0, 0, 0));
+
         self.next_reg = reg_before;
         if (dest >= self.next_reg) self.next_reg = dest + 1;
     }
@@ -387,7 +622,7 @@ test "compile: unimplemented stmt → clean error" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    // `local x = 1` is parsed but not yet emittable; phase 3.2.1 will
-    // add it. The codegen returns a clean error rather than crashing.
-    try testing.expectError(error.Unimplemented, compileSrc(arena, "local x = 1"));
+    // Function declarations aren't emittable yet (need CLOSURE +
+    // upvalues, phase 3.2.x). Should surface as a clean error.
+    try testing.expectError(error.Unimplemented, compileSrc(arena, "function f() return 1 end"));
 }
