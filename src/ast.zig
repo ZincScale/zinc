@@ -203,8 +203,14 @@ pub const Stmt = union(enum) {
     local_function: LocalFunction,
     /// `return e1, e2 [;]`
     return_stmt: Return,
-    /// `break`
-    break_stmt: void,
+    /// `break` or `break N` — exits the Nth-innermost enclosing
+    /// breakable construct (loop or switch). N=1 (the default) is
+    /// the current innermost; higher N skips outward.
+    break_stmt: BreakOrContinue,
+    /// `continue` or `continue N` — jumps to the cond evaluation of
+    /// the Nth-innermost enclosing loop. Switches don't count toward
+    /// the level — only loops, matching Java/JS behavior.
+    continue_stmt: BreakOrContinue,
     /// Expression-statement (only function calls reach here in Lua).
     expr_stmt: *Expr,
 
@@ -292,6 +298,7 @@ pub const Stmt = union(enum) {
         func: Expr.Function,
     };
     pub const Return = struct { values: []const *Expr };
+    pub const BreakOrContinue = struct { level: u32 = 1 };
 };
 
 pub const Block = struct { stmts: []const Stmt };
@@ -460,7 +467,14 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             }
             try out.writeAll(")\n");
         },
-        .break_stmt => try out.writeAll("(break)\n"),
+        .break_stmt => |bs| {
+            if (bs.level == 1) try out.writeAll("(break)\n")
+            else try out.print("(break {})\n", .{bs.level});
+        },
+        .continue_stmt => |cs| {
+            if (cs.level == 1) try out.writeAll("(continue)\n")
+            else try out.print("(continue {})\n", .{cs.level});
+        },
         .expr_stmt => |e| {
             try out.writeAll("(stmt ");
             try dumpExpr(out, e);

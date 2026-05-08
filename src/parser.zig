@@ -147,11 +147,33 @@ pub const Parser = struct {
         if (self.isKeyword("return")) return self.parseReturn();
         if (self.isKeyword("break")) {
             try self.advance();
-            return ast.Stmt{ .break_stmt = {} };
+            const level = try self.parseOptionalLevel();
+            return ast.Stmt{ .break_stmt = .{ .level = level } };
+        }
+        if (self.isKeyword("continue")) {
+            try self.advance();
+            const level = try self.parseOptionalLevel();
+            return ast.Stmt{ .continue_stmt = .{ .level = level } };
         }
         // Otherwise: an expression-starting form. Either a function
         // call (which is a statement) or an assignment (lhs = rhs).
         return self.parseExprStmt();
+    }
+
+    /// Optional integer literal level for `break N` / `continue N`.
+    /// Defaults to 1 (the innermost enclosing construct). Higher
+    /// values target progressively outer constructs — e.g. `break 2`
+    /// in `for { switch { case 1: break 2 } }` exits both.
+    fn parseOptionalLevel(self: *Parser) ParseError!u32 {
+        if (self.cur.kind != .int_lit) return 1;
+        const text = self.cur.lexeme(self.src);
+        const n = parseIntLiteral(text) orelse return error.InvalidNumber;
+        if (n < 1) {
+            std.debug.print("strict-pluto: break/continue level must be >= 1, got {}\n", .{n});
+            return error.StrictPlutoViolation;
+        }
+        try self.advance();
+        return @intCast(n);
     }
 
     fn parseLocal(self: *Parser) ParseError!ast.Stmt {
