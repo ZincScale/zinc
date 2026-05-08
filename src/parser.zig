@@ -346,7 +346,7 @@ pub const Parser = struct {
 
     fn parseFunctionBody(self: *Parser) ParseError!ast.Expr.Function {
         try self.expect(.lparen);
-        var params = std.ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
+        var params = std.ArrayList(ast.NameWithType){ .items = &.{}, .capacity = 0 };
         var has_vararg = false;
         if (self.cur.kind != .rparen) {
             while (true) {
@@ -355,17 +355,26 @@ pub const Parser = struct {
                     try self.advance();
                     break;
                 }
-                try params.append(self.arena, try self.expectIdentLexeme());
+                try params.append(self.arena, try self.parseNameWithType());
                 if (self.cur.kind != .comma) break;
                 try self.advance();
             }
         }
         try self.expect(.rparen);
+
+        // Optional return-type annotation: `function f(...): T ... end`
+        var return_type: ?ast.TypeExpr = null;
+        if (self.cur.kind == .colon) {
+            try self.advance();
+            return_type = try self.parseTypeExpr();
+        }
+
         const body = try self.parseBlock();
         try self.expectKeyword("end");
         return .{
             .params = try params.toOwnedSlice(self.arena),
             .has_vararg = has_vararg,
+            .return_type = return_type,
             .body = body,
         };
     }

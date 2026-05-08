@@ -71,8 +71,12 @@ pub const Expr = union(enum) {
     pub const Field = struct { object: *Expr, name: []const u8 };
     pub const Call = struct { callee: *Expr, args: []const *Expr };
     pub const Function = struct {
-        params: []const []const u8,
+        params: []const NameWithType,
         has_vararg: bool,
+        /// Declared return type. When set, strict-Pluto checks every
+        /// `return v` against this type — compile-time for literal
+        /// values, runtime TYPECHECK for computed ones.
+        return_type: ?TypeExpr = null,
         body: *Block,
     };
     pub const Table = struct { fields: []const TableField };
@@ -275,15 +279,13 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
                 try out.writeAll(seg);
             }
             try out.writeAll("(");
-            for (fd.func.params, 0..) |p, i| {
-                if (i > 0) try out.writeAll(",");
-                try out.writeAll(p);
+            try dumpParams(out, fd.func.params, fd.func.has_vararg);
+            try out.writeAll(")");
+            if (fd.func.return_type) |rt| {
+                try out.writeAll(":");
+                try dumpType(out, rt);
             }
-            if (fd.func.has_vararg) {
-                if (fd.func.params.len > 0) try out.writeAll(",");
-                try out.writeAll("...");
-            }
-            try out.writeAll(")\n");
+            try out.writeAll("\n");
             try dumpBlock(out, fd.func.body, indent + 1);
             try writeIndent(out, indent);
             try out.writeAll(")\n");
@@ -292,11 +294,13 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             try out.writeAll("(local-function ");
             try out.writeAll(lf.name);
             try out.writeAll("(");
-            for (lf.func.params, 0..) |p, i| {
-                if (i > 0) try out.writeAll(",");
-                try out.writeAll(p);
+            try dumpParams(out, lf.func.params, lf.func.has_vararg);
+            try out.writeAll(")");
+            if (lf.func.return_type) |rt| {
+                try out.writeAll(":");
+                try dumpType(out, rt);
             }
-            try out.writeAll(")\n");
+            try out.writeAll("\n");
             try dumpBlock(out, lf.func.body, indent + 1);
             try writeIndent(out, indent);
             try out.writeAll(")\n");
@@ -365,10 +369,7 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
         },
         .function => |f| {
             try out.writeAll("function(");
-            for (f.params, 0..) |p, i| {
-                if (i > 0) try out.writeAll(",");
-                try out.writeAll(p);
-            }
+            try dumpParams(out, f.params, f.has_vararg);
             try out.writeAll(") ...end");
         },
         .table => |t| {
@@ -390,6 +391,21 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
             }
             try out.writeAll("}");
         },
+    }
+}
+
+fn dumpParams(out: anytype, params: []const NameWithType, has_vararg: bool) !void {
+    for (params, 0..) |p, i| {
+        if (i > 0) try out.writeAll(",");
+        try out.writeAll(p.name);
+        if (p.type_annot) |ta| {
+            try out.writeAll(":");
+            try dumpType(out, ta);
+        }
+    }
+    if (has_vararg) {
+        if (params.len > 0) try out.writeAll(",");
+        try out.writeAll("...");
     }
 }
 

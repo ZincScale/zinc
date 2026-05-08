@@ -185,6 +185,27 @@ pub const VM = struct {
                 .mod => self.reg(instr.a).* = try arith(.mod, self.reg(instr.b).*, self.reg(instr.c).*),
                 .pow => self.reg(instr.a).* = try arith(.pow, self.reg(instr.b).*, self.reg(instr.c).*),
 
+                // String concatenation: R[A] = R[B] .. R[C].
+                // Lua's spec coerces numbers to strings; we follow.
+                .concat => {
+                    const left = self.reg(instr.b).*;
+                    const right = self.reg(instr.c).*;
+                    var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+                    formatValueTo(&buf, self.allocator, left) catch return error.OutOfMemory;
+                    formatValueTo(&buf, self.allocator, right) catch return error.OutOfMemory;
+                    const owned = buf.toOwnedSlice(self.allocator) catch return error.OutOfMemory;
+                    const s = v.String.createWithAllocator(self.allocator, owned) catch return error.OutOfMemory;
+                    self.allocator.free(owned);
+                    self.reg(instr.a).* = TValue.fromString(s);
+                },
+
+                // Bitwise: integer-only.
+                .band => self.reg(instr.a).* = try bitwise(.band, self.reg(instr.b).*, self.reg(instr.c).*),
+                .bor => self.reg(instr.a).* = try bitwise(.bor, self.reg(instr.b).*, self.reg(instr.c).*),
+                .bxor => self.reg(instr.a).* = try bitwise(.bxor, self.reg(instr.b).*, self.reg(instr.c).*),
+                .shl => self.reg(instr.a).* = try bitwise(.shl, self.reg(instr.b).*, self.reg(instr.c).*),
+                .shr => self.reg(instr.a).* = try bitwise(.shr, self.reg(instr.b).*, self.reg(instr.c).*),
+
                 .unm => self.reg(instr.a).* = try unary(.neg, self.reg(instr.b).*),
                 .bnot => self.reg(instr.a).* = try unary(.bnot, self.reg(instr.b).*),
                 .not_ => self.reg(instr.a).* = unaryNot(self.reg(instr.b).*),
@@ -625,6 +646,21 @@ fn floatArith(op: ArithOp, a: f64, b: f64) RuntimeError!TValue {
 // =============================================================================
 // Unary
 // =============================================================================
+
+const BitwiseOp = enum { band, bor, bxor, shl, shr };
+
+fn bitwise(op: BitwiseOp, a: TValue, b: TValue) RuntimeError!TValue {
+    if (a != .integer or b != .integer) return error.InvalidArithmeticOperand;
+    const av = a.integer;
+    const bv = b.integer;
+    return switch (op) {
+        .band => TValue.fromInt(av & bv),
+        .bor => TValue.fromInt(av | bv),
+        .bxor => TValue.fromInt(av ^ bv),
+        .shl => TValue.fromInt(if (bv >= 64 or bv < 0) 0 else av << @intCast(bv)),
+        .shr => TValue.fromInt(if (bv >= 64 or bv < 0) 0 else av >> @intCast(bv)),
+    };
+}
 
 const UnaryArith = enum { neg, bnot };
 
@@ -1741,6 +1777,121 @@ test "type: per-name annotations in multi-local" {
     );
     try testing.expectEqual(@as(i64, 1), r[0].integer);
     try testing.expectEqualStrings("two", r[1].string.slice());
+}
+
+// === Phase 4.2: typed function params + return ================================
+
+test "function: typed param accepts matching arg" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local f = function(x: number) return x * 2 end
+        \\return f(21)
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "function: typed param rejects mismatched arg at runtime" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.TypeAssertionFailed, runSrc(arena,
+        \\local f = function(x: number) return x * 2 end
+        \\return f("not a number")
+    ));
+}
+
+test "function: typed return matches at runtime" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local f = function(): number return 99 end
+        \\return f()
+    );
+    try testing.expectEqual(@as(i64, 99), r[0].integer);
+}
+
+test "function: typed return rejects literal mismatch at compile time" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.TypeAnnotationMismatch, runSrc(arena,
+        \\local f = function(): number return "not a number" end
+        \\return f()
+    ));
+}
+
+test "function: typed return rejects computed mismatch at runtime" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Inner function returns a string; outer claims to return a number.
+    // Compile-time can't see through the inner call, so TYPECHECK
+    // catches it at runtime.
+    try testing.expectError(error.TypeAssertionFailed, runSrc(arena,
+        \\local make_string = function() return "oops" end
+        \\local f = function(): number return make_string() end
+        \\return f()
+    ));
+}
+
+test "function: bare `return` rejected when type is declared" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `return` (no value) is nil, which doesn't satisfy `: number`.
+    try testing.expectError(error.TypeAnnotationMismatch, runSrc(arena,
+        \\local f = function(): number return end
+        \\return f()
+    ));
+}
+
+test "function: multiple typed params" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local concat = function(a: string, b: string): string
+        \\    return a .. b
+        \\end
+        \\return concat("hello, ", "world")
+    );
+    try testing.expectEqualStrings("hello, world", r[0].string.slice());
+}
+
+test "function: typed param rejects on second arg too" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(error.TypeAssertionFailed, runSrc(arena,
+        \\local f = function(a: number, b: string) return a end
+        \\return f(1, 2)
+    ));
+}
+
+test "function: untyped params still work alongside typed ones" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Mix typed and untyped — only the typed ones are enforced.
+    const r = try runSrc(arena,
+        \\local f = function(a: number, b)
+        \\    return a + 1, b
+        \\end
+        \\return f(5, "anything")
+    );
+    try testing.expectEqual(@as(i64, 6), r[0].integer);
 }
 
 test "vm: indexing non-table is a type error" {

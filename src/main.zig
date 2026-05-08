@@ -202,6 +202,10 @@ pub fn main(init: std.process.Init) !void {
         "local count: integer = 42\nlocal name: string = \"alice\"\nlocal active: boolean = true\nprint(name, count, active)\nreturn nil",
         // type annotation enforces at runtime when value isn't a literal
         "local function compute() return 99 end\nlocal n: number = compute()\nprint(\"got:\", n)\nreturn n",
+        // strict-Pluto: typed function params + return
+        "local greet = function(name: string): string\nreturn \"Hello, \" .. name\nend\nprint(greet(\"Alice\"))\nreturn nil",
+        // typed param rejects mismatched arg at runtime
+        "local f = function(x: number): number return x * 2 end\nprint(\"f(21) =\", f(21))\nreturn nil",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
