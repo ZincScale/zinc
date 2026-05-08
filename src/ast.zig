@@ -1,0 +1,333 @@
+//! Abstract syntax tree for the Pluto-Lang source language.
+//!
+//! The parser produces these nodes; the bytecode emitter (phase 3.2)
+//! consumes them. AST nodes are arena-allocated — parse a chunk into
+//! one arena, emit bytecode, drop the arena. Nothing here is GC-
+//! managed. The runtime String / Table / TValue types in value.zig
+//! and friends are unrelated to the AST.
+
+const std = @import("std");
+
+pub const BinaryOp = enum {
+    // arithmetic
+    add, sub, mul, div, idiv, mod, pow,
+    // bitwise
+    band, bor, bxor, shl, shr,
+    // concat (right-associative in Lua)
+    concat,
+    // comparison
+    eq, neq, lt, lte, gt, gte,
+    // logical (short-circuit)
+    and_, or_,
+
+    pub fn lexeme(self: BinaryOp) []const u8 {
+        return switch (self) {
+            .add => "+",      .sub => "-",      .mul => "*",
+            .div => "/",      .idiv => "//",    .mod => "%",
+            .pow => "^",      .band => "&",     .bor => "|",
+            .bxor => "~",     .shl => "<<",     .shr => ">>",
+            .concat => "..",  .eq => "==",      .neq => "~=",
+            .lt => "<",       .lte => "<=",     .gt => ">",
+            .gte => ">=",     .and_ => "and",   .or_ => "or",
+        };
+    }
+};
+
+pub const UnaryOp = enum {
+    neg,    // -
+    not_,   // not
+    len,    // #
+    bnot,   // ~
+
+    pub fn lexeme(self: UnaryOp) []const u8 {
+        return switch (self) {
+            .neg => "-", .not_ => "not", .len => "#", .bnot => "~",
+        };
+    }
+};
+
+pub const Expr = union(enum) {
+    // Atoms
+    nil: void,
+    boolean: bool,
+    integer: i64,
+    number: f64,
+    string: []const u8, // unescaped content (parser does the unescape)
+    ident: []const u8,
+    vararg: void,       // `...`
+
+    // Compound
+    binary: Binary,
+    unary: Unary,
+    index: Index,        // a[b]
+    field: Field,        // a.b  (b is an Ident-like atom)
+    call: Call,          // f(args)
+    function: Function,  // function(...) body end
+    table: Table,        // { ... }
+
+    pub const Binary = struct { op: BinaryOp, lhs: *Expr, rhs: *Expr };
+    pub const Unary = struct { op: UnaryOp, operand: *Expr };
+    pub const Index = struct { object: *Expr, key: *Expr };
+    pub const Field = struct { object: *Expr, name: []const u8 };
+    pub const Call = struct { callee: *Expr, args: []const *Expr };
+    pub const Function = struct {
+        params: []const []const u8,
+        has_vararg: bool,
+        body: *Block,
+    };
+    pub const Table = struct { fields: []const TableField };
+    pub const TableField = struct {
+        /// null key = positional ("array part"); string key = named
+        /// (`{x = 1}`); expr key = computed (`{[k] = v}`).
+        key: ?TableKey,
+        value: *Expr,
+    };
+    pub const TableKey = union(enum) {
+        named: []const u8,
+        computed: *Expr,
+    };
+};
+
+pub const Stmt = union(enum) {
+    /// Multi-target assignment: `a, b = e1, e2`. Targets are
+    /// restricted to ident / index / field at parse time.
+    assign: Assign,
+    /// `local a, b = e1, e2`
+    local: Local,
+    /// `if cond then ... [elseif cond then ...]* [else ...] end`
+    if_stmt: If,
+    /// `while cond do ... end`
+    while_stmt: While,
+    /// `function name.path(args) body end`. Sugar for
+    /// `name.path = function(args) body end`. Stored expanded.
+    function_decl: FunctionDecl,
+    /// `local function name(args) body end`. Distinct from
+    /// `local name = function(...)` because it allows the body to
+    /// see its own name (recursion).
+    local_function: LocalFunction,
+    /// `return e1, e2 [;]`
+    return_stmt: Return,
+    /// `break`
+    break_stmt: void,
+    /// Expression-statement (only function calls reach here in Lua).
+    expr_stmt: *Expr,
+
+    pub const Assign = struct { targets: []const *Expr, values: []const *Expr };
+    pub const Local = struct { names: []const []const u8, values: []const *Expr };
+    pub const If = struct {
+        // Pairs of (cond, then_block) — the first is the `if`, rest
+        // are `elseif`s. Optional `else_block` is the trailing else.
+        branches: []const Branch,
+        else_block: ?*Block,
+    };
+    pub const Branch = struct { cond: *Expr, body: *Block };
+    pub const While = struct { cond: *Expr, body: *Block };
+    pub const FunctionDecl = struct {
+        /// Function name as a path: `a.b.c.d` -> ["a","b","c","d"].
+        /// Single-element path is the common `function name(...)`.
+        name_path: []const []const u8,
+        is_method: bool, // last separator was ':' (function a:b())
+        func: Expr.Function,
+    };
+    pub const LocalFunction = struct {
+        name: []const u8,
+        func: Expr.Function,
+    };
+    pub const Return = struct { values: []const *Expr };
+};
+
+pub const Block = struct { stmts: []const Stmt };
+
+// =============================================================================
+// Pretty-printer (used by parser tests + the demo to validate AST shape)
+// =============================================================================
+
+pub fn dumpBlock(out: anytype, b: *const Block, indent: u32) !void {
+    for (b.stmts) |s| try dumpStmt(out, &s, indent);
+}
+
+pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
+    try writeIndent(out, indent);
+    switch (s.*) {
+        .assign => |a| {
+            try out.writeAll("(assign ");
+            for (a.targets, 0..) |t, i| {
+                if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, t);
+            }
+            try out.writeAll(" = ");
+            for (a.values, 0..) |val, i| {
+                if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, val);
+            }
+            try out.writeAll(")\n");
+        },
+        .local => |l| {
+            try out.writeAll("(local ");
+            for (l.names, 0..) |name, i| {
+                if (i > 0) try out.writeAll(",");
+                try out.writeAll(name);
+            }
+            if (l.values.len > 0) {
+                try out.writeAll(" = ");
+                for (l.values, 0..) |val, i| {
+                    if (i > 0) try out.writeAll(",");
+                    try dumpExpr(out, val);
+                }
+            }
+            try out.writeAll(")\n");
+        },
+        .if_stmt => |if_s| {
+            try out.writeAll("(if\n");
+            for (if_s.branches, 0..) |br, i| {
+                try writeIndent(out, indent + 1);
+                if (i == 0) try out.writeAll("if ") else try out.writeAll("elseif ");
+                try dumpExpr(out, br.cond);
+                try out.writeAll(" then\n");
+                try dumpBlock(out, br.body, indent + 2);
+            }
+            if (if_s.else_block) |eb| {
+                try writeIndent(out, indent + 1);
+                try out.writeAll("else\n");
+                try dumpBlock(out, eb, indent + 2);
+            }
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .while_stmt => |w| {
+            try out.writeAll("(while ");
+            try dumpExpr(out, w.cond);
+            try out.writeAll("\n");
+            try dumpBlock(out, w.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .function_decl => |fd| {
+            try out.writeAll("(function-decl ");
+            for (fd.name_path, 0..) |seg, i| {
+                if (i > 0) try out.writeAll(if (i == fd.name_path.len - 1 and fd.is_method) ":" else ".");
+                try out.writeAll(seg);
+            }
+            try out.writeAll("(");
+            for (fd.func.params, 0..) |p, i| {
+                if (i > 0) try out.writeAll(",");
+                try out.writeAll(p);
+            }
+            if (fd.func.has_vararg) {
+                if (fd.func.params.len > 0) try out.writeAll(",");
+                try out.writeAll("...");
+            }
+            try out.writeAll(")\n");
+            try dumpBlock(out, fd.func.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .local_function => |lf| {
+            try out.writeAll("(local-function ");
+            try out.writeAll(lf.name);
+            try out.writeAll("(");
+            for (lf.func.params, 0..) |p, i| {
+                if (i > 0) try out.writeAll(",");
+                try out.writeAll(p);
+            }
+            try out.writeAll(")\n");
+            try dumpBlock(out, lf.func.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .return_stmt => |r| {
+            try out.writeAll("(return");
+            for (r.values) |val| {
+                try out.writeAll(" ");
+                try dumpExpr(out, val);
+            }
+            try out.writeAll(")\n");
+        },
+        .break_stmt => try out.writeAll("(break)\n"),
+        .expr_stmt => |e| {
+            try out.writeAll("(stmt ");
+            try dumpExpr(out, e);
+            try out.writeAll(")\n");
+        },
+    }
+}
+
+pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
+    switch (e.*) {
+        .nil => try out.writeAll("nil"),
+        .boolean => |b| try out.writeAll(if (b) "true" else "false"),
+        .integer => |i| try out.print("{}", .{i}),
+        .number => |f| try out.print("{d}", .{f}),
+        .string => |s| try out.print("\"{s}\"", .{s}),
+        .ident => |s| try out.writeAll(s),
+        .vararg => try out.writeAll("..."),
+        .binary => |b| {
+            try out.writeAll("(");
+            try out.writeAll(b.op.lexeme());
+            try out.writeAll(" ");
+            try dumpExpr(out, b.lhs);
+            try out.writeAll(" ");
+            try dumpExpr(out, b.rhs);
+            try out.writeAll(")");
+        },
+        .unary => |u| {
+            try out.writeAll("(");
+            try out.writeAll(u.op.lexeme());
+            try out.writeAll(" ");
+            try dumpExpr(out, u.operand);
+            try out.writeAll(")");
+        },
+        .index => |idx| {
+            try dumpExpr(out, idx.object);
+            try out.writeAll("[");
+            try dumpExpr(out, idx.key);
+            try out.writeAll("]");
+        },
+        .field => |f| {
+            try dumpExpr(out, f.object);
+            try out.writeAll(".");
+            try out.writeAll(f.name);
+        },
+        .call => |c| {
+            try dumpExpr(out, c.callee);
+            try out.writeAll("(");
+            for (c.args, 0..) |a, i| {
+                if (i > 0) try out.writeAll(",");
+                try dumpExpr(out, a);
+            }
+            try out.writeAll(")");
+        },
+        .function => |f| {
+            try out.writeAll("function(");
+            for (f.params, 0..) |p, i| {
+                if (i > 0) try out.writeAll(",");
+                try out.writeAll(p);
+            }
+            try out.writeAll(") ...end");
+        },
+        .table => |t| {
+            try out.writeAll("{");
+            for (t.fields, 0..) |fld, i| {
+                if (i > 0) try out.writeAll(",");
+                if (fld.key) |k| switch (k) {
+                    .named => |n| {
+                        try out.writeAll(n);
+                        try out.writeAll("=");
+                    },
+                    .computed => |ce| {
+                        try out.writeAll("[");
+                        try dumpExpr(out, ce);
+                        try out.writeAll("]=");
+                    },
+                };
+                try dumpExpr(out, fld.value);
+            }
+            try out.writeAll("}");
+        },
+    }
+}
+
+fn writeIndent(out: anytype, indent: u32) !void {
+    var i: u32 = 0;
+    while (i < indent) : (i += 1) try out.writeAll("  ");
+}
