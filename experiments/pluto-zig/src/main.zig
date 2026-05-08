@@ -21,6 +21,8 @@ const Table = @import("table.zig").Table;
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
+const bc = @import("bytecode.zig");
+const codegen = @import("codegen.zig");
 
 const TValue = v.TValue;
 
@@ -140,8 +142,35 @@ pub fn main(init: std.process.Init) !void {
     ;
     try parseAndDump(out, init.arena.allocator(), fib_src);
 
-    try out.print("\n[pluto-zig] phase-1 + phase-3.0 + phase-3.1 OK\n", .{});
+    // --- Phase 3.2 codegen demo ---------------------------------------
+    try out.print("\n[pluto-zig] phase-3.2 codegen demo — `return 1 + 2 * 3`\n", .{});
+    try compileAndDisassemble(out, init.arena.allocator(), "return 1 + 2 * 3");
+
+    try out.print("\n[pluto-zig] phase-3.2 codegen demo — `return -5 * (10 + 1)`\n", .{});
+    try compileAndDisassemble(out, init.arena.allocator(), "return -5 * (10 + 1)");
+
+    try out.print("\n[pluto-zig] phase-3.2 codegen demo — `return \"answer is \", 42`\n", .{});
+    try compileAndDisassemble(out, init.arena.allocator(), "return \"answer is \", 42");
+
+    try out.print("\n[pluto-zig] phase-1 + phase-3.0 + phase-3.1 + phase-3.2 OK\n", .{});
     try out.flush();
+}
+
+fn compileAndDisassemble(out: anytype, arena: std.mem.Allocator, src: []const u8) !void {
+    var p = parser.Parser.init(arena, src) catch |err| {
+        try out.print("  parser init failed: {s}\n", .{@errorName(err)});
+        return;
+    };
+    const block = p.parseChunk() catch |err| {
+        try out.print("  parse error: {s}\n", .{@errorName(err)});
+        return;
+    };
+    var c = codegen.Compiler.init(arena);
+    const proto = c.compileChunk(block) catch |err| {
+        try out.print("  compile error: {s}\n", .{@errorName(err)});
+        return;
+    };
+    try bc.disassemble(out, proto);
 }
 
 fn parseAndDump(out: anytype, arena: std.mem.Allocator, src: []const u8) !void {
