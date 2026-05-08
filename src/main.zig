@@ -198,6 +198,10 @@ pub fn main(init: std.process.Init) !void {
         "local function check(a, b) if a != b then return \"differ\" else return \"same\" end end\nreturn check(1, 2), check(7, 7)",
         // Pluto: ! operator
         "return !nil, !false, !0, !\"x\"",
+        // strict-Pluto: enforced type annotations
+        "local count: integer = 42\nlocal name: string = \"alice\"\nlocal active: boolean = true\nprint(name, count, active)\nreturn nil",
+        // type annotation enforces at runtime when value isn't a literal
+        "local function compute() return 99 end\nlocal n: number = compute()\nprint(\"got:\", n)\nreturn n",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
