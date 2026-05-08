@@ -44,6 +44,14 @@ const Local = struct {
 const Resolution = union(enum) {
     local: u8,
     upvalue: u8,
+    /// Global access via _ENV: read with GETTABUP A env_upvalue name_const,
+    /// write with SETTABUP env_upvalue name_const value.
+    global: GlobalAccess,
+};
+
+const GlobalAccess = struct {
+    env_upvalue: u8,
+    name_const: u8,
 };
 
 /// Map AST binary ops to Lua opcodes for the register/register form.
@@ -137,30 +145,63 @@ pub const Compiler = struct {
         return null;
     }
 
-    /// Look the name up in this function's locals, then upvalues, then
-    /// recursively in enclosing scopes. If found in an enclosing scope,
-    /// register an upvalue descriptor in *this* function so the runtime
-    /// can wire it up at CLOSURE time.
-    fn resolveIdent(self: *Compiler, name: []const u8) CompileError!?Resolution {
+    /// Resolve a name to its access form. Tries local, then this
+    /// function's upvalues, then walks the parent chain capturing as
+    /// needed, then falls back to global access via _ENV. Always
+    /// succeeds — Lua treats unbound names as global lookups.
+    ///
+    /// _ENV is the only name that can't fall back to global (it IS
+    /// the global table). It must resolve as local/upvalue or be a
+    /// genuine compile error (impossible in normal use since
+    /// compileChunk seeds _ENV at upvalue 0 in the top-level proto,
+    /// and nested functions chain through).
+    fn resolveIdent(self: *Compiler, name: []const u8) CompileError!Resolution {
         if (self.findLocal(name)) |r| return Resolution{ .local = r };
         if (self.findUpvalue(name)) |i| return Resolution{ .upvalue = i };
-        if (self.parent) |p| {
-            const parent_res = try p.resolveIdent(name) orelse return null;
-            const desc: bc.UpvalueDesc = switch (parent_res) {
-                .local => |reg| .{ .name = name, .in_stack = true, .idx = reg },
-                .upvalue => |i| .{ .name = name, .in_stack = false, .idx = i },
-            };
-            const new_idx = self.upvalues.items.len;
-            try self.upvalues.append(self.arena, desc);
-            return Resolution{ .upvalue = @intCast(new_idx) };
+        if (try self.captureFromParent(name)) |idx| return Resolution{ .upvalue = idx };
+
+        // Global fallback — _ENV must already be available as an
+        // upvalue at this point (or capturable up the chain).
+        if (std.mem.eql(u8, name, "_ENV")) return error.UnknownIdentifier;
+        const env_res = try self.resolveIdent("_ENV");
+        const env_idx: u8 = switch (env_res) {
+            .upvalue => |i| i,
+            else => return error.UnknownIdentifier,
+        };
+        const k_idx = try self.addConstant(.{ .string = name });
+        if (k_idx > 255) return error.TooManyConstants;
+        return Resolution{ .global = .{ .env_upvalue = env_idx, .name_const = @intCast(k_idx) } };
+    }
+
+    /// Walk parent chain looking for `name` as a local or upvalue.
+    /// Each link adds an upvalue desc on the corresponding compiler so
+    /// the runtime can chain captures through. Returns this compiler's
+    /// upvalue index for `name` if found anywhere up the chain.
+    fn captureFromParent(self: *Compiler, name: []const u8) CompileError!?u8 {
+        const p = self.parent orelse return null;
+        if (p.findLocal(name)) |reg| {
+            try self.upvalues.append(self.arena, .{ .name = name, .in_stack = true, .idx = reg });
+            return @intCast(self.upvalues.items.len - 1);
+        }
+        if (p.findUpvalue(name)) |i| {
+            try self.upvalues.append(self.arena, .{ .name = name, .in_stack = false, .idx = i });
+            return @intCast(self.upvalues.items.len - 1);
+        }
+        if (try p.captureFromParent(name)) |parent_idx| {
+            try self.upvalues.append(self.arena, .{ .name = name, .in_stack = false, .idx = parent_idx });
+            return @intCast(self.upvalues.items.len - 1);
         }
         return null;
     }
 
     /// Compile a top-level chunk into a Proto. Treats the chunk as
     /// the body of a vararg function with no fixed params (Lua's
-    /// "main" chunk convention).
+    /// "main" chunk convention). Seeds `_ENV` as upvalue 0 — the
+    /// runtime VM main closure provides the actual cell pointing at
+    /// the globals table. Nested function bodies inherit `_ENV`
+    /// transparently via the resolveIdent upvalue chain.
     pub fn compileChunk(self: *Compiler, block: *const ast.Block) CompileError!*Proto {
+        try self.upvalues.append(self.arena, .{ .name = "_ENV", .in_stack = true, .idx = 0 });
         return self.compileFunctionBody(&.{}, true, block);
     }
 
@@ -395,13 +436,20 @@ pub const Compiler = struct {
         const target = a.targets[0];
         switch (target.*) {
             .ident => |name| {
-                const res = try self.resolveIdent(name) orelse return error.UnknownIdentifier;
+                const res = try self.resolveIdent(name);
                 switch (res) {
                     .local => |r| try self.emitExprToDest(a.values[0], r),
                     .upvalue => |idx| {
                         const reg_before = self.next_reg;
                         const tmp = try self.exprToReg(a.values[0]);
                         try self.emit(Instruction.iABC(.setupval, tmp, 0, idx, 0));
+                        self.next_reg = reg_before;
+                    },
+                    .global => |g| {
+                        // SETTABUP A B C: UpValue[A][K[B]:string] := R[C]
+                        const reg_before = self.next_reg;
+                        const val = try self.exprToReg(a.values[0]);
+                        try self.emit(Instruction.iABC(.settabup, g.env_upvalue, 0, g.name_const, val));
                         self.next_reg = reg_before;
                     },
                 }
@@ -480,12 +528,13 @@ pub const Compiler = struct {
                 try self.emit(Instruction.iABx(.loadk, dest, k));
             },
             .ident => |name| {
-                const res = try self.resolveIdent(name) orelse return error.UnknownIdentifier;
+                const res = try self.resolveIdent(name);
                 switch (res) {
                     .local => |r| {
                         if (r != dest) try self.emit(Instruction.iABC(.move, dest, 0, r, 0));
                     },
                     .upvalue => |idx| try self.emit(Instruction.iABC(.getupval, dest, 0, idx, 0)),
+                    .global => |g| try self.emit(Instruction.iABC(.gettabup, dest, 0, g.env_upvalue, g.name_const)),
                 }
             },
             .binary => |b| try self.emitBinary(b, dest),

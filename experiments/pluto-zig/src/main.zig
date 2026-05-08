@@ -186,6 +186,12 @@ pub fn main(init: std.process.Init) !void {
         "local t = {}\nt.x = 1\nt.y = 2\nt.z = t.x + t.y\nreturn t.z",
         // Object-oriented pattern via table + closures
         "local function make()\nlocal self = {count = 0}\nself.inc = function() self.count = self.count + 1 end\nself.get = function() return self.count end\nreturn self\nend\nlocal c = make()\nc.inc()\nc.inc()\nc.inc()\nreturn c.get()",
+        // stdlib: print + tostring + type
+        "print(\"Hello, Pluto!\")\nreturn nil",
+        "print(type(42), type(\"hi\"), type({}))\nreturn nil",
+        "local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end\nprint(\"fib(10) =\", fib(10))\nreturn nil",
+        // Globals from user code
+        "score = 0\nscore = score + 10\nscore = score + 20\nprint(\"score:\", score)\nreturn score",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
@@ -211,6 +217,7 @@ fn executeAndPrint(out: anytype, arena: std.mem.Allocator, src: []const u8) !voi
         try out.print("  {s} -> vm init error: {s}\n", .{ src, @errorName(err) });
         return;
     };
+    machine.bindEnv();
     const result = machine.run() catch |err| {
         try out.print("  {s} -> runtime error: {s}\n", .{ src, @errorName(err) });
         return;
@@ -218,10 +225,26 @@ fn executeAndPrint(out: anytype, arena: std.mem.Allocator, src: []const u8) !voi
     // Show source on its own line if it contains newlines (multi-stmt
     // programs); otherwise inline with the result.
     if (std.mem.indexOf(u8, src, "\n") != null) {
-        try out.print("  ----\n  {s}\n  -> ", .{src});
+        try out.print("  ----\n  {s}\n  ", .{src});
     } else {
-        try out.print("  {s:<48} -> ", .{src});
+        try out.print("  {s:<48} ", .{src});
     }
+
+    // If `print` produced output, dump it before the return value(s).
+    if (machine.output.items.len > 0) {
+        try out.writeAll("\n  [stdout] ");
+        // Indent any embedded newlines for readability.
+        for (machine.output.items) |b| {
+            try out.writeByte(b);
+            if (b == '\n' and machine.output.items[machine.output.items.len - 1] != b) {
+                try out.writeAll("  [stdout] ");
+            }
+        }
+        try out.writeAll("  -> ");
+    } else {
+        try out.writeAll("-> ");
+    }
+
     for (result.values, 0..) |val, i| {
         if (i > 0) try out.writeAll(", ");
         try printValue(out, val);
@@ -238,6 +261,7 @@ fn printValue(out: anytype, val: v.TValue) !void {
         .string => |s| try out.print("\"{s}\"", .{s.slice()}),
         .table => |t| try out.print("<table {*}>", .{t}),
         .closure => |c| try out.print("<function {*}>", .{c}),
+        .native => |n| try out.print("<native {s}>", .{n.name}),
     }
 }
 
@@ -311,6 +335,7 @@ fn printSlot(out: anytype, val: TValue) !void {
         .string => |s| try out.print("'{s}'", .{s.slice()}),
         .table => |tt| try out.print("<table {*}>", .{tt}),
         .closure => |c| try out.print("<function {*}>", .{c}),
+        .native => |n| try out.print("<native {s}>", .{n.name}),
     }
 }
 
