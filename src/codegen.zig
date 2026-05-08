@@ -1566,6 +1566,9 @@ pub const Compiler = struct {
         // Comparison ops materialize a boolean into `dest` via the
         // Lua idiom: cmp + LFALSESKIP + LOADTRUE.
         if (compareOpCode(b.op)) |cmp| return self.emitCompareToReg(b, cmp, dest);
+        // Logical ops short-circuit — the result is the selected
+        // operand, not always a boolean.
+        if (b.op == .and_ or b.op == .or_) return self.emitLogical(b, dest);
 
         const opcode = binOpCode(b.op) orelse return error.Unimplemented;
 
@@ -1611,6 +1614,41 @@ pub const Compiler = struct {
         try self.emit(Instruction.iABC(form.op, 0, k, left, right));
         try self.emit(Instruction.iABC(.lfalseskip, dest, 0, 0, 0));
         try self.emit(Instruction.iABC(.loadtrue, dest, 0, 0, 0));
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// Short-circuit logical-and / logical-or in expression context.
+    /// The result is the *selected operand*, not a coerced boolean —
+    /// `nil or "default"` returns "default", `5 and "x"` returns "x".
+    /// Pattern (and uses k=0, or uses k=1):
+    ///
+    ///   <eval lhs into dest>
+    ///   TEST dest k                    ; skip next when "fall through" wanted
+    ///   JMP past_rhs                   ; runs when we should KEEP lhs
+    ///   <eval rhs into dest>           ; runs when we should USE rhs
+    /// past_rhs:
+    ///
+    /// `and` semantics: keep lhs if falsy → JMP runs when falsy →
+    /// k=0 (TEST skips next when truthy). `or` semantics: keep lhs
+    /// if truthy → JMP runs when truthy → k=1 (TEST skips next when
+    /// falsy).
+    fn emitLogical(self: *Compiler, b: ast.Expr.Binary, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        try self.emitExprToDest(b.lhs, dest);
+
+        const k: u1 = if (b.op == .and_) 0 else 1;
+        try self.emit(Instruction.iABC(.test_, dest, k, 0, 0));
+
+        const jump_past_rhs = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // patched below
+
+        try self.emitExprToDest(b.rhs, dest);
+
+        self.patchJump(jump_past_rhs, self.code.items.len);
 
         self.next_reg = reg_before;
         if (dest >= self.next_reg) self.next_reg = dest + 1;

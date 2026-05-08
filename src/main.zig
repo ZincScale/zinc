@@ -248,6 +248,8 @@ pub fn main(init: std.process.Init) !void {
         "local config = {host = \"localhost\", port = 8080, retries = 3}\nlocal n = 0\nfor k, v in pairs(config) do n = n + 1 end\nreturn n",
         // Phase 4.9: ipairs walks the dense integer prefix
         "local items = {\"alpha\", \"beta\", \"gamma\"}\nlocal joined = \"\"\nfor i, v in ipairs(items) do joined = joined .. v end\nreturn joined",
+        // Phase 4.10: `and`/`or` in expression context — coalesce + range check
+        "local function get(name) return name or \"anon\" end\nlocal function in_range(n) return n > 0 and n < 10 end\nreturn get(nil), get(\"alice\"), in_range(5), in_range(-1)",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

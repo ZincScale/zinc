@@ -2787,6 +2787,85 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.10: and/or in expression context ==============================
+
+test "vm: and returns first falsy or last value" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\return 5 and "yes", false and "skipped", nil and "skipped"
+    );
+    try testing.expectEqualStrings("yes", r[0].string.slice());
+    try testing.expectEqual(false, r[1].boolean);
+    try testing.expectEqual(v.Tag.nil, @as(v.Tag, r[2]));
+}
+
+test "vm: or returns first truthy or last value" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\return nil or "default", false or 42, "first" or "second"
+    );
+    try testing.expectEqualStrings("default", r[0].string.slice());
+    try testing.expectEqual(@as(i64, 42), r[1].integer);
+    try testing.expectEqualStrings("first", r[2].string.slice());
+}
+
+test "vm: and/or short-circuit — RHS not evaluated when not needed" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The RHS is a call that bumps a counter. If short-circuit
+    // works, calls = 1 (only the `or` evaluates RHS, since LHS is
+    // truthy for the `and`).
+    const r = try runSrc(arena,
+        \\local calls = 0
+        \\local function bump() calls += 1 return true end
+        \\local _ = true and bump()      -- LHS truthy → RHS runs (calls=1)
+        \\local _ = false and bump()     -- LHS falsy → RHS skipped
+        \\local _ = true or bump()       -- LHS truthy → RHS skipped
+        \\local _ = nil or bump()        -- LHS falsy → RHS runs (calls=2)
+        \\return calls
+    );
+    try testing.expectEqual(@as(i64, 2), r[0].integer);
+}
+
+test "vm: and/or chained — left-associative" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `a or b or c` = (a or b) or c. With a=nil, b="x", c="y": "x".
+    // `a and b and c` = (a and b) and c. With a=true, b=true, c=42: 42.
+    const r = try runSrc(arena,
+        \\return nil or "x" or "y", true and true and 42
+    );
+    try testing.expectEqualStrings("x", r[0].string.slice());
+    try testing.expectEqual(@as(i64, 42), r[1].integer);
+}
+
+test "vm: and/or compose with comparisons" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The classic `a > 0 and a < 10` range check now works in
+    // expression position too (not just inside if).
+    const src =
+        \\local function in_range(a) return a > 0 and a < 10 end
+        \\return in_range(5), in_range(-1), in_range(15)
+    ;
+    const r = try runSrc(arena, src);
+    try testing.expectEqual(true, r[0].boolean);
+    try testing.expectEqual(false, r[1].boolean);
+    try testing.expectEqual(false, r[2].boolean);
+}
+
 // === Phase 4.9: generic-for + pairs() / ipairs() ===========================
 
 test "vm: generic for — pairs walks all keys, summing values" {
