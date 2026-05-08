@@ -169,10 +169,17 @@ pub const AtomicType = enum {
     }
 };
 
-/// A local variable declaration: name + optional type annotation.
+/// A local variable declaration / function parameter: name + optional
+/// type annotation + optional default value (only meaningful for
+/// function params; ignored on local declarations).
 pub const NameWithType = struct {
     name: []const u8,
     type_annot: ?TypeExpr = null,
+    /// Default expression, evaluated lazily when a function is called
+    /// with this parameter omitted (or explicitly nil). Used only on
+    /// function parameters; the parser of `local x: T = expr` puts
+    /// the value in the local's value list, not here.
+    default: ?*Expr = null,
 };
 
 pub const Stmt = union(enum) {

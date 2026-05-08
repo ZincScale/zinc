@@ -257,6 +257,32 @@ pub const Compiler = struct {
 
         try self.emit(Instruction.iABC(.varargprep, 0, 0, 0, 0));
 
+        // Apply default-value bindings for params that declared one
+        // (`function f(x, y = 10)`). For each defaulted param, if the
+        // caller passed nil (or omitted the arg, in which case the
+        // VM left R[i] = nil), evaluate the default expression into
+        // the param register. Runs BEFORE TYPECHECK so a missing arg
+        // backed by a default of the right type passes the type check.
+        //
+        //   LOADNIL temp
+        //   EQ param_reg temp k=0     ; skip JMP if equal (== nil)
+        //   JMP past_default          ; runs when not nil → keep arg
+        //   <eval default into param_reg>
+        // past_default:
+        for (params, 0..) |p, idx| {
+            const default_e = p.default orelse continue;
+            const param_reg: u8 = @intCast(idx);
+
+            const temp_reg = self.allocReg();
+            try self.emit(Instruction.iABC(.loadnil, temp_reg, 0, 0, 0));
+            try self.emit(Instruction.iABC(.eq, 0, 0, param_reg, temp_reg));
+            const jmp_past = self.code.items.len;
+            try self.emit(Instruction.iAx(.jmp, 0));
+            try self.emitExprToDest(default_e, param_reg);
+            self.patchJump(jmp_past, self.code.items.len);
+            self.next_reg = temp_reg; // free
+        }
+
         // Emit a TYPECHECK for each typed parameter. Caller-supplied
         // values land in R[0..num_params-1] before the body runs;
         // these instructions enforce the contract.

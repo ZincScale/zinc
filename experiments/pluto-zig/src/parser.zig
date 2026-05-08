@@ -603,7 +603,15 @@ pub const Parser = struct {
                     try self.advance();
                     break;
                 }
-                try params.append(self.arena, try self.parseNameWithType());
+                var p = try self.parseNameWithType();
+                // Optional default: `name [: type] = expr`. Only legal
+                // on function parameters — for `local x = e` the parser
+                // dispatches separately (parseLocal).
+                if (self.cur.kind == .eq) {
+                    try self.advance();
+                    p.default = try self.parseExpr();
+                }
+                try params.append(self.arena, p);
                 if (self.cur.kind != .comma) break;
                 try self.advance();
             }
