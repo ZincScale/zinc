@@ -164,6 +164,11 @@ pub const Stmt = union(enum) {
     if_stmt: If,
     /// `while cond do ... end`
     while_stmt: While,
+    /// `switch expr case v1[,v2]: body case v3: body [default: body] end`
+    /// Strict-Pluto choice: cases never fall through (each case ends
+    /// implicitly). `break` inside a case is the canonical early-exit;
+    /// it just lands at the end of the switch like any unterminated case.
+    switch_stmt: Switch,
     /// `function name.path(args) body end`. Sugar for
     /// `name.path = function(args) body end`. Stored expanded.
     function_decl: FunctionDecl,
@@ -188,6 +193,18 @@ pub const Stmt = union(enum) {
     };
     pub const Branch = struct { cond: *Expr, body: *Block };
     pub const While = struct { cond: *Expr, body: *Block };
+    pub const Switch = struct {
+        discriminant: *Expr,
+        cases: []const Case,
+        default_block: ?*Block,
+    };
+    pub const Case = struct {
+        /// One or more values to match (`case 1, 2, 3:`). Comparison
+        /// is by value equality (Lua's `==`), evaluated against the
+        /// discriminant in source order; first match wins.
+        values: []const *Expr,
+        body: *Block,
+    };
     pub const FunctionDecl = struct {
         /// Function name as a path: `a.b.c.d` -> ["a","b","c","d"].
         /// Single-element path is the common `function name(...)`.
@@ -269,6 +286,28 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             try dumpExpr(out, w.cond);
             try out.writeAll("\n");
             try dumpBlock(out, w.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .switch_stmt => |sw| {
+            try out.writeAll("(switch ");
+            try dumpExpr(out, sw.discriminant);
+            try out.writeAll("\n");
+            for (sw.cases) |case| {
+                try writeIndent(out, indent + 1);
+                try out.writeAll("case ");
+                for (case.values, 0..) |val, i| {
+                    if (i > 0) try out.writeAll(",");
+                    try dumpExpr(out, val);
+                }
+                try out.writeAll(":\n");
+                try dumpBlock(out, case.body, indent + 2);
+            }
+            if (sw.default_block) |db| {
+                try writeIndent(out, indent + 1);
+                try out.writeAll("default:\n");
+                try dumpBlock(out, db, indent + 2);
+            }
             try writeIndent(out, indent);
             try out.writeAll(")\n");
         },

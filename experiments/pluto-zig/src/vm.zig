@@ -1978,6 +1978,200 @@ test "vm: function-call-as-statement (results discarded)" {
     try testing.expectEqual(@as(i64, 0), r[0].integer);
 }
 
+test "vm: switch — single-value cases pick the matching branch" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local x = 2
+        \\local result
+        \\switch x
+        \\  case 1: result = "one"
+        \\  case 2: result = "two"
+        \\  case 3: result = "three"
+        \\  default: result = "other"
+        \\end
+        \\return result
+    );
+    try testing.expectEqualStrings("two", r[0].string.slice());
+}
+
+test "vm: switch — default clause runs when nothing matches" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local x = 99
+        \\local result
+        \\switch x
+        \\  case 1: result = "one"
+        \\  case 2: result = "two"
+        \\  default: result = "other"
+        \\end
+        \\return result
+    );
+    try testing.expectEqualStrings("other", r[0].string.slice());
+}
+
+test "vm: switch — no default and no match leaves vars untouched" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local x = 99
+        \\local result = "untouched"
+        \\switch x
+        \\  case 1: result = "one"
+        \\  case 2: result = "two"
+        \\end
+        \\return result
+    );
+    try testing.expectEqualStrings("untouched", r[0].string.slice());
+}
+
+test "vm: switch — multi-value case (case 1, 2, 3:) matches any value" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Verify each value in the multi-value case independently routes
+    // into the same body. Run three times via a helper-flavored fn.
+    const src =
+        \\local function classify(n)
+        \\  switch n
+        \\    case 1, 2, 3: return "small"
+        \\    case 10, 20, 30: return "medium"
+        \\    default: return "other"
+        \\  end
+        \\end
+        \\return classify(2), classify(20), classify(7)
+    ;
+    const r = try runSrc(arena, src);
+    try testing.expectEqualStrings("small", r[0].string.slice());
+    try testing.expectEqualStrings("medium", r[1].string.slice());
+    try testing.expectEqualStrings("other", r[2].string.slice());
+}
+
+test "vm: switch — string discriminant" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local s = "go"
+        \\local n
+        \\switch s
+        \\  case "stop": n = 0
+        \\  case "go", "run": n = 1
+        \\  default: n = -1
+        \\end
+        \\return n
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+}
+
+test "vm: switch — no fallthrough between cases" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // strict-Pluto: case 1 sets x=1 and stops. We must NOT see x mutated
+    // by the case 2 body. Without fallthrough x stays 1; with fallthrough
+    // it would become 2 (or 99 from default).
+    const r = try runSrc(arena,
+        \\local x = 0
+        \\switch 1
+        \\  case 1: x = 1
+        \\  case 2: x = 2
+        \\  default: x = 99
+        \\end
+        \\return x
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+}
+
+test "vm: switch — break inside a case body short-circuits" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `break` mid-case skips the rest of that case body and lands at
+    // the end of the switch. `done` should NOT be set.
+    const r = try runSrc(arena,
+        \\local x = 1
+        \\local entered = false
+        \\local done = false
+        \\switch x
+        \\  case 1:
+        \\    entered = true
+        \\    break
+        \\    done = true
+        \\  default: x = 99
+        \\end
+        \\return entered, done
+    );
+    try testing.expectEqual(true, r[0].boolean);
+    try testing.expectEqual(false, r[1].boolean);
+}
+
+test "vm: switch — break in while loop now also works" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The break_jumps stack added for switch generalizes: while loops
+    // also now respect `break`. Phase 4.7 will add `continue` and
+    // multi-level forms on top of the same machinery.
+    const r = try runSrc(arena,
+        \\local i = 0
+        \\while true do
+        \\  i += 1
+        \\  if i >= 5 then break end
+        \\end
+        \\return i
+    );
+    try testing.expectEqual(@as(i64, 5), r[0].integer);
+}
+
+test "vm: switch — nested switches, break exits innermost" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local outer = 0
+        \\local inner = 0
+        \\switch 1
+        \\  case 1:
+        \\    outer = 10
+        \\    switch 2
+        \\      case 2:
+        \\        inner = 20
+        \\        break
+        \\        inner = 999
+        \\    end
+        \\    outer = outer + 1
+        \\end
+        \\return outer, inner
+    );
+    try testing.expectEqual(@as(i64, 11), r[0].integer);
+    try testing.expectEqual(@as(i64, 20), r[1].integer);
+}
+
+test "vm: break outside any switch/while is a compile error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.Unimplemented,
+        runSrc(arena, "break\nreturn 1"),
+    );
+}
+
 test "vm: calling a non-closure is a type error" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

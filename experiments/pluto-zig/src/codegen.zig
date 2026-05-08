@@ -117,6 +117,12 @@ pub const Compiler = struct {
     /// compileFunctionBody when the AST has an annotation; emitReturn
     /// uses it to enforce `return v` against the declared type.
     return_type: ?ast.TypeExpr,
+    /// Stack of break-exit jump lists, one entry per enclosing
+    /// breakable construct (`switch`, `while`). Each entry collects
+    /// the PCs of placeholder JMPs emitted by `break`; the construct
+    /// patches them all to its post-end PC on exit. Empty when no
+    /// enclosing breakable, in which case `break` is a compile error.
+    break_jumps: std.ArrayList(std.ArrayList(usize)),
 
     pub fn init(arena: std.mem.Allocator) Compiler {
         return .{
@@ -132,6 +138,7 @@ pub const Compiler = struct {
             .num_params = 0,
             .is_vararg = true, // top-level chunk is vararg
             .return_type = null,
+            .break_jumps = .{ .items = &.{}, .capacity = 0 },
         };
     }
 
@@ -291,10 +298,27 @@ pub const Compiler = struct {
             .assign => |a| try self.emitAssign(a),
             .if_stmt => |if_s| try self.emitIf(if_s),
             .while_stmt => |w| try self.emitWhile(w),
+            .switch_stmt => |sw| try self.emitSwitch(sw),
+            .break_stmt => try self.emitBreak(),
             .expr_stmt => |e| try self.emitExprStmt(e),
             .local_function => |lf| try self.emitLocalFunction(lf),
             else => return error.Unimplemented,
         }
+    }
+
+    /// `break` — exits the innermost enclosing breakable construct
+    /// (currently `switch` or `while`). Emits a placeholder JMP and
+    /// records its PC on the top break-jump list; the enclosing
+    /// emitSwitch / emitWhile patches the offset on exit.
+    fn emitBreak(self: *Compiler) CompileError!void {
+        if (self.break_jumps.items.len == 0) {
+            std.debug.print("strict-pluto: `break` outside of switch / while\n", .{});
+            return error.Unimplemented;
+        }
+        const top = &self.break_jumps.items[self.break_jumps.items.len - 1];
+        const pc = self.code.items.len;
+        try top.append(self.arena, pc);
+        try self.emit(Instruction.iAx(.jmp, 0)); // placeholder, patched later
     }
 
     /// Function-call statement — call but discard results. CALL with
@@ -403,6 +427,10 @@ pub const Compiler = struct {
         try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
         self.next_reg = reg_before;
 
+        // Push a break-jump frame so any `break` in the body lands
+        // past the loop. Phase 4.7 will add `continue` similarly.
+        try self.break_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+
         try self.emitBlock(w.body);
 
         // Unconditional jump back to loop_start.
@@ -410,6 +438,103 @@ pub const Compiler = struct {
 
         const loop_end = self.code.items.len;
         self.patchJump(jump_to_end, loop_end);
+
+        // Patch every `break` collected in the body to land here.
+        var frame = self.break_jumps.pop().?;
+        for (frame.items) |jpc| self.patchJump(jpc, loop_end);
+        frame.deinit(self.arena);
+    }
+
+    /// `switch <expr> case v1[, v2]: ... case ...: ... default: ... end`
+    ///
+    /// Compiles to a chain of equality tests against the discriminant
+    /// (evaluated once into a fresh register). For each case:
+    ///
+    ///   <eval v_i into tmp>
+    ///   EQ D tmp k=1     ; PC++ iff (D == v_i) != 1, i.e. iff NOT
+    ///                    ; equal — so the JMP runs iff equal.
+    ///   JMP body         ; runs only when D == v_i
+    ///   ; (next v_i for the same case)
+    ///   JMP next_case    ; falls here when no v_i for this case matched
+    /// body:
+    ///   <case body>
+    ///   JMP after        ; no fallthrough between cases (strict-Pluto)
+    /// next_case:
+    ///   ...
+    /// after_chain:
+    ///   <default body, if any>
+    /// after:
+    ///
+    /// `break` inside any case body funnels through the break_jumps
+    /// stack to `after`. If the case body already ends with control
+    /// flow (return, etc.), the trailing JMP-to-after is dead but
+    /// harmless — keeping the codegen uniform is worth a few words of
+    /// dead code per terminal case.
+    fn emitSwitch(self: *Compiler, sw: ast.Stmt.Switch) CompileError!void {
+        // Evaluate the discriminant into a fresh register and reserve
+        // it for the lifetime of the chain — case-value temps go
+        // above it and get freed each iteration.
+        const reg_before = self.next_reg;
+        const disc_reg = try self.exprToReg(sw.discriminant);
+        const after_disc = self.next_reg;
+
+        // Push the break-jump frame for this switch.
+        try self.break_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+
+        // Each case appends its body-end JMP-to-after into this list.
+        var jumps_to_after = std.ArrayList(usize){ .items = &.{}, .capacity = 0 };
+
+        for (sw.cases) |case| {
+            // For each value: emit EQ-then-JMP-to-body. Collect the
+            // body-jump PCs so we can patch them once the body PC is known.
+            var jumps_to_body = std.ArrayList(usize){ .items = &.{}, .capacity = 0 };
+            for (case.values) |val_expr| {
+                self.next_reg = after_disc;
+                const val_reg = try self.exprToReg(val_expr);
+                // EQ disc_reg val_reg k=1 — runs next JMP iff equal.
+                // (k=0 would invert: JMP runs iff NOT equal — wrong for
+                // case-dispatch.)
+                try self.emit(Instruction.iABC(.eq, 0, 1, disc_reg, val_reg));
+                const j = self.code.items.len;
+                try self.emit(Instruction.iAx(.jmp, 0)); // patched to body
+                try jumps_to_body.append(self.arena, j);
+            }
+            self.next_reg = after_disc;
+
+            // None of the values matched — skip this case entirely.
+            const skip_case = self.code.items.len;
+            try self.emit(Instruction.iAx(.jmp, 0)); // patched to next-case
+
+            // Body lands here. Patch each "JMP body" to this PC.
+            const body_pc = self.code.items.len;
+            for (jumps_to_body.items) |jpc| self.patchJump(jpc, body_pc);
+            try self.emitBlock(case.body);
+
+            // Implicit case end → jump to after-switch (no fallthrough).
+            const j_after = self.code.items.len;
+            try self.emit(Instruction.iAx(.jmp, 0));
+            try jumps_to_after.append(self.arena, j_after);
+
+            // The "no match" skip lands at the start of the next case
+            // (or, for the last case, at the default block / after).
+            self.patchJump(skip_case, self.code.items.len);
+        }
+
+        // Default block (if any) sits where execution falls when no
+        // case matched. No skip-jump needed before it — control just
+        // arrives here from the last case's skip patch.
+        if (sw.default_block) |db| try self.emitBlock(db);
+
+        const after_pc = self.code.items.len;
+        for (jumps_to_after.items) |jpc| self.patchJump(jpc, after_pc);
+
+        // Drain break jumps (collected during case bodies) to after_pc.
+        var frame = self.break_jumps.pop().?;
+        for (frame.items) |jpc| self.patchJump(jpc, after_pc);
+        frame.deinit(self.arena);
+
+        // Free the discriminant register.
+        self.next_reg = reg_before;
     }
 
     fn emitBlock(self: *Compiler, b: *const ast.Block) CompileError!void {
