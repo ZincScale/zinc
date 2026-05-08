@@ -30,6 +30,10 @@ pub const ParseError = error{
     UnexpectedToken,
     InvalidAssignmentTarget,
     InvalidNumber,
+    /// strict-Pluto: rejected Lua-equivalent form when a Pluto form
+    /// exists. The error message points the user at the canonical
+    /// Pluto syntax.
+    StrictPlutoViolation,
     OutOfMemory,
 } || lexer.LexerError;
 
@@ -243,6 +247,23 @@ pub const Parser = struct {
     fn parseExprStmt(self: *Parser) ParseError!ast.Stmt {
         const first = try self.parseSuffixed();
 
+        // Compound assignment: target += value, target -= value, etc.
+        // Desugars to ordinary assign with a synthesized binary expr.
+        // strict-Pluto: this is the *required* form for any
+        // self-modifying assignment; `target = target + value` is
+        // rejected by detectCompoundViolation below.
+        if (compoundOpFor(self.cur.kind)) |bop| {
+            if (!isAssignTarget(first.*)) return error.InvalidAssignmentTarget;
+            try self.advance();
+            const rhs = try self.parseExpr();
+            const synth = try self.alloc(ast.Expr, .{ .binary = .{ .op = bop, .lhs = first, .rhs = rhs } });
+            const targets = try self.arena.alloc(*ast.Expr, 1);
+            targets[0] = first;
+            const values = try self.arena.alloc(*ast.Expr, 1);
+            values[0] = synth;
+            return ast.Stmt{ .assign = .{ .targets = targets, .values = values } };
+        }
+
         if (self.cur.kind == .eq or self.cur.kind == .comma) {
             // Assignment. Targets must be lvalues (ident / index / field).
             if (!isAssignTarget(first.*)) return error.InvalidAssignmentTarget;
@@ -257,6 +278,11 @@ pub const Parser = struct {
             try self.expect(.eq);
             var values = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
             try self.parseExprList(&values);
+
+            // Note: `x = x + 1` stays valid — compound ops are an
+            // additive ergonomic, not a forced canonicalization. See
+            // the design discussion in the strict-Pluto plan.
+
             return ast.Stmt{ .assign = .{
                 .targets = try targets.toOwnedSlice(self.arena),
                 .values = try values.toOwnedSlice(self.arena),
@@ -334,12 +360,16 @@ pub const Parser = struct {
         var lhs = try self.parseUnaryOrSuffixed();
 
         while (true) {
+            // strict-Pluto: `~=` in expression context is rejected. The
+            // canonical inequality is `!=`. `~=` is reserved for the
+            // compound XOR-assign statement form (handled in parseExprStmt).
+            if (self.cur.kind == .tilde_eq) {
+                return self.rejectLuaForm("`~=` for inequality is not allowed — use `!=` instead (`~=` is the compound XOR-assign in strict-Pluto)");
+            }
             const op = self.peekBinaryOp() orelse break;
             const p = binPrec(op);
             if (p < min_prec) break;
-            try self.advance(); // consume operator token
-            // For right-associative ops (concat, pow) recurse with
-            // the same precedence; for left-associative use p+1.
+            try self.advance();
             const next_min = if (binIsRightAssoc(op)) p else p + 1;
             const rhs = try self.parseExprPrec(next_min);
             lhs = try self.alloc(ast.Expr, .{ .binary = .{ .op = op, .lhs = lhs, .rhs = rhs } });
@@ -348,8 +378,13 @@ pub const Parser = struct {
     }
 
     fn parseUnaryOrSuffixed(self: *Parser) ParseError!*ast.Expr {
-        // Unary operators: -, not, #, ~. All right-associative at
-        // precedence 12 (above all binary ops except ^).
+        // strict-Pluto: reject `not` keyword. The canonical Pluto
+        // form is `!`. (Allows compound assignment / arithmetic to
+        // work normally — only the boolean operator is locked down.)
+        if (self.cur.kind == .ident and std.mem.eql(u8, self.cur.lexeme(self.src), "not")) {
+            return self.rejectLuaForm("the `not` keyword is not allowed — use `!` instead");
+        }
+        // Unary operators: -, !, #, ~. Right-associative at precedence 12.
         if (self.peekUnaryOp()) |op| {
             try self.advance();
             const operand = try self.parseExprPrec(unaryPrec());
@@ -367,7 +402,11 @@ pub const Parser = struct {
             .pipe => .bor,           .tilde => .bxor,
             .less_less => .shl,      .greater_greater => .shr,
             .dot_dot => .concat,
-            .eq_eq => .eq,           .tilde_eq => .neq,
+            .eq_eq => .eq,
+            .bang_eq => .neq, // canonical Pluto inequality
+            // .tilde_eq is NOT inequality — it's the compound XOR-assign
+            // (statement form, handled by parseExprStmt). If it shows
+            // up in expression position, parseExprPrec rejects it.
             .less => .lt,            .less_eq => .lte,
             .greater => .gt,         .greater_eq => .gte,
             .ident => blk: {
@@ -385,9 +424,21 @@ pub const Parser = struct {
             .minus => .neg,
             .hash => .len,
             .tilde => .bnot,
-            .ident => if (std.mem.eql(u8, self.cur.lexeme(self.src), "not")) ast.UnaryOp.not_ else null,
+            .bang => .not_, // canonical Pluto not
+            // `not` keyword is rejected at parseUnaryOrSuffixed's entry
             else => null,
         };
+    }
+
+    /// strict-Pluto: detect Lua-equivalent forms we reject. Each
+    /// returns true if it emitted (well, set up to emit) the
+    /// rejection. Caller bails with StrictPlutoViolation. We pair the
+    /// detection with diagnostic messages logged via std.debug.print
+    /// so the test harness can grep them; phase 4.x will route through
+    /// a proper diagnostic sink.
+    fn rejectLuaForm(_: *Parser, comptime hint: []const u8) ParseError {
+        std.debug.print("strict-pluto: {s}\n", .{hint});
+        return error.StrictPlutoViolation;
     }
 
     /// Suffixed expression: a primary followed by any number of
@@ -529,6 +580,51 @@ pub const Parser = struct {
 };
 
 // =============================================================================
+// strict-Pluto: compound-op + redundant-self-assign detection
+// =============================================================================
+
+fn compoundOpFor(kind: lexer.TokenKind) ?ast.BinaryOp {
+    return switch (kind) {
+        .plus_eq => .add,
+        .minus_eq => .sub,
+        .star_eq => .mul,
+        .slash_eq => .div,
+        .slash_slash_eq => .idiv,
+        .percent_eq => .mod,
+        .caret_eq => .pow,
+        .amp_eq => .band,
+        .pipe_eq => .bor,
+        // tilde_eq is the compound XOR-assign in strict-Pluto. The
+        // expression-context inequality use is rejected separately.
+        .tilde_eq => .bxor,
+        .less_less_eq => .shl,
+        .greater_greater_eq => .shr,
+        .dot_dot_eq => .concat,
+        else => null,
+    };
+}
+
+/// Returns the binary-op lexeme if `value` is `target OP something`
+/// where `target` and `value.lhs` refer to the same syntactic place
+/// (currently only ident comparisons; field/index comparison is
+/// future work because it'd need to compare full path expressions).
+fn detectCompoundViolation(target: *const ast.Expr, value: *const ast.Expr) ParseError!?[]const u8 {
+    if (target.* != .ident) return null;
+    if (value.* != .binary) return null;
+    const b = value.binary;
+    if (b.lhs.* != .ident) return null;
+    if (!std.mem.eql(u8, target.ident, b.lhs.ident)) return null;
+    return b.op.lexeme();
+}
+
+fn targetText(e: *const ast.Expr) []const u8 {
+    return switch (e.*) {
+        .ident => |s| s,
+        else => "<target>",
+    };
+}
+
+// =============================================================================
 // Operator precedence + associativity (Lua 5.4 reference §3.4.8)
 // =============================================================================
 
@@ -647,13 +743,71 @@ test "parse: comparison and logical" {
     try testing.expectEqualStrings("(return (or (and (< a b) (< b c)) d))\n", out);
 }
 
-test "parse: unary" {
+test "parse: unary (strict-Pluto: ! not `not`)" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const out = try parseAndDump(arena, "return -1 + #t + not flag");
+    const out = try parseAndDump(arena, "return -1 + #t + !flag");
     try testing.expectEqualStrings("(return (+ (+ (- 1) (# t)) (not flag)))\n", out);
+}
+
+test "parse: `not` keyword is rejected — use !" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var p = try Parser.init(arena, "return not x");
+    try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
+}
+
+test "parse: `~=` for inequality is rejected — use !=" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var p = try Parser.init(arena, "return a ~= b");
+    try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
+}
+
+test "parse: != for inequality" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return a != b");
+    try testing.expectEqualStrings("(return (~= a b))\n", out);
+}
+
+test "parse: `~=` as compound XOR-assign in statement form (still allowed)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `x ~= 5` at statement position is the compound XOR-assign:
+    // x = x ~ 5. Disambiguated from inequality by being a statement,
+    // not an expression context.
+    const out = try parseAndDump(arena, "x ~= 5");
+    try testing.expectEqualStrings("(assign x = (~ x 5))\n", out);
+}
+
+test "parse: compound assignment" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Compound op desugars at parse time to assign + binary expr.
+    const out = try parseAndDump(arena, "x += 1");
+    try testing.expectEqualStrings("(assign x = (+ x 1))\n", out);
+}
+
+test "parse: `x = x + 1` is still valid (compound ops are additive, not forced)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "x = x + 1");
+    try testing.expectEqualStrings("(assign x = (+ x 1))\n", out);
 }
 
 test "parse: function call chain" {
@@ -708,12 +862,12 @@ test "parse: if/elseif/else" {
     , out);
 }
 
-test "parse: while loop" {
+test "parse: while loop (strict-Pluto: x += 1 not x = x + 1)" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const out = try parseAndDump(arena, "while x < 10 do x = x + 1 end");
+    const out = try parseAndDump(arena, "while x < 10 do x += 1 end");
     try testing.expectEqualStrings(
         \\(while (< x 10)
         \\  (assign x = (+ x 1))
