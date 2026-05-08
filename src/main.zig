@@ -214,6 +214,12 @@ pub fn main(init: std.process.Init) !void {
         "local hits = 0\nlocal x = 1\nswitch x case 1: hits += 1 break hits += 99 default: hits = -1 end\nreturn hits",
         // Pluto: break in while loop (now supported via the switch break-stack)
         "local i = 0\nwhile true do i += 1 if i >= 5 then break end end\nreturn i",
+        // Phase 4.4a: __index fallback through a metatable
+        "local defaults = {role = \"guest\"}\nlocal t = setmetatable({name = \"alice\"}, {__index = defaults})\nreturn t.name, t.role",
+        // Phase 4.4a: class-style OO via setmetatable + __index + method-call sugar
+        "local Dog = {}\nDog.speak = function(self) return self.name .. \" says woof\" end\nlocal function new_dog(name) return setmetatable({name = name}, {__index = Dog}) end\nreturn new_dog(\"Rex\"):speak()",
+        // Phase 4.4a: chained __index — child → parent → root
+        "local root = {tag = \"root\"}\nlocal mid = setmetatable({}, {__index = root})\nlocal leaf = setmetatable({}, {__index = mid})\nreturn leaf.tag",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

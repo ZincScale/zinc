@@ -26,6 +26,12 @@ pub const Table = struct {
     cap: u32,
     count: u32,
     entries: [*]Entry,
+    /// Metatable for this table, or null. Used by the VM's lookup
+    /// path to resolve `__index` (read fallback) and — eventually —
+    /// other metamethods. See vm.zig's tableLookup. Set via the
+    /// `setmetatable` stdlib builtin or directly by the runtime when
+    /// constructing class instances (phase 4.4b).
+    metatable: ?*Table = null,
 
     pub const Entry = struct {
         key: TValue,
@@ -51,6 +57,7 @@ pub const Table = struct {
             .cap = INITIAL_CAP,
             .count = 0,
             .entries = e_raw,
+            .metatable = null,
         };
         return t;
     }
@@ -65,6 +72,7 @@ pub const Table = struct {
             .cap = INITIAL_CAP,
             .count = 0,
             .entries = e_raw,
+            .metatable = null,
         };
         return t;
     }
