@@ -769,6 +769,7 @@ pub const Compiler = struct {
             .call => |c| try self.emitCall(c, dest, 1), // expression context wants 1 result
             .method_call => |mc| try self.emitMethodCall(mc, dest, 1),
             .new_expr => |ne| try self.emitNewExpr(ne, dest),
+            .ternary => |tn| try self.emitTernary(tn, dest),
             .table => |t| try self.emitTableExpr(t, dest),
             .field => |f| try self.emitFieldGet(f, dest),
             .index => |i| try self.emitIndexGet(i, dest),
@@ -1161,6 +1162,43 @@ pub const Compiler = struct {
         //    instance.
         const b: u8 = @intCast(ne.args.len + 2);
         try self.emit(Instruction.iABC(.call, dest + 1, 0, b, 1));
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+    }
+
+    /// `cond ? then_e : else_e` — strict-Pluto's ternary. Avoids the
+    /// `cond and a or b` Lua idiom's footgun (returns b when a itself
+    /// is falsy). Compiles to:
+    ///
+    ///   <eval cond into temp>
+    ///   TEST cond k=0          ; skip next iff truthy
+    ///   JMP <else_label>       ; falsy → take the else branch
+    ///   <eval then_expr into dest>
+    ///   JMP <end_label>
+    /// else_label:
+    ///   <eval else_expr into dest>
+    /// end_label:
+    fn emitTernary(self: *Compiler, t: ast.Expr.Ternary, dest: u8) CompileError!void {
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        const cond_reg = try self.exprToReg(t.cond);
+        try self.emit(Instruction.iABC(.test_, cond_reg, 0, 0, 0));
+        const jump_to_else = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
+        // Free the cond temp before evaluating the branches; both
+        // branches reuse the dest slot.
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        try self.emitExprToDest(t.then_expr, dest);
+        const jump_to_end = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
+
+        self.patchJump(jump_to_else, self.code.items.len);
+        try self.emitExprToDest(t.else_expr, dest);
+        self.patchJump(jump_to_end, self.code.items.len);
 
         self.next_reg = reg_before;
         if (dest >= self.next_reg) self.next_reg = dest + 1;

@@ -236,6 +236,8 @@ pub fn main(init: std.process.Init) !void {
         "class Registry\npublic static count = 0\npublic static function reg() Registry.count = Registry.count + 1 return Registry.count end\nend\nReg1 = Registry.reg()\nReg2 = Registry.reg()\nReg3 = Registry.reg()\nreturn Reg1, Reg2, Reg3, Registry.count",
         // Phase 4.5: string interpolation `$"...{expr}..."`
         "local name = \"Pluto\"\nlocal n = 42\nreturn $\"hello, {name}! the answer is {n * 2}.\"",
+        // Phase 4.6: ternary — strict-Pluto's safe `cond ? a : b`
+        "local function sign(n) return n > 0 ? \"pos\" : n < 0 ? \"neg\" : \"zero\" end\nreturn sign(7), sign(-3), sign(0)",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

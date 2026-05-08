@@ -2716,6 +2716,70 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.6: ternary ====================================================
+
+test "vm: ternary truthy / falsy" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\return 1 > 0 ? "yes" : "no", 1 > 5 ? "yes" : "no"
+    );
+    try testing.expectEqualStrings("yes", r[0].string.slice());
+    try testing.expectEqualStrings("no", r[1].string.slice());
+}
+
+test "vm: ternary returns the falsy then-branch (the `cond and a or b` footgun fix)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Lua's `cond and a or b` returns b when a is itself falsy. The
+    // ternary must NOT fall into that trap: a true cond should select
+    // a even if a is `false` or `nil`.
+    const r = try runSrc(arena,
+        \\return true ? false : "wrong", true ? nil : "wrong"
+    );
+    try testing.expectEqual(false, r[0].boolean);
+    try testing.expectEqual(v.Tag.nil, @as(v.Tag, r[1]));
+}
+
+test "vm: ternary right-associative" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `n < 0 ? "neg" : n == 0 ? "zero" : "pos"` parses with the
+    // second ternary as the else-branch of the first. So n=0 picks
+    // "zero", n>0 picks "pos", n<0 picks "neg".
+    const src =
+        \\local function classify(n)
+        \\  return n < 0 ? "neg" : n == 0 ? "zero" : "pos"
+        \\end
+        \\return classify(-3), classify(0), classify(7)
+    ;
+    const r = try runSrc(arena, src);
+    try testing.expectEqualStrings("neg", r[0].string.slice());
+    try testing.expectEqualStrings("zero", r[1].string.slice());
+    try testing.expectEqualStrings("pos", r[2].string.slice());
+}
+
+test "vm: ternary inside an interpolated string" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // 4.5 + 4.6 compose — placeholders accept any expression. Use
+    // single-quoted strings inside the placeholder so the outer `"`
+    // doesn't terminate the interp string prematurely.
+    const r = try runSrc(arena,
+        \\local n = 7
+        \\return $"{n} is {n > 0 ? 'positive' : 'non-positive'}"
+    );
+    try testing.expectEqualStrings("7 is positive", r[0].string.slice());
+}
+
 // === Phase 4.5: string interpolation =======================================
 
 test "vm: interp — single value with surrounding text" {

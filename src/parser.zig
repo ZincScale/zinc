@@ -553,7 +553,32 @@ pub const Parser = struct {
     // --- expressions (Pratt) --------------------------------------------
 
     pub fn parseExpr(self: *Parser) ParseError!*ast.Expr {
-        return self.parseExprPrec(0);
+        const lhs = try self.parseExprPrec(0);
+        // Ternary is the lowest-precedence expression form, right-
+        // associative: `a ? b : c ? d : e` parses as `a ? b : (c ? d : e)`.
+        // Inside a switch case-value, the colon belongs to the case body —
+        // disallow_colon_method already toggles for that, but ternary
+        // also needs to stay out so we use the same flag (case values
+        // don't sensibly contain ternaries anyway).
+        if (self.cur.kind == .question and !self.disallow_colon_method) {
+            try self.advance();
+            // Then-branch: the next colon belongs to the ternary, so
+            // disable method-call colon-suffix while parsing it.
+            // Restore for the else-branch (no terminator there — it's
+            // free to use method calls again).
+            const saved = self.disallow_colon_method;
+            self.disallow_colon_method = true;
+            const then_expr = try self.parseExpr();
+            self.disallow_colon_method = saved;
+            try self.expect(.colon);
+            const else_expr = try self.parseExpr();
+            return self.alloc(ast.Expr, .{ .ternary = .{
+                .cond = lhs,
+                .then_expr = then_expr,
+                .else_expr = else_expr,
+            } });
+        }
+        return lhs;
     }
 
     /// Pratt expression parser. Precedence + associativity table is
@@ -1598,6 +1623,31 @@ test "parse: empty interpolated string" {
 
     const out = try parseAndDump(arena, "return $\"\"");
     try testing.expectEqualStrings("(return \"\")\n", out);
+}
+
+test "parse: ternary basic" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return a > 0 ? \"pos\" : \"neg\"");
+    try testing.expectEqualStrings(
+        "(return (?: (> a 0) \"pos\" \"neg\"))\n",
+        out,
+    );
+}
+
+test "parse: ternary right-associative" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // a ? b : c ? d : e  →  a ? b : (c ? d : e)
+    const out = try parseAndDump(arena, "return a ? b : c ? d : e");
+    try testing.expectEqualStrings(
+        "(return (?: a b (?: c d e)))\n",
+        out,
+    );
 }
 
 test "parse: error - missing expression in `if = end`" {

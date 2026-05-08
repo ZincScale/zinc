@@ -43,6 +43,7 @@ pub const TokenKind = enum {
     semicolon,      // ;
     colon,          // :
     dot,            // .
+    question,       // ?  (ternary `cond ? a : b` — strict-Pluto)
 
     // Multi-character operators
     slash_slash,    // //  (integer division)
@@ -461,6 +462,7 @@ pub const Lexer = struct {
                 }
                 return self.makeToken(.dot, start, 1);
             },
+            '?' => return self.makeToken(.question, start, 1),
             else => return error.UnexpectedChar,
         }
     }

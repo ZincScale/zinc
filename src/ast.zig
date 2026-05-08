@@ -66,6 +66,7 @@ pub const Expr = union(enum) {
     function: Function,  // function(...) body end
     table: Table,        // { ... }
     new_expr: NewExpr,   // new ClassExpr(args) — strict-Pluto class instantiation
+    ternary: Ternary,    // cond ? a : b — strict-Pluto's safe alternative to `a and b or c`
 
     pub const Binary = struct { op: BinaryOp, lhs: *Expr, rhs: *Expr };
     pub const Unary = struct { op: UnaryOp, operand: *Expr };
@@ -76,6 +77,11 @@ pub const Expr = union(enum) {
         receiver: *Expr,
         method: []const u8,
         args: []const *Expr,
+    };
+    pub const Ternary = struct {
+        cond: *Expr,
+        then_expr: *Expr,
+        else_expr: *Expr,
     };
     pub const NewExpr = struct {
         /// The class to instantiate. Currently restricted to a primary
@@ -515,6 +521,15 @@ pub fn dumpExpr(out: anytype, e: *const Expr) anyerror!void {
                 try out.writeAll(" ");
                 try dumpExpr(out, a);
             }
+            try out.writeAll(")");
+        },
+        .ternary => |t| {
+            try out.writeAll("(?: ");
+            try dumpExpr(out, t.cond);
+            try out.writeAll(" ");
+            try dumpExpr(out, t.then_expr);
+            try out.writeAll(" ");
+            try dumpExpr(out, t.else_expr);
             try out.writeAll(")");
         },
         .method_call => |mc| {
