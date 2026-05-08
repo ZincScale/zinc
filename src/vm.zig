@@ -2787,6 +2787,89 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.11: default arguments ========================================
+
+test "vm: default args — fills in for omitted params" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local function greet(name, greeting = "Hi")
+        \\  return greeting .. ", " .. name
+        \\end
+        \\return greet("Alice"), greet("Bob", "Hello")
+    );
+    try testing.expectEqualStrings("Hi, Alice", r[0].string.slice());
+    try testing.expectEqualStrings("Hello, Bob", r[1].string.slice());
+}
+
+test "vm: default args — explicit nil triggers the default too" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Lua/Pluto convention: passing nil is indistinguishable from
+    // omitting the arg, so the default kicks in. Symmetric with how
+    // table fields work (nil = absent).
+    const r = try runSrc(arena,
+        \\local function f(x = 99) return x end
+        \\return f(), f(nil), f(7)
+    );
+    try testing.expectEqual(@as(i64, 99), r[0].integer);
+    try testing.expectEqual(@as(i64, 99), r[1].integer);
+    try testing.expectEqual(@as(i64, 7), r[2].integer);
+}
+
+test "vm: default args — `false` is NOT replaced by the default" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The default is only used for nil. False is a real value and
+    // must round-trip — important for boolean flag args.
+    const r = try runSrc(arena,
+        \\local function flag(enabled = true) return enabled end
+        \\return flag(), flag(false)
+    );
+    try testing.expectEqual(true, r[0].boolean);
+    try testing.expectEqual(false, r[1].boolean);
+}
+
+test "vm: default args — default expression evaluated each call" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The default is an expression, not a captured value. Each call
+    // re-evaluates it (so `default = {}` would be a fresh table per
+    // call, dodging the Python mutable-default footgun).
+    const r = try runSrc(arena,
+        \\local counter = 0
+        \\local function fresh(x = (counter + 1)) counter = x return x end
+        \\fresh()  -- counter = 1 (default eval'd: counter+1 = 1)
+        \\fresh()  -- counter = 2
+        \\fresh()  -- counter = 3
+        \\return counter
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: default args — combine with type annotation" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Default fires before the type check, so a missing arg backed
+    // by a typed default still satisfies the annotation.
+    const r = try runSrc(arena,
+        \\local function f(n: integer = 42) return n * 2 end
+        \\return f(), f(5)
+    );
+    try testing.expectEqual(@as(i64, 84), r[0].integer);
+    try testing.expectEqual(@as(i64, 10), r[1].integer);
+}
+
 // === Phase 4.10: and/or in expression context ==============================
 
 test "vm: and returns first falsy or last value" {
