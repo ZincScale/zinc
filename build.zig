@@ -82,6 +82,7 @@ pub fn build(b: *std.Build) void {
         "src/parser.zig",
         "src/bytecode.zig",
         "src/codegen.zig",
+        "src/vm.zig",
     };
     const test_step = b.step("test", "Run tests");
     for (test_files) |path| {

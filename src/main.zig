@@ -23,6 +23,7 @@ const parser = @import("parser.zig");
 const ast = @import("ast.zig");
 const bc = @import("bytecode.zig");
 const codegen = @import("codegen.zig");
+const vm_mod = @import("vm.zig");
 
 const TValue = v.TValue;
 
@@ -152,8 +153,64 @@ pub fn main(init: std.process.Init) !void {
     try out.print("\n[pluto-zig] phase-3.2 codegen demo — `return \"answer is \", 42`\n", .{});
     try compileAndDisassemble(out, init.arena.allocator(), "return \"answer is \", 42");
 
-    try out.print("\n[pluto-zig] phase-1 + phase-3.0 + phase-3.1 + phase-3.2 OK\n", .{});
+    // --- Phase 2 VM execution demo ------------------------------------
+    try out.print("\n[pluto-zig] phase-2 VM demo — actual execution\n", .{});
+    const programs = [_][]const u8{
+        "return 1 + 2 * 3",
+        "return -5 * (10 + 1)",
+        "return (1 + 2) * 3",
+        "return 7 // 3, 7 % 3, 2 ^ 10",
+        "return 1 / 2",
+        "return -7 // 3, -7 % 3",
+        "return 1 + 2.5",
+        "return not nil, not 0, not false",
+        "return ~0",
+    };
+    for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
+
+    try out.print("\n[pluto-zig] all phases OK (0, 0.5, 1, 2, 3.0, 3.1, 3.2)\n", .{});
     try out.flush();
+}
+
+fn executeAndPrint(out: anytype, arena: std.mem.Allocator, src: []const u8) !void {
+    var p = parser.Parser.init(arena, src) catch |err| {
+        try out.print("  {s} -> parse error: {s}\n", .{ src, @errorName(err) });
+        return;
+    };
+    const block = p.parseChunk() catch |err| {
+        try out.print("  {s} -> parse error: {s}\n", .{ src, @errorName(err) });
+        return;
+    };
+    var c = codegen.Compiler.init(arena);
+    const proto = c.compileChunk(block) catch |err| {
+        try out.print("  {s} -> compile error: {s}\n", .{ src, @errorName(err) });
+        return;
+    };
+    var machine = vm_mod.VM.init(arena, proto) catch |err| {
+        try out.print("  {s} -> vm init error: {s}\n", .{ src, @errorName(err) });
+        return;
+    };
+    const result = machine.run() catch |err| {
+        try out.print("  {s} -> runtime error: {s}\n", .{ src, @errorName(err) });
+        return;
+    };
+    try out.print("  {s:<48} -> ", .{src});
+    for (result.values, 0..) |val, i| {
+        if (i > 0) try out.writeAll(", ");
+        try printValue(out, val);
+    }
+    try out.writeAll("\n");
+}
+
+fn printValue(out: anytype, val: v.TValue) !void {
+    switch (val) {
+        .nil => try out.writeAll("nil"),
+        .boolean => |b| try out.writeAll(if (b) "true" else "false"),
+        .integer => |i| try out.print("{d}", .{i}),
+        .number => |f| try out.print("{d}", .{f}),
+        .string => |s| try out.print("\"{s}\"", .{s.slice()}),
+        .table => |t| try out.print("<table {*}>", .{t}),
+    }
 }
 
 fn compileAndDisassemble(out: anytype, arena: std.mem.Allocator, src: []const u8) !void {
