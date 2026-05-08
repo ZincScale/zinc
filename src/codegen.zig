@@ -75,6 +75,9 @@ pub const Compiler = struct {
     arena: std.mem.Allocator,
     code: std.ArrayList(Instruction),
     constants: std.ArrayList(Constant),
+    /// Sub-protos for nested function expressions. CLOSURE indexes
+    /// into this array.
+    protos: std.ArrayList(*const bc.Proto),
     /// Active locals — each holds the name and its assigned register.
     /// Length grows on `local` statements and shrinks on scope exit.
     locals: std.ArrayList(Local),
@@ -84,15 +87,22 @@ pub const Compiler = struct {
     /// High-water mark of register usage. Becomes the proto's
     /// max_stack when we finalize.
     max_reg: u8,
+    /// Number of declared formal parameters. Stored on the Proto.
+    num_params: u8,
+    /// Whether the function takes `...`.
+    is_vararg: bool,
 
     pub fn init(arena: std.mem.Allocator) Compiler {
         return .{
             .arena = arena,
             .code = .{ .items = &.{}, .capacity = 0 },
             .constants = .{ .items = &.{}, .capacity = 0 },
+            .protos = .{ .items = &.{}, .capacity = 0 },
             .locals = .{ .items = &.{}, .capacity = 0 },
             .next_reg = 0,
             .max_reg = 0,
+            .num_params = 0,
+            .is_vararg = true, // top-level chunk is vararg
         };
     }
 
@@ -111,13 +121,34 @@ pub const Compiler = struct {
     /// the body of a vararg function with no fixed params (Lua's
     /// "main" chunk convention).
     pub fn compileChunk(self: *Compiler, block: *const ast.Block) CompileError!*Proto {
+        return self.compileFunctionBody(&.{}, true, block);
+    }
+
+    /// Compile a function body — params + block — into a Proto. Used
+    /// for both the top-level chunk and nested function expressions.
+    /// The compiler's local/code/constants/protos state is reset on
+    /// entry; nested function compilation uses a *separate* Compiler.
+    pub fn compileFunctionBody(
+        self: *Compiler,
+        params: []const []const u8,
+        is_vararg: bool,
+        block: *const ast.Block,
+    ) CompileError!*Proto {
+        self.num_params = @intCast(params.len);
+        self.is_vararg = is_vararg;
+
+        // Bind each formal param as a local in R[0..num_params-1].
+        // The VM lays args in those slots when CALL executes.
+        for (params) |name| {
+            const r = self.allocReg();
+            try self.locals.append(self.arena, .{ .name = name, .reg = r });
+        }
+
         try self.emit(Instruction.iABC(.varargprep, 0, 0, 0, 0));
 
-        // Phase 3.2.0 only handles a `return expr` chunk. More
-        // statement kinds layer in as we extend.
         for (block.stmts) |s| try self.emitStmt(&s);
 
-        // Implicit return at end of chunk if the last statement
+        // Implicit return at end of body if the last statement
         // wasn't itself a return.
         const last_is_return = block.stmts.len > 0 and block.stmts[block.stmts.len - 1] == .return_stmt;
         if (!last_is_return) {
@@ -126,12 +157,12 @@ pub const Compiler = struct {
 
         const proto = try self.arena.create(Proto);
         proto.* = .{
-            .num_params = 0,
-            .is_vararg = true,
+            .num_params = self.num_params,
+            .is_vararg = self.is_vararg,
             .max_stack = self.max_reg,
             .code = try self.code.toOwnedSlice(self.arena),
             .constants = try self.constants.toOwnedSlice(self.arena),
-            .protos = &.{},
+            .protos = try self.protos.toOwnedSlice(self.arena),
         };
         return proto;
     }
@@ -145,8 +176,29 @@ pub const Compiler = struct {
             .assign => |a| try self.emitAssign(a),
             .if_stmt => |if_s| try self.emitIf(if_s),
             .while_stmt => |w| try self.emitWhile(w),
+            .expr_stmt => |e| try self.emitExprStmt(e),
+            .local_function => |lf| try self.emitLocalFunction(lf),
             else => return error.Unimplemented,
         }
+    }
+
+    /// Function-call statement — call but discard results. CALL with
+    /// C=1 means "no results expected".
+    fn emitExprStmt(self: *Compiler, e: *ast.Expr) CompileError!void {
+        if (e.* != .call) return error.Unimplemented;
+        const reg = self.allocReg();
+        try self.emitCall(e.call, reg, 0);
+        self.next_reg = reg; // free the temp
+    }
+
+    /// `local function f(args) body end` — sugar for
+    /// `local f = function(args) body end`. Phase 3.2.3 doesn't yet
+    /// support recursion (body referencing f) — that needs upvalues.
+    fn emitLocalFunction(self: *Compiler, lf: ast.Stmt.LocalFunction) CompileError!void {
+        const reg = self.next_reg;
+        try self.emitFunctionExpr(lf.func, reg);
+        _ = self.allocReg();
+        try self.locals.append(self.arena, .{ .name = lf.name, .reg = reg });
     }
 
     /// `if c1 then b1 elseif c2 then b2 else eb end`. Compiles to:
@@ -357,8 +409,50 @@ pub const Compiler = struct {
             },
             .binary => |b| try self.emitBinary(b, dest),
             .unary => |u| try self.emitUnary(u, dest),
+            .function => |f| try self.emitFunctionExpr(f, dest),
+            .call => |c| try self.emitCall(c, dest, 1), // expression context wants 1 result
             else => return error.Unimplemented,
         }
+    }
+
+    /// Compile a `function(args) body end` expression into a sub-
+    /// Proto, register it on the parent, and emit CLOSURE A Bx so
+    /// the runtime can build the closure value at execution time.
+    /// Phase 3.2.3 has no upvalue capture — closures see only their
+    /// own params + locals, nothing from the enclosing scope.
+    fn emitFunctionExpr(self: *Compiler, f: ast.Expr.Function, dest: u8) CompileError!void {
+        var nested = Compiler.init(self.arena);
+        const sub_proto = try nested.compileFunctionBody(f.params, f.has_vararg, f.body);
+        const proto_idx: u17 = @intCast(self.protos.items.len);
+        try self.protos.append(self.arena, sub_proto);
+        try self.emit(Instruction.iABx(.closure, dest, proto_idx));
+    }
+
+    /// Emit a call expression. `num_results` is how many values the
+    /// caller expects (1 for expression context, N for `local a,b,c
+    /// = f()`, special case 0 for statement context with no
+    /// assignment). Lua's CALL encodes count as B (args+1) and C
+    /// (results+1).
+    fn emitCall(self: *Compiler, c: ast.Expr.Call, dest: u8, num_results: u8) CompileError!void {
+        // Lay out the call: [closure, arg1, arg2, ...] in consecutive
+        // registers starting at dest. Lua requires the closure and
+        // args to be contiguous because CALL expects them that way.
+        const reg_before = self.next_reg;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
+
+        // Closure into dest.
+        try self.emitExprToDest(c.callee, dest);
+        // Args into dest+1, dest+2, ...
+        for (c.args) |arg| _ = try self.exprToReg(arg);
+
+        // CALL A B C: A is closure register, B-1 is arg count,
+        // C-1 is expected result count.
+        const b: u8 = @intCast(c.args.len + 1);
+        const c_res: u8 = num_results + 1;
+        try self.emit(Instruction.iABC(.call, dest, 0, b, c_res));
+
+        self.next_reg = reg_before;
+        if (dest >= self.next_reg) self.next_reg = dest + 1;
     }
 
     fn emitLoadInt(self: *Compiler, dest: u8, n: i64) CompileError!void {
@@ -622,7 +716,8 @@ test "compile: unimplemented stmt → clean error" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    // Function declarations aren't emittable yet (need CLOSURE +
-    // upvalues, phase 3.2.x). Should surface as a clean error.
+    // Named-function declarations (`function foo.bar(...) end`) need
+    // the global table or upvalues to bind the name; phase 3.2.4 will
+    // bring them in. Local function decls already work.
     try testing.expectError(error.Unimplemented, compileSrc(arena, "function f() return 1 end"));
 }

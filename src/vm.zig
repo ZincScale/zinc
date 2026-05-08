@@ -33,111 +33,154 @@ pub const RunResult = struct {
     values: []TValue,
 };
 
-pub const VM = struct {
-    allocator: std.mem.Allocator,
+/// One stack frame on the call stack. `base` is the index into the
+/// VM's shared register pool where this frame's R[0] lives, so all
+/// register indexing in the dispatch loop is `base + r`.
+const Frame = struct {
     proto: *const bc.Proto,
     pc: usize,
-    /// Register file. Sized to proto.max_stack at init time.
+    base: usize,
+    /// On return, results land at this absolute register in the
+    /// caller's frame; the call-site emitter uses this to read them.
+    results_at: usize,
+    /// How many results the caller wants (Lua's `C-1` from CALL).
+    results_wanted: u8,
+};
+
+const REGISTER_POOL_SIZE: usize = 8 * 1024;
+
+pub const VM = struct {
+    allocator: std.mem.Allocator,
+    /// Shared register pool used by all frames; each frame indexes
+    /// from its own `base` offset. Sized large enough that no
+    /// reasonable program overflows; phase 2.x grows it on demand.
     registers: []TValue,
+    /// Call stack. Top of stack is the currently-executing frame.
+    frames: std.ArrayList(Frame),
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
-        const regs = try allocator.alloc(TValue, @max(proto.max_stack, 1));
+        const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
         @memset(regs, TValue.NIL);
-        return .{
-            .allocator = allocator,
+        var frames: std.ArrayList(Frame) = .{ .items = &.{}, .capacity = 0 };
+        try frames.append(allocator, .{
             .proto = proto,
             .pc = 0,
+            .base = 0,
+            .results_at = 0,
+            .results_wanted = 0, // top-level: returns surface via run()
+        });
+        return .{
+            .allocator = allocator,
             .registers = regs,
+            .frames = frames,
         };
     }
 
     pub fn deinit(self: *VM) void {
         self.allocator.free(self.registers);
+        self.frames.deinit(self.allocator);
     }
 
-    /// Run until a return opcode fires. The returned slice is owned
-    /// by the VM caller (allocated by `allocator`); free it when done.
+    fn currentFrame(self: *VM) *Frame {
+        return &self.frames.items[self.frames.items.len - 1];
+    }
+
+    fn currentProto(self: *VM) *const bc.Proto {
+        return self.currentFrame().proto;
+    }
+
+    fn reg(self: *VM, r: u8) *TValue {
+        return &self.registers[self.currentFrame().base + r];
+    }
+
+    /// Run until the top-level frame returns. The returned slice is
+    /// owned by the VM caller (allocated by `allocator`).
     pub fn run(self: *VM) RuntimeError!RunResult {
         while (true) {
-            if (self.pc >= self.proto.code.len) {
+            const frame = self.currentFrame();
+            if (frame.pc >= frame.proto.code.len) {
                 // Falling off the end is an implicit `return0`.
-                return .{ .values = try self.allocator.alloc(TValue, 0) };
+                if (try self.handleReturn(0, 0)) |result| return result;
+                continue;
             }
-            const instr = self.proto.code[self.pc];
-            self.pc += 1;
+            const instr = frame.proto.code[frame.pc];
+            frame.pc += 1;
 
             switch (instr.opcode()) {
-                .varargprep => {}, // No varargs handled in 2.0; trivial no-op.
+                .varargprep => {}, // No varargs handled yet; trivial no-op.
 
-                .move => self.registers[instr.a] = self.registers[instr.b],
+                .move => self.reg(instr.a).* = self.reg(instr.b).*,
 
-                .loadi => self.registers[instr.a] = TValue.fromInt(@intCast(instr.unpackSBx())),
-                .loadf => self.registers[instr.a] = TValue.fromFloat(@floatFromInt(instr.unpackSBx())),
+                .loadi => self.reg(instr.a).* = TValue.fromInt(@intCast(instr.unpackSBx())),
+                .loadf => self.reg(instr.a).* = TValue.fromFloat(@floatFromInt(instr.unpackSBx())),
                 .loadk => {
-                    const k = self.proto.constants[instr.unpackBx()];
-                    self.registers[instr.a] = try self.constToValue(k);
+                    const k = self.currentProto().constants[instr.unpackBx()];
+                    self.reg(instr.a).* = try self.constToValue(k);
                 },
-                .loadnil => self.registers[instr.a] = TValue.NIL,
-                .loadtrue => self.registers[instr.a] = TValue.TRUE,
-                .loadfalse => self.registers[instr.a] = TValue.FALSE,
+                .loadnil => self.reg(instr.a).* = TValue.NIL,
+                .loadtrue => self.reg(instr.a).* = TValue.TRUE,
+                .loadfalse => self.reg(instr.a).* = TValue.FALSE,
 
-                .add => self.registers[instr.a] = try arith(.add, self.registers[instr.b], self.registers[instr.c]),
-                .sub => self.registers[instr.a] = try arith(.sub, self.registers[instr.b], self.registers[instr.c]),
-                .mul => self.registers[instr.a] = try arith(.mul, self.registers[instr.b], self.registers[instr.c]),
-                .div => self.registers[instr.a] = try arith(.div, self.registers[instr.b], self.registers[instr.c]),
-                .idiv => self.registers[instr.a] = try arith(.idiv, self.registers[instr.b], self.registers[instr.c]),
-                .mod => self.registers[instr.a] = try arith(.mod, self.registers[instr.b], self.registers[instr.c]),
-                .pow => self.registers[instr.a] = try arith(.pow, self.registers[instr.b], self.registers[instr.c]),
+                .add => self.reg(instr.a).* = try arith(.add, self.reg(instr.b).*, self.reg(instr.c).*),
+                .sub => self.reg(instr.a).* = try arith(.sub, self.reg(instr.b).*, self.reg(instr.c).*),
+                .mul => self.reg(instr.a).* = try arith(.mul, self.reg(instr.b).*, self.reg(instr.c).*),
+                .div => self.reg(instr.a).* = try arith(.div, self.reg(instr.b).*, self.reg(instr.c).*),
+                .idiv => self.reg(instr.a).* = try arith(.idiv, self.reg(instr.b).*, self.reg(instr.c).*),
+                .mod => self.reg(instr.a).* = try arith(.mod, self.reg(instr.b).*, self.reg(instr.c).*),
+                .pow => self.reg(instr.a).* = try arith(.pow, self.reg(instr.b).*, self.reg(instr.c).*),
 
-                .unm => self.registers[instr.a] = try unary(.neg, self.registers[instr.b]),
-                .bnot => self.registers[instr.a] = try unary(.bnot, self.registers[instr.b]),
-                .not_ => self.registers[instr.a] = unaryNot(self.registers[instr.b]),
-                .len => self.registers[instr.a] = try unaryLen(self.registers[instr.b]),
+                .unm => self.reg(instr.a).* = try unary(.neg, self.reg(instr.b).*),
+                .bnot => self.reg(instr.a).* = try unary(.bnot, self.reg(instr.b).*),
+                .not_ => self.reg(instr.a).* = unaryNot(self.reg(instr.b).*),
+                .len => self.reg(instr.a).* = try unaryLen(self.reg(instr.b).*),
 
-                // Comparison opcodes — all share the "skip-next if
-                // (cmp result) != k" semantics. Lua's idiomatic
-                // pairing is comparison + JMP for branches, or
-                // comparison + LFALSESKIP + LOADTRUE for booleans.
                 .eq => {
-                    const cond = self.registers[instr.b].eql(self.registers[instr.c]);
-                    if (@intFromBool(cond) != instr.k) self.pc += 1;
+                    const cond = self.reg(instr.b).eql(self.reg(instr.c).*);
+                    if (@intFromBool(cond) != instr.k) frame.pc += 1;
                 },
                 .lt => {
-                    const cond = try compareLess(self.registers[instr.b], self.registers[instr.c]);
-                    if (@intFromBool(cond) != instr.k) self.pc += 1;
+                    const cond = try compareLess(self.reg(instr.b).*, self.reg(instr.c).*);
+                    if (@intFromBool(cond) != instr.k) frame.pc += 1;
                 },
                 .le => {
-                    const cond = try compareLessEq(self.registers[instr.b], self.registers[instr.c]);
-                    if (@intFromBool(cond) != instr.k) self.pc += 1;
+                    const cond = try compareLessEq(self.reg(instr.b).*, self.reg(instr.c).*);
+                    if (@intFromBool(cond) != instr.k) frame.pc += 1;
                 },
 
-                // TEST A k: skip next if truthy(R[A]) != k.
                 .test_ => {
-                    const cond = self.registers[instr.a].isTruthy();
-                    if (@intFromBool(cond) != instr.k) self.pc += 1;
+                    const cond = self.reg(instr.a).isTruthy();
+                    if (@intFromBool(cond) != instr.k) frame.pc += 1;
                 },
 
-                // LFALSESKIP A: R[A] = false, then skip next.
                 .lfalseskip => {
-                    self.registers[instr.a] = TValue.FALSE;
-                    self.pc += 1;
+                    self.reg(instr.a).* = TValue.FALSE;
+                    frame.pc += 1;
                 },
 
-                // JMP sJ: PC += sJ.
                 .jmp => {
                     const offset = instr.unpackSJ();
-                    self.pc = @intCast(@as(i64, @intCast(self.pc)) + offset);
+                    frame.pc = @intCast(@as(i64, @intCast(frame.pc)) + offset);
                 },
 
-                .return0 => return self.makeResult(0, 0),
-                .return1 => return self.makeResult(instr.a, 1),
+                // CLOSURE A Bx: build a closure from sub-proto Bx of
+                // the current proto, place it in R[A]. Phase 3.2.3
+                // has no upvalue capture; phase 3.2.4 fills upvalues.
+                .closure => {
+                    const sub = self.currentProto().protos[instr.unpackBx()];
+                    const cl = try self.allocator.create(v.Closure);
+                    cl.* = .{ .proto = sub };
+                    self.reg(instr.a).* = TValue.fromClosure(cl);
+                },
+
+                // CALL A B C: closure at R[A], B-1 args, C-1 expected
+                // results. Push a new frame and dispatch into it.
+                .call => try self.handleCall(instr.a, instr.b, instr.c),
+
+                .return0 => if (try self.handleReturn(0, 0)) |r| return r,
+                .return1 => if (try self.handleReturn(instr.a, 1)) |r| return r,
                 .return_ => {
-                    // RETURN A B: B-1 values starting at R[A]. B==0
-                    // would mean "return all to top of stack" in Lua;
-                    // we don't emit that form yet so a clean error
-                    // suffices.
                     if (instr.b == 0) return error.NotImplemented;
-                    return self.makeResult(instr.a, instr.b - 1);
+                    if (try self.handleReturn(instr.a, instr.b - 1)) |r| return r;
                 },
 
                 else => return error.UnknownOpcode,
@@ -145,11 +188,83 @@ pub const VM = struct {
         }
     }
 
-    fn makeResult(self: *VM, base: u8, count: usize) !RunResult {
-        const out = try self.allocator.alloc(TValue, count);
+    /// Process a CALL: validate the closure, set up a new frame, set
+    /// the dispatch loop pointing at it. Args (already laid out by
+    /// the caller in registers R[A+1]..R[A+B-1] of the current frame)
+    /// become R[1]..R[B-1] of the callee — Lua's convention is that
+    /// callee's R[0] is the first arg, which corresponds to caller's
+    /// R[A+1]. So callee's frame.base = caller_base + A + 1.
+    fn handleCall(self: *VM, a: u8, b: u8, c: u8) RuntimeError!void {
+        const closure_val = self.reg(a).*;
+        if (closure_val != .closure) return error.InvalidArithmeticOperand;
+        const cl = closure_val.closure;
+
+        const cur = self.currentFrame();
+        const callee_base = cur.base + a + 1;
+        // results_at: where in the caller's pool the results should
+        // land. Lua puts results at R[A]..R[A+C-2] in the caller, so
+        // absolute = caller_base + A.
+        const results_at = cur.base + a;
+        const results_wanted: u8 = if (c == 0) 0 else c - 1;
+
+        try self.frames.append(self.allocator, .{
+            .proto = cl.proto,
+            .pc = 0,
+            .base = callee_base,
+            .results_at = results_at,
+            .results_wanted = results_wanted,
+        });
+
+        // Pad missing args with nil so the callee always sees its
+        // declared param count.
+        const provided_args: u8 = if (b == 0) 0 else b - 1;
+        if (provided_args < cl.proto.num_params) {
+            var i: usize = provided_args;
+            while (i < cl.proto.num_params) : (i += 1) {
+                self.registers[callee_base + i] = TValue.NIL;
+            }
+        }
+    }
+
+    /// Process a RETURN: copy results into the caller's results-at
+    /// slot, pop the frame. If the popped frame was top-level,
+    /// returns the result for `run()` to surface; otherwise returns
+    /// null and the dispatch loop continues in the caller.
+    fn handleReturn(self: *VM, base: u8, count: usize) RuntimeError!?RunResult {
+        const cur = self.currentFrame();
+
+        // Snapshot return values into a small fixed buffer (we only
+        // support up to 16 multi-returns for now; matches Lua's
+        // typical use). Larger requires either a heap alloc or
+        // copying directly while accounting for register aliasing.
+        var buf: [16]TValue = undefined;
+        if (count > buf.len) return error.NotImplemented;
         var i: usize = 0;
-        while (i < count) : (i += 1) out[i] = self.registers[base + i];
-        return .{ .values = out };
+        while (i < count) : (i += 1) buf[i] = self.registers[cur.base + base + i];
+
+        // Capture caller-side info before popping.
+        const results_at = cur.results_at;
+        const results_wanted = cur.results_wanted;
+        const was_top_level = self.frames.items.len == 1;
+
+        _ = self.frames.pop();
+
+        if (was_top_level) {
+            // Surface results to run()'s caller.
+            const out = try self.allocator.alloc(TValue, count);
+            i = 0;
+            while (i < count) : (i += 1) out[i] = buf[i];
+            return .{ .values = out };
+        }
+
+        // Place results at the caller's expected slot. results_wanted
+        // is C-1 from the original CALL; truncate or nil-pad.
+        i = 0;
+        while (i < results_wanted) : (i += 1) {
+            self.registers[results_at + i] = if (i < count) buf[i] else TValue.NIL;
+        }
+
+        return null;
     }
 
     fn constToValue(self: *VM, k: bc.Constant) RuntimeError!TValue {
@@ -723,4 +838,153 @@ test "vm: comparison returns boolean from local" {
         \\return result
     );
     try testing.expect(r[0].boolean);
+}
+
+// === Phase 3.2.3 + 2.3: function calls =======================================
+
+test "vm: anonymous function called inline" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local f = function(x) return x * 2 end
+        \\return f(21)
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "vm: function with multiple args" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local add = function(x, y) return x + y end
+        \\return add(3, 4)
+    );
+    try testing.expectEqual(@as(i64, 7), r[0].integer);
+}
+
+test "vm: function with internal locals" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local mult_then_add = function(x, y, z)
+        \\    local product = x * y
+        \\    return product + z
+        \\end
+        \\return mult_then_add(3, 4, 5)
+    );
+    try testing.expectEqual(@as(i64, 17), r[0].integer);
+}
+
+test "vm: function with control flow" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local abs = function(x)
+        \\    if x < 0 then return -x else return x end
+        \\end
+        \\return abs(-5), abs(7)
+    );
+    try testing.expectEqual(@as(i64, 5), r[0].integer);
+    try testing.expectEqual(@as(i64, 7), r[1].integer);
+}
+
+test "vm: nested calls (no closure-over-outer)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Both calls happen at the same scope level — no inner function
+    // captures outer locals, so no upvalues required.
+    const r = try runSrc(arena,
+        \\local double = function(x) return x * 2 end
+        \\return double(double(5))
+    );
+    try testing.expectEqual(@as(i64, 20), r[0].integer);
+}
+
+test "vm: function body referencing outer local — pinned as known limitation" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The inner function tries to read `double` from the enclosing
+    // scope, which requires upvalue capture. Phase 3.2.4 (next push)
+    // adds it; until then this is a clean compile error rather than
+    // a silent miscompile.
+    try testing.expectError(error.UnknownIdentifier, runSrc(arena,
+        \\local double = function(x) return x * 2 end
+        \\local quadruple = function(x) return double(double(x)) end
+        \\return quadruple(5)
+    ));
+}
+
+test "vm: function returns multiple values" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Multi-return is mostly captured at the bytecode level — when a
+    // call's result feeds another expression, only the first result
+    // is taken. For top-level return propagation, our codegen
+    // currently emits CALL with C=2 (one expected result), so only
+    // the first value flows through. Real multi-value chaining is a
+    // codegen refinement (CALL C=0 for "return all"). Phase 2.3 just
+    // checks the call returns correctly when one value is requested.
+    const r = try runSrc(arena,
+        \\local f = function() return 1, 2, 3 end
+        \\local first = f()
+        \\return first
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+}
+
+test "vm: local function declaration" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local function square(x) return x * x end
+        \\return square(8)
+    );
+    try testing.expectEqual(@as(i64, 64), r[0].integer);
+}
+
+test "vm: function-call-as-statement (results discarded)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The value of f(...) is discarded; only side effects (none here)
+    // would be observed. We're testing that the codegen emits CALL
+    // with C=1 (zero results requested) and the VM doesn't crash.
+    const r = try runSrc(arena,
+        \\local x = 0
+        \\local set = function(v) return v end
+        \\set(99)
+        \\return x
+    );
+    try testing.expectEqual(@as(i64, 0), r[0].integer);
+}
+
+test "vm: calling a non-closure is a type error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.InvalidArithmeticOperand,
+        runSrc(arena,
+            \\local x = 5
+            \\return x(1)
+        ),
+    );
 }
