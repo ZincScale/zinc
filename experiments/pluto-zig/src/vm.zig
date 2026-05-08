@@ -2716,6 +2716,133 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.7: continue + multi-level break ==============================
+
+test "vm: continue skips to next iteration" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Sum 1..10 of EVEN numbers only — continue skips when odd.
+    const r = try runSrc(arena,
+        \\local i = 0
+        \\local sum = 0
+        \\while i < 10 do
+        \\  i += 1
+        \\  if i % 2 != 0 then continue end
+        \\  sum += i
+        \\end
+        \\return sum
+    );
+    // 2 + 4 + 6 + 8 + 10 = 30
+    try testing.expectEqual(@as(i64, 30), r[0].integer);
+}
+
+test "vm: continue from inside a switch case targets the enclosing loop" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local i = 0
+        \\local seen = 0
+        \\while i < 5 do
+        \\  i += 1
+        \\  switch i
+        \\    case 3: continue
+        \\    default: seen += i
+        \\  end
+        \\end
+        \\return seen
+    );
+    // 1 + 2 + 4 + 5 = 12 (skips 3 entirely)
+    try testing.expectEqual(@as(i64, 12), r[0].integer);
+}
+
+test "vm: break 2 exits two enclosing loops" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local i = 0
+        \\local j = 0
+        \\local found = 0
+        \\while i < 10 do
+        \\  i += 1
+        \\  j = 0
+        \\  while j < 10 do
+        \\    j += 1
+        \\    if i == 3 then
+        \\      if j == 4 then
+        \\        found = i * 100 + j
+        \\        break 2
+        \\      end
+        \\    end
+        \\  end
+        \\end
+        \\return i, j, found
+    );
+    // i frozen at 3, j frozen at 4, found = 304
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+    try testing.expectEqual(@as(i64, 4), r[1].integer);
+    try testing.expectEqual(@as(i64, 304), r[2].integer);
+}
+
+test "vm: continue 2 — outer-loop continue from inner loop" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // For each i in 1..3, inner loop starts; if j == 2, continue 2
+    // skips the rest of THIS i (and the rest of inner) and bumps i.
+    // Expect inner_iters_per_i = 1 (only j=1 runs before continue 2),
+    // total inner runs = 3.
+    const r = try runSrc(arena,
+        \\local i = 0
+        \\local inner_runs = 0
+        \\while i < 3 do
+        \\  i += 1
+        \\  local j = 0
+        \\  while j < 5 do
+        \\    j += 1
+        \\    inner_runs += 1
+        \\    if j == 2 then continue 2 end
+        \\  end
+        \\end
+        \\return inner_runs
+    );
+    // Each outer iteration runs 2 inner iters (j=1 logged, j=2 logged then `continue 2`).
+    // 3 outer × 2 inner = 6.
+    try testing.expectEqual(@as(i64, 6), r[0].integer);
+}
+
+test "vm: continue outside any loop is a compile error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.Unimplemented,
+        runSrc(arena, "continue\nreturn 1"),
+    );
+}
+
+test "vm: break N too high is a compile error" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Only one enclosing loop, so `break 2` is invalid.
+    try testing.expectError(
+        error.Unimplemented,
+        runSrc(arena,
+            \\while true do break 2 end
+            \\return 1
+        ),
+    );
+}
+
 // === Phase 4.6: ternary ====================================================
 
 test "vm: ternary truthy / falsy" {

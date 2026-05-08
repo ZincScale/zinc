@@ -238,6 +238,10 @@ pub fn main(init: std.process.Init) !void {
         "local name = \"Pluto\"\nlocal n = 42\nreturn $\"hello, {name}! the answer is {n * 2}.\"",
         // Phase 4.6: ternary — strict-Pluto's safe `cond ? a : b`
         "local function sign(n) return n > 0 ? \"pos\" : n < 0 ? \"neg\" : \"zero\" end\nreturn sign(7), sign(-3), sign(0)",
+        // Phase 4.7: continue — sum of even numbers in 1..10
+        "local i = 0\nlocal sum = 0\nwhile i < 10 do i += 1 if i % 2 != 0 then continue end sum += i end\nreturn sum",
+        // Phase 4.7: multi-level break — bail out of a nested search
+        "local i = 0\nlocal hit = 0\nwhile i < 10 do i += 1 local j = 0 while j < 10 do j += 1 if i == 3 then if j == 4 then hit = i * 100 + j break 2 end end end end\nreturn hit",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

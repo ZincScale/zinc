@@ -123,6 +123,12 @@ pub const Compiler = struct {
     /// patches them all to its post-end PC on exit. Empty when no
     /// enclosing breakable, in which case `break` is a compile error.
     break_jumps: std.ArrayList(std.ArrayList(usize)),
+    /// Parallel stack for `continue`. Loops push/pop here; switches
+    /// do NOT — `continue` from inside a switch case targets the
+    /// enclosing loop, matching Java/JS. Each entry collects PCs of
+    /// placeholder JMPs that the loop patches to its loop_start (cond
+    /// re-eval) on exit.
+    continue_jumps: std.ArrayList(std.ArrayList(usize)),
 
     pub fn init(arena: std.mem.Allocator) Compiler {
         return .{
@@ -139,6 +145,7 @@ pub const Compiler = struct {
             .is_vararg = true, // top-level chunk is vararg
             .return_type = null,
             .break_jumps = .{ .items = &.{}, .capacity = 0 },
+            .continue_jumps = .{ .items = &.{}, .capacity = 0 },
         };
     }
 
@@ -300,26 +307,58 @@ pub const Compiler = struct {
             .while_stmt => |w| try self.emitWhile(w),
             .switch_stmt => |sw| try self.emitSwitch(sw),
             .class_decl => |cd| try self.emitClassDecl(cd),
-            .break_stmt => try self.emitBreak(),
+            .break_stmt => |bs| try self.emitBreak(bs.level),
+            .continue_stmt => |cs| try self.emitContinue(cs.level),
             .expr_stmt => |e| try self.emitExprStmt(e),
             .local_function => |lf| try self.emitLocalFunction(lf),
             else => return error.Unimplemented,
         }
     }
 
-    /// `break` — exits the innermost enclosing breakable construct
-    /// (currently `switch` or `while`). Emits a placeholder JMP and
-    /// records its PC on the top break-jump list; the enclosing
-    /// emitSwitch / emitWhile patches the offset on exit.
-    fn emitBreak(self: *Compiler) CompileError!void {
+    /// `break` / `break N` — exits the Nth-innermost breakable
+    /// construct (loop or switch). Records a placeholder JMP on the
+    /// target frame's break-jump list; the construct patches it on
+    /// exit.
+    fn emitBreak(self: *Compiler, level: u32) CompileError!void {
         if (self.break_jumps.items.len == 0) {
             std.debug.print("strict-pluto: `break` outside of switch / while\n", .{});
             return error.Unimplemented;
         }
-        const top = &self.break_jumps.items[self.break_jumps.items.len - 1];
+        if (level > self.break_jumps.items.len) {
+            std.debug.print(
+                "strict-pluto: `break {}` requires {} enclosing constructs but only {} are open\n",
+                .{ level, level, self.break_jumps.items.len },
+            );
+            return error.Unimplemented;
+        }
+        const idx = self.break_jumps.items.len - level;
+        const target = &self.break_jumps.items[idx];
         const pc = self.code.items.len;
-        try top.append(self.arena, pc);
-        try self.emit(Instruction.iAx(.jmp, 0)); // placeholder, patched later
+        try target.append(self.arena, pc);
+        try self.emit(Instruction.iAx(.jmp, 0)); // patched by the construct's exit
+    }
+
+    /// `continue` / `continue N` — skips to the cond re-evaluation
+    /// of the Nth-innermost enclosing loop. Switches don't count
+    /// toward the level (continue inside a switch case targets the
+    /// surrounding loop, not the switch itself).
+    fn emitContinue(self: *Compiler, level: u32) CompileError!void {
+        if (self.continue_jumps.items.len == 0) {
+            std.debug.print("strict-pluto: `continue` outside of any loop\n", .{});
+            return error.Unimplemented;
+        }
+        if (level > self.continue_jumps.items.len) {
+            std.debug.print(
+                "strict-pluto: `continue {}` requires {} enclosing loops but only {} are open\n",
+                .{ level, level, self.continue_jumps.items.len },
+            );
+            return error.Unimplemented;
+        }
+        const idx = self.continue_jumps.items.len - level;
+        const target = &self.continue_jumps.items[idx];
+        const pc = self.code.items.len;
+        try target.append(self.arena, pc);
+        try self.emit(Instruction.iAx(.jmp, 0)); // patched to loop_start at exit
     }
 
     /// Function-call statement — call but discard results. CALL with
@@ -432,11 +471,19 @@ pub const Compiler = struct {
         try self.emit(Instruction.iAx(.jmp, 0)); // placeholder
         self.next_reg = reg_before;
 
-        // Push a break-jump frame so any `break` in the body lands
-        // past the loop. Phase 4.7 will add `continue` similarly.
+        // Push break + continue frames so any `break`/`continue` in
+        // the body lands at the right spot. Multi-level forms walk
+        // outward through these stacks; switches push only break_jumps.
         try self.break_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+        try self.continue_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
 
         try self.emitBlock(w.body);
+
+        // `continue` should land at the cond re-evaluation, not at
+        // the unconditional loop-back JMP — patch to loop_start.
+        var cont_frame = self.continue_jumps.pop().?;
+        for (cont_frame.items) |jpc| self.patchJump(jpc, loop_start);
+        cont_frame.deinit(self.arena);
 
         // Unconditional jump back to loop_start.
         try self.emitJump(loop_start);
