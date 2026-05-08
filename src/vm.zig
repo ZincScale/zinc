@@ -107,6 +107,14 @@ pub const VM = struct {
     /// member-access path uses it to enforce strict-Pluto's runtime
     /// visibility rule.
     visibility_metakey: TValue,
+    /// Interned `__static_set` string. Class tables carry this as a
+    /// sub-table whose keys are the names of static members (value is
+    /// always `true` — only key presence matters). tableLookup hides
+    /// these entries when the lookup started from an instance, so
+    /// `this.staticField` returns nil while `ClassName.staticField`
+    /// resolves normally. Absent on classes that have no static
+    /// members at all (treated as empty).
+    static_set_metakey: TValue,
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
         const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
@@ -125,6 +133,7 @@ pub const VM = struct {
 
         const index_key_str = try v.String.createWithAllocator(allocator, "__index");
         const visibility_key_str = try v.String.createWithAllocator(allocator, "__visibility");
+        const static_set_key_str = try v.String.createWithAllocator(allocator, "__static_set");
 
         var vm: VM = .{
             .allocator = allocator,
@@ -137,6 +146,7 @@ pub const VM = struct {
             .output = .{ .items = &.{}, .capacity = 0 },
             .index_metakey = TValue.fromString(index_key_str),
             .visibility_metakey = TValue.fromString(visibility_key_str),
+            .static_set_metakey = TValue.fromString(static_set_key_str),
         };
         // Now that the VM is in its final memory location, point the
         // cell at the env_storage field. (Building this earlier and
@@ -200,11 +210,21 @@ pub const VM = struct {
     /// (needs to issue a callback into the VM mid-dispatch). Today
     /// only table-form `__index` is honored.
     fn tableLookup(self: *VM, t: *v.Table, key: TValue) TValue {
+        // Java-style static visibility: from an instance start, skip
+        // entries listed in any class's __static_set as we walk up.
+        // From a class start (`Foo.x`), statics are visible normally.
+        // Detect the start kind by looking for __visibility — that
+        // marker is only attached to classes, never to instances.
+        const start_is_class = t.get(self.visibility_metakey) != .nil;
         var cur: *v.Table = t;
         var hops: u32 = 0;
         while (hops < 64) : (hops += 1) {
             const raw = cur.get(key);
-            if (raw != .nil) return raw;
+            if (raw != .nil) {
+                if (start_is_class or !self.isStaticOnClass(cur, key)) return raw;
+                // else fall through to the chain — instance walk
+                // ignores this static entry as if it weren't there.
+            }
             const mt = cur.metatable orelse return TValue.NIL;
             const idx = mt.get(self.index_metakey);
             switch (idx) {
@@ -213,6 +233,17 @@ pub const VM = struct {
             }
         }
         return TValue.NIL; // chain too deep — bail
+    }
+
+    /// True iff `key` is recorded as static on class `t`. Used by the
+    /// instance-side lookup to hide static members from `this.x` reads.
+    /// Returns false when t isn't a class (no __static_set), when the
+    /// class has no static members (no __static_set), or when this
+    /// particular key isn't tagged static.
+    fn isStaticOnClass(self: *VM, t: *v.Table, key: TValue) bool {
+        const set = t.get(self.static_set_metakey);
+        if (set != .table) return false;
+        return set.table.get(key) != .nil;
     }
 
     /// strict-Pluto runtime visibility check. For a member access
@@ -2683,6 +2714,149 @@ test "vm: visibility — __construct is always public (`new` works on private-de
         \\return new C("hi"):get()
     );
     try testing.expectEqualStrings("hi", r[0].string.slice());
+}
+
+// === Phase 4.4d: static members ============================================
+
+test "vm: static method called via ClassName.method()" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class Math
+        \\  public static function double(x) return x * 2 end
+        \\end
+        \\return Math.double(21)
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+}
+
+test "vm: static method gets no implicit `this` parameter" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The static method declares one param `n` and uses it as the
+    // first argument. If `this` were injected the args would shift
+    // and `n` would silently bind to the (absent) receiver.
+    const r = try runSrc(arena,
+        \\class Lib
+        \\  public static function id(n) return n end
+        \\end
+        \\return Lib.id("ok")
+    );
+    try testing.expectEqualStrings("ok", r[0].string.slice());
+}
+
+test "vm: instance can't see static method via this" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // From a non-static method, `this:helper()` (where helper is
+    // static) should fail — instances are not supposed to reach
+    // static members. SELF returns nil for the lookup, then CALL
+    // on nil errors out.
+    try testing.expectError(
+        error.InvalidArithmeticOperand,
+        runSrc(arena,
+            \\class C
+            \\  public static function helper() return "static" end
+            \\  public function leak() return this:helper() end
+            \\end
+            \\return new C():leak()
+        ),
+    );
+}
+
+test "vm: instance can't see static field via this.x" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `this.shared` from an instance method must NOT resolve to the
+    // class's static field. The method returns it unchanged; we
+    // expect nil, not the static value.
+    const r = try runSrc(arena,
+        \\class C
+        \\  public static name = "shared"
+        \\  public function leak() return this.name end
+        \\end
+        \\return new C():leak()
+    );
+    try testing.expectEqual(v.Tag.nil, @as(v.Tag, r[0]));
+}
+
+test "vm: static field accessible via class but not via instance" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\class C
+        \\  public static name = "via class"
+        \\  public other = "via instance"
+        \\end
+        \\local c = new C()
+        \\return C.name, c.other
+    );
+    try testing.expectEqualStrings("via class", r[0].string.slice());
+    try testing.expectEqualStrings("via instance", r[1].string.slice());
+}
+
+test "vm: static method accesses class state via ClassName.field" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // From a static method, the class itself isn't bound implicitly.
+    // The user accesses static state by name (`Counter.tick`). Tests
+    // both static field shared mutation across calls.
+    const r = try runSrc(arena,
+        \\class Counter
+        \\  public static tick = 0
+        \\  public static function bump()
+        \\    Counter.tick = Counter.tick + 1
+        \\    return Counter.tick
+        \\  end
+        \\end
+        \\Counter.bump()
+        \\Counter.bump()
+        \\return Counter.bump()
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: static + private — only same class can call" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try testing.expectError(
+        error.VisibilityViolation,
+        runSrc(arena,
+            \\class C
+            \\  private static function _impl() return 1 end
+            \\end
+            \\return C._impl()
+        ),
+    );
+}
+
+test "vm: static modifier order with visibility — `static public` also OK" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Modifiers may appear in either order — test the reverse.
+    const r = try runSrc(arena,
+        \\class C
+        \\  static public function answer() return 42 end
+        \\end
+        \\return C.answer()
+    );
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
 }
 
 test "vm: switch — single-value cases pick the matching branch" {

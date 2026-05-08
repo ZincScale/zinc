@@ -271,35 +271,47 @@ pub const Parser = struct {
                 try self.advance();
                 continue;
             }
-            // Optional visibility modifier — defaults to private
-            // (strict-Pluto: opt-in to external access, not opt-out).
+            // Optional modifiers — visibility (public/protected/private)
+            // and `static`, in either order. Visibility defaults to
+            // private (strict-Pluto: opt-in to external access).
             var visibility: ast.Stmt.Visibility = .private;
-            if (self.isKeyword("public")) {
-                visibility = .public;
-                try self.advance();
-            } else if (self.isKeyword("protected")) {
-                visibility = .protected;
-                try self.advance();
-            } else if (self.isKeyword("private")) {
-                visibility = .private;
-                try self.advance();
+            var is_static = false;
+            while (true) {
+                if (self.isKeyword("public")) {
+                    visibility = .public;
+                    try self.advance();
+                } else if (self.isKeyword("protected")) {
+                    visibility = .protected;
+                    try self.advance();
+                } else if (self.isKeyword("private")) {
+                    visibility = .private;
+                    try self.advance();
+                } else if (self.isKeyword("static")) {
+                    is_static = true;
+                    try self.advance();
+                } else break;
             }
 
             if (self.isKeyword("function")) {
                 try self.advance();
                 const m_name = try self.expectIdentLexeme();
                 var func = try self.parseFunctionBody();
-                // Prepend implicit `this` parameter. Strict-Pluto uses
-                // `this` (not `self`) for the receiver — pinned by the
-                // user 2026-05-08, see project memory.
-                const params = try self.arena.alloc(ast.NameWithType, func.params.len + 1);
-                params[0] = .{ .name = "this", .type_annot = null };
-                for (func.params, 0..) |p, i| params[i + 1] = p;
-                func.params = params;
+                if (!is_static) {
+                    // Prepend implicit `this` parameter. Strict-Pluto
+                    // uses `this` (not `self`) for the receiver —
+                    // pinned by the user 2026-05-08, see project memory.
+                    // Static methods skip this — they're class-bound
+                    // helpers with no implicit receiver.
+                    const params = try self.arena.alloc(ast.NameWithType, func.params.len + 1);
+                    params[0] = .{ .name = "this", .type_annot = null };
+                    for (func.params, 0..) |p, i| params[i + 1] = p;
+                    func.params = params;
+                }
                 try members.append(self.arena, .{ .method = .{
                     .name = m_name,
                     .func = func,
                     .visibility = visibility,
+                    .is_static = is_static,
                 } });
             } else if (self.cur.kind == .ident) {
                 // Field default: `NAME = expr`. Reject anything else
@@ -311,6 +323,7 @@ pub const Parser = struct {
                     .name = f_name,
                     .value = value,
                     .visibility = visibility,
+                    .is_static = is_static,
                 } });
             } else return error.UnexpectedToken;
         }
