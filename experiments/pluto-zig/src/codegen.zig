@@ -69,6 +69,12 @@ fn binOpCode(op: ast.BinaryOp) ?OpCode {
         .idiv => .idiv,
         .mod => .mod,
         .pow => .pow,
+        .concat => .concat,
+        .band => .band,
+        .bor => .bor,
+        .bxor => .bxor,
+        .shl => .shl,
+        .shr => .shr,
         else => null,
     };
 }
@@ -107,6 +113,10 @@ pub const Compiler = struct {
     max_reg: u8,
     num_params: u8,
     is_vararg: bool,
+    /// Declared return type of the current function. Set on entry to
+    /// compileFunctionBody when the AST has an annotation; emitReturn
+    /// uses it to enforce `return v` against the declared type.
+    return_type: ?ast.TypeExpr,
 
     pub fn init(arena: std.mem.Allocator) Compiler {
         return .{
@@ -121,6 +131,7 @@ pub const Compiler = struct {
             .max_reg = 0,
             .num_params = 0,
             .is_vararg = true, // top-level chunk is vararg
+            .return_type = null,
         };
     }
 
@@ -205,7 +216,7 @@ pub const Compiler = struct {
     /// transparently via the resolveIdent upvalue chain.
     pub fn compileChunk(self: *Compiler, block: *const ast.Block) CompileError!*Proto {
         try self.upvalues.append(self.arena, .{ .name = "_ENV", .in_stack = true, .idx = 0 });
-        return self.compileFunctionBody(&.{}, true, block);
+        return self.compileFunctionBody(&.{}, true, null, block);
     }
 
     /// Compile a function body — params + block — into a Proto. Used
@@ -214,21 +225,40 @@ pub const Compiler = struct {
     /// entry; nested function compilation uses a *separate* Compiler.
     pub fn compileFunctionBody(
         self: *Compiler,
-        params: []const []const u8,
+        params: []const ast.NameWithType,
         is_vararg: bool,
+        return_type: ?ast.TypeExpr,
         block: *const ast.Block,
     ) CompileError!*Proto {
         self.num_params = @intCast(params.len);
         self.is_vararg = is_vararg;
+        self.return_type = return_type;
 
         // Bind each formal param as a local in R[0..num_params-1].
         // The VM lays args in those slots when CALL executes.
-        for (params) |name| {
+        for (params) |p| {
             const r = self.allocReg();
-            try self.locals.append(self.arena, .{ .name = name, .reg = r });
+            try self.locals.append(self.arena, .{ .name = p.name, .reg = r });
         }
 
         try self.emit(Instruction.iABC(.varargprep, 0, 0, 0, 0));
+
+        // Emit a TYPECHECK for each typed parameter. Caller-supplied
+        // values land in R[0..num_params-1] before the body runs;
+        // these instructions enforce the contract.
+        for (params, 0..) |p, idx| {
+            if (p.type_annot) |annot| {
+                if (annot == .atom and annot.atom == .any) continue;
+                if (annot != .atom) continue; // optional/union: phase 4.x
+                try self.emit(Instruction.iABC(
+                    .typecheck,
+                    @intCast(idx),
+                    0,
+                    @intFromEnum(annot.atom),
+                    0,
+                ));
+            }
+        }
 
         for (block.stmts) |s| try self.emitStmt(&s);
 
@@ -526,22 +556,41 @@ pub const Compiler = struct {
 
     fn emitReturn(self: *Compiler, r: ast.Stmt.Return) CompileError!void {
         if (r.values.len == 0) {
+            // Returning nothing — if the function declares a non-nil
+            // return type, that's a static mismatch.
+            if (self.return_type) |annot| {
+                if (annot == .atom and annot.atom != .any and annot.atom != .nil_) {
+                    std.debug.print(
+                        "strict-pluto: return type mismatch — declared `{s}`, but `return` (no value) is nil\n",
+                        .{annot.atom.name()},
+                    );
+                    return error.TypeAnnotationMismatch;
+                }
+            }
             try self.emit(Instruction.iABC(.return0, 0, 0, 0, 0));
             return;
         }
         if (r.values.len == 1) {
-            // Emit the value into a fresh register, then RETURN1 of it.
             const reg_before = self.next_reg;
             const r1 = try self.exprToReg(r.values[0]);
+            // Enforce the function's declared return type, if any.
+            if (self.return_type) |annot| {
+                try self.enforceType(annot, r.values[0], r1);
+            }
             try self.emit(Instruction.iABC(.return1, r1, 0, 0, 0));
-            // Free the register we used for the return value.
             self.next_reg = reg_before;
             return;
         }
-        // Multi-value return: lay values in consecutive registers
-        // R[A]..R[A+B-2], then RETURN A B 0. Lua's RETURN encodes
-        // count as B with bias: B=0 means "until top", B=1 means 0
-        // results, B=2 means 1 result, ..., B=N+1 means N results.
+        // Multi-value return: phase 4.x adds tuple type annotations.
+        // For now, single-return-type annotations on functions with
+        // multi-value returns are an error to keep the semantics clean.
+        if (self.return_type != null) {
+            std.debug.print(
+                "strict-pluto: declared a return type but the function returns multiple values — multi-return type annotations are not yet supported\n",
+                .{},
+            );
+            return error.TypeAnnotationMismatch;
+        }
         const base = self.next_reg;
         for (r.values) |val| _ = try self.exprToReg(val);
         const b: u8 = @intCast(r.values.len + 1);
@@ -679,7 +728,7 @@ pub const Compiler = struct {
     /// those descriptors to wire the cells.
     fn emitFunctionExpr(self: *Compiler, f: ast.Expr.Function, dest: u8) CompileError!void {
         var nested = Compiler.initNested(self.arena, self);
-        const sub_proto = try nested.compileFunctionBody(f.params, f.has_vararg, f.body);
+        const sub_proto = try nested.compileFunctionBody(f.params, f.has_vararg, f.return_type, f.body);
         const proto_idx: u17 = @intCast(self.protos.items.len);
         try self.protos.append(self.arena, sub_proto);
         try self.emit(Instruction.iABx(.closure, dest, proto_idx));
