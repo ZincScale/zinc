@@ -305,6 +305,7 @@ pub const Compiler = struct {
             .assign => |a| try self.emitAssign(a),
             .if_stmt => |if_s| try self.emitIf(if_s),
             .while_stmt => |w| try self.emitWhile(w),
+            .numeric_for => |fr| try self.emitNumericFor(fr),
             .switch_stmt => |sw| try self.emitSwitch(sw),
             .class_decl => |cd| try self.emitClassDecl(cd),
             .break_stmt => |bs| try self.emitBreak(bs.level),
@@ -495,6 +496,117 @@ pub const Compiler = struct {
         var frame = self.break_jumps.pop().?;
         for (frame.items) |jpc| self.patchJump(jpc, loop_end);
         frame.deinit(self.arena);
+    }
+
+    /// `for IDENT = start, stop [, step] do body end` — numeric for.
+    ///
+    /// Compiles to (essentially) the equivalent while-loop, with the
+    /// loop variable bound as a local for the body. No new opcodes:
+    ///   <eval start into i_reg, stop into stop_reg, step into step_reg>
+    /// loop_start:
+    ///   LE/LE.swap i_reg stop_reg     ; pick direction by step's sign
+    ///   JMP loop_end                  ; runs when out of range
+    ///   <body>
+    /// continue_target:
+    ///   ADD i_reg, i_reg, step_reg
+    ///   JMP loop_start
+    /// loop_end:
+    ///
+    /// Step direction: a literal-integer step's sign picks the
+    /// comparison; a non-literal step is treated as ascending. (A
+    /// proper runtime sign-test needs branching not yet wired up
+    /// concisely; descending with a variable step is rare enough to
+    /// defer.)
+    fn emitNumericFor(self: *Compiler, fr: ast.Stmt.NumericFor) CompileError!void {
+        const reg_before = self.next_reg;
+        const locals_before = self.locals.items.len;
+
+        // Three contiguous regs: loop var, stop, step. The loop var
+        // doubles as the running counter — body reads it directly.
+        const i_reg = self.allocReg();
+        const stop_reg = self.allocReg();
+        const step_reg = self.allocReg();
+
+        // Initialize.
+        try self.emitExprToDest(fr.start, i_reg);
+        try self.emitExprToDest(fr.stop, stop_reg);
+        if (fr.step) |s| {
+            try self.emitExprToDest(s, step_reg);
+        } else {
+            try self.emitLoadInt(step_reg, 1);
+        }
+
+        // Pick comparison direction. Default: ascending (i <= stop).
+        // Detect a negative-literal step. `-1` actually parses as
+        // `unary(neg, integer(1))`, not a single negative integer
+        // node, so we look through that pattern too.
+        const descending = blk: {
+            if (fr.step) |s| switch (s.*) {
+                .integer => |n| break :blk n < 0,
+                .number => |f| break :blk f < 0,
+                .unary => |u| {
+                    if (u.op == .neg) switch (u.operand.*) {
+                        .integer => |n| break :blk n > 0,
+                        .number => |f| break :blk f > 0,
+                        else => {},
+                    };
+                },
+                else => {},
+            };
+            break :blk false;
+        };
+
+        // Bind the loop variable as a local — the body resolves
+        // `var_name` via the locals lookup. Pop it on exit.
+        try self.locals.append(self.arena, .{ .name = fr.var_name, .reg = i_reg });
+
+        const loop_start = self.code.items.len;
+
+        // LE B C k=0:  if (R[B] <= R[C]) != 0 then pc++.
+        //   ascending  → i <= stop : skip JMP-to-end (continue body).
+        //                i > stop  : run JMP-to-end (exit).
+        //   descending → swap operands so we test stop <= i, equivalent
+        //                to i >= stop. Same skip-or-run logic.
+        if (descending) {
+            try self.emit(Instruction.iABC(.le, 0, 0, stop_reg, i_reg));
+        } else {
+            try self.emit(Instruction.iABC(.le, 0, 0, i_reg, stop_reg));
+        }
+        const jump_to_end = self.code.items.len;
+        try self.emit(Instruction.iAx(.jmp, 0)); // patched at exit
+
+        // Push break + continue frames so `break`/`continue` in the
+        // body land at the right targets. Continue jumps to the
+        // increment + back-edge.
+        try self.break_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+        try self.continue_jumps.append(self.arena, .{ .items = &.{}, .capacity = 0 });
+
+        try self.emitBlock(fr.body);
+
+        // Continue target is the increment site — `continue` re-runs
+        // the loop var advance, then re-tests the condition.
+        const cont_target = self.code.items.len;
+        var cont_frame = self.continue_jumps.pop().?;
+        for (cont_frame.items) |jpc| self.patchJump(jpc, cont_target);
+        cont_frame.deinit(self.arena);
+
+        // i = i + step
+        try self.emit(Instruction.iABC(.add, i_reg, 0, i_reg, step_reg));
+
+        // Back to loop_start.
+        try self.emitJump(loop_start);
+
+        const loop_end = self.code.items.len;
+        self.patchJump(jump_to_end, loop_end);
+
+        // Patch break jumps.
+        var br_frame = self.break_jumps.pop().?;
+        for (br_frame.items) |jpc| self.patchJump(jpc, loop_end);
+        br_frame.deinit(self.arena);
+
+        // Drop the loop variable from scope; free the regs.
+        self.locals.shrinkRetainingCapacity(locals_before);
+        self.next_reg = reg_before;
     }
 
     /// `switch <expr> case v1[, v2]: ... case ...: ... default: ... end`
