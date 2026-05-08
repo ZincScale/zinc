@@ -234,6 +234,8 @@ pub fn main(init: std.process.Init) !void {
         "class Math\npublic static function double(x) return x * 2 end\npublic static function square(x) return x * x end\nend\nreturn Math.double(21), Math.square(7)",
         // Phase 4.4d: static field shared across instances + class-only access
         "class Registry\npublic static count = 0\npublic static function reg() Registry.count = Registry.count + 1 return Registry.count end\nend\nReg1 = Registry.reg()\nReg2 = Registry.reg()\nReg3 = Registry.reg()\nreturn Reg1, Reg2, Reg3, Registry.count",
+        // Phase 4.5: string interpolation `$"...{expr}..."`
+        "local name = \"Pluto\"\nlocal n = 42\nreturn $\"hello, {name}! the answer is {n * 2}.\"",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

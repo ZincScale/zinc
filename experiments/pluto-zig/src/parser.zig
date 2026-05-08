@@ -756,6 +756,14 @@ pub const Parser = struct {
                 const inner = stripStringDelimiters(raw);
                 return self.alloc(ast.Expr, .{ .string = inner });
             },
+            .interp_string => {
+                // Lexeme is `$"..."`; strip the leading $" and trailing ".
+                try self.advance();
+                const raw = t.lexeme(self.src);
+                std.debug.assert(raw.len >= 3 and raw[0] == '$' and raw[1] == '"' and raw[raw.len - 1] == '"');
+                const inner = raw[2 .. raw.len - 1];
+                return self.parseInterpolatedSegments(inner);
+            },
             .lparen => {
                 try self.advance();
                 const inner = try self.parseExpr();
@@ -811,6 +819,112 @@ pub const Parser = struct {
             }
         }
         return e;
+    }
+
+    /// Lower an interpolated string `$"...{expr}..."` to a chain of
+    /// `..` concats with each `{expr}` wrapped in `tostring(...)`. The
+    /// surrounding `$"` and `"` have already been stripped — `inner`
+    /// is the raw content (with escape sequences still raw, matching
+    /// how regular string literals are stored).
+    ///
+    /// Walking strategy:
+    ///   - Collect literal bytes into a "current text" slice.
+    ///   - At `{`, emit the text as a string segment and parse the
+    ///     enclosed expression with a sub-Parser. Wrap in tostring().
+    ///   - At `}`, end the current segment.
+    ///   - Backslash escapes (`\{`, `\"`, etc.) are kept verbatim in
+    ///     the literal segments — the runtime sees them raw, same as
+    ///     regular string literals.
+    ///
+    /// Empty interpolations (`$""`) and zero-segment results compile
+    /// to a plain empty string; single-segment results bypass concat.
+    fn parseInterpolatedSegments(self: *Parser, inner: []const u8) ParseError!*ast.Expr {
+        var segments = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
+        var i: usize = 0;
+        var text_start: usize = 0;
+
+        while (i < inner.len) {
+            const c = inner[i];
+            if (c == '\\' and i + 1 < inner.len) {
+                // Skip the escape — `\{` and friends stay in the
+                // literal text. The lexer already validated the set.
+                i += 2;
+                continue;
+            }
+            if (c == '{') {
+                // Flush literal text up to `{`.
+                if (i > text_start) {
+                    const text = inner[text_start..i];
+                    try segments.append(self.arena, try self.alloc(ast.Expr, .{ .string = text }));
+                }
+                i += 1;
+
+                // Find the matching `}`, accounting for nested braces
+                // (so `{ {a, b} }` works). Lua doesn't have arbitrary
+                // brace-paired forms in expressions besides table
+                // constructors, so a simple depth counter suffices.
+                const expr_start = i;
+                var depth: u32 = 1;
+                while (i < inner.len and depth > 0) {
+                    const ec = inner[i];
+                    if (ec == '\\' and i + 1 < inner.len) {
+                        i += 2;
+                        continue;
+                    }
+                    if (ec == '{') depth += 1
+                    else if (ec == '}') depth -= 1;
+                    if (depth == 0) break;
+                    i += 1;
+                }
+                if (depth != 0) return error.UnexpectedToken; // unterminated `{`
+                const expr_src = inner[expr_start..i];
+                i += 1; // past `}`
+                text_start = i;
+
+                // Sub-parse the embedded expression.
+                var sub = try Parser.init(self.arena, expr_src);
+                const e = try sub.parseExpr();
+                if (sub.cur.kind != .eof) return error.UnexpectedToken;
+
+                // Wrap in tostring(e). Synthesize an ident reference
+                // to the global `tostring` builtin.
+                const tostring_ref = try self.alloc(ast.Expr, .{ .ident = "tostring" });
+                const args = try self.arena.alloc(*ast.Expr, 1);
+                args[0] = e;
+                const call_expr = try self.alloc(ast.Expr, .{ .call = .{
+                    .callee = tostring_ref,
+                    .args = args,
+                } });
+                try segments.append(self.arena, call_expr);
+            } else {
+                i += 1;
+            }
+        }
+
+        // Trailing literal text.
+        if (text_start < inner.len) {
+            const text = inner[text_start..];
+            try segments.append(self.arena, try self.alloc(ast.Expr, .{ .string = text }));
+        }
+
+        // Reduce. Empty → empty string. One → as-is (but ensure it's a
+        // string-yielding form: a sole interpolated value is already
+        // wrapped in tostring()). Otherwise build a left-associative
+        // `..` chain.
+        if (segments.items.len == 0) {
+            return self.alloc(ast.Expr, .{ .string = "" });
+        }
+        if (segments.items.len == 1) return segments.items[0];
+
+        var acc = segments.items[0];
+        for (segments.items[1..]) |seg| {
+            acc = try self.alloc(ast.Expr, .{ .binary = .{
+                .op = .concat,
+                .lhs = acc,
+                .rhs = seg,
+            } });
+        }
+        return acc;
     }
 
     fn parseTable(self: *Parser) ParseError!*ast.Expr {
@@ -1440,6 +1554,50 @@ test "parse: `new` followed by non-ident is a plain identifier" {
         \\(return (+ new 1))
         \\
     , out);
+}
+
+test "parse: interpolated string with single value" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `$"hi {name}"` → `"hi " .. tostring(name)`
+    const out = try parseAndDump(arena, "return $\"hi {name}\"");
+    try testing.expectEqualStrings(
+        "(return (.. \"hi \" tostring(name)))\n",
+        out,
+    );
+}
+
+test "parse: interpolated string with multiple values + trailing text" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Left-associative — leftmost `..` binds first.
+    const out = try parseAndDump(arena, "return $\"{a} + {b} = {a + b}.\"");
+    try testing.expectEqualStrings(
+        "(return (.. (.. (.. (.. (.. tostring(a) \" + \") tostring(b)) \" = \") tostring((+ a b))) \".\"))\n",
+        out,
+    );
+}
+
+test "parse: interpolated string with no placeholders is a plain string" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return $\"plain\"");
+    try testing.expectEqualStrings("(return \"plain\")\n", out);
+}
+
+test "parse: empty interpolated string" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena, "return $\"\"");
+    try testing.expectEqualStrings("(return \"\")\n", out);
 }
 
 test "parse: error - missing expression in `if = end`" {

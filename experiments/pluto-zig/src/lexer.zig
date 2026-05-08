@@ -19,6 +19,7 @@ pub const TokenKind = enum {
     int_lit,        // 42, 0xDEAD
     float_lit,      // 3.14, 1.5e10, .5
     string_lit,     // "..." or '...' or [[...]] (long bracket)
+    interp_string,  // $"...{expr}..." — strict-Pluto string interpolation
     ident,          // identifiers and keywords (parser disambiguates)
 
     // Single-character punctuation
@@ -134,6 +135,15 @@ pub const Lexer = struct {
         // Strings — double, single, or long-bracket form.
         if (c == '"' or c == '\'') return self.lexShortString(start, c);
         if (c == '[' and self.startsLongBracket()) return self.lexLongString(start);
+
+        // Interpolated string: `$"..."`. Same escape rules as short
+        // strings — `\"` doesn't terminate. The token's lexeme is the
+        // full `$"..."` including delimiters; the parser walks the
+        // inner content to find `{expr}` placeholders.
+        if (c == '$' and self.pos + 1 < self.src.len and self.src[self.pos + 1] == '"') {
+            self.pos += 1; // consume `$`; lexShortString consumes `"`
+            return self.lexInterpString(start, '"');
+        }
 
         // Operators and punctuation. The branchy section is unavoidable
         // for a hand-written lexer; clarity wins over micro-optimization.
@@ -313,6 +323,53 @@ pub const Lexer = struct {
         const level = self.longBracketLevel();
         try self.skipPastLongClose(level, error.UnterminatedString);
         return self.makeToken(.string_lit, start, self.pos - start);
+    }
+
+    /// Interpolated string: `$"..."`. Body has the same escape rules
+    /// as short strings (so `\"` is literal, doesn't terminate). The
+    /// `{` and `}` are NOT escaped at lex time — the parser walks
+    /// the inner content. Caller has already consumed the `$`.
+    fn lexInterpString(self: *Lexer, start: u32, quote: u8) LexerError!Token {
+        self.pos += 1; // past opening quote
+        while (!self.atEnd()) {
+            const c = self.peek();
+            if (c == quote) {
+                self.pos += 1;
+                return self.makeToken(.interp_string, start, self.pos - start);
+            }
+            if (c == '\n') return error.UnterminatedString;
+            if (c == '\\') {
+                self.pos += 1;
+                if (self.atEnd()) return error.UnterminatedString;
+                // Same set as short strings, plus `\{` and `\}` so
+                // users can interpolate literal braces.
+                const e = self.peek();
+                switch (e) {
+                    'a', 'b', 'f', 'n', 'r', 't', 'v', '\\', '"', '\'', '\n', '{', '}' => self.pos += 1,
+                    'x' => {
+                        self.pos += 1;
+                        var i: u32 = 0;
+                        while (i < 2 and !self.atEnd() and isHexDigit(self.peek())) : (i += 1) self.pos += 1;
+                        if (i == 0) return error.InvalidEscape;
+                    },
+                    'z' => {
+                        self.pos += 1;
+                        while (!self.atEnd() and isSpace(self.peek())) {
+                            if (self.peek() == '\n') self.line += 1;
+                            self.pos += 1;
+                        }
+                    },
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+                        var i: u32 = 0;
+                        while (i < 3 and !self.atEnd() and isDigit(self.peek())) : (i += 1) self.pos += 1;
+                    },
+                    else => return error.InvalidEscape,
+                }
+            } else {
+                self.pos += 1;
+            }
+        }
+        return error.UnterminatedString;
     }
 
     fn lexOperator(self: *Lexer, start: u32) LexerError!Token {
