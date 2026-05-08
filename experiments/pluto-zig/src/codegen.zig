@@ -1007,6 +1007,12 @@ pub const Compiler = struct {
         //    on every member access.
         try self.emitVisibilityTable(class_reg, cd.members, cd.parent == null and !has_user_ctor);
 
+        // 5b. Build and attach the __static_set sub-table marking each
+        //     static member's name. The runtime hides these from
+        //     instance reads (see vm.tableLookup): `this.staticThing`
+        //     finds nothing, but `ClassName.staticThing` works.
+        try self.emitStaticSet(class_reg, cd.members);
+
         // 6. Bind class_reg to `Name`. Mirrors the assignment-to-ident
         //    path in emitAssign: local → MOVE, upvalue → SETUPVAL,
         //    global → SETTABUP via the resolved _ENV upvalue.
@@ -1055,6 +1061,47 @@ pub const Compiler = struct {
         if (vis_k > 255) return error.TooManyConstants;
         try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(vis_k), vis_reg));
         self.next_reg = vis_reg + 1;
+    }
+
+    /// Build a `__static_set` sub-table on the class containing one
+    /// entry (name → true) per static member. The runtime uses this
+    /// to filter static entries out of instance reads — `this.x`
+    /// won't see static `x`, but `Foo.x` will. Skipped entirely if
+    /// no member is static (no metadata = nothing to filter).
+    fn emitStaticSet(
+        self: *Compiler,
+        class_reg: u8,
+        members: []const ast.Stmt.ClassMember,
+    ) CompileError!void {
+        var any_static = false;
+        for (members) |m| {
+            const is_static = switch (m) { .method => |mm| mm.is_static, .field => |f| f.is_static };
+            if (is_static) {
+                any_static = true;
+                break;
+            }
+        }
+        if (!any_static) return;
+
+        const set_reg = self.allocReg();
+        try self.emit(Instruction.iABC(.newtable, set_reg, 0, 0, 0));
+
+        const true_reg = self.allocReg();
+        try self.emit(Instruction.iABC(.loadtrue, true_reg, 0, 0, 0));
+
+        for (members) |m| {
+            const name = switch (m) { .method => |mm| mm.name, .field => |f| f.name };
+            const is_static = switch (m) { .method => |mm| mm.is_static, .field => |f| f.is_static };
+            if (!is_static) continue;
+            const k = try self.addConstant(.{ .string = name });
+            if (k > 255) return error.TooManyConstants;
+            try self.emit(Instruction.iABC(.setfield, set_reg, 0, @intCast(k), true_reg));
+        }
+
+        const set_k = try self.addConstant(.{ .string = "__static_set" });
+        if (set_k > 255) return error.TooManyConstants;
+        try self.emit(Instruction.iABC(.setfield, class_reg, 0, @intCast(set_k), set_reg));
+        self.next_reg = set_reg + 1;
     }
 
     fn emitVisibilityEntry(

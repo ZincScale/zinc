@@ -238,16 +238,20 @@ pub const Stmt = union(enum) {
     };
     pub const Method = struct {
         name: []const u8,
-        /// The function as written by the user. Codegen prepends a
-        /// `this` first parameter so method bodies can refer to the
-        /// receiver as `this`.
+        /// The function as written by the user. For non-static methods
+        /// the parser prepends a `this` first parameter so method
+        /// bodies can refer to the receiver as `this`. Static methods
+        /// skip that injection — they're class-level helpers, not
+        /// instance-bound.
         func: Expr.Function,
         visibility: Visibility = .private,
+        is_static: bool = false,
     };
     pub const Field = struct {
         name: []const u8,
         value: *Expr,
         visibility: Visibility = .private,
+        is_static: bool = false,
     };
 
     /// Strict-Pluto class member visibility. Default is `private` —
@@ -367,7 +371,7 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
                 switch (m) {
                     .method => |mm| {
                         try out.writeAll(mm.visibility.name());
-                        try out.writeAll(" method ");
+                        try out.writeAll(if (mm.is_static) " static method " else " method ");
                         try out.writeAll(mm.name);
                         try out.writeAll("(");
                         try dumpParams(out, mm.func.params, mm.func.has_vararg);
@@ -376,7 +380,7 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
                     },
                     .field => |f| {
                         try out.writeAll(f.visibility.name());
-                        try out.writeAll(" field ");
+                        try out.writeAll(if (f.is_static) " static field " else " field ");
                         try out.writeAll(f.name);
                         try out.writeAll(" = ");
                         try dumpExpr(out, f.value);

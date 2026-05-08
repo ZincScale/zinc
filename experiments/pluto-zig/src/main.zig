@@ -230,6 +230,10 @@ pub fn main(init: std.process.Init) !void {
         "class Counter\nprivate count = 0\npublic function inc() this.count = this.count + 1 end\npublic function value() return this.count end\nend\nlocal c = new Counter()\nc:inc() c:inc() c:inc()\nreturn c:value()",
         // Phase 4.4c: protected — visible inside the class chain only
         "class Base\nprotected tag = \"base\"\npublic function reveal() return this.tag end\nend\nclass Sub extends Base\npublic function altered() return this.tag .. \"!\" end\nend\nreturn new Sub():reveal(), new Sub():altered()",
+        // Phase 4.4d: static method called via ClassName.method()
+        "class Math\npublic static function double(x) return x * 2 end\npublic static function square(x) return x * x end\nend\nreturn Math.double(21), Math.square(7)",
+        // Phase 4.4d: static field shared across instances + class-only access
+        "class Registry\npublic static count = 0\npublic static function reg() Registry.count = Registry.count + 1 return Registry.count end\nend\nReg1 = Registry.reg()\nReg2 = Registry.reg()\nReg3 = Registry.reg()\nreturn Reg1, Reg2, Reg3, Registry.count",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 
