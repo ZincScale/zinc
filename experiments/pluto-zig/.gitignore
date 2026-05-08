@@ -1,6 +1,0 @@
-.zig-cache/
-zig-out/
-alloc-rs/target/
-# vendor/lib/libgc.so is a machine-specific symlink — recreate via
-# vendor/setup-libgc.sh on a fresh checkout.
-vendor/lib/
