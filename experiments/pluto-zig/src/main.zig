@@ -242,6 +242,8 @@ pub fn main(init: std.process.Init) !void {
         "local i = 0\nlocal sum = 0\nwhile i < 10 do i += 1 if i % 2 != 0 then continue end sum += i end\nreturn sum",
         // Phase 4.7: multi-level break — bail out of a nested search
         "local i = 0\nlocal hit = 0\nwhile i < 10 do i += 1 local j = 0 while j < 10 do j += 1 if i == 3 then if j == 4 then hit = i * 100 + j break 2 end end end end\nreturn hit",
+        // Phase 4.8: numeric for-loop (ascending, step, descending)
+        "local sum = 0\nfor i = 1, 10 do sum = sum + i end\nlocal last = 0\nfor j = 10, 1, -1 do last = j end\nreturn sum, last",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

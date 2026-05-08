@@ -2716,6 +2716,113 @@ test "vm: visibility — __construct is always public (`new` works on private-de
     try testing.expectEqualStrings("hi", r[0].string.slice());
 }
 
+// === Phase 4.8: numeric for-loop ===========================================
+
+test "vm: for ascending — sums 1..10" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local sum = 0
+        \\for i = 1, 10 do sum = sum + i end
+        \\return sum
+    );
+    try testing.expectEqual(@as(i64, 55), r[0].integer);
+}
+
+test "vm: for with step — 1..10 step 2 sums odds" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local sum = 0
+        \\for i = 1, 10, 2 do sum = sum + i end
+        \\return sum
+    );
+    // 1 + 3 + 5 + 7 + 9 = 25
+    try testing.expectEqual(@as(i64, 25), r[0].integer);
+}
+
+test "vm: for descending — step -1 counts down" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local last = 0
+        \\for i = 5, 1, -1 do last = i end
+        \\return last
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+}
+
+test "vm: for — start > stop with positive step skips body entirely" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local hits = 0
+        \\for i = 5, 1 do hits = hits + 1 end
+        \\return hits
+    );
+    try testing.expectEqual(@as(i64, 0), r[0].integer);
+}
+
+test "vm: for — break exits the loop early" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local last = 0
+        \\for i = 1, 100 do
+        \\  last = i
+        \\  if i == 7 then break end
+        \\end
+        \\return last
+    );
+    try testing.expectEqual(@as(i64, 7), r[0].integer);
+}
+
+test "vm: for — continue skips an iteration's tail" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local sum = 0
+        \\for i = 1, 10 do
+        \\  if i % 2 != 0 then continue end
+        \\  sum = sum + i
+        \\end
+        \\return sum
+    );
+    // 2 + 4 + 6 + 8 + 10 = 30
+    try testing.expectEqual(@as(i64, 30), r[0].integer);
+}
+
+test "vm: for — nested loops compute factorial-like product" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Compute 5! by accumulating products in nested loops.
+    const r = try runSrc(arena,
+        \\local total = 0
+        \\for i = 1, 4 do
+        \\  for j = 1, 4 do
+        \\    total = total + i * j
+        \\  end
+        \\end
+        \\return total
+    );
+    // (1+2+3+4) * (1+2+3+4) = 100
+    try testing.expectEqual(@as(i64, 100), r[0].integer);
+}
+
 // === Phase 4.7: continue + multi-level break ==============================
 
 test "vm: continue skips to next iteration" {

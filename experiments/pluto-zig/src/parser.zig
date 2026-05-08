@@ -141,6 +141,7 @@ pub const Parser = struct {
         if (self.isKeyword("local")) return self.parseLocal();
         if (self.isKeyword("if")) return self.parseIf();
         if (self.isKeyword("while")) return self.parseWhile();
+        if (self.isKeyword("for")) return self.parseFor();
         if (self.isKeyword("switch")) return self.parseSwitch();
         if (self.isKeyword("class")) return self.parseClassDecl();
         if (self.isKeyword("function")) return self.parseFunctionDecl();
@@ -257,6 +258,43 @@ pub const Parser = struct {
         return ast.Stmt{ .if_stmt = .{
             .branches = try branches.toOwnedSlice(self.arena),
             .else_block = else_block,
+        } };
+    }
+
+    /// `for IDENT = start, stop [, step] do body end` — numeric for.
+    /// (Generic for — `for k, v in pairs(t)` — is phase 4.9 and would
+    /// need iterator opcodes + a real `pairs` builtin.) Lua's grammar
+    /// disambiguates the two forms by what follows the first ident:
+    /// `=` for numeric, `in` (or `,` then `in`) for generic.
+    fn parseFor(self: *Parser) ParseError!ast.Stmt {
+        try self.expectKeyword("for");
+        const var_name = try self.expectIdentLexeme();
+
+        if (self.cur.kind != .eq) {
+            // Generic-for form not yet supported.
+            std.debug.print("strict-pluto: only numeric `for IDENT = a, b [, c] do ... end` is supported (generic-for is phase 4.9)\n", .{});
+            return error.StrictPlutoViolation;
+        }
+        try self.advance(); // `=`
+
+        const start = try self.parseExpr();
+        try self.expect(.comma);
+        const stop = try self.parseExpr();
+        var step: ?*ast.Expr = null;
+        if (self.cur.kind == .comma) {
+            try self.advance();
+            step = try self.parseExpr();
+        }
+        try self.expectKeyword("do");
+        const body = try self.parseBlock();
+        try self.expectKeyword("end");
+
+        return ast.Stmt{ .numeric_for = .{
+            .var_name = var_name,
+            .start = start,
+            .stop = stop,
+            .step = step,
+            .body = body,
         } };
     }
 

@@ -185,6 +185,9 @@ pub const Stmt = union(enum) {
     if_stmt: If,
     /// `while cond do ... end`
     while_stmt: While,
+    /// `for IDENT = start, stop[, step] do body end` — numeric for.
+    /// Lowers to a while-style loop in codegen; no new opcodes.
+    numeric_for: NumericFor,
     /// `switch expr case v1[,v2]: body case v3: body [default: body] end`
     /// Strict-Pluto choice: cases never fall through (each case ends
     /// implicitly). `break` inside a case is the canonical early-exit;
@@ -224,6 +227,17 @@ pub const Stmt = union(enum) {
     };
     pub const Branch = struct { cond: *Expr, body: *Block };
     pub const While = struct { cond: *Expr, body: *Block };
+    pub const NumericFor = struct {
+        var_name: []const u8,
+        start: *Expr,
+        stop: *Expr,
+        /// Optional step. Defaults to 1 when null. If a literal
+        /// integer, codegen uses its sign to pick the comparison
+        /// direction (ascending vs descending). Variable steps are
+        /// always treated as ascending (caller's responsibility).
+        step: ?*Expr,
+        body: *Block,
+    };
     pub const Switch = struct {
         discriminant: *Expr,
         cases: []const Case,
@@ -368,6 +382,22 @@ pub fn dumpStmt(out: anytype, s: *const Stmt, indent: u32) anyerror!void {
             try dumpExpr(out, w.cond);
             try out.writeAll("\n");
             try dumpBlock(out, w.body, indent + 1);
+            try writeIndent(out, indent);
+            try out.writeAll(")\n");
+        },
+        .numeric_for => |fr| {
+            try out.writeAll("(for ");
+            try out.writeAll(fr.var_name);
+            try out.writeAll(" = ");
+            try dumpExpr(out, fr.start);
+            try out.writeAll(" ");
+            try dumpExpr(out, fr.stop);
+            if (fr.step) |step_e| {
+                try out.writeAll(" ");
+                try dumpExpr(out, step_e);
+            }
+            try out.writeAll("\n");
+            try dumpBlock(out, fr.body, indent + 1);
             try writeIndent(out, indent);
             try out.writeAll(")\n");
         },
