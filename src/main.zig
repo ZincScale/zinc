@@ -206,6 +206,14 @@ pub fn main(init: std.process.Init) !void {
         "local greet = function(name: string): string\nreturn \"Hello, \" .. name\nend\nprint(greet(\"Alice\"))\nreturn nil",
         // typed param rejects mismatched arg at runtime
         "local f = function(x: number): number return x * 2 end\nprint(\"f(21) =\", f(21))\nreturn nil",
+        // Pluto: switch — single-value cases + default
+        "local function name_of(d) switch d case 1: return \"Mon\" case 2: return \"Tue\" case 3: return \"Wed\" default: return \"?\" end end\nprint(name_of(2), name_of(7))\nreturn nil",
+        // Pluto: switch — multi-value case
+        "local function bucket(n) switch n case 1, 2, 3: return \"small\" case 10, 20, 30: return \"medium\" default: return \"other\" end end\nreturn bucket(2), bucket(20), bucket(7)",
+        // Pluto: switch with break (early-exit inside a case body)
+        "local hits = 0\nlocal x = 1\nswitch x case 1: hits += 1 break hits += 99 default: hits = -1 end\nreturn hits",
+        // Pluto: break in while loop (now supported via the switch break-stack)
+        "local i = 0\nwhile true do i += 1 if i >= 5 then break end end\nreturn i",
     };
     for (programs) |src| try executeAndPrint(out, init.arena.allocator(), src);
 

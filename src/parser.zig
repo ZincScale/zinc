@@ -116,14 +116,19 @@ pub const Parser = struct {
         if (self.cur.kind == .eof) return true;
         // Block-terminating keywords. `until` is for repeat/until
         // (deferred); leaving it in place so that future grammar
-        // additions don't require re-touching this list.
-        return self.isAnyKeyword(&.{ "end", "else", "elseif", "until" });
+        // additions don't require re-touching this list. `case` /
+        // `default` only legally appear inside a switch body, so
+        // treating them as block terminators everywhere is safe — any
+        // appearance outside a switch becomes an UnexpectedToken at
+        // the enclosing layer.
+        return self.isAnyKeyword(&.{ "end", "else", "elseif", "until", "case", "default" });
     }
 
     fn parseStmt(self: *Parser) ParseError!ast.Stmt {
         if (self.isKeyword("local")) return self.parseLocal();
         if (self.isKeyword("if")) return self.parseIf();
         if (self.isKeyword("while")) return self.parseWhile();
+        if (self.isKeyword("switch")) return self.parseSwitch();
         if (self.isKeyword("function")) return self.parseFunctionDecl();
         if (self.isKeyword("return")) return self.parseReturn();
         if (self.isKeyword("break")) {
@@ -226,6 +231,61 @@ pub const Parser = struct {
         const body = try self.parseBlock();
         try self.expectKeyword("end");
         return ast.Stmt{ .while_stmt = .{ .cond = cond, .body = body } };
+    }
+
+    /// `switch <expr> case v1[, v2, ...]: <body> [case ...:]* [default: <body>]? end`
+    ///
+    /// strict-Pluto: cases never fall through. `default` (if present)
+    /// must be the last clause. `break` inside a case body is allowed
+    /// (early-exit) and lands at the end of the switch.
+    fn parseSwitch(self: *Parser) ParseError!ast.Stmt {
+        try self.expectKeyword("switch");
+        const disc = try self.parseExpr();
+
+        var cases = std.ArrayList(ast.Stmt.Case){ .items = &.{}, .capacity = 0 };
+        var default_block: ?*ast.Block = null;
+
+        while (true) {
+            if (self.isKeyword("case")) {
+                if (default_block != null) {
+                    std.debug.print("strict-pluto: `case` after `default` — default must be the last clause in a switch\n", .{});
+                    return error.StrictPlutoViolation;
+                }
+                try self.advance();
+                var values = std.ArrayList(*ast.Expr){ .items = &.{}, .capacity = 0 };
+                try values.append(self.arena, try self.parseExpr());
+                while (self.cur.kind == .comma) {
+                    try self.advance();
+                    try values.append(self.arena, try self.parseExpr());
+                }
+                try self.expect(.colon);
+                const body = try self.parseBlock();
+                try cases.append(self.arena, .{
+                    .values = try values.toOwnedSlice(self.arena),
+                    .body = body,
+                });
+            } else if (self.isKeyword("default")) {
+                if (default_block != null) {
+                    std.debug.print("strict-pluto: duplicate `default` in switch\n", .{});
+                    return error.StrictPlutoViolation;
+                }
+                try self.advance();
+                try self.expect(.colon);
+                default_block = try self.parseBlock();
+            } else break;
+        }
+
+        if (cases.items.len == 0 and default_block == null) {
+            std.debug.print("strict-pluto: switch must have at least one `case` or `default` clause\n", .{});
+            return error.StrictPlutoViolation;
+        }
+
+        try self.expectKeyword("end");
+        return ast.Stmt{ .switch_stmt = .{
+            .discriminant = disc,
+            .cases = try cases.toOwnedSlice(self.arena),
+            .default_block = default_block,
+        } };
     }
 
     fn parseFunctionDecl(self: *Parser) ParseError!ast.Stmt {
@@ -992,6 +1052,101 @@ test "parse: error - assign to non-lvalue (call result)" {
     // that strictness in 3.1.0. `f() = 1` is the unambiguous case.)
     var p = try Parser.init(arena, "f() = 1");
     try testing.expectError(error.InvalidAssignmentTarget, p.parseChunk());
+}
+
+test "parse: switch with single-value cases + default" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena,
+        \\switch x
+        \\  case 1: return "one"
+        \\  case 2: return "two"
+        \\  default: return "other"
+        \\end
+    );
+    try testing.expectEqualStrings(
+        \\(switch x
+        \\  case 1:
+        \\    (return "one")
+        \\  case 2:
+        \\    (return "two")
+        \\  default:
+        \\    (return "other")
+        \\)
+        \\
+    , out);
+}
+
+test "parse: switch with multi-value case (case 1, 2, 3:)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const out = try parseAndDump(arena,
+        \\switch n
+        \\  case 1, 2, 3: return "small"
+        \\  case 100: return "big"
+        \\end
+    );
+    try testing.expectEqualStrings(
+        \\(switch n
+        \\  case 1,2,3:
+        \\    (return "small")
+        \\  case 100:
+        \\    (return "big")
+        \\)
+        \\
+    , out);
+}
+
+test "parse: switch with break inside a case body" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `break` inside a case is the canonical early-exit. It parses as
+    // an ordinary break_stmt; codegen routes it to the switch's end.
+    const out = try parseAndDump(arena,
+        \\switch x
+        \\  case 1: y = 10 break
+        \\  default: y = 0
+        \\end
+    );
+    try testing.expectEqualStrings(
+        \\(switch x
+        \\  case 1:
+        \\    (assign y = 10)
+        \\    (break)
+        \\  default:
+        \\    (assign y = 0)
+        \\)
+        \\
+    , out);
+}
+
+test "parse: switch error - default before case" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var p = try Parser.init(arena,
+        \\switch x
+        \\  default: return 0
+        \\  case 1: return 1
+        \\end
+    );
+    try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
+}
+
+test "parse: switch error - empty switch (no clauses)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var p = try Parser.init(arena, "switch x end");
+    try testing.expectError(error.StrictPlutoViolation, p.parseChunk());
 }
 
 test "parse: error - missing expression in `if = end`" {
