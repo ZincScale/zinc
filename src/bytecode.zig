@@ -266,9 +266,23 @@ pub const Proto = struct {
     code: []const Instruction,
     /// Constant table — referenced by LOADK / GETFIELD / etc.
     constants: []const Constant,
-    /// Sub-protos (closures defined inside this function). Empty for
-    /// top-level chunks until phase 3.2.x adds CLOSURE emission.
+    /// Sub-protos (closures defined inside this function).
     protos: []const *const Proto,
+    /// Upvalue descriptors: for each upvalue this proto captures
+    /// from its enclosing scope, where to grab it. Read by the
+    /// CLOSURE opcode at runtime to build the upvalue array.
+    upvalues: []const UpvalueDesc,
+};
+
+pub const UpvalueDesc = struct {
+    /// Source name — useful for debugging; not required by the VM.
+    name: []const u8,
+    /// True: capture from the enclosing function's stack at
+    ///   register `idx` (an open upvalue at CLOSURE-time).
+    /// False: capture from the enclosing closure's upvalue array
+    ///   at slot `idx` (chain through).
+    in_stack: bool,
+    idx: u8,
 };
 
 // =============================================================================

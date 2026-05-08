@@ -45,6 +45,10 @@ const Frame = struct {
     results_at: usize,
     /// How many results the caller wants (Lua's `C-1` from CALL).
     results_wanted: u8,
+    /// The closure currently executing this frame. null only for the
+    /// top-level chunk (which has no upvalues to read from anyway).
+    /// GETUPVAL / SETUPVAL go through closure.upvalues[idx].
+    closure: ?*v.Closure,
 };
 
 const REGISTER_POOL_SIZE: usize = 8 * 1024;
@@ -57,6 +61,12 @@ pub const VM = struct {
     registers: []TValue,
     /// Call stack. Top of stack is the currently-executing frame.
     frames: std.ArrayList(Frame),
+    /// Open upvalue cells — those whose `value` pointer still points
+    /// into the live register pool. When a frame pops, we walk this
+    /// list and close any cells whose target is in the popping
+    /// frame's register range. Sorted in arbitrary order; phase 2.x
+    /// keeps it ordered for O(log n) close.
+    open_upvalues: std.ArrayList(*v.UpvalueCell),
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
         const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
@@ -68,17 +78,20 @@ pub const VM = struct {
             .base = 0,
             .results_at = 0,
             .results_wanted = 0, // top-level: returns surface via run()
+            .closure = null,
         });
         return .{
             .allocator = allocator,
             .registers = regs,
             .frames = frames,
+            .open_upvalues = .{ .items = &.{}, .capacity = 0 },
         };
     }
 
     pub fn deinit(self: *VM) void {
         self.allocator.free(self.registers);
         self.frames.deinit(self.allocator);
+        self.open_upvalues.deinit(self.allocator);
     }
 
     fn currentFrame(self: *VM) *Frame {
@@ -162,14 +175,24 @@ pub const VM = struct {
                     frame.pc = @intCast(@as(i64, @intCast(frame.pc)) + offset);
                 },
 
-                // CLOSURE A Bx: build a closure from sub-proto Bx of
-                // the current proto, place it in R[A]. Phase 3.2.3
-                // has no upvalue capture; phase 3.2.4 fills upvalues.
-                .closure => {
-                    const sub = self.currentProto().protos[instr.unpackBx()];
-                    const cl = try self.allocator.create(v.Closure);
-                    cl.* = .{ .proto = sub };
-                    self.reg(instr.a).* = TValue.fromClosure(cl);
+                // CLOSURE A Bx: build a closure from sub-proto Bx,
+                // wiring its upvalues per the sub-proto's descriptor
+                // table. in_stack=true descriptors create or reuse an
+                // open cell pointing at the current frame's register.
+                // in_stack=false descriptors share the current
+                // closure's upvalue cell (chain through).
+                .closure => try self.handleClosure(instr.a, instr.unpackBx()),
+
+                // GETUPVAL A B: R[A] = upvalue[B].value.*
+                .getupval => {
+                    const cl = self.currentFrame().closure orelse return error.UnknownOpcode;
+                    self.reg(instr.a).* = cl.upvalues[instr.b].value.*;
+                },
+
+                // SETUPVAL A B: upvalue[B].value.* = R[A]
+                .setupval => {
+                    const cl = self.currentFrame().closure orelse return error.UnknownOpcode;
+                    cl.upvalues[instr.b].value.* = self.reg(instr.a).*;
                 },
 
                 // CALL A B C: closure at R[A], B-1 args, C-1 expected
@@ -213,6 +236,7 @@ pub const VM = struct {
             .base = callee_base,
             .results_at = results_at,
             .results_wanted = results_wanted,
+            .closure = cl,
         });
 
         // Pad missing args with nil so the callee always sees its
@@ -223,6 +247,68 @@ pub const VM = struct {
             while (i < cl.proto.num_params) : (i += 1) {
                 self.registers[callee_base + i] = TValue.NIL;
             }
+        }
+    }
+
+    /// CLOSURE handler — build a closure for sub-proto `bx` of the
+    /// current proto and place it in R[A]. Walks the sub-proto's
+    /// upvalue descriptors and wires each cell appropriately.
+    fn handleClosure(self: *VM, a: u8, bx: u17) RuntimeError!void {
+        const cur = self.currentFrame();
+        const sub = cur.proto.protos[bx];
+
+        const cells = try self.allocator.alloc(*v.UpvalueCell, sub.upvalues.len);
+        for (sub.upvalues, 0..) |desc, i| {
+            if (desc.in_stack) {
+                // Open upvalue capturing from this frame's register.
+                const slot_idx = cur.base + desc.idx;
+                cells[i] = try self.findOrCreateOpenUpvalue(slot_idx);
+            } else {
+                // Inherit from the current closure's upvalues. The
+                // top-level chunk has no closure, so this branch
+                // can't fire there — that's a compiler invariant.
+                const parent_cl = cur.closure orelse return error.UnknownOpcode;
+                cells[i] = parent_cl.upvalues[desc.idx];
+            }
+        }
+
+        const cl = try self.allocator.create(v.Closure);
+        cl.* = .{ .proto = sub, .upvalues = cells };
+        self.reg(a).* = TValue.fromClosure(cl);
+    }
+
+    /// Find an existing open upvalue cell pointing at register slot
+    /// `slot_idx`, or allocate a new one. Multiple closures capturing
+    /// the same local share the same cell so writes are visible.
+    fn findOrCreateOpenUpvalue(self: *VM, slot_idx: usize) RuntimeError!*v.UpvalueCell {
+        for (self.open_upvalues.items) |cell| {
+            // An open cell points into self.registers; check if it's
+            // pointing at slot_idx.
+            const offset = (@intFromPtr(cell.value) - @intFromPtr(self.registers.ptr)) / @sizeOf(TValue);
+            if (offset == slot_idx) return cell;
+        }
+        const cell = try self.allocator.create(v.UpvalueCell);
+        cell.* = .{ .value = &self.registers[slot_idx] };
+        try self.open_upvalues.append(self.allocator, cell);
+        return cell;
+    }
+
+    /// Close any open upvalue cells whose target slot is at or above
+    /// `from_slot`. Called when a frame pops — its register slots
+    /// are about to become stale, so any cells pointing there get
+    /// detached and given their own backing storage.
+    fn closeUpvaluesFrom(self: *VM, from_slot: usize) void {
+        var i: usize = 0;
+        while (i < self.open_upvalues.items.len) {
+            const cell = self.open_upvalues.items[i];
+            const offset = (@intFromPtr(cell.value) - @intFromPtr(self.registers.ptr)) / @sizeOf(TValue);
+            if (offset >= from_slot) {
+                cell.storage = cell.value.*;
+                cell.value = &cell.storage;
+                _ = self.open_upvalues.swapRemove(i);
+                continue;
+            }
+            i += 1;
         }
     }
 
@@ -246,6 +332,12 @@ pub const VM = struct {
         const results_at = cur.results_at;
         const results_wanted = cur.results_wanted;
         const was_top_level = self.frames.items.len == 1;
+        const popping_base = cur.base;
+
+        // Before popping, close any upvalues pointing into this
+        // frame's registers. After this, the cells own their values
+        // independent of the (about-to-be-stale) stack slots.
+        self.closeUpvaluesFrom(popping_base);
 
         _ = self.frames.pop();
 
@@ -910,20 +1002,102 @@ test "vm: nested calls (no closure-over-outer)" {
     try testing.expectEqual(@as(i64, 20), r[0].integer);
 }
 
-test "vm: function body referencing outer local — pinned as known limitation" {
+test "vm: closure captures outer local as upvalue" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    // The inner function tries to read `double` from the enclosing
-    // scope, which requires upvalue capture. Phase 3.2.4 (next push)
-    // adds it; until then this is a clean compile error rather than
-    // a silent miscompile.
-    try testing.expectError(error.UnknownIdentifier, runSrc(arena,
+    // `quadruple` body references `double` from the enclosing scope
+    // — the compiler resolves it as an upvalue, the runtime CLOSURE
+    // captures it as an open cell pointing at the outer's register.
+    const r = try runSrc(arena,
         \\local double = function(x) return x * 2 end
         \\local quadruple = function(x) return double(double(x)) end
         \\return quadruple(5)
-    ));
+    );
+    try testing.expectEqual(@as(i64, 20), r[0].integer);
+}
+
+// === Phase 3.2.4 + 2.4: upvalues =============================================
+
+test "vm: recursive fib via local function (the holy grail)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena,
+        \\local function fib(n)
+        \\    if n < 2 then return n end
+        \\    return fib(n - 1) + fib(n - 2)
+        \\end
+        \\return fib(10)
+    );
+    // fib(10) = 55
+    try testing.expectEqual(@as(i64, 55), r[0].integer);
+}
+
+test "vm: closure-shared upvalue sees writes from both sides" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `inc` modifies `count` (an upvalue) — `read` sees it.
+    // Both closures share the same UpvalueCell.
+    const r = try runSrc(arena,
+        \\local count = 0
+        \\local inc = function() count = count + 1 end
+        \\local read = function() return count end
+        \\inc()
+        \\inc()
+        \\inc()
+        \\return read()
+    );
+    try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+test "vm: deeply nested closures chain upvalues correctly" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // The inner-inner function captures `x` through TWO levels of
+    // function nesting — middle's upvalue desc has in_stack=true
+    // (captures from outer's register), inner's has in_stack=false
+    // (chains through middle's upvalue). Tests the compiler's
+    // upvalue chain traversal and the runtime's chain-through path.
+    const r = try runSrc(arena,
+        \\local x = 100
+        \\local outer = function()
+        \\    local inner = function() return x end
+        \\    return inner()
+        \\end
+        \\return outer()
+    );
+    try testing.expectEqual(@as(i64, 100), r[0].integer);
+}
+
+test "vm: upvalue survives parent return (closes correctly)" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // `make_counter` returns a closure that captures its local `n`.
+    // When make_counter returns, the cell must close (copy n's value
+    // into the cell's storage) so the returned closure still works.
+    const r = try runSrc(arena,
+        \\local function make_counter()
+        \\    local n = 0
+        \\    return function()
+        \\        n = n + 1
+        \\        return n
+        \\    end
+        \\end
+        \\local c = make_counter()
+        \\return c(), c(), c()
+    );
+    try testing.expectEqual(@as(i64, 1), r[0].integer);
+    try testing.expectEqual(@as(i64, 2), r[1].integer);
+    try testing.expectEqual(@as(i64, 3), r[2].integer);
 }
 
 test "vm: function returns multiple values" {

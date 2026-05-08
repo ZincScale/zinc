@@ -18,12 +18,28 @@ pub const Table = @import("table.zig").Table;
 const bc = @import("bytecode.zig");
 
 /// A Lua closure — a function value at runtime. Holds a reference to
-/// the compiled Proto, plus any captured upvalues (none yet — upvalue
-/// capture is the next phase). Defined here alongside TValue so the
-/// `.closure` variant doesn't pull a forward declaration headache.
+/// the compiled Proto and an array of upvalue cells captured from the
+/// enclosing scope at CLOSURE-time.
 pub const Closure = struct {
     proto: *const bc.Proto,
-    // upvalues: []TValue,  // populated when CLOSURE captures
+    upvalues: []*UpvalueCell,
+};
+
+/// One captured upvalue. Models Lua's open/closed transition:
+///
+/// - Open:   `value` points at a stack slot in some live frame.
+///           Reads and writes go through that slot directly, so
+///           multiple closures (and the parent function) all see the
+///           same updates.
+/// - Closed: `value` points at this cell's own `storage`. Happens
+///           when the parent frame pops — the value gets copied into
+///           the cell so it survives.
+pub const UpvalueCell = struct {
+    /// Pointer to the live TValue. Either points into a register
+    /// pool slot (open) or at this cell's own `storage` (closed).
+    value: *TValue,
+    /// Backing TValue once the cell is closed. Untouched while open.
+    storage: TValue = .{ .nil = {} },
 };
 
 pub const Tag = enum(u8) {
