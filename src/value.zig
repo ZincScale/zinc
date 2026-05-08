@@ -50,6 +50,19 @@ pub const Tag = enum(u8) {
     string,
     table,
     closure,
+    native,
+};
+
+/// A Zig-implemented built-in function callable from Lua code. Defined
+/// as a value type so the static `print`, `tostring`, etc. can live in
+/// const memory and be referenced by pointer.
+///
+/// The VM is passed as `*anyopaque` to break the circular dependency
+/// between value.zig and vm.zig — the implementation casts back to
+/// the concrete VM type.
+pub const NativeFn = struct {
+    name: []const u8,
+    func: *const fn (vm: *anyopaque, args: []const TValue) anyerror![]TValue,
 };
 
 pub const TValue = union(Tag) {
@@ -60,6 +73,7 @@ pub const TValue = union(Tag) {
     string: *String,
     table: *Table,
     closure: *Closure,
+    native: *const NativeFn,
 
     pub const NIL: TValue = .{ .nil = {} };
     pub const TRUE: TValue = .{ .boolean = true };
@@ -87,6 +101,10 @@ pub const TValue = union(Tag) {
 
     pub fn fromClosure(c: *Closure) TValue {
         return .{ .closure = c };
+    }
+
+    pub fn fromNative(n: *const NativeFn) TValue {
+        return .{ .native = n };
     }
 
     /// Lua truthiness: only `nil` and `false` are falsy.
@@ -129,6 +147,10 @@ pub const TValue = union(Tag) {
                 .closure => |bv| av == bv, // identity
                 else => false,
             },
+            .native => |av| switch (b) {
+                .native => |bv| av == bv, // identity
+                else => false,
+            },
         };
     }
 
@@ -143,6 +165,7 @@ pub const TValue = union(Tag) {
             .string => |s| s.hash,
             .table => |t| @intFromPtr(t),
             .closure => |c| @intFromPtr(c),
+            .native => |n| @intFromPtr(n),
         };
     }
 

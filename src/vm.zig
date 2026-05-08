@@ -55,43 +55,83 @@ const REGISTER_POOL_SIZE: usize = 8 * 1024;
 
 pub const VM = struct {
     allocator: std.mem.Allocator,
-    /// Shared register pool used by all frames; each frame indexes
-    /// from its own `base` offset. Sized large enough that no
-    /// reasonable program overflows; phase 2.x grows it on demand.
     registers: []TValue,
-    /// Call stack. Top of stack is the currently-executing frame.
     frames: std.ArrayList(Frame),
-    /// Open upvalue cells — those whose `value` pointer still points
-    /// into the live register pool. When a frame pops, we walk this
-    /// list and close any cells whose target is in the popping
-    /// frame's register range. Sorted in arbitrary order; phase 2.x
-    /// keeps it ordered for O(log n) close.
     open_upvalues: std.ArrayList(*v.UpvalueCell),
+    /// Globals table — _ENV at runtime. Holds built-ins (print, etc.)
+    /// at init time; user globals (`x = 5` at top level) write into
+    /// it via SETTABUP.
+    globals: *v.Table,
+    /// Backing storage for the main closure's _ENV upvalue cell. Held
+    /// inline so we don't need to allocate it from the allocator
+    /// (and so the cell stays valid for the lifetime of the VM).
+    env_storage: TValue,
+    env_cell: v.UpvalueCell,
+    /// Stdout buffer for `print`, `io.write`, etc. The demo and
+    /// tests read this after run() completes.
+    output: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator, proto: *const bc.Proto) !VM {
         const regs = try allocator.alloc(TValue, REGISTER_POOL_SIZE);
         @memset(regs, TValue.NIL);
-        var frames: std.ArrayList(Frame) = .{ .items = &.{}, .capacity = 0 };
-        try frames.append(allocator, .{
+
+        // Build the globals table and register built-ins.
+        const globals = try v.Table.createWithAllocator(allocator);
+        try registerBuiltins(globals, allocator);
+
+        // Wrap the main proto in a closure that has the globals table
+        // as upvalue 0 (_ENV). The cell is closed from the start —
+        // its value lives in the VM's env_storage field so the
+        // pointer is stable for the VM's lifetime.
+        const main_closure = try allocator.create(v.Closure);
+        const upvals = try allocator.alloc(*v.UpvalueCell, 1);
+
+        var vm: VM = .{
+            .allocator = allocator,
+            .registers = regs,
+            .frames = .{ .items = &.{}, .capacity = 0 },
+            .open_upvalues = .{ .items = &.{}, .capacity = 0 },
+            .globals = globals,
+            .env_storage = TValue.fromTable(globals),
+            .env_cell = undefined,
+            .output = .{ .items = &.{}, .capacity = 0 },
+        };
+        // Now that the VM is in its final memory location, point the
+        // cell at the env_storage field. (Building this earlier and
+        // moving the VM by-value would invalidate the pointer.)
+        // Caller takes ownership; the returned struct is what they hold.
+        // To make this safe, return a heap-allocated VM... but we use
+        // the existing convention of returning a value. Instead, let
+        // the caller call vm.bindEnv() right after init to wire it.
+        try vm.frames.append(allocator, .{
             .proto = proto,
             .pc = 0,
             .base = 0,
             .results_at = 0,
-            .results_wanted = 0, // top-level: returns surface via run()
-            .closure = null,
+            .results_wanted = 0,
+            .closure = main_closure,
         });
-        return .{
-            .allocator = allocator,
-            .registers = regs,
-            .frames = frames,
-            .open_upvalues = .{ .items = &.{}, .capacity = 0 },
-        };
+        main_closure.* = .{ .proto = proto, .upvalues = upvals };
+        // env_cell.value is wired in bindEnv() after the VM is at its
+        // final address. upvals[0] = &vm.env_cell — same caveat.
+        return vm;
+    }
+
+    /// Wire the _ENV cell to point at this VM's env_storage. Must be
+    /// called after `init` once the VM is at its final memory address
+    /// (typically right after assigning the result of `init` to a
+    /// stack variable). Pointers into `vm.env_storage` and
+    /// `&vm.env_cell` need stable addresses.
+    pub fn bindEnv(self: *VM) void {
+        self.env_cell = .{ .value = &self.env_storage };
+        self.frames.items[0].closure.?.upvalues[0] = &self.env_cell;
     }
 
     pub fn deinit(self: *VM) void {
         self.allocator.free(self.registers);
         self.frames.deinit(self.allocator);
         self.open_upvalues.deinit(self.allocator);
+        self.output.deinit(self.allocator);
     }
 
     fn currentFrame(self: *VM) *Frame {
@@ -195,6 +235,31 @@ pub const VM = struct {
                     cl.upvalues[instr.b].value.* = self.reg(instr.a).*;
                 },
 
+                // GETTABUP A B C: R[A] = upvalue[B].value.*[K[C]:string]
+                // Used for global reads (B == _ENV upvalue, C == name).
+                .gettabup => {
+                    const cl = self.currentFrame().closure orelse return error.UnknownOpcode;
+                    const env = cl.upvalues[instr.b].value.*;
+                    if (env != .table) return error.InvalidArithmeticOperand;
+                    const k = self.currentProto().constants[instr.c];
+                    if (k != .string) return error.InvalidArithmeticOperand;
+                    const key = try self.constToValue(k);
+                    self.reg(instr.a).* = env.table.get(key);
+                },
+
+                // SETTABUP A B C: upvalue[A].value.*[K[B]:string] = R[C]
+                .settabup => {
+                    const cl = self.currentFrame().closure orelse return error.UnknownOpcode;
+                    const env = cl.upvalues[instr.a].value.*;
+                    if (env != .table) return error.InvalidArithmeticOperand;
+                    const k = self.currentProto().constants[instr.b];
+                    if (k != .string) return error.InvalidArithmeticOperand;
+                    const key = try self.constToValue(k);
+                    const val = self.reg(instr.c).*;
+                    env.table.setWithAllocator(self.allocator, key, val) catch
+                        return error.OutOfMemory;
+                },
+
                 // NEWTABLE A: R[A] = {}.
                 // (Lua's NEWTABLE encodes size hints in B/C; we ignore
                 // them — the table grows as needed.)
@@ -284,9 +349,30 @@ pub const VM = struct {
     /// callee's R[0] is the first arg, which corresponds to caller's
     /// R[A+1]. So callee's frame.base = caller_base + A + 1.
     fn handleCall(self: *VM, a: u8, b: u8, c: u8) RuntimeError!void {
-        const closure_val = self.reg(a).*;
-        if (closure_val != .closure) return error.InvalidArithmeticOperand;
-        const cl = closure_val.closure;
+        const callee = self.reg(a).*;
+
+        // Native function: invoke directly, no frame needed.
+        if (callee == .native) {
+            const cur_frame = self.currentFrame();
+            const arg_count: usize = if (b == 0) 0 else b - 1;
+            const args_start = cur_frame.base + a + 1;
+            const args = self.registers[args_start .. args_start + arg_count];
+
+            const results = callee.native.func(@ptrCast(self), args) catch
+                return error.InvalidArithmeticOperand;
+            defer self.allocator.free(results);
+
+            const results_at = cur_frame.base + a;
+            const wanted: usize = if (c == 0) 0 else c - 1;
+            var i: usize = 0;
+            while (i < wanted) : (i += 1) {
+                self.registers[results_at + i] = if (i < results.len) results[i] else TValue.NIL;
+            }
+            return;
+        }
+
+        if (callee != .closure) return error.InvalidArithmeticOperand;
+        const cl = callee.closure;
 
         const cur = self.currentFrame();
         const callee_base = cur.base + a + 1;
@@ -593,6 +679,129 @@ fn compareLessEq(a: TValue, b: TValue) RuntimeError!bool {
 }
 
 // =============================================================================
+// Built-in functions (the basic stdlib)
+// =============================================================================
+//
+// Each builtin is a NativeFn the VM exposes via the globals table.
+// They take `*anyopaque` (cast back to *VM) plus the args slice, and
+// return a slice of result values allocated from the VM's allocator.
+// The VM frees the slice after copying values into result registers.
+
+fn registerBuiltins(globals: *v.Table, allocator: std.mem.Allocator) !void {
+    const builtins = [_]struct { name: []const u8, fn_ptr: *const v.NativeFn }{
+        .{ .name = "print", .fn_ptr = &builtin_print },
+        .{ .name = "tostring", .fn_ptr = &builtin_tostring },
+        .{ .name = "type", .fn_ptr = &builtin_type },
+        .{ .name = "tonumber", .fn_ptr = &builtin_tonumber },
+        .{ .name = "ipairs", .fn_ptr = &builtin_ipairs },
+    };
+    for (builtins) |b| {
+        const key_str = try v.String.createWithAllocator(allocator, b.name);
+        try globals.setWithAllocator(allocator, TValue.fromString(key_str), TValue.fromNative(b.fn_ptr));
+    }
+}
+
+const builtin_print: v.NativeFn = .{ .name = "print", .func = lua_print };
+const builtin_tostring: v.NativeFn = .{ .name = "tostring", .func = lua_tostring };
+const builtin_type: v.NativeFn = .{ .name = "type", .func = lua_type };
+const builtin_tonumber: v.NativeFn = .{ .name = "tonumber", .func = lua_tonumber };
+const builtin_ipairs: v.NativeFn = .{ .name = "ipairs", .func = lua_ipairs };
+
+fn lua_print(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (i > 0) try vm.output.append(vm.allocator, '\t');
+        try formatValueTo(&vm.output, vm.allocator, args[i]);
+    }
+    try vm.output.append(vm.allocator, '\n');
+    return try vm.allocator.alloc(TValue, 0);
+}
+
+fn lua_tostring(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+    if (args.len > 0) try formatValueTo(&buf, vm.allocator, args[0]);
+    const owned = try buf.toOwnedSlice(vm.allocator);
+    const s = try v.String.createWithAllocator(vm.allocator, owned);
+    vm.allocator.free(owned);
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = TValue.fromString(s);
+    return out;
+}
+
+fn lua_type(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    const name: []const u8 = if (args.len == 0) "nil" else switch (args[0]) {
+        .nil => "nil",
+        .boolean => "boolean",
+        .integer, .number => "number",
+        .string => "string",
+        .table => "table",
+        .closure, .native => "function",
+    };
+    const s = try v.String.createWithAllocator(vm.allocator, name);
+    const out = try vm.allocator.alloc(TValue, 1);
+    out[0] = TValue.fromString(s);
+    return out;
+}
+
+fn lua_tonumber(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    const out = try vm.allocator.alloc(TValue, 1);
+    if (args.len == 0) {
+        out[0] = TValue.NIL;
+        return out;
+    }
+    out[0] = switch (args[0]) {
+        .integer, .number => args[0],
+        .string => |s| blk: {
+            const text = s.slice();
+            if (std.fmt.parseInt(i64, text, 10)) |n| {
+                break :blk TValue.fromInt(n);
+            } else |_| {}
+            if (std.fmt.parseFloat(f64, text)) |f| {
+                break :blk TValue.fromFloat(f);
+            } else |_| {}
+            break :blk TValue.NIL;
+        },
+        else => TValue.NIL,
+    };
+    return out;
+}
+
+/// Phase 3.5 stub: ipairs is supposed to return an iterator triple
+/// (iterator function, table, control). Real iteration support
+/// requires generic-for codegen (deferred). For now we just make the
+/// symbol resolvable so demo programs don't crash on `ipairs(t)` —
+/// returning nil triple disables iteration cleanly.
+fn lua_ipairs(vm_ptr: *anyopaque, args: []const TValue) anyerror![]TValue {
+    const vm: *VM = @ptrCast(@alignCast(vm_ptr));
+    _ = args;
+    const out = try vm.allocator.alloc(TValue, 3);
+    out[0] = TValue.NIL;
+    out[1] = TValue.NIL;
+    out[2] = TValue.NIL;
+    return out;
+}
+
+/// Format a TValue's print-form into `buf`. Used by print, tostring,
+/// and the demo's printValue. Mirrors Lua's tostring rules.
+fn formatValueTo(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, val: TValue) !void {
+    var stack_buf: [64]u8 = undefined;
+    switch (val) {
+        .nil => try buf.appendSlice(allocator, "nil"),
+        .boolean => |b| try buf.appendSlice(allocator, if (b) "true" else "false"),
+        .integer => |i| try buf.appendSlice(allocator, try std.fmt.bufPrint(&stack_buf, "{d}", .{i})),
+        .number => |f| try buf.appendSlice(allocator, try std.fmt.bufPrint(&stack_buf, "{d}", .{f})),
+        .string => |s| try buf.appendSlice(allocator, s.slice()),
+        .table => |t| try buf.appendSlice(allocator, try std.fmt.bufPrint(&stack_buf, "table: 0x{x}", .{@intFromPtr(t)})),
+        .closure => |c| try buf.appendSlice(allocator, try std.fmt.bufPrint(&stack_buf, "function: 0x{x}", .{@intFromPtr(c)})),
+        .native => |n| try buf.appendSlice(allocator, try std.fmt.bufPrint(&stack_buf, "function: native '{s}'", .{n.name})),
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -606,8 +815,22 @@ fn runSrc(arena: std.mem.Allocator, src: []const u8) ![]TValue {
     var c = codegen.Compiler.init(arena);
     const proto = try c.compileChunk(block);
     var vm = try VM.init(arena, proto);
+    vm.bindEnv();
     const result = try vm.run();
     return result.values;
+}
+
+/// Run + return the print-output buffer alongside results. Used by
+/// stdlib tests that exercise `print`.
+fn runSrcWithOutput(arena: std.mem.Allocator, src: []const u8) !struct { values: []TValue, output: []const u8 } {
+    var p = try parser.Parser.init(arena, src);
+    const block = try p.parseChunk();
+    var c = codegen.Compiler.init(arena);
+    const proto = try c.compileChunk(block);
+    var vm = try VM.init(arena, proto);
+    vm.bindEnv();
+    const result = try vm.run();
+    return .{ .values = result.values, .output = vm.output.items };
 }
 
 test "vm: return literal int" {
@@ -852,12 +1075,15 @@ test "vm: assignment updates local" {
     try testing.expectEqual(@as(i64, 15), r[0].integer);
 }
 
-test "vm: unknown identifier is a compile error" {
+test "vm: unknown identifier is a global lookup → nil" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    try testing.expectError(error.UnknownIdentifier, runSrc(arena, "return undefined_thing"));
+    // Lua treats unbound names as `_ENV.name` lookups. If _ENV doesn't
+    // hold the name, the result is nil — never a compile error.
+    const r = try runSrc(arena, "return undefined_thing");
+    try testing.expect(r[0] == .nil);
 }
 
 // === Phase 3.2.2 + 2.2: comparison + control flow ============================
@@ -1275,6 +1501,93 @@ test "vm: tables and closures together" {
         \\return c.get()
     );
     try testing.expectEqual(@as(i64, 3), r[0].integer);
+}
+
+// === Phase 3.5: stdlib (print, tostring, type, tonumber) ====================
+
+test "stdlib: print writes to output buffer" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrcWithOutput(arena, "print(\"hello\", \"world\")");
+    try testing.expectEqualStrings("hello\tworld\n", r.output);
+}
+
+test "stdlib: print formats values like Lua tostring" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrcWithOutput(arena, "print(42, 3.14, true, nil)");
+    try testing.expectEqualStrings("42\t3.14\ttrue\tnil\n", r.output);
+}
+
+test "stdlib: type returns the value's type" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "return type(42), type(\"x\"), type({}), type(nil), type(true), type(print)");
+    try testing.expectEqualStrings("number", r[0].string.slice());
+    try testing.expectEqualStrings("string", r[1].string.slice());
+    try testing.expectEqualStrings("table", r[2].string.slice());
+    try testing.expectEqualStrings("nil", r[3].string.slice());
+    try testing.expectEqualStrings("boolean", r[4].string.slice());
+    try testing.expectEqualStrings("function", r[5].string.slice());
+}
+
+test "stdlib: tostring for various values" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "return tostring(42), tostring(3.14), tostring(nil)");
+    try testing.expectEqualStrings("42", r[0].string.slice());
+    try testing.expectEqualStrings("3.14", r[1].string.slice());
+    try testing.expectEqualStrings("nil", r[2].string.slice());
+}
+
+test "stdlib: tonumber parses strings" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrc(arena, "return tonumber(\"42\"), tonumber(\"3.14\"), tonumber(\"bogus\")");
+    try testing.expectEqual(@as(i64, 42), r[0].integer);
+    try testing.expectEqual(@as(f64, 3.14), r[1].number);
+    try testing.expect(r[2] == .nil);
+}
+
+test "stdlib: globals are settable from user code" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Top-level `x = 5` (no `local`) writes to _ENV.x.
+    // Reading x reads from _ENV.x. Lua's classic global semantics.
+    const r = try runSrc(arena,
+        \\x = 100
+        \\y = x + 1
+        \\return y
+    );
+    try testing.expectEqual(@as(i64, 101), r[0].integer);
+}
+
+test "stdlib: closures + globals + print together" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const r = try runSrcWithOutput(arena,
+        \\local function fib(n)
+        \\    if n < 2 then return n end
+        \\    return fib(n - 1) + fib(n - 2)
+        \\end
+        \\print("fib(10) =", fib(10))
+        \\print("fib(15) =", fib(15))
+    );
+    try testing.expectEqualStrings("fib(10) =\t55\nfib(15) =\t610\n", r.output);
 }
 
 test "vm: indexing non-table is a type error" {
