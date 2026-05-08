@@ -19,6 +19,8 @@ const v = @import("value.zig");
 const String = @import("string.zig").String;
 const Table = @import("table.zig").Table;
 const lexer = @import("lexer.zig");
+const parser = @import("parser.zig");
+const ast = @import("ast.zig");
 
 const TValue = v.TValue;
 
@@ -125,8 +127,33 @@ pub fn main(init: std.process.Init) !void {
     ;
     try lexAndDump(out, sample);
 
-    try out.print("\n[pluto-zig] phase-1 + phase-3.0 OK\n", .{});
+    // --- Phase 3.1 parser demo ----------------------------------------
+    try out.print("\n[pluto-zig] phase-3.1 parser demo\n", .{});
+    const fib_src =
+        \\local function fib(n)
+        \\    if n < 2 then return n end
+        \\    return fib(n - 1) + fib(n - 2)
+        \\end
+        \\
+        \\local result = fib(10)
+        \\print("fib(10) = " .. result)
+    ;
+    try parseAndDump(out, init.arena.allocator(), fib_src);
+
+    try out.print("\n[pluto-zig] phase-1 + phase-3.0 + phase-3.1 OK\n", .{});
     try out.flush();
+}
+
+fn parseAndDump(out: anytype, arena: std.mem.Allocator, src: []const u8) !void {
+    var p = parser.Parser.init(arena, src) catch |err| {
+        try out.print("  parser init failed: {s}\n", .{@errorName(err)});
+        return;
+    };
+    const block = p.parseChunk() catch |err| {
+        try out.print("  parse error: {s}\n", .{@errorName(err)});
+        return;
+    };
+    try ast.dumpBlock(out, block, 1);
 }
 
 fn lexAndDump(out: anytype, src: []const u8) !void {
