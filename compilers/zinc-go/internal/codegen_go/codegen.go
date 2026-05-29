@@ -33,6 +33,13 @@ type Generator struct {
 	imports        map[string]bool
 	structs        map[string]*parser.ClassDecl
 	sourceFile     string // for //line directives
+	// pythonMode disables Zinc's lowercase built-in method/string dispatch
+	// (e.g. .upper()/.keys()/.add() → strings.ToUpper/maps.Keys/append). The
+	// Python front-end lowers every Python collection/string operation
+	// explicitly (to zincpy* helpers or capitalized runtime methods), so those
+	// rewrites are pure liability here — they silently hijack a user method of
+	// the same name on a receiver the codegen doesn't recognize as a struct.
+	pythonMode bool
 	currentFields      map[string]bool   // field names of current class (for implicit self)
 	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
 	currentMethods map[string]bool // method names of current class (for implicit self)
@@ -273,6 +280,13 @@ func (g *Generator) SetGoModDir(dir string) {
 // migration is complete, both paths coexist (gated by `g.bound != nil`).
 func (g *Generator) SetBoundProgram(bp *typechecker.BoundProgram) {
 	g.bound = bp
+}
+
+// SetPythonMode disables Zinc's built-in lowercase method/string dispatch, so
+// a Python program's user methods (.upper(), .keys(), .add(), ...) are never
+// hijacked by the Zinc collection/string lowerings. See the pythonMode field.
+func (g *Generator) SetPythonMode(on bool) {
+	g.pythonMode = on
 }
 
 // SetImportAliases sets the import alias → module path mappings from zinc.toml [deps].

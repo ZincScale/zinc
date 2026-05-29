@@ -95,6 +95,7 @@ func compile(path string) ([]codegen.OutputFile, *pyfront.Meta, error) {
 	className := classNameFor(path)
 	gen := codegen.New()
 	gen.SetBoundProgram(bp)
+	gen.SetPythonMode(true) // user methods (.upper/.keys/...) must not hit Zinc's builtin dispatch
 	out := gen.GenerateFiles(prog, className)
 	for _, w := range gen.CompileWarnings() {
 		fmt.Fprintln(os.Stderr, w)

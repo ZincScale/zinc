@@ -47,6 +47,15 @@ print(s.sort())
 print(s.join(10))
 print(s.length())
 
+# A colliding method name on a non-variable receiver (a method-chain / call
+# result) must still call the user method, not the Zinc string/collection
+# lowering — the receiver isn't a tracked struct variable.
+def make_store() -> Store:
+    return Store()
+
+print(make_store().upper())
+print(make_store().keys())
+
 # A plain variable named `it` (collides with no Python construct, but did with
 # Zinc's implicit closure parameter) is an ordinary identifier.
 nums = [5, 6, 7]

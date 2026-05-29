@@ -209,8 +209,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 
 	// String method rewrites — guarded so a user-defined method on a class
 	// with the same name (e.g., `class Text { fn upper() { ... } }`) doesn't
-	// get redirected to `strings.ToUpper(obj)`.
-	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
+	// get redirected to `strings.ToUpper(obj)`. Skipped entirely in pythonMode:
+	// the Python front-end lowers str/collection ops itself, so these would
+	// only hijack a same-named user method on a non-variable receiver.
+	if sel, ok := c.Callee.(*parser.SelectorExpr); ok && !g.pythonMode {
 		if goFunc, ok := stringMethodMapping[sel.Field]; ok && !g.isStructVar(sel.Object) {
 			g.needImport("strings")
 			obj := g.formatExpr(sel.Object)
