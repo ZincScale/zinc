@@ -1109,7 +1109,7 @@ func (p *Parser) parseTernary() parser.Expr {
 		p.errf(p.cur(), "conditional expression missing 'else'")
 	}
 	elseE := p.parseTernary() // right-associative
-	return &parser.IfExpr{Cond: p.truthyWrap(cond), Then: e, Else: elseE}
+	return p.condExpr(p.truthyWrap(cond), e, elseE)
 }
 
 // truthyWrap wraps a non-bool expression in zincpyTruthy so it can be used in
@@ -1121,12 +1121,35 @@ func (p *Parser) truthyWrap(e parser.Expr) parser.Expr {
 	return callIdent("zincpyTruthy", e)
 }
 
+// condExpr builds a value-returning conditional `then if cond else els` (cond
+// already truthy-wrapped). When both branches share a known type it uses a
+// Zinc IfExpr (codegen infers that concrete Go type); when they differ it
+// emits an explicit interface{} IIFE so the heterogeneous branches box safely.
+// Backs both the ternary and value-returning and/or.
+func (p *Parser) condExpr(cond, then, els parser.Expr) parser.Expr {
+	if tt := p.typeOf(then); tt != tUnknown && tt == p.typeOf(els) {
+		return &parser.IfExpr{Cond: cond, Then: then, Else: els}
+	}
+	return &parser.CallExpr{Callee: &parser.LambdaExpr{
+		ReturnType: &parser.SimpleType{Name: "interface{}"},
+		Body: &parser.BlockStmt{Stmts: []parser.Stmt{
+			&parser.IfStmt{Cond: cond, Then: &parser.BlockStmt{Stmts: []parser.Stmt{&parser.ReturnStmt{Value: then}}}},
+			&parser.ReturnStmt{Value: els},
+		}},
+	}}
+}
+
 func (p *Parser) parseOr() parser.Expr {
 	left := p.parseAnd()
 	for p.isKw("or") {
 		p.advance()
 		right := p.parseAnd()
-		left = &parser.BinaryExpr{Left: p.truthyWrap(left), Op: "||", Right: p.truthyWrap(right)}
+		if p.typeOf(left) == tBool && p.typeOf(right) == tBool {
+			left = &parser.BinaryExpr{Left: left, Op: "||", Right: right}
+		} else {
+			// Python `a or b` returns the operand value: a if truthy(a) else b.
+			left = p.condExpr(p.truthyWrap(left), left, right)
+		}
 	}
 	return left
 }
@@ -1136,7 +1159,12 @@ func (p *Parser) parseAnd() parser.Expr {
 	for p.isKw("and") {
 		p.advance()
 		right := p.parseNot()
-		left = &parser.BinaryExpr{Left: p.truthyWrap(left), Op: "&&", Right: p.truthyWrap(right)}
+		if p.typeOf(left) == tBool && p.typeOf(right) == tBool {
+			left = &parser.BinaryExpr{Left: left, Op: "&&", Right: right}
+		} else {
+			// Python `a and b` returns the operand value: b if truthy(a) else a.
+			left = p.condExpr(p.truthyWrap(left), right, left)
+		}
 	}
 	return left
 }
