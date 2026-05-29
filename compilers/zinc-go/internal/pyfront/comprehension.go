@@ -33,61 +33,41 @@ import (
 //	    return _comp
 //	}()
 //
-// `output` has already been parsed (it precedes `for` in Python syntax); the
-// cursor is on the `for` keyword. The element type T is inferred by typing
-// `output` with the loop variable bound to the iterable's element type.
-func (p *Parser) parseListComprehension(output parser.Expr) parser.Expr {
-	p.advance() // 'for'
-	loopVar := p.expectKind(TName).Value
-	if p.isKw("in") {
-		p.advance()
-	} else {
-		p.errf(p.cur(), "expected 'in' in comprehension")
-	}
-	iter := p.parseOr() // parseOr (not parseExpr): don't let a ternary eat the filter `if`
-	var cond parser.Expr
-	if p.isKw("if") {
-		p.advance()
-		cond = p.parseExpr()
-	}
-	p.expectOp("]")
-
-	// Infer the result element type: bind the loop var to the iterable's
-	// element type, then type the output expression.
+// The cursor is on `for`; outStart is the saved position of `output` (before
+// `for`), so the output is re-parsed with the loop variable(s) bound — which
+// both infers the element type and lets multi-target loops (`for a, b in
+// pairs`) and arithmetic on dynamic unpacked vars lower correctly.
+func (p *Parser) parseListComprehension(outStart int) parser.Expr {
+	targets, iter, cond := p.parseCompClause("]")
+	endPos := p.pos
+	p.pos = outStart
 	p.pushScope()
-	p.declare(loopVar, p.elemTypeOf(iter))
+	p.declareCompTargets(targets, iter)
+	output := p.parseExpr()
 	resultElem := p.typeOf(output)
 	p.popScope()
+	p.pos = endPos
 
 	listType := &parser.GenericType{Name: "List"}
 	if resultElem != tUnknown {
 		listType.TypeArgs = []parser.TypeExpr{zincTypeForPy(resultElem)}
 	}
 
-	// range(...) iterables lower to a numeric range, like a plain for-loop.
-	rangeExpr := iter
-	if rng, ok := asRange(iter); ok {
-		rangeExpr = rng
-	}
-
 	acc := fmt.Sprintf("_comp%d", p.tmpCount)
 	p.tmpCount++
-
 	appendStmt := &parser.AssignStmt{
 		Target: &parser.Ident{Name: acc}, Op: "=",
 		Value: callIdent("append", &parser.Ident{Name: acc}, output),
 	}
 	var loopBody parser.Stmt = appendStmt
 	if cond != nil {
-		loopBody = &parser.IfStmt{Cond: cond, Then: &parser.BlockStmt{Stmts: []parser.Stmt{appendStmt}}}
+		loopBody = &parser.IfStmt{Cond: p.truthyWrap(cond), Then: &parser.BlockStmt{Stmts: []parser.Stmt{appendStmt}}}
 	}
-
 	lambda := &parser.LambdaExpr{
 		ReturnType: listType,
 		Body: &parser.BlockStmt{Stmts: []parser.Stmt{
 			&parser.VarStmt{Name: acc, Value: &parser.ListLit{ExplicitType: listType}},
-			&parser.ForStmt{IsRange: true, Item: loopVar, Range: rangeExpr,
-				Body: &parser.BlockStmt{Stmts: []parser.Stmt{loopBody}}},
+			p.compForStmt(targets, iter, loopBody),
 			&parser.ReturnStmt{Value: &parser.Ident{Name: acc}},
 		}},
 	}
@@ -96,14 +76,14 @@ func (p *Parser) parseListComprehension(output parser.Expr) parser.Expr {
 
 // parseCompClause parses the `for a[, b] in iter [if cond]}` tail shared by set
 // and dict comprehensions (cursor on `for`; consumes the closing `}`).
-func (p *Parser) parseCompClause() (targets []string, iter, cond parser.Expr) {
+func (p *Parser) parseCompClause(close string) (targets []string, iter, cond parser.Expr) {
 	p.advance() // 'for'
-	targets = []string{p.expectKind(TName).Value}
+	targets = []string{goSafe(p.expectKind(TName).Value)}
 	for p.acceptOp(",") {
 		if p.isKw("in") {
 			break
 		}
-		targets = append(targets, p.expectKind(TName).Value)
+		targets = append(targets, goSafe(p.expectKind(TName).Value))
 	}
 	if p.isKw("in") {
 		p.advance()
@@ -115,7 +95,7 @@ func (p *Parser) parseCompClause() (targets []string, iter, cond parser.Expr) {
 		p.advance()
 		cond = p.parseExpr()
 	}
-	p.expectOp("}")
+	p.expectOp(close)
 	if rng, ok := asRange(iter); ok {
 		iter = rng
 	}
@@ -137,9 +117,25 @@ func (p *Parser) compForStmt(targets []string, iter parser.Expr, loopBody parser
 		stmts = append(stmts, &parser.VarStmt{Name: t,
 			Value: callIdent("zincpyGetItem", &parser.Ident{Name: tmp}, &parser.IntLit{Value: fmt.Sprintf("%d", k)})})
 	}
+	stmts = append(stmts, blankUse(targets)...)
 	stmts = append(stmts, loopBody)
 	return &parser.ForStmt{IsRange: true, Item: tmp, Range: callIdent("zincpyIter", iter),
 		Body: &parser.BlockStmt{Stmts: stmts}}
+}
+
+// blankUse emits `_ = name` for each unpacked target, so a target the body
+// doesn't reference isn't a Go "declared and not used" error.
+func blankUse(targets []string) []parser.Stmt {
+	var stmts []parser.Stmt
+	for _, t := range targets {
+		if t == "_" {
+			continue
+		}
+		stmts = append(stmts, &parser.AssignStmt{
+			Target: &parser.Ident{Name: "_"}, Op: "=", Value: &parser.Ident{Name: t},
+		})
+	}
+	return stmts
 }
 
 // declareCompTargets binds the comprehension loop variable(s) for typing the
@@ -159,7 +155,7 @@ func (p *Parser) declareCompTargets(targets []string, iter parser.Expr) {
 // accumulating into a *zincpySet.
 func (p *Parser) parseSetComprehension(outStart int) parser.Expr {
 	// cursor is on `for`. Parse the clause to learn the loop variable(s)...
-	targets, iter, cond := p.parseCompClause()
+	targets, iter, cond := p.parseCompClause("}")
 	endPos := p.pos
 	// ...then re-parse the output expression with them bound, so e.g. `v * 2`
 	// over a dynamic unpacked var routes through the dynamic operators.
@@ -197,7 +193,7 @@ func (p *Parser) parseSetComprehension(outStart int) parser.Expr {
 // accumulating into a *zincpyDict.
 func (p *Parser) parseDictComprehension(outStart int) parser.Expr {
 	// cursor is on `for`. Parse the clause for the loop variable(s)...
-	targets, iter, cond := p.parseCompClause()
+	targets, iter, cond := p.parseCompClause("}")
 	endPos := p.pos
 	// ...then re-parse `key: val` with them bound (so arithmetic on dynamic
 	// unpacked vars lowers correctly) and recover the key/value types.

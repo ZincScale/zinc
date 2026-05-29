@@ -868,6 +868,7 @@ func (p *Parser) parseFor() parser.Stmt {
 			stmts = append(stmts, &parser.VarStmt{Name: t,
 				Value: callIdent("zincpyGetItem", &parser.Ident{Name: tmp}, &parser.IntLit{Value: fmt.Sprintf("%d", k)})})
 		}
+		stmts = append(stmts, blankUse(targets)...)
 		stmts = append(stmts, body.Stmts...)
 		return &parser.ForStmt{Line: line, IsRange: true, Item: tmp,
 			Range: callIdent("zincpyIter", iter),
@@ -1361,9 +1362,10 @@ func (p *Parser) parseListLit() parser.Expr {
 		p.advance()
 		return &parser.ListLit{}
 	}
+	outStart := p.pos
 	first := p.parseExpr()
 	if p.isKw("for") {
-		return p.parseListComprehension(first)
+		return p.parseListComprehension(outStart)
 	}
 	lit := &parser.ListLit{Elements: []parser.Expr{first}}
 	for p.acceptOp(",") {
