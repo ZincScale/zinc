@@ -119,6 +119,19 @@ type Parser struct {
 	// classMethodRet[class][method] is the method's return class name (when it
 	// returns an instance), so operator-dunder results chain (a + b + c).
 	classMethodRet map[string]map[string]string
+	// classConstVal[class][name] holds a class-level constant's literal value,
+	// inlined at each `Class.NAME` / `self.NAME` / `instance.NAME` read.
+	classConstVal map[string]map[string]parser.Expr
+	// classStatics[class][method] marks @staticmethod/@classmethod methods,
+	// which are emitted as package functions named Class_method and called via
+	// Class.method(...) / obj.method(...).
+	classStatics map[string]map[string]bool
+	// pendingDecls holds top-level decls (static/class methods lifted to
+	// package functions) that parseProgram appends after the class.
+	pendingDecls []parser.TopLevelDecl
+	// clsAlias is the class name bound to `cls` while parsing a @classmethod
+	// body, so `cls(...)` constructs and `cls.X` reads a class member.
+	clsAlias string
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -150,6 +163,8 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		instanceClass:  map[string]string{},
 		classProps:     map[string]map[string]bool{},
 		classMethodRet: map[string]map[string]string{},
+		classConstVal:  map[string]map[string]parser.Expr{},
+		classStatics:   map[string]map[string]bool{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -234,6 +249,13 @@ func (p *Parser) advance() Token {
 }
 
 func (p *Parser) isOp(v string) bool  { t := p.cur(); return t.Kind == TOp && t.Value == v }
+func (p *Parser) peekOp(v string) bool {
+	if p.pos+1 < len(p.toks) {
+		t := p.toks[p.pos+1]
+		return t.Kind == TOp && t.Value == v
+	}
+	return false
+}
 func (p *Parser) isKw(v string) bool  { t := p.cur(); return t.Kind == TName && t.Value == v }
 func (p *Parser) acceptOp(v string) bool {
 	if p.isOp(v) {
@@ -286,6 +308,9 @@ func (p *Parser) parseProgram() *parser.Program {
 		}
 		if p.isKw("class") {
 			prog.Decls = append(prog.Decls, p.parseClass())
+			// static/class methods were lifted to package functions.
+			prog.Decls = append(prog.Decls, p.pendingDecls...)
+			p.pendingDecls = nil
 			continue
 		}
 		startPos := p.pos
@@ -930,7 +955,11 @@ func (p *Parser) parsePostfix() parser.Expr {
 			// FFI module attribute read (`math.pi`) lowers to zincpyPyGet —
 			// unless it is immediately called (`math.sqrt(...)`), which
 			// parseCall lowers to zincpyPyCall.
-			if id, ok := e.(*parser.Ident); ok && p.isFFIModule(id.Name) && !p.isOp("(") {
+			if v, ok := p.classConst(e, field); ok {
+				// Class constant (Class.NAME / self.NAME / instance.NAME) —
+				// inline the literal value.
+				e = v
+			} else if id, ok := e.(*parser.Ident); ok && p.isFFIModule(id.Name) && !p.isOp("(") {
 				e = callIdent("zincpyPyGet",
 					&parser.StringLit{Value: p.ffiModBind[id.Name]},
 					&parser.StringLit{Value: field})
@@ -1135,6 +1164,21 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			}
 		}
 	}
+	// static/class method call: Class.method(args) / obj.method(args) →
+	// Class_method(args) (the lifted package function).
+	if sel, ok := callee.(*parser.SelectorExpr); ok {
+		cls := ""
+		if id, ok := sel.Object.(*parser.Ident); ok && p.classNames[id.Name] {
+			cls = id.Name
+		} else {
+			cls = p.exprClass(sel.Object)
+		}
+		if cls != "" {
+			if st, ok := p.classStatics[cls]; ok && st[sel.Field] {
+				return &parser.CallExpr{Callee: &parser.Ident{Name: cls + "_" + sel.Field}, Args: call.Args}
+			}
+		}
+	}
 	// FFI module call (`math.sqrt(x)`) → zincpyPyCall("math", "sqrt", x).
 	if sel, ok := callee.(*parser.SelectorExpr); ok {
 		if id, ok := sel.Object.(*parser.Ident); ok && p.isFFIModule(id.Name) {
@@ -1180,6 +1224,12 @@ func (p *Parser) parseAtom() parser.Expr {
 		case "self":
 			if p.inMethod {
 				return &parser.ThisExpr{}
+			}
+		case "cls":
+			// Inside a @classmethod, `cls` is the class: cls(...) constructs,
+			// cls.X reads a class member.
+			if p.clsAlias != "" {
+				return &parser.Ident{Name: p.clsAlias}
 			}
 		}
 		return &parser.Ident{Name: t.Value}

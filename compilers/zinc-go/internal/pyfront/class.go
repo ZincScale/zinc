@@ -42,6 +42,63 @@ func (p *Parser) isClassProp(cls, pyName string) bool {
 	return ok && props[pyName]
 }
 
+// parseClassVar records a class-level constant `NAME [: T] = literal`. The
+// value is inlined at use sites (classConst), so only literal values are
+// supported; a non-literal class variable is rejected with a clear error.
+func (p *Parser) parseClassVar(className string) {
+	name := p.expectKind(TName).Value
+	if p.acceptOp(":") {
+		p.parseType() // annotation, ignored
+	}
+	if !p.acceptOp("=") {
+		p.errf(p.cur(), "expected '=' in class variable %q", name)
+		return
+	}
+	val := p.parseExpr()
+	p.endSimple()
+	if !isLiteralExpr(val) {
+		p.errf(p.cur(), "non-literal class variable %q is not yet supported", name)
+		return
+	}
+	if p.classConstVal[className] == nil {
+		p.classConstVal[className] = map[string]parser.Expr{}
+	}
+	p.classConstVal[className][name] = val
+}
+
+// classConst returns the inlined value of a class constant accessed as
+// `Class.NAME` (obj is the class name) or `self.NAME`/`instance.NAME` (obj is
+// an instance), and whether it was found.
+func (p *Parser) classConst(obj parser.Expr, field string) (parser.Expr, bool) {
+	cls := ""
+	if id, ok := obj.(*parser.Ident); ok && p.classNames[id.Name] {
+		cls = id.Name // Class.NAME
+	} else {
+		cls = p.exprClass(obj) // self.NAME / instance.NAME
+	}
+	if cls == "" {
+		return nil, false
+	}
+	if cv, ok := p.classConstVal[cls]; ok {
+		if v, ok := cv[field]; ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// isLiteralExpr reports whether e is a constant literal (optionally negated),
+// safe to inline at multiple use sites.
+func isLiteralExpr(e parser.Expr) bool {
+	switch ex := e.(type) {
+	case *parser.IntLit, *parser.FloatLit, *parser.StringLit, *parser.BoolLit, *parser.NullLit:
+		return true
+	case *parser.UnaryExpr:
+		return isLiteralExpr(ex.Operand)
+	}
+	return false
+}
+
 // parseClass parses a Python `class` into a zinc ClassDecl. Python attributes
 // are implicit (created by `self.x = ...`), whereas zinc needs explicit field
 // declarations — so fields are discovered by scanning method bodies for
@@ -85,6 +142,9 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 	if p.classMethodRet[name] == nil {
 		p.classMethodRet[name] = map[string]string{}
 	}
+	if p.classStatics[name] == nil {
+		p.classStatics[name] = map[string]bool{}
+	}
 	prevClass := p.currentClass
 	p.currentClass = name
 	defer func() { p.currentClass = prevClass }()
@@ -111,7 +171,13 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 			p.parseClassMethod(cls, &fields, seen, nil)
 			continue
 		}
-		// pass / docstrings / class-level statements: not modelled yet.
+		// Class-level constant `NAME [: T] = literal` — inlined at use sites.
+		if p.cur().Kind == TName && !p.isKw("pass") &&
+			(p.peekOp("=") || p.peekOp(":")) {
+			p.parseClassVar(name)
+			continue
+		}
+		// pass / docstrings / other class-level statements: not modelled yet.
 		startPos := p.pos
 		if p.isKw("pass") {
 			p.advance()
@@ -160,7 +226,7 @@ func (p *Parser) parseDecorators() []string {
 }
 
 func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.FieldDecl, seen map[string]bool, decorators []string) {
-	p.advance() // 'def'
+	line := p.advance().Line // 'def'
 	pyName := p.expectKind(TName).Value
 	mname := pyName
 	// Dunders map to their Go equivalents (e.g. __str__ → Stringer's String),
@@ -168,10 +234,15 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	if g, ok := dunderMethods[mname]; ok {
 		mname = g
 	}
-	isProperty := false
+	isProperty, isStatic, isClassmethod := false, false, false
 	for _, d := range decorators {
-		if d == "property" {
+		switch d {
+		case "property":
 			isProperty = true
+		case "staticmethod":
+			isStatic = true
+		case "classmethod":
+			isClassmethod = true
 		}
 	}
 	p.expectOp("(")
@@ -188,9 +259,12 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 		if p.acceptOp("=") {
 			def = p.parseExpr()
 		}
-		isSelf := first && pn == "self"
+		// Drop the implicit receiver: `self` for a normal method, `cls` for a
+		// @classmethod. A @staticmethod has no implicit first parameter.
+		dropFirst := first && ((pn == "self" && !isStatic && !isClassmethod) ||
+			(pn == "cls" && isClassmethod))
 		first = false
-		if !isSelf {
+		if !dropFirst {
 			params = append(params, &parser.ParamDecl{Name: pn, Type: pt, Default: def})
 		}
 		if !p.acceptOp(",") {
@@ -206,7 +280,13 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 
 	prevInMethod := p.inMethod
 	prevRet := p.currentFnRet
-	p.inMethod = true
+	prevCls := p.clsAlias
+	// static/class methods have no `self`; a @classmethod binds `cls` to the
+	// class for the body.
+	p.inMethod = !isStatic && !isClassmethod
+	if isClassmethod {
+		p.clsAlias = p.currentClass
+	}
 	p.currentFnRet = ret
 	p.pushScope()
 	for _, pa := range params {
@@ -215,17 +295,33 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 		p.recordParamInstance(pa)
 	}
 	body := p.parseBlock()
-	p.collectFields(body, fields, seen)
+	if !isStatic && !isClassmethod {
+		p.collectFields(body, fields, seen)
+	}
 	p.popScope()
 	p.inMethod = prevInMethod
 	p.currentFnRet = prevRet
+	p.clsAlias = prevCls
+
+	ensureTrailingReturn(body, ret)
+
+	// @staticmethod / @classmethod are lifted to a package function named
+	// Class_method, called via Class.method(...) / obj.method(...).
+	if isStatic || isClassmethod {
+		fnName := p.currentClass + "_" + pyName
+		p.classStatics[p.currentClass][pyName] = true
+		p.fnRet[fnName] = typeFromExpr(ret)
+		p.pendingDecls = append(p.pendingDecls, &parser.FnDecl{
+			Line: line, Name: fnName, Params: params, ReturnType: ret, Body: body,
+		})
+		return
+	}
 
 	if mname == "__init__" {
 		superArgs, superCalled := extractSuperInit(body)
 		cls.Ctor = &parser.CtorDecl{Params: params, Body: body, SuperArgs: superArgs, SuperCalled: superCalled}
 		return
 	}
-	ensureTrailingReturn(body, ret)
 	if p.currentClass != "" {
 		p.classMethods[p.currentClass][mname] = typeFromExpr(ret)
 		if isProperty {
