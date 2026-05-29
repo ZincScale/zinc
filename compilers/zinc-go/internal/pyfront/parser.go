@@ -43,25 +43,20 @@ func callIdent(name string, args ...parser.Expr) parser.Expr {
 	return &parser.CallExpr{Callee: &parser.Ident{Name: name}, Args: args}
 }
 
-// goReserved are identifiers that are valid Python names but that the emitted
-// Go cannot use as-is: Go keywords (range/map deliberately excluded — they are
-// Python builtins handled by name), plus `it`, which the Zinc codegen treats as
-// an implicit closure parameter and rewrites to `_it` in expression position
-// (so a Python loop var named `it` would lose its binding). A Python
-// variable/param/function with one of these names is renamed with a trailing
-// underscore so the emitted Go is valid. Applied consistently at every
-// identifier site, declarations and references alike, so the rename stays
-// internally consistent.
+// goReserved are Go keywords that are valid Python identifiers and that the
+// front-end does NOT special-case (range/map are deliberately excluded — they
+// are Python builtins handled by name). A Python variable/param/function with
+// one of these names is renamed with a trailing underscore so the emitted Go
+// is valid. Applied consistently at every identifier site, declarations and
+// references alike, so the rename stays internally consistent.
 var goReserved = map[string]bool{
 	"type": true, "func": true, "var": true, "const": true, "chan": true,
 	"go": true, "goto": true, "interface": true, "package": true,
 	"select": true, "struct": true, "switch": true, "case": true,
 	"default": true, "defer": true, "fallthrough": true,
-	"it": true,
 }
 
-// goSafe renames a Python identifier that collides with a Go keyword or a
-// Zinc-codegen reserved identifier.
+// goSafe renames a Python identifier that collides with a Go keyword.
 func goSafe(name string) string {
 	if goReserved[name] {
 		return name + "_"

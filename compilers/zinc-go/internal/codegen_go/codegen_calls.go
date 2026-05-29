@@ -550,12 +550,10 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 		}
 	}
 
-	// Rewrite `it` keyword in args + adapt callback signatures + auto-insert & for pointer params
+	// Adapt callback signatures + auto-insert & for pointer params
 	var argStrs []string
 	for i, arg := range c.Args {
-		if containsIt(arg) {
-			argStrs = append(argStrs, g.formatExprIt(arg))
-		} else if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
+		if ident, ok := arg.(*parser.Ident); ok && goExpectedParams != nil && goExpectedParams[i] != nil {
 			argStrs = append(argStrs, g.adaptCallback(ident.Name, goExpectedParams[i]))
 		} else {
 			// Lambda arg into a Fn-typed param slot: publish the param's
