@@ -211,7 +211,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	case "str", "zincpyStr", "zincpyRepr", "zincpyUpper", "zincpyLower",
 		"zincpyStrip", "zincpyReplace", "zincpyJoin":
 		return tStr
-	case "zincpyStartswith", "zincpyEndswith", "zincpyTruthy",
+	case "zincpyStartswith", "zincpyEndswith", "zincpyTruthy", "zincpyIn",
 		"zincpyEq", "zincpyNe", "zincpyLt", "zincpyGt", "zincpyLe", "zincpyGe":
 		return tBool
 	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt":

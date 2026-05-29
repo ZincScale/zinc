@@ -500,6 +500,8 @@ func zincpyTruthy(v any) bool {
 		return len(x.items) != 0
 	case *zincpyDict:
 		return x.Len() != 0
+	case *zincpySet:
+		return x.Len() != 0
 	}
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
@@ -519,9 +521,18 @@ func zincpySeq(xs any) []any {
 	rv := reflect.ValueOf(xs)
 	if !rv.IsValid() || rv.Kind() != reflect.Slice {
 		switch v := xs.(type) {
+		case string:
+			rs := []rune(v)
+			out := make([]any, len(rs))
+			for i, r := range rs {
+				out[i] = string(r)
+			}
+			return out
 		case zincpyTuple:
 			return v.items
 		case *zincpyDict:
+			return v.Keys()
+		case *zincpySet:
 			return v.Keys()
 		}
 		panic(zincpyExc{"TypeError", "object is not iterable"})
@@ -853,6 +864,112 @@ func (d *zincpyDict) String() string {
 		b.WriteString(zincpyRepr(k))
 		b.WriteString(": ")
 		b.WriteString(zincpyRepr(d.vals[k]))
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// zincpyIn implements Python's "in" membership test, dispatching on the
+// container: substring for strings, element search (value equality) for
+// lists/tuples, key/element presence for dicts/sets.
+func zincpyIn(needle, hay any) bool {
+	switch h := hay.(type) {
+	case string:
+		s, ok := needle.(string)
+		return ok && strings.Contains(h, s)
+	case []any:
+		for _, e := range h {
+			if zincpyEq(e, needle) {
+				return true
+			}
+		}
+		return false
+	case zincpyTuple:
+		for _, e := range h.items {
+			if zincpyEq(e, needle) {
+				return true
+			}
+		}
+		return false
+	case *zincpyDict:
+		return h.Has(needle)
+	case *zincpySet:
+		return h.Has(needle)
+	}
+	rv := reflect.ValueOf(hay)
+	if rv.Kind() == reflect.Slice {
+		for i := 0; i < rv.Len(); i++ {
+			if zincpyEq(rv.Index(i).Interface(), needle) {
+				return true
+			}
+		}
+		return false
+	}
+	panic(zincpyExc{"TypeError", "argument of type " + zincpyTypeName(hay) + " is not iterable"})
+}
+
+// zincpySet is a Python set. Backed by insertion-ordered storage for
+// deterministic iteration in OUR output; note this differs from CPython's
+// hash-ordered iteration, so set iteration/printing order is not guaranteed to
+// match CPython (use sorted() for stable output). repr: {a, b}, or set() empty.
+type zincpySet struct {
+	items []any
+	has   map[any]bool
+}
+
+func zincpyNewSet() *zincpySet { return &zincpySet{has: map[any]bool{}} }
+
+func zincpySetOf(xs any) *zincpySet {
+	s := zincpyNewSet()
+	for _, v := range zincpySeq(xs) {
+		s.Add(v)
+	}
+	return s
+}
+
+func (s *zincpySet) Add(v any) {
+	if !s.has[v] {
+		s.has[v] = true
+		s.items = append(s.items, v)
+	}
+}
+
+func (s *zincpySet) Has(v any) bool { return s.has[v] }
+
+func (s *zincpySet) Len() int { return len(s.items) }
+
+func (s *zincpySet) Keys() []any { return s.items }
+
+func (s *zincpySet) Discard(v any) {
+	if s.has[v] {
+		delete(s.has, v)
+		for i, x := range s.items {
+			if x == v {
+				s.items = append(s.items[:i], s.items[i+1:]...)
+				break
+			}
+		}
+	}
+}
+
+func (s *zincpySet) Remove(v any) {
+	if !s.has[v] {
+		panic(zincpyExc{"KeyError", zincpyRepr(v)})
+	}
+	s.Discard(v)
+}
+
+func (s *zincpySet) String() string {
+	if len(s.items) == 0 {
+		return "set()"
+	}
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, v := range s.items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(zincpyRepr(v))
 	}
 	b.WriteByte('}')
 	return b.String()

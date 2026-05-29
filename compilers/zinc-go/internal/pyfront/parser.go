@@ -154,6 +154,12 @@ type Parser struct {
 	// clsAlias is the class name bound to `cls` while parsing a @classmethod
 	// body, so `cls(...)` constructs and `cls.X` reads a class member.
 	clsAlias string
+
+	// setVars marks variables holding a *zincpySet (from a set literal or
+	// set()), so .add()/len()/iteration route to set operations. setExprMeta
+	// marks the set-literal constructor IIFEs so an assignment can pick them up.
+	setVars     map[string]bool
+	setExprMeta map[parser.Expr]bool
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -187,6 +193,8 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		classMethodRet: map[string]map[string]string{},
 		classConstVal:  map[string]map[string]parser.Expr{},
 		classStatics:   map[string]map[string]bool{},
+		setVars:        map[string]bool{},
+		setExprMeta:    map[parser.Expr]bool{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -222,6 +230,33 @@ func (p *Parser) recordInstanceClass(name string, rhs parser.Expr) {
 			p.instanceClass[name] = id.Name
 		}
 	}
+}
+
+// isSetExpr reports whether an expression produces a *zincpySet (a set literal
+// IIFE or a set()/set(iter) call).
+func (p *Parser) isSetExpr(e parser.Expr) bool {
+	if p.setExprMeta[e] {
+		return true
+	}
+	if call, ok := e.(*parser.CallExpr); ok {
+		if id, ok := call.Callee.(*parser.Ident); ok {
+			return id.Name == "zincpyNewSet" || id.Name == "zincpySetOf"
+		}
+	}
+	return false
+}
+
+// recordSetVar marks a variable as holding a set when its initializer makes one.
+func (p *Parser) recordSetVar(name string, rhs parser.Expr) {
+	if p.isSetExpr(rhs) {
+		p.setVars[name] = true
+	}
+}
+
+// isSetVar reports whether e is a variable known to hold a set.
+func (p *Parser) isSetVar(e parser.Expr) bool {
+	id, ok := e.(*parser.Ident)
+	return ok && p.setVars[id.Name]
 }
 
 // recordParamInstance tracks a parameter annotated with a class type as an
@@ -275,6 +310,13 @@ func (p *Parser) peekOp(v string) bool {
 	if p.pos+1 < len(p.toks) {
 		t := p.toks[p.pos+1]
 		return t.Kind == TOp && t.Value == v
+	}
+	return false
+}
+func (p *Parser) peekKw(v string) bool {
+	if p.pos+1 < len(p.toks) {
+		t := p.toks[p.pos+1]
+		return t.Kind == TName && t.Value == v
 	}
 	return false
 }
@@ -425,6 +467,7 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 					p.declare(id.Name, p.typeOf(rhs))
 					p.recordElemType(id.Name, rhs)
 					p.recordInstanceClass(id.Name, rhs)
+					p.recordSetVar(id.Name, rhs)
 					if dm, ok := p.dictMetaOfValue(rhs); ok {
 						p.dictVars[id.Name] = dm
 					}
@@ -697,6 +740,14 @@ func (p *Parser) parseFor() parser.Stmt {
 			Range: &parser.CallExpr{Callee: &parser.SelectorExpr{Object: iter, Field: "Keys"}},
 			Body:  body}
 	}
+	// `for x in s` over a set → iterate its elements (insertion order).
+	if p.isSetVar(iter) {
+		p.declare(item, tDynamic)
+		body := p.parseBlock()
+		return &parser.ForStmt{Line: line, IsRange: true, Item: item,
+			Range: &parser.CallExpr{Callee: &parser.SelectorExpr{Object: iter, Field: "Keys"}},
+			Body:  body}
+	}
 	// `for x in v` over a dynamic FFI value → range zincpyIter(v) (list elems,
 	// dict keys, or string chars); the loop variable is itself dynamic.
 	if p.typeOf(iter) == tDynamic {
@@ -891,16 +942,29 @@ func (p *Parser) parseNot() parser.Expr {
 
 func (p *Parser) parseComparison() parser.Expr {
 	left := p.parseAdditive()
-	for p.cur().Kind == TOp {
-		switch p.cur().Value {
-		case "==", "!=", "<", ">", "<=", ">=":
-			op := p.advance().Value
-			left = p.numericBinary(left, op, p.parseAdditive())
-		default:
-			return left
+	for {
+		if p.cur().Kind == TOp {
+			switch p.cur().Value {
+			case "==", "!=", "<", ">", "<=", ">=":
+				op := p.advance().Value
+				left = p.numericBinary(left, op, p.parseAdditive())
+				continue
+			}
 		}
+		// membership: `x in c` → zincpyIn(x, c); `x not in c` → !zincpyIn(...).
+		if p.isKw("in") {
+			p.advance()
+			left = callIdent("zincpyIn", left, p.parseAdditive())
+			continue
+		}
+		if p.isKw("not") && p.peekKw("in") {
+			p.advance()
+			p.advance()
+			left = &parser.UnaryExpr{Op: "!", Operand: callIdent("zincpyIn", left, p.parseAdditive())}
+			continue
+		}
+		return left
 	}
-	return left
 }
 
 func (p *Parser) parseAdditive() parser.Expr {
@@ -1075,21 +1139,62 @@ func (p *Parser) parseListLit() parser.Expr {
 // A bare `{...}` without colons is a set literal, which isn't modelled yet.
 func (p *Parser) parseDictLit() parser.Expr {
 	p.expectOp("{")
-	var keys, vals []parser.Expr
-	for !p.isOp("}") && p.cur().Kind != TEOF {
-		k := p.parseExpr()
-		if !p.acceptOp(":") {
-			p.errf(p.cur(), "set literals are not yet supported")
+	// `{}` is an empty dict (Python); `set()` makes an empty set.
+	if p.isOp("}") {
+		p.advance()
+		return p.buildDictLit(nil, nil)
+	}
+	first := p.parseExpr()
+	if !p.isOp(":") {
+		// Set literal `{a, b, c}` (no colons).
+		elems := []parser.Expr{first}
+		for p.acceptOp(",") {
+			if p.isOp("}") {
+				break
+			}
+			elems = append(elems, p.parseExpr())
+		}
+		p.expectOp("}")
+		return p.buildSetLit(elems)
+	}
+	// Dict literal `{k: v, ...}`.
+	p.expectOp(":")
+	keys := []parser.Expr{first}
+	vals := []parser.Expr{p.parseExpr()}
+	for p.acceptOp(",") {
+		if p.isOp("}") {
 			break
 		}
-		keys = append(keys, k)
+		keys = append(keys, p.parseExpr())
+		p.expectOp(":")
 		vals = append(vals, p.parseExpr())
-		if !p.acceptOp(",") {
-			break
-		}
 	}
 	p.expectOp("}")
+	return p.buildDictLit(keys, vals)
+}
 
+// buildSetLit builds the IIFE constructor for a set literal:
+// func() *zincpySet { _s := zincpyNewSet(); _s.Add(e); ...; return _s }()
+func (p *Parser) buildSetLit(elems []parser.Expr) parser.Expr {
+	s := fmt.Sprintf("_s%d", p.tmpCount)
+	p.tmpCount++
+	stmts := []parser.Stmt{&parser.VarStmt{Name: s, Value: callIdent("zincpyNewSet")}}
+	for _, e := range elems {
+		stmts = append(stmts, &parser.ExprStmt{Expr: &parser.CallExpr{
+			Callee: &parser.SelectorExpr{Object: &parser.Ident{Name: s}, Field: "Add"},
+			Args:   []parser.Expr{e},
+		}})
+	}
+	stmts = append(stmts, &parser.ReturnStmt{Value: &parser.Ident{Name: s}})
+	iife := &parser.CallExpr{Callee: &parser.LambdaExpr{
+		ReturnType: &parser.SimpleType{Name: "*zincpySet"},
+		Body:       &parser.BlockStmt{Stmts: stmts},
+	}}
+	p.setExprMeta[iife] = true
+	return iife
+}
+
+func (p *Parser) buildDictLit(keys, vals []parser.Expr) parser.Expr {
 	d := fmt.Sprintf("_d%d", p.tmpCount)
 	p.tmpCount++
 	stmts := []parser.Stmt{
@@ -1192,6 +1297,9 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		if p.typeOf(call.Args[0]) == tDynamic {
 			return callIdent("zincpyLen", call.Args[0])
 		}
+		if p.isSetVar(call.Args[0]) {
+			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
+		}
 		// len(obj) on a class instance defining __len__ → obj.Len().
 		if cls := p.exprClass(call.Args[0]); cls != "" && p.classHasMethod(cls, "Len") {
 			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
@@ -1225,6 +1333,13 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			if len(call.Args) == 1 {
 				return callIdent("zincpyAbs", call.Args[0])
 			}
+		case "set":
+			if len(call.Args) == 0 {
+				return callIdent("zincpyNewSet")
+			}
+			if len(call.Args) == 1 {
+				return callIdent("zincpySetOf", call.Args[0])
+			}
 		}
 	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,
@@ -1248,6 +1363,17 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 				sel.Field = "Keys"
 			case "values":
 				sel.Field = "Values"
+			}
+		}
+		// set mutators on a set var → capitalized runtime methods.
+		if p.isSetVar(sel.Object) {
+			switch sel.Field {
+			case "add":
+				sel.Field = "Add"
+			case "discard":
+				sel.Field = "Discard"
+			case "remove":
+				sel.Field = "Remove"
 			}
 		}
 	}
