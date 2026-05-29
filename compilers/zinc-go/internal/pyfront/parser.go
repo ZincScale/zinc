@@ -673,15 +673,39 @@ func (p *Parser) parseFromImport() parser.Stmt {
 	if p.isKw("import") {
 		p.advance()
 	}
-	// consume the rest of the line so we don't misparse it as an expression
-	for p.cur().Kind != TNewline && p.cur().Kind != TEOF {
-		p.advance()
+	// Collect the imported names (handles `a, b as c` and parenthesized lists).
+	p.acceptOp("(")
+	var names []string
+	for p.cur().Kind == TName || p.isOp("*") {
+		if p.acceptOp("*") {
+			names = append(names, "*")
+		} else {
+			names = append(names, p.expectKind(TName).Value)
+			if p.isKw("as") { // alias — binding name doesn't matter for our checks
+				p.advance()
+				p.expectKind(TName)
+			}
+		}
+		if !p.acceptOp(",") {
+			break
+		}
 	}
+	p.acceptOp(")")
 	p.endSimple()
-	// Compile-time-only modules (handled natively or pure annotations) →
-	// the from-import is a no-op (it only needs to exist for CPython to run).
+
+	// Compile-time-only modules: the import only needs to exist for CPython.
+	// We no-op it, but ONLY for names we actually handle natively — anything
+	// else gets a clear error here rather than a confusing Go compile failure,
+	// so we never silently emit a program that diverges from CPython.
 	switch mod {
-	case "dataclasses", "typing", "__future__", "abc", "collections.abc":
+	case "__future__", "typing": // directives / annotation-only — safe no-op
+		return nil
+	case "dataclasses":
+		for _, n := range names {
+			if n != "dataclass" {
+				p.errf(tok, "from dataclasses import %q is not supported yet (only 'dataclass')", n)
+			}
+		}
 		return nil
 	}
 	p.errf(tok, "from-import (`from %s import ...`) is not yet supported; use `import %s` and `%s.name`", mod, mod, mod)
