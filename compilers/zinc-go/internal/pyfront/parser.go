@@ -64,6 +64,19 @@ func goSafe(name string) string {
 	return name
 }
 
+// coerceEmptyList gives an empty list literal `[]` the element type of the
+// context it flows into (a typed parameter or return type), so it emits []T{}
+// rather than []interface{}{} and matches the target type.
+func coerceEmptyList(arg parser.Expr, target parser.TypeExpr) {
+	lit, ok := arg.(*parser.ListLit)
+	if !ok || len(lit.Elements) > 0 || lit.ExplicitType != nil {
+		return
+	}
+	if gt, ok := target.(*parser.GenericType); ok && gt.Name == "List" {
+		lit.ExplicitType = gt
+	}
+}
+
 // sliceCall builds zincpySlice(obj, start, stop, step) for `obj[start:stop:step]`,
 // passing a NullLit (→ nil) for any omitted bound.
 func sliceCall(obj, start, stop, step parser.Expr) parser.Expr {
@@ -676,6 +689,9 @@ func (p *Parser) parseReturn() parser.Stmt {
 		val = p.parseTestList()
 	}
 	p.endSimple()
+	if val != nil && p.currentFnRet != nil {
+		coerceEmptyList(val, p.currentFnRet) // `return []` from a `-> list[T]` fn
+	}
 	return &parser.ReturnStmt{Line: line, Value: val}
 }
 
@@ -1558,6 +1574,16 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		}
 	}
 	p.expectOp(")")
+	// Empty list args to a known callable take the parameter's element type.
+	if id, ok := callee.(*parser.Ident); ok {
+		if params, ok := p.defParams[id.Name]; ok {
+			for i, a := range call.Args {
+				if i < len(params) {
+					coerceEmptyList(a, params[i].Type)
+				}
+			}
+		}
+	}
 	// Resolve keyword args / omitted defaults of a known function or
 	// constructor into a plain positional call.
 	if resolved, ok := p.resolveDefaults(call); ok {
