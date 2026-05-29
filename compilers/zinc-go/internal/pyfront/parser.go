@@ -1605,6 +1605,45 @@ func isSuperCall(e parser.Expr) bool {
 	return ok && id.Name == "super"
 }
 
+// isinstanceTypeNames extracts the type-name operands of an isinstance second
+// argument: a bare type name (`int`, `Dog`) or a tuple of them (`(A, B)`),
+// which parseAtom may have lowered to a zincpyNewTuple call or kept as a
+// TupleLit. Returns nil if the argument is not a name / tuple-of-names.
+func (p *Parser) isinstanceTypeNames(e parser.Expr) []string {
+	identNames := func(es []parser.Expr) []string {
+		var names []string
+		for _, el := range es {
+			id, ok := el.(*parser.Ident)
+			if !ok {
+				return nil
+			}
+			names = append(names, p.isinstanceName(id.Name))
+		}
+		return names
+	}
+	switch x := e.(type) {
+	case *parser.Ident:
+		return []string{p.isinstanceName(x.Name)}
+	case *parser.TupleLit:
+		return identNames(x.Elements)
+	case *parser.CallExpr:
+		if cid, ok := x.Callee.(*parser.Ident); ok && cid.Name == "zincpyNewTuple" {
+			return identNames(x.Args)
+		}
+	}
+	return nil
+}
+
+// isinstanceName maps a Python type name to the string the runtime check
+// expects: a user class is capitalized to match its emitted Go struct name;
+// builtin type names (int, str, list, ...) are matched verbatim by the helper.
+func (p *Parser) isinstanceName(name string) string {
+	if p.classNames[name] {
+		return strings.ToUpper(name[:1]) + name[1:]
+	}
+	return name
+}
+
 func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	p.expectOp("(")
 	call := &parser.CallExpr{Callee: callee}
@@ -1653,6 +1692,24 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		if cls := p.exprClass(call.Args[0]); cls != "" && p.classHasMethod(cls, "Len") {
 			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
 		}
+	}
+	// isinstance(x, T) / isinstance(x, (A, B)) → zincpyIsInstance(x, "T", ...),
+	// a runtime reflection check (builtin types by Go representation, user
+	// classes by walking the embedded-struct chain). The type operands are
+	// emitted as name strings, not expressions (a bare `int`/`Dog` would be an
+	// undefined Go identifier).
+	if id, ok := callee.(*parser.Ident); ok && id.Name == "isinstance" &&
+		len(call.Args) == 2 && len(call.NamedArgs) == 0 {
+		names := p.isinstanceTypeNames(call.Args[1])
+		if names == nil {
+			p.errf(p.cur(), "isinstance: second argument must be a type name or a tuple of type names")
+			return call
+		}
+		args := []parser.Expr{call.Args[0]}
+		for _, n := range names {
+			args = append(args, &parser.StringLit{Value: n})
+		}
+		return callIdent("zincpyIsInstance", args...)
 	}
 	// sorted(xs, key=f) takes a keyword arg, so it's handled before the
 	// no-kwargs builtins switch below.

@@ -1177,4 +1177,83 @@ func zincpyRepr(v any) string {
 		return fmt.Sprint(v)
 	}
 }
+
+// zincpyIsInstance reports whether v is an instance of any of the named types,
+// mirroring isinstance(obj, T) and isinstance(obj, (A, B)). Builtin type names
+// match by the value's Go representation; a user-class name matches when v is
+// that struct or embeds it (Go struct embedding mirrors the inheritance chain,
+// walked via anonymous reflect fields).
+func zincpyIsInstance(v any, names ...string) bool {
+	for _, name := range names {
+		if zincpyIsInstance1(v, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func zincpyIsInstance1(v any, name string) bool {
+	switch name {
+	case "object":
+		return true
+	case "bool":
+		_, ok := v.(bool)
+		return ok
+	case "int":
+		// Python's bool is a subclass of int, so an int check accepts a bool.
+		if _, ok := v.(bool); ok {
+			return true
+		}
+		k := reflect.ValueOf(v).Kind()
+		return k >= reflect.Int && k <= reflect.Uint64
+	case "float":
+		_, ok := v.(float64)
+		return ok
+	case "str":
+		_, ok := v.(string)
+		return ok
+	case "list":
+		rv := reflect.ValueOf(v)
+		return rv.IsValid() && rv.Kind() == reflect.Slice
+	case "dict":
+		_, ok := v.(*zincpyDict)
+		return ok
+	case "set":
+		_, ok := v.(*zincpySet)
+		return ok
+	case "tuple":
+		_, ok := v.(zincpyTuple)
+		return ok
+	}
+	// User class: match the struct's own name or any embedded (anonymous) field
+	// up the chain.
+	t := reflect.TypeOf(v)
+	for t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return false
+	}
+	return zincpyStructIsA(t, name)
+}
+
+func zincpyStructIsA(t reflect.Type, name string) bool {
+	if t.Name() == name {
+		return true
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.Anonymous {
+			continue
+		}
+		ft := f.Type
+		for ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Struct && zincpyStructIsA(ft, name) {
+			return true
+		}
+	}
+	return false
+}
 `
