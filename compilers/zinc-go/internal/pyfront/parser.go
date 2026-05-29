@@ -43,6 +43,27 @@ func callIdent(name string, args ...parser.Expr) parser.Expr {
 	return &parser.CallExpr{Callee: &parser.Ident{Name: name}, Args: args}
 }
 
+// goReserved are Go keywords that are valid Python identifiers and that the
+// front-end does NOT special-case (range/map are deliberately excluded — they
+// are Python builtins handled by name). A Python variable/param/function with
+// one of these names is renamed with a trailing underscore so the emitted Go
+// is valid. Applied consistently at every identifier site, declarations and
+// references alike, so the rename stays internally consistent.
+var goReserved = map[string]bool{
+	"type": true, "func": true, "var": true, "const": true, "chan": true,
+	"go": true, "goto": true, "interface": true, "package": true,
+	"select": true, "struct": true, "switch": true, "case": true,
+	"default": true, "defer": true, "fallthrough": true,
+}
+
+// goSafe renames a Python identifier that collides with a Go keyword.
+func goSafe(name string) string {
+	if goReserved[name] {
+		return name + "_"
+	}
+	return name
+}
+
 // sliceCall builds zincpySlice(obj, start, stop, step) for `obj[start:stop:step]`,
 // passing a NullLit (→ nil) for any omitted bound.
 func sliceCall(obj, start, stop, step parser.Expr) parser.Expr {
@@ -745,7 +766,7 @@ func (p *Parser) parseFromImport() parser.Stmt {
 
 func (p *Parser) parseDef() *parser.FnDecl {
 	line := p.advance().Line // 'def'
-	name := p.expectKind(TName).Value
+	name := goSafe(p.expectKind(TName).Value)
 	p.expectOp("(")
 	var params []*parser.ParamDecl
 	for !p.isOp(")") && p.cur().Kind != TEOF {
@@ -753,7 +774,7 @@ func (p *Parser) parseDef() *parser.FnDecl {
 			p.errf(p.cur(), "**kwargs is not yet supported")
 		}
 		variadic := p.acceptOp("*") // *args
-		pname := p.expectKind(TName).Value
+		pname := goSafe(p.expectKind(TName).Value)
 		var ptype parser.TypeExpr
 		if p.acceptOp(":") {
 			ptype = p.parseType()
@@ -803,12 +824,12 @@ func (p *Parser) parseDef() *parser.FnDecl {
 
 func (p *Parser) parseFor() parser.Stmt {
 	line := p.advance().Line // 'for'
-	targets := []string{p.expectKind(TName).Value}
+	targets := []string{goSafe(p.expectKind(TName).Value)}
 	for p.acceptOp(",") {
 		if p.isKw("in") {
 			break
 		}
-		targets = append(targets, p.expectKind(TName).Value)
+		targets = append(targets, goSafe(p.expectKind(TName).Value))
 	}
 	if !p.isKw("in") {
 		p.errf(p.cur(), "expected 'in' in for-statement")
@@ -1704,7 +1725,7 @@ func (p *Parser) parseLambda() parser.Expr {
 	p.advance() // 'lambda'
 	var params []*parser.ParamDecl
 	for p.cur().Kind == TName {
-		params = append(params, &parser.ParamDecl{Name: p.advance().Value})
+		params = append(params, &parser.ParamDecl{Name: goSafe(p.advance().Value)})
 		if !p.acceptOp(",") {
 			break
 		}
@@ -1761,7 +1782,7 @@ func (p *Parser) parseAtom() parser.Expr {
 				return &parser.Ident{Name: p.clsAlias}
 			}
 		}
-		return &parser.Ident{Name: t.Value}
+		return &parser.Ident{Name: goSafe(t.Value)}
 	case TOp:
 		switch t.Value {
 		case "(":

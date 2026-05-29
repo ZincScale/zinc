@@ -359,7 +359,7 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 			p.errf(p.cur(), "**kwargs is not yet supported")
 		}
 		variadic := p.acceptOp("*") // *args
-		pn := p.expectKind(TName).Value
+		pn := goSafe(p.expectKind(TName).Value)
 		var pt parser.TypeExpr
 		if p.acceptOp(":") {
 			pt = p.parseType()
