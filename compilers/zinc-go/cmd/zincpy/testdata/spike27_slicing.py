@@ -1,0 +1,22 @@
+xs = [10, 20, 30, 40, 50]
+print(xs[1:3])
+print(xs[:2])
+print(xs[3:])
+print(xs[:])
+print(xs[::2])
+print(xs[::-1])
+print(xs[-2:])
+print(xs[1:4:2])
+print(xs[-1])
+print(xs[-2])
+s = "hello world"
+print(s[0:5])
+print(s[6:])
+print(s[::-1])
+print(s[-5:])
+print(s[-1])
+t = (1, 2, 3, 4)
+print(t[1:3])
+print(t[::-1])
+for c in s[0:5]:
+    print(c)

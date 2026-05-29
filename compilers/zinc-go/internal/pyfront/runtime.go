@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -477,6 +478,233 @@ func zincpyLt(a, b any) bool { return zincpyCmp(a, b) < 0 }
 func zincpyGt(a, b any) bool { return zincpyCmp(a, b) > 0 }
 func zincpyLe(a, b any) bool { return zincpyCmp(a, b) <= 0 }
 func zincpyGe(a, b any) bool { return zincpyCmp(a, b) >= 0 }
+
+// zincpyTruthy implements Python truthiness for a condition value: None, zero
+// numbers, empty string, and empty containers are falsy; everything else
+// (including any object) is truthy.
+func zincpyTruthy(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return x
+	case int:
+		return x != 0
+	case float64:
+		return x != 0
+	case string:
+		return x != ""
+	case []any:
+		return len(x) != 0
+	case zincpyTuple:
+		return len(x.items) != 0
+	case *zincpyDict:
+		return x.Len() != 0
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Array:
+		return rv.Len() != 0
+	}
+	return true
+}
+
+// --- builtins over sequences -------------------------------------------------
+//
+// min/max/sum/sorted accept any slice kind (the front-end's homogeneous list
+// literals become concrete Go slices), so they reflect over the elements and
+// return boxed (dynamic) results.
+
+func zincpySeq(xs any) []any {
+	rv := reflect.ValueOf(xs)
+	if !rv.IsValid() || rv.Kind() != reflect.Slice {
+		switch v := xs.(type) {
+		case zincpyTuple:
+			return v.items
+		case *zincpyDict:
+			return v.Keys()
+		}
+		panic(zincpyExc{"TypeError", "object is not iterable"})
+	}
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out
+}
+
+func zincpyMin(xs any) any {
+	s := zincpySeq(xs)
+	if len(s) == 0 {
+		panic(zincpyExc{"ValueError", "min() arg is an empty sequence"})
+	}
+	best := s[0]
+	for _, v := range s[1:] {
+		if zincpyCmp(v, best) < 0 {
+			best = v
+		}
+	}
+	return best
+}
+
+func zincpyMax(xs any) any {
+	s := zincpySeq(xs)
+	if len(s) == 0 {
+		panic(zincpyExc{"ValueError", "max() arg is an empty sequence"})
+	}
+	best := s[0]
+	for _, v := range s[1:] {
+		if zincpyCmp(v, best) > 0 {
+			best = v
+		}
+	}
+	return best
+}
+
+// zincpySum mirrors Python sum(): result is int unless any element is float.
+func zincpySum(xs any) any {
+	s := zincpySeq(xs)
+	isum, fsum, isFloat := 0, 0.0, false
+	for _, v := range s {
+		switch x := v.(type) {
+		case int:
+			isum += x
+			fsum += float64(x)
+		case bool:
+			if x {
+				isum++
+				fsum++
+			}
+		case float64:
+			isFloat = true
+			fsum += x
+		default:
+			panic(zincpyExc{"TypeError", "unsupported operand type for sum(): " + zincpyTypeName(v)})
+		}
+	}
+	if isFloat {
+		return fsum
+	}
+	return isum
+}
+
+func zincpySorted(xs any) []any {
+	s := zincpySeq(xs)
+	out := make([]any, len(s))
+	copy(out, s)
+	sort.SliceStable(out, func(i, j int) bool { return zincpyCmp(out[i], out[j]) < 0 })
+	return out
+}
+
+// zincpySlice implements Python slicing seq[start:stop:step] on a list, string,
+// or tuple. start/stop/step are int or nil (omitted). Negative indices and
+// negative step are handled per CPython; the result is a new list/string/tuple.
+func zincpySlice(seq, startA, stopA, stepA any) any {
+	step := 1
+	if stepA != nil {
+		step = stepA.(int)
+		if step == 0 {
+			panic(zincpyExc{"ValueError", "slice step cannot be zero"})
+		}
+	}
+	switch s := seq.(type) {
+	case string:
+		rs := []rune(s)
+		var b strings.Builder
+		for _, i := range zincpySliceIndices(len(rs), startA, stopA, step) {
+			b.WriteRune(rs[i])
+		}
+		return b.String()
+	case zincpyTuple:
+		idxs := zincpySliceIndices(len(s.items), startA, stopA, step)
+		out := make([]any, len(idxs))
+		for k, i := range idxs {
+			out[k] = s.items[i]
+		}
+		return zincpyTuple{items: out}
+	}
+	elems := zincpySeq(seq)
+	idxs := zincpySliceIndices(len(elems), startA, stopA, step)
+	out := make([]any, len(idxs))
+	for k, i := range idxs {
+		out[k] = elems[i]
+	}
+	return out
+}
+
+// zincpySliceIndices returns the concrete indices a slice selects, mirroring
+// CPython's slice.indices(length).
+func zincpySliceIndices(n int, startA, stopA any, step int) []int {
+	lower, upper := 0, n
+	if step < 0 {
+		lower, upper = -1, n-1
+	}
+	clamp := func(i int) int {
+		if i < lower {
+			return lower
+		}
+		if i > upper {
+			return upper
+		}
+		return i
+	}
+	var start, stop int
+	if startA == nil {
+		if step < 0 {
+			start = upper
+		} else {
+			start = lower
+		}
+	} else {
+		start = startA.(int)
+		if start < 0 {
+			start += n
+		}
+		start = clamp(start)
+	}
+	if stopA == nil {
+		if step < 0 {
+			stop = lower
+		} else {
+			stop = upper
+		}
+	} else {
+		stop = stopA.(int)
+		if stop < 0 {
+			stop += n
+		}
+		stop = clamp(stop)
+	}
+	var idxs []int
+	if step > 0 {
+		for i := start; i < stop; i += step {
+			idxs = append(idxs, i)
+		}
+	} else {
+		for i := start; i > stop; i += step {
+			idxs = append(idxs, i)
+		}
+	}
+	return idxs
+}
+
+func zincpyAbs(v any) any {
+	switch x := v.(type) {
+	case int:
+		if x < 0 {
+			return -x
+		}
+		return x
+	case float64:
+		return math.Abs(x)
+	case bool:
+		if x {
+			return 1
+		}
+		return 0
+	}
+	panic(zincpyExc{"TypeError", "bad operand type for abs(): " + zincpyTypeName(v)})
+}
 
 // zincpyStr mirrors Python's str() for the value kinds the front-end emits.
 func zincpyStr(v any) string {

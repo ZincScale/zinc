@@ -43,6 +43,28 @@ func callIdent(name string, args ...parser.Expr) parser.Expr {
 	return &parser.CallExpr{Callee: &parser.Ident{Name: name}, Args: args}
 }
 
+// sliceCall builds zincpySlice(obj, start, stop, step) for `obj[start:stop:step]`,
+// passing a NullLit (→ nil) for any omitted bound.
+func sliceCall(obj, start, stop, step parser.Expr) parser.Expr {
+	nilify := func(e parser.Expr) parser.Expr {
+		if e == nil {
+			return &parser.NullLit{}
+		}
+		return e
+	}
+	return callIdent("zincpySlice", obj, nilify(start), nilify(stop), nilify(step))
+}
+
+// isNegLiteral reports whether e is a negative integer literal (`-k`).
+func isNegLiteral(e parser.Expr) bool {
+	u, ok := e.(*parser.UnaryExpr)
+	if !ok || u.Op != "-" {
+		return false
+	}
+	_, ok = u.Operand.(*parser.IntLit)
+	return ok
+}
+
 // Parser is a recursive-descent parser that turns the Python token stream
 // into the zinc parser.Program AST. It is intentionally a subset: enough to
 // drive the existing typechecker + Go codegen for the current spikes.
@@ -718,14 +740,14 @@ func asRange(e parser.Expr) (*parser.RangeExpr, bool) {
 
 func (p *Parser) parseWhile() parser.Stmt {
 	line := p.advance().Line // 'while'
-	cond := p.parseExpr()
+	cond := p.truthyWrap(p.parseExpr())
 	body := p.parseBlock()
 	return &parser.WhileStmt{Line: line, Cond: cond, Body: body}
 }
 
 func (p *Parser) parseIf() parser.Stmt {
 	line := p.advance().Line // 'if' or 'elif'
-	cond := p.parseExpr()
+	cond := p.truthyWrap(p.parseExpr())
 	then := p.parseBlock()
 	stmt := &parser.IfStmt{Line: line, Cond: cond, Then: then}
 
@@ -830,12 +852,21 @@ func mapPyType(name string) string {
 
 func (p *Parser) parseExpr() parser.Expr { return p.parseOr() }
 
+// truthyWrap wraps a non-bool expression in zincpyTruthy so it can be used in
+// a boolean context (Go requires a bool; Python accepts any value).
+func (p *Parser) truthyWrap(e parser.Expr) parser.Expr {
+	if p.typeOf(e) == tBool {
+		return e
+	}
+	return callIdent("zincpyTruthy", e)
+}
+
 func (p *Parser) parseOr() parser.Expr {
 	left := p.parseAnd()
 	for p.isKw("or") {
 		p.advance()
 		right := p.parseAnd()
-		left = &parser.BinaryExpr{Left: left, Op: "||", Right: right}
+		left = &parser.BinaryExpr{Left: p.truthyWrap(left), Op: "||", Right: p.truthyWrap(right)}
 	}
 	return left
 }
@@ -845,7 +876,7 @@ func (p *Parser) parseAnd() parser.Expr {
 	for p.isKw("and") {
 		p.advance()
 		right := p.parseNot()
-		left = &parser.BinaryExpr{Left: left, Op: "&&", Right: right}
+		left = &parser.BinaryExpr{Left: p.truthyWrap(left), Op: "&&", Right: p.truthyWrap(right)}
 	}
 	return left
 }
@@ -853,7 +884,7 @@ func (p *Parser) parseAnd() parser.Expr {
 func (p *Parser) parseNot() parser.Expr {
 	if p.isKw("not") {
 		p.advance()
-		return &parser.UnaryExpr{Op: "!", Operand: p.parseNot()}
+		return &parser.UnaryExpr{Op: "!", Operand: p.truthyWrap(p.parseNot())}
 	}
 	return p.parseComparison()
 }
@@ -971,12 +1002,38 @@ func (p *Parser) parsePostfix() parser.Expr {
 			}
 		case p.isOp("["):
 			p.advance()
-			idx := p.parseExpr()
+			var start parser.Expr
+			if !p.isOp(":") {
+				start = p.parseExpr()
+			}
+			if p.isOp(":") {
+				// slice obj[start:stop:step] → zincpySlice (omitted → None/nil)
+				p.advance()
+				var stop, step parser.Expr
+				if !p.isOp(":") && !p.isOp("]") {
+					stop = p.parseExpr()
+				}
+				if p.acceptOp(":") {
+					if !p.isOp("]") {
+						step = p.parseExpr()
+					}
+				}
+				p.expectOp("]")
+				e = sliceCall(e, start, stop, step)
+				break
+			}
+			idx := start
 			p.expectOp("]")
 			if dm, ok := p.dictMetaOf(e); ok {
 				e = dictGetExpr(e, idx, dm.val) // d[k] → any(d.Get(k)).(V)
-			} else if p.typeOf(e) == tDynamic {
-				e = callIdent("zincpyGetItem", e, idx) // FFI value: runtime dispatch
+			} else if p.typeOf(e) == tDynamic || p.typeOf(e) == tStr {
+				// FFI value, or a string (Go string indexing yields a byte, not
+				// a 1-char string) → runtime dispatch (also handles negatives).
+				e = callIdent("zincpyGetItem", e, idx)
+			} else if isNegLiteral(idx) {
+				// xs[-k] on a native sequence → xs[len(xs)+(-k)] (stays typed).
+				e = &parser.IndexExpr{Object: e, Index: &parser.BinaryExpr{
+					Left: callIdent("len", e), Op: "+", Right: idx}}
 			} else {
 				e = &parser.IndexExpr{Object: e, Index: idx}
 			}
@@ -1138,6 +1195,36 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		// len(obj) on a class instance defining __len__ → obj.Len().
 		if cls := p.exprClass(call.Args[0]); cls != "" && p.classHasMethod(cls, "Len") {
 			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
+		}
+	}
+	// Sequence builtins min/max/sum/sorted/abs → reflection-based runtime
+	// helpers (result is dynamic). min/max also take the varargs form
+	// min(a, b, ...) → wrap the args in a list.
+	if id, ok := callee.(*parser.Ident); ok && len(call.NamedArgs) == 0 {
+		switch id.Name {
+		case "min", "max":
+			helper := "zincpyMin"
+			if id.Name == "max" {
+				helper = "zincpyMax"
+			}
+			if len(call.Args) == 1 {
+				return callIdent(helper, call.Args[0])
+			}
+			if len(call.Args) >= 2 {
+				return callIdent(helper, &parser.ListLit{Elements: call.Args})
+			}
+		case "sum":
+			if len(call.Args) == 1 {
+				return callIdent("zincpySum", call.Args[0])
+			}
+		case "sorted":
+			if len(call.Args) == 1 {
+				return callIdent("zincpySorted", call.Args[0])
+			}
+		case "abs":
+			if len(call.Args) == 1 {
+				return callIdent("zincpyAbs", call.Args[0])
+			}
 		}
 	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,

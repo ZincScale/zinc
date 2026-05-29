@@ -211,7 +211,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	case "str", "zincpyStr", "zincpyRepr", "zincpyUpper", "zincpyLower",
 		"zincpyStrip", "zincpyReplace", "zincpyJoin":
 		return tStr
-	case "zincpyStartswith", "zincpyEndswith",
+	case "zincpyStartswith", "zincpyEndswith", "zincpyTruthy",
 		"zincpyEq", "zincpyNe", "zincpyLt", "zincpyGt", "zincpyLe", "zincpyGe":
 		return tBool
 	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt":
@@ -222,7 +222,9 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	// chained access (data[0][1], iterating a parsed list, arithmetic on a
 	// dynamic) keeps routing through the dynamic helpers.
 	case "zincpyPyCall", "zincpyPyGet", "zincpyGetItem", "zincpyNewTuple",
-		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn":
+		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn",
+		"zincpyMin", "zincpyMax", "zincpySum", "zincpySorted", "zincpyAbs",
+		"zincpySlice":
 		return tDynamic
 	}
 	if t, ok := p.fnRet[id.Name]; ok {
