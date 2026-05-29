@@ -180,6 +180,10 @@ type Parser struct {
 	// lambdaVars marks variables bound to a lambda, so calling one yields a
 	// dynamic result (the lambda returns interface{}).
 	lambdaVars map[string]bool
+
+	// classFieldDecl maps class→field→FieldDecl so an empty-list field's
+	// element type can be refined in place from later `self.f.append(v)` calls.
+	classFieldDecl map[string]map[string]*parser.FieldDecl
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -217,6 +221,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		setExprMeta:    map[parser.Expr]bool{},
 		defParams:      map[string][]*parser.ParamDecl{},
 		lambdaVars:     map[string]bool{},
+		classFieldDecl: map[string]map[string]*parser.FieldDecl{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -525,6 +530,12 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 	// `xs = append(xs, v)`.
 	if call, ok := lhs.(*parser.CallExpr); ok {
 		if sel, ok := call.Callee.(*parser.SelectorExpr); ok && sel.Field == "append" && len(call.Args) == 1 {
+			// `self.field.append(v)` refines an empty-list field's element type.
+			if fld, ok := sel.Object.(*parser.SelectorExpr); ok {
+				if _, isThis := fld.Object.(*parser.ThisExpr); isThis {
+					p.refineListFieldElem(fld.Field, call.Args[0])
+				}
+			}
 			return &parser.AssignStmt{
 				Line: line, Target: sel.Object, Op: "=",
 				Value: callIdent("append", sel.Object, call.Args[0]),

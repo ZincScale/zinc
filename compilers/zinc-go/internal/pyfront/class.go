@@ -513,11 +513,52 @@ func (p *Parser) collectFields(b *parser.BlockStmt, fields *[]*parser.FieldDecl,
 		if p.currentClass != "" {
 			p.classFields[p.currentClass][sel.Field] = ft
 		}
-		*fields = append(*fields, &parser.FieldDecl{
-			Name:  sel.Field,
-			IsPub: true,
-			Type:  zincTypeForPy(ft),
-		})
+		// A list-literal field gets a concrete Go slice type ([]T) rather than
+		// Any, so len(self.f) / self.f[i] / `for x in self.f` / self.f.append()
+		// work natively. (Dict/set fields still infer as Any — see gaps.)
+		fieldType := zincTypeForPy(ft)
+		if lit, ok := as.Value.(*parser.ListLit); ok {
+			gt := &parser.GenericType{Name: "List"}
+			if len(lit.Elements) > 0 {
+				if elem := p.typeOf(lit.Elements[0]); elem != tUnknown {
+					gt.TypeArgs = []parser.TypeExpr{zincTypeForPy(elem)}
+				}
+			}
+			fieldType = gt
+			// Share the type node with the literal so a later refinement (from
+			// self.f.append(v)) updates the constructor initializer too — the
+			// empty `[]` then emits []T{} matching the []T field.
+			lit.ExplicitType = gt
+		}
+		fd := &parser.FieldDecl{Name: sel.Field, IsPub: true, Type: fieldType}
+		*fields = append(*fields, fd)
+		if p.currentClass != "" {
+			if p.classFieldDecl[p.currentClass] == nil {
+				p.classFieldDecl[p.currentClass] = map[string]*parser.FieldDecl{}
+			}
+			p.classFieldDecl[p.currentClass][sel.Field] = fd
+		}
+	}
+}
+
+// refineListFieldElem infers an empty-list field's element type from a
+// `self.field.append(v)` call: if the field is a List with no element type yet,
+// set it from the appended value. Lets `self.items = []` then
+// `self.items.append(int)` become []int so accumulation type-checks.
+func (p *Parser) refineListFieldElem(field string, val parser.Expr) {
+	if p.currentClass == "" {
+		return
+	}
+	fd := p.classFieldDecl[p.currentClass][field]
+	if fd == nil {
+		return
+	}
+	gt, ok := fd.Type.(*parser.GenericType)
+	if !ok || gt.Name != "List" || len(gt.TypeArgs) > 0 {
+		return
+	}
+	if elem := p.typeOf(val); elem != tUnknown {
+		gt.TypeArgs = []parser.TypeExpr{zincTypeForPy(elem)}
 	}
 }
 
