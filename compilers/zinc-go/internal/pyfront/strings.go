@@ -211,18 +211,32 @@ var pyStrMethods = map[string]string{
 }
 
 // lowerStrMethod rewrites `recv.method(args...)` to its runtime helper when
-// recv is statically a string. Returns nil when it does not apply, leaving the
-// original call intact. For `sep.join(items)` the receiver is the separator,
-// so the natural helper(recv, args...) order already matches Python.
+// recv is a string. Returns nil when it does not apply, leaving the original
+// call intact. For `sep.join(items)` the receiver is the separator, so the
+// natural helper(recv, args...) order already matches Python.
+//
+// A statically-string receiver routes to the typed helper directly. A DYNAMIC
+// receiver (an unannotated / duck-typed value) routes to zincpyStrMethod, which
+// dispatches by name at run time and asserts the receiver is really a string
+// (Python raises AttributeError otherwise). Note `count` is also a list method;
+// on a dynamic receiver it is assumed to be the str method (a non-str receiver
+// raises at run time) — a known duck-typing ambiguity.
 func (p *Parser) lowerStrMethod(callee parser.Expr, args []parser.Expr) parser.Expr {
 	sel, ok := callee.(*parser.SelectorExpr)
-	if !ok || p.typeOf(sel.Object) != tStr {
+	if !ok {
 		return nil
 	}
 	helper, ok := pyStrMethods[sel.Field]
 	if !ok {
 		return nil
 	}
-	callArgs := append([]parser.Expr{sel.Object}, args...)
-	return callIdent(helper, callArgs...)
+	switch p.typeOf(sel.Object) {
+	case tStr:
+		callArgs := append([]parser.Expr{sel.Object}, args...)
+		return callIdent(helper, callArgs...)
+	case tDynamic:
+		callArgs := append([]parser.Expr{sel.Object, &parser.StringLit{Value: sel.Field}}, args...)
+		return callIdent("zincpyStrMethod", callArgs...)
+	}
+	return nil
 }

@@ -100,6 +100,63 @@ func zincpyJoin(sep string, items []string) string {
 	return strings.Join(items, sep)
 }
 
+// zincpyStrMethod dispatches a str method called on a DYNAMIC receiver (an
+// unannotated / duck-typed value the front-end could not lower to the typed
+// helper). The receiver must be a string at run time — Python raises
+// AttributeError otherwise — and string arguments are likewise asserted. The
+// result is boxed (any) since the receiver's type was not known statically.
+func zincpyStrMethod(recv any, method string, args ...any) any {
+	s, ok := recv.(string)
+	if !ok {
+		panic(zincpyExc{"AttributeError", zincpyTypeName(recv) + " object has no attribute " + zincpyRepr(method)})
+	}
+	argStr := func(i int) string {
+		a, ok := args[i].(string)
+		if !ok {
+			panic(zincpyExc{"TypeError", method + "() argument must be str, not " + zincpyTypeName(args[i])})
+		}
+		return a
+	}
+	switch method {
+	case "upper":
+		return zincpyUpper(s)
+	case "lower":
+		return zincpyLower(s)
+	case "strip":
+		if len(args) == 0 {
+			return zincpyStrip(s)
+		}
+		return zincpyStrip(s, argStr(0))
+	case "replace":
+		return zincpyReplace(s, argStr(0), argStr(1))
+	case "startswith":
+		return zincpyStartswith(s, argStr(0))
+	case "endswith":
+		return zincpyEndswith(s, argStr(0))
+	case "find":
+		return zincpyFind(s, argStr(0))
+	case "count":
+		return zincpyCount(s, argStr(0))
+	case "split":
+		if len(args) == 0 {
+			return zincpySplit(s)
+		}
+		return zincpySplit(s, argStr(0))
+	case "join":
+		items := zincpySeq(args[0])
+		strs := make([]string, len(items))
+		for i, item := range items {
+			si, ok := item.(string)
+			if !ok {
+				panic(zincpyExc{"TypeError", "sequence item " + strconv.Itoa(i) + ": expected str instance, " + zincpyTypeName(item) + " found"})
+			}
+			strs[i] = si
+		}
+		return zincpyJoin(s, strs)
+	}
+	panic(zincpyExc{"AttributeError", "str object has no attribute " + zincpyRepr(method)})
+}
+
 // --- dynamic-value operations ------------------------------------------------
 //
 // These dispatch on the boxed runtime type of a dynamic value (an FFI result
