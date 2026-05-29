@@ -228,13 +228,17 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	// chained access (data[0][1], iterating a parsed list, arithmetic on a
 	// dynamic) keeps routing through the dynamic helpers.
 	case "zincpyPyCall", "zincpyPyGet", "zincpyGetItem", "zincpyNewTuple",
-		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn",
+		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn", "zincpyNeg",
 		"zincpyMin", "zincpyMax", "zincpySum", "zincpySorted", "zincpyAbs",
-		"zincpySlice", "zincpyEnumerate", "zincpyZip":
+		"zincpySlice", "zincpyEnumerate", "zincpyZip",
+		"zincpySortedKey", "zincpyMap", "zincpyFilter", "zincpyList":
 		return tDynamic
 	}
 	if t, ok := p.fnRet[id.Name]; ok {
 		return t
+	}
+	if p.lambdaVars[id.Name] {
+		return tDynamic // a lambda returns interface{}
 	}
 	return tUnknown
 }

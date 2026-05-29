@@ -288,6 +288,22 @@ func zincpyNum(v any) (float64, bool) {
 	return 0, false
 }
 
+// zincpyNeg is unary minus on a dynamic value.
+func zincpyNeg(v any) any {
+	switch x := v.(type) {
+	case int:
+		return -x
+	case float64:
+		return -x
+	case bool:
+		if x {
+			return -1
+		}
+		return 0
+	}
+	panic(zincpyExc{"TypeError", "bad operand type for unary -: " + zincpyTypeName(v)})
+}
+
 func zincpyAdd(a, b any) any {
 	if ai, ok := zincpyIntish(a); ok {
 		if bi, ok := zincpyIntish(b); ok {
@@ -604,6 +620,44 @@ func zincpySorted(xs any) []any {
 	out := make([]any, len(s))
 	copy(out, s)
 	sort.SliceStable(out, func(i, j int) bool { return zincpyCmp(out[i], out[j]) < 0 })
+	return out
+}
+
+// zincpySortedKey is sorted(xs, key=f): order by f(element).
+func zincpySortedKey(xs any, key func(any) any) []any {
+	s := zincpySeq(xs)
+	out := make([]any, len(s))
+	copy(out, s)
+	sort.SliceStable(out, func(i, j int) bool { return zincpyCmp(key(out[i]), key(out[j])) < 0 })
+	return out
+}
+
+// zincpyList is list(x): materialize any iterable into a new []any.
+func zincpyList(xs any) []any {
+	s := zincpySeq(xs)
+	out := make([]any, len(s))
+	copy(out, s)
+	return out
+}
+
+// zincpyMap is map(f, xs): f applied to each element.
+func zincpyMap(f func(any) any, xs any) []any {
+	s := zincpySeq(xs)
+	out := make([]any, len(s))
+	for i, v := range s {
+		out[i] = f(v)
+	}
+	return out
+}
+
+// zincpyFilter is filter(f, xs): elements where f(element) is truthy.
+func zincpyFilter(f func(any) any, xs any) []any {
+	var out []any
+	for _, v := range zincpySeq(xs) {
+		if zincpyTruthy(f(v)) {
+			out = append(out, v)
+		}
+	}
 	return out
 }
 

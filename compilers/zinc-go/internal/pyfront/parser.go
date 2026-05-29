@@ -55,6 +55,16 @@ func sliceCall(obj, start, stop, step parser.Expr) parser.Expr {
 	return callIdent("zincpySlice", obj, nilify(start), nilify(stop), nilify(step))
 }
 
+// namedArg returns the value of a call's keyword argument by name.
+func namedArg(call *parser.CallExpr, name string) (parser.Expr, bool) {
+	for _, na := range call.NamedArgs {
+		if na.Name == name {
+			return na.Value, true
+		}
+	}
+	return nil, false
+}
+
 // isNegLiteral reports whether e is a negative integer literal (`-k`).
 func isNegLiteral(e parser.Expr) bool {
 	u, ok := e.(*parser.UnaryExpr)
@@ -166,6 +176,10 @@ type Parser struct {
 	// defaults into a plain positional call. Keyed by function name and by
 	// class name (for the constructor).
 	defParams map[string][]*parser.ParamDecl
+
+	// lambdaVars marks variables bound to a lambda, so calling one yields a
+	// dynamic result (the lambda returns interface{}).
+	lambdaVars map[string]bool
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -202,6 +216,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		setVars:        map[string]bool{},
 		setExprMeta:    map[parser.Expr]bool{},
 		defParams:      map[string][]*parser.ParamDecl{},
+		lambdaVars:     map[string]bool{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -480,6 +495,9 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 					p.recordElemType(id.Name, rhs)
 					p.recordInstanceClass(id.Name, rhs)
 					p.recordSetVar(id.Name, rhs)
+					if _, isLambda := rhs.(*parser.LambdaExpr); isLambda {
+						p.lambdaVars[id.Name] = true
+					}
 					if dm, ok := p.dictMetaOfValue(rhs); ok {
 						p.dictVars[id.Name] = dm
 					}
@@ -1134,7 +1152,15 @@ func (p *Parser) parseMultiplicative() parser.Expr {
 func (p *Parser) parseUnary() parser.Expr {
 	if p.isOp("-") || p.isOp("+") {
 		op := p.advance().Value
-		return &parser.UnaryExpr{Op: op, Operand: p.parseUnary()}
+		operand := p.parseUnary()
+		if p.typeOf(operand) == tDynamic {
+			// Unary on a dynamic value: `-x` → zincpyNeg(x); `+x` is identity.
+			if op == "-" {
+				return callIdent("zincpyNeg", operand)
+			}
+			return operand
+		}
+		return &parser.UnaryExpr{Op: op, Operand: operand}
 	}
 	return p.parsePostfix()
 }
@@ -1480,11 +1506,23 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
 		}
 	}
+	// sorted(xs, key=f) takes a keyword arg, so it's handled before the
+	// no-kwargs builtins switch below.
+	if id, ok := callee.(*parser.Ident); ok && id.Name == "sorted" && len(call.Args) == 1 {
+		if key, ok := namedArg(call, "key"); ok {
+			return callIdent("zincpySortedKey", call.Args[0], key)
+		}
+	}
 	// Sequence builtins min/max/sum/sorted/abs → reflection-based runtime
 	// helpers (result is dynamic). min/max also take the varargs form
 	// min(a, b, ...) → wrap the args in a list.
 	if id, ok := callee.(*parser.Ident); ok && len(call.NamedArgs) == 0 {
 		switch id.Name {
+		case "list":
+			if len(call.Args) == 0 {
+				return &parser.ListLit{}
+			}
+			return callIdent("zincpyList", call.Args[0])
 		case "min", "max":
 			helper := "zincpyMin"
 			if id.Name == "max" {
@@ -1502,7 +1540,18 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			}
 		case "sorted":
 			if len(call.Args) == 1 {
+				if key, ok := namedArg(call, "key"); ok {
+					return callIdent("zincpySortedKey", call.Args[0], key)
+				}
 				return callIdent("zincpySorted", call.Args[0])
+			}
+		case "map":
+			if len(call.Args) == 2 {
+				return callIdent("zincpyMap", call.Args[0], call.Args[1])
+			}
+		case "filter":
+			if len(call.Args) == 2 {
+				return callIdent("zincpyFilter", call.Args[0], call.Args[1])
 			}
 		case "abs":
 			if len(call.Args) == 1 {
@@ -1595,7 +1644,36 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	return call
 }
 
+// parseLambda parses `lambda a, b: expr` into a Zinc single-expression
+// LambdaExpr. Parameters are dynamic (any), so the body's operations route
+// through the dynamic helpers; the function value is `func(...any) any`.
+func (p *Parser) parseLambda() parser.Expr {
+	p.advance() // 'lambda'
+	var params []*parser.ParamDecl
+	for p.cur().Kind == TName {
+		params = append(params, &parser.ParamDecl{Name: p.advance().Value})
+		if !p.acceptOp(",") {
+			break
+		}
+	}
+	p.expectOp(":")
+	p.pushScope()
+	for _, pa := range params {
+		p.declare(pa.Name, tDynamic)
+	}
+	body := p.parseExpr()
+	p.popScope()
+	return &parser.LambdaExpr{
+		Params:     params,
+		ReturnType: &parser.SimpleType{Name: "interface{}"},
+		Expr:       body,
+	}
+}
+
 func (p *Parser) parseAtom() parser.Expr {
+	if p.isKw("lambda") {
+		return p.parseLambda()
+	}
 	t := p.cur()
 	switch t.Kind {
 	case TNumber:
