@@ -216,6 +216,11 @@ type Parser struct {
 	// classFieldDecl maps class→field→FieldDecl so an empty-list field's
 	// element type can be refined in place from later `self.f.append(v)` calls.
 	classFieldDecl map[string]map[string]*parser.FieldDecl
+
+	// classParent maps a class to its (first) base class name, so a
+	// `super().method(args)` call inside a method body lowers to the embedded
+	// parent's method `this.<Parent>.Method(args)`.
+	classParent map[string]string
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -254,6 +259,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		defParams:      map[string][]*parser.ParamDecl{},
 		lambdaVars:     map[string]bool{},
 		classFieldDecl: map[string]map[string]*parser.FieldDecl{},
+		classParent:    map[string]string{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -1588,6 +1594,17 @@ func (p *Parser) resolveDefaults(call *parser.CallExpr) (parser.Expr, bool) {
 	return &parser.CallExpr{Callee: call.Callee, Args: final}, true
 }
 
+// isSuperCall reports whether e is a bare `super()` call (no arguments), the
+// receiver of a `super().method(...)` chain.
+func isSuperCall(e parser.Expr) bool {
+	call, ok := e.(*parser.CallExpr)
+	if !ok || len(call.Args) != 0 {
+		return false
+	}
+	id, ok := call.Callee.(*parser.Ident)
+	return ok && id.Name == "super"
+}
+
 func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	p.expectOp("(")
 	call := &parser.CallExpr{Callee: callee}
@@ -1705,6 +1722,13 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			}
 		}
 	}
+	// str(x) → zincpyStr for any argument, so floats/bools/lists format the
+	// Python way (str(2.0) == "2.0", not Go's fmt.Sprint "2"). int()/float()
+	// keep Go conversions for typed args; only dynamic values need coercion.
+	if id, ok := callee.(*parser.Ident); ok && id.Name == "str" &&
+		len(call.Args) == 1 && len(call.NamedArgs) == 0 {
+		return callIdent("zincpyStr", call.Args[0])
+	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,
 	// since Go's float64(x)/int(x) conversions reject interface{}.
 	if id, ok := callee.(*parser.Ident); ok && len(call.Args) == 1 && p.typeOf(call.Args[0]) == tDynamic {
@@ -1740,6 +1764,28 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			case "remove":
 				sel.Field = "Remove"
 			}
+		}
+	}
+	// super().method(args) inside a method body → call the embedded parent's
+	// method directly: this.<Parent>.Method(args). (super().__init__ is handled
+	// separately by extractSuperInit and removed from the constructor body.)
+	if sel, ok := callee.(*parser.SelectorExpr); ok && isSuperCall(sel.Object) &&
+		sel.Field != "__init__" { // __init__ is hoisted by extractSuperInit
+		parent := p.classParent[p.currentClass]
+		if parent == "" {
+			p.errf(p.cur(), "super() used in %q which has no base class", p.currentClass)
+			return call
+		}
+		field := sel.Field
+		if g, ok := dunderMethods[field]; ok {
+			field = g
+		}
+		return &parser.CallExpr{
+			Callee: &parser.SelectorExpr{
+				Object: &parser.SelectorExpr{Object: &parser.ThisExpr{}, Field: parent},
+				Field:  field,
+			},
+			Args: call.Args,
 		}
 	}
 	// static/class method call: Class.method(args) / obj.method(args) →

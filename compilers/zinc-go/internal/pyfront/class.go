@@ -160,6 +160,11 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 	if p.classStatics[name] == nil {
 		p.classStatics[name] = map[string]bool{}
 	}
+	// Record the first base class so `super().method(...)` in a body lowers to
+	// the embedded parent's method.
+	if len(parents) > 0 {
+		p.classParent[name] = parents[0].Name
+	}
 	prevClass := p.currentClass
 	p.currentClass = name
 	defer func() { p.currentClass = prevClass }()
