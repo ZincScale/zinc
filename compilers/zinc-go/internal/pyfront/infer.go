@@ -119,6 +119,12 @@ func (p *Parser) typeOf(e parser.Expr) pytype {
 			}
 		}
 		return tUnknown
+	case *parser.IfExpr:
+		// Ternary: type is the common branch type, else unknown.
+		if t := p.typeOf(e.Then); t == p.typeOf(e.Else) {
+			return t
+		}
+		return tUnknown
 	case *parser.UnaryExpr:
 		if e.Op == "!" {
 			return tBool
@@ -224,7 +230,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	case "zincpyPyCall", "zincpyPyGet", "zincpyGetItem", "zincpyNewTuple",
 		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn",
 		"zincpyMin", "zincpyMax", "zincpySum", "zincpySorted", "zincpyAbs",
-		"zincpySlice":
+		"zincpySlice", "zincpyEnumerate", "zincpyZip":
 		return tDynamic
 	}
 	if t, ok := p.fnRet[id.Name]; ok {

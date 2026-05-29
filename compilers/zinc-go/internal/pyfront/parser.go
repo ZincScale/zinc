@@ -717,14 +717,41 @@ func (p *Parser) parseDef() *parser.FnDecl {
 
 func (p *Parser) parseFor() parser.Stmt {
 	line := p.advance().Line // 'for'
-	itemTok := p.expectKind(TName)
-	item := itemTok.Value
+	targets := []string{p.expectKind(TName).Value}
+	for p.acceptOp(",") {
+		if p.isKw("in") {
+			break
+		}
+		targets = append(targets, p.expectKind(TName).Value)
+	}
 	if !p.isKw("in") {
 		p.errf(p.cur(), "expected 'in' in for-statement")
 	} else {
 		p.advance()
 	}
 	iter := p.parseExpr()
+
+	// Multi-target `for a, b in iter` (dict.items(), enumerate, zip, list of
+	// tuples): iterate via zincpyIter and unpack each element with zincpyGetItem.
+	if len(targets) > 1 {
+		tmp := fmt.Sprintf("_it%d", p.tmpCount)
+		p.tmpCount++
+		for _, t := range targets {
+			p.declare(t, tDynamic)
+		}
+		body := p.parseBlock()
+		var stmts []parser.Stmt
+		for k, t := range targets {
+			stmts = append(stmts, &parser.VarStmt{Name: t,
+				Value: callIdent("zincpyGetItem", &parser.Ident{Name: tmp}, &parser.IntLit{Value: fmt.Sprintf("%d", k)})})
+		}
+		stmts = append(stmts, body.Stmts...)
+		return &parser.ForStmt{Line: line, IsRange: true, Item: tmp,
+			Range: callIdent("zincpyIter", iter),
+			Body:  &parser.BlockStmt{Stmts: stmts}}
+	}
+	item := targets[0]
+
 	rng, isRange := asRange(iter)
 	// `for _ in range(n)`: Go can't read `_` as a numeric loop counter, so give
 	// the throwaway a fresh name (it's used only in the generated loop header).
@@ -901,7 +928,26 @@ func mapPyType(name string) string {
 
 // --- expressions (precedence climbing) ---------------------------------------
 
-func (p *Parser) parseExpr() parser.Expr { return p.parseOr() }
+func (p *Parser) parseExpr() parser.Expr { return p.parseTernary() }
+
+// parseTernary handles Python's conditional expression `X if C else Y`
+// (lower precedence than or). It lowers to a Zinc IfExpr, which codegen emits
+// as an IIFE with an inferred result type.
+func (p *Parser) parseTernary() parser.Expr {
+	e := p.parseOr()
+	if !p.isKw("if") {
+		return e
+	}
+	p.advance() // 'if'
+	cond := p.parseOr()
+	if p.isKw("else") {
+		p.advance()
+	} else {
+		p.errf(p.cur(), "conditional expression missing 'else'")
+	}
+	elseE := p.parseTernary() // right-associative
+	return &parser.IfExpr{Cond: p.truthyWrap(cond), Then: e, Else: elseE}
+}
 
 // truthyWrap wraps a non-bool expression in zincpyTruthy so it can be used in
 // a boolean context (Go requires a bool; Python accepts any value).
@@ -1144,8 +1190,12 @@ func (p *Parser) parseDictLit() parser.Expr {
 		p.advance()
 		return p.buildDictLit(nil, nil)
 	}
+	outStart := p.pos // remember the output position for comprehension re-parse
 	first := p.parseExpr()
 	if !p.isOp(":") {
+		if p.isKw("for") {
+			return p.parseSetComprehension(outStart) // {expr for x in it}
+		}
 		// Set literal `{a, b, c}` (no colons).
 		elems := []parser.Expr{first}
 		for p.acceptOp(",") {
@@ -1157,10 +1207,14 @@ func (p *Parser) parseDictLit() parser.Expr {
 		p.expectOp("}")
 		return p.buildSetLit(elems)
 	}
-	// Dict literal `{k: v, ...}`.
+	// Dict literal or comprehension `{k: v ...}`.
 	p.expectOp(":")
+	firstVal := p.parseExpr()
+	if p.isKw("for") {
+		return p.parseDictComprehension(outStart) // {k: v for x in it}
+	}
 	keys := []parser.Expr{first}
-	vals := []parser.Expr{p.parseExpr()}
+	vals := []parser.Expr{firstVal}
 	for p.acceptOp(",") {
 		if p.isOp("}") {
 			break
@@ -1340,6 +1394,14 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			if len(call.Args) == 1 {
 				return callIdent("zincpySetOf", call.Args[0])
 			}
+		case "enumerate":
+			if len(call.Args) == 1 {
+				return callIdent("zincpyEnumerate", call.Args[0])
+			}
+		case "zip":
+			if len(call.Args) >= 1 {
+				return callIdent("zincpyZip", call.Args...)
+			}
 		}
 	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,
@@ -1363,6 +1425,8 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 				sel.Field = "Keys"
 			case "values":
 				sel.Field = "Values"
+			case "items":
+				sel.Field = "Items"
 			}
 		}
 		// set mutators on a set var → capitalized runtime methods.

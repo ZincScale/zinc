@@ -699,6 +699,41 @@ func zincpySliceIndices(n int, startA, stopA any, step int) []int {
 	return idxs
 }
 
+// zincpyEnumerate mirrors enumerate(xs): (index, element) 2-tuples.
+func zincpyEnumerate(xs any) []any {
+	s := zincpySeq(xs)
+	out := make([]any, len(s))
+	for i, v := range s {
+		out[i] = zincpyTuple{items: []any{i, v}}
+	}
+	return out
+}
+
+// zincpyZip mirrors zip(a, b, ...): tuples of corresponding elements, stopping
+// at the shortest input.
+func zincpyZip(args ...any) []any {
+	if len(args) == 0 {
+		return nil
+	}
+	seqs := make([][]any, len(args))
+	minLen := -1
+	for i, a := range args {
+		seqs[i] = zincpySeq(a)
+		if minLen < 0 || len(seqs[i]) < minLen {
+			minLen = len(seqs[i])
+		}
+	}
+	out := make([]any, minLen)
+	for i := 0; i < minLen; i++ {
+		tup := make([]any, len(seqs))
+		for j := range seqs {
+			tup[j] = seqs[j][i]
+		}
+		out[i] = zincpyTuple{items: tup}
+	}
+	return out
+}
+
 func zincpyAbs(v any) any {
 	switch x := v.(type) {
 	case int:
@@ -843,6 +878,16 @@ func (d *zincpyDict) Has(k any) bool { _, ok := d.vals[k]; return ok }
 func (d *zincpyDict) Len() int { return len(d.keys) }
 
 func (d *zincpyDict) Keys() []any { return d.keys }
+
+// Items returns the dict's (key, value) pairs as 2-tuples, in insertion order,
+// for use by a for k, v in d.items() loop.
+func (d *zincpyDict) Items() []any {
+	out := make([]any, len(d.keys))
+	for i, k := range d.keys {
+		out[i] = zincpyTuple{items: []any{k, d.vals[k]}}
+	}
+	return out
+}
 
 func (d *zincpyDict) Values() []any {
 	vs := make([]any, len(d.keys))
