@@ -104,9 +104,22 @@ func isLiteralExpr(e parser.Expr) bool {
 // declarations — so fields are discovered by scanning method bodies for
 // self-assignments and their inferred types. `__init__` becomes the
 // constructor; other defs become methods with the leading `self` dropped.
-func (p *Parser) parseClass() *parser.ClassDecl {
+// dcField is one @dataclass field: a class-level `name: type [= default]`.
+type dcField struct {
+	name string
+	typ  parser.TypeExpr
+	def  parser.Expr
+}
+
+func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 	line := p.advance().Line // 'class'
 	name := p.expectKind(TName).Value
+	isDataclass := false
+	for _, d := range decorators {
+		if d == "dataclass" {
+			isDataclass = true
+		}
+	}
 
 	var parents []parser.ParentRef
 	if p.acceptOp("(") {
@@ -152,6 +165,7 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 	cls := &parser.ClassDecl{Line: line, Name: name, Parents: parents}
 	var fields []*parser.FieldDecl
 	seen := map[string]bool{}
+	var dcFields []dcField
 
 	for p.cur().Kind != TDedent && p.cur().Kind != TEOF {
 		p.skipNewlines()
@@ -169,6 +183,11 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 		}
 		if p.isKw("def") {
 			p.parseClassMethod(cls, &fields, seen, nil)
+			continue
+		}
+		// @dataclass field: `name: type [= default]` declared at class level.
+		if isDataclass && p.cur().Kind == TName && p.peekOp(":") {
+			dcFields = append(dcFields, p.parseDataclassField())
 			continue
 		}
 		// Class-level constant `NAME [: T] = literal` — inlined at use sites.
@@ -190,8 +209,92 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 		}
 	}
 	p.expectKind(TDedent)
+	if isDataclass {
+		p.synthesizeDataclass(cls, name, dcFields, &fields)
+	}
 	cls.Fields = fields
 	return cls
+}
+
+// parseDataclassField parses one `name: type [= default]` field line.
+func (p *Parser) parseDataclassField() dcField {
+	name := p.expectKind(TName).Value
+	p.expectOp(":")
+	typ := p.parseType()
+	var def parser.Expr
+	if p.acceptOp("=") {
+		def = p.parseExpr()
+	}
+	p.endSimple()
+	return dcField{name: name, typ: typ, def: def}
+}
+
+// synthesizeDataclass generates the constructor, struct fields, __repr__
+// (String) and __eq__ (Eq) for an @dataclass from its declared fields.
+func (p *Parser) synthesizeDataclass(cls *parser.ClassDecl, name string, dcFields []dcField, fields *[]*parser.FieldDecl) {
+	var ctorParams []*parser.ParamDecl
+	var ctorBody []parser.Stmt
+	for _, f := range dcFields {
+		*fields = append(*fields, &parser.FieldDecl{Name: f.name, IsPub: true, Type: f.typ})
+		p.classFields[name][f.name] = typeFromExpr(f.typ)
+		ctorParams = append(ctorParams, &parser.ParamDecl{Name: f.name, Type: f.typ, Default: f.def})
+		ctorBody = append(ctorBody, &parser.AssignStmt{
+			Target: &parser.SelectorExpr{Object: &parser.ThisExpr{}, Field: f.name},
+			Op:     "=",
+			Value:  &parser.Ident{Name: f.name},
+		})
+	}
+	cls.Ctor = &parser.CtorDecl{Params: ctorParams, Body: &parser.BlockStmt{Stmts: ctorBody}}
+	p.defParams[name] = ctorParams
+
+	// __repr__ → String(): "Name(f1=<repr>, f2=<repr>)"
+	repr := concatStr(&parser.StringLit{Value: name + "("})
+	for i, f := range dcFields {
+		sep := ""
+		if i > 0 {
+			sep = ", "
+		}
+		repr = concatStr(repr, &parser.StringLit{Value: sep + f.name + "="},
+			callIdent("zincpyRepr", &parser.SelectorExpr{Object: &parser.ThisExpr{}, Field: f.name}))
+	}
+	repr = concatStr(repr, &parser.StringLit{Value: ")"})
+	cls.Methods = append(cls.Methods, &parser.MethodDecl{
+		Name: "String", IsPub: true, ReturnType: &parser.SimpleType{Name: "String"},
+		Body: &parser.BlockStmt{Stmts: []parser.Stmt{&parser.ReturnStmt{Value: repr}}},
+	})
+	p.classMethods[name]["String"] = tStr
+
+	// __eq__ → Eq(other): all fields equal (via zincpyEq for cross-type safety)
+	var eq parser.Expr
+	for _, f := range dcFields {
+		cmp := callIdent("zincpyEq",
+			&parser.SelectorExpr{Object: &parser.ThisExpr{}, Field: f.name},
+			&parser.SelectorExpr{Object: &parser.Ident{Name: "other"}, Field: f.name})
+		if eq == nil {
+			eq = cmp
+		} else {
+			eq = &parser.BinaryExpr{Left: eq, Op: "&&", Right: cmp}
+		}
+	}
+	if eq == nil {
+		eq = &parser.BoolLit{Value: true}
+	}
+	cls.Methods = append(cls.Methods, &parser.MethodDecl{
+		Name: "Eq", IsPub: true,
+		Params:     []*parser.ParamDecl{{Name: "other", Type: &parser.SimpleType{Name: name}}},
+		ReturnType: &parser.SimpleType{Name: "bool"},
+		Body:       &parser.BlockStmt{Stmts: []parser.Stmt{&parser.ReturnStmt{Value: eq}}},
+	})
+	p.classMethods[name]["Eq"] = tBool
+}
+
+// concatStr chains string expressions with `+`.
+func concatStr(parts ...parser.Expr) parser.Expr {
+	e := parts[0]
+	for _, part := range parts[1:] {
+		e = &parser.BinaryExpr{Left: e, Op: "+", Right: part}
+	}
+	return e
 }
 
 // parseClassMethod parses one `def` inside a class, routing __init__ to the

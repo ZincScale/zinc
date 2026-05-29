@@ -371,6 +371,11 @@ func (p *Parser) parseProgram() *parser.Program {
 		if p.cur().Kind == TEOF {
 			break
 		}
+		// Top-level decorators (e.g. @dataclass) precede a class or def.
+		var decorators []string
+		if p.isOp("@") {
+			decorators = p.parseDecorators()
+		}
 		if p.isKw("def") {
 			if fn := p.parseDef(); fn != nil {
 				prog.Decls = append(prog.Decls, fn)
@@ -378,7 +383,7 @@ func (p *Parser) parseProgram() *parser.Program {
 			continue
 		}
 		if p.isKw("class") {
-			prog.Decls = append(prog.Decls, p.parseClass())
+			prog.Decls = append(prog.Decls, p.parseClass(decorators))
 			// static/class methods were lifted to package functions.
 			prog.Decls = append(prog.Decls, p.pendingDecls...)
 			p.pendingDecls = nil
@@ -673,6 +678,12 @@ func (p *Parser) parseFromImport() parser.Stmt {
 		p.advance()
 	}
 	p.endSimple()
+	// Compile-time-only modules (handled natively or pure annotations) →
+	// the from-import is a no-op (it only needs to exist for CPython to run).
+	switch mod {
+	case "dataclasses", "typing", "__future__", "abc", "collections.abc":
+		return nil
+	}
 	p.errf(tok, "from-import (`from %s import ...`) is not yet supported; use `import %s` and `%s.name`", mod, mod, mod)
 	return nil
 }
