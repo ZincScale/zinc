@@ -43,20 +43,25 @@ func callIdent(name string, args ...parser.Expr) parser.Expr {
 	return &parser.CallExpr{Callee: &parser.Ident{Name: name}, Args: args}
 }
 
-// goReserved are Go keywords that are valid Python identifiers and that the
-// front-end does NOT special-case (range/map are deliberately excluded — they
-// are Python builtins handled by name). A Python variable/param/function with
-// one of these names is renamed with a trailing underscore so the emitted Go
-// is valid. Applied consistently at every identifier site, declarations and
-// references alike, so the rename stays internally consistent.
+// goReserved are identifiers that are valid Python names but that the emitted
+// Go cannot use as-is: Go keywords (range/map deliberately excluded — they are
+// Python builtins handled by name), plus `it`, which the Zinc codegen treats as
+// an implicit closure parameter and rewrites to `_it` in expression position
+// (so a Python loop var named `it` would lose its binding). A Python
+// variable/param/function with one of these names is renamed with a trailing
+// underscore so the emitted Go is valid. Applied consistently at every
+// identifier site, declarations and references alike, so the rename stays
+// internally consistent.
 var goReserved = map[string]bool{
 	"type": true, "func": true, "var": true, "const": true, "chan": true,
 	"go": true, "goto": true, "interface": true, "package": true,
 	"select": true, "struct": true, "switch": true, "case": true,
 	"default": true, "defer": true, "fallthrough": true,
+	"it": true,
 }
 
-// goSafe renames a Python identifier that collides with a Go keyword.
+// goSafe renames a Python identifier that collides with a Go keyword or a
+// Zinc-codegen reserved identifier.
 func goSafe(name string) string {
 	if goReserved[name] {
 		return name + "_"
@@ -686,6 +691,34 @@ func (p *Parser) parseUnpackAssign(line int, first parser.Expr) parser.Stmt {
 	return &parser.TupleVarStmt{Line: line, Names: names, Value: rhs}
 }
 
+// coerceDynamicTo wraps a dynamic value (e.g. derived from an unannotated /
+// duck-typed param, or an FFI result) being returned from a function with a
+// concrete scalar return type, so the value's interface{} representation
+// becomes the Go return type. The helpers reproduce Python int()/float()/str()
+// and a bool pass-through; for a well-annotated program the value already holds
+// that type so the conversion is identity. Non-scalar return types (classes,
+// containers) are left alone.
+func (p *Parser) coerceDynamicTo(e parser.Expr, t parser.TypeExpr) parser.Expr {
+	if p.typeOf(e) != tDynamic {
+		return e
+	}
+	st, ok := t.(*parser.SimpleType)
+	if !ok {
+		return e
+	}
+	switch st.Name {
+	case "int":
+		return callIdent("zincpyToInt", e)
+	case "float", "double":
+		return callIdent("zincpyToFloat", e)
+	case "String", "string":
+		return callIdent("zincpyStr", e)
+	case "bool":
+		return callIdent("zincpyToBool", e)
+	}
+	return e
+}
+
 func (p *Parser) parseReturn() parser.Stmt {
 	line := p.advance().Line // 'return'
 	var val parser.Expr
@@ -695,6 +728,7 @@ func (p *Parser) parseReturn() parser.Stmt {
 	p.endSimple()
 	if val != nil && p.currentFnRet != nil {
 		coerceEmptyList(val, p.currentFnRet) // `return []` from a `-> list[T]` fn
+		val = p.coerceDynamicTo(val, p.currentFnRet)
 	}
 	return &parser.ReturnStmt{Line: line, Value: val}
 }
@@ -784,6 +818,17 @@ func (p *Parser) parseFromImport() parser.Stmt {
 	return nil
 }
 
+// paramPyType is the pytype to declare for a parameter. An unannotated param
+// (like *args) carries no static type, so it is dynamic: its uses route
+// through the runtime helpers (arithmetic, indexing, iteration on `any`),
+// matching Python's duck typing. An annotated param uses its hint.
+func paramPyType(pa *parser.ParamDecl) pytype {
+	if pa.Variadic || pa.Type == nil {
+		return tDynamic
+	}
+	return typeFromExpr(pa.Type)
+}
+
 func (p *Parser) parseDef() *parser.FnDecl {
 	line := p.advance().Line // 'def'
 	name := goSafe(p.expectKind(TName).Value)
@@ -827,17 +872,21 @@ func (p *Parser) parseDef() *parser.FnDecl {
 	p.currentFnRet = ret
 	p.pushScope()
 	for _, pa := range params {
-		if pa.Variadic {
-			p.declare(pa.Name, tDynamic) // *args is a []any — route ops through dynamic helpers
-		} else {
-			p.declare(pa.Name, typeFromExpr(pa.Type))
-		}
+		p.declare(pa.Name, paramPyType(pa))
 		p.recordParamElem(pa)
 		p.recordParamInstance(pa)
 	}
 	body := p.parseBlock()
 	p.popScope()
 	p.currentFnRet = prevRet
+	// An unannotated function that returns a value gets a dynamic (interface{})
+	// Go return type rather than void — so a duck-typed `def add(a, b): return
+	// a + b` returns the (boxed) result instead of failing as "too many return
+	// values". Its uses route through the dynamic helpers (fnRet → tDynamic).
+	if ret == nil && returnsValueInBlock(body) {
+		ret = &parser.SimpleType{Name: "any"}
+		p.fnRet[name] = tDynamic
+	}
 	ensureTrailingReturn(body, ret)
 	return &parser.FnDecl{Line: line, Name: name, Params: params, ReturnType: ret, Body: body}
 }

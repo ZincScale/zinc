@@ -284,6 +284,36 @@ func returnInBlock(b *parser.BlockStmt) bool {
 	return false
 }
 
+// returnsValueInBlock reports whether a block has a value-returning `return x`
+// (not a bare `return`), descending into if/for/while. Used to give an
+// unannotated function a dynamic (interface{}) Go return type rather than void.
+func returnsValueInBlock(b *parser.BlockStmt) bool {
+	if b == nil {
+		return false
+	}
+	for _, s := range b.Stmts {
+		switch st := s.(type) {
+		case *parser.ReturnStmt:
+			if st.Value != nil {
+				return true
+			}
+		case *parser.IfStmt:
+			if returnsValueInBlock(st.Then) || returnsValueInBlock(elseBlock(st.ElseStmt)) {
+				return true
+			}
+		case *parser.ForStmt:
+			if returnsValueInBlock(st.Body) {
+				return true
+			}
+		case *parser.WhileStmt:
+			if returnsValueInBlock(st.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // escapingBreakContinue reports whether a block has a break/continue that
 // would escape the try (i.e. not bound to a loop nested inside the try).
 func escapingBreakContinue(b *parser.BlockStmt) bool {

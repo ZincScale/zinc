@@ -409,11 +409,7 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	p.currentFnRet = ret
 	p.pushScope()
 	for _, pa := range params {
-		if pa.Variadic {
-			p.declare(pa.Name, tDynamic)
-		} else {
-			p.declare(pa.Name, typeFromExpr(pa.Type))
-		}
+		p.declare(pa.Name, paramPyType(pa))
 		p.recordParamElem(pa)
 		p.recordParamInstance(pa)
 	}

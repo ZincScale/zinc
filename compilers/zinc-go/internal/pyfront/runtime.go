@@ -146,6 +146,18 @@ func zincpyGetItem(container, key any) any {
 		}
 		return string(rs[i])
 	}
+	// A typed slice (e.g. []int) reaching here was boxed into a dynamic value
+	// (passed to an unannotated param); index it reflectively.
+	if rv := reflect.ValueOf(container); rv.IsValid() && rv.Kind() == reflect.Slice {
+		i := key.(int)
+		if i < 0 {
+			i += rv.Len()
+		}
+		if i < 0 || i >= rv.Len() {
+			panic(zincpyExc{"IndexError", "list index out of range"})
+		}
+		return rv.Index(i).Interface()
+	}
 	panic(zincpyExc{"TypeError", "object is not subscriptable"})
 }
 
@@ -167,7 +179,9 @@ func zincpyIter(container any) []any {
 		}
 		return out
 	}
-	panic(zincpyExc{"TypeError", "object is not iterable"})
+	// Sets and arbitrary typed slices (boxed into a dynamic value) — materialize
+	// reflectively. zincpySeq raises the same TypeError for non-iterables.
+	return zincpySeq(container)
 }
 
 // zincpyLen is len() on a dynamic value.
@@ -181,6 +195,15 @@ func zincpyLen(container any) int {
 		return c.Len()
 	case string:
 		return len([]rune(c))
+	case *zincpySet:
+		return c.Len()
+	}
+	// A typed slice/map/array boxed into a dynamic value.
+	if rv := reflect.ValueOf(container); rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.Slice, reflect.Map, reflect.Array:
+			return rv.Len()
+		}
 	}
 	panic(zincpyExc{"TypeError", "object has no len()"})
 }
@@ -227,6 +250,15 @@ func zincpyToInt(v any) int {
 		return n
 	}
 	panic(zincpyExc{"TypeError", "int() argument must be a string or a number"})
+}
+
+// zincpyToBool coerces a dynamic value to a Go bool for a bool-typed return: a
+// genuine bool passes through; anything else falls back to Python truthiness.
+func zincpyToBool(v any) bool {
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return zincpyTruthy(v)
 }
 
 // --- dynamic binary operators ------------------------------------------------
@@ -341,6 +373,19 @@ func zincpyAdd(a, b any) any {
 			it := make([]any, 0, len(at.items)+len(bt.items))
 			return zincpyTuple{items: append(append(it, at.items...), bt.items...)}
 		}
+	}
+	// Typed slices (e.g. []int) boxed into dynamic values concatenate like
+	// lists, producing a []any (matching Python list +).
+	if ra, rb := reflect.ValueOf(a), reflect.ValueOf(b); ra.IsValid() && rb.IsValid() &&
+		ra.Kind() == reflect.Slice && rb.Kind() == reflect.Slice {
+		r := make([]any, 0, ra.Len()+rb.Len())
+		for i := 0; i < ra.Len(); i++ {
+			r = append(r, ra.Index(i).Interface())
+		}
+		for i := 0; i < rb.Len(); i++ {
+			r = append(r, rb.Index(i).Interface())
+		}
+		return r
 	}
 	panic(zincpyExc{"TypeError", "unsupported operand type(s) for +: " + zincpyTypeName(a) + " and " + zincpyTypeName(b)})
 }
