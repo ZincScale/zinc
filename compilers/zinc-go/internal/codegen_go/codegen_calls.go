@@ -361,13 +361,17 @@ func (g *Generator) formatCallExpr(c *parser.CallExpr) string {
 				return fmt.Sprintf("strings.Join(%s, \"\")", obj)
 			}
 		case "keys":
-			g.needImport("maps")
-			g.needImport("slices")
-			return fmt.Sprintf("slices.Collect(maps.Keys(%s))", obj)
+			if shouldApplyBuiltin {
+				g.needImport("maps")
+				g.needImport("slices")
+				return fmt.Sprintf("slices.Collect(maps.Keys(%s))", obj)
+			}
 		case "values":
-			g.needImport("maps")
-			g.needImport("slices")
-			return fmt.Sprintf("slices.Collect(maps.Values(%s))", obj)
+			if shouldApplyBuiltin {
+				g.needImport("maps")
+				g.needImport("slices")
+				return fmt.Sprintf("slices.Collect(maps.Values(%s))", obj)
+			}
 		case "containsKey":
 			if len(c.Args) == 1 && !g.isStructVar(sel.Object) {
 				return fmt.Sprintf("func() bool { _, _ok := %s[%s]; return _ok }()", obj, g.formatExpr(c.Args[0]))
