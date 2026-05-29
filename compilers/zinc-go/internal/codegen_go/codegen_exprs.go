@@ -650,6 +650,15 @@ func (g *Generator) formatLambdaExpr(l *parser.LambdaExpr) string {
 			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, retType, body)
 		}
 
+		// Honor an explicit return type on a block lambda (`(): T => { ... }`)
+		// before falling back to body inference. Without this, a block lambda
+		// that declared its return type emitted `func() { ... return v }`
+		// (no return type) — invalid Go.
+		if l.ReturnType != nil {
+			retType := g.formatType(l.ReturnType)
+			return fmt.Sprintf("func(%s) %s {\n%s\n}", paramStr, retType, body)
+		}
+
 		blockRetType := ""
 		for _, s := range l.Body.Stmts {
 			if ret, ok := s.(*parser.ReturnStmt); ok && ret.Value != nil {

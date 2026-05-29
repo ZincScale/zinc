@@ -340,6 +340,11 @@ type TupleVarStmt struct {
 	Names     []string
 	Value     Expr
 	OrHandler *OrHandler // optional or { } handler for failable calls
+	// Op selects the assignment operator for a parallel-assignment lowering
+	// (a TupleLit Value): "=" when every target already exists (a reassignment
+	// or swap), "" / ":=" to declare new targets. Ignored for the multi-return
+	// destructuring form.
+	Op string
 }
 
 func (t *TupleVarStmt) nodeTag() {}

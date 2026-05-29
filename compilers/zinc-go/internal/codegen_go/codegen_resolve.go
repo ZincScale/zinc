@@ -1222,6 +1222,11 @@ func (g *Generator) formatType(t parser.TypeExpr) string {
 				return fmt.Sprintf("map[%s]struct{}", g.formatType(typ.TypeArgs[0]))
 			}
 			return "map[interface{}]struct{}"
+		case "PyDict":
+			// pyfront's insertion-ordered dict (runtime.go zincpyDict). The K/V
+			// type args are erased here — values are boxed (any) with read-site
+			// assertions inserted by the front-end.
+			return "*zincpyDict"
 		case "Channel", "Chan":
 			if len(typ.TypeArgs) > 0 {
 				return "chan " + g.formatType(typ.TypeArgs[0])

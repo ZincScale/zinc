@@ -3458,6 +3458,26 @@ func (g *Generator) emitTupleVarStmt(t *parser.TupleVarStmt) {
 		}
 		return
 	}
+	// Parallel assignment / swap: `a, b = e1, e2` (a TupleLit RHS) maps to Go's
+	// native multi-assignment, which evaluates the whole RHS before binding
+	// (so swaps work). Use `=` when every target is already a local (a pure
+	// reassignment, e.g. a swap), otherwise `:=` to introduce the new ones.
+	if tup, ok := t.Value.(*parser.TupleLit); ok && len(tup.Elements) == len(t.Names) {
+		parts := make([]string, len(tup.Elements))
+		for i, e := range tup.Elements {
+			parts[i] = g.formatExpr(e)
+		}
+		op := t.Op
+		if op == "" {
+			op = ":="
+		}
+		g.writeln("%s %s %s", strings.Join(t.Names, ", "), op, strings.Join(parts, ", "))
+		for _, n := range t.Names {
+			g.declareLocal(n)
+		}
+		return
+	}
+
 	names := strings.Join(t.Names, ", ")
 	g.writeln("%s := %s", names, g.formatExpr(t.Value))
 	for _, n := range t.Names {
