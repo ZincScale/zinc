@@ -16,6 +16,32 @@ package pyfront
 
 import "zinc-go/internal/parser"
 
+// dunderMethods maps Python special methods to the Go method names the
+// front-end emits and routes to. __str__ becomes Go's Stringer (used by
+// print/str); the arithmetic/comparison/len ones are routed from operators
+// and len() when an operand is a known class instance.
+var dunderMethods = map[string]string{
+	"__str__":     "String",
+	"__repr__":    "Repr",
+	"__eq__":      "Eq",
+	"__ne__":      "Ne",
+	"__lt__":      "Lt",
+	"__le__":      "Le",
+	"__gt__":      "Gt",
+	"__ge__":      "Ge",
+	"__add__":     "Add",
+	"__sub__":     "Sub",
+	"__mul__":     "Mul",
+	"__len__":     "Len",
+	"__getitem__": "GetItem",
+}
+
+// isClassProp reports whether class cls exposes pyName as an @property.
+func (p *Parser) isClassProp(cls, pyName string) bool {
+	props, ok := p.classProps[cls]
+	return ok && props[pyName]
+}
+
 // parseClass parses a Python `class` into a zinc ClassDecl. Python attributes
 // are implicit (created by `self.x = ...`), whereas zinc needs explicit field
 // declarations — so fields are discovered by scanning method bodies for
@@ -53,6 +79,12 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 	if p.classMethods[name] == nil {
 		p.classMethods[name] = map[string]pytype{}
 	}
+	if p.classProps[name] == nil {
+		p.classProps[name] = map[string]bool{}
+	}
+	if p.classMethodRet[name] == nil {
+		p.classMethodRet[name] = map[string]string{}
+	}
 	prevClass := p.currentClass
 	p.currentClass = name
 	defer func() { p.currentClass = prevClass }()
@@ -66,8 +98,17 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 		if p.cur().Kind == TDedent || p.cur().Kind == TEOF {
 			break
 		}
+		if p.isOp("@") {
+			decs := p.parseDecorators()
+			if p.isKw("def") {
+				p.parseClassMethod(cls, &fields, seen, decs)
+			} else {
+				p.errf(p.cur(), "a decorator must be followed by a def")
+			}
+			continue
+		}
 		if p.isKw("def") {
-			p.parseClassMethod(cls, &fields, seen)
+			p.parseClassMethod(cls, &fields, seen, nil)
 			continue
 		}
 		// pass / docstrings / class-level statements: not modelled yet.
@@ -90,12 +131,48 @@ func (p *Parser) parseClass() *parser.ClassDecl {
 // parseClassMethod parses one `def` inside a class, routing __init__ to the
 // constructor and everything else to a method. The leading `self` parameter
 // is dropped (zinc methods have an implicit receiver).
-func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.FieldDecl, seen map[string]bool) {
+// parseDecorators consumes one or more `@name[(...)]` lines and returns the
+// decorator base names. Decorator call arguments are skipped (not modelled).
+func (p *Parser) parseDecorators() []string {
+	var decs []string
+	for p.isOp("@") {
+		p.advance()
+		name := p.parseDottedName()
+		if p.isOp("(") { // skip @deco(args)
+			depth := 0
+			for p.cur().Kind != TEOF {
+				if p.isOp("(") {
+					depth++
+				} else if p.isOp(")") {
+					depth--
+					if depth == 0 {
+						p.advance()
+						break
+					}
+				}
+				p.advance()
+			}
+		}
+		decs = append(decs, name)
+		p.skipNewlines()
+	}
+	return decs
+}
+
+func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.FieldDecl, seen map[string]bool, decorators []string) {
 	p.advance() // 'def'
-	mname := p.expectKind(TName).Value
-	// __str__ → Go's Stringer, so print(obj)/str(obj) use it (via fmt).
-	if mname == "__str__" {
-		mname = "String"
+	pyName := p.expectKind(TName).Value
+	mname := pyName
+	// Dunders map to their Go equivalents (e.g. __str__ → Stringer's String),
+	// so operators/len/print route to them.
+	if g, ok := dunderMethods[mname]; ok {
+		mname = g
+	}
+	isProperty := false
+	for _, d := range decorators {
+		if d == "property" {
+			isProperty = true
+		}
 	}
 	p.expectOp("(")
 
@@ -151,6 +228,14 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	ensureTrailingReturn(body, ret)
 	if p.currentClass != "" {
 		p.classMethods[p.currentClass][mname] = typeFromExpr(ret)
+		if isProperty {
+			p.classProps[p.currentClass][pyName] = true
+		}
+		// Record a method that returns an instance, so operator-dunder results
+		// chain (a + b + c) and attribute access on a method result resolves.
+		if st, ok := ret.(*parser.SimpleType); ok && p.classNames[st.Name] {
+			p.classMethodRet[p.currentClass][mname] = st.Name
+		}
 	}
 	cls.Methods = append(cls.Methods, &parser.MethodDecl{
 		Name: mname, IsPub: true, Params: params, ReturnType: ret, Body: body,

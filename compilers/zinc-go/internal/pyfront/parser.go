@@ -113,6 +113,12 @@ type Parser struct {
 	classMethods  map[string]map[string]pytype
 	instanceClass map[string]string
 	currentClass  string
+	// classProps[class][pyName] marks a method decorated @property, so a bare
+	// `obj.name` read is lowered to the method call `obj.Name()`.
+	classProps map[string]map[string]bool
+	// classMethodRet[class][method] is the method's return class name (when it
+	// returns an instance), so operator-dunder results chain (a + b + c).
+	classMethodRet map[string]map[string]string
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -141,7 +147,9 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		classNames:    map[string]bool{},
 		classFields:   map[string]map[string]pytype{},
 		classMethods:  map[string]map[string]pytype{},
-		instanceClass: map[string]string{},
+		instanceClass:  map[string]string{},
+		classProps:     map[string]map[string]bool{},
+		classMethodRet: map[string]map[string]string{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -732,6 +740,11 @@ func (p *Parser) parseBlock() *parser.BlockStmt {
 // --- types -------------------------------------------------------------------
 
 func (p *Parser) parseType() parser.TypeExpr {
+	// A string annotation is a forward reference (`other: "Vec"`), required in
+	// CPython when the type isn't defined yet — treat the contents as the name.
+	if p.cur().Kind == TString {
+		return &parser.SimpleType{Name: mapPyType(p.advance().Value)}
+	}
 	name := p.expectKind(TName).Value
 	// Subscripted generics: list[int], dict[str, int], set[int].
 	if p.isOp("[") {
@@ -921,6 +934,9 @@ func (p *Parser) parsePostfix() parser.Expr {
 				e = callIdent("zincpyPyGet",
 					&parser.StringLit{Value: p.ffiModBind[id.Name]},
 					&parser.StringLit{Value: field})
+			} else if !p.isOp("(") && p.isClassProp(p.exprClass(e), field) {
+				// @property read `obj.x` → method call `obj.x()`.
+				e = &parser.CallExpr{Callee: &parser.SelectorExpr{Object: e, Field: field}}
 			} else {
 				e = &parser.SelectorExpr{Object: e, Field: field}
 			}
@@ -1089,6 +1105,10 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		}
 		if p.typeOf(call.Args[0]) == tDynamic {
 			return callIdent("zincpyLen", call.Args[0])
+		}
+		// len(obj) on a class instance defining __len__ → obj.Len().
+		if cls := p.exprClass(call.Args[0]); cls != "" && p.classHasMethod(cls, "Len") {
+			return &parser.CallExpr{Callee: &parser.SelectorExpr{Object: call.Args[0], Field: "Len"}}
 		}
 	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,

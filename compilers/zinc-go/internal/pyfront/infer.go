@@ -111,7 +111,7 @@ func (p *Parser) typeOf(e parser.Expr) pytype {
 	case *parser.SelectorExpr:
 		// self.field inside a method, or obj.field where obj is a tracked
 		// instance — resolve the field's type from the class registry.
-		if cls := p.selectorClass(e.Object); cls != "" {
+		if cls := p.exprClass(e.Object); cls != "" {
 			if ft, ok := p.classFields[cls]; ok {
 				if t, ok := ft[e.Field]; ok {
 					return t
@@ -149,17 +149,39 @@ func (p *Parser) typeOf(e parser.Expr) pytype {
 	return tUnknown
 }
 
-// selectorClass returns the class name an attribute receiver resolves to:
-// `self` → the class whose method is being parsed; a tracked instance var →
-// its class; "" otherwise.
-func (p *Parser) selectorClass(obj parser.Expr) string {
-	switch o := obj.(type) {
+// exprClass returns the class an expression evaluates to an instance of:
+// `self` → the enclosing class; a tracked instance var → its class; a
+// constructor call `C(...)` → C; a method call → the method's return class
+// (so operator-dunder results chain). "" if not a known instance.
+func (p *Parser) exprClass(e parser.Expr) string {
+	switch o := e.(type) {
 	case *parser.ThisExpr:
 		return p.currentClass
 	case *parser.Ident:
 		return p.instanceClass[o.Name]
+	case *parser.CallExpr:
+		if sel, ok := o.Callee.(*parser.SelectorExpr); ok {
+			if cls := p.exprClass(sel.Object); cls != "" {
+				if rc, ok := p.classMethodRet[cls]; ok {
+					return rc[sel.Field]
+				}
+			}
+		}
+		if id, ok := o.Callee.(*parser.Ident); ok && p.classNames[id.Name] {
+			return id.Name // constructor
+		}
 	}
 	return ""
+}
+
+// classHasMethod reports whether class cls defines (Go) method m.
+func (p *Parser) classHasMethod(cls, m string) bool {
+	mm, ok := p.classMethods[cls]
+	if !ok {
+		return false
+	}
+	_, ok = mm[m]
+	return ok
 }
 
 // callType infers the return type of a call: builtin conversions and known
@@ -168,7 +190,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 	// Method call obj.method() / self.method(): look up the method's declared
 	// return type on the receiver's class.
 	if sel, ok := c.Callee.(*parser.SelectorExpr); ok {
-		if cls := p.selectorClass(sel.Object); cls != "" {
+		if cls := p.exprClass(sel.Object); cls != "" {
 			if mm, ok := p.classMethods[cls]; ok {
 				if t, ok := mm[sel.Field]; ok {
 					return t
@@ -301,11 +323,35 @@ func dynBinaryHelper(op string) string {
 	return ""
 }
 
+// opDunder maps a binary operator to the Go method name a class can define to
+// overload it (Python's __add__/__eq__/… → the front-end's renamed methods).
+var opDunder = map[string]string{
+	"+":  "Add",
+	"-":  "Sub",
+	"*":  "Mul",
+	"==": "Eq",
+	"!=": "Ne",
+	"<":  "Lt",
+	"<=": "Le",
+	">":  "Gt",
+	">=": "Ge",
+}
+
 // numericBinary builds a binary expression, inserting a float() conversion on
 // whichever operand is int when the other is float — Python's implicit
 // int→float promotion, made explicit for Go.
 func (p *Parser) numericBinary(left parser.Expr, op string, right parser.Expr) parser.Expr {
 	lt, rt := p.typeOf(left), p.typeOf(right)
+	// Operator overloading: if the left operand is a class instance whose class
+	// defines the dunder for this operator, route `a op b` → `a.Dunder(b)`.
+	if m, ok := opDunder[op]; ok {
+		if cls := p.exprClass(left); cls != "" && p.classHasMethod(cls, m) {
+			return &parser.CallExpr{
+				Callee: &parser.SelectorExpr{Object: left, Field: m},
+				Args:   []parser.Expr{right},
+			}
+		}
+	}
 	// A dynamic operand (FFI result, tuple element, ...) can't pick a Go
 	// operator statically — route to the runtime dispatcher.
 	if lt == tDynamic || rt == tDynamic {
