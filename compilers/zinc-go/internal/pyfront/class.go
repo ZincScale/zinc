@@ -318,6 +318,9 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	}
 
 	if mname == "__init__" {
+		if p.currentClass != "" {
+			p.defParams[p.currentClass] = params // constructor signature for kwargs/defaults
+		}
 		superArgs, superCalled := extractSuperInit(body)
 		cls.Ctor = &parser.CtorDecl{Params: params, Body: body, SuperArgs: superArgs, SuperCalled: superCalled}
 		return

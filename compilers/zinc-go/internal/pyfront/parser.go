@@ -160,6 +160,12 @@ type Parser struct {
 	// marks the set-literal constructor IIFEs so an assignment can pick them up.
 	setVars     map[string]bool
 	setExprMeta map[parser.Expr]bool
+
+	// defParams maps a callable name to its parameter declarations (with
+	// defaults), so call sites can resolve keyword args and fill omitted
+	// defaults into a plain positional call. Keyed by function name and by
+	// class name (for the constructor).
+	defParams map[string][]*parser.ParamDecl
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -195,6 +201,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		classStatics:   map[string]map[string]bool{},
 		setVars:        map[string]bool{},
 		setExprMeta:    map[parser.Expr]bool{},
+		defParams:      map[string][]*parser.ParamDecl{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -681,7 +688,11 @@ func (p *Parser) parseDef() *parser.FnDecl {
 		if p.acceptOp(":") {
 			ptype = p.parseType()
 		}
-		params = append(params, &parser.ParamDecl{Name: pname, Type: ptype})
+		var def parser.Expr
+		if p.acceptOp("=") {
+			def = p.parseExpr()
+		}
+		params = append(params, &parser.ParamDecl{Name: pname, Type: ptype, Default: def})
 		if !p.acceptOp(",") {
 			break
 		}
@@ -693,6 +704,7 @@ func (p *Parser) parseDef() *parser.FnDecl {
 	}
 	// Record the signature before the body so recursive calls infer correctly.
 	p.fnRet[name] = typeFromExpr(ret)
+	p.defParams[name] = params
 	if gt, ok := ret.(*parser.GenericType); ok && gt.Name == "PyDict" {
 		dm := dictMeta{key: tUnknown, val: tUnknown}
 		if len(gt.TypeArgs) == 2 {
@@ -1332,16 +1344,78 @@ func asDictSetTarget(e parser.Expr) (obj, key parser.Expr, ok bool) {
 	return sel.Object, call.Args[0], true
 }
 
+// resolveDefaults rewrites a call to a known function/constructor into a plain
+// positional call, placing keyword args by name and filling omitted parameters
+// from their defaults. Returns ok=false when the callee is unknown or the call
+// is already a complete positional call (nothing to do).
+func (p *Parser) resolveDefaults(call *parser.CallExpr) (parser.Expr, bool) {
+	id, ok := call.Callee.(*parser.Ident)
+	if !ok {
+		return nil, false
+	}
+	params, ok := p.defParams[id.Name]
+	if !ok {
+		return nil, false
+	}
+	if len(call.NamedArgs) == 0 && len(call.Args) >= len(params) {
+		return nil, false // complete positional call — leave as-is
+	}
+	final := make([]parser.Expr, len(params))
+	filled := make([]bool, len(params))
+	for i, a := range call.Args {
+		if i >= len(params) {
+			break
+		}
+		final[i], filled[i] = a, true
+	}
+	for _, na := range call.NamedArgs {
+		idx := -1
+		for i, pa := range params {
+			if pa.Name == na.Name {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			p.errf(p.cur(), "%s() got an unexpected keyword argument %q", id.Name, na.Name)
+			return nil, false
+		}
+		final[idx], filled[idx] = na.Value, true
+	}
+	for i, pa := range params {
+		if !filled[i] {
+			if pa.Default == nil {
+				p.errf(p.cur(), "%s() missing required argument %q", id.Name, pa.Name)
+				return nil, false
+			}
+			final[i] = pa.Default
+		}
+	}
+	return &parser.CallExpr{Callee: call.Callee, Args: final}, true
+}
+
 func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	p.expectOp("(")
 	call := &parser.CallExpr{Callee: callee}
 	for !p.isOp(")") && p.cur().Kind != TEOF {
-		call.Args = append(call.Args, p.parseExpr())
+		// keyword argument `name = value` (but not `name == value`).
+		if p.cur().Kind == TName && p.peekOp("=") {
+			name := p.advance().Value
+			p.advance() // '='
+			call.NamedArgs = append(call.NamedArgs, parser.NamedArg{Name: name, Value: p.parseExpr()})
+		} else {
+			call.Args = append(call.Args, p.parseExpr())
+		}
 		if !p.acceptOp(",") {
 			break
 		}
 	}
 	p.expectOp(")")
+	// Resolve keyword args / omitted defaults of a known function or
+	// constructor into a plain positional call.
+	if resolved, ok := p.resolveDefaults(call); ok {
+		return resolved
+	}
 
 	// len(d) on an ordered-dict → d.Len() (Go's len doesn't work on it).
 	if id, ok := callee.(*parser.Ident); ok && id.Name == "len" && len(call.Args) == 1 {
