@@ -439,6 +439,8 @@ func (p *Parser) parseStmt() parser.Stmt {
 			return p.parseImport()
 		case "from":
 			return p.parseFromImport()
+		case "with":
+			return p.parseWith()
 		case "pass":
 			p.advance()
 			p.endSimple()
@@ -887,6 +889,46 @@ func asRange(e parser.Expr) (*parser.RangeExpr, bool) {
 		return &parser.RangeExpr{Start: call.Args[0], End: call.Args[1]}, true
 	}
 	return nil, false
+}
+
+// parseWith lowers `with expr as name: body` (context managers) to an IIFE
+// that calls __enter__ (Enter), defers __exit__ (Exit), then runs the body —
+// the IIFE scopes the defer to the with-block. __enter__ conventionally
+// returns self, so `name` binds to the context object. Limitation: a `return`
+// inside the body escapes only the IIFE, not the enclosing function.
+func (p *Parser) parseWith() parser.Stmt {
+	line := p.advance().Line // 'with'
+	ctx := p.parseExpr()
+	var name string
+	if p.isKw("as") {
+		p.advance()
+		name = p.expectKind(TName).Value
+	}
+	tmp := fmt.Sprintf("_cm%d", p.tmpCount)
+	p.tmpCount++
+	cls := p.exprClass(ctx)
+	if name != "" {
+		p.declare(name, tUnknown)
+		if cls != "" {
+			p.instanceClass[name] = cls // __enter__ returns self → name is an instance
+		}
+	}
+	body := p.parseBlock()
+
+	enter := &parser.CallExpr{Callee: &parser.SelectorExpr{Object: &parser.Ident{Name: tmp}, Field: "Enter"}}
+	stmts := []parser.Stmt{&parser.VarStmt{Name: tmp, Value: ctx}}
+	if name != "" {
+		stmts = append(stmts, &parser.VarStmt{Name: name, Value: enter})
+	} else {
+		stmts = append(stmts, &parser.ExprStmt{Expr: enter})
+	}
+	stmts = append(stmts, &parser.DeferStmt{Expr: &parser.CallExpr{
+		Callee: &parser.SelectorExpr{Object: &parser.Ident{Name: tmp}, Field: "Exit"},
+		Args:   []parser.Expr{&parser.NullLit{}, &parser.NullLit{}, &parser.NullLit{}},
+	}})
+	stmts = append(stmts, body.Stmts...)
+	iife := &parser.CallExpr{Callee: &parser.LambdaExpr{Body: &parser.BlockStmt{Stmts: stmts}}}
+	return &parser.ExprStmt{Line: line, Expr: iife}
 }
 
 func (p *Parser) parseWhile() parser.Stmt {

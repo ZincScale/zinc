@@ -34,6 +34,8 @@ var dunderMethods = map[string]string{
 	"__mul__":     "Mul",
 	"__len__":     "Len",
 	"__getitem__": "GetItem",
+	"__enter__":   "Enter",
+	"__exit__":    "Exit",
 }
 
 // isClassProp reports whether class cls exposes pyName as an @property.
@@ -383,6 +385,11 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	var ret parser.TypeExpr
 	if p.acceptOp("->") {
 		ret = p.parseType()
+	}
+	// __enter__ conventionally `return self`; default its return type to the
+	// class so the return type-checks and `with ... as x` binds an instance.
+	if pyName == "__enter__" && ret == nil {
+		ret = &parser.SimpleType{Name: p.currentClass}
 	}
 
 	prevInMethod := p.inMethod
