@@ -250,6 +250,10 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	var params []*parser.ParamDecl
 	first := true
 	for !p.isOp(")") && p.cur().Kind != TEOF {
+		if p.isOp("**") {
+			p.errf(p.cur(), "**kwargs is not yet supported")
+		}
+		variadic := p.acceptOp("*") // *args
 		pn := p.expectKind(TName).Value
 		var pt parser.TypeExpr
 		if p.acceptOp(":") {
@@ -265,7 +269,7 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 			(pn == "cls" && isClassmethod))
 		first = false
 		if !dropFirst {
-			params = append(params, &parser.ParamDecl{Name: pn, Type: pt, Default: def})
+			params = append(params, &parser.ParamDecl{Name: pn, Type: pt, Default: def, Variadic: variadic})
 		}
 		if !p.acceptOp(",") {
 			break
@@ -290,7 +294,11 @@ func (p *Parser) parseClassMethod(cls *parser.ClassDecl, fields *[]*parser.Field
 	p.currentFnRet = ret
 	p.pushScope()
 	for _, pa := range params {
-		p.declare(pa.Name, typeFromExpr(pa.Type))
+		if pa.Variadic {
+			p.declare(pa.Name, tDynamic)
+		} else {
+			p.declare(pa.Name, typeFromExpr(pa.Type))
+		}
 		p.recordParamElem(pa)
 		p.recordParamInstance(pa)
 	}

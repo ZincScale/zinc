@@ -683,6 +683,10 @@ func (p *Parser) parseDef() *parser.FnDecl {
 	p.expectOp("(")
 	var params []*parser.ParamDecl
 	for !p.isOp(")") && p.cur().Kind != TEOF {
+		if p.isOp("**") {
+			p.errf(p.cur(), "**kwargs is not yet supported")
+		}
+		variadic := p.acceptOp("*") // *args
 		pname := p.expectKind(TName).Value
 		var ptype parser.TypeExpr
 		if p.acceptOp(":") {
@@ -692,7 +696,7 @@ func (p *Parser) parseDef() *parser.FnDecl {
 		if p.acceptOp("=") {
 			def = p.parseExpr()
 		}
-		params = append(params, &parser.ParamDecl{Name: pname, Type: ptype, Default: def})
+		params = append(params, &parser.ParamDecl{Name: pname, Type: ptype, Default: def, Variadic: variadic})
 		if !p.acceptOp(",") {
 			break
 		}
@@ -716,7 +720,11 @@ func (p *Parser) parseDef() *parser.FnDecl {
 	p.currentFnRet = ret
 	p.pushScope()
 	for _, pa := range params {
-		p.declare(pa.Name, typeFromExpr(pa.Type))
+		if pa.Variadic {
+			p.declare(pa.Name, tDynamic) // *args is a []any — route ops through dynamic helpers
+		} else {
+			p.declare(pa.Name, typeFromExpr(pa.Type))
+		}
 		p.recordParamElem(pa)
 		p.recordParamInstance(pa)
 	}
@@ -1355,6 +1363,10 @@ func (p *Parser) resolveDefaults(call *parser.CallExpr) (parser.Expr, bool) {
 	}
 	params, ok := p.defParams[id.Name]
 	if !ok {
+		return nil, false
+	}
+	// Variadic functions: let Go's native variadic spread handle the call.
+	if len(params) > 0 && params[len(params)-1].Variadic {
 		return nil, false
 	}
 	if len(call.NamedArgs) == 0 && len(call.Args) >= len(params) {
