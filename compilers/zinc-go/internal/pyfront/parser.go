@@ -99,13 +99,11 @@ func namedArg(call *parser.CallExpr, name string) (parser.Expr, bool) {
 	return nil, false
 }
 
-// isNegLiteral reports whether e is a negative integer literal (`-k`).
-func isNegLiteral(e parser.Expr) bool {
-	u, ok := e.(*parser.UnaryExpr)
-	if !ok || u.Op != "-" {
-		return false
-	}
-	_, ok = u.Operand.(*parser.IntLit)
+// isNonNegIntLit reports whether e is a plain integer literal (always
+// non-negative; negatives parse as UnaryExpr) — a definitely-in-range index
+// that can be emitted directly without negative-index wrapping.
+func isNonNegIntLit(e parser.Expr) bool {
+	_, ok := e.(*parser.IntLit)
 	return ok
 }
 
@@ -1340,12 +1338,15 @@ func (p *Parser) parsePostfix() parser.Expr {
 				// FFI value, or a string (Go string indexing yields a byte, not
 				// a 1-char string) → runtime dispatch (also handles negatives).
 				e = callIdent("zincpyGetItem", e, idx)
-			} else if isNegLiteral(idx) {
-				// xs[-k] on a native sequence → xs[len(xs)+(-k)] (stays typed).
-				e = &parser.IndexExpr{Object: e, Index: &parser.BinaryExpr{
-					Left: callIdent("len", e), Op: "+", Right: idx}}
-			} else {
+			} else if isNonNegIntLit(idx) {
+				// xs[0], xs[2] — definitely in range form → direct (fast path).
 				e = &parser.IndexExpr{Object: e, Index: idx}
+			} else {
+				// xs[i] / xs[i-1] / xs[-k] on a native sequence: wrap the index
+				// through zincpyIdx so a negative value counts from the end
+				// (Go would panic). Stays typed: xs[int] → element type.
+				e = &parser.IndexExpr{Object: e,
+					Index: callIdent("zincpyIdx", idx, callIdent("len", e))}
 			}
 		default:
 			return e

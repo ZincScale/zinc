@@ -288,6 +288,16 @@ func zincpyNum(v any) (float64, bool) {
 	return 0, false
 }
 
+// zincpyIdx normalizes a (possibly negative) sequence index against the
+// length, matching Python: xs[-1] is the last element. Positive indices pass
+// through unchanged.
+func zincpyIdx(i, n int) int {
+	if i < 0 {
+		return i + n
+	}
+	return i
+}
+
 // zincpyNeg is unary minus on a dynamic value.
 func zincpyNeg(v any) any {
 	switch x := v.(type) {
