@@ -200,7 +200,11 @@ func (p *Parser) subExpr(t Token, src string) parser.Expr {
 var pyStrMethods = map[string]string{
 	"upper":      "zincpyUpper",
 	"lower":      "zincpyLower",
+	"title":      "zincpyTitle",
+	"capitalize": "zincpyCapitalize",
 	"strip":      "zincpyStrip",
+	"lstrip":     "zincpyLstrip",
+	"rstrip":     "zincpyRstrip",
 	"replace":    "zincpyReplace",
 	"startswith": "zincpyStartswith",
 	"endswith":   "zincpyEndswith",
@@ -208,6 +212,9 @@ var pyStrMethods = map[string]string{
 	"count":      "zincpyCount",
 	"split":      "zincpySplit",
 	"join":       "zincpyJoin",
+	"ljust":      "zincpyLjust",
+	"rjust":      "zincpyRjust",
+	"center":     "zincpyCenter",
 }
 
 // lowerStrMethod rewrites `recv.method(args...)` to its runtime helper when

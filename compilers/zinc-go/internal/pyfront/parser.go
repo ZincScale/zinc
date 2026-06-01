@@ -1845,6 +1845,13 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			return callIdent("zincpySortedKey", call.Args[0], key)
 		}
 	}
+	// enumerate(xs, start=N): the keyword form, handled here because the
+	// builtins switch below skips any call carrying named args.
+	if id, ok := callee.(*parser.Ident); ok && id.Name == "enumerate" && len(call.Args) == 1 {
+		if start, ok := namedArg(call, "start"); ok {
+			return callIdent("zincpyEnumerate", call.Args[0], start)
+		}
+	}
 	// Sequence builtins min/max/sum/sorted/abs → reflection-based runtime
 	// helpers (result is dynamic). min/max also take the varargs form
 	// min(a, b, ...) → wrap the args in a list.
@@ -1897,8 +1904,13 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 				return callIdent("zincpySetOf", call.Args[0])
 			}
 		case "enumerate":
+			// enumerate(xs) / enumerate(xs, start). The start=N keyword form is
+			// handled before this no-kwargs switch.
 			if len(call.Args) == 1 {
 				return callIdent("zincpyEnumerate", call.Args[0])
+			}
+			if len(call.Args) == 2 {
+				return callIdent("zincpyEnumerate", call.Args[0], call.Args[1])
 			}
 		case "zip":
 			if len(call.Args) >= 1 {

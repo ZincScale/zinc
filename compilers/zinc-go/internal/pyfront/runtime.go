@@ -36,6 +36,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // zincpyPrint mirrors Python's print() for one value: Python str()
@@ -87,6 +89,96 @@ func zincpyReplace(s, old, replacement string) string {
 	return strings.ReplaceAll(s, old, replacement)
 }
 
+// zincpyLstrip / zincpyRstrip are str.lstrip()/str.rstrip(): no argument trims
+// surrounding whitespace from one side; an argument trims any of the given
+// characters from that side.
+func zincpyLstrip(s string, chars ...string) string {
+	if len(chars) == 0 {
+		return strings.TrimLeft(s, " \t\n\r\v\f")
+	}
+	return strings.TrimLeft(s, chars[0])
+}
+
+func zincpyRstrip(s string, chars ...string) string {
+	if len(chars) == 0 {
+		return strings.TrimRight(s, " \t\n\r\v\f")
+	}
+	return strings.TrimRight(s, chars[0])
+}
+
+// zincpyTitle is str.title(): the first letter of each run of letters is
+// uppercased and the rest lowercased, where any non-letter (digit, space,
+// punctuation) ends a word — matching CPython's quirky boundaries
+// ("they're".title() == "They'Re").
+func zincpyTitle(s string) string {
+	var b strings.Builder
+	prevCased := false
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			if prevCased {
+				b.WriteRune(unicode.ToLower(r))
+			} else {
+				b.WriteRune(unicode.ToTitle(r))
+			}
+			prevCased = true
+		} else {
+			b.WriteRune(r)
+			prevCased = false
+		}
+	}
+	return b.String()
+}
+
+// zincpyCapitalize is str.capitalize(): first character uppercased, the rest
+// lowercased.
+func zincpyCapitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToTitle(r)) + strings.ToLower(s[size:])
+}
+
+// padFill returns the single padding rune for ljust/rjust/center (default
+// space); Python requires the fill to be exactly one character.
+func padFill(fill []string) rune {
+	if len(fill) > 0 && fill[0] != "" {
+		r, _ := utf8.DecodeRuneInString(fill[0])
+		return r
+	}
+	return ' '
+}
+
+// zincpyRjust / zincpyLjust are str.rjust()/str.ljust(): pad to width characters
+// (counted as Python code points) with fill on the left/right; returns s
+// unchanged when already at least width wide.
+func zincpyRjust(s string, width int, fill ...string) string {
+	if pad := width - utf8.RuneCountInString(s); pad > 0 {
+		return strings.Repeat(string(padFill(fill)), pad) + s
+	}
+	return s
+}
+
+func zincpyLjust(s string, width int, fill ...string) string {
+	if pad := width - utf8.RuneCountInString(s); pad > 0 {
+		return s + strings.Repeat(string(padFill(fill)), pad)
+	}
+	return s
+}
+
+// zincpyCenter is str.center(): center s in a field of width characters. The
+// extra padding (odd margin) goes on the right, matching CPython's
+// left = marg/2 + (marg & width & 1) rule.
+func zincpyCenter(s string, width int, fill ...string) string {
+	marg := width - utf8.RuneCountInString(s)
+	if marg <= 0 {
+		return s
+	}
+	left := marg/2 + (marg & width & 1)
+	f := string(padFill(fill))
+	return strings.Repeat(f, left) + s + strings.Repeat(f, marg-left)
+}
+
 // zincpyStartswith / zincpyEndswith mirror str.startswith()/str.endswith().
 func zincpyStartswith(s, prefix string) bool { return strings.HasPrefix(s, prefix) }
 func zincpyEndswith(s, suffix string) bool   { return strings.HasSuffix(s, suffix) }
@@ -100,11 +192,18 @@ func zincpyCount(s, sub string) int { return strings.Count(s, sub) }
 // zincpySplit is str.split(): with no separator it splits on runs of
 // whitespace and drops empty fields (Python's default); with a separator it
 // splits on each occurrence.
-func zincpySplit(s string, sep ...string) []string {
-	if len(sep) == 0 {
+func zincpySplit(s string, args ...any) []string {
+	if len(args) == 0 {
 		return strings.Fields(s)
 	}
-	return strings.Split(s, sep[0])
+	sep, _ := args[0].(string)
+	if len(args) >= 2 {
+		// str.split(sep, maxsplit): at most maxsplit splits → maxsplit+1 fields.
+		if n, ok := zincpyIntish(args[1]); ok && n >= 0 {
+			return strings.SplitN(s, sep, n+1)
+		}
+	}
+	return strings.Split(s, sep)
 }
 
 // zincpyJoin is sep.join(items): the receiver string joins the elements.
@@ -129,16 +228,49 @@ func zincpyStrMethod(recv any, method string, args ...any) any {
 		}
 		return a
 	}
+	argInt := func(i int) int {
+		n, ok := zincpyIntish(args[i])
+		if !ok {
+			panic(zincpyExc{"TypeError", method + "() argument must be int, not " + zincpyTypeName(args[i])})
+		}
+		return n
+	}
+	optFill := func(i int) []string {
+		if len(args) > i {
+			return []string{argStr(i)}
+		}
+		return nil
+	}
 	switch method {
 	case "upper":
 		return zincpyUpper(s)
 	case "lower":
 		return zincpyLower(s)
+	case "title":
+		return zincpyTitle(s)
+	case "capitalize":
+		return zincpyCapitalize(s)
 	case "strip":
 		if len(args) == 0 {
 			return zincpyStrip(s)
 		}
 		return zincpyStrip(s, argStr(0))
+	case "lstrip":
+		if len(args) == 0 {
+			return zincpyLstrip(s)
+		}
+		return zincpyLstrip(s, argStr(0))
+	case "rstrip":
+		if len(args) == 0 {
+			return zincpyRstrip(s)
+		}
+		return zincpyRstrip(s, argStr(0))
+	case "ljust":
+		return zincpyLjust(s, argInt(0), optFill(1)...)
+	case "rjust":
+		return zincpyRjust(s, argInt(0), optFill(1)...)
+	case "center":
+		return zincpyCenter(s, argInt(0), optFill(1)...)
 	case "replace":
 		return zincpyReplace(s, argStr(0), argStr(1))
 	case "startswith":
@@ -152,6 +284,9 @@ func zincpyStrMethod(recv any, method string, args ...any) any {
 	case "split":
 		if len(args) == 0 {
 			return zincpySplit(s)
+		}
+		if len(args) >= 2 {
+			return zincpySplit(s, argStr(0), argInt(1))
 		}
 		return zincpySplit(s, argStr(0))
 	case "join":
@@ -922,11 +1057,15 @@ func zincpySliceIndices(n int, startA, stopA any, step int) []int {
 }
 
 // zincpyEnumerate mirrors enumerate(xs): (index, element) 2-tuples.
-func zincpyEnumerate(xs any) []any {
+func zincpyEnumerate(xs any, start ...int) []any {
+	base := 0
+	if len(start) > 0 {
+		base = start[0]
+	}
 	s := zincpySeq(xs)
 	out := make([]any, len(s))
 	for i, v := range s {
-		out[i] = zincpyTuple{items: []any{i, v}}
+		out[i] = zincpyTuple{items: []any{base + i, v}}
 	}
 	return out
 }
