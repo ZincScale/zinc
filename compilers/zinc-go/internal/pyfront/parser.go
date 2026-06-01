@@ -903,6 +903,16 @@ func paramPyType(pa *parser.ParamDecl) pytype {
 	return typeFromExpr(pa.Type)
 }
 
+// voidIfNone maps a `-> None` return annotation to a void return (nil type).
+// Python spells "returns nothing" as None; Go spells it as an absent return
+// type, and a literal "None" type would be an undefined Go identifier.
+func voidIfNone(t parser.TypeExpr) parser.TypeExpr {
+	if st, ok := t.(*parser.SimpleType); ok && st.Name == "None" {
+		return nil
+	}
+	return t
+}
+
 func (p *Parser) parseDef() *parser.FnDecl {
 	line := p.advance().Line // 'def'
 	name := goSafe(p.expectKind(TName).Value)
@@ -930,7 +940,7 @@ func (p *Parser) parseDef() *parser.FnDecl {
 	p.expectOp(")")
 	var ret parser.TypeExpr
 	if p.acceptOp("->") {
-		ret = p.parseType()
+		ret = voidIfNone(p.parseType())
 	}
 	// Record the signature before the body so recursive calls infer correctly.
 	p.fnRet[name] = typeFromExpr(ret)
@@ -1412,7 +1422,23 @@ func (p *Parser) parseUnary() parser.Expr {
 		}
 		return &parser.UnaryExpr{Op: op, Operand: operand}
 	}
-	return p.parsePostfix()
+	return p.parsePower()
+}
+
+// parsePower handles `base ** exp`. Python's `**` binds tighter than a leading
+// unary minus (so `-2**2 == -4`) and is right-associative (`2**3**2 ==
+// 2**(3**2)`); the exponent is therefore parsed as a full unary expression,
+// which recurses back here. The result reproduces Python's typing (int when
+// both operands are non-negative ints, float otherwise) via zincpyPow, so it is
+// dynamic — fine for the usual `x**2` / `2**n` uses.
+func (p *Parser) parsePower() parser.Expr {
+	base := p.parsePostfix()
+	if p.isOp("**") {
+		p.advance()
+		exp := p.parseUnary()
+		return callIdent("zincpyPow", base, exp)
+	}
+	return base
 }
 
 func (p *Parser) parsePostfix() parser.Expr {
@@ -1895,6 +1921,13 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			if len(call.Args) == 1 {
 				return callIdent("zincpySum", call.Args[0])
 			}
+		case "round":
+			if len(call.Args) == 1 {
+				return callIdent("zincpyRound", call.Args[0])
+			}
+			if len(call.Args) == 2 {
+				return callIdent("zincpyRoundN", call.Args[0], call.Args[1])
+			}
 		case "any":
 			if len(call.Args) == 1 {
 				return callIdent("zincpyAny", call.Args[0])
@@ -1950,6 +1983,17 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	if id, ok := callee.(*parser.Ident); ok && id.Name == "str" &&
 		len(call.Args) == 1 && len(call.NamedArgs) == 0 {
 		return callIdent("zincpyStr", call.Args[0])
+	}
+	// int(str)/float(str) on a statically-string argument → parsing helpers that
+	// raise ValueError on a bad literal (Go's int(string) would emit a two-value
+	// strconv.Atoi in a single-value context).
+	if id, ok := callee.(*parser.Ident); ok && len(call.Args) == 1 && len(call.NamedArgs) == 0 && p.typeOf(call.Args[0]) == tStr {
+		switch id.Name {
+		case "int":
+			return callIdent("zincpyParseInt", call.Args[0])
+		case "float":
+			return callIdent("zincpyParseFloat", call.Args[0])
+		}
 	}
 	// float()/int()/str() on a dynamic FFI value → runtime coercion helpers,
 	// since Go's float64(x)/int(x) conversions reject interface{}.

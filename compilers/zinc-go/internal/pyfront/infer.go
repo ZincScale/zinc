@@ -243,15 +243,15 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 		"zincpyEq", "zincpyNe", "zincpyLt", "zincpyGt", "zincpyLe", "zincpyGe",
 		"zincpyIsInstance", "zincpyAny", "zincpyAll":
 		return tBool
-	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt":
+	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt", "zincpyParseInt", "zincpyRound":
 		return tInt
-	case "zincpyToFloat", "zincpyTrueDiv":
+	case "zincpyToFloat", "zincpyTrueDiv", "zincpyParseFloat", "zincpyRoundN":
 		return tFloat
 	// FFI results and anything derived from a dynamic value stay dynamic, so
 	// chained access (data[0][1], iterating a parsed list, arithmetic on a
 	// dynamic) keeps routing through the dynamic helpers.
 	case "zincpyPyCall", "zincpyPyGet", "zincpyGetItem", "zincpyNewTuple",
-		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyFloorDivDyn", "zincpyModDyn", "zincpyNeg",
+		"zincpyAdd", "zincpySub", "zincpyMul", "zincpyPow", "zincpyFloorDivDyn", "zincpyModDyn", "zincpyNeg",
 		"zincpyMin", "zincpyMax", "zincpySum", "zincpySorted", "zincpyAbs",
 		"zincpySlice", "zincpyEnumerate", "zincpyZip",
 		"zincpySortedKey", "zincpyMap", "zincpyFilter", "zincpyList",

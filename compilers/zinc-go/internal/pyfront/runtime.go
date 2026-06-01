@@ -875,6 +875,62 @@ func zincpySub(a, b any) any {
 	panic(zincpyExc{"TypeError", "unsupported operand type(s) for -: " + zincpyTypeName(a) + " and " + zincpyTypeName(b)})
 }
 
+// zincpyParseInt / zincpyParseFloat are int(str) / float(str): parse the string
+// the Python way, raising ValueError on a malformed literal. int() ignores
+// surrounding whitespace.
+func zincpyParseInt(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		panic(zincpyExc{"ValueError", "invalid literal for int() with base 10: " + zincpyRepr(s)})
+	}
+	return n
+}
+
+func zincpyParseFloat(s string) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		panic(zincpyExc{"ValueError", "could not convert string to float: " + zincpyRepr(s)})
+	}
+	return f
+}
+
+// zincpyRound is round(x) → int using banker's rounding (round half to even),
+// matching Python (round(2.5) == 2, round(3.5) == 4).
+func zincpyRound(x any) int {
+	f, _ := zincpyNum(x)
+	return int(math.RoundToEven(f))
+}
+
+// zincpyRoundN is round(x, ndigits) → float, also banker's rounding at the
+// given decimal place.
+func zincpyRoundN(x any, ndigits any) float64 {
+	f, _ := zincpyNum(x)
+	n, _ := zincpyIntish(ndigits)
+	scale := math.Pow(10, float64(n))
+	return math.RoundToEven(f*scale) / scale
+}
+
+// zincpyPow is the power operator: int to a non-negative int power stays int
+// (exact), anything else (float operand, or a negative exponent) is float —
+// matching CPython.
+func zincpyPow(a, b any) any {
+	if ai, aok := zincpyIntish(a); aok {
+		if bi, bok := zincpyIntish(b); bok && bi >= 0 {
+			result := 1
+			for i := 0; i < bi; i++ {
+				result *= ai
+			}
+			return result
+		}
+	}
+	af, ao := zincpyNum(a)
+	bf, bo := zincpyNum(b)
+	if ao && bo {
+		return math.Pow(af, bf)
+	}
+	panic(zincpyExc{"TypeError", "unsupported operand type(s) for ** : " + zincpyTypeName(a) + " and " + zincpyTypeName(b)})
+}
+
 func zincpyMul(a, b any) any {
 	if ai, ok := zincpyIntish(a); ok {
 		if bi, ok := zincpyIntish(b); ok {

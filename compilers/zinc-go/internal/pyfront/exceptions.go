@@ -398,8 +398,11 @@ func clauseBody(c exceptClause, excVar string) *parser.BlockStmt {
 	rewriteReraise(c.body, excVar) // bare `raise` → panic(excVar)
 	stmts := c.body.Stmts
 	if c.name != "" {
+		// Bind `as e`, then a blank-use so an unused binding isn't a Go
+		// "declared and not used" error — Python allows `except X as e: pass`.
 		stmts = append([]parser.Stmt{
 			&parser.VarStmt{Name: c.name, Value: &parser.Ident{Name: excVar}},
+			&parser.AssignStmt{Target: &parser.Ident{Name: "_"}, Op: "=", Value: &parser.Ident{Name: c.name}},
 		}, stmts...)
 	}
 	return &parser.BlockStmt{Stmts: stmts}
