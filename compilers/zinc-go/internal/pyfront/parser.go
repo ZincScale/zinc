@@ -1499,7 +1499,7 @@ func (p *Parser) parseListLit() parser.Expr {
 	outStart := p.pos
 	first := p.parseExpr()
 	if p.isKw("for") {
-		return p.parseListComprehension(outStart)
+		return p.parseListComprehension(outStart, "]")
 	}
 	lit := &parser.ListLit{Elements: []parser.Expr{first}}
 	for p.acceptOp(",") {
@@ -1774,6 +1774,7 @@ func (p *Parser) isinstanceName(name string) string {
 func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	p.expectOp("(")
 	call := &parser.CallExpr{Callee: callee}
+	genexprClosed := false
 	for !p.isOp(")") && p.cur().Kind != TEOF {
 		// keyword argument `name = value` (but not `name == value`).
 		if p.cur().Kind == TName && p.peekOp("=") {
@@ -1781,13 +1782,30 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			p.advance() // '='
 			call.NamedArgs = append(call.NamedArgs, parser.NamedArg{Name: name, Value: p.parseExpr()})
 		} else {
-			call.Args = append(call.Args, p.parseExpr())
+			outStart := p.pos
+			arg := p.parseExpr()
+			// A bare generator expression `f(expr for x in it)` — Python allows
+			// it only as the sole argument. Materialize it as a list
+			// comprehension (byte-identical for the usual consumers: join, sum,
+			// any, all, max, min, sorted). parseListComprehension consumes the
+			// closing ')'.
+			if p.isKw("for") {
+				if len(call.Args) != 0 || len(call.NamedArgs) != 0 {
+					p.errf(p.cur(), "generator expression must be parenthesized when not the sole argument")
+				}
+				call.Args = append(call.Args, p.parseListComprehension(outStart, ")"))
+				genexprClosed = true
+				break
+			}
+			call.Args = append(call.Args, arg)
 		}
 		if !p.acceptOp(",") {
 			break
 		}
 	}
-	p.expectOp(")")
+	if !genexprClosed {
+		p.expectOp(")")
+	}
 	// Empty list args to a known callable take the parameter's element type.
 	if id, ok := callee.(*parser.Ident); ok {
 		if params, ok := p.defParams[id.Name]; ok {
@@ -1876,6 +1894,14 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		case "sum":
 			if len(call.Args) == 1 {
 				return callIdent("zincpySum", call.Args[0])
+			}
+		case "any":
+			if len(call.Args) == 1 {
+				return callIdent("zincpyAny", call.Args[0])
+			}
+		case "all":
+			if len(call.Args) == 1 {
+				return callIdent("zincpyAll", call.Args[0])
 			}
 		case "sorted":
 			if len(call.Args) == 1 {

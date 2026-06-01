@@ -37,8 +37,8 @@ import (
 // `for`), so the output is re-parsed with the loop variable(s) bound — which
 // both infers the element type and lets multi-target loops (`for a, b in
 // pairs`) and arithmetic on dynamic unpacked vars lower correctly.
-func (p *Parser) parseListComprehension(outStart int) parser.Expr {
-	targets, iter, cond := p.parseCompClause("]")
+func (p *Parser) parseListComprehension(outStart int, close string) parser.Expr {
+	targets, iter, cond := p.parseCompClause(close)
 	endPos := p.pos
 	p.pos = outStart
 	p.pushScope()
@@ -107,7 +107,13 @@ func (p *Parser) parseCompClause(close string) (targets []string, iter, cond par
 // with zincpyGetItem (for `... for k, v in d.items()`).
 func (p *Parser) compForStmt(targets []string, iter parser.Expr, loopBody parser.Stmt) *parser.ForStmt {
 	if len(targets) == 1 {
-		return &parser.ForStmt{IsRange: true, Item: targets[0], Range: iter,
+		rng := iter
+		// A dynamic iterable (FFI result, a list-repetition result, ...) can't be
+		// ranged over natively — iterate it via zincpyIter like the for-statement.
+		if p.typeOf(iter) == tDynamic {
+			rng = callIdent("zincpyIter", iter)
+		}
+		return &parser.ForStmt{IsRange: true, Item: targets[0], Range: rng,
 			Body: &parser.BlockStmt{Stmts: []parser.Stmt{loopBody}}}
 	}
 	tmp := fmt.Sprintf("_it%d", p.tmpCount)
@@ -143,6 +149,11 @@ func blankUse(targets []string) []parser.Stmt {
 // targets are dynamic (unpacked at runtime).
 func (p *Parser) declareCompTargets(targets []string, iter parser.Expr) {
 	if len(targets) == 1 {
+		// A dynamic iterable yields dynamic elements (zincpyIter boxes them).
+		if p.typeOf(iter) == tDynamic {
+			p.declare(targets[0], tDynamic)
+			return
+		}
 		p.declare(targets[0], p.elemTypeOf(iter))
 		return
 	}

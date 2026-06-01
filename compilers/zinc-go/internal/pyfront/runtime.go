@@ -915,17 +915,24 @@ func zincpyStrRepeat(a, b any) (string, int, bool) {
 }
 
 func zincpyListRepeat(a, b any) ([]any, int, bool) {
-	if l, ok := a.([]any); ok {
+	// A list operand may be a typed slice ([]int from a literal) as well as
+	// []any, so detect any slice kind via reflection and materialize it.
+	if isGoSlice(a) {
 		if n, ok := zincpyIntish(b); ok {
-			return l, n, true
+			return zincpySeq(a), n, true
 		}
 	}
-	if l, ok := b.([]any); ok {
+	if isGoSlice(b) {
 		if n, ok := zincpyIntish(a); ok {
-			return l, n, true
+			return zincpySeq(b), n, true
 		}
 	}
 	return nil, 0, false
+}
+
+// isGoSlice reports whether v is any Go slice (any element type).
+func isGoSlice(v any) bool {
+	return v != nil && reflect.TypeOf(v).Kind() == reflect.Slice
 }
 
 // zincpyTrueDiv is Python / on dynamic operands: always float, /0 raises.
@@ -1324,6 +1331,26 @@ func zincpySliceIndices(n int, startA, stopA any, step int) []int {
 }
 
 // zincpyEnumerate mirrors enumerate(xs): (index, element) 2-tuples.
+// zincpyAny / zincpyAll mirror any()/all(): truthiness of the elements, with
+// Python's empty-iterable conventions (any([]) is False, all([]) is True).
+func zincpyAny(xs any) bool {
+	for _, v := range zincpySeq(xs) {
+		if zincpyTruthy(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func zincpyAll(xs any) bool {
+	for _, v := range zincpySeq(xs) {
+		if !zincpyTruthy(v) {
+			return false
+		}
+	}
+	return true
+}
+
 func zincpyEnumerate(xs any, start ...int) []any {
 	base := 0
 	if len(start) > 0 {

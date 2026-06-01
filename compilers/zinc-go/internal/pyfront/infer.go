@@ -241,7 +241,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 		return tStr
 	case "zincpyStartswith", "zincpyEndswith", "zincpyTruthy", "zincpyIn",
 		"zincpyEq", "zincpyNe", "zincpyLt", "zincpyGt", "zincpyLe", "zincpyGe",
-		"zincpyIsInstance":
+		"zincpyIsInstance", "zincpyAny", "zincpyAll":
 		return tBool
 	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt":
 		return tInt
@@ -376,6 +376,19 @@ var opDunder = map[string]string{
 // numericBinary builds a binary expression, inserting a float() conversion on
 // whichever operand is int when the other is float — Python's implicit
 // int→float promotion, made explicit for Go.
+// isListishExpr conservatively reports whether e is statically known to be a
+// list: a list literal or a variable with a tracked element type.
+func (p *Parser) isListishExpr(e parser.Expr) bool {
+	switch e := e.(type) {
+	case *parser.ListLit:
+		return true
+	case *parser.Ident:
+		_, ok := p.elemType[e.Name]
+		return ok
+	}
+	return false
+}
+
 func (p *Parser) numericBinary(left parser.Expr, op string, right parser.Expr) parser.Expr {
 	lt, rt := p.typeOf(left), p.typeOf(right)
 	// Operator overloading: if the left operand is a class instance whose class
@@ -393,6 +406,15 @@ func (p *Parser) numericBinary(left parser.Expr, op string, right parser.Expr) p
 	if lt == tDynamic || rt == tDynamic {
 		if h := dynBinaryHelper(op); h != "" {
 			return callIdent(h, left, right)
+		}
+	}
+	// Sequence repetition `seq * n` / `n * seq` (str*int or list*int): Go has no
+	// `*` for these, so route to zincpyMul (which repeats). The result is
+	// dynamic, which is fine for the usual `print("=" * 40)` / `[0] * n` uses.
+	if op == "*" {
+		lSeq, rSeq := lt == tStr || p.isListishExpr(left), rt == tStr || p.isListishExpr(right)
+		if (lSeq && rt == tInt) || (lt == tInt && rSeq) {
+			return callIdent("zincpyMul", left, right)
 		}
 	}
 	if lt == tInt && rt == tFloat {
