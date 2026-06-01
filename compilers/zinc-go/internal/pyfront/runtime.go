@@ -55,6 +55,18 @@ func zincpyPrintN(vs ...any) {
 	fmt.Println(strings.Join(parts, " "))
 }
 
+// zincpyPrintSep mirrors print(*vs, sep=sep, end=end): each value is
+// str()-formatted, joined by sep, then end is written (end IS the terminator,
+// so no implicit newline). The front-end passes sep/end first, defaulting them
+// to " " and "\n" when the call omits them.
+func zincpyPrintSep(sep, end string, vs ...any) {
+	parts := make([]string, len(vs))
+	for i, v := range vs {
+		parts[i] = zincpyStr(v)
+	}
+	fmt.Print(strings.Join(parts, sep) + end)
+}
+
 // zincpyUpper / zincpyLower mirror str.upper()/str.lower(). (ASCII-equivalent
 // to Python; full Unicode case folding is a known gap.)
 func zincpyUpper(s string) string { return strings.ToUpper(s) }
@@ -599,7 +611,51 @@ func zincpyCmp(a, b any) int {
 			return strings.Compare(as, bs)
 		}
 	}
+	// Tuples and lists compare lexicographically (element by element, shorter
+	// is less when one is a prefix of the other) — Python's behavior, and what
+	// sorted(d.items()) relies on.
+	if as, ok := zincpySeqItems(a); ok {
+		if bs, ok := zincpySeqItems(b); ok {
+			return zincpySeqCmp(as, bs)
+		}
+	}
 	panic(zincpyExc{"TypeError", "'<' not supported between instances of " + zincpyTypeName(a) + " and " + zincpyTypeName(b)})
+}
+
+// zincpySeqItems returns the element slice of a tuple or list value (and true),
+// or nil/false for anything else.
+func zincpySeqItems(v any) ([]any, bool) {
+	switch x := v.(type) {
+	case zincpyTuple:
+		return x.items, true
+	case *zincpyTuple:
+		return x.items, true
+	case []any:
+		return x, true
+	}
+	return nil, false
+}
+
+// zincpySeqCmp compares two sequences lexicographically using zincpyCmp on
+// elements, mirroring Python's tuple/list ordering.
+func zincpySeqCmp(a, b []any) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if c := zincpyCmp(a[i], b[i]); c != 0 {
+			return c
+		}
+	}
+	switch {
+	case len(a) < len(b):
+		return -1
+	case len(a) > len(b):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func zincpyLt(a, b any) bool { return zincpyCmp(a, b) < 0 }
@@ -1038,6 +1094,52 @@ func (d *zincpyDict) Set(k, v any) {
 }
 
 func (d *zincpyDict) Get(k any) any { return d.vals[k] }
+
+// GetDefault is dict.get(k, default): the value if present, else default.
+func (d *zincpyDict) GetDefault(k, def any) any {
+	if v, ok := d.vals[k]; ok {
+		return v
+	}
+	return def
+}
+
+// SetDefault is dict.setdefault(k, default): if k is present return its value;
+// otherwise insert k=default (preserving order) and return default.
+func (d *zincpyDict) SetDefault(k, def any) any {
+	if v, ok := d.vals[k]; ok {
+		return v
+	}
+	d.keys = append(d.keys, k)
+	d.vals[k] = def
+	return def
+}
+
+// Pop is dict.pop(k[, default]): remove k and return its value; with no default
+// a missing key raises KeyError (Python parity), with one it returns default.
+func (d *zincpyDict) Pop(k any, def ...any) any {
+	if v, ok := d.vals[k]; ok {
+		delete(d.vals, k)
+		for i, kk := range d.keys {
+			if kk == k {
+				d.keys = append(d.keys[:i], d.keys[i+1:]...)
+				break
+			}
+		}
+		return v
+	}
+	if len(def) > 0 {
+		return def[0]
+	}
+	panic(zincpyExc{Type: "KeyError", Msg: zincpyRepr(k)})
+}
+
+// Update is dict.update(other): merge another dict's entries, overwriting on
+// key collision and appending new keys in the other's iteration order.
+func (d *zincpyDict) Update(other *zincpyDict) {
+	for _, k := range other.keys {
+		d.Set(k, other.vals[k])
+	}
+}
 
 func (d *zincpyDict) Has(k any) bool { _, ok := d.vals[k]; return ok }
 

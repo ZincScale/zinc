@@ -27,6 +27,7 @@ import (
 const (
 	rtPrint    = "zincpyPrint"
 	rtPrintN   = "zincpyPrintN"
+	rtPrintSep = "zincpyPrintSep"
 	rtFloorDiv = "zincpyFloorDiv"
 	rtMod      = "zincpyMod"
 	rtDiv      = "zincpyDiv"
@@ -512,6 +513,28 @@ func (p *Parser) endSimple() {
 // consumed as id, the cursor is on `:`). The annotation pins the local's type;
 // a dynamic value is coerced to a scalar annotation at the boundary, and an
 // empty list literal takes the annotated element type.
+// rewritePrintKwargs lowers print(*args, sep=S, end=E) to a zincpyPrintSep call
+// with S and E threaded ahead of the positional args (defaulting to " " and
+// "\n"). Only sep/end are recognized — `file=`/`flush=` and any other keyword
+// is rejected with a clear message.
+func (p *Parser) rewritePrintKwargs(line int, call *parser.CallExpr) {
+	sep := parser.Expr(&parser.StringLit{Value: " "})
+	end := parser.Expr(&parser.StringLit{Value: "\n"})
+	for _, na := range call.NamedArgs {
+		switch na.Name {
+		case "sep":
+			sep = na.Value
+		case "end":
+			end = na.Value
+		default:
+			p.errf(Token{Line: line}, "print() keyword %q is not supported (only sep= and end=)", na.Name)
+		}
+	}
+	call.Callee = &parser.Ident{Name: rtPrintSep}
+	call.Args = append([]parser.Expr{sep, end}, call.Args...)
+	call.NamedArgs = nil
+}
+
 func (p *Parser) parseAnnotatedAssign(line int, id *parser.Ident) parser.Stmt {
 	p.advance() // ':'
 	typ := p.parseType()
@@ -640,12 +663,12 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 	// print(...): route to the runtime shim so floats/bools format the
 	// Python way (3.0 not 3, True not true) rather than Go's fmt defaults.
 	// One arg → zincpyPrint; zero or many → zincpyPrintN (space-separated,
-	// matching Python's default sep). Keyword args (sep=/end=) are not yet
-	// supported.
+	// matching Python's default sep). The sep=/end= keywords route to
+	// zincpyPrintSep with the sep/end values threaded ahead of the positionals.
 	if call, ok := lhs.(*parser.CallExpr); ok {
 		if id, ok := call.Callee.(*parser.Ident); ok && id.Name == "print" {
 			if len(call.NamedArgs) != 0 {
-				p.errf(p.cur(), "print() keyword arguments (sep=/end=) are not yet supported")
+				p.rewritePrintKwargs(line, call)
 			} else if len(call.Args) == 1 {
 				id.Name = rtPrint
 			} else {
@@ -1913,6 +1936,20 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 				sel.Field = "Values"
 			case "items":
 				sel.Field = "Items"
+			case "get":
+				// d.get(k) → d.Get(k) (None on miss); d.get(k, default) →
+				// d.GetDefault(k, default).
+				if len(call.Args) == 2 {
+					sel.Field = "GetDefault"
+				} else {
+					sel.Field = "Get"
+				}
+			case "setdefault":
+				sel.Field = "SetDefault"
+			case "pop":
+				sel.Field = "Pop"
+			case "update":
+				sel.Field = "Update"
 			}
 		}
 		// set mutators on a set var → capitalized runtime methods.
