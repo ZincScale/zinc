@@ -113,19 +113,28 @@ func matchBrace(s string, open int) int {
 // (not yet supported), then parses the remaining text as a Python expression.
 func (p *Parser) fstringField(t Token, src string) parser.Expr {
 	exprSrc, conv, spec, hasSpec := splitFStringField(src)
-	if hasSpec && strings.TrimSpace(spec) != "" {
-		p.errf(t, "f-string format specifier (:%s) is not yet supported", spec)
+	if strings.ContainsAny(spec, "{}") {
+		// A nested-field spec like {x:.{n}f} — not yet supported.
+		p.errf(t, "f-string nested format specifier (:%s) is not yet supported", spec)
 	}
 	e := p.subExpr(t, exprSrc)
+	// A `!r` conversion repr()s first; `!s` / none str()s. With a format spec
+	// the (already converted, for !r/!s) value is then formatted.
 	switch conv {
 	case "r":
-		return callIdent("zincpyRepr", e)
-	case "", "s":
-		return callIdent("zincpyStr", e)
+		e = callIdent("zincpyRepr", e)
+	case "s":
+		e = callIdent("zincpyStr", e)
+	case "":
+		// leave e as-is; zincpyFormat / zincpyStr handle the raw value
 	default:
 		p.errf(t, "unsupported f-string conversion !%s", conv)
 		return callIdent("zincpyStr", e)
 	}
+	if hasSpec && strings.TrimSpace(spec) != "" {
+		return callIdent("zincpyFormat", e, &parser.StringLit{Value: spec})
+	}
+	return callIdent("zincpyStr", e)
 }
 
 // splitFStringField separates an f-string field into its expression text, an

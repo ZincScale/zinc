@@ -46,6 +46,273 @@ func zincpyPrint(v any) {
 	fmt.Println(zincpyStr(v))
 }
 
+// zincpyFormat implements format(value, spec) / an f-string {value:spec} field
+// for the common subset of Python's format mini-language:
+//
+//	[[fill]align][sign][#][0][width][grouping][.precision][type]
+//
+// align <>^= , sign +- space, grouping , or _, the int types b/o/d/x/X, the
+// float types e/E/f/F/g/G/%, and string s. Unsupported pieces fall back as
+// closely as possible rather than diverging silently.
+func zincpyFormat(v any, spec string) string {
+	f := parseFormatSpec(spec)
+	// String values (and an explicit s type) only honor fill/align/width.
+	if s, ok := v.(string); ok || f.typ == 's' {
+		if !ok {
+			s = zincpyStr(v)
+		}
+		if f.align == 0 {
+			f.align = '<' // strings default to left-aligned
+		}
+		return f.pad(s)
+	}
+	switch f.typ {
+	case 'b', 'o', 'x', 'X', 'd', 'c':
+		return f.formatInt(v)
+	case 'e', 'E', 'f', 'F', 'g', 'G', '%':
+		return f.formatFloat(v)
+	}
+	// No explicit type: pick by the value's runtime type.
+	if _, ok := zincpyIntish(v); ok {
+		return f.formatInt(v)
+	}
+	if _, ok := zincpyNum(v); ok {
+		return f.formatFloat(v)
+	}
+	return f.pad(zincpyStr(v))
+}
+
+type formatSpec struct {
+	fill      rune
+	align     rune // '<' '>' '^' '=' or 0
+	sign      byte // '+' '-' ' ' or 0
+	alt       bool // '#'
+	zero      bool // '0' pad
+	width     int
+	grouping  byte // ',' '_' or 0
+	precision int  // -1 if absent
+	typ       byte // format type or 0
+}
+
+func parseFormatSpec(spec string) formatSpec {
+	f := formatSpec{fill: ' ', precision: -1}
+	r := []rune(spec)
+	i := 0
+	// [fill]align: align is one of <>^= ; a fill char precedes it.
+	if len(r) >= 2 && isAlign(r[1]) {
+		f.fill = r[0]
+		f.align = r[1]
+		i = 2
+	} else if len(r) >= 1 && isAlign(r[0]) {
+		f.align = r[0]
+		i = 1
+	}
+	if i < len(r) && (r[i] == '+' || r[i] == '-' || r[i] == ' ') {
+		f.sign = byte(r[i])
+		i++
+	}
+	if i < len(r) && r[i] == '#' {
+		f.alt = true
+		i++
+	}
+	if i < len(r) && r[i] == '0' {
+		f.zero = true
+		if f.align == 0 {
+			f.align = '=' // '0' implies zero-pad after the sign
+			f.fill = '0'
+		}
+		i++
+	}
+	for i < len(r) && r[i] >= '0' && r[i] <= '9' {
+		f.width = f.width*10 + int(r[i]-'0')
+		i++
+	}
+	if i < len(r) && (r[i] == ',' || r[i] == '_') {
+		f.grouping = byte(r[i])
+		i++
+	}
+	if i < len(r) && r[i] == '.' {
+		i++
+		f.precision = 0
+		for i < len(r) && r[i] >= '0' && r[i] <= '9' {
+			f.precision = f.precision*10 + int(r[i]-'0')
+			i++
+		}
+	}
+	if i < len(r) {
+		f.typ = byte(r[i])
+	}
+	return f
+}
+
+func isAlign(r rune) bool { return r == '<' || r == '>' || r == '^' || r == '=' }
+
+// pad applies fill/align/width to an already-rendered body (no sign handling).
+func (f formatSpec) pad(s string) string {
+	gap := f.width - utf8.RuneCountInString(s)
+	if gap <= 0 {
+		return s
+	}
+	fill := string(f.fill)
+	switch f.align {
+	case '>', '=':
+		return strings.Repeat(fill, gap) + s
+	case '^':
+		left := gap / 2
+		return strings.Repeat(fill, left) + s + strings.Repeat(fill, gap-left)
+	default: // '<' or 0
+		return s + strings.Repeat(fill, gap)
+	}
+}
+
+// padNumeric applies width to a signed numeric body. With align '=' (or a '0'
+// flag) the fill goes between the sign and the digits; otherwise it pads the
+// whole field.
+func (f formatSpec) padNumeric(sign, body string) string {
+	if f.align == '=' || (f.zero && f.align == 0) {
+		gap := f.width - utf8.RuneCountInString(sign) - utf8.RuneCountInString(body)
+		if gap > 0 {
+			return sign + strings.Repeat(string(f.fill), gap) + body
+		}
+		return sign + body
+	}
+	if f.align == 0 {
+		f.align = '>' // numbers default to right-aligned
+	}
+	return f.pad(sign + body)
+}
+
+// signStr returns the leading sign string for a non-negative value given the
+// sign flag ('+' forces '+', ' ' forces a space, otherwise empty).
+func (f formatSpec) signStr(neg bool) string {
+	if neg {
+		return "-"
+	}
+	switch f.sign {
+	case '+':
+		return "+"
+	case ' ':
+		return " "
+	}
+	return ""
+}
+
+func (f formatSpec) formatInt(v any) string {
+	n, ok := zincpyIntish(v)
+	if !ok {
+		if fv, ok := zincpyNum(v); ok {
+			n = int(fv)
+		}
+	}
+	neg := n < 0
+	u := n
+	if neg {
+		u = -u
+	}
+	var body, prefix string
+	switch f.typ {
+	case 'b':
+		body = strconv.FormatInt(int64(u), 2)
+		if f.alt {
+			prefix = "0b"
+		}
+	case 'o':
+		body = strconv.FormatInt(int64(u), 8)
+		if f.alt {
+			prefix = "0o"
+		}
+	case 'x':
+		body = strconv.FormatInt(int64(u), 16)
+		if f.alt {
+			prefix = "0x"
+		}
+	case 'X':
+		body = strings.ToUpper(strconv.FormatInt(int64(u), 16))
+		if f.alt {
+			prefix = "0X"
+		}
+	case 'c':
+		return f.pad(string(rune(u)))
+	default: // 'd' or 0
+		body = strconv.FormatInt(int64(u), 10)
+		if f.grouping != 0 {
+			body = groupDigits(body, f.grouping, 3)
+		}
+	}
+	return f.padNumeric(f.signStr(neg), prefix+body)
+}
+
+func (f formatSpec) formatFloat(v any) string {
+	x, ok := zincpyNum(v)
+	if !ok {
+		if n, ok := zincpyIntish(v); ok {
+			x = float64(n)
+		}
+	}
+	neg := math.Signbit(x)
+	ax := math.Abs(x)
+	prec := f.precision
+	var body string
+	switch f.typ {
+	case 'e', 'E':
+		if prec < 0 {
+			prec = 6
+		}
+		body = strconv.FormatFloat(ax, f.typ, prec, 64)
+	case 'g', 'G':
+		if prec < 0 {
+			prec = 6
+		}
+		if prec == 0 {
+			prec = 1
+		}
+		body = strconv.FormatFloat(ax, f.typ, prec, 64)
+	case '%':
+		if prec < 0 {
+			prec = 6
+		}
+		body = strconv.FormatFloat(ax*100, 'f', prec, 64) + "%"
+	default: // 'f', 'F', or 0
+		if prec < 0 {
+			prec = 6
+		}
+		body = strconv.FormatFloat(ax, 'f', prec, 64)
+	}
+	if f.grouping != 0 {
+		body = groupFloat(body, f.grouping)
+	}
+	return f.padNumeric(f.signStr(neg), body)
+}
+
+// groupDigits inserts the grouping separator every n digits from the right.
+func groupDigits(s string, sep byte, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	var b strings.Builder
+	pre := len(s) % n
+	if pre > 0 {
+		b.WriteString(s[:pre])
+	}
+	for i := pre; i < len(s); i += n {
+		if b.Len() > 0 {
+			b.WriteByte(sep)
+		}
+		b.WriteString(s[i : i+n])
+	}
+	return b.String()
+}
+
+// groupFloat applies digit grouping to the integer part of a formatted float,
+// leaving the fractional part (and any exponent) untouched.
+func groupFloat(s string, sep byte) string {
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 {
+		return groupDigits(s, sep, 3)
+	}
+	return groupDigits(s[:dot], sep, 3) + s[dot:]
+}
+
 // zincpyPrintN mirrors Python's print() for any number of arguments: each is
 // str()-formatted and joined with a single space, newline-terminated. This is
 // Python's default sep=' ', end='\n'.
