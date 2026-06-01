@@ -182,26 +182,72 @@ func runOutput(files []codegen.OutputFile, meta *pyfront.Meta) (string, error) {
 	return string(out), err
 }
 
-// pythonCGOFlags derives the cgo compile/link flags for embedding the host
-// CPython from python3-config: --includes for the <Python.h> search path, and
-// --embed --ldflags for libpython (the --embed variant adds -lpython, which
-// the plain extension-module form omits on 3.8+). This adapts to whatever
-// Python the host's `python3` is — 3.9, 3.14, etc. — so the same compiler
-// targets any installed interpreter that ships a dev package. Requires
-// python3-devel (python3-config + Python.h).
-func pythonCGOFlags() (cflags, ldflags string, err error) {
-	inc, e1 := exec.Command("python3-config", "--includes").Output()
-	if e1 != nil {
-		return "", "", fmt.Errorf("python3-config --includes failed (install python3-devel?): %w", e1)
+// pythonConfigTool returns the python*-config script that belongs to the SAME
+// interpreter as the `python3` on PATH. The embedded libpython must match the
+// `python3` we differential-test against, byte for byte — linking a different
+// version (e.g. system 3.9 while `python3` is a 3.14 venv) makes runtime
+// messages diverge (math.sqrt(-1) phrasing changed across versions). A bare
+// `python3-config` resolves to the system Python, NOT the venv's, so we instead
+// ask `python3` for its base prefix + version and locate
+// `{base_prefix}/bin/python{X.Y}-config`. Falls back to `python3-config` when
+// that sibling is absent (hosts where only the system Python ships a config).
+func pythonConfigTool() string {
+	out, err := exec.Command("python3", "-c",
+		"import sys; print(sys.base_prefix); print('%d.%d' % sys.version_info[:2])").Output()
+	if err != nil {
+		return "python3-config"
 	}
-	ld, e2 := exec.Command("python3-config", "--embed", "--ldflags").Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 {
+		return "python3-config"
+	}
+	cfg := filepath.Join(strings.TrimSpace(lines[0]), "bin", "python"+strings.TrimSpace(lines[1])+"-config")
+	if _, err := os.Stat(cfg); err != nil {
+		return "python3-config"
+	}
+	return cfg
+}
+
+// pythonCGOFlags derives the cgo compile/link flags for embedding the host
+// CPython from python*-config: --includes for the <Python.h> search path, and
+// --embed --ldflags for libpython (the --embed variant adds -lpython, which
+// the plain extension-module form omits on 3.8+). The config tool is resolved
+// to match the `python3` on PATH (see pythonConfigTool), so the same compiler
+// targets whatever interpreter we run against — 3.9, a 3.14 venv, etc. Requires
+// that interpreter's dev files (python*-config + Python.h).
+func pythonCGOFlags() (cflags, ldflags string, err error) {
+	cfg := pythonConfigTool()
+	inc, e1 := exec.Command(cfg, "--includes").Output()
+	if e1 != nil {
+		return "", "", fmt.Errorf("%s --includes failed (install python3-devel?): %w", cfg, e1)
+	}
+	ld, e2 := exec.Command(cfg, "--embed", "--ldflags").Output()
 	if e2 != nil {
-		return "", "", fmt.Errorf("python3-config --embed --ldflags failed: %w", e2)
+		return "", "", fmt.Errorf("%s --embed --ldflags failed: %w", cfg, e2)
 	}
 	cflags = strings.TrimSpace(string(inc))
 	ldflags = strings.TrimSpace(string(ld))
 	if ldflags == "" {
-		return "", "", fmt.Errorf("python3-config --embed --ldflags was empty; need a python3 built with --enable-shared")
+		return "", "", fmt.Errorf("%s --embed --ldflags was empty; need a python3 built with --enable-shared", cfg)
+	}
+	// Bake the libpython directory into the binary as an rpath so it loads at
+	// runtime without LD_LIBRARY_PATH. --embed --ldflags emits the dir as a
+	// `-L<dir>` link-search flag; the same dir is where libpython lives, and a
+	// non-standard install (a uv/pyenv venv's lib dir) is otherwise invisible to
+	// the dynamic loader. cgo's LDFLAGS allowlist permits -Wl,-rpath.
+	if libDir := firstLibDir(ldflags); libDir != "" {
+		ldflags += " -Wl,-rpath," + libDir
 	}
 	return cflags, ldflags, nil
+}
+
+// firstLibDir returns the path from the first `-L<dir>` token in a linker flag
+// string, or "" if there is none.
+func firstLibDir(ldflags string) string {
+	for _, tok := range strings.Fields(ldflags) {
+		if strings.HasPrefix(tok, "-L") && len(tok) > 2 {
+			return tok[2:]
+		}
+	}
+	return ""
 }
