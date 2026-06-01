@@ -548,13 +548,26 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 					}
 					return &parser.VarStmt{Line: line, Name: id.Name, Value: rhs}
 				}
-				// Type-checker-clean contract: a variable keeps one type. A
-				// reassignment that changes it (e.g. int → float) is what mypy
-				// rejects and what Go's single-typed vars can't express, so
-				// reject it here with a clear message rather than emit broken
-				// Go. Only fire when both old and new types are known.
-				if old, nw := p.lookupType(id.Name), p.typeOf(rhs); old != tUnknown && nw != tUnknown && old != tDynamic && nw != tDynamic && old != nw {
-					p.errf(Token{Line: line}, "variable %q is %s but reassigned to %s; zinc-py requires type-consistent variables (mypy would reject this)", id.Name, old, nw)
+				// Type-checker-clean contract: a statically-typed variable keeps
+				// one type. We enforce this as strictly as a strict mypy config
+				// would, rejecting at parse time with a clear message rather than
+				// leaking a downstream Go type error. Two violations, both only
+				// when the existing type is a known concrete (non-dynamic) type:
+				if old := p.lookupType(id.Name); old != tUnknown && old != tDynamic {
+					nw := p.typeOf(rhs)
+					switch {
+					case nw == tDynamic:
+						// A dynamic value (FFI/deserialization result, Any) flowing
+						// into a statically-typed local. Strict mypy flags this
+						// implicit-Any leak; narrow it at the boundary instead
+						// (e.g. int(x)/float(x)/str(x), or validate into a typed
+						// model) so the local stays its static type.
+						p.errf(Token{Line: line}, "variable %q is %s but reassigned from a dynamic value; zinc-py enforces static types — narrow it at the boundary (e.g. %s(...) or a typed model)", id.Name, old, narrowHint(old))
+					case nw != tUnknown && old != nw:
+						// e.g. int → float: a genuine type change mypy rejects and
+						// Go's single-typed vars can't express.
+						p.errf(Token{Line: line}, "variable %q is %s but reassigned to %s; zinc-py requires type-consistent variables (mypy would reject this)", id.Name, old, nw)
+					}
 				}
 			}
 			return &parser.AssignStmt{Line: line, Target: lhs, Op: op, Value: rhs}

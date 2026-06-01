@@ -60,6 +60,24 @@ func (t pytype) String() string {
 	return "unknown"
 }
 
+// narrowHint returns the Python conversion built-in that narrows a dynamic
+// value to t, for use in diagnostics suggesting how to keep a local statically
+// typed (e.g. "int(...)"). Falls back to "cast" for types with no scalar
+// constructor.
+func narrowHint(t pytype) string {
+	switch t {
+	case tInt:
+		return "int"
+	case tFloat:
+		return "float"
+	case tStr:
+		return "str"
+	case tBool:
+		return "bool"
+	}
+	return "cast"
+}
+
 // typeFromExpr maps a Zinc type-hint node to a pytype.
 func typeFromExpr(t parser.TypeExpr) pytype {
 	st, ok := t.(*parser.SimpleType)
