@@ -508,9 +508,52 @@ func (p *Parser) endSimple() {
 	}
 }
 
+// parseAnnotatedAssign parses `x: T = value` (the leading `x` is already
+// consumed as id, the cursor is on `:`). The annotation pins the local's type;
+// a dynamic value is coerced to a scalar annotation at the boundary, and an
+// empty list literal takes the annotated element type.
+func (p *Parser) parseAnnotatedAssign(line int, id *parser.Ident) parser.Stmt {
+	p.advance() // ':'
+	typ := p.parseType()
+	if !p.isOp("=") {
+		// Annotation-only `x: T` doesn't bind a value at runtime in Python and
+		// leaves no Go declaration to anchor; require an initializer.
+		p.errf(p.cur(), "annotation-only statement %q: T is not supported; give it a value (%s: T = ...)", id.Name, id.Name)
+		p.endSimple()
+		return &parser.ExprStmt{Line: line, Expr: id}
+	}
+	p.advance() // '='
+	rhs := p.parseExpr()
+	p.endSimple()
+	if p.isDeclared(id.Name) {
+		p.errf(Token{Line: line}, "variable %q is already declared; re-annotating it is not supported", id.Name)
+	}
+	// The annotation drives the value's type: narrow a dynamic boundary value to
+	// a scalar annotation, and fill an empty `[]` with the annotated element type.
+	coerceEmptyList(rhs, typ)
+	rhs = p.coerceDynamicTo(rhs, typ)
+	p.declare(id.Name, typeFromExpr(typ))
+	p.recordElemType(id.Name, rhs)
+	p.recordInstanceClass(id.Name, rhs)
+	p.recordSetVar(id.Name, rhs)
+	if dm, ok := p.dictMetaOfValue(rhs); ok {
+		p.dictVars[id.Name] = dm
+	}
+	return &parser.VarStmt{Line: line, Name: id.Name, Type: typ, Value: rhs}
+}
+
 func (p *Parser) parseSimpleStmt() parser.Stmt {
 	line := p.cur().Line
 	lhs := p.parseExpr()
+
+	// Annotated assignment (PEP 526): `x: T = value`. The annotation is
+	// authoritative — it pins the local's static type and drives boundary
+	// narrowing, so `x: int = json.loads(s)` coerces the dynamic value to int
+	// rather than erroring. `x: Any = value` is the explicit escape hatch for a
+	// genuinely-dynamic local (interface{}). Only a bare-name target is allowed.
+	if id, ok := lhs.(*parser.Ident); ok && p.isOp(":") {
+		return p.parseAnnotatedAssign(line, id)
+	}
 
 	// Multi-target assignment: `a, b = ...`. Collect the target names and
 	// route to tuple unpacking.
@@ -1131,7 +1174,7 @@ func genericType(name string, args []parser.TypeExpr) parser.TypeExpr {
 		}
 		return &parser.TupleType{Elements: args}
 	}
-	return &parser.SimpleType{Name: "Any"} // Optional/Union — not yet modelled
+	return &parser.SimpleType{Name: "any"} // Optional/Union — not yet modelled
 }
 
 // mapPyType maps Python type-hint names to the zinc type names the codegen
@@ -1147,6 +1190,10 @@ func mapPyType(name string) string {
 		return "double"
 	case "int", "bool":
 		return name
+	case "Any":
+		// The typechecker treats the lowercase "any" as boxing-permissive (any
+		// value assignable); capital "Any" maps to a strict interface{}.
+		return "any"
 	}
 	return name
 }

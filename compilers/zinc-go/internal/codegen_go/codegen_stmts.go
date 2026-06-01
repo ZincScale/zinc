@@ -471,6 +471,13 @@ func (g *Generator) emitVarStmt(v *parser.VarStmt) {
 				if g.isInterface(st.Name) {
 					useExplicitType = true
 				}
+				// A dynamic (`any`) annotation must be honored explicitly: `:=`
+				// would infer the value's concrete type (e.g. int from `x: Any =
+				// 0`), defeating the boxing that lets a later dynamic reassignment
+				// type-check (`var x any = 0` then `x = zincpyAdd(x, dyn)`).
+				if st.Name == "any" {
+					useExplicitType = true
+				}
 				// Check unqualified names for cross-package interfaces
 				if _, kind, ok := g.lookupUnqualified(st.Name); ok && kind == "interface" {
 					useExplicitType = true

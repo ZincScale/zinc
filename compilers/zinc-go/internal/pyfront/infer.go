@@ -93,6 +93,8 @@ func typeFromExpr(t parser.TypeExpr) pytype {
 		return tStr
 	case "bool":
 		return tBool
+	case "Any", "any":
+		return tDynamic
 	}
 	return tUnknown
 }
