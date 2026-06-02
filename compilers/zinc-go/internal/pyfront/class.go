@@ -138,8 +138,10 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 	}
 
 	p.expectOp(":")
-	p.expectKind(TNewline)
-	p.expectKind(TIndent)
+	// An inline class body (`class E: pass`, `class E(Exception): pass`) puts the
+	// suite on the header line; detect it before consuming the NEWLINE the
+	// indented form requires. Inline bodies hold only simple statements.
+	inline := p.cur().Kind != TNewline
 
 	// Register the class so constructor calls (`x = Name(...)`) and typed
 	// params (`p: Name`) can be tracked as instances, and so `self.field` /
@@ -174,11 +176,9 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 	seen := map[string]bool{}
 	var dcFields []dcField
 
-	for p.cur().Kind != TDedent && p.cur().Kind != TEOF {
-		p.skipNewlines()
-		if p.cur().Kind == TDedent || p.cur().Kind == TEOF {
-			break
-		}
+	// parseItem reads one class-level item (method, field, class var, pass, or
+	// an unmodelled statement). Shared by the inline and indented body loops.
+	parseItem := func() {
 		if p.isOp("@") {
 			decs := p.parseDecorators()
 			if p.isKw("def") {
@@ -186,36 +186,65 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 			} else {
 				p.errf(p.cur(), "a decorator must be followed by a def")
 			}
-			continue
+			return
 		}
 		if p.isKw("def") {
 			p.parseClassMethod(cls, &fields, seen, nil)
-			continue
+			return
 		}
 		// @dataclass field: `name: type [= default]` declared at class level.
 		if isDataclass && p.cur().Kind == TName && p.peekOp(":") {
 			dcFields = append(dcFields, p.parseDataclassField())
-			continue
+			return
 		}
 		// Class-level constant `NAME [: T] = literal` — inlined at use sites.
 		if p.cur().Kind == TName && !p.isKw("pass") &&
 			(p.peekOp("=") || p.peekOp(":")) {
 			p.parseClassVar(name)
-			continue
+			return
 		}
 		// pass / docstrings / other class-level statements: not modelled yet.
-		startPos := p.pos
 		if p.isKw("pass") {
 			p.advance()
 			p.endSimple()
-		} else {
-			p.parseStmt()
+			return
 		}
-		if p.pos == startPos {
-			p.advance()
-		}
+		p.parseStmt()
 	}
-	p.expectKind(TDedent)
+
+	if inline {
+		// Body shares the header line: `;`-separated simple statements, no INDENT.
+		for {
+			startPos := p.pos
+			parseItem()
+			if p.pos == startPos {
+				p.advance()
+			}
+			if !p.isOp(";") {
+				break
+			}
+			p.advance() // ';'
+			if k := p.cur().Kind; k == TNewline || k == TEOF {
+				p.endSimple()
+				break
+			}
+		}
+	} else {
+		p.expectKind(TNewline)
+		p.expectKind(TIndent)
+		for p.cur().Kind != TDedent && p.cur().Kind != TEOF {
+			p.skipNewlines()
+			if p.cur().Kind == TDedent || p.cur().Kind == TEOF {
+				break
+			}
+			startPos := p.pos
+			parseItem()
+			if p.pos == startPos {
+				p.advance()
+			}
+		}
+		p.expectKind(TDedent)
+	}
 	if isDataclass {
 		p.synthesizeDataclass(cls, name, dcFields, &fields)
 	}

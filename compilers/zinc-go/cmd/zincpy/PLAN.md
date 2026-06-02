@@ -1,6 +1,6 @@
 # Python→Go compiler (zincpy) — work plan
 
-Last updated: 2026-06-01. Branch: `python-to-go-compiler`.
+Last updated: 2026-06-02. Branch: `python-to-go-compiler`.
 
 ## What this is
 
@@ -16,12 +16,40 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 54 "spikes" done, all byte-identical to CPython (contract test green).
+- 55 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
 - The long tail is a short list of bounded fixes + ~5 sizable features (below) +
   stdlib breadth (reachable today via CPython FFI `import X`).
+
+## Strategy (confirmed 2026-06-02)
+
+The goal is **parity for idiomatic mypy/Pydantic-strict, fully-annotated Python
+syntax** — NOT the whole stdlib. Anything outside that runs via FFI into CPython,
+which is acceptable because the heavy libraries we'd reach for (pandas, numpy, …)
+are native-C under the hood, so the per-call FFI overhead is amortized over real
+C work. **Priority: convert as much Python *syntax* to the native-Go path as
+possible** — that's where the speedups live (see Performance below) and it shrinks
+the FFI surface.
+
+## Performance (measured 2026-06-02)
+
+Native path (annotated → pure Go), standalone binary vs CPython 3.14, best-of-3:
+
+| workload                         | speedup vs CPython |
+|----------------------------------|--------------------|
+| 30M-iter arithmetic loop         | **94×**            |
+| float math (2M ops)              | **59×**            |
+| recursive fib                    | **18×**            |
+| string concat + len (2M)         | **3.1×**           |
+| FFI `math.sqrt` ×2M (slow path)  | **0.13× (7× slower)** |
+
+Takeaways: compute-bound annotated code is **18–95× faster** as native Go; the
+FFI fallback is ~7× *slower* than plain CPython (cgo + GIL per call), so it's a
+correctness net, not a perf path — every construct we move onto the native path
+is a direct win. **Strings are the weak spot (only 3.1×)** because the string
+runtime boxes/allocates — see the string-runtime TODO below.
 
 ## How to work
 
@@ -70,13 +98,13 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 
 ## Tier 1 — quick wins (bounded, high frequency)
 
-- [ ] **One-line compound suites** `def f(): return x`, `if c: foo()`, `class E: pass`,
-      `try: ... except: ...` on one line. **(M, HIGHEST leverage)** — the parser requires
-      NEWLINE+INDENT after every `:`. Real-world code uses the inline form constantly, and
-      it silently inflates "failure" counts. Fix in `parseBlock` (or wherever a suite is
-      read after `:`): if the next token is not NEWLINE, parse a single simple statement
-      (or `;`-separated list) as the body. Touches def/class/if/while/for/with/try/except/
-      else/finally. Test: re-run the terse survey in `/tmp/survey/` — should jump sharply.
+- [x] **One-line compound suites** `def f(): return x`, `if c: foo()`, `class E: pass`,
+      `try: ... except: ...` on one line. **DONE 2026-06-02** (spike55). `parseBlock` now
+      detects a non-NEWLINE token after `:` and parses an inline suite; `parseLineInto`
+      drives one logical line of `;`-separated simple statements and is reused by indented
+      blocks + the module top level (so `a=1; b=2` works everywhere). Class bodies got the
+      same treatment via a shared `parseItem` closure (class.go). Lexer learned `;`. Covers
+      def/if/elif/else/for/while/with/try/except(-as)/finally + inline class `pass`.
 
 - [ ] **`list.sort()` / `list.reverse()` / `list.pop()` / `list.insert()` / `list.index()`
       / `list.count()`** **(S)** — currently `xs.sort()` → `xs.Sort undefined`. `.sort()`
@@ -143,6 +171,20 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       when a class defines `__repr__` (Repr) but not `__str__` (String), emit a `String()`
       that calls `Repr()`. In class.go dunder handling.
 
+## Performance TODOs
+
+- [ ] **String-runtime perf** **(M)** — string-heavy code is only ~3.1× faster than
+      CPython (vs 18–95× for numeric code; see Performance above). The string path
+      boxes/allocates through `zincpy*` helpers instead of using Go `string` directly.
+      Investigate: keep statically-`str`-typed values as native Go `string` end-to-end
+      (concat → `+`, `len` → `len()`, indexing → native) and only fall back to the boxed
+      runtime for dynamic receivers. Biggest remaining native-path win. Profile `strs`
+      benchmark first (2M concat+len loop) to find the hot allocation.
+- [ ] **Flag FFI hot paths** **(S)** — FFI calls are ~7× slower than CPython; a construct
+      in a hot loop that routes through FFI is a silent perf cliff. Consider a
+      `--warn-ffi-in-loop` diagnostic (or note in `--emit`) so users know when they've
+      left the native path.
+
 ## Tier 3 — big features (the real "what's left")
 
 - [ ] **Generators / `yield`** **(L, highest-value big item)** — `def g(): yield x`.
@@ -166,10 +208,13 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 - [ ] **stdlib breadth** is reachable via FFI `import X` today (math/json/re/itertools/
       collections all work through libpython). `from X import` (Tier 2) makes it ergonomic.
 
-## Suggested order for tomorrow
+## Suggested order
 
-1. **One-line compound suites** (Tier 1) — unblocks the most real-world code in one shot.
-2. **list.sort + tuple-unpack + str predicates + nested-list typing** — fast cluster,
-   knocks out 4 survey failures.
+1. ~~One-line compound suites~~ — **DONE 2026-06-02** (spike55).
+2. **list.sort + tuple-unpack + str predicates + nested-list typing** — fast Tier-1
+   cluster, knocks out several survey failures and keeps more code on the native path.
+   (Note from the perf pass: prioritize fixes that move syntax onto native Go.)
 3. Then pick **generators (`yield`)** as the first big feature, or **from-import** for
    stdlib ergonomics.
+4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
+   speedup on string-heavy code — currently the weakest multiplier (3.1×).

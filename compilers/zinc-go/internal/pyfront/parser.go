@@ -448,13 +448,7 @@ func (p *Parser) parseProgram() *parser.Program {
 			p.pendingDecls = nil
 			continue
 		}
-		startPos := p.pos
-		if s := p.parseStmt(); s != nil {
-			prog.Stmts = append(prog.Stmts, s)
-		}
-		if p.pos == startPos { // no progress — avoid infinite loop on error
-			p.advance()
-		}
+		p.parseLineInto(&prog.Stmts)
 	}
 	return prog
 }
@@ -1140,9 +1134,24 @@ func (p *Parser) parseIf() parser.Stmt {
 	return stmt
 }
 
-// parseBlock parses `: NEWLINE INDENT stmts DEDENT`.
+// parseBlock parses a suite in either form Python allows after the `:` of a
+// compound header:
+//
+//	indented:  : NEWLINE INDENT stmts DEDENT
+//	inline:    : simple_stmt (';' simple_stmt)* NEWLINE
+//
+// The inline form (`if c: return`, `class E: pass`, `except: handle()`) is
+// pervasive in real code, so every compound that routes through parseBlock —
+// def/if/elif/else/for/while/with/try/except/finally — gets it for free.
 func (p *Parser) parseBlock() *parser.BlockStmt {
 	p.expectOp(":")
+	if p.cur().Kind != TNewline {
+		// Inline suite: the body shares the header's line. Only simple
+		// statements are valid here (Python rejects nested compounds inline).
+		block := &parser.BlockStmt{}
+		p.parseLineInto(&block.Stmts)
+		return block
+	}
 	p.expectKind(TNewline)
 	p.expectKind(TIndent)
 	block := &parser.BlockStmt{}
@@ -1151,16 +1160,38 @@ func (p *Parser) parseBlock() *parser.BlockStmt {
 		if p.cur().Kind == TDedent || p.cur().Kind == TEOF {
 			break
 		}
-		startPos := p.pos
-		if s := p.parseStmt(); s != nil {
-			block.Stmts = append(block.Stmts, s)
-		}
-		if p.pos == startPos {
-			p.advance()
-		}
+		p.parseLineInto(&block.Stmts)
 	}
 	p.expectKind(TDedent)
 	return block
+}
+
+// parseLineInto parses one logical line — a statement optionally followed by
+// `;`-separated simple statements (`a = 1; b = 2`) — appending each non-nil
+// result to dst. A simple statement's own terminator handling (endSimple) stops
+// at `;` instead of consuming it, so the trailing statements parse here. This is
+// also the per-line driver for indented blocks and the module top level, so the
+// `;` separator works everywhere a logical line can appear.
+func (p *Parser) parseLineInto(dst *[]parser.Stmt) {
+	for {
+		startPos := p.pos
+		if s := p.parseStmt(); s != nil {
+			*dst = append(*dst, s)
+		}
+		if p.pos == startPos { // no progress (parse error) — bail to avoid a loop
+			p.advance()
+			return
+		}
+		if !p.isOp(";") {
+			return
+		}
+		p.advance() // ';'
+		// A trailing `;` right before the line break ends the statement list.
+		if k := p.cur().Kind; k == TNewline || k == TEOF || k == TDedent {
+			p.endSimple()
+			return
+		}
+	}
 }
 
 // --- types -------------------------------------------------------------------
