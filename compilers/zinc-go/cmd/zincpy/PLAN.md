@@ -227,6 +227,31 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 - [ ] **stdlib breadth** is reachable via FFI `import X` today (math/json/re/itertools/
       collections all work through libpython). `from X import` (Tier 2) makes it ergonomic.
 
+## Documentation (do when close to 100%)
+
+- [ ] **Developer guide: using FFI + the dynamic-value boundary** — a docs page with
+      worked examples. FFI calls (`import X`, `from X import name`) return a DYNAMIC value
+      (boxed `any`); the only friction is crossing dynamic → static. Document the three
+      narrowing patterns, each with a runnable example:
+      1. annotated assignment — `x: float = sqrt(2.0)` (coerces at the boundary);
+      2. explicit conversion — `int(...) / float(...) / str(...) / bool(...)` inline;
+      3. stay dynamic end-to-end — don't annotate; arithmetic/print route through the
+         dynamic helpers (correct, just slower).
+      Call out the gotcha that bites most: a `list[T]` is a real Go slice, so a raw FFI
+      result must be narrowed PER ELEMENT before append / inside a comprehension
+      (`vals.append(int(randint(...)))`, `[float(sqrt(float(d))) for d in data]`). Frame the
+      mental model as a "border crossing": past an FFI call you're in dynamic territory; an
+      annotation or `int()/float()/str()` is the passport back to typed Go; the compiler only
+      complains on a silent crossing. Also cover: error timing differs from CPython (name
+      errors surface at use, not import), and that heavy native-C libs (numpy/pandas) are the
+      intended FFI use — their results are meant to stay opaque and flow back into more FFI.
+      Pair with the two ergonomic improvements noted below if they land first.
+- [ ] **(optional, ergonomics) auto-narrow FFI into typed containers** — when a `list[T]`
+      append / typed assignment receives a dynamic FFI call, auto-insert the `T(...)`
+      coercion so `vals.append(randint(...))` just works; and improve the compile error to
+      name the fix ("narrow with int(...) or annotate") instead of Go's raw
+      "need type assertion". Reduces how much the FFI doc above has to caveat.
+
 ## Suggested order
 
 1. ~~One-line compound suites~~ — **DONE 2026-06-02** (spike55).
