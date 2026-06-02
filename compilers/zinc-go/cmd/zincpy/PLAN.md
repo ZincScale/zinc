@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 64 "spikes" done, all byte-identical to CPython (contract test green).
+- 65 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -173,14 +173,15 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       `kwargs map[string]any` / `*zincpyDict` param; calls collect leftover `name=value`
       into it. Pairs with the existing `*args` support.
 
-- [ ] **walrus `:=`** **(S now — infra exists)** — assignment expression. The statement-hoist
-      buffer (`p.pending`, flushed in `parseLineInto`) is already built for `list.pop()`, so
-      lowering `if (n := len(x)) > 3:` is now just: parse `(name := expr)`, hoist a
-      `name := expr` VarStmt into `p.pending`, declare `name`, and return `Ident{name}`. Use
-      `hoistPop` as the template. CAVEAT (same as pop): a walrus in a loop CONDITION
-      (`while (line := read()):`) would hoist once, not per-iteration — detect a walrus in a
-      while/for cond and either reject loudly or re-hoist into the loop body. Statement-position
-      and if-condition walrus are exact.
+- [x] **walrus `:=`** **DONE 2026-06-02** (spike65). `parseWalrus` (parser.go, in parseAtom's
+      name branch) hoists `name := expr` into `p.pending` (or `name = expr` if already bound),
+      declares the name, and yields `Ident{name}` — the name leaks to the enclosing scope as
+      in Python. `parseBlock` now stashes/restores `p.pending` around a body so a header
+      hoist (an if-condition walrus) lands BEFORE the compound, not inside its body. A walrus
+      in a re-evaluated/per-element context (while CONDITION, comprehension) is rejected
+      loudly via the `noHoist` guard — these would otherwise lift the side effect out of the
+      loop. (Same guard now also makes `list.pop()` in those contexts a loud error.)
+      if-condition, statement, and call-argument walrus are exact.
 
 - [ ] **Custom exception subclasses** `class E(Exception): pass` + `raise E(msg)` +
       `except E` **(M)** — user exception classes aren't modeled (Exception base undefined).
@@ -268,8 +269,8 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
    predicates, list methods (incl. `pop` via the statement-hoist buffer), tuple-value unpack,
    nested-list typing, string iteration, range-as-value, sorted(key=builtin). **Tier 1 is
    fully cleared.** First Tier-2 item (`from X import`) also done (spike63).
-3. **walrus `:=`** is now cheap (the hoist buffer exists) — good next quick win. Then the big
-   features: **generators (`yield`)**, or Tier-2 breadth (`**kwargs`, custom exceptions,
-   function decorators).
+3. ~~walrus `:=`~~ — **DONE 2026-06-02** (spike65). Next: the big features —
+   **generators (`yield`)** — or Tier-2 breadth (`**kwargs`, custom exception subclasses,
+   function decorators, `__repr__`→`__str__` fallback).
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).

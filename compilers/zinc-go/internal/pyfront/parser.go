@@ -174,6 +174,12 @@ type Parser struct {
 	// CONDITION would evaluate once, not per-iteration — see hoistPop.)
 	pending []parser.Stmt
 
+	// noHoist > 0 marks a context where hoisting to the enclosing statement would
+	// be semantically wrong — a while CONDITION (re-evaluated each iteration) or a
+	// comprehension (evaluated per element). Walrus/pop reject loudly there rather
+	// than silently lifting the side effect out of the loop.
+	noHoist int
+
 	// ffiImports lists the CPython modules the program imports, in first-seen
 	// order. Empty means the program needs no embedded interpreter, so the
 	// driver skips the (libpython-linking) cgo runtime file.
@@ -1224,7 +1230,11 @@ func (p *Parser) parseWith() parser.Stmt {
 
 func (p *Parser) parseWhile() parser.Stmt {
 	line := p.advance().Line // 'while'
+	// The condition is re-evaluated each iteration, so a walrus/pop in it can't be
+	// hoisted out (that would run once) — noHoist makes those reject loudly.
+	p.noHoist++
 	cond := p.truthyWrap(p.parseExpr())
+	p.noHoist--
 	body := p.parseBlock()
 	return &parser.WhileStmt{Line: line, Cond: cond, Body: body}
 }
@@ -1256,16 +1266,23 @@ func (p *Parser) parseIf() parser.Stmt {
 // def/if/elif/else/for/while/with/try/except/finally — gets it for free.
 func (p *Parser) parseBlock() *parser.BlockStmt {
 	p.expectOp(":")
+	// Isolate any statements hoisted from the enclosing header — e.g. a walrus in
+	// an `if (n := f()) > 3:` condition. Those belong BEFORE the compound
+	// statement, not inside its body; the body's own parseLineInto would otherwise
+	// flush them in. Stash them, let the body manage its own pending, then restore
+	// so the enclosing parseLineInto emits the header hoists ahead of the compound.
+	saved := p.pending
+	p.pending = nil
+	block := &parser.BlockStmt{}
 	if p.cur().Kind != TNewline {
 		// Inline suite: the body shares the header's line. Only simple
 		// statements are valid here (Python rejects nested compounds inline).
-		block := &parser.BlockStmt{}
 		p.parseLineInto(&block.Stmts)
+		p.pending = saved
 		return block
 	}
 	p.expectKind(TNewline)
 	p.expectKind(TIndent)
-	block := &parser.BlockStmt{}
 	for p.cur().Kind != TDedent && p.cur().Kind != TEOF {
 		p.skipNewlines()
 		if p.cur().Kind == TDedent || p.cur().Kind == TEOF {
@@ -1274,6 +1291,7 @@ func (p *Parser) parseBlock() *parser.BlockStmt {
 		p.parseLineInto(&block.Stmts)
 	}
 	p.expectKind(TDedent)
+	p.pending = saved
 	return block
 }
 
@@ -2280,6 +2298,31 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	return call
 }
 
+// parseWalrus lowers an assignment expression `name := expr` (the cursor is on
+// `:=`). It hoists the binding as a statement so the surrounding expression keeps
+// just the bound name; the name leaks to the enclosing scope as in Python. A
+// walrus in a re-evaluated/per-element context (while cond, comprehension) can't
+// be hoisted correctly, so it is rejected there (noHoist).
+func (p *Parser) parseWalrus(nameTok Token) parser.Expr {
+	p.advance() // ':='
+	rhs := p.parseExpr()
+	name := goSafe(nameTok.Value)
+	if p.noHoist > 0 {
+		p.errf(nameTok, "walrus ':=' inside a loop condition or comprehension is not yet supported; assign on a separate line")
+		return &parser.Ident{Name: name}
+	}
+	if p.isDeclared(name) {
+		p.pending = append(p.pending, &parser.AssignStmt{
+			Target: &parser.Ident{Name: name}, Op: "=", Value: rhs})
+	} else {
+		p.declare(name, p.typeOf(rhs))
+		p.recordElemType(name, rhs)
+		p.recordInstanceClass(name, rhs)
+		p.pending = append(p.pending, &parser.VarStmt{Name: name, Value: rhs})
+	}
+	return &parser.Ident{Name: name}
+}
+
 // hoistPop lowers `xs.pop([i])` on a statically-known list. Python pop both
 // removes and returns an element, which a single expression can't express in Go,
 // so it emits two hoisted statements — read the value, then write the shortened
@@ -2302,6 +2345,10 @@ func (p *Parser) hoistPop(callee parser.Expr, args []parser.Expr) parser.Expr {
 	}
 	if len(args) > 1 {
 		p.errf(p.cur(), "list.pop() takes at most one argument")
+		return nil
+	}
+	if p.noHoist > 0 {
+		p.errf(p.cur(), "list.pop() inside a loop condition or comprehension is not yet supported; pop in the loop body instead")
 		return nil
 	}
 	temp := fmt.Sprintf("__pop%d", p.tmpCount)
@@ -2480,6 +2527,11 @@ func (p *Parser) parseAtom() parser.Expr {
 		return p.parseFString(t)
 	case TName:
 		p.advance()
+		// Walrus `name := expr`: an assignment expression. Hoist `name := expr`
+		// (or `name = expr` if already bound) as a statement and yield the name.
+		if p.isOp(":=") {
+			return p.parseWalrus(t)
+		}
 		switch t.Value {
 		case "True":
 			return &parser.BoolLit{Value: true}

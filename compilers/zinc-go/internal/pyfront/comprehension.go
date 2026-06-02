@@ -38,6 +38,8 @@ import (
 // both infers the element type and lets multi-target loops (`for a, b in
 // pairs`) and arithmetic on dynamic unpacked vars lower correctly.
 func (p *Parser) parseListComprehension(outStart int, close string) parser.Expr {
+	p.noHoist++
+	defer func() { p.noHoist-- }()
 	targets, iter, cond := p.parseCompClause(close)
 	endPos := p.pos
 	p.pos = outStart
@@ -165,6 +167,8 @@ func (p *Parser) declareCompTargets(targets []string, iter parser.Expr) {
 // parseSetComprehension lowers `{output for x in iter [if cond]}` to an IIFE
 // accumulating into a *zincpySet.
 func (p *Parser) parseSetComprehension(outStart int) parser.Expr {
+	p.noHoist++
+	defer func() { p.noHoist-- }()
 	// cursor is on `for`. Parse the clause to learn the loop variable(s)...
 	targets, iter, cond := p.parseCompClause("}")
 	endPos := p.pos
@@ -203,6 +207,8 @@ func (p *Parser) parseSetComprehension(outStart int) parser.Expr {
 // parseDictComprehension lowers `{key: val for x in iter [if cond]}` to an IIFE
 // accumulating into a *zincpyDict.
 func (p *Parser) parseDictComprehension(outStart int) parser.Expr {
+	p.noHoist++
+	defer func() { p.noHoist-- }()
 	// cursor is on `for`. Parse the clause for the loop variable(s)...
 	targets, iter, cond := p.parseCompClause("}")
 	endPos := p.pos
