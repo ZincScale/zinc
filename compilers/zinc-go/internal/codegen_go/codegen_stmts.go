@@ -138,7 +138,11 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 	case *parser.BlockStmt:
 		g.emitBlock(stmt)
 	case *parser.FnDecl:
+		// A FnDecl in statement position is a nested function → emit a closure
+		// assignment rather than a package-level func.
+		g.nestedFnDecl = true
 		g.emitFnDecl(stmt)
+		g.nestedFnDecl = false
 	case *parser.TupleVarStmt:
 		g.emitTupleVarStmt(stmt)
 	case *parser.GoStmt:

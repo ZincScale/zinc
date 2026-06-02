@@ -12,6 +12,10 @@ import (
 
 // emitFnDecl generates a top-level Go function from a Zinc fn declaration.
 func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
+	// Capture+clear the nested flag up front so emitting the body (which may
+	// contain a deeper nested def via emitStmt) doesn't see a stale value.
+	nested := g.nestedFnDecl
+	g.nestedFnDecl = false
 	if g.sourceFile != "" && fn.Line > 0 {
 		g.writeln("//line %s:%d", g.sourceFile, fn.Line)
 	}
@@ -124,7 +128,13 @@ func (g *Generator) emitFnDecl(fn *parser.FnDecl) {
 	// Ident reference inside the body resolves to the right V2Type.
 	tparams := goTypeParamsWithBounds(fn.TypeParams, fn.TypeParamBounds)
 	g.trackTypeParamImports(fn.TypeParamBounds)
-	g.writeln("func %s%s(%s)%s {", name, tparams, params, ret)
+	if nested {
+		// Nested function → closure assigned to a local. (Recursion via the
+		// bound name isn't supported by this `:=` form and fails loudly.)
+		g.writeln("%s := func%s(%s)%s {", name, tparams, params, ret)
+	} else {
+		g.writeln("func %s%s(%s)%s {", name, tparams, params, ret)
+	}
 	g.indent++
 	g.inferChannelTypes(fn.Body)
 	g.emitBlock(fn.Body)

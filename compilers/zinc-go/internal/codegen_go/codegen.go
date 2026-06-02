@@ -40,6 +40,10 @@ type Generator struct {
 	// rewrites are pure liability here — they silently hijack a user method of
 	// the same name on a receiver the codegen doesn't recognize as a struct.
 	pythonMode bool
+	// nestedFnDecl is set by emitStmt when a FnDecl appears in statement
+	// position (a nested function): emitFnDecl then emits a closure assignment
+	// `name := func(...)...` instead of a package-level `func name(...)`.
+	nestedFnDecl bool
 	currentFields      map[string]bool   // field names of current class (for implicit self)
 	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
 	currentMethods map[string]bool // method names of current class (for implicit self)

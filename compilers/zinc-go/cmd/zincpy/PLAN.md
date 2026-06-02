@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 67 "spikes" done, all byte-identical to CPython (contract test green).
+- 68 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -196,9 +196,20 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       **rejected loudly** rather than diverge. Re-raise, no-arg `raise E()` (empty message),
       and exact-vs-base arm dispatch all verified byte-identical.
 
-- [ ] **decorators on plain functions** `@deco def f(): ...` **(M)** — top-level function
-      decorators (class decorators/@property/@dataclass already work). Lower `@deco` to
-      `f = deco(f)` after the def.
+- [x] **Nested functions / closures (locally-called)** **DONE 2026-06-02** (spike68). A
+      `def` in statement position (inside another function/method) now emits a Go closure
+      `name := func(params) ret { body }` instead of an invalid package-level `func name`.
+      Codegen-only change: a `FnDecl` reaching `emitStmt` is always nested, so it sets a
+      `nestedFnDecl` flag that `emitFnDecl` reads to switch the header line (reusing all the
+      return-type/thrower/tuple machinery). Captures work via Go's by-reference closures
+      (read-capture of enclosing params/locals); deep nesting (3+ levels) works. **`nonlocal`**
+      is supported — it lowers to nothing but marks the names bound in the closure scope so a
+      reassignment emits `=` (mutating the captured var) not `:=` (shadowing). Limits, all
+      **loud**: a RETURNED closure / **function decorator** needs first-class function values +
+      a dynamic-call helper (calling an `interface{}`) — still unsupported (decorators now
+      error clearly instead of silently dropping). Recursion via the bound name fails (the
+      `:=` form). **`global`** is rejected (module-level vars live in `main()`, not package
+      scope, so they're not accessible across functions yet).
 
 - [ ] **`-> None` audit / void-method polish** — DONE for returns; verify methods, lambdas,
       and `__init__` paths all treat None as void everywhere.
@@ -279,7 +290,9 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
    nested-list typing, string iteration, range-as-value, sorted(key=builtin). **Tier 1 is
    fully cleared.** First Tier-2 item (`from X import`) also done (spike63).
 3. ~~walrus `:=`~~ — **DONE 2026-06-02** (spike65). ~~custom exception subclasses~~ —
-   **DONE 2026-06-02** (spike67). Next: the big features — **generators (`yield`)** — or
-   remaining Tier-2 breadth (`**kwargs`, function decorators on plain functions).
+   **DONE 2026-06-02** (spike67). ~~nested functions / closures + nonlocal~~ — **DONE
+   2026-06-02** (spike68). Next: the big features — **generators (`yield`)** — or the
+   remaining breadth: **returned closures / function decorators** (need first-class function
+   values + a dynamic-call helper) and **`**kwargs`**.
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).

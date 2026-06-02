@@ -465,6 +465,12 @@ func (p *Parser) parseProgram() *parser.Program {
 			decorators = p.parseDecorators()
 		}
 		if p.isKw("def") {
+			// Decorators on a plain function (e.g. @deco) would need `f = deco(f)`
+			// lowering plus first-class function values — not yet supported.
+			// Reject loudly rather than silently drop the decorator.
+			if len(decorators) > 0 {
+				p.errf(p.cur(), "decorator @%s on a function is not yet supported", decorators[0])
+			}
 			if fn := p.parseDef(); fn != nil {
 				prog.Decls = append(prog.Decls, fn)
 			}
@@ -525,6 +531,8 @@ func (p *Parser) parseStmt() parser.Stmt {
 			return p.parseFromImport()
 		case "with":
 			return p.parseWith()
+		case "nonlocal", "global":
+			return p.parseScopeDecl()
 		case "pass":
 			p.advance()
 			p.endSimple()
@@ -540,6 +548,30 @@ func (p *Parser) parseStmt() parser.Stmt {
 		}
 	}
 	return p.parseSimpleStmt()
+}
+
+// parseScopeDecl handles `nonlocal a, b` / `global a, b`. For `nonlocal`, Go
+// closures capture enclosing locals by reference, so the declaration lowers to
+// nothing — its only effect is to mark each name as already-bound in the
+// current scope, so a later `name = expr` reassigns the captured variable
+// (AssignStmt `=`) rather than shadowing it with a fresh `:=`. `global` is
+// rejected: module-level variables are emitted inside main(), so they aren't
+// accessible across functions yet (would otherwise fail as a cryptic Go
+// "undefined" error).
+func (p *Parser) parseScopeDecl() parser.Stmt {
+	kw := p.advance().Value // 'nonlocal' / 'global'
+	if kw == "global" {
+		p.errf(p.cur(), "`global` is not yet supported (module-level variables aren't accessible across functions)")
+	}
+	for {
+		name := goSafe(p.expectKind(TName).Value)
+		p.declare(name, p.lookupType(name))
+		if !p.acceptOp(",") {
+			break
+		}
+	}
+	p.endSimple()
+	return nil
 }
 
 // endSimple consumes the NEWLINE terminating a simple statement.
