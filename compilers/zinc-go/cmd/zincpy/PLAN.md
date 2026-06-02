@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 63 "spikes" done, all byte-identical to CPython (contract test green).
+- 64 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -114,13 +114,17 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       bool); `sort(key=...)` rejected loudly. Element-comparison sort requires an orderable
       element type (int/float/str) — a list of objects without key= fails to compile (ok).
 
-- [ ] **`list.pop()`** **(M, was bundled above)** — both mutates and returns, so the
-      append-style single write-back doesn't fit, and the codegen restricts `&` (address-of)
-      to Go-library call args so the pointer-helper route is blocked. Two viable paths:
-      (a) `x, xs = zincpyPop(xs)` (helper returns `(value, newSlice)`) — works for the bare
-      statement and `x = xs.pop()` but NOT for pop nested in an expression (`print(xs.pop())`,
-      `t += xs.pop()`); (b) build a **statement-hoist** buffer in the front-end (also unblocks
-      walrus `:=`) so a mutating sub-expression can emit a preceding statement. Prefer (b).
+- [x] **`list.pop()`** **DONE 2026-06-02** (spike64). Built the **statement-hoist buffer**
+      (`p.pending`, flushed in `parseLineInto` before each statement) — the infra path (b).
+      `hoistPop` (parser.go) emits two hoisted statements — `__pop := zincpyPopVal(xs[,i])`
+      (value-read, raises IndexError on empty/out-of-range) then `xs = zincpyPopDrop(xs[,i])`
+      (write-back, uses `=` so it mutates the right var even in a nested Go block) — and
+      returns the temp, so pop works in EVERY position (bare stmt, `x = xs.pop()`,
+      `print(xs.pop())`, `t += xs.pop()`, two pops in one expr). A bare-statement pop discards
+      the value (keeps the side-effecting check). Bonus fix: an annotated `list[T] = []`
+      now pins its element type (so list methods/iteration work on empty-initialized lists).
+      Known limit: pop in a loop CONDITION would hoist once (the body idiom `while xs:
+      x = xs.pop()` is exact). **The hoist buffer now also unblocks walrus `:=` cheaply.**
 
 - [x] **Tuple-unpack from a stored tuple value** `a, b, c = t`. **DONE 2026-06-02**
       (spike58). In `parseUnpackAssign`, a non-call single-expr RHS expands to
@@ -169,9 +173,14 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       `kwargs map[string]any` / `*zincpyDict` param; calls collect leftover `name=value`
       into it. Pairs with the existing `*args` support.
 
-- [ ] **walrus `:=`** **(M)** — assignment expression. Lower `if (n := len(x)) > 3:` to a
-      pre-statement `n := len(x)` hoist + use `n`. Needs an expression-context statement
-      hoist (similar to how `as`-casts hoist in codegen).
+- [ ] **walrus `:=`** **(S now — infra exists)** — assignment expression. The statement-hoist
+      buffer (`p.pending`, flushed in `parseLineInto`) is already built for `list.pop()`, so
+      lowering `if (n := len(x)) > 3:` is now just: parse `(name := expr)`, hoist a
+      `name := expr` VarStmt into `p.pending`, declare `name`, and return `Ident{name}`. Use
+      `hoistPop` as the template. CAVEAT (same as pop): a walrus in a loop CONDITION
+      (`while (line := read()):`) would hoist once, not per-iteration — detect a walrus in a
+      while/for cond and either reject loudly or re-hoist into the loop body. Statement-position
+      and if-condition walrus are exact.
 
 - [ ] **Custom exception subclasses** `class E(Exception): pass` + `raise E(msg)` +
       `except E` **(M)** — user exception classes aren't modeled (Exception base undefined).
@@ -255,12 +264,12 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 ## Suggested order
 
 1. ~~One-line compound suites~~ — **DONE 2026-06-02** (spike55).
-2. ~~Tier-1 quick wins~~ — **DONE 2026-06-02** (spikes 55–62): one-line suites, str
-   predicates, list methods, tuple-value unpack, nested-list typing, string iteration,
-   range-as-value, sorted(key=builtin). **Tier 1 is now clear except `list.pop()`**, which
-   is deferred to the statement-hoist work (see its entry — that infra also unblocks walrus).
-3. Then pick **generators (`yield`)** as the first big feature, or **from-import** for
-   stdlib ergonomics. Consider doing the **statement-hoist buffer** first since it unblocks
-   both `list.pop()` and walrus `:=` cheaply.
+2. ~~Tier-1 quick wins~~ — **DONE 2026-06-02** (spikes 55–64): one-line suites, str
+   predicates, list methods (incl. `pop` via the statement-hoist buffer), tuple-value unpack,
+   nested-list typing, string iteration, range-as-value, sorted(key=builtin). **Tier 1 is
+   fully cleared.** First Tier-2 item (`from X import`) also done (spike63).
+3. **walrus `:=`** is now cheap (the hoist buffer exists) — good next quick win. Then the big
+   features: **generators (`yield`)**, or Tier-2 breadth (`**kwargs`, custom exceptions,
+   function decorators).
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).

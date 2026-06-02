@@ -167,6 +167,13 @@ type Parser struct {
 	// bare `pi` value to zincpyPyGet — the same FFI routing as `math.sqrt(x)`.
 	ffiFromBind map[string]ffiAttr
 
+	// pending holds statements hoisted out of an expression during lowering — a
+	// mutating sub-expression (`xs.pop()`) emits its value-extraction + slice
+	// write-back here and returns a temp. parseLineInto flushes these BEFORE the
+	// statement that produced them, so they run first. (Hoisting from a loop
+	// CONDITION would evaluate once, not per-iteration — see hoistPop.)
+	pending []parser.Stmt
+
 	// ffiImports lists the CPython modules the program imports, in first-seen
 	// order. Empty means the program needs no embedded interpreter, so the
 	// driver skips the (libpython-linking) cgo runtime file.
@@ -558,6 +565,12 @@ func (p *Parser) parseAnnotatedAssign(line int, id *parser.Ident) parser.Stmt {
 	rhs = p.coerceDynamicTo(rhs, typ)
 	p.declare(id.Name, typeFromExpr(typ))
 	p.recordElemType(id.Name, rhs)
+	// An annotated `list[T]` pins the element type even when the initializer is
+	// an empty `[]` (which recordElemType can't infer from), so iteration /
+	// indexing / list methods on the variable still know the element type.
+	if gt, ok := typ.(*parser.GenericType); ok && gt.Name == "List" && len(gt.TypeArgs) == 1 {
+		p.elemType[id.Name] = typeFromExpr(gt.TypeArgs[0])
+	}
 	p.recordInstanceClass(id.Name, rhs)
 	p.recordSetVar(id.Name, rhs)
 	if dm, ok := p.dictMetaOfValue(rhs); ok {
@@ -687,7 +700,31 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 			}
 		}
 	}
+	// A bare `xs.pop()` statement discards the popped value: drop the (now unused)
+	// value temp so Go doesn't reject it; the hoisted slice write-back still runs.
+	if id, ok := lhs.(*parser.Ident); ok && p.discardHoistTemp(id.Name) {
+		return nil
+	}
 	return &parser.ExprStmt{Line: line, Expr: lhs}
+}
+
+// discardHoistTemp handles a bare `xs.pop()` statement, whose popped value is
+// unused. It rewrites the hoisted value-read `t := zincpyPopVal(xs)` into the
+// bare call `zincpyPopVal(xs)` — keeping its side effect (the empty/bounds check
+// that raises IndexError) while discarding the result, so Go doesn't flag an
+// unused temp. The paired slice write-back is left untouched. Returns true if a
+// matching temp was found.
+func (p *Parser) discardHoistTemp(name string) bool {
+	if !strings.HasPrefix(name, "__pop") {
+		return false
+	}
+	for i, s := range p.pending {
+		if vs, ok := s.(*parser.VarStmt); ok && vs.Name == name {
+			p.pending[i] = &parser.ExprStmt{Expr: vs.Value}
+			return true
+		}
+	}
+	return false
 }
 
 // parseTestList parses a comma-separated expression list. A single expression
@@ -1249,7 +1286,14 @@ func (p *Parser) parseBlock() *parser.BlockStmt {
 func (p *Parser) parseLineInto(dst *[]parser.Stmt) {
 	for {
 		startPos := p.pos
-		if s := p.parseStmt(); s != nil {
+		s := p.parseStmt()
+		// Statements hoisted out of this line's expressions (e.g. xs.pop()) run
+		// first, so flush them ahead of the statement that produced them.
+		if len(p.pending) > 0 {
+			*dst = append(*dst, p.pending...)
+			p.pending = nil
+		}
+		if s != nil {
 			*dst = append(*dst, s)
 		}
 		if p.pos == startPos { // no progress (parse error) — bail to avoid a loop
@@ -2218,6 +2262,12 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			return callIdent("zincpyPyCall", ffiArgs...)
 		}
 	}
+	// list.pop([i]): mutates AND returns. Hoist the value-read + slice write-back
+	// as statements and replace the call with the temp holding the popped value,
+	// so it works in any position (`x = xs.pop()`, `print(xs.pop())`, bare stmt).
+	if lowered := p.hoistPop(callee, call.Args); lowered != nil {
+		return lowered
+	}
 	// str methods on a string-typed receiver → runtime helpers with Python
 	// semantics (e.g. join's swapped arg order, no-arg split on whitespace).
 	if lowered := p.lowerStrMethod(callee, call.Args); lowered != nil {
@@ -2228,6 +2278,58 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		return lowered
 	}
 	return call
+}
+
+// hoistPop lowers `xs.pop([i])` on a statically-known list. Python pop both
+// removes and returns an element, which a single expression can't express in Go,
+// so it emits two hoisted statements — read the value, then write the shortened
+// slice back — and returns the temp that holds the popped value. Returns nil when
+// not a list-pop. The slice write-back uses `xs = ...` (xs is already declared),
+// so it mutates the right variable even inside a nested block.
+//
+// Caveat: the hoist runs once, just before the statement using the value — so
+// `x = xs.pop()` / `print(xs.pop())` / a bare `xs.pop()` are exact, but a pop in
+// a loop CONDITION would (wrongly) run once. The idiomatic `while xs: x = xs.pop()`
+// is fine (the pop is in the body). A future loop-cond check could reject the rest.
+func (p *Parser) hoistPop(callee parser.Expr, args []parser.Expr) parser.Expr {
+	sel, ok := callee.(*parser.SelectorExpr)
+	if !ok || sel.Field != "pop" {
+		return nil
+	}
+	recv, ok := sel.Object.(*parser.Ident)
+	if !ok || !p.isListishExpr(recv) {
+		return nil
+	}
+	if len(args) > 1 {
+		p.errf(p.cur(), "list.pop() takes at most one argument")
+		return nil
+	}
+	temp := fmt.Sprintf("__pop%d", p.tmpCount)
+	p.tmpCount++
+	et := tDynamic
+	if t, ok := p.elemType[recv.Name]; ok {
+		et = t
+	}
+	p.declare(temp, et)
+
+	valHelper, dropHelper := "zincpyPopVal", "zincpyPopDrop"
+	var extra []parser.Expr
+	if len(args) == 1 {
+		// Bind the index to a temp so a side-effecting index is evaluated once
+		// and shared by both the value-read and the write-back.
+		idx := fmt.Sprintf("__pi%d", p.tmpCount)
+		p.tmpCount++
+		p.declare(idx, tInt)
+		p.pending = append(p.pending, &parser.VarStmt{Name: idx, Value: args[0]})
+		extra = []parser.Expr{&parser.Ident{Name: idx}}
+		valHelper, dropHelper = "zincpyPopValAt", "zincpyPopDropAt"
+	}
+	// __popN := zincpyPopVal(xs[, i])   then   xs = zincpyPopDrop(xs[, i])
+	p.pending = append(p.pending,
+		&parser.VarStmt{Name: temp, Value: callIdent(valHelper, append([]parser.Expr{recv}, extra...)...)},
+		&parser.AssignStmt{Target: recv, Op: "=", Value: callIdent(dropHelper, append([]parser.Expr{recv}, extra...)...)},
+	)
+	return &parser.Ident{Name: temp}
 }
 
 // builtinKeyFn turns a bare builtin passed as a sort key (`sorted(xs, key=len)`)

@@ -690,6 +690,38 @@ func zincpyListCount[T comparable](xs []T, v T) int {
 	return n
 }
 
+// list.pop([i]): the front-end emits the value-read (zincpyPopVal*) then the
+// slice write-back (zincpyPopDrop*) as two statements. The Val helper runs first
+// and validates, so the paired Drop helper can assume a valid, non-empty slice.
+func zincpyPopVal[T any](xs []T) T {
+	if len(xs) == 0 {
+		panic(zincpyExc{"IndexError", "pop from empty list"})
+	}
+	return xs[len(xs)-1]
+}
+
+func zincpyPopDrop[T any](xs []T) []T {
+	return xs[:len(xs)-1]
+}
+
+func zincpyPopValAt[T any](xs []T, i int) T {
+	n := len(xs)
+	if i < 0 {
+		i += n
+	}
+	if i < 0 || i >= n {
+		panic(zincpyExc{"IndexError", "pop index out of range"})
+	}
+	return xs[i]
+}
+
+func zincpyPopDropAt[T any](xs []T, i int) []T {
+	if i < 0 {
+		i += len(xs)
+	}
+	return append(xs[:i], xs[i+1:]...)
+}
+
 // zincpyStrMethod dispatches a str method called on a DYNAMIC receiver (an
 // unannotated / duck-typed value the front-end could not lower to the typed
 // helper). The receiver must be a string at run time — Python raises
