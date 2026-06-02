@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 55 "spikes" done, all byte-identical to CPython (contract test green).
+- 59 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -106,16 +106,20 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       same treatment via a shared `parseItem` closure (class.go). Lexer learned `;`. Covers
       def/if/elif/else/for/while/with/try/except(-as)/finally + inline class `pass`.
 
-- [ ] **`list.sort()` / `list.reverse()` / `list.pop()` / `list.insert()` / `list.index()`
-      / `list.count()`** **(S)** — currently `xs.sort()` → `xs.Sort undefined`. `.sort()`
-      mutates in place; lower like `.append` (statement rewrite) using `sort.Slice`, or to a
-      runtime helper. `sort(key=, reverse=)` kwargs too. See the `.append` rewrite in
-      `parseSimpleStmt` (parser.go ~570) for the in-place-mutation pattern.
+- [~] **`list.sort()` / `list.reverse()` / `list.insert()` / `list.index()` /
+      `list.count()`** **DONE 2026-06-02** (spike57). Mutators lower to `xs = helper(xs,...)`
+      via `lowerListMutator` (parser.go, next to `.append`); pure queries via
+      `lowerListMethod` in `parseCall`. Generic runtime helpers (`zincpySort[T cmp.Ordered]`,
+      `zincpyInsert`, `zincpyListIndex`/`Count`). `sort(reverse=True)` supported (literal
+      bool); `sort(key=...)` rejected loudly. **`list.pop()` still TODO** — it both mutates
+      and returns a value, so the single-assignment write-back pattern doesn't fit; needs a
+      temp-hoist or a pointer helper. Element-comparison sort requires an orderable element
+      type (int/float/str) — a list of objects without key= fails to compile (acceptable).
 
-- [ ] **Tuple-unpack from a stored tuple value** `a, b, c = t` where `t` is a
-      `zincpyTuple`. **(S)** — currently "assignment mismatch: 3 vars but 1 value". In
-      `parseUnpackAssign`, when the RHS is a single expr that's a tuple/dynamic, emit
-      `a, b, c = zincpyGetItem(t,0), zincpyGetItem(t,1), zincpyGetItem(t,2)`.
+- [x] **Tuple-unpack from a stored tuple value** `a, b, c = t`. **DONE 2026-06-02**
+      (spike58). In `parseUnpackAssign`, a non-call single-expr RHS expands to
+      `zincpyGetItem(t, i)` per target (reusing the parallel-assign path); a function CALL
+      stays on the Go multi-return path (`a, b := f()`). Targets type as dynamic.
 
 - [ ] **`sorted(xs, key=len)` / bare-builtin key** **(S)** — "len (built-in) must be
       called". A bare builtin name as a value (function reference) isn't supported. Either
@@ -127,13 +131,15 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       lowered to an iterable value. Make `range(...)` in value position produce a
       materialized list / `zincpyRange` runtime iterable.
 
-- [ ] **Nested-list element typing** `m = [[1,2],[3,4]]; m[1][0]` **(S/M)** — `m[1]` types
-      as `interface{}` so the second index fails. Track element types of list-of-list
-      literals (recurse in `recordElemType` / `elemType`).
+- [x] **Nested-list element typing** `m = [[1,2],[3,4]]; m[1][0]` **DONE 2026-06-02**
+      (spike59). Fixed in codegen: `inferListLitElemType` (codegen_stmts.go) now recurses on
+      list-literal elements, so an unannotated list-of-lists types as `[][]int` instead of
+      `[]interface{}` (annotated form already worked). Inner types must agree, else `any`.
 
-- [ ] **str predicate methods** `isalpha/isdigit/isalnum/isspace/isupper/islower/
-      startswith-already-done` **(S)** — add to `pyStrMethods` map + runtime helpers +
-      `zincpyStrMethod` dispatcher (all in strings.go/runtime.go; return tBool in callType).
+- [x] **str predicate methods** `isalpha/isdigit/isalnum/isspace/isupper/islower/istitle`
+      **DONE 2026-06-02** (spike56). Added to `pyStrMethods` + the `zincpyStrMethod`
+      dispatcher + tBool in callType; runtime helpers use `unicode.*` (byte-identical to
+      CPython for ASCII and the common cases; exotic Unicode Numeric_Type is approximated).
 
 - [ ] **`for c in s` yields a 1-char str, not a Go rune** **(S/M)** — `for c in "abc":
       c.upper()` fails because `c` is a Go `rune`. String iteration should bind each char as
@@ -211,9 +217,9 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 ## Suggested order
 
 1. ~~One-line compound suites~~ — **DONE 2026-06-02** (spike55).
-2. **list.sort + tuple-unpack + str predicates + nested-list typing** — fast Tier-1
-   cluster, knocks out several survey failures and keeps more code on the native path.
-   (Note from the perf pass: prioritize fixes that move syntax onto native Go.)
+2. ~~list.sort + tuple-unpack + str predicates + nested-list typing~~ — **DONE 2026-06-02**
+   (spikes 56–59). Remaining quick Tier-1 bits: `list.pop()`, `for c in s` → 1-char str,
+   `sorted(key=len)` bare-builtin key, `map`/`filter` over `range(...)`.
 3. Then pick **generators (`yield`)** as the first big feature, or **from-import** for
    stdlib ergonomics.
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path

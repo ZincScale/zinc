@@ -16,6 +16,7 @@ package pyfront
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"zinc-go/internal/parser"
@@ -654,6 +655,16 @@ func (p *Parser) parseSimpleStmt() parser.Stmt {
 		}
 	}
 
+	// In-place list mutators (sort/reverse/insert): Python returns None and
+	// mutates the list, so they are only valid as statements. Lower like append
+	// to `xs = helper(xs, ...)`. Gated on a statically-known list receiver so a
+	// user class's own .sort()/.insert() method is left untouched.
+	if call, ok := lhs.(*parser.CallExpr); ok {
+		if stmt := p.lowerListMutator(line, call); stmt != nil {
+			return stmt
+		}
+	}
+
 	// print(...): route to the runtime shim so floats/bools format the
 	// Python way (3.0 not 3, True not true) rather than Go's fmt defaults.
 	// One arg → zincpyPrint; zero or many → zincpyPrintN (space-separated,
@@ -719,6 +730,21 @@ func (p *Parser) parseUnpackAssign(line int, first parser.Expr) parser.Stmt {
 			return &parser.ExprStmt{Line: line, Expr: rhs}
 		}
 		names = append(names, id.Name)
+	}
+	// Unpacking a tuple VALUE: `a, b, c = t` where the RHS is a single stored
+	// tuple (a zincpyTuple, an indexed element, ...). Expand to per-element reads
+	// so it lowers to `a, b, c = zincpyGetItem(t, 0), zincpyGetItem(t, 1), ...`,
+	// matching Python's sequence unpacking. A function CALL is left on the Go
+	// multi-return path (`a, b := f()`, for a bare-tuple `return x, y`). A simple
+	// name / index has no side effects, so reading it once per element is safe.
+	if _, isTuple := rhs.(*parser.TupleLit); !isTuple {
+		if _, isCall := rhs.(*parser.CallExpr); !isCall {
+			elems := make([]parser.Expr, len(names))
+			for i := range names {
+				elems[i] = callIdent("zincpyGetItem", rhs, &parser.IntLit{Value: strconv.Itoa(i)})
+			}
+			rhs = &parser.TupleLit{Elements: elems}
+		}
 	}
 	// Parallel assignment / swap: `a, b = e1, e2`. The RHS is evaluated fully
 	// before binding (Go's multi-assignment matches Python here), so a swap
@@ -2129,7 +2155,85 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	if lowered := p.lowerStrMethod(callee, call.Args); lowered != nil {
 		return lowered
 	}
+	// Pure list query methods (xs.index(v) / xs.count(v)) on a list receiver.
+	if lowered := p.lowerListMethod(callee, call.Args); lowered != nil {
+		return lowered
+	}
 	return call
+}
+
+// lowerListMethod rewrites pure list query methods — `xs.index(v)` and
+// `xs.count(v)` — to runtime helpers when xs is statically a list. Returns nil
+// otherwise, so str.count() (handled by lowerStrMethod) and user methods are
+// left untouched.
+func (p *Parser) lowerListMethod(callee parser.Expr, args []parser.Expr) parser.Expr {
+	sel, ok := callee.(*parser.SelectorExpr)
+	if !ok || len(args) != 1 || !p.isListishExpr(sel.Object) {
+		return nil
+	}
+	switch sel.Field {
+	case "index":
+		return callIdent("zincpyListIndex", sel.Object, args[0])
+	case "count":
+		return callIdent("zincpyListCount", sel.Object, args[0])
+	}
+	return nil
+}
+
+// lowerListMutator rewrites an in-place list method statement — `xs.sort()`,
+// `xs.reverse()`, `xs.insert(i, v)` — to `xs = helper(xs, ...)`, mirroring the
+// `.append` rewrite. Returns nil when the call is not one of these on a
+// statically-known list receiver (so a user class's own method is left alone).
+func (p *Parser) lowerListMutator(line int, call *parser.CallExpr) parser.Stmt {
+	sel, ok := call.Callee.(*parser.SelectorExpr)
+	if !ok || !p.isListishExpr(sel.Object) {
+		return nil
+	}
+	mk := func(helper string, args ...parser.Expr) parser.Stmt {
+		return &parser.AssignStmt{
+			Line: line, Target: sel.Object, Op: "=",
+			Value: callIdent(helper, append([]parser.Expr{sel.Object}, args...)...),
+		}
+	}
+	switch sel.Field {
+	case "sort":
+		if len(call.Args) != 0 {
+			p.errf(Token{Line: line}, "list.sort() takes no positional arguments")
+			return nil
+		}
+		helper := "zincpySort"
+		for _, na := range call.NamedArgs {
+			switch na.Name {
+			case "reverse":
+				b, ok := na.Value.(*parser.BoolLit)
+				if !ok {
+					p.errf(Token{Line: line}, "list.sort(reverse=...) requires a literal True or False")
+					return nil
+				}
+				if b.Value {
+					helper = "zincpySortRev"
+				}
+			case "key":
+				p.errf(Token{Line: line}, "list.sort(key=...) is not supported yet")
+				return nil
+			default:
+				p.errf(Token{Line: line}, "list.sort(): unexpected keyword %q", na.Name)
+				return nil
+			}
+		}
+		return mk(helper)
+	case "reverse":
+		if len(call.Args) != 0 {
+			return nil
+		}
+		return mk("zincpyReverseList")
+	case "insert":
+		if len(call.Args) != 2 {
+			return nil
+		}
+		return mk("zincpyInsert", call.Args[0], call.Args[1])
+	}
+	return nil
 }
 
 // parseLambda parses `lambda a, b: expr` into a Zinc single-expression

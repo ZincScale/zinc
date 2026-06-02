@@ -241,9 +241,12 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 		return tStr
 	case "zincpyStartswith", "zincpyEndswith", "zincpyTruthy", "zincpyIn",
 		"zincpyEq", "zincpyNe", "zincpyLt", "zincpyGt", "zincpyLe", "zincpyGe",
-		"zincpyIsInstance", "zincpyAny", "zincpyAll":
+		"zincpyIsInstance", "zincpyAny", "zincpyAll",
+		"zincpyIsalpha", "zincpyIsdigit", "zincpyIsalnum", "zincpyIsspace",
+		"zincpyIsupper", "zincpyIslower", "zincpyIstitle":
 		return tBool
-	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt", "zincpyParseInt", "zincpyRound":
+	case "zincpyFind", "zincpyCount", "zincpyLen", "zincpyToInt", "zincpyParseInt", "zincpyRound",
+		"zincpyListIndex", "zincpyListCount":
 		return tInt
 	case "zincpyToFloat", "zincpyTrueDiv", "zincpyParseFloat", "zincpyRoundN":
 		return tFloat

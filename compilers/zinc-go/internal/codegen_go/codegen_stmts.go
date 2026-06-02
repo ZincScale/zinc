@@ -241,6 +241,25 @@ func inferListLitElemType(elements []parser.Expr) string {
 	if len(elements) == 0 {
 		return "interface{}"
 	}
+	// Nested list literal: every element is itself a list, so recurse to type
+	// [[1,2],[3,4]] as [][]int rather than []interface{} (which can't be indexed
+	// twice). All inner element types must agree; otherwise fall back to any.
+	if _, ok := elements[0].(*parser.ListLit); ok {
+		inner := ""
+		for _, e := range elements {
+			le, ok := e.(*parser.ListLit)
+			if !ok {
+				return "interface{}"
+			}
+			t := "[]" + inferListLitElemType(le.Elements)
+			if inner == "" {
+				inner = t
+			} else if inner != t {
+				return "interface{}"
+			}
+		}
+		return inner
+	}
 	allInt := true
 	allFloat := true
 	allString := true

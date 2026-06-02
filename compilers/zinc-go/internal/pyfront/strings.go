@@ -224,6 +224,13 @@ var pyStrMethods = map[string]string{
 	"ljust":      "zincpyLjust",
 	"rjust":      "zincpyRjust",
 	"center":     "zincpyCenter",
+	"isalpha":    "zincpyIsalpha",
+	"isdigit":    "zincpyIsdigit",
+	"isalnum":    "zincpyIsalnum",
+	"isspace":    "zincpyIsspace",
+	"isupper":    "zincpyIsupper",
+	"islower":    "zincpyIslower",
+	"istitle":    "zincpyIstitle",
 }
 
 // lowerStrMethod rewrites `recv.method(args...)` to its runtime helper when
