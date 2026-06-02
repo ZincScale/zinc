@@ -2071,6 +2071,11 @@ type zincpyExc struct {
 
 func (e zincpyExc) String() string { return e.Msg }
 
+// zincpyRegisterExc records a user-defined exception subclass's base, so
+// zincpyMatch honors the inheritance chain (e.g. a user error caught by
+// except Exception). Called at the top of main() for each such class.
+func zincpyRegisterExc(child, parent string) { zincpyExcParents[child] = parent }
+
 // zincpyExcParents is a subset of CPython's builtin exception hierarchy, used
 // by zincpyMatch to honor subclass relationships in except clauses.
 var zincpyExcParents = map[string]string{

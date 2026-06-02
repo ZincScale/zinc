@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 66 "spikes" done, all byte-identical to CPython (contract test green).
+- 67 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -183,10 +183,18 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       loop. (Same guard now also makes `list.pop()` in those contexts a loud error.)
       if-condition, statement, and call-argument walrus are exact.
 
-- [ ] **Custom exception subclasses** `class E(Exception): pass` + `raise E(msg)` +
-      `except E` **(M)** — user exception classes aren't modeled (Exception base undefined).
-      Map a user class deriving Exception/a builtin-exc to a `zincpyExc`-compatible value,
-      register it in the `zincpyExcParents` chain at runtime, and route raise/except.
+- [x] **Custom exception subclasses** `class E(Exception): pass` + `raise E(msg)` +
+      `except E` **DONE 2026-06-02** (spike67). A class deriving from a builtin exception
+      (or another user exception) is detected in `parseClass` (`exceptionParent`) and NOT
+      emitted as a Go struct — it returns nil and is dropped from `classNames`. `raise E(msg)`
+      already lowered to `panic(zincpyExc{Type:"E", Msg:msg})`; the new piece is registering
+      the parent chain so base-class clauses match: `parseProgram` prepends a
+      `zincpyRegisterExc("E","Base")` call per class to `main()` (runtime helper mutates
+      `zincpyExcParents`), so `except Exception`/`except AppError` catch user subclasses and
+      multi-level chains (`FatalConfigError(ConfigError(Exception))`) resolve. Message-only:
+      a custom `__init__` or `__str__`/`__repr__` (which would change the message/identity) is
+      **rejected loudly** rather than diverge. Re-raise, no-arg `raise E()` (empty message),
+      and exact-vs-base arm dispatch all verified byte-identical.
 
 - [ ] **decorators on plain functions** `@deco def f(): ...` **(M)** — top-level function
       decorators (class decorators/@property/@dataclass already work). Lower `@deco` to
@@ -270,8 +278,8 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
    predicates, list methods (incl. `pop` via the statement-hoist buffer), tuple-value unpack,
    nested-list typing, string iteration, range-as-value, sorted(key=builtin). **Tier 1 is
    fully cleared.** First Tier-2 item (`from X import`) also done (spike63).
-3. ~~walrus `:=`~~ — **DONE 2026-06-02** (spike65). Next: the big features —
-   **generators (`yield`)** — or Tier-2 breadth (`**kwargs`, custom exception subclasses,
-   function decorators, `__repr__`→`__str__` fallback).
+3. ~~walrus `:=`~~ — **DONE 2026-06-02** (spike65). ~~custom exception subclasses~~ —
+   **DONE 2026-06-02** (spike67). Next: the big features — **generators (`yield`)** — or
+   remaining Tier-2 breadth (`**kwargs`, function decorators on plain functions).
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).

@@ -241,6 +241,14 @@ type Parser struct {
 	// `super().method(args)` call inside a method body lowers to the embedded
 	// parent's method `this.<Parent>.Method(args)`.
 	classParent map[string]string
+
+	// excClasses maps a user-defined exception subclass to its (exception) base
+	// name. Such classes are NOT emitted as Go structs: `raise E(msg)` lowers to
+	// panic(zincpyExc{Type:"E", Msg:msg}) and the parent chain is registered at
+	// runtime so `except Exception` etc. matches. excOrder preserves source
+	// order for deterministic codegen.
+	excClasses map[string]string
+	excOrder   []string
 }
 
 // Meta carries front-end facts the driver needs that are not expressible in
@@ -281,6 +289,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		lambdaVars:     map[string]bool{},
 		classFieldDecl: map[string]map[string]*parser.FieldDecl{},
 		classParent:    map[string]string{},
+		excClasses:     map[string]string{},
 	}
 	p.pushScope()
 	prog := p.parseProgram()
@@ -462,13 +471,30 @@ func (p *Parser) parseProgram() *parser.Program {
 			continue
 		}
 		if p.isKw("class") {
-			prog.Decls = append(prog.Decls, p.parseClass(decorators))
+			// An exception subclass parses to nil (registered separately, not
+			// emitted as a struct).
+			if cls := p.parseClass(decorators); cls != nil {
+				prog.Decls = append(prog.Decls, cls)
+			}
 			// static/class methods were lifted to package functions.
 			prog.Decls = append(prog.Decls, p.pendingDecls...)
 			p.pendingDecls = nil
 			continue
 		}
 		p.parseLineInto(&prog.Stmts)
+	}
+	// Prepend exception-hierarchy registration so except-clause matching
+	// (zincpyMatch) honors user exception subclasses — e.g. `except Exception`
+	// catching a user error. These run at the top of main(), before any try.
+	if len(p.excOrder) > 0 {
+		reg := make([]parser.Stmt, 0, len(p.excOrder))
+		for _, name := range p.excOrder {
+			reg = append(reg, &parser.ExprStmt{Expr: &parser.CallExpr{
+				Callee: &parser.Ident{Name: "zincpyRegisterExc"},
+				Args:   []parser.Expr{&parser.StringLit{Value: name}, &parser.StringLit{Value: p.excClasses[name]}},
+			}})
+		}
+		prog.Stmts = append(reg, prog.Stmts...)
 	}
 	return prog
 }

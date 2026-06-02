@@ -265,8 +265,51 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 			}
 		}
 	}
+	// A subclass of Exception (a builtin or another user exception) is modelled
+	// as a message-carrying zincpyExc, not a Go struct: `raise E(msg)` lowers to
+	// panic(zincpyExc{Type:"E", Msg:msg}) and the parent chain is registered at
+	// runtime so `except Exception`/`except E` match. A custom __init__ or
+	// __str__/__repr__ would change the message/identity — reject loudly rather
+	// than diverge from CPython (these are the message-only common case).
+	if excParent, ok := p.exceptionParent(parents); ok {
+		if cls.Ctor != nil {
+			p.errf(Token{Line: line}, "custom __init__ on exception subclass %q is not yet supported (message-only exceptions work)", name)
+		}
+		for _, m := range cls.Methods {
+			if m.Name == "String" || m.Name == "Repr" {
+				p.errf(Token{Line: line}, "custom __str__/__repr__ on exception subclass %q is not yet supported", name)
+			}
+		}
+		p.excClasses[name] = excParent
+		p.excOrder = append(p.excOrder, name)
+		// Undo the regular-class registration so a stray `E(...)` outside a raise
+		// isn't lowered to a (nonexistent) NewE constructor.
+		delete(p.classNames, name)
+		return nil
+	}
 	cls.Fields = fields
 	return cls
+}
+
+// builtinExcNames is the set of CPython builtin exception type names the runtime
+// hierarchy (zincpyExcParents) knows about, plus the two roots. A class deriving
+// from any of these (or another user exception) is an exception subclass.
+var builtinExcNames = map[string]bool{
+	"BaseException": true, "Exception": true, "ValueError": true, "TypeError": true,
+	"KeyError": true, "IndexError": true, "LookupError": true, "ZeroDivisionError": true,
+	"ArithmeticError": true, "RuntimeError": true, "NotImplementedError": true,
+	"StopIteration": true, "AttributeError": true, "OSError": true,
+}
+
+// exceptionParent returns the first base that makes this class an exception
+// subclass (a builtin exception or an already-seen user exception), and true.
+func (p *Parser) exceptionParent(parents []parser.ParentRef) (string, bool) {
+	for _, pr := range parents {
+		if builtinExcNames[pr.Name] || p.excClasses[pr.Name] != "" {
+			return pr.Name, true
+		}
+	}
+	return "", false
 }
 
 // parseDataclassField parses one `name: type [= default]` field line.
