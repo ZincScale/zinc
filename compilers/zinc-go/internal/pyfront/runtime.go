@@ -2122,6 +2122,12 @@ func zincpyRepr(v any) string {
 	case float64:
 		return zincpyFloat(x)
 	default:
+		// A user class's __repr__ (Go method Repr) is what Python uses inside
+		// containers (a list shows repr of each element, not str) — prefer it over
+		// fmt.Sprint, which would otherwise pick up the Stringer (__str__) method.
+		if r, ok := v.(interface{ Repr() string }); ok {
+			return r.Repr()
+		}
 		if s, ok := zincpySeqRepr(v); ok {
 			return s
 		}

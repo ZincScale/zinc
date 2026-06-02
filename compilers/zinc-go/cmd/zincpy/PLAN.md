@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 65 "spikes" done, all byte-identical to CPython (contract test green).
+- 66 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -195,10 +195,11 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 - [ ] **`-> None` audit / void-method polish** — DONE for returns; verify methods, lambdas,
       and `__init__` paths all treat None as void everywhere.
 
-- [ ] **`__repr__` without `__str__` fallback** **(S)** — a class with only `__repr__`
-      prints Go's `&{..}` instead of using Repr. Python's `__str__` defaults to `__repr__`:
-      when a class defines `__repr__` (Repr) but not `__str__` (String), emit a `String()`
-      that calls `Repr()`. In class.go dunder handling.
+- [x] **`__repr__` without `__str__` fallback** **DONE 2026-06-02** (spike66). parseClass
+      synthesizes a `String()` that calls `Repr()` when a class defines `__repr__` but not
+      `__str__`, so print/str use it. Also fixed a related pre-existing bug: containers now
+      format elements with `__repr__` (Python uses repr inside `[...]`/`(...)`) — `zincpyRepr`
+      prefers a `Repr()` method over `fmt.Sprint`, which had been picking up the Stringer.
 
 ## Performance TODOs
 

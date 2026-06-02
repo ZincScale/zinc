@@ -248,6 +248,23 @@ func (p *Parser) parseClass(decorators []string) *parser.ClassDecl {
 	if isDataclass {
 		p.synthesizeDataclass(cls, name, dcFields, &fields)
 	}
+	// Python's str() falls back to __repr__ when __str__ is absent. So when a
+	// class defines __repr__ (Repr) but no __str__ (String), synthesize a
+	// String() that calls Repr() — otherwise print(obj) / str(obj) would show
+	// Go's default &{...} instead of the user's repr.
+	if m := p.classMethods[name]; m != nil {
+		if _, hasRepr := m["Repr"]; hasRepr {
+			if _, hasStr := m["String"]; !hasStr {
+				cls.Methods = append(cls.Methods, &parser.MethodDecl{
+					Name: "String", IsPub: true, ReturnType: &parser.SimpleType{Name: "String"},
+					Body: &parser.BlockStmt{Stmts: []parser.Stmt{&parser.ReturnStmt{
+						Value: &parser.CallExpr{Callee: &parser.SelectorExpr{
+							Object: &parser.ThisExpr{}, Field: "Repr"}}}}},
+				})
+				m["String"] = tStr
+			}
+		}
+	}
 	cls.Fields = fields
 	return cls
 }
