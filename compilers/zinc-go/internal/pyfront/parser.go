@@ -1094,7 +1094,11 @@ func asRange(e parser.Expr) (*parser.RangeExpr, bool) {
 		return nil, false
 	}
 	id, ok := call.Callee.(*parser.Ident)
-	if !ok || id.Name != "range" {
+	// `range` is recognized both before lowering and after parseCall has
+	// materialized it to zincpyRangeList (its value-position form); a 1- or
+	// 2-arg range maps to a numeric Zinc range, while a 3-arg (step) range falls
+	// through to iterating the materialized []int slice.
+	if !ok || (id.Name != "range" && id.Name != "zincpyRangeList") {
 		return nil, false
 	}
 	switch len(call.Args) {
@@ -1948,11 +1952,21 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		}
 		return callIdent("zincpyIsInstance", args...)
 	}
+	// range(...) used as a VALUE (a call argument, list(range(n)), sum(range(n)),
+	// map/filter over it, ...) materializes to []int via zincpyRangeList. The
+	// optimized for-loop path recognizes this lowered form in asRange, so
+	// `for i in range(n)` still compiles to a numeric Zinc range (no allocation);
+	// a 3-arg range(start, stop, step) iterates the materialized slice.
+	if id, ok := callee.(*parser.Ident); ok && id.Name == "range" && len(call.NamedArgs) == 0 {
+		if n := len(call.Args); n >= 1 && n <= 3 {
+			return callIdent("zincpyRangeList", call.Args...)
+		}
+	}
 	// sorted(xs, key=f) takes a keyword arg, so it's handled before the
 	// no-kwargs builtins switch below.
 	if id, ok := callee.(*parser.Ident); ok && id.Name == "sorted" && len(call.Args) == 1 {
 		if key, ok := namedArg(call, "key"); ok {
-			return callIdent("zincpySortedKey", call.Args[0], key)
+			return callIdent("zincpySortedKey", call.Args[0], p.builtinKeyFn(key))
 		}
 	}
 	// enumerate(xs, start=N): the keyword form, handled here because the
@@ -2005,7 +2019,7 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		case "sorted":
 			if len(call.Args) == 1 {
 				if key, ok := namedArg(call, "key"); ok {
-					return callIdent("zincpySortedKey", call.Args[0], key)
+					return callIdent("zincpySortedKey", call.Args[0], p.builtinKeyFn(key))
 				}
 				return callIdent("zincpySorted", call.Args[0])
 			}
@@ -2169,6 +2183,34 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 		return lowered
 	}
 	return call
+}
+
+// builtinKeyFn turns a bare builtin passed as a sort key (`sorted(xs, key=len)`)
+// into the lambda it stands for — `lambda __k: len(__k)` — so it becomes a real
+// func(any) any value. A non-builtin key (a lambda or a user function) is left
+// as-is. This mirrors what writing the lambda by hand would lower to.
+func (p *Parser) builtinKeyFn(key parser.Expr) parser.Expr {
+	id, ok := key.(*parser.Ident)
+	if !ok {
+		return key
+	}
+	arg := &parser.Ident{Name: "__k"}
+	var body parser.Expr
+	switch id.Name {
+	case "len":
+		body = callIdent("zincpyLen", arg)
+	case "str":
+		body = callIdent("zincpyStr", arg)
+	case "abs":
+		body = callIdent("zincpyAbs", arg)
+	case "int":
+		body = callIdent("zincpyToInt", arg)
+	case "float":
+		body = callIdent("zincpyToFloat", arg)
+	default:
+		return key
+	}
+	return &parser.LambdaExpr{Params: []*parser.ParamDecl{{Name: "__k"}}, Expr: body}
 }
 
 // lowerListMethod rewrites pure list query methods — `xs.index(v)` and

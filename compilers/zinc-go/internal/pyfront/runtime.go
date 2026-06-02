@@ -582,6 +582,35 @@ func zincpyJoin(sep string, items []string) string {
 	return strings.Join(items, sep)
 }
 
+// zincpyRangeList materializes range(...) used in value position into a []int,
+// matching Python's range(stop) / range(start, stop) / range(start, stop, step).
+// A zero step raises ValueError, as in CPython; an empty range yields [].
+func zincpyRangeList(args ...int) []int {
+	start, stop, step := 0, 0, 1
+	switch len(args) {
+	case 1:
+		stop = args[0]
+	case 2:
+		start, stop = args[0], args[1]
+	case 3:
+		start, stop, step = args[0], args[1], args[2]
+	}
+	if step == 0 {
+		panic(zincpyExc{"ValueError", "range() arg 3 must not be zero"})
+	}
+	out := []int{}
+	if step > 0 {
+		for i := start; i < stop; i += step {
+			out = append(out, i)
+		}
+	} else {
+		for i := start; i > stop; i += step {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 // zincpyChars yields each character of s as a length-1 string, matching how
 // Python iterates a str (length-1 strings, not Go runes). Iterating by rune
 // makes a multi-byte code point a single character, as in Python.

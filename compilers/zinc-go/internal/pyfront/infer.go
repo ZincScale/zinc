@@ -284,6 +284,11 @@ func (p *Parser) elemTypeOf(iter parser.Expr) pytype {
 		if len(it.Elements) > 0 {
 			return p.typeOf(it.Elements[0])
 		}
+	case *parser.CallExpr:
+		// A 3-arg range materialized to zincpyRangeList([]int) iterates ints.
+		if id, ok := it.Callee.(*parser.Ident); ok && id.Name == "zincpyRangeList" {
+			return tInt
+		}
 	case *parser.Ident:
 		if t, ok := p.elemType[it.Name]; ok {
 			return t
@@ -324,8 +329,13 @@ func (p *Parser) recordElemType(name string, value parser.Expr) {
 	}
 	// str.split(...) → []string, so iterating the result yields strings.
 	if call, ok := value.(*parser.CallExpr); ok {
-		if id, ok := call.Callee.(*parser.Ident); ok && id.Name == "zincpySplit" {
-			p.elemType[name] = tStr
+		if id, ok := call.Callee.(*parser.Ident); ok {
+			switch id.Name {
+			case "zincpySplit":
+				p.elemType[name] = tStr
+			case "zincpyRangeList": // r = range(n) → []int
+				p.elemType[name] = tInt
+			}
 		}
 	}
 }

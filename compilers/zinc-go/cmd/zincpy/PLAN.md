@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 60 "spikes" done, all byte-identical to CPython (contract test green).
+- 62 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -127,15 +127,17 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       `zincpyGetItem(t, i)` per target (reusing the parallel-assign path); a function CALL
       stays on the Go multi-return path (`a, b := f()`). Targets type as dynamic.
 
-- [ ] **`sorted(xs, key=len)` / bare-builtin key** **(S)** — "len (built-in) must be
-      called". A bare builtin name as a value (function reference) isn't supported. Either
-      special-case common keys (len/str/abs) into a lambda, or make bare builtin idents
-      usable as first-class func values.
+- [x] **`sorted(xs, key=len)` / bare-builtin key** **DONE 2026-06-02** (spike62).
+      `builtinKeyFn` (parser.go) rewrites a bare builtin key — len/str/abs/int/float — into
+      the lambda it stands for (`lambda __k: zincpyLen(__k)`), so it becomes a real
+      func(any) any. Lambdas / other keys are left as-is. (A user function name as key is
+      still unsupported — a separate first-class-func-value gap.)
 
-- [ ] **`map`/`filter` over a `range(...)` argument** **(S)** — `filter(f, range(6))` →
-      "unexpected keyword range". `range(...)` as a call argument (not loop iterable) isn't
-      lowered to an iterable value. Make `range(...)` in value position produce a
-      materialized list / `zincpyRange` runtime iterable.
+- [x] **`map`/`filter`/`list`/`sum`/... over a `range(...)` argument** **DONE 2026-06-02**
+      (spike61). `parseCall` lowers `range(...)` in value position to `zincpyRangeList(...)`
+      (a materialized []int, with start/stop/step + negative step). `asRange` also recognizes
+      the lowered form, so `for i in range(n)` keeps its optimized numeric loop; a 3-arg
+      range iterates the slice. Bonus: 3-arg/negative-step ranges now work in for-loops too.
 
 - [x] **Nested-list element typing** `m = [[1,2],[3,4]]; m[1][0]` **DONE 2026-06-02**
       (spike59). Fixed in codegen: `inferListLitElemType` (codegen_stmts.go) now recurses on
@@ -224,10 +226,12 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 ## Suggested order
 
 1. ~~One-line compound suites~~ — **DONE 2026-06-02** (spike55).
-2. ~~list.sort + tuple-unpack + str predicates + nested-list typing~~ — **DONE 2026-06-02**
-   (spikes 56–59). Remaining quick Tier-1 bits: `list.pop()`, `for c in s` → 1-char str,
-   `sorted(key=len)` bare-builtin key, `map`/`filter` over `range(...)`.
+2. ~~Tier-1 quick wins~~ — **DONE 2026-06-02** (spikes 55–62): one-line suites, str
+   predicates, list methods, tuple-value unpack, nested-list typing, string iteration,
+   range-as-value, sorted(key=builtin). **Tier 1 is now clear except `list.pop()`**, which
+   is deferred to the statement-hoist work (see its entry — that infra also unblocks walrus).
 3. Then pick **generators (`yield`)** as the first big feature, or **from-import** for
-   stdlib ergonomics.
+   stdlib ergonomics. Consider doing the **statement-hoist buffer** first since it unblocks
+   both `list.pop()` and walrus `:=` cheaply.
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).
