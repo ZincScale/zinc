@@ -582,6 +582,17 @@ func zincpyJoin(sep string, items []string) string {
 	return strings.Join(items, sep)
 }
 
+// zincpyChars yields each character of s as a length-1 string, matching how
+// Python iterates a str (length-1 strings, not Go runes). Iterating by rune
+// makes a multi-byte code point a single character, as in Python.
+func zincpyChars(s string) []string {
+	out := make([]string, 0, len(s))
+	for _, r := range s {
+		out = append(out, string(r))
+	}
+	return out
+}
+
 // --- list methods ------------------------------------------------------------
 //
 // Python list mutators return None and mutate in place; the front-end lowers

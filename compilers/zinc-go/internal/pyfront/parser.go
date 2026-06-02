@@ -1064,6 +1064,15 @@ func (p *Parser) parseFor() parser.Stmt {
 		return &parser.ForStmt{Line: line, IsRange: true, Item: item,
 			Range: callIdent("zincpyIter", iter), Body: body}
 	}
+	// `for c in s` over a string binds each character as a 1-char string (Python
+	// semantics), not a Go rune. Materialize to []string and range that, so the
+	// loop variable supports str methods (c.upper(), c.isdigit(), ...).
+	if !isRange && p.typeOf(iter) == tStr {
+		p.declare(item, tStr)
+		body := p.parseBlock()
+		return &parser.ForStmt{Line: line, IsRange: true, Item: item,
+			Range: callIdent("zincpyChars", iter), Body: body}
+	}
 	p.declare(item, p.elemTypeOf(iter)) // range→int, list→element type
 	body := p.parseBlock()
 

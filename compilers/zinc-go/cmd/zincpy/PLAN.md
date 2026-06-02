@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 59 "spikes" done, all byte-identical to CPython (contract test green).
+- 60 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -111,10 +111,16 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       via `lowerListMutator` (parser.go, next to `.append`); pure queries via
       `lowerListMethod` in `parseCall`. Generic runtime helpers (`zincpySort[T cmp.Ordered]`,
       `zincpyInsert`, `zincpyListIndex`/`Count`). `sort(reverse=True)` supported (literal
-      bool); `sort(key=...)` rejected loudly. **`list.pop()` still TODO** — it both mutates
-      and returns a value, so the single-assignment write-back pattern doesn't fit; needs a
-      temp-hoist or a pointer helper. Element-comparison sort requires an orderable element
-      type (int/float/str) — a list of objects without key= fails to compile (acceptable).
+      bool); `sort(key=...)` rejected loudly. Element-comparison sort requires an orderable
+      element type (int/float/str) — a list of objects without key= fails to compile (ok).
+
+- [ ] **`list.pop()`** **(M, was bundled above)** — both mutates and returns, so the
+      append-style single write-back doesn't fit, and the codegen restricts `&` (address-of)
+      to Go-library call args so the pointer-helper route is blocked. Two viable paths:
+      (a) `x, xs = zincpyPop(xs)` (helper returns `(value, newSlice)`) — works for the bare
+      statement and `x = xs.pop()` but NOT for pop nested in an expression (`print(xs.pop())`,
+      `t += xs.pop()`); (b) build a **statement-hoist** buffer in the front-end (also unblocks
+      walrus `:=`) so a mutating sub-expression can emit a preceding statement. Prefer (b).
 
 - [x] **Tuple-unpack from a stored tuple value** `a, b, c = t`. **DONE 2026-06-02**
       (spike58). In `parseUnpackAssign`, a non-call single-expr RHS expands to
@@ -141,9 +147,10 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       dispatcher + tBool in callType; runtime helpers use `unicode.*` (byte-identical to
       CPython for ASCII and the common cases; exotic Unicode Numeric_Type is approximated).
 
-- [ ] **`for c in s` yields a 1-char str, not a Go rune** **(S/M)** — `for c in "abc":
-      c.upper()` fails because `c` is a Go `rune`. String iteration should bind each char as
-      a 1-char string (Python semantics). Fix in `parseFor` string-iteration path.
+- [x] **`for c in s` yields a 1-char str, not a Go rune** **DONE 2026-06-02** (spike60).
+      `parseFor` now detects a string iterable and ranges `zincpyChars(s)` (a `[]string` of
+      length-1 chars, split by code point), binding the loop var as `str` so `c.upper()`,
+      `c.isdigit()`, `c in vowels`, etc. all work. Unicode-correct (one char per code point).
 
 ## Tier 2 — medium features
 
