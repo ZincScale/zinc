@@ -59,6 +59,9 @@ func main() {
 			fmt.Printf("// === %s ===\n%s\n", f.Name, f.Content)
 		}
 		fmt.Printf("// === %s ===\n%s\n", pyfront.RuntimeFileName, pyfront.RuntimeGo)
+		if meta.GlobalDecls != "" {
+			fmt.Printf("// === %s ===\n%s\n", pyfront.GlobalDeclsFileName, meta.GlobalDecls)
+		}
 		if len(meta.FFIModules) > 0 {
 			cf, ld, _ := pythonCGOFlags()
 			fmt.Printf("// === %s ===\n%s\n", pyfront.FFIRuntimeFileName, pyfront.FFIRuntime(cf, ld))
@@ -165,6 +168,11 @@ func runOutput(files []codegen.OutputFile, meta *pyfront.Meta) (string, error) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, pyfront.RuntimeFileName), []byte(pyfront.RuntimeGo), 0o644); err != nil {
 		return "", err
+	}
+	if meta != nil && meta.GlobalDecls != "" {
+		if err := os.WriteFile(filepath.Join(dir, pyfront.GlobalDeclsFileName), []byte(meta.GlobalDecls), 0o644); err != nil {
+			return "", err
+		}
 	}
 	if meta != nil && len(meta.FFIModules) > 0 {
 		cf, ld, ferr := pythonCGOFlags()

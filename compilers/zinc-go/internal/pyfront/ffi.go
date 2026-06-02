@@ -21,6 +21,10 @@ import "strings"
 // so a pure-language program never links libpython.
 const FFIRuntimeFileName = "zincpy_ffi.go"
 
+// GlobalDeclsFileName is where the driver writes Meta.GlobalDecls (function
+// decorator package-level rebinds), when non-empty.
+const GlobalDeclsFileName = "zincpy_decls.go"
+
 // FFIRuntime returns the Go source of the embedded-CPython FFI shim. The cgo
 // compile/link flags are host-specific (Python include dir, libpython
 // location), so the driver computes them from python3-config and passes them

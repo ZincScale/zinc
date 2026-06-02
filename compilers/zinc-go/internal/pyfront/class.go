@@ -14,7 +14,11 @@
 
 package pyfront
 
-import "zinc-go/internal/parser"
+import (
+	"strings"
+
+	"zinc-go/internal/parser"
+)
 
 // dunderMethods maps Python special methods to the Go method names the
 // front-end emits and routes to. __str__ becomes Go's Stringer (used by
@@ -399,11 +403,16 @@ func concatStr(parts ...parser.Expr) parser.Expr {
 // parseDecorators consumes one or more `@name[(...)]` lines and returns the
 // decorator base names. Decorator call arguments are skipped (not modelled).
 func (p *Parser) parseDecorators() []string {
+	p.decoComplex = false
 	var decs []string
 	for p.isOp("@") {
 		p.advance()
 		name := p.parseDottedName()
+		if strings.Contains(name, ".") {
+			p.decoComplex = true // dotted name (e.g. @functools.wraps)
+		}
 		if p.isOp("(") { // skip @deco(args)
+			p.decoComplex = true
 			depth := 0
 			for p.cur().Kind != TEOF {
 				if p.isOp("(") {

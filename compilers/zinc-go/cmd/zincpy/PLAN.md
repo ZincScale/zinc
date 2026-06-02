@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 69 "spikes" done, all byte-identical to CPython (contract test green).
+- 70 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -221,13 +221,21 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       Go call. Keyed off `typeOf(callee) == tDynamic`, so it composes with the closures above.
       **This is the enabler the closures/decorator items were blocked on.**
 
-- [ ] **Function decorators** `@deco def f(): ...` **(M)** — now that dynamic call works, the
-      remaining piece is rebinding `f` to `deco(f)` at module load, visible across functions.
-      Needs a **package-level var** (`var f any = deco(fImpl)`): rename the original to `fImpl`,
-      emit a top-level var, and `f(...)` already routes through `zincpyCallDynamic`. There's no
-      top-level mutable-var AST node yet — add one + codegen. (A module-statement rebind would
-      only work for module-level call sites, not cross-function — rejected as half-working.)
-      Currently errors loudly.
+- [x] **Function decorators** `@deco def f(): ...` **DONE 2026-06-02** (spike70). `@a @b def f`
+      keeps the body under a hidden Go name `zincpyUndecorated_f` (parseDef result, renamed by
+      `applyFnDecorators`) and rebinds the user-facing `f` to `a(b(zincpyUndecorated_f))` as a
+      **package-level var**, so `f(...)` dispatches through `zincpyCallDynamic` (f types as
+      dynamic) and is visible across functions. The package var is emitted via a **driver-injected
+      file** `zincpy_decls.go` (Meta.GlobalDecls) — no new AST node / typechecker / codegen-core
+      change needed, because the typechecker already treats an unknown identifier as `any` without
+      erroring (typechecker_v2.go:1065) and `f`/`deco`/`zincpyUndecorated_f` are all package-main
+      symbols the injected file links against. Verified: simple wrap, stacked (bottom-up),
+      cross-function call, identity decorator, two-arg target, stateful (closure-cell) decorator.
+      Limits, all **loud**: `@deco(args)` and dotted `@mod.deco` need the decorator's full value
+      expression (rejected via `decoComplex`); a decorated function's return type is genuinely
+      dynamic, so feeding it into a typed container still needs `str(...)`/`int(...)` narrowing
+      (same dynamic-boundary rule as FFI). Recursion through the decorated name works (routes via
+      the dynamic var), unlike nested-closure self-recursion.
 
 - [ ] **`-> None` audit / void-method polish** — DONE for returns; verify methods, lambdas,
       and `__init__` paths all treat None as void everywhere.
@@ -307,10 +315,9 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
    predicates, list methods (incl. `pop` via the statement-hoist buffer), tuple-value unpack,
    nested-list typing, string iteration, range-as-value, sorted(key=builtin). **Tier 1 is
    fully cleared.** First Tier-2 item (`from X import`) also done (spike63).
-3. ~~walrus `:=`~~ — **DONE 2026-06-02** (spike65). ~~custom exception subclasses~~ —
-   **DONE 2026-06-02** (spike67). ~~nested functions / closures + nonlocal~~ — **DONE
-   2026-06-02** (spike68). Next: the big features — **generators (`yield`)** — or the
-   remaining breadth: **returned closures / function decorators** (need first-class function
-   values + a dynamic-call helper) and **`**kwargs`**.
+3. ~~walrus `:=`~~ — **DONE** (spike65). ~~custom exception subclasses~~ — **DONE** (spike67).
+   ~~nested functions / closures + nonlocal~~ — **DONE** (spike68). ~~first-class function
+   values + dynamic call~~ — **DONE** (spike69). ~~function decorators~~ — **DONE** (spike70).
+   Next: the big feature — **generators (`yield`)** — or remaining breadth: **`**kwargs`**.
 4. **String-runtime perf** (Performance TODOs) when ready to chase the native-path
    speedup on string-heavy code — currently the weakest multiplier (3.1×).
