@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 62 "spikes" done, all byte-identical to CPython (contract test green).
+- 63 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -156,10 +156,14 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
 
 ## Tier 2 — medium features
 
-- [ ] **`from X import name`** **(M)** — currently rejected (use `import X` + `X.name`).
-      For FFI modules, lower `from math import sqrt` to bind `sqrt` → `zincpyPyCall("math",
-      "sqrt", ...)`. For compile-time modules (dataclasses/typing) it's already name-aware.
-      Big ergonomic win for stdlib. Start in the import parsing + `ffiModBind`.
+- [x] **`from X import name`** **DONE 2026-06-02** (spike63). `parseFromImport` binds each
+      imported name (with `as` aliases) into `ffiFromBind` → (mod, attr); a call `sqrt(x)`
+      lowers to `zincpyPyCall("math","sqrt",x)` (parseCall) and a bare value `pi` to
+      `zincpyPyGet` (parseAtom, when not immediately called). `from X import *` and dotted
+      modules are rejected loudly; compile-time modules (typing/dataclasses) stay name-checked
+      no-ops. NOTE: like any FFI result, an imported call returns a dynamic value — narrow it
+      at an annotated boundary (`n: int = factorial(6)`) before storing into a typed list/var
+      (same pre-existing dynamic→typed gap as `import X`; not specific to from-import).
 
 - [ ] **`**kwargs`** **(M)** — currently rejected. Lower to a trailing
       `kwargs map[string]any` / `*zincpyDict` param; calls collect leftover `name=value`

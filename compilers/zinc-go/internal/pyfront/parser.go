@@ -162,6 +162,11 @@ type Parser struct {
 	// to a libpython FFI call. See ffi.go.
 	ffiModBind map[string]string
 
+	// ffiFromBind maps a name introduced by `from mod import name [as alias]` to
+	// its (module, attribute), so a bare `sqrt(x)` lowers to zincpyPyCall and a
+	// bare `pi` value to zincpyPyGet — the same FFI routing as `math.sqrt(x)`.
+	ffiFromBind map[string]ffiAttr
+
 	// ffiImports lists the CPython modules the program imports, in first-seen
 	// order. Empty means the program needs no embedded interpreter, so the
 	// driver skips the (libpython-linking) cgo runtime file.
@@ -248,6 +253,7 @@ func Parse(src string) (*parser.Program, *Meta, []string) {
 		dictVars:     map[string]dictMeta{},
 		dictExprMeta:  map[parser.Expr]dictMeta{},
 		ffiModBind:    map[string]string{},
+		ffiFromBind:   map[string]ffiAttr{},
 		classNames:    map[string]bool{},
 		classFields:   map[string]map[string]pytype{},
 		classMethods:  map[string]map[string]pytype{},
@@ -864,27 +870,40 @@ func (p *Parser) parseImport() parser.Stmt {
 	return &parser.ExprStmt{Expr: callIdent("zincpyPyImport", &parser.StringLit{Value: mod})}
 }
 
-// parseFromImport handles `from mod import ...`. Binding individual names
-// (`from math import sqrt`) is ambiguous to lower (a bare name may be a value
-// or a call), so it is rejected for now in favor of `import mod` + `mod.name`.
+// ffiAttr names an attribute of an FFI module bound by `from mod import name`:
+// the real CPython module and the attribute within it.
+type ffiAttr struct {
+	mod  string // CPython module, e.g. "math"
+	attr string // attribute within it, e.g. "sqrt"
+}
+
+// parseFromImport handles `from mod import name [as alias], ...`. Compile-time
+// modules (__future__/typing/dataclasses) are name-checked no-ops; any other
+// module is treated as an FFI module — each imported name binds to (mod, name)
+// so a bare `sqrt(x)` lowers to zincpyPyCall and a bare `pi` value to
+// zincpyPyGet, exactly as `import mod` + `mod.name` already does.
 func (p *Parser) parseFromImport() parser.Stmt {
 	tok := p.advance() // 'from'
 	mod := p.parseDottedName()
 	if p.isKw("import") {
 		p.advance()
 	}
-	// Collect the imported names (handles `a, b as c` and parenthesized lists).
+	// Collect imported names with optional aliases (handles parenthesized lists).
 	p.acceptOp("(")
-	var names []string
+	type imp struct{ name, bind string }
+	var names []imp
+	hasStar := false
 	for p.cur().Kind == TName || p.isOp("*") {
 		if p.acceptOp("*") {
-			names = append(names, "*")
+			hasStar = true
 		} else {
-			names = append(names, p.expectKind(TName).Value)
-			if p.isKw("as") { // alias — binding name doesn't matter for our checks
+			n := p.expectKind(TName).Value
+			bind := n
+			if p.isKw("as") {
 				p.advance()
-				p.expectKind(TName)
+				bind = p.expectKind(TName).Value
 			}
+			names = append(names, imp{name: n, bind: bind})
 		}
 		if !p.acceptOp(",") {
 			break
@@ -902,14 +921,30 @@ func (p *Parser) parseFromImport() parser.Stmt {
 		return nil
 	case "dataclasses":
 		for _, n := range names {
-			if n != "dataclass" {
-				p.errf(tok, "from dataclasses import %q is not supported yet (only 'dataclass')", n)
+			if n.name != "dataclass" {
+				p.errf(tok, "from dataclasses import %q is not supported yet (only 'dataclass')", n.name)
 			}
 		}
 		return nil
 	}
-	p.errf(tok, "from-import (`from %s import ...`) is not yet supported; use `import %s` and `%s.name`", mod, mod, mod)
-	return nil
+
+	// `from mod import *` can't be enumerated statically, so we can't route the
+	// (otherwise invisible) names through FFI — reject it loudly.
+	if hasStar {
+		p.errf(tok, "from %s import * is not supported; import the names explicitly", mod)
+		return nil
+	}
+	// Treat any other module as FFI: bind each name to (mod, name) and ensure the
+	// interpreter is imported once at startup (side-effecting zincpyPyImport).
+	if strings.Contains(mod, ".") {
+		p.errf(tok, "dotted from-import %q is not yet supported", mod)
+		return nil
+	}
+	for _, n := range names {
+		p.ffiFromBind[goSafe(n.bind)] = ffiAttr{mod: mod, attr: n.name}
+	}
+	p.recordFFIImport(mod)
+	return &parser.ExprStmt{Expr: callIdent("zincpyPyImport", &parser.StringLit{Value: mod})}
 }
 
 // paramPyType is the pytype to declare for a parameter. An unannotated param
@@ -2173,6 +2208,16 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 			return callIdent("zincpyPyCall", ffiArgs...)
 		}
 	}
+	// `from mod import name` then `name(args)` → zincpyPyCall("mod", "name", args).
+	if id, ok := callee.(*parser.Ident); ok {
+		if fa, ok := p.ffiFromBind[id.Name]; ok {
+			ffiArgs := append([]parser.Expr{
+				&parser.StringLit{Value: fa.mod},
+				&parser.StringLit{Value: fa.attr},
+			}, call.Args...)
+			return callIdent("zincpyPyCall", ffiArgs...)
+		}
+	}
 	// str methods on a string-typed receiver → runtime helpers with Python
 	// semantics (e.g. join's swapped arg order, no-arg split on whitespace).
 	if lowered := p.lowerStrMethod(callee, call.Args); lowered != nil {
@@ -2350,6 +2395,15 @@ func (p *Parser) parseAtom() parser.Expr {
 			if p.clsAlias != "" {
 				return &parser.Ident{Name: p.clsAlias}
 			}
+		}
+		// A `from mod import name` binding used as a VALUE (not immediately
+		// called) reads the module attribute: `from math import pi; 2 * pi` →
+		// zincpyPyGet("math", "pi"). When it IS called, the name stays an Ident so
+		// parseCall lowers `name(args)` to zincpyPyCall instead.
+		if fa, ok := p.ffiFromBind[goSafe(t.Value)]; ok && !p.isOp("(") {
+			return callIdent("zincpyPyGet",
+				&parser.StringLit{Value: fa.mod},
+				&parser.StringLit{Value: fa.attr})
 		}
 		return &parser.Ident{Name: goSafe(t.Value)}
 	case TOp:
