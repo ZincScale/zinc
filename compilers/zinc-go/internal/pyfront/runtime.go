@@ -1515,11 +1515,16 @@ func zincpySorted(xs any) []any {
 }
 
 // zincpySortedKey is sorted(xs, key=f): order by f(element).
-func zincpySortedKey(xs any, key func(any) any) []any {
+// key/f are taken as a bare any (not a concrete func(any) any) so a named
+// function (Go func(int) int), a closure, or a lambda all work — each is
+// invoked via zincpyCallDynamic's reflection path.
+func zincpySortedKey(xs any, key any) []any {
 	s := zincpySeq(xs)
 	out := make([]any, len(s))
 	copy(out, s)
-	sort.SliceStable(out, func(i, j int) bool { return zincpyCmp(key(out[i]), key(out[j])) < 0 })
+	sort.SliceStable(out, func(i, j int) bool {
+		return zincpyCmp(zincpyCallDynamic(key, out[i]), zincpyCallDynamic(key, out[j])) < 0
+	})
 	return out
 }
 
@@ -1531,21 +1536,22 @@ func zincpyList(xs any) []any {
 	return out
 }
 
-// zincpyMap is map(f, xs): f applied to each element.
-func zincpyMap(f func(any) any, xs any) []any {
+// zincpyMap is map(f, xs): f applied to each element. f is a bare any so a
+// named function, a closure, or a lambda all work (invoked via zincpyCallDynamic).
+func zincpyMap(f any, xs any) []any {
 	s := zincpySeq(xs)
 	out := make([]any, len(s))
 	for i, v := range s {
-		out[i] = f(v)
+		out[i] = zincpyCallDynamic(f, v)
 	}
 	return out
 }
 
 // zincpyFilter is filter(f, xs): elements where f(element) is truthy.
-func zincpyFilter(f func(any) any, xs any) []any {
+func zincpyFilter(f any, xs any) []any {
 	var out []any
 	for _, v := range zincpySeq(xs) {
-		if zincpyTruthy(f(v)) {
+		if zincpyTruthy(zincpyCallDynamic(f, v)) {
 			out = append(out, v)
 		}
 	}
