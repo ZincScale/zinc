@@ -2113,6 +2113,46 @@ func zincpyMatch(exc any, typ string) bool {
 	return false
 }
 
+// zincpyCallDynamic calls a function value held in an interface{} — a named
+// function, a nested closure, or a lambda — via reflection, for callers that
+// only know at runtime that the value is callable (an unannotated parameter, a
+// returned closure, a decorator result). Each argument is converted to the
+// parameter's type when assignable; the first result (if any) is returned.
+func zincpyCallDynamic(fn any, args ...any) any {
+	fv := reflect.ValueOf(fn)
+	if fv.Kind() != reflect.Func {
+		panic(zincpyExc{"TypeError", zincpyTypeName(fn) + " object is not callable"})
+	}
+	ft := fv.Type()
+	variadic := ft.IsVariadic()
+	nIn := ft.NumIn()
+	in := make([]reflect.Value, 0, len(args))
+	for i, a := range args {
+		var pt reflect.Type
+		if variadic && i >= nIn-1 {
+			pt = ft.In(nIn - 1).Elem()
+		} else if i < nIn {
+			pt = ft.In(i)
+		}
+		av := reflect.ValueOf(a)
+		if pt == nil {
+			in = append(in, av)
+			continue
+		}
+		if !av.IsValid() {
+			av = reflect.Zero(pt)
+		} else if pt.Kind() != reflect.Interface && av.Type() != pt && av.Type().ConvertibleTo(pt) {
+			av = av.Convert(pt)
+		}
+		in = append(in, av)
+	}
+	out := fv.Call(in)
+	if len(out) == 0 {
+		return nil
+	}
+	return out[0].Interface()
+}
+
 // zincpyRepr is Python's repr() for the value kinds we emit: strings are
 // single-quoted, bools are True/False, floats use Python float formatting.
 func zincpyRepr(v any) string {

@@ -2353,7 +2353,25 @@ func (p *Parser) parseCall(callee parser.Expr) parser.Expr {
 	if lowered := p.lowerListMethod(callee, call.Args); lowered != nil {
 		return lowered
 	}
+	// Calling a value only known to be callable at runtime — an unannotated
+	// param, a stored/returned closure (`g = make_adder(1); g(2)`), a chained
+	// call (`make_adder(1)(2)`), or a decorator result, all boxed as
+	// interface{} — routes through reflection (zincpyCallDynamic), since Go
+	// can't call an interface{}. Lambdas keep a concrete Go func type and are
+	// called directly, so they're excluded. FFI module/from-import calls are
+	// already lowered above.
+	if len(call.NamedArgs) == 0 && !p.isLambdaCallee(callee) && p.typeOf(callee) == tDynamic {
+		return callIdent("zincpyCallDynamic", append([]parser.Expr{callee}, call.Args...)...)
+	}
 	return call
+}
+
+// isLambdaCallee reports whether callee is a variable bound to a lambda, which
+// already has a concrete Go func type and is called directly (not via
+// zincpyCallDynamic).
+func (p *Parser) isLambdaCallee(callee parser.Expr) bool {
+	id, ok := callee.(*parser.Ident)
+	return ok && p.lambdaVars[id.Name]
 }
 
 // parseWalrus lowers an assignment expression `name := expr` (the cursor is on

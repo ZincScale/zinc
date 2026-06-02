@@ -258,7 +258,7 @@ func (p *Parser) callType(c *parser.CallExpr) pytype {
 		"zincpyMin", "zincpyMax", "zincpySum", "zincpySorted", "zincpyAbs",
 		"zincpySlice", "zincpyEnumerate", "zincpyZip",
 		"zincpySortedKey", "zincpyMap", "zincpyFilter", "zincpyList",
-		"zincpyStrMethod":
+		"zincpyStrMethod", "zincpyCallDynamic":
 		return tDynamic
 	}
 	if t, ok := p.fnRet[id.Name]; ok {

@@ -16,7 +16,7 @@ runtime helpers (`zincpy*`) but is the secondary path.
 
 ## Current status
 
-- 68 "spikes" done, all byte-identical to CPython (contract test green).
+- 69 "spikes" done, all byte-identical to CPython (contract test green).
 - Coverage of **idiomatic annotated everyday Python ≈ 83%** (measured 2026-06-01).
   Core arithmetic, strings, classes, comprehensions, exceptions basics, iterators
   (genexpr), most builtins all working.
@@ -205,11 +205,29 @@ Effort: S = <½ day, M = ~1 day, L = multi-day.
       (read-capture of enclosing params/locals); deep nesting (3+ levels) works. **`nonlocal`**
       is supported — it lowers to nothing but marks the names bound in the closure scope so a
       reassignment emits `=` (mutating the captured var) not `:=` (shadowing). Limits, all
-      **loud**: a RETURNED closure / **function decorator** needs first-class function values +
-      a dynamic-call helper (calling an `interface{}`) — still unsupported (decorators now
-      error clearly instead of silently dropping). Recursion via the bound name fails (the
-      `:=` form). **`global`** is rejected (module-level vars live in `main()`, not package
-      scope, so they're not accessible across functions yet).
+      **loud**: recursion via the bound name fails (the `:=` form). **`global`** is rejected
+      (module-level vars live in `main()`, not package scope, so they're not accessible across
+      functions yet). (Returned closures are now supported — see first-class functions below.)
+
+- [x] **First-class function values + dynamic call** **DONE 2026-06-02** (spike69). A function
+      (named, nested, or a returned closure) stored in a variable, passed as an argument, or
+      returned and then called now works. When the callee's static type is only `interface{}` —
+      an unannotated param (`def apply(fn, x): return fn(x)`), an `any`-returning factory's
+      result (`g = make_adder(10); g(5)`), or a chained call (`make_adder(100)(7)`) —
+      `parseCall` lowers it to `zincpyCallDynamic(fn, args...)` (runtime.go), which calls the
+      func value via reflection, converting each arg to the parameter type when assignable.
+      Lambdas keep their concrete Go func type and are called directly (excluded via
+      `isLambdaCallee`); `g := greet` where `greet` types as a concrete func also stays a direct
+      Go call. Keyed off `typeOf(callee) == tDynamic`, so it composes with the closures above.
+      **This is the enabler the closures/decorator items were blocked on.**
+
+- [ ] **Function decorators** `@deco def f(): ...` **(M)** — now that dynamic call works, the
+      remaining piece is rebinding `f` to `deco(f)` at module load, visible across functions.
+      Needs a **package-level var** (`var f any = deco(fImpl)`): rename the original to `fImpl`,
+      emit a top-level var, and `f(...)` already routes through `zincpyCallDynamic`. There's no
+      top-level mutable-var AST node yet — add one + codegen. (A module-statement rebind would
+      only work for module-level call sites, not cross-function — rejected as half-working.)
+      Currently errors loudly.
 
 - [ ] **`-> None` audit / void-method polish** — DONE for returns; verify methods, lambdas,
       and `__init__` paths all treat None as void everywhere.
