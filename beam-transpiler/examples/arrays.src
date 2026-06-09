@@ -1,0 +1,11 @@
+fn sum_list(xs) {
+  var total = 0
+  for (i in 0..len(xs)) {
+    total = total + xs[i]
+  }
+  return total
+}
+
+fn main() {
+  print(sum_list([10, 20, 30, 40]))
+}

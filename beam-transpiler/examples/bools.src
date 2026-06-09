@@ -1,0 +1,9 @@
+fn main() {
+  var a = true
+  var b = false
+  if (a && !b) {
+    println("yes")
+  } else {
+    println("no")
+  }
+}

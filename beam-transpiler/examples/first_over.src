@@ -1,0 +1,12 @@
+fn first_over(xs, limit) {
+  for (x in xs) {
+    if (x > limit) {
+      return x
+    }
+  }
+  return -1
+}
+
+fn main() {
+  print(first_over([3, 7, 2, 9, 4], 5))
+}

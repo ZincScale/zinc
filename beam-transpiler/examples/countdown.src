@@ -1,0 +1,13 @@
+fn countdown(n) {
+  var i = n
+  var acc = 0
+  while (i > 0) {
+    acc = acc + i
+    i = i - 1
+  }
+  return acc
+}
+
+fn main() {
+  print(countdown(5))
+}

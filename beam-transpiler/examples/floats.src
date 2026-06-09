@@ -1,0 +1,7 @@
+fn half(x) {
+  return x / 2
+}
+
+fn main() {
+  print(half(7) + 1.5)
+}

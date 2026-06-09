@@ -1,0 +1,5 @@
+fn main() {
+  var name = "BEAM"
+  var n = 3
+  println("hi-${name}-${n}")
+}
