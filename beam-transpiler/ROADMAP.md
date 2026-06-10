@@ -170,9 +170,17 @@ dev writes proplists of tagged tuples. The architecture is three layers:
 3. **Third-party BEAM packages = FFI** (`import erlang.*` stays the basement door), with
    curated wrappers only where earned — an HTTP server/router API over cowboy first
    (also dissolves GAP-10's `'_'` quoted-atom hack).
-Build order: settle open decision #9 (namespace strategy), then HTTP client + HTTP server
-— both dogfoods needed exactly those two. Acceptance test: webdemo rewritten with zero
-`Tuple.of`/`Atom.*` in user code. Then `import elixir.*` FFI.
+Build order (architecture-first — dogfoods test what exists, they don't drive design):
+1. **Language v1 completeness spec** — settle, as one coherent design, the surface
+   decisions the stdlib APIs depend on: generics surface (JDK-faithful APIs mean
+   `HttpResponse<T>`/`List<T>` — decide the story even if v1 erases/doesn't check),
+   instance classes, interfaces / lambda target types, user-defined exceptions/throw,
+   quoted atoms (GAP-10). Decide in/out + semantics for each; implement what stdlib
+   shapes require.
+2. **Open decision #9** (namespace strategy), then stdlib API design against that
+   settled surface: HTTP client + HTTP server first.
+3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
+Then `import elixir.*` FFI.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:
@@ -259,9 +267,11 @@ made real, and it's pure BEAM strength:
    names when faithful, `zinc.*` otherwise. Must be settled before stdlib v1 code.
 
 ## Start here next session
-**Stdlib v1** (see "Next: the standard library" above): settle decision #9, then the
-HTTP client + HTTP server facades; webdemo rewritten with zero `Tuple.of`/`Atom.*` in
-user code is the acceptance test.
+**Language v1 completeness spec, then stdlib v1** (see "Next: the standard library"
+above): settle the language-surface decisions stdlib APIs depend on (generics surface,
+instance classes, interfaces, exceptions), then decision #9, then the HTTP client +
+HTTP server facades. Webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code
+verifies the result.
 ```
 cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 23/23 e2e + zc + webdemo
 ```
