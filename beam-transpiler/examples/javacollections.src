@@ -1,0 +1,17 @@
+// ArrayList + HashMap + Math/Integer/String statics — plain Java, word-count shape
+public class Main {
+  public static void main(String[] args) {
+    var words = new ArrayList();
+    words.add("b");
+    words.add("a");
+    words.add("b");
+    var counts = new HashMap();
+    for (var w : words) {
+      counts.put(w, counts.getOrDefault(w, 0) + 1);
+    }
+    System.out.println(counts.get("b"));                // 2
+    System.out.println(words.size() + counts.size());   // 3 + 2 = 5
+    System.out.println(Math.max(Integer.parseInt("40"), 2) + Math.min(1, 5));  // 41
+    System.out.println(String.valueOf(7).equals("7"));  // true
+  }
+}

@@ -1,0 +1,16 @@
+// java.lang.String facade: users write Java, the compiler writes Erlang
+public class Main {
+  public static void main(String[] args) {
+    String s = "  Hello, BEAM!  ";
+    String t = s.trim();
+    System.out.println(t.length());           // 12
+    System.out.println(t.toUpperCase());      // HELLO, BEAM!
+    System.out.println(t.substring(7, 11));   // BEAM
+    var parts = t.split(", ");
+    System.out.println(parts.length);         // 2
+    if (t.contains("BEAM") && t.startsWith("Hello") && t.endsWith("!")) {
+      System.out.println("yes");
+    }
+    System.out.println(t.replace("BEAM", "Java").indexOf("Java"));  // 7 (chained)
+  }
+}

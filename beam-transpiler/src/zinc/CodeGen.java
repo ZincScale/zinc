@@ -72,6 +72,10 @@ class CodeGen {
           + "'$fmt'(X) when is_integer(X) -> integer_to_binary(X);\n"
           + "'$fmt'(X) -> iolist_to_binary(io_lib:format(\"~p\", [X])).";
 
+  private static final String SFX_HELPER =
+      "'$sfx'(B, S) -> byte_size(S) =< byte_size(B) andalso\n"
+          + "    binary:part(B, byte_size(B) - byte_size(S), byte_size(S)) =:= S.";
+
   static final String SUP_SOURCE = "-module(actor_sup).\n"
       + "-behaviour(supervisor).\n"
       + "-export([start_link/0, spawn_child/1, init/1]).\n\n"
@@ -137,6 +141,7 @@ class CodeGen {
     pieces.addAll(defs);
     pieces.addAll(helpers);
     pieces.add(FMT_HELPER);
+    pieces.add(SFX_HELPER);
     return "-module(" + c.erlMod() + ").\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
@@ -193,6 +198,7 @@ class CodeGen {
     if (!calls.isEmpty()) pieces.add(String.join(";\n", calls) + ".");
     pieces.addAll(helpers);
     pieces.add(FMT_HELPER);
+    pieces.add(SFX_HELPER);
     return "-module(" + a.erlMod() + ").\n"
         + "-behaviour(gen_server).\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
@@ -335,21 +341,9 @@ class CodeGen {
           out.add("throw({'$cont', " + loopTuple(loopMut, env) + "})");
         }
         case ExprStmt st -> {
-          // map mutation as a statement rebinds the receiver (SSA)
-          if (st.expr() instanceof MethodCall mc && mc.target() instanceof VarRef vr
-              && "HashMap".equals(varTypes.get(vr.name())) && env.containsKey(vr.name())
-              && (mc.method().equals("put") || mc.method().equals("remove"))) {
-            String cur = envGet(env, vr.name());
-            String rhs = mc.method().equals("put")
-                ? "maps:put(" + genExpr(mc.args().get(0), env) + ", "
-                    + genExpr(mc.args().get(1), env) + ", " + cur + ")"
-                : "maps:remove(" + genExpr(mc.args().get(0), env) + ", " + cur + ")";
-            String v = fresh(vr.name());
-            out.add(v + " = " + rhs);
-            env.put(vr.name(), v);
-          } else {
-            out.add(genExpr(st.expr(), env));
-          }
+          // collection mutation as a statement rebinds the receiver (SSA)
+          String rebind = st.expr() instanceof MethodCall mc ? genMutator(mc, env) : null;
+          out.add(rebind != null ? rebind : genExpr(st.expr(), env));
         }
         case IfStmt st -> out.add(genIf(st, env, loopMut));
         case ForEachStmt st -> out.add(genForEach(st, env));
@@ -359,6 +353,29 @@ class CodeGen {
       }
     }
     return out;
+  }
+
+  /** m.put/m.remove/list.add as a statement: emit `New = ..., env rebind`; null if not one. */
+  private String genMutator(MethodCall mc, Map<String, String> env) {
+    if (!(mc.target() instanceof VarRef vr) || !env.containsKey(vr.name())) return null;
+    String vt = varTypes.get(vr.name());
+    boolean isMap = "HashMap".equals(vt) || "Map".equals(vt);
+    boolean isList = "ArrayList".equals(vt) || "List".equals(vt);
+    String cur = envGet(env, vr.name());
+    String rhs;
+    if (isMap && mc.method().equals("put")) {
+      rhs = "maps:put(" + genExpr(mc.args().get(0), env) + ", "
+          + genExpr(mc.args().get(1), env) + ", " + cur + ")";
+    } else if (isMap && mc.method().equals("remove")) {
+      rhs = "maps:remove(" + genExpr(mc.args().get(0), env) + ", " + cur + ")";
+    } else if (isList && mc.method().equals("add")) {
+      rhs = cur + " ++ [" + genExpr(mc.args().get(0), env) + "]"; // O(n); buffer tier later
+    } else {
+      return null;
+    }
+    String v = fresh(vr.name());
+    env.put(vr.name(), v);
+    return v + " = " + rhs;
   }
 
   private static String envGet(Map<String, String> env, String name) {
@@ -615,6 +632,10 @@ class CodeGen {
           if (!x.args().isEmpty()) throw new CompileError("new HashMap takes no args (v1)");
           yield "#{}";
         }
+        if (x.typeName().equals("ArrayList")) {
+          if (!x.args().isEmpty()) throw new CompileError("new ArrayList takes no args (v1)");
+          yield "[]";
+        }
         RecordDecl r = records.get(x.typeName());
         if (r == null) throw new CompileError("unknown record type: " + x.typeName());
         if (r.components().size() != x.args().size()) {
@@ -711,87 +732,165 @@ class CodeGen {
       String fmt = isStr(x.args().get(0)) ? "~ts" : "~p";
       return "io:format(\"" + fmt + nl + "\", [" + genExpr(x.args().get(0), env) + "])";
     }
-    if (!(x.target() instanceof VarRef vr)) {
-      throw new CompileError("unsupported method call target");
+    if (x.target() instanceof VarRef vr) {
+      String byName = genNamespaceCall(vr.name(), x, env);
+      if (byName != null) return byName;
     }
-    // Thread.sleep(ms)
-    if (vr.name().equals("Thread") && x.method().equals("sleep")) {
-      return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
+    // facade dispatch by the receiver's STATIC type — works on chains, not just vars
+    String tt = exprType(x.target());
+    if ("String".equals(tt)) return genStringMethod(x, env);
+    if ("ArrayList".equals(tt) || "List".equals(tt)) return genListMethod(x, env);
+    if ("HashMap".equals(tt) || "Map".equals(tt)) return genMapMethod(x, env);
+    RecordDecl r = tt == null ? null : records.get(tt);
+    if (r != null && x.args().isEmpty()
+        && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
+      return "maps:get(" + x.method() + ", " + genExpr(x.target(), env) + ")";
     }
-    // Tuple.of(a, b) -> {A, B};  Tuple.get(t, i) -> element(i+1, T)
-    if (vr.name().equals("Tuple")) {
-      if (x.method().equals("of")) {
-        var args = new ArrayList<String>();
-        for (Expr a : x.args()) args.add(genExpr(a, env));
-        return "{" + String.join(", ", args) + "}";
+    throw new CompileError("unknown method call ." + x.method()
+        + " (receiver type: " + (tt == null ? "unknown" : tt) + ")");
+  }
+
+  /** Builtin namespaces, actor handles, class statics, FFI — all keyed by a bare name. */
+  private String genNamespaceCall(String name, MethodCall x, Map<String, String> env) {
+    switch (name) {
+      case "Thread" -> {
+        if (x.method().equals("sleep")) {
+          return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
+        }
       }
-      if (x.method().equals("get") && x.args().size() == 2) {
-        return "erlang:element((" + genExpr(x.args().get(1), env) + ") + 1, "
-            + genExpr(x.args().get(0), env) + ")";
+      case "Tuple" -> {
+        if (x.method().equals("of")) {
+          return "{" + genArgs(x.args(), env) + "}";
+        }
+        if (x.method().equals("get") && x.args().size() == 2) {
+          return "erlang:element((" + genExpr(x.args().get(1), env) + ") + 1, "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: Tuple." + x.method());
       }
-      throw new CompileError("unsupported: Tuple." + x.method());
+      case "Erlang" -> {
+        // Erlang.ok(e) -> unwrap {ok, V} or raise catchable {badmatch, Other}
+        if (x.method().equals("ok")) {
+          String v = fresh("ok");
+          String o = fresh("err");
+          return "case " + genExpr(x.args().get(0), env) + " of {ok, " + v + "} -> " + v
+              + "; " + o + " -> erlang:error({badmatch, " + o + "}) end";
+        }
+      }
+      case "Math" -> {
+        if (List.of("max", "min", "abs").contains(x.method())) {
+          return x.method() + "(" + genArgs(x.args(), env) + ")";
+        }
+        throw new CompileError("unsupported: Math." + x.method());
+      }
+      case "Integer" -> {
+        if (x.method().equals("parseInt")) {
+          return "binary_to_integer(" + genExpr(x.args().get(0), env) + ")";
+        }
+      }
+      case "String" -> {
+        if (x.method().equals("valueOf")) {
+          return "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
+        }
+      }
+      default -> {}
     }
-    // Erlang.ok(e) -> unwrap {ok, V} or raise catchable {badmatch, Other}
-    if (vr.name().equals("Erlang") && x.method().equals("ok")) {
-      String v = fresh("ok");
-      String o = fresh("err");
-      return "case " + genExpr(x.args().get(0), env) + " of {ok, " + v + "} -> " + v
-          + "; " + o + " -> erlang:error({badmatch, " + o + "}) end";
-    }
-    // actor handle
-    ActorDecl actor = handleTypes.get(vr.name());
+    ActorDecl actor = handleTypes.get(name);
     if (actor != null) {
       int arity = x.args().size();
       MethodDecl m = actor.methods().stream()
           .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
           .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
               + " has no method " + x.method() + "/" + arity));
-      var margs = new ArrayList<String>();
-      for (Expr arg : x.args()) margs.add(genExpr(arg, env));
-      String msg = margs.isEmpty() ? "{" + x.method() + "}"
-          : "{" + x.method() + ", " + String.join(", ", margs) + "}";
+      String msg = x.args().isEmpty() ? "{" + x.method() + "}"
+          : "{" + x.method() + ", " + genArgs(x.args(), env) + "}";
       String kind = m.retType().equals("void") ? "cast" : "call";
-      return "gen_server:" + kind + "(" + envGet(env, vr.name()) + ", " + msg + ")";
+      return "gen_server:" + kind + "(" + envGet(env, name) + ", " + msg + ")";
     }
-    // record accessor p.x(); HashMap reads (put/remove are statements -> SSA rebind)
-    if (env.containsKey(vr.name())) {
-      if ("HashMap".equals(varTypes.get(vr.name()))) {
-        String m = envGet(env, vr.name());
-        return switch (x.method()) {
-          case "get" -> "maps:get(" + genExpr(x.args().get(0), env) + ", " + m + ")";
-          case "containsKey" -> "maps:is_key(" + genExpr(x.args().get(0), env) + ", " + m + ")";
-          case "size" -> "maps:size(" + m + ")";
-          case "put", "remove" -> throw new CompileError(
-              "HashMap." + x.method() + " mutates: use it as a statement");
-          default -> throw new CompileError("unsupported: HashMap." + x.method());
-        };
+    if (!env.containsKey(name)) {
+      ClassInfo ci = classes.get(name);
+      if (ci != null) {
+        String key = x.method() + "/" + x.args().size();
+        if (!ci.methods().containsKey(key)) {
+          throw new CompileError("class " + name + " has no method " + key);
+        }
+        return ci.module() + ":" + x.method() + "(" + genArgs(x.args(), env) + ")";
       }
-      RecordDecl r = records.get(varTypes.get(vr.name()));
-      if (r != null && x.args().isEmpty()
-          && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
-        return "maps:get(" + x.method() + ", " + envGet(env, vr.name()) + ")";
+      // FFI: erlang module, no arity check (signatures unknown; runtime reports undef)
+      String ffiMod = ffi.get(name);
+      if (ffiMod != null) {
+        return ffiMod + ":" + x.method() + "(" + genArgs(x.args(), env) + ")";
       }
-      throw new CompileError("unsupported method call on variable '" + vr.name() + "'");
     }
-    // FFI: erlang module, no arity check (signatures unknown; runtime reports undef)
-    String ffiMod = ffi.get(vr.name());
-    if (ffiMod != null) {
-      var args = new ArrayList<String>();
-      for (Expr a : x.args()) args.add(genExpr(a, env));
-      return ffiMod + ":" + x.method() + "(" + String.join(", ", args) + ")";
-    }
-    // static method of another class
-    ClassInfo ci = classes.get(vr.name());
-    if (ci != null) {
-      String key = x.method() + "/" + x.args().size();
-      if (!ci.methods().containsKey(key)) {
-        throw new CompileError("class " + vr.name() + " has no method " + key);
+    return null; // fall through to type-based facade dispatch
+  }
+
+  private String genArgs(List<Expr> args, Map<String, String> env) {
+    var out = new ArrayList<String>();
+    for (Expr a : args) out.add(genExpr(a, env));
+    return String.join(", ", out);
+  }
+
+  // ---- java.util / java.lang facade: users write Java, the compiler writes Erlang ----
+
+  private String genStringMethod(MethodCall x, Map<String, String> env) {
+    String r = genExpr(x.target(), env);
+    return switch (x.method()) {
+      case "length" -> "string:length(" + r + ")";
+      case "isEmpty" -> "(" + r + " =:= <<>>)";
+      case "equals" -> "(" + r + " =:= " + genExpr(x.args().get(0), env) + ")";
+      case "toUpperCase" -> "string:uppercase(" + r + ")";
+      case "toLowerCase" -> "string:lowercase(" + r + ")";
+      case "trim", "strip" -> "string:trim(" + r + ")";
+      case "substring" -> x.args().size() == 1
+          ? "string:slice(" + r + ", " + genExpr(x.args().get(0), env) + ")"
+          : "string:slice(" + r + ", " + genExpr(x.args().get(0), env) + ", ("
+              + genExpr(x.args().get(1), env) + ") - (" + genExpr(x.args().get(0), env) + "))";
+      case "contains" -> "(string:find(" + r + ", " + genExpr(x.args().get(0), env)
+          + ") =/= nomatch)";
+      case "startsWith" -> "(string:prefix(" + r + ", " + genExpr(x.args().get(0), env)
+          + ") =/= nomatch)";
+      case "endsWith" -> "'$sfx'(" + r + ", " + genExpr(x.args().get(0), env) + ")";
+      case "indexOf" -> {
+        String p = fresh("p");
+        yield "case binary:match(" + r + ", " + genExpr(x.args().get(0), env)
+            + ") of nomatch -> -1; {" + p + ", _} -> " + p + " end"; // byte offset
       }
-      var args = new ArrayList<String>();
-      for (Expr a : x.args()) args.add(genExpr(a, env));
-      return ci.module() + ":" + x.method() + "(" + String.join(", ", args) + ")";
-    }
-    throw new CompileError("unknown method call target '" + vr.name() + "'");
+      case "replace" -> "iolist_to_binary(string:replace(" + r + ", "
+          + genExpr(x.args().get(0), env) + ", " + genExpr(x.args().get(1), env) + ", all))";
+      case "split" -> "string:split(" + r + ", " + genExpr(x.args().get(0), env) + ", all)";
+      case "repeat" -> "binary:copy(" + r + ", " + genExpr(x.args().get(0), env) + ")";
+      default -> throw new CompileError("unsupported: String." + x.method());
+    };
+  }
+
+  private String genListMethod(MethodCall x, Map<String, String> env) {
+    String r = genExpr(x.target(), env);
+    return switch (x.method()) {
+      case "get" -> "lists:nth((" + genExpr(x.args().get(0), env) + ") + 1, " + r + ")";
+      case "size" -> "length(" + r + ")";
+      case "contains" -> "lists:member(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "isEmpty" -> "(" + r + " =:= [])";
+      case "add" -> throw new CompileError("List.add mutates: use it as a statement");
+      default -> throw new CompileError("unsupported: List." + x.method());
+    };
+  }
+
+  private String genMapMethod(MethodCall x, Map<String, String> env) {
+    String r = genExpr(x.target(), env);
+    return switch (x.method()) {
+      case "get" -> "maps:get(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "getOrDefault" -> "maps:get(" + genExpr(x.args().get(0), env) + ", " + r + ", "
+          + genExpr(x.args().get(1), env) + ")";
+      case "containsKey" -> "maps:is_key(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "size" -> "maps:size(" + r + ")";
+      case "isEmpty" -> "(map_size(" + r + ") =:= 0)";
+      case "keySet" -> "maps:keys(" + r + ")";
+      case "values" -> "maps:values(" + r + ")";
+      case "put", "remove" -> throw new CompileError(
+          "Map." + x.method() + " mutates: use it as a statement");
+      default -> throw new CompileError("unsupported: Map." + x.method());
+    };
   }
 
   /** Segments of a string concatenation chain, flattened. */
@@ -864,28 +963,53 @@ class CodeGen {
         yield ci == null ? null : ci.methods().get(x.callee() + "/" + x.args().size());
       }
       case MethodCall x -> {
-        if (!(x.target() instanceof VarRef vr)) yield null;
-        if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
-        if ("HashMap".equals(varTypes.get(vr.name()))) {
+        if (x.target() instanceof VarRef vr) {
+          if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
+          if (vr.name().equals("Math")) yield exprType(x.args().get(0));
+          if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
+          if (vr.name().equals("String")) yield x.method().equals("valueOf") ? "String" : null;
+          ActorDecl actor = handleTypes.get(vr.name());
+          if (actor != null) {
+            yield actor.methods().stream()
+                .filter(m -> m.name().equals(x.method()) && m.params().size() == x.args().size())
+                .map(MethodDecl::retType).findFirst().orElse(null);
+          }
+          if (!varTypes.containsKey(vr.name())) {
+            ClassInfo ci = classes.get(vr.name());
+            if (ci != null) yield ci.methods().get(x.method() + "/" + x.args().size());
+          }
+        }
+        String tt = exprType(x.target());
+        if ("String".equals(tt)) {
           yield switch (x.method()) {
-            case "size" -> "int";
-            case "containsKey" -> "boolean";
+            case "length", "indexOf" -> "int";
+            case "isEmpty", "equals", "contains", "startsWith", "endsWith" -> "boolean";
+            case "toUpperCase", "toLowerCase", "trim", "strip", "substring", "replace",
+                "repeat" -> "String";
+            case "split" -> "String[]";
             default -> null;
           };
         }
-        ActorDecl actor = handleTypes.get(vr.name());
-        if (actor != null) {
-          yield actor.methods().stream()
-              .filter(m -> m.name().equals(x.method()) && m.params().size() == x.args().size())
-              .map(MethodDecl::retType).findFirst().orElse(null);
+        if ("ArrayList".equals(tt) || "List".equals(tt)) {
+          yield switch (x.method()) {
+            case "size" -> "int";
+            case "contains", "isEmpty" -> "boolean";
+            default -> null;
+          };
         }
-        RecordDecl r = records.get(varTypes.get(vr.name()));
+        if ("HashMap".equals(tt) || "Map".equals(tt)) {
+          yield switch (x.method()) {
+            case "size" -> "int";
+            case "containsKey", "isEmpty" -> "boolean";
+            default -> null;
+          };
+        }
+        RecordDecl r = tt == null ? null : records.get(tt);
         if (r != null) {
           yield r.components().stream().filter(c -> c.name().equals(x.method()))
               .map(Param::type).findFirst().orElse(null);
         }
-        ClassInfo ci = classes.get(vr.name());
-        yield ci == null ? null : ci.methods().get(x.method() + "/" + x.args().size());
+        yield null;
       }
       case SpawnExpr x -> x.actorName();
     };
@@ -988,9 +1112,9 @@ class CodeGen {
           collectAssigned(st.catchBlock(), out);
         }
         case ExprStmt st -> {
-          // m.put/m.remove statements rebind the receiver
+          // collection-mutator statements rebind the receiver
           if (st.expr() instanceof MethodCall mc && mc.target() instanceof VarRef vr
-              && (mc.method().equals("put") || mc.method().equals("remove"))) {
+              && List.of("put", "remove", "add").contains(mc.method())) {
             out.add(vr.name());
           }
         }
@@ -1072,11 +1196,8 @@ class CodeGen {
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case MethodCall x -> {
-        // class names/System/Thread aren't data deps, but actor handles and records are
-        if (x.target() instanceof VarRef vr
-            && (handleTypes.containsKey(vr.name()) || varTypes.containsKey(vr.name()))) {
-          out.add(vr.name());
-        }
+        // namespace/class names land in the set too; freeVars filters by env membership
+        exprRefs(x.target(), out);
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case SpawnExpr x -> {}

@@ -95,6 +95,18 @@ gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting —
 - **try/catch**: `catch (Exception e)` -> `catch error:E`; assigned vars phi-merge like if;
   internal `'$ret'/'$brk'/'$cont'` signals are throw-class and pass through untouched.
 
+### Language-shape round 2: the java.lang/java.util facade — DONE (e2e 20/20)
+**The point of the project: user code is Java, not Erlang-in-braces.** FFI (`import
+erlang.*`) is the basement door for libraries; day-to-day code uses Java idioms, and plain
+loops are both the most Java and the fastest lowering (direct recursion beat foldl 1.85-2x
+in beam-lab). Facade dispatch is by the receiver's STATIC type, so chains work
+(`t.replace(..).indexOf(..)`).
+- String: length/isEmpty/equals/toUpperCase/toLowerCase/trim/substring/contains/startsWith/
+  endsWith/indexOf(byte offset)/replace/split/repeat
+- ArrayList/List: add (statement, `++` O(n) — buffer tier later), get/size/contains/isEmpty
+- HashMap/Map: put/remove (statements), get/getOrDefault/containsKey/size/isEmpty/keySet/values
+- Statics: Math.max/min/abs, Integer.parseInt, String.valueOf
+
 ### Remaining shape backlog
 Index/array assignment (needs the array-module tier from LOWERING_SPEC — design properly),
 switch (with tuple/record patterns), string/array ops sugar, actor args + cross-file actors

@@ -26,7 +26,7 @@ public class Main {
       var records = new LinkedHashMap<String, RecordDecl>();
       var modules = new java.util.HashSet<String>(List.of("actor_sup"));
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tuple", "Erlang",
-          "HashMap", "String", "Exception");
+          "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "String", "Exception");
       boolean hasActors = false;
       for (Program p : files) {
         var names = new ArrayList<String>();

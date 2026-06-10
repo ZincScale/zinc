@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal ffi atoms_tuples lambdas hashmap trycatch)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -29,6 +29,8 @@ declare -A want=(
   [lambdas]=22
   [hashmap]=12
   [trycatch]=$'7\ncaught'
+  [javastrings]=$'12\nHELLO, BEAM!\nBEAM\n2\nyes\n7'
+  [javacollections]=$'2\n5\n41\ntrue'
 )
 fail=0
 for ex in "${examples[@]}"; do
