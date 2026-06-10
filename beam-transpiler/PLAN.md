@@ -25,7 +25,7 @@ Target generated code = exactly the proven pattern in `beam-lab/lowering/otp/`
    a crash. `gen_server:cast/call` accept registered names natively.
 5. **State model**: gen_server state = map of field atoms. Handler bodies lower with the
    existing SSA machinery: seed env with one fresh var per field (bound via `maps:get`),
-   run `_genStmts`, rebuild the map from the final env.
+   run `genStmts`, rebuild the map from the final env.
 6. **Dispatch (cast vs call at the call site)**: codegen keeps a side table
    `var name -> actor type`, populated when it sees `var c = spawn Counter()`. Method calls
    on tracked vars dispatch by that actor's handler table. v1 restriction: calling methods
@@ -47,22 +47,21 @@ Target generated code = exactly the proven pattern in `beam-lab/lowering/otp/`
 
 ## Step A — lexer + AST + parser (ROADMAP 1.2)
 
-**lexer.dart**: add keywords `actor` → `kwActor`, `on` → `kwOn`, `spawn` → `kwSpawn`
-(token.dart: 3 new TokKind values). Nothing else — all needed punctuation exists.
+**Lexer.java**: add keywords `actor` → `KW_ACTOR`, `on` → `KW_ON`, `spawn` → `KW_SPAWN`
+(TokKind.java: 3 new values). Nothing else — all needed punctuation exists.
 
-**ast.dart**:
-```dart
-class Program { final List<FnDecl> fns; final List<ActorDecl> actors; }
-class ActorDecl { final String name; final List<(String, Expr)> fields; // var name = init
-                  final List<HandlerDecl> handlers; }
-class HandlerDecl { final String name; final List<String> params; final Block body; }
-final class SpawnExpr extends Expr { final String actorName; }           // spawn Counter()
-final class MethodCall extends Expr { final Expr target; final String method;
-                                      final List<Expr> args; }           // c.incr(...)
+**Ast.java**:
+```java
+record Program(List<FnDecl> fns, List<ActorDecl> actors) {}
+record ActorDecl(String name, List<FieldInit> fields,        // var name = init
+                 List<HandlerDecl> handlers) {}
+record HandlerDecl(String name, List<String> params, Block body) {}
+record SpawnExpr(String actorName) implements Expr {}        // spawn Counter()
+record MethodCall(Expr target, String method, List<Expr> args) implements Expr {} // c.incr(...)
 ```
-Handler kind is NOT stored — computed in codegen (`_hasReturn(body)`), one source of truth.
+Handler kind is NOT stored — computed in codegen (`hasReturn(body)`), one source of truth.
 
-**parser.dart**:
+**Parser.java**:
 - `parseProgram()` returns `Program`; loops over `struct | actor | fn`.
 - `parseActor()`: `actor Name { (var f = expr)* (on name(params) Block)* }` — fields first,
   then handlers (enforce order; simpler and reads well).
@@ -70,7 +69,7 @@ Handler kind is NOT stored — computed in codegen (`_hasReturn(body)`), one sou
   (Currently `c.incr()` is a parse error, so this is purely additive.)
 - `parsePrimary()`: `spawn` keyword → `expect ident, expect ( )` → `SpawnExpr`.
 
-**Callers**: `bin/main.dart` passes `Program` to CodeGen.
+**Callers**: `Main.java` passes `Program` to CodeGen.
 
 *Guard*: after Step A alone, run `./e2e.sh` — 10/10 must stay green (parser changes are
 additive; nothing emits yet).
@@ -121,7 +120,7 @@ additive; nothing emits yet).
       {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600}, []}}.
   ```
 
-**Expression lowering** (in `_genExpr`):
+**Expression lowering** (in `genExpr`):
 - `SpawnExpr('Counter')` → `actor_sup:spawn_child(counter)`. In `VarStmt`, when init is a
   SpawnExpr, record `handleTypes[varName] = 'Counter'`.
 - `MethodCall(target c, m, args)`: target must be a tracked handle var; look up handler `m`
@@ -191,7 +190,7 @@ module, no logger line, byte-identical main except none of this triggers).
 ## Order & why
 
 A (parse, inert) → guard → B (codegen) → C (examples prove it) → D. Riskiest unknowns are
-in B: (a) handler SSA reseeding from the state map — mitigated by reusing `_genStmts`
+in B: (a) handler SSA reseeding from the state map — mitigated by reusing `genStmts`
 verbatim with a pre-seeded env; (b) restart/registered-name timing in the demo — mitigated
 by `sleep`, and the pattern is already proven end-to-end in `beam-lab/lowering/otp/`
 (`../beam-lab/run.sh -m lowering/otp 'otp_demo:main()'` to see it run today).

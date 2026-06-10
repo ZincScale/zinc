@@ -1,4 +1,0 @@
-name: beam_transpiler
-description: Imperative C-family -> Erlang transpiler (walking skeleton)
-environment:
-  sdk: '>=3.0.0 <4.0.0'

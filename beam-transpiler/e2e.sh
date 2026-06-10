@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# End-to-end: source -> Dart transpiler -> Erlang modules -> erlc -> run on BEAM -> assert output.
+# End-to-end: source -> Java transpiler -> Erlang modules -> erlc -> run on BEAM -> assert output.
 set -uo pipefail
 cd "$(dirname "$0")"
 mkdir -p out
+# Multi-file source launcher (JDK 22+): java compiles src/ in memory, no build tool.
+JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
+command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
-DART="docker run --rm --user $(id -u):$(id -g) -e PUB_CACHE=/tmp/pub -v $PWD:/app -w /app dart:stable"
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
 examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont)
@@ -24,7 +26,7 @@ fail=0
 for ex in "${examples[@]}"; do
   dir="out/$ex"
   rm -rf "$dir" && mkdir -p "$dir"
-  if ! $DART dart bin/main.dart "examples/$ex.src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
+  if ! "$JAVA" src/zinc/Main.java "examples/$ex.src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
   if ! $ERL erlc -o "$dir" "$dir"/*.erl 2>"$dir/compile.err"; then

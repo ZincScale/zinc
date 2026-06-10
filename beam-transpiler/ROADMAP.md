@@ -13,7 +13,7 @@ a supervisor — and gets a service that heals itself.
 ## The end-to-end pipeline (what every phase slots into)
 ```
 file.src ──lex/parse──► AST ──codegen──► N .erl modules ──erlc──► .beam ──erl──► running BEAM
-            (Dart transpiler)            main + actor modules                    supervised app
+            (Java transpiler)            main + actor modules                    supervised app
                                          + generated supervisor
 └────────────────────────────── today: e2e.sh + Docker ─────────────────────────────────────┘
 └────────────────────────────── Phase 4: `zc build` / `zc run` (managed runtime, no Docker) ─┘
@@ -23,7 +23,8 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
 ## Where we are (done)
 - **`beam-lab/`** — validated that imperative idioms lower cleanly + fast to Erlang/OTP
   (`LOWERING_SPEC.md` is the codegen contract; throw/catch free; supervised self-heal ~16µs).
-- **`beam-transpiler/`** — working Dart transpiler (lexer → sealed AST → parser → Erlang codegen).
+- **`beam-transpiler/`** — working Java transpiler (lexer → sealed AST → parser → Erlang codegen;
+  Java 22+ multi-file source launcher, so `java src/zinc/Main.java` needs no build tool).
   `./e2e.sh` runs **10 example programs end-to-end on BEAM**. Base language is usable:
   fn, var/assign(+compound), for-range/for-each/while, if/else-if/else, break/continue, early
   return, ints/floats/bools, lists, structs, strings (+interpolation), arithmetic/comparison/logical,
@@ -31,7 +32,8 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
 - **Phase 1.1 multi-module output** (`7e3ec4a`) — codegen emits named Erlang modules, driver
   writes `.erl` files to an outdir, `e2e.sh` compiles with `erlc` and runs `erl -noshell`.
   Escript path retired. All 10 examples green.
-- Dev toolchain is Docker-only (`dart:stable`, `erlang:slim`) — that stays the dev/CI path
+- Dev toolchain: local JDK (Temurin 25 at `~/.local/java/current`, override with `JAVA_BIN`)
+  for the transpiler + Docker `erlang:slim` for erlc/BEAM — that stays the dev/CI path
   until Phase 4 replaces it for END USERS with the managed runtime.
 
 ---
@@ -83,7 +85,10 @@ Working CLI name: `zc` (final language name is open decision #6 — rename then)
   - `zc build` — project build into `_build/` (.beam + start script)
   - `zc new myapp` — scaffold (src/main.src, `zc.toml` with pinned toolchain+OTP versions)
   - `zc doctor` — verify dev kit + runtime install, print versions, suggest fixes
-  - Ship as a **single native executable** (`dart compile exe`) — end users don't need Dart.
+  - End users never see Java, same way they never see Erlang: the installer's managed-runtime
+    model (4.2) covers both — a pinned JRE lands in `~/.zc/` next to the pinned OTP build, and
+    `zc` is a thin launcher over them. Everything compiles **to BEAM**; internally `zc` drives
+    the standard Erlang toolchain (erlc, relx for Phase 5 releases) — users only ever see `zc`.
 - **4.2 The installer (one-stop shop)**:
   - `curl -fsSL get.<lang>.dev | sh` (and a Windows installer later) → installs `zc` into
     `~/.zc/bin`, adds to PATH, then first-run TUI: pick/confirm OTP version → downloads a
