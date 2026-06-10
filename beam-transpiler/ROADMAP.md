@@ -172,11 +172,25 @@ dev writes proplists of tagged tuples. The architecture is three layers:
    (also dissolves GAP-10's `'_'` quoted-atom hack).
 Build order (architecture-first — dogfoods test what exists, they don't drive design):
 1. **Language v1 completeness spec** — settle, as one coherent design, the surface
-   decisions the stdlib APIs depend on: generics surface (JDK-faithful APIs mean
-   `HttpResponse<T>`/`List<T>` — decide the story even if v1 erases/doesn't check),
-   instance classes, interfaces / lambda target types, user-defined exceptions/throw,
-   quoted atoms (GAP-10). Decide in/out + semantics for each; implement what stdlib
-   shapes require.
+   decisions the stdlib APIs depend on. **Generics: SETTLED (2026-06-10, designed with
+   user):**
+   - **Erased at lowering** (forced: BEAM has no reified types — same model as the JVM;
+     specs/dialyzer are Erlang's own erased "generics"). Invariant, raw types legal,
+     no inference.
+   - **Gradual static checking at transpile time** — the point of having generics:
+     every expression is known-typed (declarations, literals, record/actor/facade/stdlib
+     signatures) or unknown (`var` from FFI, `Object`); known-vs-known mismatch = error
+     (exact nominal match — no subtyping lattice exists yet); unknown flows freely
+     (the FFI basement, analogous to Java raw types/casts).
+   - **Runtime boundary guards where unknown crosses into known** (Java's hidden
+     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed actor
+     method entry (= checked message contracts — messages arrive from anywhere)**,
+     typed record fields, insertion into known-type-arg collections. SHALLOW only
+     (element at the crossing; never deep-scan a collection). Failure = structured
+     `{zinc_badtype, expected, got, loc}` crash for supervision. Default ON; build
+     flag to strip later if profiling justifies.
+   Still to design (each WITH its checking story): instance classes, interfaces /
+   lambda target types, user-defined exceptions/throw, quoted atoms (GAP-10).
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
@@ -267,10 +281,11 @@ made real, and it's pure BEAM strength:
    names when faithful, `zinc.*` otherwise. Must be settled before stdlib v1 code.
 
 ## Start here next session
-**Language v1 completeness spec, then stdlib v1** (see "Next: the standard library"
-above): settle the language-surface decisions stdlib APIs depend on (generics surface,
-instance classes, interfaces, exceptions), then decision #9, then the HTTP client +
-HTTP server facades. Webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code
+**Continue the language v1 completeness spec** (see "Next: the standard library" above).
+Generics are settled (erase + gradual static checks + runtime boundary guards); design
+the remaining decisions the same way — instance classes, interfaces / lambda target
+types, user exceptions, quoted atoms — each with its checking story. Then decision #9,
+then HTTP client + server facades. Webdemo rewritten with zero `Tuple.of`/`Atom.*`
 verifies the result.
 ```
 cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 23/23 e2e + zc + webdemo
