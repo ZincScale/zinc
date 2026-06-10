@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal ffi)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -24,6 +24,7 @@ declare -A want=(
   [multifile]="[10]"
   [actor_counter]=7
   [actor_selfheal]=$'3\n0\n1'
+  [ffi]="BEAM-9"
 )
 fail=0
 for ex in "${examples[@]}"; do

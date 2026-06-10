@@ -77,14 +77,19 @@ Steps (each guarded by the 10-example regression suite):
 gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting — verified in `e2e.sh`.
 **Status: shipped — `actor_counter` and `actor_selfheal` are green in the 13-case suite.**
 
-## Phase 2: **Erlang FFI + modules/imports** (practicality)
-Makes real programs possible — calling existing BEAM libraries (HTTP, JSON, DB, etc.).
-- **FFI**: call Erlang/Elixir functions, e.g. `extern fn now() = "erlang:system_time"` or
-  qualified `erlang.system_time()`. Lower to `module:function(Args)`. Compiler bridges the
-  ugly atom names; users never see them.
-- **Modules/imports**: DONE (pulled forward — see "Where we are"). Remaining detail work:
-  visibility (everything is exported today), import aliasing/renames if needed.
-- This is what turns demos into apps. Detail pass happens when Phase 1 ships.
+## Phase 2: **Erlang FFI + modules/imports** — DONE
+- **FFI**: `import erlang.<module>;` binds that OTP module; `lists.sort(xs)` lowers to
+  `lists:sort(Xs)`. No arity check (signatures unknown); declared types on the receiving
+  var supply string/number typing. e2e: `ffi` -> BEAM-9.
+- **Modules/imports**: done earlier (see "Where we are").
+
+### Broad-first backlog (gaps real programs hit, in rough order)
+1. **Tuples + {ok, X} handling** — most OTP APIs return tuples; without destructuring the
+   FFI hits a wall fast (workaround today: `erlang.element(n, t)`).
+2. **Atom literals** — many OTP args are atoms (`string.split(s, " ", all)`).
+3. **Lambdas** — unlocks lists:map/filter/foldl, gen_tcp loops.
+4. Maps as a surface type; index/array assignment; string/array ops sugar; surface
+   try/catch; switch.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:

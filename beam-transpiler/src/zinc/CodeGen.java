@@ -23,6 +23,7 @@ class CodeGen {
   private final Map<String, ClassInfo> classes;   // project-wide, by class name
   private final Map<String, RecordDecl> records;  // project-wide, by record name
   private final Map<String, ActorDecl> actors = new LinkedHashMap<>(); // this file's
+  private final Map<String, String> ffi = new LinkedHashMap<>(); // alias -> erlang module
   private final boolean projectHasActors;
 
   private String curModule;
@@ -40,6 +41,15 @@ class CodeGen {
     this.records = records;
     this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
+      // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
+      if (im.path().size() == 2 && im.path().get(0).equals("erlang")) {
+        String mod = im.className();
+        if (classes.containsKey(mod)) {
+          throw new CompileError("FFI import " + im.display() + " collides with class " + mod);
+        }
+        ffi.put(mod, mod);
+        continue;
+      }
       if (!classes.containsKey(im.className())) {
         throw new CompileError("unknown import: " + im.display()
             + " (no class " + im.className() + " in the project)");
@@ -632,6 +642,13 @@ class CodeGen {
         return "maps:get(" + x.method() + ", " + envGet(env, vr.name()) + ")";
       }
       throw new CompileError("unsupported method call on variable '" + vr.name() + "'");
+    }
+    // FFI: erlang module, no arity check (signatures unknown; runtime reports undef)
+    String ffiMod = ffi.get(vr.name());
+    if (ffiMod != null) {
+      var args = new ArrayList<String>();
+      for (Expr a : x.args()) args.add(genExpr(a, env));
+      return ffiMod + ":" + x.method() + "(" + String.join(", ", args) + ")";
     }
     // static method of another class
     ClassInfo ci = classes.get(vr.name());

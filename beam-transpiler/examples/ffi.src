@@ -1,0 +1,12 @@
+// Erlang FFI: import erlang.<module> binds that OTP module; calls pass through.
+import erlang.lists;
+import erlang.string;
+
+public class Main {
+  public static void main(String[] args) {
+    int[] xs = {3, 1, 2};
+    int total = lists.sum(xs) + lists.max(lists.sort(xs));  // 6 + 3 = 9
+    String up = string.uppercase("beam");                   // declared type -> ~ts/concat
+    System.out.println(up + "-" + total);                   // BEAM-9
+  }
+}
