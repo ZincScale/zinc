@@ -179,6 +179,11 @@ made real, and it's pure BEAM strength:
 - **`zc deploy user@host`** — scp the release, install a systemd unit (restart-on-boot;
   BEAM+supervisors handle everything above process level), health-check, flip a `current`
   symlink, roll back on failed health check. Deploy #2 is an upgrade.
+- **Trivy gate before deploy**: rebar.lock is the dep source of truth, but Trivy parses
+  mix.lock (Hex ecosystem) — so `zc build` emits a derived mix.lock from the resolved
+  rebar3 deps. `zc deploy` runs the Trivy scan on it; scan passes -> deploy proceeds,
+  fails -> blocked. (OTP/ERTS itself isn't in any lockfile — covered by zc's toolchain
+  pin, bumped on advisories, same model as the zinc-go Go pin.)
 - **Later in 5**: `--docker` flag to emit a minimal OCI image for teams that want it;
   multi-node clustering/distribution (BEAM's native distribution is the long-game moat);
   hot code upgrades only if ever justified (systemd restart is fine for the target user).
