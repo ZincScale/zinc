@@ -148,7 +148,31 @@ zinc-go generates go.mod) and wires the rebar_zinc plugin via _checkouts; rebar3
 PATH (managed runtime comes in 4.2). Single-file Java CLI, no build step. Test: zc/test.sh
 (init -> run -> "Hello from demo!").
 
-### Next: cowboy dogfood (hex deps now via `zc add cowboy@...`) + `import elixir.*` FFI.
+### Dogfood 2: DONE — cowboy webdemo (`dogfood/webdemo/`, test.sh green)
+Cowboy HTTP service; a zinc class IS the cowboy handler (cowboy calls `handler:init/2` by
+module name); main doubles as httpc test client. The "undiagnosed timeout" was NOT zinc:
+the corp egress firewall drops **Erlang's TLS ClientHello by fingerprint** (curl/Java
+pass), so rebar3's hex fetch hangs forever. Fixes landed: **zc vendors hex deps itself**
+(Java TLS; tarball + transitive requirements from metadata.config; minimal-version
+selection; into `_checkouts/` — rebar3 then builds fully offline, which doubles as the
+hermetic-builds story), checkout ebins on `zc run`'s code path, httpc needs explicit ssl
+opts on cert-less systems. Record: `dogfood/FINDINGS-webdemo.md` (GAP-9, GAP-10).
+
+### Next: **the standard library** (GAP-9 — the headline dogfood finding)
+Webdemo code reads `List.of(Tuple.of(Atom.port, 0))` — Erlang in Java clothes; no Java
+dev writes proplists of tagged tuples. The architecture is three layers:
+1. **OTP behaviours = language semantics** (already true: `actor` -> gen_server +
+   supervisor; users never see callbacks).
+2. **OTP stdlib apps = zinc's JDK**: Java-shaped facades backed by OTP. First surfaces:
+   `java.net.http.HttpClient`-shaped client over httpc (also the one home for the
+   corp-proxy / native-transport escape hatches the firewall finding motivates) and
+   `ServerSocket`-shaped sockets over gen_tcp. Collections facade already exists.
+3. **Third-party BEAM packages = FFI** (`import erlang.*` stays the basement door), with
+   curated wrappers only where earned — an HTTP server/router API over cowboy first
+   (also dissolves GAP-10's `'_'` quoted-atom hack).
+Build order: settle open decision #9 (namespace strategy), then HTTP client + HTTP server
+— both dogfoods needed exactly those two. Acceptance test: webdemo rewritten with zero
+`Tuple.of`/`Atom.*` in user code. Then `import elixir.*` FFI.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:
@@ -229,10 +253,15 @@ made real, and it's pure BEAM strength:
    prebuilt ones; decide early in Phase 4.2.
 8. **`zc.toml` shape** — project manifest (name, version, toolchain pin, deps later in
    Phase 2-FFI era). Keep minimal; decide at `zc new`.
+9. **stdlib namespace strategy** — mirror JDK names exactly where semantics genuinely
+   match (`java.net.http.HttpClient`, `ServerSocket` — muscle memory, copy-paste compat)
+   vs `zinc.*` where BEAM shows through (timeouts, binaries, processes). Leaning: JDK
+   names when faithful, `zinc.*` otherwise. Must be settled before stdlib v1 code.
 
 ## Start here next session
-**Phase 2 — Erlang FFI** (modules/imports already done): call existing BEAM libraries from
-the surface language, lowering to `module:function(Args)`. Then Phase 3 features as needed.
+**Stdlib v1** (see "Next: the standard library" above): settle decision #9, then the
+HTTP client + HTTP server facades; webdemo rewritten with zero `Tuple.of`/`Atom.*` in
+user code is the acceptance test.
 ```
-cd beam-transpiler && ./e2e.sh        # current green baseline (13/13) before you start
+cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 23/23 e2e + zc + webdemo
 ```

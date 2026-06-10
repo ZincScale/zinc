@@ -8,6 +8,7 @@ A family of tools that remove syntax warts from target languages. Clean source i
 
 | Project | Category | Target | What it does |
 |---------|----------|--------|--------------|
+| [beam-transpiler](beam-transpiler/) | Compiler | Erlang/OTP (BEAM) | **Active.** Java syntax → readable Erlang. `actor` classes become supervised gen_servers (self-healing by default); `zc` CLI scaffolds, vendors hex deps, builds and runs via rebar3. Language name TBD. |
 | [zinc-go](compilers/zinc-go/) | Compiler | Go | Full Zinc language → idiomatic Go. Classes, generics, sealed types, channels, goroutines via `spawn`, `catch { }` error handling. |
 | [zinc-python](dialects/zinc-python/) | Dialect | Python 3.14t | Braces → indentation, method-name dunders, implicit `self`, auto f-strings. Roundtrips with `from-py`. |
 | [zinc-csharp](build-tools/zinc-csharp/) | Build tool | C# / .NET 10 | Reads `zinc.toml`, generates `.csproj`, drives `dotnet publish` for Native AOT. |
@@ -15,6 +16,7 @@ A family of tools that remove syntax warts from target languages. Clean source i
 
 The repo groups projects by what they actually do:
 
+- **`beam-transpiler/`** — the active project (Java-on-BEAM); `beam-lab/` holds its lowering experiments and perf evidence.
 - **`compilers/`** — Zinc-language transpilers. Currently `zinc-go`.
 - **`dialects/`** — Other source languages in the Zinc family — different surface syntax, same "fix the warts, emit readable output" ethos.
 - **`build-tools/`** — Project-scaffold + build CLIs for native targets. These read `zinc.toml` but don't transpile from Zinc; they wrap the target's native toolchain.
