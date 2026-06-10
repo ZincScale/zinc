@@ -190,6 +190,12 @@ made real, and it's pure BEAM strength:
   compliance coordinate) is first-class, not a later add-on. Deploy ships the exact
   green-lit digest — never rebuild at deploy. (OTP/ERTS isn't in any lockfile — covered
   by zc's toolchain pin, bumped on advisories, same model as the zinc-go Go pin.)
+- **Both artifact forms from one build**: (a) the plain OTP release tarball (the $10-VM
+  story) named+hashed the same way — name-version native to the release (.rel pins app +
+  ERTS versions), sha256 sidecar as its coordinate; (b) the OCI image wrapping that same
+  release. Digests must be meaningful: reproducible builds via `erlc +deterministic` and
+  normalized tar (sorted entries, fixed mtimes) so the same source+lock rebuilds to the
+  same digest — green lights become verifiable.
 - **Later in 5**: `--docker` flag to emit a minimal OCI image for teams that want it;
   multi-node clustering/distribution (BEAM's native distribution is the long-game moat);
   hot code upgrades only if ever justified (systemd restart is fine for the target user).
