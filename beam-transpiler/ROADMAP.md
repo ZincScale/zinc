@@ -179,6 +179,10 @@ made real, and it's pure BEAM strength:
 - **`zc deploy user@host`** — scp the release, install a systemd unit (restart-on-boot;
   BEAM+supervisors handle everything above process level), health-check, flip a `current`
   symlink, roll back on failed health check. Deploy #2 is an upgrade.
+- **SBOM in every release** (CycloneDX, emitted by `zc build`/`zc release`): .beam bytecode
+  and bundled ERTS are invisible to scanners (no Trivy analyzer; no OS package entry), but
+  zc knows the exact OTP/ERTS version, hex deps, and compiler version — declare them so
+  `trivy sbom` catches things like OTP CVE-2025-32433. Ship rebar.lock/mix.lock too.
 - **Later in 5**: `--docker` flag to emit a minimal OCI image for teams that want it;
   multi-node clustering/distribution (BEAM's native distribution is the long-game moat);
   hot code upgrades only if ever justified (systemd restart is fine for the target user).
