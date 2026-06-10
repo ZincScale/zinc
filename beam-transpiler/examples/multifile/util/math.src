@@ -1,0 +1,7 @@
+fn sum_to(n) {
+  var acc = 0
+  for (i in 0 .. n + 1) {
+    acc += i
+  }
+  return acc
+}

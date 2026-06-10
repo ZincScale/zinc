@@ -5,6 +5,23 @@ import java.util.List;
 final class Ast {
   private Ast() {}
 
+  record Program(List<Import> imports, List<FnDecl> fns) {}
+
+  /** import util/math -> path [util, math], alias "math", Erlang module util_math. */
+  record Import(List<String> path) {
+    String alias() {
+      return path.get(path.size() - 1);
+    }
+
+    String erlMod() {
+      return String.join("_", path);
+    }
+
+    String display() {
+      return String.join("/", path);
+    }
+  }
+
   record FnDecl(String name, List<String> params, Block body) {}
 
   record Block(List<Stmt> stmts) {}
@@ -60,6 +77,9 @@ final class Ast {
   record Unary(String op, Expr operand) implements Expr {}
 
   record Call(String callee, List<Expr> args) implements Expr {}
+
+  /** x.f(args) — today only valid when x is an imported module alias; actors reuse it later. */
+  record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
 
   record StrLit(List<StrPart> parts) implements Expr {}
 

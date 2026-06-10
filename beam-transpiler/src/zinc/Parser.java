@@ -40,7 +40,11 @@ class Parser {
     return advance();
   }
 
-  List<FnDecl> parseProgram() {
+  Program parseProgram() {
+    var imports = new ArrayList<Import>();
+    while (check(TokKind.KW_IMPORT)) {
+      imports.add(parseImport());
+    }
     var fns = new ArrayList<FnDecl>();
     while (!check(TokKind.EOF)) {
       if (check(TokKind.KW_STRUCT)) {
@@ -49,7 +53,17 @@ class Parser {
         fns.add(parseFn());
       }
     }
-    return fns;
+    return new Program(imports, fns);
+  }
+
+  private Import parseImport() {
+    expect(TokKind.KW_IMPORT, "'import'");
+    var path = new ArrayList<String>();
+    path.add(expect(TokKind.IDENT, "module path").text());
+    while (match(TokKind.SLASH)) {
+      path.add(expect(TokKind.IDENT, "module path segment").text());
+    }
+    return new Import(path);
   }
 
   private void skipStruct() {
@@ -255,7 +269,20 @@ class Parser {
     Expr e = parsePrimary();
     while (true) {
       if (match(TokKind.DOT)) {
-        e = new FieldAccess(e, expect(TokKind.IDENT, "field name").text());
+        String name = expect(TokKind.IDENT, "field name").text();
+        if (match(TokKind.LPAREN)) {
+          var args = new ArrayList<Expr>();
+          if (!check(TokKind.RPAREN)) {
+            args.add(parseExpr());
+            while (match(TokKind.COMMA)) {
+              args.add(parseExpr());
+            }
+          }
+          expect(TokKind.RPAREN, "')'");
+          e = new MethodCall(e, name, args);
+        } else {
+          e = new FieldAccess(e, name);
+        }
       } else if (match(TokKind.LBRACKET)) {
         Expr idx = parseExpr();
         expect(TokKind.RBRACKET, "']'");

@@ -24,12 +24,28 @@ import zinc.Ast.*;
  *  - string -> binary; interpolation -> '$fmt'-formatted binary segments
  */
 class CodeGen {
+  private final String moduleName;
   private final List<FnDecl> fns;
+  /** erlang module name -> set of "fn/arity" it defines (whole project). */
+  private final Map<String, Set<String>> moduleFns;
+  /** import alias -> erlang module name. */
+  private final Map<String, String> imports = new LinkedHashMap<>();
   private int ctr = 0;
   private final List<String> helpers = new ArrayList<>();
 
-  CodeGen(List<FnDecl> fns) {
-    this.fns = fns;
+  CodeGen(String moduleName, Program program, Map<String, Set<String>> moduleFns) {
+    this.moduleName = moduleName;
+    this.fns = program.fns();
+    this.moduleFns = moduleFns;
+    for (Import im : program.imports()) {
+      if (im.erlMod().equals("main") || !moduleFns.containsKey(im.erlMod())) {
+        throw new CompileError("unknown module: import " + im.display()
+            + " (no " + im.display() + ".src in the project)");
+      }
+      if (imports.put(im.alias(), im.erlMod()) != null) {
+        throw new CompileError("duplicate import alias '" + im.alias() + "'");
+      }
+    }
   }
 
   private static final String FMT_HELPER =
@@ -42,24 +58,30 @@ class CodeGen {
     return cap + "_" + (ctr++);
   }
 
-  private static String fnName(String src) {
-    return src.equals("main") ? "user_main" : src;
+  /** `main` is renamed only in the entry module, where the generated main/0 wraps it. */
+  private String fnName(String src) {
+    return (moduleName.equals("main") && src.equals("main")) ? "user_main" : src;
   }
 
-  Map<String, String> generateModules() {
+  String generate() {
     var defs = new ArrayList<String>();
     for (var fn : fns) defs.add(genFn(fn));
     var pieces = new ArrayList<>(defs);
     pieces.addAll(helpers);
     pieces.add(FMT_HELPER);
     String body = String.join("\n\n", pieces);
-    String main = "-module(main).\n"
-        + "-export([main/0]).\n"
+    if (moduleName.equals("main")) {
+      return "-module(main).\n"
+          + "-export([main/0]).\n"
+          + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
+          + "main() -> user_main().\n\n" + body + "\n";
+    }
+    var exports = new ArrayList<String>();
+    for (var fn : fns) exports.add(fn.name() + "/" + fn.params().size());
+    return "-module(" + moduleName + ").\n"
+        + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
-        + "main() -> user_main().\n\n" + body + "\n";
-    var modules = new LinkedHashMap<String, String>();
-    modules.put("main", main);
-    return modules;
+        + body + "\n";
   }
 
   private String genFn(FnDecl fn) {
@@ -437,6 +459,23 @@ class CodeGen {
         for (Expr a : x.args()) args.add(genExpr(a, env));
         yield fnName(x.callee()) + "(" + String.join(", ", args) + ")";
       }
+      case MethodCall x -> {
+        if (!(x.target() instanceof VarRef vr)) {
+          throw new CompileError("method call target must be an imported module alias");
+        }
+        if (env.containsKey(vr.name()) || !imports.containsKey(vr.name())) {
+          throw new CompileError("method calls are only supported on imported modules, '"
+              + vr.name() + "' is not an import (actors come in Phase 1)");
+        }
+        String mod = imports.get(vr.name());
+        String key = x.method() + "/" + x.args().size();
+        if (!moduleFns.get(mod).contains(key)) {
+          throw new CompileError("module '" + vr.name() + "' has no function " + key);
+        }
+        var args = new ArrayList<String>();
+        for (Expr a : x.args()) args.add(genExpr(a, env));
+        yield mod + ":" + x.method() + "(" + String.join(", ", args) + ")";
+      }
       case StrLit x -> {
         if (x.parts().isEmpty()) yield "<<>>";
         var segs = new ArrayList<String>();
@@ -620,6 +659,10 @@ class CodeGen {
         exprRefs(x.right(), out);
       }
       case Call x -> {
+        for (Expr a : x.args()) exprRefs(a, out);
+      }
+      case MethodCall x -> {
+        // target stays out: a module alias is not a data dependency to thread through loops
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case StrLit x -> {

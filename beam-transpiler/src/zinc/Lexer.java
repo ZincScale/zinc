@@ -9,6 +9,7 @@ final class Lexer {
 
   private static final Map<String, TokKind> KEYWORDS = Map.ofEntries(
       Map.entry("fn", TokKind.KW_FN),
+      Map.entry("import", TokKind.KW_IMPORT),
       Map.entry("var", TokKind.KW_VAR),
       Map.entry("for", TokKind.KW_FOR),
       Map.entry("in", TokKind.KW_IN),

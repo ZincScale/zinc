@@ -32,6 +32,12 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
 - **Phase 1.1 multi-module output** (`7e3ec4a`) — codegen emits named Erlang modules, driver
   writes `.erl` files to an outdir, `e2e.sh` compiles with `erlc` and runs `erl -noshell`.
   Escript path retired. All 10 examples green.
+- **Multi-file, multi-dir projects** (Phase 2's modules/imports, pulled forward): point the
+  transpiler at a directory — every `.src` is a module, `main.src` at the root is the entry,
+  `util/math.src` becomes module `util_math`. Surface: `import util/math` (alias = last
+  segment), calls `math.sum_to(4)` lower to `util_math:sum_to(4)`. Import resolution and
+  fn/arity existence checked at transpile time; `MethodCall` postfix (`x.f(args)`) landed in
+  the parser, which Phase 1 actors reuse. e2e case: `examples/multifile/`.
 - Dev toolchain: local JDK (Temurin 25 at `~/.local/java/current`, override with `JAVA_BIN`)
   for the transpiler + Docker `erlang:slim` for erlc/BEAM — that stays the dev/CI path
   until Phase 4 replaces it for END USERS with the managed runtime.
@@ -62,8 +68,8 @@ Makes real programs possible — calling existing BEAM libraries (HTTP, JSON, DB
 - **FFI**: call Erlang/Elixir functions, e.g. `extern fn now() = "erlang:system_time"` or
   qualified `erlang.system_time()`. Lower to `module:function(Args)`. Compiler bridges the
   ugly atom names; users never see them.
-- **Modules/imports**: multi-file programs, `import`, namespacing (Phase 1's multi-module
-  output already did the hard plumbing).
+- **Modules/imports**: DONE (pulled forward — see "Where we are"). Remaining detail work:
+  visibility (everything is exported today), import aliasing/renames if needed.
 - This is what turns demos into apps. Detail pass happens when Phase 1 ships.
 
 ## Phase 3: second-tier language features (round out the language)
