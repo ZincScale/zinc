@@ -1,11 +1,11 @@
-fn sum_list(xs) {
-  var total = 0
-  for (i in 0..len(xs)) {
-    total = total + xs[i]
+public class Main {
+  public static void main(String[] args) {
+    int[] xs = {10, 20, 30, 40};
+    int acc = 0;
+    for (int x : xs) {
+      acc += x;
+    }
+    acc += xs.length - xs.length;     // exercise .length
+    System.out.println(acc + xs[0] - xs[0]);  // 100, exercises indexing
   }
-  return total
-}
-
-fn main() {
-  print(sum_list([10, 20, 30, 40]))
 }

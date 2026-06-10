@@ -8,22 +8,18 @@ final class Lexer {
   private Lexer() {}
 
   private static final Map<String, TokKind> KEYWORDS = Map.ofEntries(
-      Map.entry("fn", TokKind.KW_FN),
       Map.entry("import", TokKind.KW_IMPORT),
       Map.entry("var", TokKind.KW_VAR),
       Map.entry("for", TokKind.KW_FOR),
-      Map.entry("in", TokKind.KW_IN),
       Map.entry("while", TokKind.KW_WHILE),
       Map.entry("if", TokKind.KW_IF),
       Map.entry("else", TokKind.KW_ELSE),
       Map.entry("return", TokKind.KW_RETURN),
-      Map.entry("struct", TokKind.KW_STRUCT),
       Map.entry("true", TokKind.KW_TRUE),
       Map.entry("false", TokKind.KW_FALSE),
       Map.entry("break", TokKind.KW_BREAK),
       Map.entry("continue", TokKind.KW_CONTINUE),
       Map.entry("actor", TokKind.KW_ACTOR),
-      Map.entry("on", TokKind.KW_ON),
       Map.entry("spawn", TokKind.KW_SPAWN));
 
   private static final Map<String, TokKind> TWO = Map.ofEntries(
@@ -36,7 +32,8 @@ final class Lexer {
       Map.entry("+=", TokKind.PLUS_EQ),
       Map.entry("-=", TokKind.MINUS_EQ),
       Map.entry("*=", TokKind.STAR_EQ),
-      Map.entry("..", TokKind.DOT_DOT));
+      Map.entry("++", TokKind.PLUS_PLUS),
+      Map.entry("--", TokKind.MINUS_MINUS));
 
   private static final Map<String, TokKind> ONE = Map.ofEntries(
       Map.entry("(", TokKind.LPAREN),
@@ -48,6 +45,7 @@ final class Lexer {
       Map.entry(",", TokKind.COMMA),
       Map.entry(".", TokKind.DOT),
       Map.entry(":", TokKind.COLON),
+      Map.entry(";", TokKind.SEMI),
       Map.entry("=", TokKind.ASSIGN),
       Map.entry("+", TokKind.PLUS),
       Map.entry("-", TokKind.MINUS),

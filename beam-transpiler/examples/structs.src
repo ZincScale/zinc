@@ -1,11 +1,10 @@
-struct Point { x, y }
+record Point(int x, int y) {}
 
-fn dist_sq(p) {
-  return p.x * p.x + p.y * p.y
-}
-
-fn main() {
-  var p = Point { x: 3, y: 4 }
-  p.x = p.x + 10
-  print(dist_sq(p))
+public class Main {
+  public static void main(String[] args) {
+    Point p = new Point(170, 4);
+    p.x = 180;             // extension: mutation sugar over functional map update
+    p.x += 5;
+    System.out.println(p.x());  // 185
+  }
 }

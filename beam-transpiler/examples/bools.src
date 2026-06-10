@@ -1,9 +1,11 @@
-fn main() {
-  var a = true
-  var b = false
-  if (a && !b) {
-    println("yes")
-  } else {
-    println("no")
+public class Main {
+  public static void main(String[] args) {
+    boolean a = true;
+    boolean b = !a;
+    if (a && !b || false) {
+      System.out.println("yes");
+    } else {
+      System.out.println("no");
+    }
   }
 }

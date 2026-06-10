@@ -1,10 +1,12 @@
-# Roadmap — BEAM imperative language
+# Roadmap — Java-on-BEAM language
 
 ## What this is
-A familiar **imperative C-family language that transpiles to Erlang/BEAM**, giving mainstream
-(Java/C#/Go) developers OTP-grade reliability — supervision, self-healing, distribution — **without**
-writing functional code. The pitch: a lightweight alternative to the microservices + Kubernetes tax
-for small teams. The language is the on-ramp; the BEAM runtime is the moat.
+**Legal Java syntax that transpiles to Erlang/BEAM** — classic class ceremony, types,
+semicolons, `System.out.println` — plus extension keywords only where OTP concepts need them
+(`actor`, `spawn`). Java devs get OTP-grade reliability (supervision, self-healing,
+distribution) without writing functional code. The pitch: a lightweight alternative to the
+microservices + Kubernetes tax for small teams. The language is the on-ramp; BEAM is the moat.
+Project-focused: one public class per file, file named after its class, dirs = packages.
 
 The end state this roadmap builds to: **one installer → dev kit → managed runtime → `build` /
 `run` / `deploy` to a plain VM**. A user never installs Erlang, never sees `erlc`, never writes
@@ -25,27 +27,30 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
   (`LOWERING_SPEC.md` is the codegen contract; throw/catch free; supervised self-heal ~16µs).
 - **`beam-transpiler/`** — working Java transpiler (lexer → sealed AST → parser → Erlang codegen;
   Java 22+ multi-file source launcher, so `java src/zinc/Main.java` needs no build tool).
-  `./e2e.sh` runs **10 example programs end-to-end on BEAM**. Base language is usable:
-  fn, var/assign(+compound), for-range/for-each/while, if/else-if/else, break/continue, early
-  return, ints/floats/bools, lists, structs, strings (+interpolation), arithmetic/comparison/logical,
-  field & index read, field set, print/println/len.
+  `./e2e.sh` runs **13 example programs end-to-end on BEAM**.
+- **Surface = legal Java (rewrite landed after Phase 1):** classes with static methods,
+  typed params/locals (+`var`), classic/enhanced `for`, while, if/else-if, break/continue
+  (classic-for continue runs the update), `++`/compound assigns, `int[]` + `.length`,
+  records as structs (`new Point(1,2)`, `p.x()`; `p.x = v` mutation sugar is an extension),
+  `String +` concat (type-aware → binary segments), int/int → `div`, `System.out.println`
+  (`~ts` for strings, `~p` otherwise), `Thread.sleep`. Declared types drive codegen
+  (void vs typed actor methods, div vs /, concat vs add).
 - **Phase 1.1 multi-module output** (`7e3ec4a`) — codegen emits named Erlang modules, driver
   writes `.erl` files to an outdir, `e2e.sh` compiles with `erlc` and runs `erl -noshell`.
   Escript path retired. All 10 examples green.
-- **Multi-file, multi-dir projects** (Phase 2's modules/imports, pulled forward): point the
-  transpiler at a directory — every `.src` is a module, `main.src` at the root is the entry,
-  `util/math.src` becomes module `util_math`. Surface: `import util/math` (alias = last
-  segment), calls `math.sum_to(4)` lower to `util_math:sum_to(4)`. Import resolution and
-  fn/arity existence checked at transpile time; `MethodCall` postfix (`x.f(args)`) landed in
-  the parser, which Phase 1 actors reuse. e2e case: `examples/multifile/`.
-- **Phase 1, the `actor` surface: DONE.** `actor`/`on`/`spawn` compile to a gen_server module
-  per actor + one generated `actor_sup` (one_for_one, dynamic children). Handles are registered
-  names, so they survive restarts; handler with `return` ⇒ sync call, without ⇒ async cast;
-  state = map of fields, handler bodies reuse the SSA machinery seeded from `maps:get`.
-  Actors work in any project module (handlers call file-local fns cross-module). v1 limits
-  enforced with clear errors: return only as last handler stmt, `spawn T()` arg-less and only
-  as `var x = spawn T()`, handles file-local + not storable/passable. Headline e2e
-  `actor_selfheal`: crash a handler → supervisor restarts → SAME handle serves (`3/0/1`).
+- **Multi-file, multi-dir projects**: point the transpiler at a directory — each class is a
+  module (`class Fmt` → `fmt`), `class Main` with `main(String[] args)` is the entry,
+  dirs = packages (`import util.MathUtil;` → `util/MathUtil.src`), file must declare its
+  eponymous type. `MathUtil.sumTo(4)` lowers to `mathutil:sumTo(4)`; imports and
+  method/arity existence checked at transpile time. e2e case: `examples/multifile/`.
+- **Phase 1, the `actor` surface: DONE.** `actor` declarations (typed fields + methods)
+  compile to a gen_server module per actor + one generated `actor_sup` (one_for_one, dynamic
+  children). Handles are registered names, so they survive restarts; **void method ⇒ async
+  cast, typed method ⇒ sync call** (the Java type IS the messaging contract); state = map of
+  fields, method bodies reuse the SSA machinery seeded from `maps:get`. v1 limits enforced
+  with clear errors: return only as last stmt of a call method, `spawn T()` arg-less and only
+  as `var x = spawn T()`, actors file-local, handles not storable/passable. Headline e2e
+  `actor_selfheal`: crash a method → supervisor restarts → SAME handle serves (`3/0/1`).
 - Dev toolchain: local JDK (Temurin 25 at `~/.local/java/current`, override with `JAVA_BIN`)
   for the transpiler + Docker `erlang:slim` for erlc/BEAM — that stays the dev/CI path
   until Phase 4 replaces it for END USERS with the managed runtime.

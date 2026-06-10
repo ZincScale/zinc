@@ -1,12 +1,15 @@
-fn first_over(xs, limit) {
-  for (x in xs) {
-    if (x > limit) {
-      return x
+public class Main {
+  static int firstOver(int[] xs, int limit) {
+    for (int x : xs) {
+      if (x > limit) {
+        return x;       // early return out of a loop
+      }
     }
+    return -1;
   }
-  return -1
-}
 
-fn main() {
-  print(first_over([3, 7, 2, 9, 4], 5))
+  public static void main(String[] args) {
+    int[] xs = {3, 5, 7, 9};
+    System.out.println(firstOver(xs, 6));  // 7
+  }
 }

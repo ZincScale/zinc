@@ -2,9 +2,13 @@ package zinc;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import zinc.Ast.*;
 
 class Parser {
+  private static final Set<String> MODIFIERS =
+      Set.of("public", "private", "protected", "static", "final");
+
   private final List<Token> toks;
   private int pos = 0;
 
@@ -24,6 +28,10 @@ class Parser {
     return cur().kind() == k;
   }
 
+  private boolean checkIdent(String text) {
+    return check(TokKind.IDENT) && cur().text().equals(text);
+  }
+
   private boolean match(TokKind k) {
     if (check(k)) {
       pos++;
@@ -40,93 +48,128 @@ class Parser {
     return advance();
   }
 
+  // ---- declarations ----
+
   Program parseProgram() {
     var imports = new ArrayList<Import>();
     while (check(TokKind.KW_IMPORT)) {
       imports.add(parseImport());
     }
-    var fns = new ArrayList<FnDecl>();
+    var classes = new ArrayList<ClassDecl>();
+    var records = new ArrayList<RecordDecl>();
     var actors = new ArrayList<ActorDecl>();
     while (!check(TokKind.EOF)) {
-      if (check(TokKind.KW_STRUCT)) {
-        skipStruct(); // struct fields aren't needed for map-based codegen
-      } else if (check(TokKind.KW_ACTOR)) {
+      skipModifiers();
+      if (check(TokKind.KW_ACTOR)) {
         actors.add(parseActor());
+      } else if (checkIdent("class")) {
+        classes.add(parseClass());
+      } else if (checkIdent("record")) {
+        records.add(parseRecord());
       } else {
-        fns.add(parseFn());
+        throw new CompileError("Parse error: expected class, record or actor at line "
+            + cur().line());
       }
     }
-    return new Program(imports, fns, actors);
-  }
-
-  /** actor Name { (var field = expr)* (on name(params) Block)* } — fields first. */
-  private ActorDecl parseActor() {
-    expect(TokKind.KW_ACTOR, "'actor'");
-    String name = expect(TokKind.IDENT, "actor name").text();
-    expect(TokKind.LBRACE, "'{'");
-    var fields = new ArrayList<FieldInit>();
-    while (check(TokKind.KW_VAR)) {
-      advance();
-      String f = expect(TokKind.IDENT, "field name").text();
-      expect(TokKind.ASSIGN, "'='");
-      fields.add(new FieldInit(f, parseExpr()));
-    }
-    var handlers = new ArrayList<HandlerDecl>();
-    while (check(TokKind.KW_ON)) {
-      advance();
-      String h = expect(TokKind.IDENT, "handler name").text();
-      expect(TokKind.LPAREN, "'('");
-      var params = new ArrayList<String>();
-      if (!check(TokKind.RPAREN)) {
-        params.add(expect(TokKind.IDENT, "parameter").text());
-        while (match(TokKind.COMMA)) {
-          params.add(expect(TokKind.IDENT, "parameter").text());
-        }
-      }
-      expect(TokKind.RPAREN, "')'");
-      handlers.add(new HandlerDecl(h, params, parseBlock()));
-    }
-    expect(TokKind.RBRACE, "'}'");
-    return new ActorDecl(name, fields, handlers);
+    return new Program(imports, classes, records, actors);
   }
 
   private Import parseImport() {
     expect(TokKind.KW_IMPORT, "'import'");
     var path = new ArrayList<String>();
-    path.add(expect(TokKind.IDENT, "module path").text());
-    while (match(TokKind.SLASH)) {
-      path.add(expect(TokKind.IDENT, "module path segment").text());
+    path.add(expect(TokKind.IDENT, "package or class name").text());
+    while (match(TokKind.DOT)) {
+      path.add(expect(TokKind.IDENT, "package or class name").text());
     }
+    expect(TokKind.SEMI, "';'");
     return new Import(path);
   }
 
-  private void skipStruct() {
-    expect(TokKind.KW_STRUCT, "'struct'");
-    expect(TokKind.IDENT, "struct name");
+  private void skipModifiers() {
+    while (check(TokKind.IDENT) && MODIFIERS.contains(cur().text())) {
+      advance();
+    }
+  }
+
+  /** Base type or array type: int, double, String, Point, int[], void, var. */
+  private String parseType() {
+    if (match(TokKind.KW_VAR)) return "var";
+    var t = new StringBuilder(expect(TokKind.IDENT, "type").text());
+    while (check(TokKind.LBRACKET) && toks.get(pos + 1).kind() == TokKind.RBRACKET) {
+      pos += 2;
+      t.append("[]");
+    }
+    return t.toString();
+  }
+
+  private ClassDecl parseClass() {
+    advance(); // 'class'
+    String name = expect(TokKind.IDENT, "class name").text();
     expect(TokKind.LBRACE, "'{'");
-    if (!check(TokKind.RBRACE)) {
-      expect(TokKind.IDENT, "field name");
-      while (match(TokKind.COMMA)) {
-        expect(TokKind.IDENT, "field name");
+    var methods = new ArrayList<MethodDecl>();
+    while (!check(TokKind.RBRACE)) {
+      skipModifiers();
+      methods.add(parseMethod());
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ClassDecl(name, methods);
+  }
+
+  private MethodDecl parseMethod() {
+    String ret = parseType();
+    String name = expect(TokKind.IDENT, "method name").text();
+    if (!check(TokKind.LPAREN)) {
+      throw new CompileError("static fields are not supported (v1), at line " + cur().line());
+    }
+    return new MethodDecl(ret, name, parseParams(), parseBlock());
+  }
+
+  private List<Param> parseParams() {
+    expect(TokKind.LPAREN, "'('");
+    var params = new ArrayList<Param>();
+    if (!check(TokKind.RPAREN)) {
+      do {
+        String t = parseType();
+        params.add(new Param(t, expect(TokKind.IDENT, "parameter name").text()));
+      } while (match(TokKind.COMMA));
+    }
+    expect(TokKind.RPAREN, "')'");
+    return params;
+  }
+
+  private RecordDecl parseRecord() {
+    advance(); // 'record'
+    String name = expect(TokKind.IDENT, "record name").text();
+    List<Param> comps = parseParams();
+    expect(TokKind.LBRACE, "'{'");
+    expect(TokKind.RBRACE, "'}'  (record bodies not supported, v1)");
+    return new RecordDecl(name, comps);
+  }
+
+  private ActorDecl parseActor() {
+    expect(TokKind.KW_ACTOR, "'actor'");
+    String name = expect(TokKind.IDENT, "actor name").text();
+    expect(TokKind.LBRACE, "'{'");
+    var fields = new ArrayList<FieldDecl>();
+    var methods = new ArrayList<MethodDecl>();
+    while (!check(TokKind.RBRACE)) {
+      skipModifiers();
+      String type = parseType();
+      String memberName = expect(TokKind.IDENT, "member name").text();
+      if (check(TokKind.LPAREN)) {
+        methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock()));
+      } else {
+        expect(TokKind.ASSIGN, "'=' (actor fields need an initializer)");
+        Expr init = parseExpr();
+        expect(TokKind.SEMI, "';'");
+        fields.add(new FieldDecl(type, memberName, init));
       }
     }
     expect(TokKind.RBRACE, "'}'");
+    return new ActorDecl(name, fields, methods);
   }
 
-  private FnDecl parseFn() {
-    expect(TokKind.KW_FN, "'fn'");
-    String name = expect(TokKind.IDENT, "function name").text();
-    expect(TokKind.LPAREN, "'('");
-    var params = new ArrayList<String>();
-    if (!check(TokKind.RPAREN)) {
-      params.add(expect(TokKind.IDENT, "parameter").text());
-      while (match(TokKind.COMMA)) {
-        params.add(expect(TokKind.IDENT, "parameter").text());
-      }
-    }
-    expect(TokKind.RPAREN, "')'");
-    return new FnDecl(name, params, parseBlock());
-  }
+  // ---- statements ----
 
   private Block parseBlock() {
     expect(TokKind.LBRACE, "'{'");
@@ -145,8 +188,6 @@ class Parser {
 
   private Stmt parseStmt() {
     switch (cur().kind()) {
-      case KW_VAR:
-        return parseVar();
       case KW_IF:
         return parseIf();
       case KW_FOR:
@@ -157,18 +198,67 @@ class Parser {
         return parseReturn();
       case KW_BREAK:
         advance();
+        expect(TokKind.SEMI, "';'");
         return new BreakStmt();
       case KW_CONTINUE:
         advance();
+        expect(TokKind.SEMI, "';'");
         return new ContinueStmt();
       default:
-        Expr e = parseExpr();
-        if (isAssignOp(cur().kind())) {
-          String op = advance().text();
-          return makeAssign(e, op, parseExpr());
-        }
-        return new ExprStmt(e);
+        if (looksLikeDecl()) return parseLocalDecl();
+        Stmt s = parseSimpleStmt();
+        expect(TokKind.SEMI, "';'");
+        return s;
     }
+  }
+
+  /** IDENT ('[' ']')* IDENT, or 'var' IDENT — a local declaration. */
+  private boolean looksLikeDecl() {
+    if (check(TokKind.KW_VAR)) return true;
+    if (!check(TokKind.IDENT)) return false;
+    int save = pos;
+    advance();
+    while (check(TokKind.LBRACKET) && toks.get(pos + 1).kind() == TokKind.RBRACKET) {
+      pos += 2;
+    }
+    boolean decl = check(TokKind.IDENT);
+    pos = save;
+    return decl;
+  }
+
+  private Stmt parseLocalDecl() {
+    String type = parseType();
+    String name = expect(TokKind.IDENT, "variable name").text();
+    expect(TokKind.ASSIGN, "'=' (declarations need an initializer, v1)");
+    Expr init = check(TokKind.LBRACE) ? parseArrayLit() : parseExpr();
+    expect(TokKind.SEMI, "';'");
+    return new VarStmt(type, name, init);
+  }
+
+  private Expr parseArrayLit() {
+    expect(TokKind.LBRACE, "'{'");
+    var elems = new ArrayList<Expr>();
+    if (!check(TokKind.RBRACE)) {
+      do {
+        elems.add(parseExpr());
+      } while (match(TokKind.COMMA));
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ListLit(elems);
+  }
+
+  /** Assignment, ++/--, or expression — no trailing semicolon (also used as for-update). */
+  private Stmt parseSimpleStmt() {
+    Expr e = parseExpr();
+    if (check(TokKind.PLUS_PLUS) || check(TokKind.MINUS_MINUS)) {
+      String op = advance().kind() == TokKind.PLUS_PLUS ? "+=" : "-=";
+      return makeAssign(e, op, new IntLit(1));
+    }
+    if (isAssignOp(cur().kind())) {
+      String op = advance().text();
+      return makeAssign(e, op, parseExpr());
+    }
+    return new ExprStmt(e);
   }
 
   private Stmt makeAssign(Expr lvalue, String op, Expr rhs) {
@@ -179,13 +269,6 @@ class Parser {
     throw new CompileError("Parse error: invalid assignment target at line " + cur().line());
   }
 
-  private Stmt parseVar() {
-    expect(TokKind.KW_VAR, "'var'");
-    String name = expect(TokKind.IDENT, "variable name").text();
-    expect(TokKind.ASSIGN, "'='");
-    return new VarStmt(name, parseExpr());
-  }
-
   private Stmt parseIf() {
     expect(TokKind.KW_IF, "'if'");
     expect(TokKind.LPAREN, "'('");
@@ -194,25 +277,9 @@ class Parser {
     Block thenBlock = parseBlock();
     Block elseBlock = null;
     if (match(TokKind.KW_ELSE)) {
-      // `else if` -> wrap the nested if as the else block
       elseBlock = check(TokKind.KW_IF) ? new Block(List.of(parseIf())) : parseBlock();
     }
     return new IfStmt(cond, thenBlock, elseBlock);
-  }
-
-  private Stmt parseFor() {
-    expect(TokKind.KW_FOR, "'for'");
-    expect(TokKind.LPAREN, "'('");
-    String varName = expect(TokKind.IDENT, "loop variable").text();
-    expect(TokKind.KW_IN, "'in'");
-    Expr first = parseExpr();
-    if (match(TokKind.DOT_DOT)) {
-      Expr end = parseExpr();
-      expect(TokKind.RPAREN, "')'");
-      return new ForRangeStmt(varName, first, end, parseBlock());
-    }
-    expect(TokKind.RPAREN, "')'");
-    return new ForEachStmt(varName, first, parseBlock());
   }
 
   private Stmt parseWhile() {
@@ -225,9 +292,63 @@ class Parser {
 
   private Stmt parseReturn() {
     expect(TokKind.KW_RETURN, "'return'");
-    if (check(TokKind.RBRACE)) return new ReturnStmt(null);
-    return new ReturnStmt(parseExpr());
+    if (match(TokKind.SEMI)) return new ReturnStmt(null);
+    Expr v = parseExpr();
+    expect(TokKind.SEMI, "';'");
+    return new ReturnStmt(v);
   }
+
+  /** Enhanced for -> ForEachStmt; classic for -> { init; while (cond) { body'; update } }. */
+  private Stmt parseFor() {
+    expect(TokKind.KW_FOR, "'for'");
+    expect(TokKind.LPAREN, "'('");
+    if (looksLikeDecl()) {
+      int save = pos;
+      String type = parseType();
+      String name = expect(TokKind.IDENT, "variable name").text();
+      if (match(TokKind.COLON)) {
+        Expr iter = parseExpr();
+        expect(TokKind.RPAREN, "')'");
+        return new ForEachStmt(type, name, iter, parseBlock());
+      }
+      pos = save;
+    }
+    Stmt init = looksLikeDecl() ? parseLocalDecl() : seqInit();
+    Expr cond = parseExpr();
+    expect(TokKind.SEMI, "';'");
+    Stmt update = parseSimpleStmt();
+    expect(TokKind.RPAREN, "')'");
+    Block body = parseBlock();
+    // continue must still run the update; break must not
+    var stmts = new ArrayList<>(rewriteContinue(body, update).stmts());
+    stmts.add(update);
+    return new SeqStmt(List.of(init, new WhileStmt(cond, new Block(stmts))));
+  }
+
+  private Stmt seqInit() {
+    Stmt s = parseSimpleStmt();
+    expect(TokKind.SEMI, "';'");
+    return s;
+  }
+
+  /** Replace `continue` belonging to THIS loop with `update; continue` (descends ifs only). */
+  private Block rewriteContinue(Block b, Stmt update) {
+    var out = new ArrayList<Stmt>();
+    for (Stmt s : b.stmts()) {
+      if (s instanceof ContinueStmt) {
+        out.add(update);
+        out.add(s);
+      } else if (s instanceof IfStmt it) {
+        out.add(new IfStmt(it.cond(), rewriteContinue(it.thenBlock(), update),
+            it.elseBlock() == null ? null : rewriteContinue(it.elseBlock(), update)));
+      } else {
+        out.add(s);
+      }
+    }
+    return new Block(out);
+  }
+
+  // ---- expressions ----
 
   Expr parseExpr() {
     return parseOr();
@@ -303,14 +424,13 @@ class Parser {
     Expr e = parsePrimary();
     while (true) {
       if (match(TokKind.DOT)) {
-        String name = expect(TokKind.IDENT, "field name").text();
+        String name = expect(TokKind.IDENT, "member name").text();
         if (match(TokKind.LPAREN)) {
           var args = new ArrayList<Expr>();
           if (!check(TokKind.RPAREN)) {
-            args.add(parseExpr());
-            while (match(TokKind.COMMA)) {
+            do {
               args.add(parseExpr());
-            }
+            } while (match(TokKind.COMMA));
           }
           expect(TokKind.RPAREN, "')'");
           e = new MethodCall(e, name, args);
@@ -339,7 +459,7 @@ class Parser {
       advance();
       return new BoolLit(false);
     }
-    if (check(TokKind.STR_LIT)) return parseStr(advance().text());
+    if (check(TokKind.STR_LIT)) return new StrLit(advance().text());
     if (check(TokKind.KW_SPAWN)) {
       advance();
       String name = expect(TokKind.IDENT, "actor name").text();
@@ -350,77 +470,39 @@ class Parser {
       advance();
       return new SpawnExpr(name);
     }
+    if (checkIdent("new")) {
+      advance();
+      String type = expect(TokKind.IDENT, "type name").text();
+      expect(TokKind.LPAREN, "'('");
+      var args = new ArrayList<Expr>();
+      if (!check(TokKind.RPAREN)) {
+        do {
+          args.add(parseExpr());
+        } while (match(TokKind.COMMA));
+      }
+      expect(TokKind.RPAREN, "')'");
+      return new NewExpr(type, args);
+    }
     if (match(TokKind.LPAREN)) {
       Expr e = parseExpr();
       expect(TokKind.RPAREN, "')'");
       return e;
-    }
-    if (match(TokKind.LBRACKET)) {
-      var elems = new ArrayList<Expr>();
-      if (!check(TokKind.RBRACKET)) {
-        elems.add(parseExpr());
-        while (match(TokKind.COMMA)) {
-          elems.add(parseExpr());
-        }
-      }
-      expect(TokKind.RBRACKET, "']'");
-      return new ListLit(elems);
     }
     if (check(TokKind.IDENT)) {
       String name = advance().text();
       if (match(TokKind.LPAREN)) {
         var args = new ArrayList<Expr>();
         if (!check(TokKind.RPAREN)) {
-          args.add(parseExpr());
-          while (match(TokKind.COMMA)) {
+          do {
             args.add(parseExpr());
-          }
+          } while (match(TokKind.COMMA));
         }
         expect(TokKind.RPAREN, "')'");
         return new Call(name, args);
       }
-      if (check(TokKind.LBRACE)) return parseStructLit(name);
       return new VarRef(name);
     }
     throw new CompileError("Parse error: unexpected " + cur().kind() + " \"" + cur().text()
         + "\" at line " + cur().line());
-  }
-
-  private Expr parseStructLit(String name) {
-    expect(TokKind.LBRACE, "'{'");
-    var fields = new ArrayList<FieldInit>();
-    if (!check(TokKind.RBRACE)) {
-      do {
-        String f = expect(TokKind.IDENT, "field name").text();
-        expect(TokKind.COLON, "':'");
-        fields.add(new FieldInit(f, parseExpr()));
-      } while (match(TokKind.COMMA));
-    }
-    expect(TokKind.RBRACE, "'}'");
-    return new StructLit(name, fields);
-  }
-
-  private Expr parseStr(String raw) {
-    var parts = new ArrayList<StrPart>();
-    var buf = new StringBuilder();
-    int i = 0;
-    while (i < raw.length()) {
-      if (i + 1 < raw.length() && raw.charAt(i) == '$' && raw.charAt(i + 1) == '{') {
-        if (buf.length() > 0) {
-          parts.add(new StrText(buf.toString()));
-          buf.setLength(0);
-        }
-        int end = raw.indexOf('}', i + 2);
-        if (end < 0) throw new CompileError("unterminated ${...} in string");
-        Expr sub = new Parser(Lexer.lex(raw.substring(i + 2, end))).parseExpr();
-        parts.add(new StrExpr(sub));
-        i = end + 1;
-      } else {
-        buf.append(raw.charAt(i));
-        i++;
-      }
-    }
-    if (buf.length() > 0) parts.add(new StrText(buf.toString()));
-    return new StrLit(parts);
   }
 }

@@ -1,5 +1,7 @@
-fn main() {
-  var name = "BEAM"
-  var n = 3
-  println("hi-${name}-${n}")
+public class Main {
+  public static void main(String[] args) {
+    String name = "BEAM";
+    int n = 3;
+    System.out.println("hi-" + name + "-" + n);  // concat + int formatting
+  }
 }

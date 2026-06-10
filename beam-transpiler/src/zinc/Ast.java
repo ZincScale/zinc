@@ -5,55 +5,59 @@ import java.util.List;
 final class Ast {
   private Ast() {}
 
-  record Program(List<Import> imports, List<FnDecl> fns, List<ActorDecl> actors) {}
+  record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
+      List<ActorDecl> actors) {}
 
-  /** import util/math -> path [util, math], alias "math", Erlang module util_math. */
+  /** import util.MathUtil; -> class MathUtil defined in util/MathUtil.src */
   record Import(List<String> path) {
-    String alias() {
+    String className() {
       return path.get(path.size() - 1);
     }
 
-    String erlMod() {
-      return String.join("_", path);
-    }
-
     String display() {
-      return String.join("/", path);
+      return String.join(".", path);
     }
   }
 
-  record FnDecl(String name, List<String> params, Block body) {}
-
-  /** actor Counter { var count = 0  on incr() {..} } -> one gen_server module. */
-  record ActorDecl(String name, List<FieldInit> fields, List<HandlerDecl> handlers) {
+  record ClassDecl(String name, List<MethodDecl> methods) {
     String erlMod() {
       return name.toLowerCase();
     }
   }
 
-  /** Handler kind is not stored: a body with `return` is a call, otherwise a cast. */
-  record HandlerDecl(String name, List<String> params, Block body) {}
+  record MethodDecl(String retType, String name, List<Param> params, Block body) {}
+
+  record Param(String type, String name) {}
+
+  /** record Point(int x, int y) {} -> map; accessors p.x() -> maps:get */
+  record RecordDecl(String name, List<Param> components) {}
+
+  /** actor -> gen_server module; void method = async cast, typed method = sync call */
+  record ActorDecl(String name, List<FieldDecl> fields, List<MethodDecl> methods) {
+    String erlMod() {
+      return name.toLowerCase();
+    }
+  }
+
+  record FieldDecl(String type, String name, Expr init) {}
 
   record Block(List<Stmt> stmts) {}
 
   sealed interface Stmt {}
 
-  record VarStmt(String name, Expr init) implements Stmt {}
+  /** type is the declared type, or "var" to infer from init. */
+  record VarStmt(String type, String name, Expr init) implements Stmt {}
 
   record AssignStmt(String name, String op, Expr value) implements Stmt {}
 
   record FieldAssignStmt(String objVar, String field, String op, Expr value) implements Stmt {}
 
-  /** elseBlock is null when there is no else branch. */
   record IfStmt(Expr cond, Block thenBlock, Block elseBlock) implements Stmt {}
 
-  record ForRangeStmt(String varName, Expr start, Expr end, Block body) implements Stmt {}
-
-  record ForEachStmt(String varName, Expr iterable, Block body) implements Stmt {}
+  record ForEachStmt(String varType, String varName, Expr iterable, Block body) implements Stmt {}
 
   record WhileStmt(Expr cond, Block body) implements Stmt {}
 
-  /** value is null for a bare `return`. */
   record ReturnStmt(Expr value) implements Stmt {}
 
   record ExprStmt(Expr expr) implements Stmt {}
@@ -61,6 +65,9 @@ final class Ast {
   record BreakStmt() implements Stmt {}
 
   record ContinueStmt() implements Stmt {}
+
+  /** classic for desugared to { init; while }, sharing the enclosing scope. */
+  record SeqStmt(List<Stmt> stmts) implements Stmt {}
 
   sealed interface Expr {}
 
@@ -70,13 +77,14 @@ final class Ast {
 
   record BoolLit(boolean value) implements Expr {}
 
+  record StrLit(String text) implements Expr {}
+
   record VarRef(String name) implements Expr {}
 
+  /** array initializer {1, 2, 3} */
   record ListLit(List<Expr> elems) implements Expr {}
 
-  record FieldInit(String name, Expr value) {}
-
-  record StructLit(String name, List<FieldInit> fields) implements Expr {}
+  record NewExpr(String typeName, List<Expr> args) implements Expr {}
 
   record FieldAccess(Expr obj, String field) implements Expr {}
 
@@ -86,19 +94,11 @@ final class Ast {
 
   record Unary(String op, Expr operand) implements Expr {}
 
+  /** bare call -> static method of the enclosing class */
   record Call(String callee, List<Expr> args) implements Expr {}
 
-  /** x.f(args) — x is an imported module alias or an actor handle bound by `var x = spawn T()`. */
+  /** x.f(args): System.out.println / Thread.sleep / Class.staticMethod / record accessor / actor handle */
   record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
 
-  /** spawn Counter() — only valid as the whole init of a var statement (v1). */
   record SpawnExpr(String actorName) implements Expr {}
-
-  record StrLit(List<StrPart> parts) implements Expr {}
-
-  sealed interface StrPart {}
-
-  record StrText(String text) implements StrPart {}
-
-  record StrExpr(Expr expr) implements StrPart {}
 }

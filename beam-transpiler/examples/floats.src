@@ -1,7 +1,7 @@
-fn half(x) {
-  return x / 2
-}
-
-fn main() {
-  print(half(7) + 1.5)
+public class Main {
+  public static void main(String[] args) {
+    double d = 25.0 / 5.0;                // double division stays /
+    int half = 5 / 2;                     // int division -> div
+    System.out.println(d + half - half);  // 5.0
+  }
 }

@@ -4,58 +4,62 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import zinc.Ast.Program;
+import zinc.Ast.RecordDecl;
+import zinc.CodeGen.ClassInfo;
 
 public class Main {
   public static void main(String[] args) throws IOException {
     if (args.length != 2) {
-      System.err.println("usage: Main <file.src | project-dir> <outdir>");
+      System.err.println("usage: Main <File.src | project-dir> <outdir>");
       System.exit(2);
     }
     try {
       Path in = Path.of(args[0]);
-      Map<String, Program> modules = Files.isDirectory(in) ? loadProject(in) : loadSingle(in);
-      if (!modules.containsKey("main")) {
-        throw new CompileError("project has no main.src at its root");
-      }
+      List<Program> files = parseAll(in);
 
-      var moduleFns = new HashMap<String, Set<String>>();
-      for (var e : modules.entrySet()) {
-        var fns = new LinkedHashSet<String>();
-        for (var fn : e.getValue().fns()) fns.add(fn.name() + "/" + fn.params().size());
-        moduleFns.put(e.getKey(), fns);
-      }
-      if (!moduleFns.get("main").contains("main/0")) {
-        throw new CompileError("entry module must define fn main()");
-      }
-
-      // every actor becomes its own module: check names against files and other actors
-      boolean projectHasActors = false;
-      var actorModules = new LinkedHashSet<String>();
-      for (var e : modules.entrySet()) {
-        for (var a : e.getValue().actors()) {
-          projectHasActors = true;
-          String mod = a.erlMod();
-          if (mod.equals("main") || mod.equals("actor_sup") || !mod.matches("[a-z][a-z0-9_]*")
-              || modules.containsKey(mod) || !actorModules.add(mod)) {
-            throw new CompileError("actor name '" + a.name() + "' (module '" + mod
-                + "') collides with a module, another actor, or a reserved name");
+      // project-wide registries; every module name must be unique
+      var classes = new LinkedHashMap<String, ClassInfo>();
+      var records = new LinkedHashMap<String, RecordDecl>();
+      var modules = new java.util.HashSet<String>(List.of("actor_sup"));
+      boolean hasActors = false;
+      for (Program p : files) {
+        for (var c : p.classes()) {
+          var methods = new LinkedHashMap<String, String>();
+          for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
+          if (classes.put(c.name(), new ClassInfo(c.erlMod(), methods)) != null
+              || !modules.add(c.erlMod())) {
+            throw new CompileError("duplicate class/module name: " + c.name());
           }
         }
+        for (var r : p.records()) {
+          if (records.put(r.name(), r) != null) {
+            throw new CompileError("duplicate record name: " + r.name());
+          }
+        }
+        for (var a : p.actors()) {
+          hasActors = true;
+          if (!modules.add(a.erlMod())) {
+            throw new CompileError("actor name '" + a.name()
+                + "' collides with a class, another actor, or a reserved name");
+          }
+        }
+      }
+      ClassInfo entry = classes.get("Main");
+      if (entry == null || !entry.methods().containsKey("main/1")) {
+        throw new CompileError("project needs a class Main with main(String[] args)");
       }
 
       // generate everything before writing anything: no partial output on a compile error
       var generated = new LinkedHashMap<String, String>();
-      for (var e : modules.entrySet()) {
-        generated.putAll(
-            new CodeGen(e.getKey(), e.getValue(), moduleFns, projectHasActors).generateAll());
+      for (Program p : files) {
+        generated.putAll(new CodeGen(p, classes, records, hasActors).generateAll());
       }
-      if (projectHasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
+      if (hasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
+
       Path outDir = Files.createDirectories(Path.of(args[1]));
       for (var e : generated.entrySet()) {
         Path path = outDir.resolve(e.getKey() + ".erl");
@@ -68,41 +72,36 @@ public class Main {
     }
   }
 
-  /** Single-file mode: the file is the entry module, whatever its name. */
-  private static Map<String, Program> loadSingle(Path file) throws IOException {
-    var modules = new LinkedHashMap<String, Program>();
-    modules.put("main", parse(file));
-    return modules;
+  private static List<Program> parseAll(Path in) throws IOException {
+    var programs = new ArrayList<Program>();
+    if (!Files.isDirectory(in)) {
+      programs.add(parse(in));
+      return programs;
+    }
+    var srcFiles = new ArrayList<Path>();
+    try (var walk = Files.walk(in)) {
+      walk.filter(p -> p.toString().endsWith(".src")).sorted().forEach(srcFiles::add);
+    }
+    if (srcFiles.isEmpty()) throw new CompileError("no .src files under " + in);
+    for (Path p : srcFiles) {
+      Program prog = parse(p);
+      checkFileName(in.relativize(p), prog);
+      programs.add(prog);
+    }
+    return programs;
   }
 
-  /**
-   * Project mode: every *.src under the root is one module; util/math.src -> util_math.
-   * main.src at the root is the entry module.
-   */
-  private static Map<String, Program> loadProject(Path root) throws IOException {
-    var files = new ArrayList<Path>();
-    try (var walk = Files.walk(root)) {
-      walk.filter(p -> p.toString().endsWith(".src")).sorted().forEach(files::add);
+  /** Java convention: File.src declares its eponymous public type. */
+  private static void checkFileName(Path rel, Program prog) {
+    String stem = rel.getFileName().toString();
+    stem = stem.substring(0, stem.length() - ".src".length());
+    var names = new ArrayList<String>();
+    prog.classes().forEach(c -> names.add(c.name()));
+    prog.records().forEach(r -> names.add(r.name()));
+    prog.actors().forEach(a -> names.add(a.name()));
+    if (!names.contains(stem)) {
+      throw new CompileError(rel + " must declare a type named '" + stem + "'");
     }
-    if (files.isEmpty()) throw new CompileError("no .src files under " + root);
-    var modules = new LinkedHashMap<String, Program>();
-    for (Path p : files) {
-      String name = moduleName(root.relativize(p));
-      if (modules.put(name, parse(p)) != null) {
-        throw new CompileError("module name collision: two files map to '" + name + "'");
-      }
-    }
-    return modules;
-  }
-
-  private static String moduleName(Path rel) {
-    String s = rel.toString();
-    s = s.substring(0, s.length() - ".src".length()).replace(java.io.File.separatorChar, '_');
-    if (!s.matches("[a-z][a-z0-9_]*")) {
-      throw new CompileError("bad module path '" + rel
-          + "': each segment must match [a-z][a-z0-9_]*");
-    }
-    return s;
   }
 
   private static Program parse(Path file) throws IOException {

@@ -1,8 +1,0 @@
-// project mode: every .src in this dir tree is a module; imports are path-based
-import util/math
-import fmt
-
-fn main() {
-  var s = math.sum_to(4)        // 0+1+2+3+4 = 10
-  println(fmt.banner("${s}"))   // [10]
-}

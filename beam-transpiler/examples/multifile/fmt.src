@@ -1,3 +1,0 @@
-fn banner(s) {
-  return "[${s}]"
-}
