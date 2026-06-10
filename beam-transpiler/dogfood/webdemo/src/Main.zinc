@@ -22,7 +22,11 @@ public class Main {
     // --- client ---
     application.ensure_all_started(Atom.inets);
     String url = "http://localhost:" + port + "/";
-    var resp = Erlang.ok(httpc.request(url.toCharArray()));  // GAP: httpc wants charlists
+    // request/4: explicit ssl opt, else httpc's defaults crash on cert-less systems
+    // (pubkey_os_cacerts: no_cacerts_found -- even for plain http URLs)
+    var sslOpt = Tuple.of(Atom.ssl, List.of(Tuple.of(Atom.verify, Atom.verify_none)));
+    var req = Tuple.of(url.toCharArray(), List.of());  // GAP: httpc wants charlists
+    var resp = Erlang.ok(httpc.request(Atom.get, req, List.of(sslOpt), List.of()));
     String body = erlang.list_to_binary(Tuple.get(resp, 2));
     System.out.println(body.trim());   // hello from zinc
   }

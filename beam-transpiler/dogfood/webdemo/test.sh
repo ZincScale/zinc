@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cowboy dogfood: zc run inside docker (fetches cowboy from hex on first run).
+# Cowboy dogfood: zc run inside docker (zc vendors cowboy+deps into _checkouts first).
 set -euo pipefail
 cd "$(dirname "$0")"
 

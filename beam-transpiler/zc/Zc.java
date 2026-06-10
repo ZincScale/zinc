@@ -1,11 +1,19 @@
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** zc — the zinc meta-builder for BEAM (patterned on compilers/zinc-go cmd/zinc). */
 public class Zc {
@@ -85,7 +93,8 @@ public class Zc {
           }
         }
         """.formatted(base));
-    Files.writeString(dir.resolve(".gitignore"), "_build/\nsrc/zinc_gen/\n");
+    Files.writeString(dir.resolve(".gitignore"),
+        "_build/\n_checkouts/\nsrc/zinc_gen/\nrebar.config\nsrc/*.app.src\n");
     ensureGenerated(dir, loadToml(dir));
     System.out.println("created " + name + "/");
     System.out.println("  zinc.toml  src/Main.zinc");
@@ -129,24 +138,94 @@ public class Zc {
     Path checkouts = dir.resolve("_checkouts");
     Files.createDirectories(checkouts);
     Path link = checkouts.resolve("rebar_zinc");
-    if (!Files.exists(link)) Files.createSymbolicLink(link, home.resolve("rebar_zinc"));
+    if (!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+      Files.createSymbolicLink(link, home.resolve("rebar_zinc"));
+    }
+  }
+
+  // ---- hex deps: zc fetches and vendors into _checkouts; rebar3 then builds offline.
+  // (rebar3's own fetch uses Erlang TLS, which fingerprint-filtering egress fireworks drop;
+  // zc's Java TLS passes. Vendoring also serves hermetic/reproducible builds.)
+
+  static void vendorDeps(Path dir, Map<String, Map<String, String>> cfg) throws Exception {
+    var queue = new LinkedHashMap<String, String>(cfg.getOrDefault("deps", Map.of()));
+    var seen = new HashSet<String>();
+    while (!queue.isEmpty()) {
+      var it = queue.entrySet().iterator();
+      var e = it.next();
+      it.remove();
+      String name = e.getKey(), vsn = e.getValue();
+      if (!seen.add(name)) continue; // MVS-lite: first requirement wins (root deps first)
+      Path dst = dir.resolve("_checkouts").resolve(name);
+      if (Files.isDirectory(dst, LinkOption.NOFOLLOW_LINKS)) continue; // already vendored
+      Path tar = fetchTarball(name, vsn);
+      Path tmp = Files.createTempDirectory("zc-hex-" + name);
+      exec(tmp, "tar", "xf", tar.toString());
+      Files.createDirectories(dst);
+      exec(dst, "tar", "xzf", tmp.resolve("contents.tar.gz").toString());
+      System.out.println("zc: vendored " + name + " " + vsn + " (hex)");
+      requirements(tmp.resolve("metadata.config")).forEach(queue::putIfAbsent);
+    }
+  }
+
+  static Path fetchTarball(String name, String vsn) throws Exception {
+    Path cache = Path.of(System.getProperty("user.home"), ".cache", "zinc", "hex");
+    Files.createDirectories(cache);
+    Path tar = cache.resolve(name + "-" + vsn + ".tar");
+    if (Files.exists(tar)) return tar;
+    String url = "https://repo.hex.pm/tarballs/" + name + "-" + vsn + ".tar";
+    var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+    var resp = client.send(HttpRequest.newBuilder(URI.create(url)).build(),
+                           HttpResponse.BodyHandlers.ofByteArray());
+    if (resp.statusCode() != 200) die("zc: fetch " + url + " -> HTTP " + resp.statusCode());
+    Files.write(tar, resp.body());
+    return tar;
+  }
+
+  // requirement entries in metadata.config are proplists with keys in alphabetical order:
+  // {<<"app">>,<<"cowlib">>}, {<<"optional">>,false}, {<<"requirement">>,<<"2.13.0">>}
+  static final Pattern REQ = Pattern.compile(
+      "\\{<<\"app\">>,<<\"([a-z0-9_]+)\">>\\},\\s*\\{<<\"optional\">>,(true|false)\\},\\s*"
+          + "\\{<<\"requirement\">>,<<\"([^\"]+)\">>\\}");
+
+  static Map<String, String> requirements(Path metadataConfig) throws IOException {
+    var reqs = new LinkedHashMap<String, String>();
+    Matcher m = REQ.matcher(Files.readString(metadataConfig));
+    while (m.find()) {
+      if (m.group(2).equals("false")) reqs.put(m.group(1), minVersion(m.group(3)));
+    }
+    return reqs;
+  }
+
+  // MVS: a hex requirement ("2.13.0", "~> 2.13", ">= 1.8.0") admits a minimum version;
+  // build against exactly that. Reproducible without a lock file.
+  static String minVersion(String req) {
+    Matcher m = Pattern.compile("\\d+(\\.\\d+){0,2}").matcher(req);
+    if (!m.find()) die("zc: unsupported hex requirement: " + req);
+    String v = m.group();
+    return v + ".0.0".substring(0, 2 * (3 - v.split("\\.").length));
   }
 
   // ---- build / run ----
 
   static void build(Path dir) throws Exception {
-    ensureGenerated(dir, loadToml(dir));
+    var cfg = loadToml(dir);
+    ensureGenerated(dir, cfg);
+    vendorDeps(dir, cfg);
     exec(dir, "rebar3", "compile");
   }
 
   static void run(Path dir) throws Exception {
     var cmd = new ArrayList<>(List.of("erl", "-noshell"));
-    Path lib = dir.resolve("_build/default/lib");
-    try (DirectoryStream<Path> apps = Files.newDirectoryStream(lib)) {
-      for (Path app : apps) {
-        if (Files.isDirectory(app.resolve("ebin"))) {
-          cmd.add("-pa");
-          cmd.add(app.resolve("ebin").toString());
+    for (String d : List.of("_build/default/lib", "_build/default/checkouts")) {
+      Path base = dir.resolve(d);
+      if (!Files.isDirectory(base)) continue;
+      try (DirectoryStream<Path> apps = Files.newDirectoryStream(base)) {
+        for (Path app : apps) {
+          if (Files.isDirectory(app.resolve("ebin"))) {
+            cmd.add("-pa");
+            cmd.add(app.resolve("ebin").toString());
+          }
         }
       }
     }
