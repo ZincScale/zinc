@@ -141,7 +141,7 @@ module, no logger line, byte-identical main except none of this triggers).
 
 ## Step C — examples + e2e (ROADMAP 1.4)
 
-1. `examples/actor_counter.src` — the happy path:
+1. `examples/actor_counter.zinc` — the happy path:
    ```
    actor Counter {
      var count = 0
@@ -157,7 +157,7 @@ module, no logger line, byte-identical main except none of this triggers).
      print(c.get())          // 7
    }
    ```
-2. `examples/actor_selfheal.src` — THE headline demo (thesis proof):
+2. `examples/actor_selfheal.zinc` — THE headline demo (thesis proof):
    ```
    actor Counter {
      var count = 0

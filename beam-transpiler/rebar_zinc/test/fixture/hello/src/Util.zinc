@@ -1,0 +1,5 @@
+public class Util {
+  static String greet(String who) {
+    return "hello-" + who;
+  }
+}

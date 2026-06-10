@@ -14,7 +14,7 @@ import zinc.CodeGen.ClassInfo;
 public class Main {
   public static void main(String[] args) throws IOException {
     if (args.length != 2) {
-      System.err.println("usage: Main <File.src | project-dir> <outdir>");
+      System.err.println("usage: Main <File.zinc | project-dir> <outdir>");
       System.exit(2);
     }
     try {
@@ -92,9 +92,9 @@ public class Main {
     }
     var srcFiles = new ArrayList<Path>();
     try (var walk = Files.walk(in)) {
-      walk.filter(p -> p.toString().endsWith(".src")).sorted().forEach(srcFiles::add);
+      walk.filter(p -> p.toString().endsWith(".zinc")).sorted().forEach(srcFiles::add);
     }
-    if (srcFiles.isEmpty()) throw new CompileError("no .src files under " + in);
+    if (srcFiles.isEmpty()) throw new CompileError("no .zinc files under " + in);
     for (Path p : srcFiles) {
       Program prog = parse(p);
       checkFileName(in.relativize(p), prog);
@@ -103,10 +103,10 @@ public class Main {
     return programs;
   }
 
-  /** Java convention: File.src declares its eponymous public type. */
+  /** Java convention: File.zinc declares its eponymous public type. */
   private static void checkFileName(Path rel, Program prog) {
     String stem = rel.getFileName().toString();
-    stem = stem.substring(0, stem.length() - ".src".length());
+    stem = stem.substring(0, stem.length() - ".zinc".length());
     var names = new ArrayList<String>();
     prog.classes().forEach(c -> names.add(c.name()));
     prog.records().forEach(r -> names.add(r.name()));

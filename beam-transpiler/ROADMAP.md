@@ -14,7 +14,7 @@ a supervisor — and gets a service that heals itself.
 
 ## The end-to-end pipeline (what every phase slots into)
 ```
-file.src ──lex/parse──► AST ──codegen──► N .erl modules ──erlc──► .beam ──erl──► running BEAM
+file.zinc ──lex/parse──► AST ──codegen──► N .erl modules ──erlc──► .beam ──erl──► running BEAM
             (Java transpiler)            main + actor modules                    supervised app
                                          + generated supervisor
 └────────────────────────────── today: e2e.sh + Docker ─────────────────────────────────────┘
@@ -40,7 +40,7 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
   Escript path retired. All 10 examples green.
 - **Multi-file, multi-dir projects**: point the transpiler at a directory — each class is a
   module (`class Fmt` → `fmt`), `class Main` with `main(String[] args)` is the entry,
-  dirs = packages (`import util.MathUtil;` → `util/MathUtil.src`), file must declare its
+  dirs = packages (`import util.MathUtil;` → `util/MathUtil.zinc`), file must declare its
   eponymous type. `MathUtil.sumTo(4)` lowers to `mathutil:sumTo(4)`; imports and
   method/arity existence checked at transpile time. e2e case: `examples/multifile/`.
 - **Phase 1, the `actor` surface: DONE.** `actor` declarations (typed fields + methods)
@@ -69,7 +69,7 @@ Steps (each guarded by the 10-example regression suite):
    the existing SSA machinery); one generated `actor_sup` (supervised-by-default, dynamic
    children, handles = registered names so they survive restarts); `spawn`/method-call
    dispatch; `sleep(ms)` builtin. Actor-free programs byte-identical to today.
-3. **1.4 Demo + e2e** — `actor_counter.src` (happy path) and `actor_selfheal.src`: crash a
+3. **1.4 Demo + e2e** — `actor_counter.zinc` (happy path) and `actor_selfheal.zinc`: crash a
    handler, supervisor auto-restarts, SAME handle keeps serving (`3 / 0 / 1` output). That
    self-heal e2e IS the thesis proof — make it the headline case.
 
@@ -134,8 +134,14 @@ actor), `s.toCharArray()` for charlist APIs, `List.of`/`Map.of`, handle_call/cas
 caught try reverts outer-var mutations to try-entry values (differs from Java; Erlang
 cannot observe partial bindings). Record: `dogfood/FINDINGS.md`.
 
-### Next: more dogfood breadth (JSON/OTP-27 `json`, a hex dep via the future rebar3
-plugin) or start Phase 4 tooling (`zc` CLI wrapping transpile+erlc+run).
+### rebar3 plugin: DONE (`rebar_zinc/`)
+Providers `zinc compile` / `zinc clean`; wire with provider_hooks so plain `rebar3
+compile` transpiles `src/**/*.zinc` -> `src/zinc_gen/*.erl` first (transpiler via
+`{zinc, [{compiler_home, ..}]}` or ZINC_HOME). Test: `rebar_zinc/test.sh` (fixture
+project, rebar3 in docker + host JDK mounted). Forced decision: source extension is now
+**`.zinc`** — `.src` collided with rebar3's mandatory `<app>.app.src`.
+
+### Next: cowboy dogfood (hex deps via the plugin) + `import elixir.*` FFI; then `zc` CLI.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:
@@ -152,9 +158,9 @@ One installer gets you everything; the dev kit manages the runtime. Rustup/flutt
 Working CLI name: `zc` (final language name is open decision #6 — rename then).
 
 - **4.1 The `zc` CLI** (first, still runnable via Docker while the installer doesn't exist):
-  - `zc run file.src` — transpile → erlc → run, one command, quiet unless it fails
+  - `zc run file.zinc` — transpile → erlc → run, one command, quiet unless it fails
   - `zc build` — project build into `_build/` (.beam + start script)
-  - `zc new myapp` — scaffold (src/main.src, `zc.toml` with pinned toolchain+OTP versions)
+  - `zc new myapp` — scaffold (src/main.zinc, `zc.toml` with pinned toolchain+OTP versions)
   - `zc doctor` — verify dev kit + runtime install, print versions, suggest fixes
   - End users never see Java, same way they never see Erlang: the installer's managed-runtime
     model (4.2) covers both — a pinned JRE lands in `~/.zc/` next to the pinned OTP build, and
@@ -168,7 +174,7 @@ Working CLI name: `zc` (final language name is open decision #6 — rename then)
   - The runtime is **owned by the dev kit**: `zc toolchain list|install|use`, per-project pin
     in `zc.toml`. Users NEVER apt-install erlang. This is the moment Docker stops being a
     user-facing requirement (CI keeps it).
-- **4.3 Error source-maps** — map erlc/runtime errors back to `.src` spans (the transpiler
+- **4.3 Error source-maps** — map erlc/runtime errors back to `.zinc` spans (the transpiler
   tax; budget real time, it's what makes the toolchain feel native instead of leaky).
 
 ## Phase 5: **deploy — the anti-K8s story**

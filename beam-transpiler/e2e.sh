@@ -39,8 +39,8 @@ fail=0
 for ex in "${examples[@]}"; do
   dir="out/$ex"
   rm -rf "$dir" && mkdir -p "$dir"
-  src="examples/$ex.src"
-  [ -d "examples/$ex" ] && src="examples/$ex"   # project mode: a directory of .src files
+  src="examples/$ex.zinc"
+  [ -d "examples/$ex" ] && src="examples/$ex"   # project mode: a directory of .zinc files
   if ! "$JAVA" src/zinc/Main.java "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi

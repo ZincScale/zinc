@@ -5,9 +5,9 @@
 > GAP-7/8 documented/deferred. The natural-Java server is now e2e case `tcpserver`.
 > New decision found while fixing: **try/catch is transactional** — a caught try reverts
 > outer-var mutations to try-entry values (Erlang can't observe partial bindings; differs
-> from Java, documented in examples/trycatch.src).
+> from Java, documented in examples/trycatch.zinc).
 
-Program: `tcp_line_server.src` — Acceptor actor + one Conn actor per connection,
+Program: `tcp_line_server.zinc` — Acceptor actor + one Conn actor per connection,
 socket handoff via `controlling_process`, main doubles as test client. **Works**
 (HELLO WORLD / BEAM ME UP) on try 2; try 1 deadlocked on GAP-4. Transpiler was NOT
 modified; every gap routed around in the program and recorded here.
@@ -15,14 +15,14 @@ modified; every gap routed around in the program and recorded here.
 ## Bugs (P0 — fix before anything else)
 
 **GAP-1: break/continue inside try/catch escapes the loop.**
-Evidence: `probe_break_in_try.src` → `{nocatch, {'$brk', 2}}` crash.
+Evidence: `probe_break_in_try.zinc` → `{nocatch, {'$brk', 2}}` crash.
 Cause: `hasBreakContinue` only descends IfStmt, so the loop helper never installs its
 `'$brk'/'$cont'` catcher. Same hole for SwitchStmt arms.
 Fix architecture: `hasBreakContinue` must mirror same-loop-scope reachability through ALL
 non-loop compound statements (IfStmt, TryStmt, SwitchStmt; not nested loops, not SeqStmt's
 inner while). The signals are throw-class and user catch is error-class, so once the
 catcher exists, composition is already sound (verified: return-inside-try works today,
-`probe_return_in_try.src` → 30).
+`probe_return_in_try.zinc` → 30).
 
 **GAP-4: string escape sequences don't exist.**
 `"\n"` lexes as backslash+n; codegen then emits `"\\n"`. Killed the server silently: no
