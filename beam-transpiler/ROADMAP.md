@@ -141,7 +141,14 @@ compile` transpiles `src/**/*.zinc` -> `src/zinc_gen/*.erl` first (transpiler vi
 project, rebar3 in docker + host JDK mounted). Forced decision: source extension is now
 **`.zinc`** — `.src` collided with rebar3's mandatory `<app>.app.src`.
 
-### Next: cowboy dogfood (hex deps via the plugin) + `import elixir.*` FFI; then `zc` CLI.
+### `zc` CLI v1: DONE (`zc/Zc.java` + `bin/zc`, patterned on compilers/zinc-go cmd/zinc)
+`zc init|build|run|clean|add|deps|version` (fmt stubbed). zinc.toml ([project] name/version,
+[otp] version pin, [deps] hex table) -> zc GENERATES rebar.config + <app>.app.src (like
+zinc-go generates go.mod) and wires the rebar_zinc plugin via _checkouts; rebar3/erl from
+PATH (managed runtime comes in 4.2). Single-file Java CLI, no build step. Test: zc/test.sh
+(init -> run -> "Hello from demo!").
+
+### Next: cowboy dogfood (hex deps now via `zc add cowboy@...`) + `import elixir.*` FFI.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:

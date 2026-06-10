@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# zc shim: runs the single-file Java CLI with ZINC_HOME pointing at beam-transpiler.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec "${ZINC_JAVA:-java}" -Dzinc.home="$ROOT" "$ROOT/zc/Zc.java" "$@"
