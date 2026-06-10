@@ -1,0 +1,16 @@
+public class Main {
+  public static void main(String[] args) {
+    int n = 0;
+    while (true) {
+      try {
+        n = n + 1;
+        if (n > 2) {
+          int x = 1 / 0;
+        }
+      } catch (Exception e) {
+        break;
+      }
+    }
+    System.out.println(n);  // expect 3
+  }
+}

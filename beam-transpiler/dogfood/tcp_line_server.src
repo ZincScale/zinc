@@ -1,0 +1,73 @@
+// Dogfood: TCP line server. One Acceptor actor; one Conn actor per connection.
+// main() doubles as the test client so the run is self-contained + deterministic.
+import erlang.gen_tcp;
+import erlang.inet;
+import erlang.erlang;
+import erlang.io_lib;
+
+actor Conn {
+  void serve(Object sock) {
+    // workaround GAP-4: lexer has no escape sequences, "\n" is backslash-n
+    String nl = erlang.list_to_binary(io_lib.nl());
+    boolean open = true;            // workaround GAP-1: break-inside-catch escapes loops
+    while (open) {
+      try {
+        String line = Erlang.ok(gen_tcp.recv(sock, 0));
+        String resp = line.trim().toUpperCase() + nl;
+        gen_tcp.send(sock, resp);
+      } catch (Exception e) {
+        open = false;               // peer closed
+      }
+    }
+  }
+}
+
+actor Acceptor {
+  void run(Object lsock) {
+    boolean up = true;
+    while (up) {
+      try {
+        var sock = Erlang.ok(gen_tcp.accept(lsock));
+        var conn = spawn Conn();
+        gen_tcp.controlling_process(sock, erlang.whereis(conn));
+        conn.serve(sock);
+      } catch (Exception e) {
+        up = false;                 // listen socket closed
+      }
+    }
+  }
+}
+
+public class Main {
+  public static void main(String[] args) {
+    var opts = new ArrayList();     // workaround GAP-2: no List.of(...) literal
+    opts.add(Atom.binary);
+    opts.add(Tuple.of(Atom.packet, Atom.line));
+    opts.add(Tuple.of(Atom.active, false));
+    opts.add(Tuple.of(Atom.reuseaddr, true));
+    var lsock = Erlang.ok(gen_tcp.listen(0, opts));
+    int port = Erlang.ok(inet.port(lsock));
+
+    var acceptor = spawn Acceptor();
+    acceptor.run(lsock);
+
+    // --- client side ---
+    var copts = new ArrayList();
+    copts.add(Atom.binary);
+    copts.add(Tuple.of(Atom.packet, Atom.line));
+    copts.add(Tuple.of(Atom.active, false));
+    // workaround GAP-3: gen_tcp wants hostname as charlist/atom/ip-tuple, String is a binary
+    var cs = Erlang.ok(gen_tcp.connect(Tuple.of(127, 0, 0, 1), port, copts));
+
+    String nl = erlang.list_to_binary(io_lib.nl());   // GAP-4 again
+    gen_tcp.send(cs, "hello world" + nl);
+    String r1 = Erlang.ok(gen_tcp.recv(cs, 0, 5000));
+    System.out.println(r1.trim());        // HELLO WORLD
+
+    gen_tcp.send(cs, "  beam me up  " + nl);
+    String r2 = Erlang.ok(gen_tcp.recv(cs, 0, 5000));
+    System.out.println(r2.trim());        // BEAM ME UP
+
+    gen_tcp.close(cs);
+  }
+}
