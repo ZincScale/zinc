@@ -1,0 +1,20 @@
+// Constructor args (restart re-runs the SAME constructor) + typed handle params
+actor Counter {
+  int count;
+  Counter(int start) { count = start; }
+  void incr()        { count = count + 1; }
+  int get()          { return count; }
+}
+
+public class Main {
+  static void bump(Counter c) {   // handles pass like any value: type drives dispatch
+    c.incr();
+  }
+
+  public static void main(String[] args) {
+    var c = spawn Counter(40);
+    bump(c);
+    bump(c);
+    System.out.println(c.get());  // 42
+  }
+}

@@ -107,10 +107,25 @@ in beam-lab). Facade dispatch is by the receiver's STATIC type, so chains work
 - HashMap/Map: put/remove (statements), get/getOrDefault/containsKey/size/isEmpty/keySet/values
 - Statics: Math.max/min/abs, Integer.parseInt, String.valueOf
 
-### Remaining shape backlog
-Index/array assignment (needs the array-module tier from LOWERING_SPEC — design properly),
-switch (with tuple/record patterns), string/array ops sugar, actor args + cross-file actors
-+ handles-in-data, interfaces/enums, typechecker, error source-maps.
+### Language-shape round 3: DONE (e2e 22/22) — shape complete, ready for dogfood
+- **Arrays = Erlang `array` module** (the LOWERING_SPEC tier): `T[]` is fixed-size +
+  indexable (`xs[i] = v` -> `array:set`, O(log n)); `List` stays an Erlang list (growable,
+  iterable). Bridges: `Arrays.asList(xs)` / `list.toArray()` — also the explicit FFI
+  boundary. `new int[n]` -> `array:new` with typed default; `.length` -> `array:size`;
+  for-each converts once per loop.
+- **switch** (arrow form): constants + bare enum labels (subject-typed), multi-label,
+  default; phi-merge across arms; no-match without default is a no-op (Java semantics).
+- **enum -> atoms**: `enum Color { RED }`, `Color.RED` -> `'RED'`; switch + == work.
+- **Actor constructors**: `spawn Counter(40)` -> ctor params via init args, embedded in the
+  child spec, so a supervisor restart re-runs the SAME constructor. Fields may omit
+  initializers (typed defaults).
+- **Cross-file actors + typed handles**: actor registry is project-wide; handle dispatch is
+  by static type (`Counter c` param/field works) — no more var-binding-only tracking.
+
+Out of shape scope (deliberately): typechecker (Phase 6), error source-maps (Phase 4.3),
+interfaces, streams facade, handles in collections (need generics story).
+
+### Next: the dogfood target — pick a real program, expect it to compile in 1-2 tries.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:

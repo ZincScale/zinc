@@ -1,11 +1,14 @@
+// T[] = Erlang array module: O(log n) indexed read/write, fixed-size Java semantics
 public class Main {
   public static void main(String[] args) {
     int[] xs = {10, 20, 30, 40};
+    xs[1] = 25;             // index assignment -> array:set
+    xs[1] += 5;
     int acc = 0;
     for (int x : xs) {
       acc += x;
     }
-    acc += xs.length - xs.length;     // exercise .length
-    System.out.println(acc + xs[0] - xs[0]);  // 100, exercises indexing
+    int[] zeros = new int[3];
+    System.out.println(acc + xs.length + zeros.length + zeros[0]);  // 110+4+3+0 = 117
   }
 }

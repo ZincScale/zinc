@@ -4,5 +4,8 @@ public class Main {
   public static void main(String[] args) {
     int s = MathUtil.sumTo(4);              // 10
     System.out.println(Fmt.banner("" + s)); // [10]  (Fmt is in the root package)
+    var t = spawn Tick();                   // actor declared in another file
+    t.inc();
+    System.out.println(t.get());            // 1
   }
 }

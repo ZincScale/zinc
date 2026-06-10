@@ -21,39 +21,40 @@ public class Main {
       Path in = Path.of(args[0]);
       List<Program> files = parseAll(in);
 
-      // project-wide registries; every module name must be unique
+      // project-wide registries; type names and module names must be unique
       var classes = new LinkedHashMap<String, ClassInfo>();
-      var records = new LinkedHashMap<String, RecordDecl>();
+      var records = new LinkedHashMap<String, Ast.RecordDecl>();
+      var enums = new LinkedHashMap<String, Ast.EnumDecl>();
+      var actors = new LinkedHashMap<String, Ast.ActorDecl>();
       var modules = new java.util.HashSet<String>(List.of("actor_sup"));
+      var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tuple", "Erlang",
-          "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "String", "Exception");
-      boolean hasActors = false;
+          "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
+          "String", "Exception");
       for (Program p : files) {
         var names = new ArrayList<String>();
         p.classes().forEach(c -> names.add(c.name()));
         p.records().forEach(r -> names.add(r.name()));
         p.actors().forEach(a -> names.add(a.name()));
+        p.enums().forEach(e2 -> names.add(e2.name()));
         for (String n : names) {
           if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
+          if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
         }
         for (var c : p.classes()) {
           var methods = new LinkedHashMap<String, String>();
           for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
-          if (classes.put(c.name(), new ClassInfo(c.erlMod(), methods)) != null
-              || !modules.add(c.erlMod())) {
-            throw new CompileError("duplicate class/module name: " + c.name());
+          classes.put(c.name(), new ClassInfo(c.erlMod(), methods));
+          if (!modules.add(c.erlMod())) {
+            throw new CompileError("module name collision: " + c.name());
           }
         }
-        for (var r : p.records()) {
-          if (records.put(r.name(), r) != null) {
-            throw new CompileError("duplicate record name: " + r.name());
-          }
-        }
+        p.records().forEach(r -> records.put(r.name(), r));
+        p.enums().forEach(e2 -> enums.put(e2.name(), e2));
         for (var a : p.actors()) {
-          hasActors = true;
+          actors.put(a.name(), a);
           if (!modules.add(a.erlMod())) {
-            throw new CompileError("actor name '" + a.name()
-                + "' collides with a class, another actor, or a reserved name");
+            throw new CompileError("module name collision: actor " + a.name());
           }
         }
       }
@@ -63,9 +64,11 @@ public class Main {
       }
 
       // generate everything before writing anything: no partial output on a compile error
+      boolean hasActors = !actors.isEmpty();
       var generated = new LinkedHashMap<String, String>();
       for (Program p : files) {
-        generated.putAll(new CodeGen(p, classes, records, hasActors).generateAll());
+        generated.putAll(
+            new CodeGen(p, classes, records, enums, actors, hasActors).generateAll());
       }
       if (hasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
 
@@ -108,6 +111,7 @@ public class Main {
     prog.classes().forEach(c -> names.add(c.name()));
     prog.records().forEach(r -> names.add(r.name()));
     prog.actors().forEach(a -> names.add(a.name()));
+    prog.enums().forEach(e -> names.add(e.name()));
     if (!names.contains(stem)) {
       throw new CompileError(rel + " must declare a type named '" + stem + "'");
     }

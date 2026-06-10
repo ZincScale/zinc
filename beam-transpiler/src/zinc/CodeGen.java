@@ -22,6 +22,8 @@ class CodeGen {
   private final Program program;
   private final Map<String, ClassInfo> classes;   // project-wide, by class name
   private final Map<String, RecordDecl> records;  // project-wide, by record name
+  private final Map<String, EnumDecl> enums;      // project-wide, by enum name
+  private final Map<String, ActorDecl> allActors; // project-wide: spawn/dispatch anywhere
   private final Map<String, ActorDecl> actors = new LinkedHashMap<>(); // this file's
   private final Map<String, String> ffi = new LinkedHashMap<>(); // alias -> erlang module
   private final boolean projectHasActors;
@@ -29,16 +31,18 @@ class CodeGen {
   private String curModule;
   private String curClassName;
   private boolean inActor = false;
-  private Map<String, ActorDecl> handleTypes = new HashMap<>(); // var -> spawned actor
   private Map<String, String> varTypes = new HashMap<>();       // var -> type, per method
   private int ctr = 0;
   private List<String> helpers = new ArrayList<>();
 
   CodeGen(Program program, Map<String, ClassInfo> classes, Map<String, RecordDecl> records,
+      Map<String, EnumDecl> enums, Map<String, ActorDecl> allActors,
       boolean projectHasActors) {
     this.program = program;
     this.classes = classes;
     this.records = records;
+    this.enums = enums;
+    this.allActors = allActors;
     this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
       // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
@@ -78,13 +82,13 @@ class CodeGen {
 
   static final String SUP_SOURCE = "-module(actor_sup).\n"
       + "-behaviour(supervisor).\n"
-      + "-export([start_link/0, spawn_child/1, init/1]).\n\n"
+      + "-export([start_link/0, spawn_child/2, init/1]).\n\n"
       + "start_link() -> supervisor:start_link({local, actor_sup}, ?MODULE, []).\n\n"
-      + "spawn_child(Mod) ->\n"
+      + "spawn_child(Mod, Args) ->\n"
       + "    N = erlang:unique_integer([positive]),\n"
       + "    Name = list_to_atom(atom_to_list(Mod) ++ \"_\" ++ integer_to_list(N)),\n"
       + "    {ok, _} = supervisor:start_child(actor_sup,\n"
-      + "        #{id => Name, start => {Mod, start_link, [Name]}, restart => permanent,\n"
+      + "        #{id => Name, start => {Mod, start_link, [Name, Args]}, restart => permanent,\n"
       + "          shutdown => 5000, type => worker, modules => [Mod]}),\n"
       + "    Name.\n\n"
       + "init([]) ->\n"
@@ -149,7 +153,6 @@ class CodeGen {
   }
 
   private String genFn(MethodDecl m) {
-    handleTypes = new HashMap<>();
     varTypes = new HashMap<>();
     var env = new HashMap<String, String>();
     var params = new ArrayList<String>();
@@ -186,12 +189,13 @@ class CodeGen {
         calls.add(genHandler(a, m, true));
       }
     }
-    var exports = new ArrayList<>(List.of("start_link/1", "init/1"));
+    var exports = new ArrayList<>(List.of("start_link/2", "init/1"));
     if (!calls.isEmpty()) exports.add("handle_call/3");
     if (!casts.isEmpty()) exports.add("handle_cast/2");
 
     var pieces = new ArrayList<String>();
-    pieces.add("start_link(Name) -> gen_server:start_link({local, Name}, ?MODULE, [], []).");
+    pieces.add(
+        "start_link(Name, Args) -> gen_server:start_link({local, Name}, ?MODULE, Args, []).");
     pieces.add(genInit(a));
     // no catch-all clauses: unknown messages crash the actor, the supervisor heals it
     if (!casts.isEmpty()) pieces.add(String.join(";\n", casts) + ".");
@@ -207,23 +211,48 @@ class CodeGen {
   }
 
   private String genInit(ActorDecl a) {
-    handleTypes = new HashMap<>();
     varTypes = new HashMap<>();
     var env = new HashMap<String, String>();
+    String head = "init([])";
+    if (a.ctor() != null) {
+      var ps = new ArrayList<String>();
+      for (Param p : a.ctor().params()) {
+        String v = fresh(p.name());
+        env.put(p.name(), v);
+        varTypes.put(p.name(), p.type());
+        ps.add(v);
+      }
+      head = "init([" + String.join(", ", ps) + "])";
+    }
     var lines = new ArrayList<String>();
     for (FieldDecl f : a.fields()) {
       String v = fresh(f.name());
-      lines.add(v + " = " + genExpr(f.init(), env));
+      lines.add(v + " = " + (f.init() == null ? defaultFor(f.type()) : genExpr(f.init(), env)));
       env.put(f.name(), v);
       varTypes.put(f.name(), f.type());
     }
+    if (a.ctor() != null) {
+      if (countReturns(a.ctor().body()) > 0) {
+        throw new CompileError("actor " + a.name() + ": constructor cannot return");
+      }
+      lines.addAll(genStmts(a.ctor().body().stmts(), env, false, null));
+    }
     lines.add("{ok, " + stateMap(a, env) + "}");
-    return "init([]) ->\n        " + String.join(",\n        ", lines) + ".";
+    return head + " ->\n        " + String.join(",\n        ", lines) + ".";
+  }
+
+  private static String defaultFor(String type) {
+    return switch (type) {
+      case "int" -> "0";
+      case "double" -> "0.0";
+      case "boolean" -> "false";
+      case "String" -> "<<>>";
+      default -> "undefined";
+    };
   }
 
   /** One handle_cast/handle_call clause: fields seeded via maps:get, SSA body, new state map. */
   private String genHandler(ActorDecl a, MethodDecl m, boolean isCall) {
-    handleTypes = new HashMap<>();
     varTypes = new HashMap<>();
     var env = new HashMap<String, String>();
     var params = new ArrayList<String>();
@@ -282,14 +311,19 @@ class CodeGen {
         case VarStmt st -> {
           String v = fresh(st.name());
           if (st.init() instanceof SpawnExpr sp) {
-            ActorDecl a = actors.get(sp.actorName());
-            if (a == null) {
-              throw new CompileError("unknown actor: " + sp.actorName()
-                  + " (actors are file-local in v1)");
+            ActorDecl a = allActors.get(sp.actorName());
+            if (a == null) throw new CompileError("unknown actor: " + sp.actorName());
+            int want = a.ctor() == null ? 0 : a.ctor().params().size();
+            if (sp.args().size() != want) {
+              throw new CompileError("spawn " + a.name() + ": constructor takes " + want
+                  + " args, got " + sp.args().size());
             }
-            out.add(v + " = actor_sup:spawn_child(" + a.erlMod() + ")");
-            handleTypes.put(st.name(), a);
+            out.add(v + " = actor_sup:spawn_child(" + a.erlMod() + ", ["
+                + genArgs(sp.args(), env) + "])");
             varTypes.put(st.name(), a.name());
+          } else if (st.init() instanceof ListLit && st.type().endsWith("[]")) {
+            out.add(v + " = array:from_list(" + genExpr(st.init(), env) + ")");
+            varTypes.put(st.name(), st.type());
           } else {
             out.add(v + " = " + genExpr(st.init(), env));
             varTypes.put(st.name(),
@@ -345,6 +379,27 @@ class CodeGen {
           String rebind = st.expr() instanceof MethodCall mc ? genMutator(mc, env) : null;
           out.add(rebind != null ? rebind : genExpr(st.expr(), env));
         }
+        case IndexAssignStmt st -> {
+          String t = varTypes.get(st.arrVar());
+          if (t == null || !t.endsWith("[]")) {
+            throw new CompileError("index assignment needs an array-typed variable, '"
+                + st.arrVar() + "' is " + (t == null ? "untyped" : t));
+          }
+          String cur = envGet(env, st.arrVar());
+          String iv = fresh("i");
+          out.add(iv + " = " + genExpr(st.index(), env));
+          String rhs = switch (st.op()) {
+            case "=" -> genExpr(st.value(), env);
+            case "+=" -> "array:get(" + iv + ", " + cur + ") + " + genExpr(st.value(), env);
+            case "-=" -> "array:get(" + iv + ", " + cur + ") - " + genExpr(st.value(), env);
+            case "*=" -> "array:get(" + iv + ", " + cur + ") * " + genExpr(st.value(), env);
+            default -> throw new CompileError("bad assign op " + st.op());
+          };
+          String v = fresh(st.arrVar());
+          out.add(v + " = array:set(" + iv + ", " + rhs + ", " + cur + ")");
+          env.put(st.arrVar(), v);
+        }
+        case SwitchStmt st -> out.add(genSwitch(st, env, loopMut));
         case IfStmt st -> out.add(genIf(st, env, loopMut));
         case ForEachStmt st -> out.add(genForEach(st, env));
         case WhileStmt st -> out.add(genWhile(st, env));
@@ -431,6 +486,68 @@ class CodeGen {
     return lhs + " = case " + cond + " of true -> " + tArm + "; false -> " + eArm + " end";
   }
 
+  /** Arrow switch -> case with one clause per label; assigned vars phi-merge across arms. */
+  private String genSwitch(SwitchStmt s, Map<String, String> env, List<String> loopMut) {
+    String subj = genExpr(s.subject(), env);
+    String subjType = exprType(s.subject());
+    var assigned = new LinkedHashSet<String>();
+    for (SwitchCase c : s.cases()) collectAssigned(c.body(), assigned);
+    if (s.defaultBlock() != null) collectAssigned(s.defaultBlock(), assigned);
+    var phi = assigned.stream().filter(env::containsKey).toList();
+
+    var clauses = new ArrayList<String>();
+    for (SwitchCase c : s.cases()) {
+      var armEnv = new HashMap<>(env);
+      List<String> code = genStmts(c.body().stmts(), armEnv, false, loopMut);
+      String arm = phi.isEmpty()
+          ? (code.isEmpty() ? "ok" : String.join(", ", code))
+          : ifArm(code, armEnv, endsInJump(c.body()), phi);
+      for (Expr label : c.labels()) {
+        clauses.add(switchLabel(label, subjType) + " -> " + arm);
+      }
+    }
+    String defArm;
+    if (s.defaultBlock() != null) {
+      var defEnv = new HashMap<>(env);
+      List<String> code = genStmts(s.defaultBlock().stmts(), defEnv, false, loopMut);
+      defArm = phi.isEmpty()
+          ? (code.isEmpty() ? "ok" : String.join(", ", code))
+          : ifArm(code, defEnv, endsInJump(s.defaultBlock()), phi);
+    } else {
+      // Java: a non-matching switch statement is a no-op
+      defArm = phi.isEmpty() ? "ok" : ifArm(List.of(), env, false, phi);
+    }
+    clauses.add("_ -> " + defArm);
+
+    String body = "case " + subj + " of " + String.join("; ", clauses) + " end";
+    if (phi.isEmpty()) return body;
+    var newNames = new ArrayList<String>();
+    for (String v : phi) newNames.add(fresh(v));
+    String lhs = newNames.size() == 1 ? newNames.get(0) : "{" + String.join(", ", newNames) + "}";
+    for (int i = 0; i < phi.size(); i++) {
+      env.put(phi.get(i), newNames.get(i));
+    }
+    return lhs + " = " + body;
+  }
+
+  /** Constant label pattern; bare enum values resolve when the subject is enum-typed. */
+  private String switchLabel(Expr label, String subjType) {
+    if (label instanceof VarRef vr) {
+      EnumDecl ed = subjType == null ? null : enums.get(subjType);
+      if (ed != null && ed.values().contains(vr.name())) return "'" + vr.name() + "'";
+      throw new CompileError("switch label '" + vr.name() + "' is not a constant"
+          + (ed != null ? " of enum " + subjType : ""));
+    }
+    if (label instanceof Unary u && u.op().equals("-") && u.operand() instanceof IntLit i) {
+      return "-" + i.value(); // no parens: patterns reject them
+    }
+    if (label instanceof IntLit || label instanceof BoolLit || label instanceof StrLit
+        || label instanceof FieldAccess) {
+      return genExpr(label, new HashMap<>());
+    }
+    throw new CompileError("switch labels must be constants");
+  }
+
   /**
    * Like if: vars assigned in either block phi-merge. catch error:E only — internal
    * control-flow signals ('$ret'/'$brk'/'$cont') are throw-class and pass through.
@@ -480,6 +597,13 @@ class CodeGen {
 
   private String genForEach(ForEachStmt s, Map<String, String> env) {
     String listCode = genExpr(s.iterable(), env);
+    String iterType = exprType(s.iterable());
+    if (iterType != null && iterType.endsWith("[]")) {
+      listCode = "array:to_list(" + listCode + ")";
+      if (s.varType().equals("var")) {
+        varTypes.put(s.varName(), iterType.substring(0, iterType.length() - 2));
+      }
+    }
     List<String> mut = mutated(s.body(), env);
     var exclude = new LinkedHashSet<String>();
     exclude.add(s.varName());
@@ -649,17 +773,38 @@ class CodeGen {
         yield "#{" + String.join(", ", entries) + "}";
       }
       case FieldAccess x -> {
-        // Atom.ok -> the atom ok (enum-constant syntax)
-        if (x.obj() instanceof VarRef vr && vr.name().equals("Atom") && !env.containsKey("Atom")) {
-          if (!x.field().matches("[a-z][a-zA-Z0-9_]*")) {
-            throw new CompileError("Atom." + x.field() + ": atoms must start lowercase");
+        if (x.obj() instanceof VarRef vr && !env.containsKey(vr.name())) {
+          // Atom.ok -> the atom ok; Color.RED -> 'RED' (enum values are atoms)
+          if (vr.name().equals("Atom")) {
+            if (!x.field().matches("[a-z][a-zA-Z0-9_]*")) {
+              throw new CompileError("Atom." + x.field() + ": atoms must start lowercase");
+            }
+            yield x.field();
           }
-          yield x.field();
+          EnumDecl ed = enums.get(vr.name());
+          if (ed != null) {
+            if (!ed.values().contains(x.field())) {
+              throw new CompileError("enum " + vr.name() + " has no value " + x.field());
+            }
+            yield "'" + x.field() + "'";
+          }
         }
-        if (x.field().equals("length")) yield "length(" + genExpr(x.obj(), env) + ")";
+        if (x.field().equals("length")) {
+          String t = exprType(x.obj());
+          yield t != null && t.endsWith("[]")
+              ? "array:size(" + genExpr(x.obj(), env) + ")"
+              : "length(" + genExpr(x.obj(), env) + ")";
+        }
         yield "maps:get(" + x.field() + ", " + genExpr(x.obj(), env) + ")";
       }
-      case Index x -> "lists:nth((" + genExpr(x.index(), env) + ") + 1, " + genExpr(x.obj(), env) + ")";
+      case Index x -> {
+        String t = exprType(x.obj());
+        yield t != null && t.endsWith("[]")
+            ? "array:get(" + genExpr(x.index(), env) + ", " + genExpr(x.obj(), env) + ")"
+            : "lists:nth((" + genExpr(x.index(), env) + ") + 1, " + genExpr(x.obj(), env) + ")";
+      }
+      case ArrayNewExpr x -> "array:new(" + genExpr(x.size(), env) + ", {default, "
+          + defaultFor(x.elemType()) + "})";
       case Unary x -> {
         String inner = genExpr(x.operand(), env);
         yield x.op().equals("!") ? "(not " + inner + ")" : "(" + x.op() + inner + ")";
@@ -741,6 +886,19 @@ class CodeGen {
     if ("String".equals(tt)) return genStringMethod(x, env);
     if ("ArrayList".equals(tt) || "List".equals(tt)) return genListMethod(x, env);
     if ("HashMap".equals(tt) || "Map".equals(tt)) return genMapMethod(x, env);
+    // actor handle: anything statically typed as an actor (var from spawn, params, fields)
+    ActorDecl actor = tt == null ? null : allActors.get(tt);
+    if (actor != null) {
+      int arity = x.args().size();
+      MethodDecl m = actor.methods().stream()
+          .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
+          .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
+              + " has no method " + x.method() + "/" + arity));
+      String msg = x.args().isEmpty() ? "{" + x.method() + "}"
+          : "{" + x.method() + ", " + genArgs(x.args(), env) + "}";
+      String kind = m.retType().equals("void") ? "cast" : "call";
+      return "gen_server:" + kind + "(" + genExpr(x.target(), env) + ", " + msg + ")";
+    }
     RecordDecl r = tt == null ? null : records.get(tt);
     if (r != null && x.args().isEmpty()
         && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
@@ -793,19 +951,13 @@ class CodeGen {
           return "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
         }
       }
+      case "Arrays" -> {
+        if (x.method().equals("asList")) {
+          return "array:to_list(" + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: Arrays." + x.method());
+      }
       default -> {}
-    }
-    ActorDecl actor = handleTypes.get(name);
-    if (actor != null) {
-      int arity = x.args().size();
-      MethodDecl m = actor.methods().stream()
-          .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
-          .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
-              + " has no method " + x.method() + "/" + arity));
-      String msg = x.args().isEmpty() ? "{" + x.method() + "}"
-          : "{" + x.method() + ", " + genArgs(x.args(), env) + "}";
-      String kind = m.retType().equals("void") ? "cast" : "call";
-      return "gen_server:" + kind + "(" + envGet(env, name) + ", " + msg + ")";
     }
     if (!env.containsKey(name)) {
       ClassInfo ci = classes.get(name);
@@ -858,7 +1010,8 @@ class CodeGen {
       }
       case "replace" -> "iolist_to_binary(string:replace(" + r + ", "
           + genExpr(x.args().get(0), env) + ", " + genExpr(x.args().get(1), env) + ", all))";
-      case "split" -> "string:split(" + r + ", " + genExpr(x.args().get(0), env) + ", all)";
+      case "split" -> "array:from_list(string:split(" + r + ", "
+          + genExpr(x.args().get(0), env) + ", all))"; // Java split returns an array
       case "repeat" -> "binary:copy(" + r + ", " + genExpr(x.args().get(0), env) + ")";
       default -> throw new CompileError("unsupported: String." + x.method());
     };
@@ -871,6 +1024,7 @@ class CodeGen {
       case "size" -> "length(" + r + ")";
       case "contains" -> "lists:member(" + genExpr(x.args().get(0), env) + ", " + r + ")";
       case "isEmpty" -> "(" + r + " =:= [])";
+      case "toArray" -> "array:from_list(" + r + ")";
       case "add" -> throw new CompileError("List.add mutates: use it as a statement");
       default -> throw new CompileError("unsupported: List." + x.method());
     };
@@ -940,9 +1094,13 @@ class CodeGen {
       case ListLit x -> null;
       case NewExpr x -> x.typeName();
       case FieldAccess x -> {
-        if (x.obj() instanceof VarRef vr && vr.name().equals("Atom")) yield "Atom";
+        if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
+          if (vr.name().equals("Atom")) yield "Atom";
+          if (enums.containsKey(vr.name())) yield vr.name();
+        }
         yield x.field().equals("length") ? "int" : null;
       }
+      case ArrayNewExpr x -> x.elemType() + "[]";
       case LambdaExpr x -> "Function";
       case Index x -> {
         String t = exprType(x.obj());
@@ -968,18 +1126,19 @@ class CodeGen {
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
           if (vr.name().equals("String")) yield x.method().equals("valueOf") ? "String" : null;
-          ActorDecl actor = handleTypes.get(vr.name());
-          if (actor != null) {
-            yield actor.methods().stream()
-                .filter(m -> m.name().equals(x.method()) && m.params().size() == x.args().size())
-                .map(MethodDecl::retType).findFirst().orElse(null);
-          }
+          if (vr.name().equals("Arrays")) yield x.method().equals("asList") ? "List" : null;
           if (!varTypes.containsKey(vr.name())) {
             ClassInfo ci = classes.get(vr.name());
             if (ci != null) yield ci.methods().get(x.method() + "/" + x.args().size());
           }
         }
         String tt = exprType(x.target());
+        ActorDecl actor = tt == null ? null : allActors.get(tt);
+        if (actor != null) {
+          yield actor.methods().stream()
+              .filter(m -> m.name().equals(x.method()) && m.params().size() == x.args().size())
+              .map(MethodDecl::retType).findFirst().orElse(null);
+        }
         if ("String".equals(tt)) {
           yield switch (x.method()) {
             case "length", "indexOf" -> "int";
@@ -994,6 +1153,7 @@ class CodeGen {
           yield switch (x.method()) {
             case "size" -> "int";
             case "contains", "isEmpty" -> "boolean";
+            case "toArray" -> "Object[]";
             default -> null;
           };
         }
@@ -1031,8 +1191,16 @@ class CodeGen {
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
       if (s instanceof TryStmt it
           && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
+      if (s instanceof SwitchStmt it && switchHasReturn(it)) return true;
     }
     return false;
+  }
+
+  private boolean switchHasReturn(SwitchStmt s) {
+    for (SwitchCase c : s.cases()) {
+      if (hasReturn(c.body())) return true;
+    }
+    return s.defaultBlock() != null && hasReturn(s.defaultBlock());
   }
 
   private boolean hasReturn(Block b) {
@@ -1047,6 +1215,7 @@ class CodeGen {
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
       if (s instanceof TryStmt it
           && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
+      if (s instanceof SwitchStmt it && switchHasReturn(it)) return true;
     }
     return false;
   }
@@ -1064,6 +1233,10 @@ class CodeGen {
         case WhileStmt st -> n += countReturns(st.body());
         case SeqStmt st -> n += countReturns(new Block(st.stmts()));
         case TryStmt st -> n += countReturns(st.tryBlock()) + countReturns(st.catchBlock());
+        case SwitchStmt st -> {
+          for (SwitchCase c : st.cases()) n += countReturns(c.body());
+          if (st.defaultBlock() != null) n += countReturns(st.defaultBlock());
+        }
         default -> {}
       }
     }
@@ -1100,6 +1273,11 @@ class CodeGen {
       switch (s) {
         case AssignStmt st -> out.add(st.name());
         case FieldAssignStmt st -> out.add(st.objVar());
+        case IndexAssignStmt st -> out.add(st.arrVar());
+        case SwitchStmt st -> {
+          for (SwitchCase c : st.cases()) collectAssigned(c.body(), out);
+          if (st.defaultBlock() != null) collectAssigned(st.defaultBlock(), out);
+        }
         case IfStmt st -> {
           collectAssigned(st.thenBlock(), out);
           if (st.elseBlock() != null) collectAssigned(st.elseBlock(), out);
@@ -1140,6 +1318,16 @@ class CodeGen {
         case FieldAssignStmt st -> {
           out.add(st.objVar());
           exprRefs(st.value(), out);
+        }
+        case IndexAssignStmt st -> {
+          out.add(st.arrVar()); // reads the old array
+          exprRefs(st.index(), out);
+          exprRefs(st.value(), out);
+        }
+        case SwitchStmt st -> {
+          exprRefs(st.subject(), out);
+          for (SwitchCase c : st.cases()) blockRefs(c.body(), out);
+          if (st.defaultBlock() != null) blockRefs(st.defaultBlock(), out);
         }
         case ReturnStmt st -> {
           if (st.value() != null) exprRefs(st.value(), out);
@@ -1200,7 +1388,10 @@ class CodeGen {
         exprRefs(x.target(), out);
         for (Expr a : x.args()) exprRefs(a, out);
       }
-      case SpawnExpr x -> {}
+      case ArrayNewExpr x -> exprRefs(x.size(), out);
+      case SpawnExpr x -> {
+        for (Expr a : x.args()) exprRefs(a, out);
+      }
       case LambdaExpr x -> {
         var inner = new LinkedHashSet<String>();
         blockRefs(x.body(), inner);

@@ -6,7 +6,10 @@ final class Ast {
   private Ast() {}
 
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
-      List<ActorDecl> actors) {}
+      List<ActorDecl> actors, List<EnumDecl> enums) {}
+
+  /** enum Color { RED, GREEN } — values lower to atoms 'RED', 'GREEN'. */
+  record EnumDecl(String name, List<String> values) {}
 
   /** import util.MathUtil; -> class MathUtil defined in util/MathUtil.src */
   record Import(List<String> path) {
@@ -32,13 +35,17 @@ final class Ast {
   /** record Point(int x, int y) {} -> map; accessors p.x() -> maps:get */
   record RecordDecl(String name, List<Param> components) {}
 
-  /** actor -> gen_server module; void method = async cast, typed method = sync call */
-  record ActorDecl(String name, List<FieldDecl> fields, List<MethodDecl> methods) {
+  /** actor -> gen_server module; void method = async cast, typed method = sync call.
+   *  ctor (method named like the actor, null if absent) receives spawn args; the child
+   *  spec embeds them, so a supervisor restart re-runs the SAME constructor. */
+  record ActorDecl(String name, List<FieldDecl> fields, MethodDecl ctor,
+      List<MethodDecl> methods) {
     String erlMod() {
       return name.toLowerCase();
     }
   }
 
+  /** init is null for `int count;` — defaulted by type (0, 0.0, false, "", undefined). */
   record FieldDecl(String type, String name, Expr init) {}
 
   record Block(List<Stmt> stmts) {}
@@ -51,6 +58,14 @@ final class Ast {
   record AssignStmt(String name, String op, Expr value) implements Stmt {}
 
   record FieldAssignStmt(String objVar, String field, String op, Expr value) implements Stmt {}
+
+  /** xs[i] = v  -> SSA rebind via array:set (receiver must be T[]). */
+  record IndexAssignStmt(String arrVar, Expr index, String op, Expr value) implements Stmt {}
+
+  /** Arrow switch; labels are constants (or bare enum values when the subject is an enum). */
+  record SwitchStmt(Expr subject, List<SwitchCase> cases, Block defaultBlock) implements Stmt {}
+
+  record SwitchCase(List<Expr> labels, Block body) {}
 
   record IfStmt(Expr cond, Block thenBlock, Block elseBlock) implements Stmt {}
 
@@ -89,6 +104,9 @@ final class Ast {
 
   record NewExpr(String typeName, List<Expr> args) implements Expr {}
 
+  /** new int[n] -> array:new(N, {default, <type default>}) */
+  record ArrayNewExpr(String elemType, Expr size) implements Expr {}
+
   record FieldAccess(Expr obj, String field) implements Expr {}
 
   record Index(Expr obj, Expr index) implements Expr {}
@@ -103,7 +121,7 @@ final class Ast {
   /** x.f(args): System.out.println / Thread.sleep / Class.staticMethod / record accessor / actor handle */
   record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
 
-  record SpawnExpr(String actorName) implements Expr {}
+  record SpawnExpr(String actorName, List<Expr> args) implements Expr {}
 
   /** x -> e  |  (a, b) -> { ... }  -> Erlang fun; captures must be effectively final. */
   record LambdaExpr(List<String> params, Block body) implements Expr {}

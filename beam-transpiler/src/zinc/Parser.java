@@ -58,6 +58,7 @@ class Parser {
     var classes = new ArrayList<ClassDecl>();
     var records = new ArrayList<RecordDecl>();
     var actors = new ArrayList<ActorDecl>();
+    var enums = new ArrayList<EnumDecl>();
     while (!check(TokKind.EOF)) {
       skipModifiers();
       if (check(TokKind.KW_ACTOR)) {
@@ -66,12 +67,28 @@ class Parser {
         classes.add(parseClass());
       } else if (checkIdent("record")) {
         records.add(parseRecord());
+      } else if (checkIdent("enum")) {
+        enums.add(parseEnum());
       } else {
-        throw new CompileError("Parse error: expected class, record or actor at line "
+        throw new CompileError("Parse error: expected class, record, enum or actor at line "
             + cur().line());
       }
     }
-    return new Program(imports, classes, records, actors);
+    return new Program(imports, classes, records, actors, enums);
+  }
+
+  private EnumDecl parseEnum() {
+    advance(); // 'enum'
+    String name = expect(TokKind.IDENT, "enum name").text();
+    expect(TokKind.LBRACE, "'{'");
+    var values = new ArrayList<String>();
+    values.add(expect(TokKind.IDENT, "enum value").text());
+    while (match(TokKind.COMMA)) {
+      values.add(expect(TokKind.IDENT, "enum value").text());
+    }
+    match(TokKind.SEMI);
+    expect(TokKind.RBRACE, "'}'");
+    return new EnumDecl(name, values);
   }
 
   private Import parseImport() {
@@ -152,21 +169,29 @@ class Parser {
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
     var methods = new ArrayList<MethodDecl>();
+    MethodDecl ctor = null;
     while (!check(TokKind.RBRACE)) {
       skipModifiers();
       String type = parseType();
+      if (type.equals(name) && check(TokKind.LPAREN)) { // constructor
+        if (ctor != null) throw new CompileError("actor " + name + ": duplicate constructor");
+        ctor = new MethodDecl("", name, parseParams(), parseBlock());
+        continue;
+      }
       String memberName = expect(TokKind.IDENT, "member name").text();
       if (check(TokKind.LPAREN)) {
         methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock()));
-      } else {
-        expect(TokKind.ASSIGN, "'=' (actor fields need an initializer)");
+      } else if (match(TokKind.ASSIGN)) {
         Expr init = parseExpr();
         expect(TokKind.SEMI, "';'");
         fields.add(new FieldDecl(type, memberName, init));
+      } else {
+        expect(TokKind.SEMI, "';'");
+        fields.add(new FieldDecl(type, memberName, null)); // defaulted by type
       }
     }
     expect(TokKind.RBRACE, "'}'");
-    return new ActorDecl(name, fields, methods);
+    return new ActorDecl(name, fields, ctor, methods);
   }
 
   // ---- statements ----
@@ -206,11 +231,49 @@ class Parser {
         return new ContinueStmt();
       default:
         if (checkIdent("try")) return parseTry();
+        if (checkIdent("switch") && toks.get(pos + 1).kind() == TokKind.LPAREN) {
+          return parseSwitch();
+        }
         if (looksLikeDecl()) return parseLocalDecl();
         Stmt s = parseSimpleStmt();
         expect(TokKind.SEMI, "';'");
         return s;
     }
+  }
+
+  private Stmt parseSwitch() {
+    advance(); // 'switch'
+    expect(TokKind.LPAREN, "'('");
+    Expr subject = parseExpr();
+    expect(TokKind.RPAREN, "')'");
+    expect(TokKind.LBRACE, "'{'");
+    var cases = new ArrayList<SwitchCase>();
+    Block defaultBlock = null;
+    while (!check(TokKind.RBRACE)) {
+      if (checkIdent("default")) {
+        advance();
+        expect(TokKind.ARROW, "'->'");
+        if (defaultBlock != null) throw new CompileError("duplicate default case");
+        defaultBlock = parseArmBody();
+      } else if (checkIdent("case")) {
+        advance();
+        var labels = new ArrayList<Expr>();
+        labels.add(parseOr()); // parseOr, not parseExpr: labels can't be lambdas
+        while (match(TokKind.COMMA)) {
+          labels.add(parseOr());
+        }
+        expect(TokKind.ARROW, "'->'");
+        cases.add(new SwitchCase(labels, parseArmBody()));
+      } else {
+        throw new CompileError("Parse error: expected case/default at line " + cur().line());
+      }
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new SwitchStmt(subject, cases, defaultBlock);
+  }
+
+  private Block parseArmBody() {
+    return check(TokKind.LBRACE) ? parseBlock() : new Block(List.of(parseStmt()));
   }
 
   private Stmt parseTry() {
@@ -280,6 +343,9 @@ class Parser {
     if (lvalue instanceof VarRef v) return new AssignStmt(v.name(), op, rhs);
     if (lvalue instanceof FieldAccess fa && fa.obj() instanceof VarRef v) {
       return new FieldAssignStmt(v.name(), fa.field(), op, rhs);
+    }
+    if (lvalue instanceof Index ix && ix.obj() instanceof VarRef v) {
+      return new IndexAssignStmt(v.name(), ix.index(), op, rhs);
     }
     throw new CompileError("Parse error: invalid assignment target at line " + cur().line());
   }
@@ -516,15 +582,23 @@ class Parser {
       advance();
       String name = expect(TokKind.IDENT, "actor name").text();
       expect(TokKind.LPAREN, "'('");
+      var args = new ArrayList<Expr>();
       if (!check(TokKind.RPAREN)) {
-        throw new CompileError("Parse error: spawn takes no args in v1, at line " + cur().line());
+        do {
+          args.add(parseExpr());
+        } while (match(TokKind.COMMA));
       }
-      advance();
-      return new SpawnExpr(name);
+      expect(TokKind.RPAREN, "')'");
+      return new SpawnExpr(name, args);
     }
     if (checkIdent("new")) {
       advance();
       String type = expect(TokKind.IDENT, "type name").text();
+      if (match(TokKind.LBRACKET)) { // new int[n]
+        Expr size = parseExpr();
+        expect(TokKind.RBRACKET, "']'");
+        return new ArrayNewExpr(type, size);
+      }
       expect(TokKind.LPAREN, "'('");
       var args = new ArrayList<Expr>();
       if (!check(TokKind.RPAREN)) {
