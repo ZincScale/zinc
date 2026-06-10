@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end: source -> Dart transpiler -> Erlang -> run on BEAM -> assert output.
+# End-to-end: source -> Dart transpiler -> Erlang modules -> erlc -> run on BEAM -> assert output.
 set -uo pipefail
 cd "$(dirname "$0")"
 mkdir -p out
-DART="docker run --rm -v $PWD:/app -w /app dart:stable"
-ERL="docker run --rm -v $PWD:/app -w /app erlang:slim"
+# --user keeps files written into the mount owned by the host user.
+DART="docker run --rm --user $(id -u):$(id -g) -e PUB_CACHE=/tmp/pub -v $PWD:/app -w /app dart:stable"
+ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
 examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont)
 declare -A want=(
@@ -21,16 +22,23 @@ declare -A want=(
 )
 fail=0
 for ex in "${examples[@]}"; do
-  if ! $DART dart bin/main.dart "examples/$ex.src" > "out/$ex.erl" 2>"out/$ex.dart.err"; then
-    echo "FAIL  $ex (transpile)"; sed 's/^/    /' "out/$ex.dart.err"; fail=1; continue
+  dir="out/$ex"
+  rm -rf "$dir" && mkdir -p "$dir"
+  if ! $DART dart bin/main.dart "examples/$ex.src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
+    echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
-  got=$($ERL escript "out/$ex.erl" 2>"out/$ex.run.err")
+  if ! $ERL erlc -o "$dir" "$dir"/*.erl 2>"$dir/compile.err"; then
+    echo "FAIL  $ex (erlc)"; sed 's/^/    /' "$dir/compile.err"; fail=1; continue
+  fi
+  got=$($ERL erl -noshell -pa "$dir" -eval "main:main(), init:stop()." 2>"$dir/run.err")
   if [ "$got" = "${want[$ex]}" ]; then
     echo "PASS  $ex  ->  $got"
   else
     echo "FAIL  $ex  ->  got '$got'  want '${want[$ex]}'"
-    echo "----- generated $ex.erl -----"; sed 's/^/    /' "out/$ex.erl"
-    echo "----- run stderr -----"; sed 's/^/    /' "out/$ex.run.err"
+    for f in "$dir"/*.erl; do
+      echo "----- generated $(basename "$f") -----"; sed 's/^/    /' "$f"
+    done
+    echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
     fail=1
   fi
 done

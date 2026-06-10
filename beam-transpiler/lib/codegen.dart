@@ -1,6 +1,8 @@
 import 'ast.dart';
 
-/// Lowers the imperative AST to Erlang source text (an escript).
+/// Lowers the imperative AST to Erlang module sources (module name -> source).
+/// A program with no actors produces a single 'main' module; actors will add
+/// one gen_server module each plus a supervisor (Phase 1).
 /// Lowerings (validated in beam-lab/LOWERING_SPEC.md):
 ///  - mutable locals -> SSA; mutated-across-loop -> threaded accumulators
 ///  - for/while -> direct tail-recursive helper (free vars captured, mutated threaded)
@@ -28,12 +30,14 @@ class CodeGen {
 
   String _fnName(String src) => src == 'main' ? 'user_main' : src;
 
-  String generate() {
+  Map<String, String> generateModules() {
     final defs = fns.map(_genFn).toList();
     final body = [...defs, ..._helpers, _fmtHelper].join('\n\n');
-    return '#!/usr/bin/env escript\n-mode(compile).\n'
+    final main = '-module(main).\n'
+        '-export([main/0]).\n'
         '-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n'
-        'main(_) -> user_main().\n\n$body\n';
+        'main() -> user_main().\n\n$body\n';
+    return {'main': main};
   }
 
   String _genFn(FnDecl fn) {
