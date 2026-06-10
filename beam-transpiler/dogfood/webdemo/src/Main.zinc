@@ -1,0 +1,29 @@
+// Cowboy HTTP service; main doubles as the test client (deterministic, self-contained).
+import erlang.application;
+import erlang.cowboy_router;
+import erlang.cowboy;
+import erlang.ranch;
+import erlang.httpc;
+import erlang.erlang;
+
+public class Main {
+  public static void main(String[] args) {
+    application.ensure_all_started(Atom.cowboy);
+    // GAP: Atom.x can't express the quoted atom '_' (cowboy's match-any host)
+    var any = erlang.list_to_atom("_".toCharArray());
+    var routes = List.of(Tuple.of(any,
+        List.of(Tuple.of("/", Atom.handler, Atom.undefined))));
+    var dispatch = cowboy_router.compile(routes);
+    var opts = List.of(Tuple.of(Atom.port, 0));
+    Erlang.ok(cowboy.start_clear(Atom.web, opts,
+        Map.of(Atom.env, Map.of(Atom.dispatch, dispatch))));
+    int port = ranch.get_port(Atom.web);
+
+    // --- client ---
+    application.ensure_all_started(Atom.inets);
+    String url = "http://localhost:" + port + "/";
+    var resp = Erlang.ok(httpc.request(url.toCharArray()));  // GAP: httpc wants charlists
+    String body = erlang.list_to_binary(Tuple.get(resp, 2));
+    System.out.println(body.trim());   // hello from zinc
+  }
+}

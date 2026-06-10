@@ -1,0 +1,10 @@
+// A zinc class IS a cowboy handler: cowboy calls handler:init/2.
+import erlang.cowboy_req;
+
+public class Handler {
+  static Object init(Object req, Object state) {
+    var headers = Map.of("content-type", "text/plain");
+    var req2 = cowboy_req.reply(200, headers, "hello from zinc\n", req);
+    return Tuple.of(Atom.ok, req2, state);
+  }
+}
