@@ -1,0 +1,13 @@
+// HashMap -> Erlang map; put/remove are statements (SSA rebind), reads are pure
+public class Main {
+  public static void main(String[] args) {
+    var m = new HashMap();
+    m.put("a", 1);
+    m.put("b", 2);
+    m.put("a", m.get("a") + 10);
+    if (m.containsKey("b")) {
+      m.remove("b");
+    }
+    System.out.println(m.get("a") + m.size());  // 11 + 1 = 12
+  }
+}

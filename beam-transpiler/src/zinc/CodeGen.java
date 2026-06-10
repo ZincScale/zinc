@@ -334,11 +334,28 @@ class CodeGen {
           if (loopMut == null) throw new CompileError("continue outside loop");
           out.add("throw({'$cont', " + loopTuple(loopMut, env) + "})");
         }
-        case ExprStmt st -> out.add(genExpr(st.expr(), env));
+        case ExprStmt st -> {
+          // map mutation as a statement rebinds the receiver (SSA)
+          if (st.expr() instanceof MethodCall mc && mc.target() instanceof VarRef vr
+              && "HashMap".equals(varTypes.get(vr.name())) && env.containsKey(vr.name())
+              && (mc.method().equals("put") || mc.method().equals("remove"))) {
+            String cur = envGet(env, vr.name());
+            String rhs = mc.method().equals("put")
+                ? "maps:put(" + genExpr(mc.args().get(0), env) + ", "
+                    + genExpr(mc.args().get(1), env) + ", " + cur + ")"
+                : "maps:remove(" + genExpr(mc.args().get(0), env) + ", " + cur + ")";
+            String v = fresh(vr.name());
+            out.add(v + " = " + rhs);
+            env.put(vr.name(), v);
+          } else {
+            out.add(genExpr(st.expr(), env));
+          }
+        }
         case IfStmt st -> out.add(genIf(st, env, loopMut));
         case ForEachStmt st -> out.add(genForEach(st, env));
         case WhileStmt st -> out.add(genWhile(st, env));
         case SeqStmt st -> out.addAll(genStmts(st.stmts(), env, false, loopMut));
+        case TryStmt st -> out.add(genTry(st, env, loopMut));
       }
     }
     return out;
@@ -395,6 +412,42 @@ class CodeGen {
       env.put(phi.get(i), newNames.get(i));
     }
     return lhs + " = case " + cond + " of true -> " + tArm + "; false -> " + eArm + " end";
+  }
+
+  /**
+   * Like if: vars assigned in either block phi-merge. catch error:E only — internal
+   * control-flow signals ('$ret'/'$brk'/'$cont') are throw-class and pass through.
+   */
+  private String genTry(TryStmt s, Map<String, String> env, List<String> loopMut) {
+    var assigned = new LinkedHashSet<String>();
+    collectAssigned(s.tryBlock(), assigned);
+    collectAssigned(s.catchBlock(), assigned);
+    var phi = assigned.stream().filter(env::containsKey).toList();
+
+    var tEnv = new HashMap<>(env);
+    List<String> tCode = genStmts(s.tryBlock().stmts(), tEnv, false, loopMut);
+    boolean tJump = endsInJump(s.tryBlock());
+
+    var cEnv = new HashMap<>(env);
+    String ev = fresh(s.exVar());
+    cEnv.put(s.exVar(), ev);
+    List<String> cCode = genStmts(s.catchBlock().stmts(), cEnv, false, loopMut);
+    boolean cJump = endsInJump(s.catchBlock());
+
+    if (phi.isEmpty()) {
+      String t = tCode.isEmpty() ? "ok" : String.join(", ", tCode);
+      String c = cCode.isEmpty() ? "ok" : String.join(", ", cCode);
+      return "try " + t + " catch error:" + ev + " -> " + c + " end";
+    }
+    String tArm = ifArm(tCode, tEnv, tJump, phi);
+    String cArm = ifArm(cCode, cEnv, cJump, phi);
+    var newNames = new ArrayList<String>();
+    for (String v : phi) newNames.add(fresh(v));
+    String lhs = newNames.size() == 1 ? newNames.get(0) : "{" + String.join(", ", newNames) + "}";
+    for (int i = 0; i < phi.size(); i++) {
+      env.put(phi.get(i), newNames.get(i));
+    }
+    return lhs + " = try " + tArm + " catch error:" + ev + " -> " + cArm + " end";
   }
 
   private String ifArm(List<String> code, Map<String, String> benv, boolean jump,
@@ -558,6 +611,10 @@ class CodeGen {
         yield "[" + String.join(", ", elems) + "]";
       }
       case NewExpr x -> {
+        if (x.typeName().equals("HashMap")) {
+          if (!x.args().isEmpty()) throw new CompileError("new HashMap takes no args (v1)");
+          yield "#{}";
+        }
         RecordDecl r = records.get(x.typeName());
         if (r == null) throw new CompileError("unknown record type: " + x.typeName());
         if (r.components().size() != x.args().size()) {
@@ -571,6 +628,13 @@ class CodeGen {
         yield "#{" + String.join(", ", entries) + "}";
       }
       case FieldAccess x -> {
+        // Atom.ok -> the atom ok (enum-constant syntax)
+        if (x.obj() instanceof VarRef vr && vr.name().equals("Atom") && !env.containsKey("Atom")) {
+          if (!x.field().matches("[a-z][a-zA-Z0-9_]*")) {
+            throw new CompileError("Atom." + x.field() + ": atoms must start lowercase");
+          }
+          yield x.field();
+        }
         if (x.field().equals("length")) yield "length(" + genExpr(x.obj(), env) + ")";
         yield "maps:get(" + x.field() + ", " + genExpr(x.obj(), env) + ")";
       }
@@ -598,7 +662,42 @@ class CodeGen {
       case SpawnExpr x ->
           throw new CompileError("spawn must be bound directly: var x = spawn "
               + x.actorName() + "()  (v1)");
+      case LambdaExpr x -> genLambda(x, env);
     };
+  }
+
+  /** Erlang fun; Java's effectively-final capture rule == Erlang's semantics, enforced. */
+  private String genLambda(LambdaExpr x, Map<String, String> env) {
+    var bad = new LinkedHashSet<String>();
+    collectAssigned(x.body(), bad);
+    for (String b : bad) {
+      if (env.containsKey(b) && !x.params().contains(b)) {
+        throw new CompileError("lambda: captured variable '" + b
+            + "' must be effectively final (cannot assign or mutate it)");
+      }
+    }
+    var lenv = new HashMap<>(env);
+    var savedTypes = new HashMap<String, String>();
+    var ps = new ArrayList<String>();
+    for (String p : x.params()) {
+      savedTypes.put(p, varTypes.get(p));
+      varTypes.remove(p);
+      String v = fresh(p);
+      lenv.put(p, v);
+      ps.add(v);
+    }
+    List<String> code = genStmts(x.body().stmts(), lenv, true, null);
+    if (code.isEmpty()) code = List.of("ok");
+    String body = String.join(",\n            ", code);
+    if (needsThrow(x.body())) {
+      String rv = fresh("v");
+      body = "try " + body + " catch throw:{'$ret', " + rv + "} -> " + rv + " end";
+    }
+    for (var e : savedTypes.entrySet()) {
+      if (e.getValue() == null) varTypes.remove(e.getKey());
+      else varTypes.put(e.getKey(), e.getValue());
+    }
+    return "fun(" + String.join(", ", ps) + ") -> " + body + " end";
   }
 
   private String genMethodCall(MethodCall x, Map<String, String> env) {
@@ -619,6 +718,26 @@ class CodeGen {
     if (vr.name().equals("Thread") && x.method().equals("sleep")) {
       return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
     }
+    // Tuple.of(a, b) -> {A, B};  Tuple.get(t, i) -> element(i+1, T)
+    if (vr.name().equals("Tuple")) {
+      if (x.method().equals("of")) {
+        var args = new ArrayList<String>();
+        for (Expr a : x.args()) args.add(genExpr(a, env));
+        return "{" + String.join(", ", args) + "}";
+      }
+      if (x.method().equals("get") && x.args().size() == 2) {
+        return "erlang:element((" + genExpr(x.args().get(1), env) + ") + 1, "
+            + genExpr(x.args().get(0), env) + ")";
+      }
+      throw new CompileError("unsupported: Tuple." + x.method());
+    }
+    // Erlang.ok(e) -> unwrap {ok, V} or raise catchable {badmatch, Other}
+    if (vr.name().equals("Erlang") && x.method().equals("ok")) {
+      String v = fresh("ok");
+      String o = fresh("err");
+      return "case " + genExpr(x.args().get(0), env) + " of {ok, " + v + "} -> " + v
+          + "; " + o + " -> erlang:error({badmatch, " + o + "}) end";
+    }
     // actor handle
     ActorDecl actor = handleTypes.get(vr.name());
     if (actor != null) {
@@ -634,8 +753,19 @@ class CodeGen {
       String kind = m.retType().equals("void") ? "cast" : "call";
       return "gen_server:" + kind + "(" + envGet(env, vr.name()) + ", " + msg + ")";
     }
-    // record accessor: p.x()
+    // record accessor p.x(); HashMap reads (put/remove are statements -> SSA rebind)
     if (env.containsKey(vr.name())) {
+      if ("HashMap".equals(varTypes.get(vr.name()))) {
+        String m = envGet(env, vr.name());
+        return switch (x.method()) {
+          case "get" -> "maps:get(" + genExpr(x.args().get(0), env) + ", " + m + ")";
+          case "containsKey" -> "maps:is_key(" + genExpr(x.args().get(0), env) + ", " + m + ")";
+          case "size" -> "maps:size(" + m + ")";
+          case "put", "remove" -> throw new CompileError(
+              "HashMap." + x.method() + " mutates: use it as a statement");
+          default -> throw new CompileError("unsupported: HashMap." + x.method());
+        };
+      }
       RecordDecl r = records.get(varTypes.get(vr.name()));
       if (r != null && x.args().isEmpty()
           && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
@@ -710,7 +840,11 @@ class CodeGen {
       case VarRef x -> varTypes.get(x.name());
       case ListLit x -> null;
       case NewExpr x -> x.typeName();
-      case FieldAccess x -> x.field().equals("length") ? "int" : null;
+      case FieldAccess x -> {
+        if (x.obj() instanceof VarRef vr && vr.name().equals("Atom")) yield "Atom";
+        yield x.field().equals("length") ? "int" : null;
+      }
+      case LambdaExpr x -> "Function";
       case Index x -> {
         String t = exprType(x.obj());
         yield t != null && t.endsWith("[]") ? t.substring(0, t.length() - 2) : null;
@@ -731,6 +865,14 @@ class CodeGen {
       }
       case MethodCall x -> {
         if (!(x.target() instanceof VarRef vr)) yield null;
+        if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
+        if ("HashMap".equals(varTypes.get(vr.name()))) {
+          yield switch (x.method()) {
+            case "size" -> "int";
+            case "containsKey" -> "boolean";
+            default -> null;
+          };
+        }
         ActorDecl actor = handleTypes.get(vr.name());
         if (actor != null) {
           yield actor.methods().stream()
@@ -763,6 +905,8 @@ class CodeGen {
       if (s instanceof ForEachStmt it && hasReturn(it.body())) return true;
       if (s instanceof WhileStmt it && hasReturn(it.body())) return true;
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
+      if (s instanceof TryStmt it
+          && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
     }
     return false;
   }
@@ -777,6 +921,8 @@ class CodeGen {
       if (s instanceof ForEachStmt it && hasReturn(it.body())) return true;
       if (s instanceof WhileStmt it && hasReturn(it.body())) return true;
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
+      if (s instanceof TryStmt it
+          && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
     }
     return false;
   }
@@ -793,6 +939,7 @@ class CodeGen {
         case ForEachStmt st -> n += countReturns(st.body());
         case WhileStmt st -> n += countReturns(st.body());
         case SeqStmt st -> n += countReturns(new Block(st.stmts()));
+        case TryStmt st -> n += countReturns(st.tryBlock()) + countReturns(st.catchBlock());
         default -> {}
       }
     }
@@ -836,6 +983,17 @@ class CodeGen {
         case ForEachStmt st -> collectAssigned(st.body(), out);
         case WhileStmt st -> collectAssigned(st.body(), out);
         case SeqStmt st -> collectAssigned(new Block(st.stmts()), out);
+        case TryStmt st -> {
+          collectAssigned(st.tryBlock(), out);
+          collectAssigned(st.catchBlock(), out);
+        }
+        case ExprStmt st -> {
+          // m.put/m.remove statements rebind the receiver
+          if (st.expr() instanceof MethodCall mc && mc.target() instanceof VarRef vr
+              && (mc.method().equals("put") || mc.method().equals("remove"))) {
+            out.add(vr.name());
+          }
+        }
         default -> {}
       }
     }
@@ -877,6 +1035,10 @@ class CodeGen {
           blockRefs(st.body(), out);
         }
         case SeqStmt st -> blockRefs(new Block(st.stmts()), out);
+        case TryStmt st -> {
+          blockRefs(st.tryBlock(), out);
+          blockRefs(st.catchBlock(), out);
+        }
         case BreakStmt st -> {}
         case ContinueStmt st -> {}
       }
@@ -918,6 +1080,12 @@ class CodeGen {
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case SpawnExpr x -> {}
+      case LambdaExpr x -> {
+        var inner = new LinkedHashSet<String>();
+        blockRefs(x.body(), inner);
+        inner.removeAll(x.params());
+        out.addAll(inner);
+      }
     }
   }
 }

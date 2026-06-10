@@ -83,13 +83,22 @@ gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting —
   var supply string/number typing. e2e: `ffi` -> BEAM-9.
 - **Modules/imports**: done earlier (see "Where we are").
 
-### Broad-first backlog (gaps real programs hit, in rough order)
-1. **Tuples + {ok, X} handling** — most OTP APIs return tuples; without destructuring the
-   FFI hits a wall fast (workaround today: `erlang.element(n, t)`).
-2. **Atom literals** — many OTP args are atoms (`string.split(s, " ", all)`).
-3. **Lambdas** — unlocks lists:map/filter/foldl, gen_tcp loops.
-4. Maps as a surface type; index/array assignment; string/array ops sugar; surface
-   try/catch; switch.
+### Language-shape round 1: DONE (all designed against the Java surface, e2e 18/18)
+- **Atoms**: `Atom.ok` (enum-constant syntax) -> atom `ok`.
+- **Tuples**: `Tuple.of(a,b)` -> `{A,B}`; `Tuple.get(t,i)` 0-based; `Erlang.ok(e)` unwraps
+  `{ok,V}` or raises catchable `{badmatch,...}` — OTP's ok/error idiom becomes Java's
+  value-or-throw idiom.
+- **Lambdas**: Java syntax -> Erlang funs; Java's effectively-final rule enforced (it IS
+  Erlang's capture semantics). Unlocks lists:map/filter/foldl etc.
+- **HashMap**: `new HashMap()` -> `#{}`; `m.put/remove` are statements (SSA rebind, counted
+  as mutation by loop threading); `get/containsKey/size` pure.
+- **try/catch**: `catch (Exception e)` -> `catch error:E`; assigned vars phi-merge like if;
+  internal `'$ret'/'$brk'/'$cont'` signals are throw-class and pass through untouched.
+
+### Remaining shape backlog
+Index/array assignment (needs the array-module tier from LOWERING_SPEC — design properly),
+switch (with tuple/record patterns), string/array ops sugar, actor args + cross-file actors
++ handles-in-data, interfaces/enums, typechecker, error source-maps.
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:

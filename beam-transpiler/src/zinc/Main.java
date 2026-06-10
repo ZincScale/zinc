@@ -25,8 +25,17 @@ public class Main {
       var classes = new LinkedHashMap<String, ClassInfo>();
       var records = new LinkedHashMap<String, RecordDecl>();
       var modules = new java.util.HashSet<String>(List.of("actor_sup"));
+      var reserved = java.util.Set.of("System", "Thread", "Atom", "Tuple", "Erlang",
+          "HashMap", "String", "Exception");
       boolean hasActors = false;
       for (Program p : files) {
+        var names = new ArrayList<String>();
+        p.classes().forEach(c -> names.add(c.name()));
+        p.records().forEach(r -> names.add(r.name()));
+        p.actors().forEach(a -> names.add(a.name()));
+        for (String n : names) {
+          if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
+        }
         for (var c : p.classes()) {
           var methods = new LinkedHashMap<String, String>();
           for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());

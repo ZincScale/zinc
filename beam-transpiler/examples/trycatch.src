@@ -1,0 +1,17 @@
+// try/catch -> try .. catch error:E; assigned vars phi-merge like if
+public class Main {
+  public static void main(String[] args) {
+    int x = 0;
+    try {
+      x = 1 / 0;                 // badarith
+    } catch (Exception e) {
+      x = 7;
+    }
+    System.out.println(x);       // 7
+    try {
+      Erlang.ok(Tuple.of(Atom.error, Atom.nope));   // raises {badmatch, ...}
+    } catch (Exception e) {
+      System.out.println("caught");
+    }
+  }
+}

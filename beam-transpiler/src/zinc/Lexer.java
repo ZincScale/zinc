@@ -33,7 +33,8 @@ final class Lexer {
       Map.entry("-=", TokKind.MINUS_EQ),
       Map.entry("*=", TokKind.STAR_EQ),
       Map.entry("++", TokKind.PLUS_PLUS),
-      Map.entry("--", TokKind.MINUS_MINUS));
+      Map.entry("--", TokKind.MINUS_MINUS),
+      Map.entry("->", TokKind.ARROW));
 
   private static final Map<String, TokKind> ONE = Map.ofEntries(
       Map.entry("(", TokKind.LPAREN),

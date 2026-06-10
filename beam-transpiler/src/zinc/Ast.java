@@ -69,6 +69,9 @@ final class Ast {
   /** classic for desugared to { init; while }, sharing the enclosing scope. */
   record SeqStmt(List<Stmt> stmts) implements Stmt {}
 
+  /** try {..} catch (Exception e) {..} -> try .. catch error:E -> .. end */
+  record TryStmt(Block tryBlock, String exVar, Block catchBlock) implements Stmt {}
+
   sealed interface Expr {}
 
   record IntLit(long value) implements Expr {}
@@ -101,4 +104,7 @@ final class Ast {
   record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
 
   record SpawnExpr(String actorName) implements Expr {}
+
+  /** x -> e  |  (a, b) -> { ... }  -> Erlang fun; captures must be effectively final. */
+  record LambdaExpr(List<String> params, Block body) implements Expr {}
 }

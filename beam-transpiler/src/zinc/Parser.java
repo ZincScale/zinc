@@ -205,11 +205,26 @@ class Parser {
         expect(TokKind.SEMI, "';'");
         return new ContinueStmt();
       default:
+        if (checkIdent("try")) return parseTry();
         if (looksLikeDecl()) return parseLocalDecl();
         Stmt s = parseSimpleStmt();
         expect(TokKind.SEMI, "';'");
         return s;
     }
+  }
+
+  private Stmt parseTry() {
+    advance(); // 'try'
+    Block tryBlock = parseBlock();
+    if (!checkIdent("catch")) {
+      throw new CompileError("Parse error: expected 'catch' at line " + cur().line());
+    }
+    advance();
+    expect(TokKind.LPAREN, "'('");
+    expect(TokKind.IDENT, "exception type"); // type is ignored: one catch-all clause (v1)
+    String exVar = expect(TokKind.IDENT, "exception variable").text();
+    expect(TokKind.RPAREN, "')'");
+    return new TryStmt(tryBlock, exVar, parseBlock());
   }
 
   /** IDENT ('[' ']')* IDENT, or 'var' IDENT — a local declaration. */
@@ -351,7 +366,44 @@ class Parser {
   // ---- expressions ----
 
   Expr parseExpr() {
+    if (lambdaAhead()) return parseLambda();
     return parseOr();
+  }
+
+  /** IDENT ->  |  ( [IDENT {, IDENT}] ) ->  */
+  private boolean lambdaAhead() {
+    if (check(TokKind.IDENT) && toks.get(pos + 1).kind() == TokKind.ARROW) return true;
+    if (!check(TokKind.LPAREN)) return false;
+    int i = pos + 1;
+    if (toks.get(i).kind() == TokKind.RPAREN) return toks.get(i + 1).kind() == TokKind.ARROW;
+    while (toks.get(i).kind() == TokKind.IDENT) {
+      i++;
+      if (toks.get(i).kind() == TokKind.COMMA) {
+        i++;
+        continue;
+      }
+      break;
+    }
+    return toks.get(i).kind() == TokKind.RPAREN && toks.get(i + 1).kind() == TokKind.ARROW;
+  }
+
+  private Expr parseLambda() {
+    var params = new ArrayList<String>();
+    if (check(TokKind.IDENT)) {
+      params.add(advance().text());
+    } else {
+      expect(TokKind.LPAREN, "'('");
+      if (!check(TokKind.RPAREN)) {
+        do {
+          params.add(expect(TokKind.IDENT, "lambda parameter").text());
+        } while (match(TokKind.COMMA));
+      }
+      expect(TokKind.RPAREN, "')'");
+    }
+    expect(TokKind.ARROW, "'->'");
+    Block body = check(TokKind.LBRACE) ? parseBlock()
+        : new Block(List.of(new ReturnStmt(parseExpr())));
+    return new LambdaExpr(params, body);
   }
 
   private Expr parseOr() {

@@ -1,0 +1,13 @@
+// Java lambdas -> Erlang funs; captures are effectively final (enforced)
+import erlang.lists;
+
+public class Main {
+  public static void main(String[] args) {
+    int[] xs = {1, 2, 3, 4};
+    int base = 0;
+    var doubled = lists.map(x -> x * 2, xs);
+    int sum = lists.foldl((x, acc) -> x + acc, base, doubled);  // 20
+    var evens = lists.filter(x -> x % 2 == 0, xs);
+    System.out.println(sum + evens.length);  // 22
+  }
+}
