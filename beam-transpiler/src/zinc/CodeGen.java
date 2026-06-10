@@ -80,6 +80,42 @@ class CodeGen {
       "'$sfx'(B, S) -> byte_size(S) =< byte_size(B) andalso\n"
           + "    binary:part(B, byte_size(B) - byte_size(S), byte_size(S)) =:= S.";
 
+  private static final String OK_HELPER =
+      "'$ok'({ok, V}) -> V;\n"
+          + "'$ok'(Other) -> erlang:error({badmatch, Other}).";
+
+  private static final String IDX_HELPER =
+      "'$idx'(B, P) -> case binary:match(B, P) of nomatch -> -1; {Pos, _} -> Pos end.";
+
+  // per-output-module usage flags: helpers are emitted only when referenced
+  private boolean useFmt;
+  private boolean useSfx;
+  private boolean useOk;
+  private boolean useIdx;
+
+  private List<String> usedHelpers() {
+    var out = new ArrayList<String>();
+    if (useFmt) out.add(FMT_HELPER);
+    if (useSfx) out.add(SFX_HELPER);
+    if (useOk) out.add(OK_HELPER);
+    if (useIdx) out.add(IDX_HELPER);
+    return out;
+  }
+
+  private void resetModuleState() {
+    helpers = new ArrayList<>();
+    useFmt = false;
+    useSfx = false;
+    useOk = false;
+    useIdx = false;
+  }
+
+  /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
+  private static String block(List<String> code, String pad) {
+    if (code.isEmpty()) return pad + "ok";
+    return pad + String.join(",\n", code).replace("\n", "\n" + pad);
+  }
+
   static final String SUP_SOURCE = "-module(actor_sup).\n"
       + "-behaviour(supervisor).\n"
       + "-export([start_link/0, spawn_child/2, init/1]).\n\n"
@@ -107,13 +143,13 @@ class CodeGen {
   Map<String, String> generateAll() {
     var out = new LinkedHashMap<String, String>();
     for (ClassDecl c : program.classes()) {
-      helpers = new ArrayList<>();
+      resetModuleState();
       curModule = c.erlMod();
       curClassName = c.name();
       out.put(c.erlMod(), genClassModule(c));
     }
     for (ActorDecl a : actors.values()) {
-      helpers = new ArrayList<>();
+      resetModuleState();
       curModule = a.erlMod();
       curClassName = null;
       inActor = true;
@@ -144,8 +180,7 @@ class CodeGen {
     }
     pieces.addAll(defs);
     pieces.addAll(helpers);
-    pieces.add(FMT_HELPER);
-    pieces.add(SFX_HELPER);
+    pieces.addAll(usedHelpers());
     return "-module(" + c.erlMod() + ").\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
@@ -164,13 +199,12 @@ class CodeGen {
     }
     List<String> stmts = genStmts(m.body().stmts(), env, true, null);
     if (stmts.isEmpty()) stmts = List.of("ok");
-    String bodyStr = String.join(",\n        ", stmts);
     String head = fnName(m.name()) + "(" + String.join(", ", params) + ")";
     if (needsThrow(m.body())) {
-      return head + " ->\n    try\n        " + bodyStr
+      return head + " ->\n    try\n" + block(stmts, "        ")
           + "\n    catch throw:{'$ret', V} -> V end.";
     }
-    return head + " ->\n        " + bodyStr + ".";
+    return head + " ->\n" + block(stmts, "        ") + ".";
   }
 
   // ---- actors ----
@@ -206,8 +240,7 @@ class CodeGen {
         ? "handle_call(Msg, _From, _State) -> erlang:error({unknown_call, Msg})."
         : String.join(";\n", calls) + ".");
     pieces.addAll(helpers);
-    pieces.add(FMT_HELPER);
-    pieces.add(SFX_HELPER);
+    pieces.addAll(usedHelpers());
     return "-module(" + a.erlMod() + ").\n"
         + "-behaviour(gen_server).\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
@@ -245,7 +278,7 @@ class CodeGen {
       lines.addAll(genStmts(a.ctor().body().stmts(), env, false, null));
     }
     lines.add("{ok, " + stateMap(a, env) + "}");
-    return head + " ->\n        " + String.join(",\n        ", lines) + ".";
+    return head + " ->\n" + block(lines, "        ") + ".";
   }
 
   private static String defaultFor(String type) {
@@ -301,7 +334,7 @@ class CodeGen {
         : "{" + m.name() + ", " + String.join(", ", params) + "}";
     String head = isCall ? "handle_call(" + msg + ", _From, State)"
         : "handle_cast(" + msg + ", State)";
-    return head + " ->\n        " + String.join(",\n        ", lines);
+    return head + " ->\n" + block(lines, "        ");
   }
 
   private String stateMap(ActorDecl a, Map<String, String> env) {
@@ -347,6 +380,7 @@ class CodeGen {
           String cur = envGet(env, st.name());
           String rhs;
           if (st.op().equals("+=") && (isStr(new VarRef(st.name())) || isStr(st.value()))) {
+            useFmt = true;
             rhs = "<<('$fmt'(" + cur + "))/binary, " + concatSegs(st.value(), env) + ">>";
           } else {
             rhs = switch (st.op()) {
@@ -481,21 +515,23 @@ class CodeGen {
       elseJump = false;
     }
 
-    if (phi.isEmpty()) {
-      String t = thenCode.isEmpty() ? "ok" : String.join(", ", thenCode);
-      String e = elseCode.isEmpty() ? "ok" : String.join(", ", elseCode);
-      return "case " + cond + " of true -> " + t + "; false -> " + e + " end";
-    }
+    String body = "case " + cond + " of\n"
+        + "    true ->\n" + block(armLines(thenCode, thenEnv, thenJump, phi), "        ") + ";\n"
+        + "    false ->\n" + block(armLines(elseCode, elseEnv, elseJump, phi), "        ") + "\n"
+        + "end";
+    return bindPhi(phi, env, body);
+  }
 
-    String tArm = ifArm(thenCode, thenEnv, thenJump, phi);
-    String eArm = ifArm(elseCode, elseEnv, elseJump, phi);
+  /** Binds the phi tuple to fresh names (and rebinds env), or returns the body as-is. */
+  private String bindPhi(List<String> phi, Map<String, String> env, String body) {
+    if (phi.isEmpty()) return body;
     var newNames = new ArrayList<String>();
     for (String v : phi) newNames.add(fresh(v));
     String lhs = newNames.size() == 1 ? newNames.get(0) : "{" + String.join(", ", newNames) + "}";
     for (int i = 0; i < phi.size(); i++) {
       env.put(phi.get(i), newNames.get(i));
     }
-    return lhs + " = case " + cond + " of true -> " + tArm + "; false -> " + eArm + " end";
+    return lhs + " = " + body;
   }
 
   /** Arrow switch -> case with one clause per label; assigned vars phi-merge across arms. */
@@ -511,35 +547,24 @@ class CodeGen {
     for (SwitchCase c : s.cases()) {
       var armEnv = new HashMap<>(env);
       List<String> code = genStmts(c.body().stmts(), armEnv, false, loopMut);
-      String arm = phi.isEmpty()
-          ? (code.isEmpty() ? "ok" : String.join(", ", code))
-          : ifArm(code, armEnv, endsInJump(c.body()), phi);
+      String arm = block(armLines(code, armEnv, endsInJump(c.body()), phi), "        ");
       for (Expr label : c.labels()) {
-        clauses.add(switchLabel(label, subjType) + " -> " + arm);
+        clauses.add("    " + switchLabel(label, subjType) + " ->\n" + arm);
       }
     }
     String defArm;
     if (s.defaultBlock() != null) {
       var defEnv = new HashMap<>(env);
       List<String> code = genStmts(s.defaultBlock().stmts(), defEnv, false, loopMut);
-      defArm = phi.isEmpty()
-          ? (code.isEmpty() ? "ok" : String.join(", ", code))
-          : ifArm(code, defEnv, endsInJump(s.defaultBlock()), phi);
+      defArm = block(armLines(code, defEnv, endsInJump(s.defaultBlock()), phi), "        ");
     } else {
       // Java: a non-matching switch statement is a no-op
-      defArm = phi.isEmpty() ? "ok" : ifArm(List.of(), env, false, phi);
+      defArm = block(armLines(List.of(), env, false, phi), "        ");
     }
-    clauses.add("_ -> " + defArm);
+    clauses.add("    _ ->\n" + defArm);
 
-    String body = "case " + subj + " of " + String.join("; ", clauses) + " end";
-    if (phi.isEmpty()) return body;
-    var newNames = new ArrayList<String>();
-    for (String v : phi) newNames.add(fresh(v));
-    String lhs = newNames.size() == 1 ? newNames.get(0) : "{" + String.join(", ", newNames) + "}";
-    for (int i = 0; i < phi.size(); i++) {
-      env.put(phi.get(i), newNames.get(i));
-    }
-    return lhs + " = " + body;
+    String body = "case " + subj + " of\n" + String.join(";\n", clauses) + "\nend";
+    return bindPhi(phi, env, body);
   }
 
   /** Constant label pattern; bare enum values resolve when the subject is enum-typed. */
@@ -580,31 +605,22 @@ class CodeGen {
     List<String> cCode = genStmts(s.catchBlock().stmts(), cEnv, false, loopMut);
     boolean cJump = endsInJump(s.catchBlock());
 
-    if (phi.isEmpty()) {
-      String t = tCode.isEmpty() ? "ok" : String.join(", ", tCode);
-      String c = cCode.isEmpty() ? "ok" : String.join(", ", cCode);
-      return "try " + t + " catch error:" + ev + " -> " + c + " end";
-    }
-    String tArm = ifArm(tCode, tEnv, tJump, phi);
-    String cArm = ifArm(cCode, cEnv, cJump, phi);
-    var newNames = new ArrayList<String>();
-    for (String v : phi) newNames.add(fresh(v));
-    String lhs = newNames.size() == 1 ? newNames.get(0) : "{" + String.join(", ", newNames) + "}";
-    for (int i = 0; i < phi.size(); i++) {
-      env.put(phi.get(i), newNames.get(i));
-    }
-    return lhs + " = try " + tArm + " catch error:" + ev + " -> " + cArm + " end";
+    String body = "try\n" + block(armLines(tCode, tEnv, tJump, phi), "        ") + "\n"
+        + "catch error:" + ev + " ->\n"
+        + block(armLines(cCode, cEnv, cJump, phi), "        ") + "\n"
+        + "end";
+    return bindPhi(phi, env, body);
   }
 
-  private String ifArm(List<String> code, Map<String, String> benv, boolean jump,
+  /** Clause body for a phi-merging construct: arm code plus the phi tuple (unless it jumps). */
+  private List<String> armLines(List<String> code, Map<String, String> benv, boolean jump,
       List<String> phi) {
-    if (jump) return String.join(", ", code);
+    if (jump || phi.isEmpty()) return code;
     var vals = new ArrayList<String>();
     for (String v : phi) vals.add(envGet(benv, v));
-    String tup = vals.size() == 1 ? vals.get(0) : "{" + String.join(", ", vals) + "}";
     var all = new ArrayList<>(code);
-    all.add(tup);
-    return String.join(", ", all);
+    all.add(vals.size() == 1 ? vals.get(0) : "{" + String.join(", ", vals) + "}");
+    return all;
   }
 
   private String genForEach(ForEachStmt s, Map<String, String> env) {
@@ -655,9 +671,9 @@ class CodeGen {
     var resultVals = new ArrayList<String>();
     for (String m : mut) resultVals.add(mutIn.get(m));
     String result = tupleOf(resultVals);
-    String clauseBody = loopClauseBody(s.body(), bodyCode, mutOut, mut, recursePrefix, helper);
-    helpers.add(helper + "(" + String.join(", ", head1) + ") ->\n        " + clauseBody + ";\n"
-        + helper + "(" + String.join(", ", base) + ") ->\n        " + result + ".");
+    List<String> clauseBody = loopClauseBody(s.body(), bodyCode, mutOut, mut, recursePrefix, helper);
+    helpers.add(helper + "(" + String.join(", ", head1) + ") ->\n" + block(clauseBody, "    ")
+        + ";\n" + helper + "(" + String.join(", ", base) + ") ->\n    " + result + ".");
 
     var callArgs = new ArrayList<String>();
     callArgs.add(listCode);
@@ -694,12 +710,12 @@ class CodeGen {
     var resultVals = new ArrayList<String>();
     for (String m : mut) resultVals.add(mutIn.get(m));
     String result = tupleOf(resultVals);
-    String clauseBody = loopClauseBody(s.body(), bodyCode, mutOut, mut, recursePrefix, helper);
+    List<String> clauseBody = loopClauseBody(s.body(), bodyCode, mutOut, mut, recursePrefix, helper);
     helpers.add(helper + "(" + String.join(", ", head1) + ") ->\n"
-        + "        case " + condCode + " of\n"
-        + "            true -> " + clauseBody + ";\n"
-        + "            false -> " + result + "\n"
-        + "        end.");
+        + "    case " + condCode + " of\n"
+        + "        true ->\n" + block(clauseBody, "            ") + ";\n"
+        + "        false ->\n            " + result + "\n"
+        + "    end.");
 
     var callArgs = new ArrayList<String>();
     for (String f : free) callArgs.add(env.get(f));
@@ -707,29 +723,31 @@ class CodeGen {
     return bindLoop(helper + "(" + String.join(", ", callArgs) + ")", mut, env);
   }
 
-  private String loopClauseBody(Block body, List<String> bodyCode, List<String> mutOut,
+  private List<String> loopClauseBody(Block body, List<String> bodyCode, List<String> mutOut,
       List<String> mut, List<String> recursePrefix, String helper) {
     if (!hasBreakContinue(body)) {
       var recArgs = new ArrayList<>(recursePrefix);
       recArgs.addAll(mutOut);
-      String rec = helper + "(" + String.join(", ", recArgs) + ")";
       var all = new ArrayList<>(bodyCode);
-      all.add(rec);
-      return String.join(",\n        ", all);
+      all.add(helper + "(" + String.join(", ", recArgs) + ")");
+      return all;
     }
     String sig = fresh("sig");
-    String payload = tupleOf(mutOut);
     var pm = new ArrayList<String>();
     for (String m : mut) pm.add(fresh(m));
     String pat = pm.isEmpty() ? "ok" : (pm.size() == 1 ? pm.get(0) : "{" + String.join(", ", pm) + "}");
     var recArgs = new ArrayList<>(recursePrefix);
     recArgs.addAll(pm);
-    String recurse = helper + "(" + String.join(", ", recArgs) + ")";
-    String joined = String.join(",\n            ", bodyCode);
-    return sig + " = try\n            " + joined + ",\n            {'$cont', " + payload + "}\n"
-        + "        catch throw:{'$cont', M} -> {'$cont', M}; throw:{'$brk', M} -> {'$brk', M} end,\n"
-        + "        case " + sig + " of {'$cont', " + pat + "} -> " + recurse
-        + "; {'$brk', " + pat + "} -> " + pat + " end";
+    var tryBody = new ArrayList<>(bodyCode);
+    tryBody.add("{'$cont', " + tupleOf(mutOut) + "}");
+    return List.of(
+        sig + " = try\n" + block(tryBody, "    ") + "\n"
+            + "catch throw:{'$cont', M} -> {'$cont', M}; throw:{'$brk', M} -> {'$brk', M}\n"
+            + "end",
+        "case " + sig + " of\n"
+            + "    {'$cont', " + pat + "} -> " + helper + "(" + String.join(", ", recArgs) + ");\n"
+            + "    {'$brk', " + pat + "} -> " + pat + "\n"
+            + "end");
   }
 
   private String tupleOf(List<String> xs) {
@@ -866,16 +884,18 @@ class CodeGen {
     }
     List<String> code = genStmts(x.body().stmts(), lenv, true, null);
     if (code.isEmpty()) code = List.of("ok");
-    String body = String.join(",\n            ", code);
+    String body = code.size() == 1 && !code.get(0).contains("\n")
+        ? " " + code.get(0) + " "
+        : "\n" + block(code, "    ") + "\n";
     if (needsThrow(x.body())) {
       String rv = fresh("v");
-      body = "try " + body + " catch throw:{'$ret', " + rv + "} -> " + rv + " end";
+      body = " try" + body + "catch throw:{'$ret', " + rv + "} -> " + rv + " end ";
     }
     for (var e : savedTypes.entrySet()) {
       if (e.getValue() == null) varTypes.remove(e.getKey());
       else varTypes.put(e.getKey(), e.getValue());
     }
-    return "fun(" + String.join(", ", ps) + ") -> " + body + " end";
+    return "fun(" + String.join(", ", ps) + ") ->" + body + "end";
   }
 
   private String genMethodCall(MethodCall x, Map<String, String> env) {
@@ -941,10 +961,8 @@ class CodeGen {
       case "Erlang" -> {
         // Erlang.ok(e) -> unwrap {ok, V} or raise catchable {badmatch, Other}
         if (x.method().equals("ok")) {
-          String v = fresh("ok");
-          String o = fresh("err");
-          return "case " + genExpr(x.args().get(0), env) + " of {ok, " + v + "} -> " + v
-              + "; " + o + " -> erlang:error({badmatch, " + o + "}) end";
+          useOk = true;
+          return "'$ok'(" + genExpr(x.args().get(0), env) + ")";
         }
       }
       case "Math" -> {
@@ -960,6 +978,7 @@ class CodeGen {
       }
       case "String" -> {
         if (x.method().equals("valueOf")) {
+          useFmt = true;
           return "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
         }
       }
@@ -1032,11 +1051,13 @@ class CodeGen {
           + ") =/= nomatch)";
       case "startsWith" -> "(string:prefix(" + r + ", " + genExpr(x.args().get(0), env)
           + ") =/= nomatch)";
-      case "endsWith" -> "'$sfx'(" + r + ", " + genExpr(x.args().get(0), env) + ")";
+      case "endsWith" -> {
+        useSfx = true;
+        yield "'$sfx'(" + r + ", " + genExpr(x.args().get(0), env) + ")";
+      }
       case "indexOf" -> {
-        String p = fresh("p");
-        yield "case binary:match(" + r + ", " + genExpr(x.args().get(0), env)
-            + ") of nomatch -> -1; {" + p + ", _} -> " + p + " end"; // byte offset
+        useIdx = true;
+        yield "'$idx'(" + r + ", " + genExpr(x.args().get(0), env) + ")"; // byte offset
       }
       case "replace" -> "iolist_to_binary(string:replace(" + r + ", "
           + genExpr(x.args().get(0), env) + ", " + genExpr(x.args().get(1), env) + ", all))";
@@ -1084,6 +1105,7 @@ class CodeGen {
       return concatSegs(b.left(), env) + ", " + concatSegs(b.right(), env);
     }
     if (e instanceof StrLit s) return "\"" + escErl(s.text()) + "\"/utf8";
+    useFmt = true;
     return "('$fmt'(" + genExpr(e, env) + "))/binary";
   }
 
