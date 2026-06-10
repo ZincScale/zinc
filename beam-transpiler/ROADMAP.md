@@ -179,13 +179,17 @@ made real, and it's pure BEAM strength:
 - **`zc deploy user@host`** — scp the release, install a systemd unit (restart-on-boot;
   BEAM+supervisors handle everything above process level), health-check, flip a `current`
   symlink, roll back on failed health check. Deploy #2 is an upgrade.
-- **Compliance handoff artifact (no scanning in zc)**: deploys need a manual green light
-  from a separate security/compliance team that runs Trivy — we have no scanner access.
-  rebar.lock is the dep source of truth, but Trivy parses mix.lock (Hex ecosystem), so
-  `zc build` emits a derived mix.lock from the resolved rebar3 deps as the artifact to
-  ship to compliance. zc deploys only after the human green light; no gating logic in the
-  tool. (OTP/ERTS isn't in any lockfile — covered by zc's toolchain pin, bumped on
-  advisories, same model as the zinc-go Go pin.)
+- **Compliance workflow (no scanning in zc)**: deploys need a manual green light from a
+  separate security/compliance team that runs Trivy — we have no scanner access.
+  Flow: `zc build` emits a derived mix.lock (rebar.lock is the dep truth; Trivy reads
+  mix.lock) -> human ships it to compliance -> green light -> deploy. No gating in the tool.
+- **Identity-validated deploys**: compliance does NOT continuously scan prod (tight
+  timing/network constraints) — they validate by name + version + container hash (docker
+  coordinates). So releases must be immutable and coordinate-addressable: version from
+  zc.toml, content digest at build time, and the `--docker` OCI image (digest = the
+  compliance coordinate) is first-class, not a later add-on. Deploy ships the exact
+  green-lit digest — never rebuild at deploy. (OTP/ERTS isn't in any lockfile — covered
+  by zc's toolchain pin, bumped on advisories, same model as the zinc-go Go pin.)
 - **Later in 5**: `--docker` flag to emit a minimal OCI image for teams that want it;
   multi-node clustering/distribution (BEAM's native distribution is the long-game moat);
   hot code upgrades only if ever justified (systemd restart is fine for the target user).
