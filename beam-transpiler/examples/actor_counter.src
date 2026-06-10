@@ -1,0 +1,15 @@
+// happy path: actor -> gen_server, handler with return -> call, without -> cast
+actor Counter {
+  var count = 0
+  on incr()  { count = count + 1 }
+  on add(n)  { count = count + n }
+  on get()   { return count }
+}
+
+fn main() {
+  var c = spawn Counter()
+  c.incr()
+  c.incr()
+  c.add(5)
+  print(c.get())          // 7
+}

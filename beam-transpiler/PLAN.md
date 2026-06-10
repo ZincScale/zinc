@@ -1,4 +1,11 @@
-# Phase 1 detail — the `actor` surface
+# Phase 1 detail — the `actor` surface — **SHIPPED**
+
+**Status: implemented end-to-end.** All steps below landed (Java impl); `actor_counter` and
+`actor_selfheal` are green in `e2e.sh` (13 cases). Deviations from this plan, post-modules:
+actors may live in ANY project module (each still becomes its own gen_server module);
+handlers calling file-local fns lower to qualified `filemodule:fn(...)` calls, and a file
+that declares actors exports its fns to make that work. The doc below is kept as the
+design record; "Known debts" at the bottom still apply.
 
 Implementation-level detail for ROADMAP Phase 1 (the master phase plan lives in
 ROADMAP.md; this is its Phase 1 appendix), grounded in the current code. Phase 1.1

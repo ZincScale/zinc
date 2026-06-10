@@ -24,19 +24,30 @@ import zinc.Ast.*;
  *  - string -> binary; interpolation -> '$fmt'-formatted binary segments
  */
 class CodeGen {
-  private final String moduleName;
+  /** Module of the source file; actors declared here become sibling gen_server modules. */
+  private final String fileModule;
   private final List<FnDecl> fns;
   /** erlang module name -> set of "fn/arity" it defines (whole project). */
   private final Map<String, Set<String>> moduleFns;
   /** import alias -> erlang module name. */
   private final Map<String, String> imports = new LinkedHashMap<>();
+  /** actor surface name -> decl, for this file. */
+  private final Map<String, ActorDecl> actors = new LinkedHashMap<>();
+  /** true when ANY file in the project declares an actor: entry main/0 must start the sup. */
+  private final boolean projectHasActors;
+  /** true while generating an actor module: local fn calls must qualify with fileModule. */
+  private boolean inActor = false;
+  /** var name -> actor type, for vars bound by `var x = spawn T()`; reset per fn/handler. */
+  private Map<String, ActorDecl> handleTypes = new HashMap<>();
   private int ctr = 0;
-  private final List<String> helpers = new ArrayList<>();
+  private List<String> helpers = new ArrayList<>();
 
-  CodeGen(String moduleName, Program program, Map<String, Set<String>> moduleFns) {
-    this.moduleName = moduleName;
+  CodeGen(String fileModule, Program program, Map<String, Set<String>> moduleFns,
+      boolean projectHasActors) {
+    this.fileModule = fileModule;
     this.fns = program.fns();
     this.moduleFns = moduleFns;
+    this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
       if (im.erlMod().equals("main") || !moduleFns.containsKey(im.erlMod())) {
         throw new CompileError("unknown module: import " + im.display()
@@ -44,6 +55,18 @@ class CodeGen {
       }
       if (imports.put(im.alias(), im.erlMod()) != null) {
         throw new CompileError("duplicate import alias '" + im.alias() + "'");
+      }
+    }
+    for (ActorDecl a : program.actors()) {
+      if (actors.put(a.name(), a) != null) {
+        throw new CompileError("duplicate actor '" + a.name() + "'");
+      }
+      var seen = new LinkedHashSet<String>();
+      for (HandlerDecl h : a.handlers()) {
+        if (!seen.add(h.name() + "/" + h.params().size())) {
+          throw new CompileError("actor " + a.name() + ": duplicate handler "
+              + h.name() + "/" + h.params().size());
+        }
       }
     }
   }
@@ -60,31 +83,185 @@ class CodeGen {
 
   /** `main` is renamed only in the entry module, where the generated main/0 wraps it. */
   private String fnName(String src) {
-    return (moduleName.equals("main") && src.equals("main")) ? "user_main" : src;
+    return (fileModule.equals("main") && src.equals("main")) ? "user_main" : src;
   }
 
-  String generate() {
+  /** One generated supervisor per project; the handle a spawn returns IS the registered name. */
+  static final String SUP_SOURCE = "-module(actor_sup).\n"
+      + "-behaviour(supervisor).\n"
+      + "-export([start_link/0, spawn_child/1, init/1]).\n\n"
+      + "start_link() -> supervisor:start_link({local, actor_sup}, ?MODULE, []).\n\n"
+      + "spawn_child(Mod) ->\n"
+      + "    N = erlang:unique_integer([positive]),\n"
+      + "    Name = list_to_atom(atom_to_list(Mod) ++ \"_\" ++ integer_to_list(N)),\n"
+      + "    {ok, _} = supervisor:start_child(actor_sup,\n"
+      + "        #{id => Name, start => {Mod, start_link, [Name]}, restart => permanent,\n"
+      + "          shutdown => 5000, type => worker, modules => [Mod]}),\n"
+      + "    Name.\n\n"
+      + "init([]) ->\n"
+      + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600}, []}}.\n";
+
+  /** Generates this source file's module plus one gen_server module per actor it declares. */
+  Map<String, String> generateAll() {
+    var out = new LinkedHashMap<String, String>();
+    helpers = new ArrayList<>();
+    out.put(fileModule, genFileModule());
+    for (ActorDecl a : actors.values()) {
+      helpers = new ArrayList<>();
+      inActor = true;
+      out.put(a.erlMod(), genActorModule(a));
+      inActor = false;
+    }
+    return out;
+  }
+
+  private String genFileModule() {
     var defs = new ArrayList<String>();
     for (var fn : fns) defs.add(genFn(fn));
     var pieces = new ArrayList<>(defs);
     pieces.addAll(helpers);
     pieces.add(FMT_HELPER);
     String body = String.join("\n\n", pieces);
-    if (moduleName.equals("main")) {
+    if (fileModule.equals("main")) {
+      // actor handlers call file-local fns cross-module, so export them when actors exist
+      var exports = new ArrayList<String>();
+      exports.add("main/0");
+      if (!actors.isEmpty()) {
+        for (var fn : fns) exports.add(fnName(fn.name()) + "/" + fn.params().size());
+      }
+      String mainFn = projectHasActors
+          ? "main() ->\n"
+              + "    logger:set_primary_config(level, none),\n"  // crash reports would pollute stdout
+              + "    {ok, _} = actor_sup:start_link(),\n"
+              + "    user_main()."
+          : "main() -> user_main().";
       return "-module(main).\n"
-          + "-export([main/0]).\n"
+          + "-export([" + String.join(", ", exports) + "]).\n"
           + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
-          + "main() -> user_main().\n\n" + body + "\n";
+          + mainFn + "\n\n" + body + "\n";
     }
     var exports = new ArrayList<String>();
     for (var fn : fns) exports.add(fn.name() + "/" + fn.params().size());
-    return "-module(" + moduleName + ").\n"
+    return "-module(" + fileModule + ").\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
         + body + "\n";
   }
 
+  // ---- actor lowering: actor -> gen_server, state = map of field atoms ----
+
+  private String genActorModule(ActorDecl a) {
+    var casts = new ArrayList<String>();
+    var calls = new ArrayList<String>();
+    for (HandlerDecl h : a.handlers()) {
+      if (hasReturn(h.body())) {
+        calls.add(genHandler(a, h, true));
+      } else {
+        casts.add(genHandler(a, h, false));
+      }
+    }
+    var exports = new ArrayList<String>(List.of("start_link/1", "init/1"));
+    if (!calls.isEmpty()) exports.add("handle_call/3");
+    if (!casts.isEmpty()) exports.add("handle_cast/2");
+
+    var pieces = new ArrayList<String>();
+    pieces.add("start_link(Name) -> gen_server:start_link({local, Name}, ?MODULE, [], []).");
+    pieces.add(genInit(a));
+    // no catch-all clauses: unknown messages crash the actor, the supervisor heals it
+    if (!casts.isEmpty()) pieces.add(String.join(";\n", casts) + ".");
+    if (!calls.isEmpty()) pieces.add(String.join(";\n", calls) + ".");
+    pieces.addAll(helpers);
+    pieces.add(FMT_HELPER);
+    return "-module(" + a.erlMod() + ").\n"
+        + "-behaviour(gen_server).\n"
+        + "-export([" + String.join(", ", exports) + "]).\n"
+        + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
+        + String.join("\n\n", pieces) + "\n";
+  }
+
+  private String genInit(ActorDecl a) {
+    var env = new HashMap<String, String>();
+    var lines = new ArrayList<String>();
+    for (FieldInit f : a.fields()) {
+      String v = fresh(f.name());
+      lines.add(v + " = " + genExpr(f.value(), env));
+      env.put(f.name(), v);
+    }
+    lines.add("{ok, " + stateMap(a, env) + "}");
+    return "init([]) ->\n        " + String.join(",\n        ", lines) + ".";
+  }
+
+  /**
+   * One handle_cast/handle_call clause (no trailing dot). State fields are seeded into the
+   * SSA env via maps:get, the body lowers with the ordinary machinery, and the new state
+   * map is rebuilt from the final env.
+   */
+  private String genHandler(ActorDecl a, HandlerDecl h, boolean isCall) {
+    handleTypes = new HashMap<>();
+    var env = new HashMap<String, String>();
+    var params = new ArrayList<String>();
+    for (String p : h.params()) {
+      String v = fresh(p);
+      env.put(p, v);
+      params.add(v);
+    }
+    var lines = new ArrayList<String>();
+    for (FieldInit f : a.fields()) {
+      String v = fresh(f.name());
+      lines.add(v + " = maps:get(" + f.name() + ", State)");
+      env.put(f.name(), v);
+    }
+
+    var stmts = h.body().stmts();
+    if (isCall) {
+      // v1: return must be the single, last top-level statement of the handler
+      boolean lastIsReturn = !stmts.isEmpty()
+          && stmts.get(stmts.size() - 1) instanceof ReturnStmt r && r.value() != null;
+      if (!lastIsReturn || countReturns(h.body()) != 1) {
+        throw new CompileError("actor " + a.name() + ", handler " + h.name()
+            + ": 'return' must be the last statement of the handler (v1)");
+      }
+      lines.addAll(genStmts(stmts.subList(0, stmts.size() - 1), env, false, null));
+      String reply = genExpr(((ReturnStmt) stmts.get(stmts.size() - 1)).value(), env);
+      lines.add("{reply, " + reply + ", " + stateMap(a, env) + "}");
+    } else {
+      lines.addAll(genStmts(stmts, env, false, null));
+      lines.add("{noreply, " + stateMap(a, env) + "}");
+    }
+
+    String msg = params.isEmpty() ? "{" + h.name() + "}"
+        : "{" + h.name() + ", " + String.join(", ", params) + "}";
+    String head = isCall ? "handle_call(" + msg + ", _From, State)"
+        : "handle_cast(" + msg + ", State)";
+    return head + " ->\n        " + String.join(",\n        ", lines);
+  }
+
+  private String stateMap(ActorDecl a, Map<String, String> env) {
+    var entries = new ArrayList<String>();
+    for (FieldInit f : a.fields()) entries.add(f.name() + " => " + envGet(env, f.name()));
+    return "#{" + String.join(", ", entries) + "}";
+  }
+
+  private int countReturns(Block b) {
+    int n = 0;
+    for (Stmt s : b.stmts()) {
+      switch (s) {
+        case ReturnStmt st -> n++;
+        case IfStmt st -> {
+          n += countReturns(st.thenBlock());
+          if (st.elseBlock() != null) n += countReturns(st.elseBlock());
+        }
+        case ForRangeStmt st -> n += countReturns(st.body());
+        case ForEachStmt st -> n += countReturns(st.body());
+        case WhileStmt st -> n += countReturns(st.body());
+        default -> {}
+      }
+    }
+    return n;
+  }
+
   private String genFn(FnDecl fn) {
+    handleTypes = new HashMap<>();
     var env = new HashMap<String, String>();
     var params = new ArrayList<String>();
     for (String p : fn.params()) {
@@ -111,7 +288,17 @@ class CodeGen {
       switch (s) {
         case VarStmt st -> {
           String v = fresh(st.name());
-          out.add(v + " = " + genExpr(st.init(), env));
+          if (st.init() instanceof SpawnExpr sp) {
+            ActorDecl a = actors.get(sp.actorName());
+            if (a == null) {
+              throw new CompileError("unknown actor: " + sp.actorName()
+                  + " (actors are file-local in v1)");
+            }
+            out.add(v + " = actor_sup:spawn_child(" + a.erlMod() + ")");
+            handleTypes.put(st.name(), a);
+          } else {
+            out.add(v + " = " + genExpr(st.init(), env));
+          }
           env.put(st.name(), v);
         }
         case AssignStmt st -> {
@@ -455,17 +642,40 @@ class CodeGen {
         if (x.callee().equals("len")) {
           yield "length(" + genExpr(x.args().get(0), env) + ")";
         }
+        if (x.callee().equals("sleep")) {
+          yield "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
+        }
         var args = new ArrayList<String>();
         for (Expr a : x.args()) args.add(genExpr(a, env));
-        yield fnName(x.callee()) + "(" + String.join(", ", args) + ")";
+        // inside an actor module, file-local fns live in the source file's module
+        String prefix = inActor
+            && moduleFns.get(fileModule).contains(x.callee() + "/" + x.args().size())
+            ? fileModule + ":" : "";
+        yield prefix + fnName(x.callee()) + "(" + String.join(", ", args) + ")";
       }
       case MethodCall x -> {
         if (!(x.target() instanceof VarRef vr)) {
-          throw new CompileError("method call target must be an imported module alias");
+          throw new CompileError(
+              "method call target must be an imported module alias or an actor handle");
+        }
+        ActorDecl actor = handleTypes.get(vr.name());
+        if (actor != null) {
+          int arity = x.args().size();
+          HandlerDecl handler = actor.handlers().stream()
+              .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
+              .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
+                  + " has no handler " + x.method() + "/" + arity));
+          var margs = new ArrayList<String>();
+          for (Expr arg : x.args()) margs.add(genExpr(arg, env));
+          String msg = margs.isEmpty() ? "{" + x.method() + "}"
+              : "{" + x.method() + ", " + String.join(", ", margs) + "}";
+          // handler with return -> sync call; otherwise async cast
+          String kind = hasReturn(handler.body()) ? "call" : "cast";
+          yield "gen_server:" + kind + "(" + envGet(env, vr.name()) + ", " + msg + ")";
         }
         if (env.containsKey(vr.name()) || !imports.containsKey(vr.name())) {
-          throw new CompileError("method calls are only supported on imported modules, '"
-              + vr.name() + "' is not an import (actors come in Phase 1)");
+          throw new CompileError("method calls need an imported module or an actor handle "
+              + "bound by 'var x = spawn T()'; '" + vr.name() + "' is neither (v1)");
         }
         String mod = imports.get(vr.name());
         String key = x.method() + "/" + x.args().size();
@@ -476,6 +686,9 @@ class CodeGen {
         for (Expr a : x.args()) args.add(genExpr(a, env));
         yield mod + ":" + x.method() + "(" + String.join(", ", args) + ")";
       }
+      case SpawnExpr x ->
+          throw new CompileError("spawn must be bound directly: var x = spawn "
+              + x.actorName() + "()  (v1)");
       case StrLit x -> {
         if (x.parts().isEmpty()) yield "<<>>";
         var segs = new ArrayList<String>();
@@ -662,9 +875,13 @@ class CodeGen {
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case MethodCall x -> {
-        // target stays out: a module alias is not a data dependency to thread through loops
+        // module aliases aren't data deps, but actor handles are — include the target var
+        if (x.target() instanceof VarRef vr && handleTypes.containsKey(vr.name())) {
+          out.add(vr.name());
+        }
         for (Expr a : x.args()) exprRefs(a, out);
       }
+      case SpawnExpr x -> {}
       case StrLit x -> {
         for (StrPart p : x.parts()) {
           if (p instanceof StrExpr se) exprRefs(se.expr(), out);

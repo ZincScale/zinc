@@ -38,13 +38,21 @@ file.src ──lex/parse──► AST ──codegen──► N .erl modules ─�
   segment), calls `math.sum_to(4)` lower to `util_math:sum_to(4)`. Import resolution and
   fn/arity existence checked at transpile time; `MethodCall` postfix (`x.f(args)`) landed in
   the parser, which Phase 1 actors reuse. e2e case: `examples/multifile/`.
+- **Phase 1, the `actor` surface: DONE.** `actor`/`on`/`spawn` compile to a gen_server module
+  per actor + one generated `actor_sup` (one_for_one, dynamic children). Handles are registered
+  names, so they survive restarts; handler with `return` ⇒ sync call, without ⇒ async cast;
+  state = map of fields, handler bodies reuse the SSA machinery seeded from `maps:get`.
+  Actors work in any project module (handlers call file-local fns cross-module). v1 limits
+  enforced with clear errors: return only as last handler stmt, `spawn T()` arg-less and only
+  as `var x = spawn T()`, handles file-local + not storable/passable. Headline e2e
+  `actor_selfheal`: crash a handler → supervisor restarts → SAME handle serves (`3/0/1`).
 - Dev toolchain: local JDK (Temurin 25 at `~/.local/java/current`, override with `JAVA_BIN`)
   for the transpiler + Docker `erlang:slim` for erlc/BEAM — that stays the dev/CI path
   until Phase 4 replaces it for END USERS with the managed runtime.
 
 ---
 
-## Phase 1 (NEXT): the **`actor` surface** — the differentiator
+## Phase 1 (DONE — see "Where we are"): the **`actor` surface** — the differentiator
 The whole reason the language exists. Detailed implementation plan: **`PLAN.md`** (settles
 handle syntax `c.incr()`, return⇒call / no-return⇒cast, registered-name handles that survive
 restarts, SSA-over-state-map handlers, dynamic `actor_sup`, v1 restrictions).
@@ -62,6 +70,7 @@ Steps (each guarded by the 10-example regression suite):
 
 **Done =** a supervised Counter written in plain imperative syntax compiles to
 gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting — verified in `e2e.sh`.
+**Status: shipped — `actor_counter` and `actor_selfheal` are green in the 13-case suite.**
 
 ## Phase 2: **Erlang FFI + modules/imports** (practicality)
 Makes real programs possible — calling existing BEAM libraries (HTTP, JSON, DB, etc.).
@@ -136,8 +145,8 @@ made real, and it's pure BEAM strength:
    Phase 2-FFI era). Keep minimal; decide at `zc new`.
 
 ## Start here next session
-**Phase 1.2 — parse the actor surface.** Open `PLAN.md`, follow Step A (lexer keywords →
-AST nodes → parser), keep e2e green, then Step B (codegen) and C (the self-heal demo).
+**Phase 2 — Erlang FFI** (modules/imports already done): call existing BEAM libraries from
+the surface language, lowering to `module:function(Args)`. Then Phase 3 features as needed.
 ```
-cd beam-transpiler && ./e2e.sh        # current green baseline (10/10) before you start
+cd beam-transpiler && ./e2e.sh        # current green baseline (13/13) before you start
 ```

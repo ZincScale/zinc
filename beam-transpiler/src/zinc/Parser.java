@@ -46,14 +46,48 @@ class Parser {
       imports.add(parseImport());
     }
     var fns = new ArrayList<FnDecl>();
+    var actors = new ArrayList<ActorDecl>();
     while (!check(TokKind.EOF)) {
       if (check(TokKind.KW_STRUCT)) {
         skipStruct(); // struct fields aren't needed for map-based codegen
+      } else if (check(TokKind.KW_ACTOR)) {
+        actors.add(parseActor());
       } else {
         fns.add(parseFn());
       }
     }
-    return new Program(imports, fns);
+    return new Program(imports, fns, actors);
+  }
+
+  /** actor Name { (var field = expr)* (on name(params) Block)* } — fields first. */
+  private ActorDecl parseActor() {
+    expect(TokKind.KW_ACTOR, "'actor'");
+    String name = expect(TokKind.IDENT, "actor name").text();
+    expect(TokKind.LBRACE, "'{'");
+    var fields = new ArrayList<FieldInit>();
+    while (check(TokKind.KW_VAR)) {
+      advance();
+      String f = expect(TokKind.IDENT, "field name").text();
+      expect(TokKind.ASSIGN, "'='");
+      fields.add(new FieldInit(f, parseExpr()));
+    }
+    var handlers = new ArrayList<HandlerDecl>();
+    while (check(TokKind.KW_ON)) {
+      advance();
+      String h = expect(TokKind.IDENT, "handler name").text();
+      expect(TokKind.LPAREN, "'('");
+      var params = new ArrayList<String>();
+      if (!check(TokKind.RPAREN)) {
+        params.add(expect(TokKind.IDENT, "parameter").text());
+        while (match(TokKind.COMMA)) {
+          params.add(expect(TokKind.IDENT, "parameter").text());
+        }
+      }
+      expect(TokKind.RPAREN, "')'");
+      handlers.add(new HandlerDecl(h, params, parseBlock()));
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ActorDecl(name, fields, handlers);
   }
 
   private Import parseImport() {
@@ -306,6 +340,16 @@ class Parser {
       return new BoolLit(false);
     }
     if (check(TokKind.STR_LIT)) return parseStr(advance().text());
+    if (check(TokKind.KW_SPAWN)) {
+      advance();
+      String name = expect(TokKind.IDENT, "actor name").text();
+      expect(TokKind.LPAREN, "'('");
+      if (!check(TokKind.RPAREN)) {
+        throw new CompileError("Parse error: spawn takes no args in v1, at line " + cur().line());
+      }
+      advance();
+      return new SpawnExpr(name);
+    }
     if (match(TokKind.LPAREN)) {
       Expr e = parseExpr();
       expect(TokKind.RPAREN, "')'");

@@ -34,11 +34,28 @@ public class Main {
         throw new CompileError("entry module must define fn main()");
       }
 
+      // every actor becomes its own module: check names against files and other actors
+      boolean projectHasActors = false;
+      var actorModules = new LinkedHashSet<String>();
+      for (var e : modules.entrySet()) {
+        for (var a : e.getValue().actors()) {
+          projectHasActors = true;
+          String mod = a.erlMod();
+          if (mod.equals("main") || mod.equals("actor_sup") || !mod.matches("[a-z][a-z0-9_]*")
+              || modules.containsKey(mod) || !actorModules.add(mod)) {
+            throw new CompileError("actor name '" + a.name() + "' (module '" + mod
+                + "') collides with a module, another actor, or a reserved name");
+          }
+        }
+      }
+
       // generate everything before writing anything: no partial output on a compile error
       var generated = new LinkedHashMap<String, String>();
       for (var e : modules.entrySet()) {
-        generated.put(e.getKey(), new CodeGen(e.getKey(), e.getValue(), moduleFns).generate());
+        generated.putAll(
+            new CodeGen(e.getKey(), e.getValue(), moduleFns, projectHasActors).generateAll());
       }
+      if (projectHasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
       Path outDir = Files.createDirectories(Path.of(args[1]));
       for (var e : generated.entrySet()) {
         Path path = outDir.resolve(e.getKey() + ".erl");

@@ -5,7 +5,7 @@ import java.util.List;
 final class Ast {
   private Ast() {}
 
-  record Program(List<Import> imports, List<FnDecl> fns) {}
+  record Program(List<Import> imports, List<FnDecl> fns, List<ActorDecl> actors) {}
 
   /** import util/math -> path [util, math], alias "math", Erlang module util_math. */
   record Import(List<String> path) {
@@ -23,6 +23,16 @@ final class Ast {
   }
 
   record FnDecl(String name, List<String> params, Block body) {}
+
+  /** actor Counter { var count = 0  on incr() {..} } -> one gen_server module. */
+  record ActorDecl(String name, List<FieldInit> fields, List<HandlerDecl> handlers) {
+    String erlMod() {
+      return name.toLowerCase();
+    }
+  }
+
+  /** Handler kind is not stored: a body with `return` is a call, otherwise a cast. */
+  record HandlerDecl(String name, List<String> params, Block body) {}
 
   record Block(List<Stmt> stmts) {}
 
@@ -78,8 +88,11 @@ final class Ast {
 
   record Call(String callee, List<Expr> args) implements Expr {}
 
-  /** x.f(args) — today only valid when x is an imported module alias; actors reuse it later. */
+  /** x.f(args) — x is an imported module alias or an actor handle bound by `var x = spawn T()`. */
   record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
+
+  /** spawn Counter() — only valid as the whole init of a var statement (v1). */
+  record SpawnExpr(String actorName) implements Expr {}
 
   record StrLit(List<StrPart> parts) implements Expr {}
 

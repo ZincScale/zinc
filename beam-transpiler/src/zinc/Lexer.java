@@ -21,7 +21,10 @@ final class Lexer {
       Map.entry("true", TokKind.KW_TRUE),
       Map.entry("false", TokKind.KW_FALSE),
       Map.entry("break", TokKind.KW_BREAK),
-      Map.entry("continue", TokKind.KW_CONTINUE));
+      Map.entry("continue", TokKind.KW_CONTINUE),
+      Map.entry("actor", TokKind.KW_ACTOR),
+      Map.entry("on", TokKind.KW_ON),
+      Map.entry("spawn", TokKind.KW_SPAWN));
 
   private static final Map<String, TokKind> TWO = Map.ofEntries(
       Map.entry("&&", TokKind.AMP_AMP),
