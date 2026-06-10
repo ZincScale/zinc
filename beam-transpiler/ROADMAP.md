@@ -6,6 +6,20 @@ A familiar **imperative C-family language that transpiles to Erlang/BEAM**, givi
 writing functional code. The pitch: a lightweight alternative to the microservices + Kubernetes tax
 for small teams. The language is the on-ramp; the BEAM runtime is the moat.
 
+The end state this roadmap builds to: **one installer → dev kit → managed runtime → `build` /
+`run` / `deploy` to a plain VM**. A user never installs Erlang, never sees `erlc`, never writes
+a supervisor — and gets a service that heals itself.
+
+## The end-to-end pipeline (what every phase slots into)
+```
+file.src ──lex/parse──► AST ──codegen──► N .erl modules ──erlc──► .beam ──erl──► running BEAM
+            (Dart transpiler)            main + actor modules                    supervised app
+                                         + generated supervisor
+└────────────────────────────── today: e2e.sh + Docker ─────────────────────────────────────┘
+└────────────────────────────── Phase 4: `zc build` / `zc run` (managed runtime, no Docker) ─┘
+└────────────────────────────── Phase 5: `zc release` / `zc deploy` (self-contained bundle) ─┘
+```
+
 ## Where we are (done)
 - **`beam-lab/`** — validated that imperative idioms lower cleanly + fast to Erlang/OTP
   (`LOWERING_SPEC.md` is the codegen contract; throw/catch free; supervised self-heal ~16µs).
@@ -14,109 +28,105 @@ for small teams. The language is the on-ramp; the BEAM runtime is the moat.
   fn, var/assign(+compound), for-range/for-each/while, if/else-if/else, break/continue, early
   return, ints/floats/bools, lists, structs, strings (+interpolation), arithmetic/comparison/logical,
   field & index read, field set, print/println/len.
-- Toolchain is Docker-only: `dart:stable` to transpile, `erlang:slim` to run. No local installs.
+- **Phase 1.1 multi-module output** (`7e3ec4a`) — codegen emits named Erlang modules, driver
+  writes `.erl` files to an outdir, `e2e.sh` compiles with `erlc` and runs `erl -noshell`.
+  Escript path retired. All 10 examples green.
+- Dev toolchain is Docker-only (`dart:stable`, `erlang:slim`) — that stays the dev/CI path
+  until Phase 4 replaces it for END USERS with the managed runtime.
 
 ---
 
-## Phase 1 (NEXT — start here tomorrow): the **`actor` surface** — the differentiator
-This is the whole reason the language exists. Until actors exist, it's "just another imperative
-language on BEAM." The Erlang target is **already proven** in `beam-lab/lowering/otp/` — Phase 1 is
-about generating that pattern from clean imperative syntax.
+## Phase 1 (NEXT): the **`actor` surface** — the differentiator
+The whole reason the language exists. Detailed implementation plan: **`PLAN.md`** (settles
+handle syntax `c.incr()`, return⇒call / no-return⇒cast, registered-name handles that survive
+restarts, SSA-over-state-map handlers, dynamic `actor_sup`, v1 restrictions).
 
-### Proposed surface (refine first thing, then build)
-```
-actor Counter {
-  var count = 0                       // actor state
+Steps (each guarded by the 10-example regression suite):
+1. **1.2 Parse** — `actor`/`on`/`spawn` keywords, `ActorDecl`/`HandlerDecl`/`SpawnExpr`/
+   `MethodCall` AST, parser returns `Program{fns, actors}`. Inert: e2e stays green.
+2. **1.3 Codegen** — per actor → gen_server module (state = field map, handlers lowered with
+   the existing SSA machinery); one generated `actor_sup` (supervised-by-default, dynamic
+   children, handles = registered names so they survive restarts); `spawn`/method-call
+   dispatch; `sleep(ms)` builtin. Actor-free programs byte-identical to today.
+3. **1.4 Demo + e2e** — `actor_counter.src` (happy path) and `actor_selfheal.src`: crash a
+   handler, supervisor auto-restarts, SAME handle keeps serving (`3 / 0 / 1` output). That
+   self-heal e2e IS the thesis proof — make it the headline case.
 
-  on incr()        { count = count + 1 }      // no return  -> async cast
-  on add(n)        { count = count + n }       // cast with args
-  on get()         { return count }            // has return -> sync call (reply)
-}
-
-fn main() {
-  var c = spawn Counter()             // start a SUPERVISED actor, get a handle
-  c.incr()
-  c.incr()
-  print(c.get())                       // 2   (call)
-}
-```
-Rule of thumb: a handler with `return` is a **call** (sync); without, a **cast** (async). State
-fields are `var`s at actor top level; handlers mutate them (SSA → new gen_server state map).
-
-### The big architectural change this forces: **multi-module output**
-`gen_server`/`supervisor` need a module per behaviour, so we can no longer emit a single escript.
-Phase 1.1 is therefore: **driver emits N `.erl` files, compiles with `erlc`, runs.**
-- program with no actors → one `main` module (keep all 10 current examples working)
-- each `actor` → one gen_server callback module
-- one generated supervisor module (supervised-by-default; dynamic so `spawn` adds children)
-- update `e2e.sh` to handle the multi-module case (compile dir, run entry) — mirror
-  `beam-lab/run.sh -m`.
-
-### Step order
-1. **1.1 Multi-module output** — driver writes `.erl` files + `erlc` + run; existing examples still
-   green (regression guard). This is the riskiest plumbing; do it first, in isolation.
-2. **1.2 Parse** — keep `actor`/`on`/`spawn` in the AST (don't discard like structs). Handler kind =
-   call if it contains `return`, else cast. `spawn Name(args)` expression. `c.method(args)` already
-   parses as a call on a field access / method — decide method-call syntax.
-3. **1.3 Codegen** — per actor → gen_server module (state = field map; `handle_cast` for casts,
-   `handle_call` for calls; handler body lowered with existing SSA machinery, final field map = new
-   state). Supervisor module. `spawn Counter()` → `supervisor:start_child` returning the pid/handle.
-   `c.incr()` → `gen_server:cast`, `c.get()` → `gen_server:call` (dispatch by the actor's handler
-   kind — so codegen needs the actor decls in scope).
-4. **1.4 Demo + e2e** — a `counter` actor (incr/add/get) driven from `main` → prints expected value;
-   then a **crash + self-heal** demo (a handler that crashes; supervisor auto-restarts; show it keeps
-   serving). That self-heal demo IS the proof of the whole thesis — make it the headline e2e case.
-
-### Phase 1 "done" =
-A supervised `Counter` actor, written in plain imperative syntax, compiles to gen_server+supervisor,
-runs on BEAM, and **survives a crash by auto-restarting** — all from the new surface, verified in
-`e2e.sh`.
-
----
+**Done =** a supervised Counter written in plain imperative syntax compiles to
+gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting — verified in `e2e.sh`.
 
 ## Phase 2: **Erlang FFI + modules/imports** (practicality)
 Makes real programs possible — calling existing BEAM libraries (HTTP, JSON, DB, etc.).
-- **FFI**: a way to call Erlang/Elixir functions, e.g. `extern fn now() = "erlang:system_time"` or a
-  qualified-call syntax `erlang.system_time()`. Lower to `module:function(Args)`. Compiler bridges
-  the ugly atom names; users never see them.
-- **Modules/imports**: multi-file programs, `import`, namespacing. (Phase 1's multi-module output is
-  a prerequisite, so this gets cheaper after Phase 1.)
-- This is what turns demos into apps.
+- **FFI**: call Erlang/Elixir functions, e.g. `extern fn now() = "erlang:system_time"` or
+  qualified `erlang.system_time()`. Lower to `module:function(Args)`. Compiler bridges the
+  ugly atom names; users never see them.
+- **Modules/imports**: multi-file programs, `import`, namespacing (Phase 1's multi-module
+  output already did the hard plumbing).
+- This is what turns demos into apps. Detail pass happens when Phase 1 ships.
 
-## Phase 3: second-tier base features (round out the language)
+## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:
 - **string ops** — concat, length, split, contains, substring
-- **array ops** — push/append, slice, contains; `xs[i] = v` (index assignment → persistent vector or
-  an explicit mutable `Buffer` per `LOWERING_SPEC.md` tiers)
+- **array ops** — push/append, slice, contains; `xs[i] = v` (index assignment → persistent
+  vector or explicit mutable `Buffer` per `LOWERING_SPEC.md` tiers)
 - **surface `try`/`catch`** — user-facing error handling (throw/catch already proven)
 - **`switch`/`match`** — pattern matching
 - **tuples / multiple return**, optionally **lambdas / first-class functions**
 
-## Phase 4: tooling & polish
-- **Real CLI** — `<lang> build file.src` / `run` / project scaffold, wrapping the BEAM build (à la
-  `gleam build`) so users never touch `erlc`/rebar3 directly. Name the language here.
-- **Error source-maps** — map Erlang/compile errors back to source spans (the transpiler tax; plan
-  for it now, it eats time later).
-- **Optional checker / linter** on the AST (types as opt-in — the one thing worth stealing from
-  Gleam: `Option` instead of null).
+## Phase 4: **SDK & toolchain — the one-stop shop**
+One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
+**install dev kit → dev kit installs runtime**. No Docker, no system Erlang, no rebar3.
+Working CLI name: `zc` (final language name is open decision #6 — rename then).
+
+- **4.1 The `zc` CLI** (first, still runnable via Docker while the installer doesn't exist):
+  - `zc run file.src` — transpile → erlc → run, one command, quiet unless it fails
+  - `zc build` — project build into `_build/` (.beam + start script)
+  - `zc new myapp` — scaffold (src/main.src, `zc.toml` with pinned toolchain+OTP versions)
+  - `zc doctor` — verify dev kit + runtime install, print versions, suggest fixes
+  - Ship as a **single native executable** (`dart compile exe`) — end users don't need Dart.
+- **4.2 The installer (one-stop shop)**:
+  - `curl -fsSL get.<lang>.dev | sh` (and a Windows installer later) → installs `zc` into
+    `~/.zc/bin`, adds to PATH, then first-run TUI: pick/confirm OTP version → downloads a
+    **pinned portable OTP build** into `~/.zc/otp/<ver>` (prebuilt per platform — the same
+    trick Elixir-burrito/Livebook use). Progress bars, resumable, checksummed.
+  - The runtime is **owned by the dev kit**: `zc toolchain list|install|use`, per-project pin
+    in `zc.toml`. Users NEVER apt-install erlang. This is the moment Docker stops being a
+    user-facing requirement (CI keeps it).
+- **4.3 Error source-maps** — map erlc/runtime errors back to `.src` spans (the transpiler
+  tax; budget real time, it's what makes the toolchain feel native instead of leaky).
+
+## Phase 5: **deploy — the anti-K8s story**
+A small team ships a self-healing service to a $10 VM with one command. This is the pitch
+made real, and it's pure BEAM strength:
+- **`zc release`** — self-contained bundle: ERTS + compiled .beam + boot script in a tarball.
+  Target machine needs NOTHING installed (no Erlang, no container runtime).
+- **`zc deploy user@host`** — scp the release, install a systemd unit (restart-on-boot;
+  BEAM+supervisors handle everything above process level), health-check, flip a `current`
+  symlink, roll back on failed health check. Deploy #2 is an upgrade.
+- **Later in 5**: `--docker` flag to emit a minimal OCI image for teams that want it;
+  multi-node clustering/distribution (BEAM's native distribution is the long-game moat);
+  hot code upgrades only if ever justified (systemd restart is fine for the target user).
+
+## Phase 6: polish & bets
+- **Optional checker / linter** on the AST (types as opt-in — the one thing worth stealing
+  from Gleam: `Option` instead of null).
+- **Name the language** (open decision #6) — needed by the time the installer/domain exists.
 - (Much later) self-hosting — rewrite the compiler in this language.
 
 ---
 
-## Open design decisions to settle (cheap to decide, expensive to change)
-1. **Actor handle / method-call syntax** — `c.incr()` vs `send c incr` vs `c ! incr`. (Lean `c.incr()`.)
-2. **call vs cast disambiguation** — `return`-in-handler = call (proposed). Confirm.
-3. **spawn + supervision** — dynamic supervisor (`spawn` adds children) vs static declared actors.
-   Dynamic is more flexible; start there.
-4. **state mutation model in handlers** — SSA over the field map, final map = new gen_server state.
-5. **Output: single-module-when-no-actors vs always multi-module** — keep single for actor-free
-   programs (simpler, faster) and switch to multi only when actors present? Or always multi for
-   consistency? (Lean: always multi once Phase 1 lands; retire the escript path.)
-6. **language name** — still TBD.
+## Open design decisions
+1–5 (handle syntax, call/cast rule, supervision model, state mutation, multi-module always)
+— **settled in `PLAN.md`**.
+6. **language name** — TBD; blocks the installer domain + CLI final name, nothing before Phase 4.
+7. **portable OTP distribution** — build our own per-platform OTP tarballs vs reuse existing
+   prebuilt ones; decide early in Phase 4.2.
+8. **`zc.toml` shape** — project manifest (name, version, toolchain pin, deps later in
+   Phase 2-FFI era). Keep minimal; decide at `zc new`.
 
-## Start here tomorrow
-**Phase 1.1 — multi-module output.** Make the driver emit `.erl` files + `erlc` + run, keep all 10
-examples green, then layer the `actor` surface (1.2→1.4) on top. The self-heal e2e is the goal post.
+## Start here next session
+**Phase 1.2 — parse the actor surface.** Open `PLAN.md`, follow Step A (lexer keywords →
+AST nodes → parser), keep e2e green, then Step B (codegen) and C (the self-heal demo).
 ```
 cd beam-transpiler && ./e2e.sh        # current green baseline (10/10) before you start
 ```
