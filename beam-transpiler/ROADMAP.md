@@ -125,7 +125,17 @@ in beam-lab). Facade dispatch is by the receiver's STATIC type, so chains work
 Out of shape scope (deliberately): typechecker (Phase 6), error source-maps (Phase 4.3),
 interfaces, streams facade, handles in collections (need generics story).
 
-### Next: the dogfood target — pick a real program, expect it to compile in 1-2 tries.
+### Dogfood: DONE — TCP line server (e2e `tcpserver`, 23/23)
+Acceptor actor + per-connection actors + socket handoff + FFI; worked on try 2 (try 1 hit
+the then-missing string escapes). Findings round landed: string escapes (lexer decode/emit
+encode), break/continue through try+switch, `this` self-handle ('$self' state key, every
+actor), `s.toCharArray()` for charlist APIs, `List.of`/`Map.of`, handle_call/cast stubs
+(no behaviour warnings). **Language semantic decided: try/catch is transactional** — a
+caught try reverts outer-var mutations to try-entry values (differs from Java; Erlang
+cannot observe partial bindings). Record: `dogfood/FINDINGS.md`.
+
+### Next: more dogfood breadth (JSON/OTP-27 `json`, a hex dep via the future rebar3
+plugin) or start Phase 4 tooling (`zc` CLI wrapping transpile+erlc+run).
 
 ## Phase 3: second-tier language features (round out the language)
 Interleave as needed — all incremental on the existing codegen:

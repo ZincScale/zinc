@@ -189,17 +189,22 @@ class CodeGen {
         calls.add(genHandler(a, m, true));
       }
     }
-    var exports = new ArrayList<>(List.of("start_link/2", "init/1"));
-    if (!calls.isEmpty()) exports.add("handle_call/3");
-    if (!casts.isEmpty()) exports.add("handle_cast/2");
+    var exports = new ArrayList<>(
+        List.of("start_link/2", "init/1", "handle_call/3", "handle_cast/2"));
 
     var pieces = new ArrayList<String>();
-    pieces.add(
-        "start_link(Name, Args) -> gen_server:start_link({local, Name}, ?MODULE, Args, []).");
+    // [Name | Args]: init needs the registered name to seed '$self' (the `this` handle)
+    pieces.add("start_link(Name, Args) -> "
+        + "gen_server:start_link({local, Name}, ?MODULE, [Name | Args], []).");
     pieces.add(genInit(a));
-    // no catch-all clauses: unknown messages crash the actor, the supervisor heals it
-    if (!casts.isEmpty()) pieces.add(String.join(";\n", casts) + ".");
-    if (!calls.isEmpty()) pieces.add(String.join(";\n", calls) + ".");
+    // no user catch-all clauses: unknown messages crash the actor, the supervisor heals it
+    // (the stubs below keep that semantic and silence the behaviour warning)
+    pieces.add(casts.isEmpty()
+        ? "handle_cast(Msg, _State) -> erlang:error({unknown_cast, Msg})."
+        : String.join(";\n", casts) + ".");
+    pieces.add(calls.isEmpty()
+        ? "handle_call(Msg, _From, _State) -> erlang:error({unknown_call, Msg})."
+        : String.join(";\n", calls) + ".");
     pieces.addAll(helpers);
     pieces.add(FMT_HELPER);
     pieces.add(SFX_HELPER);
@@ -213,17 +218,19 @@ class CodeGen {
   private String genInit(ActorDecl a) {
     varTypes = new HashMap<>();
     var env = new HashMap<String, String>();
-    String head = "init([])";
+    String self = fresh("self");
+    env.put("this", self);
+    varTypes.put("this", a.name());
+    var ps = new ArrayList<String>(List.of(self));
     if (a.ctor() != null) {
-      var ps = new ArrayList<String>();
       for (Param p : a.ctor().params()) {
         String v = fresh(p.name());
         env.put(p.name(), v);
         varTypes.put(p.name(), p.type());
         ps.add(v);
       }
-      head = "init([" + String.join(", ", ps) + "])";
     }
+    String head = "init([" + String.join(", ", ps) + "])";
     var lines = new ArrayList<String>();
     for (FieldDecl f : a.fields()) {
       String v = fresh(f.name());
@@ -263,6 +270,10 @@ class CodeGen {
       params.add(v);
     }
     var lines = new ArrayList<String>();
+    String self = fresh("self");
+    lines.add(self + " = maps:get('$self', State)");
+    env.put("this", self);
+    varTypes.put("this", a.name());
     for (FieldDecl f : a.fields()) {
       String v = fresh(f.name());
       lines.add(v + " = maps:get(" + f.name() + ", State)");
@@ -295,6 +306,7 @@ class CodeGen {
 
   private String stateMap(ActorDecl a, Map<String, String> env) {
     var entries = new ArrayList<String>();
+    entries.add("'$self' => " + envGet(env, "this")); // the handle survives every rebuild
     for (FieldDecl f : a.fields()) entries.add(f.name() + " => " + envGet(env, f.name()));
     return "#{" + String.join(", ", entries) + "}";
   }
@@ -957,6 +969,24 @@ class CodeGen {
         }
         throw new CompileError("unsupported: Arrays." + x.method());
       }
+      case "List" -> {
+        if (x.method().equals("of") && !env.containsKey("List")) {
+          return "[" + genArgs(x.args(), env) + "]";
+        }
+      }
+      case "Map" -> {
+        if (x.method().equals("of") && !env.containsKey("Map")) {
+          if (x.args().size() % 2 != 0) {
+            throw new CompileError("Map.of needs an even number of args");
+          }
+          var entries = new ArrayList<String>();
+          for (int i = 0; i < x.args().size(); i += 2) {
+            entries.add(genExpr(x.args().get(i), env) + " => "
+                + genExpr(x.args().get(i + 1), env));
+          }
+          return "#{" + String.join(", ", entries) + "}";
+        }
+      }
       default -> {}
     }
     if (!env.containsKey(name)) {
@@ -1013,6 +1043,7 @@ class CodeGen {
       case "split" -> "array:from_list(string:split(" + r + ", "
           + genExpr(x.args().get(0), env) + ", all))"; // Java split returns an array
       case "repeat" -> "binary:copy(" + r + ", " + genExpr(x.args().get(0), env) + ")";
+      case "toCharArray" -> "binary_to_list(" + r + ")"; // charlist: what old OTP APIs want
       default -> throw new CompileError("unsupported: String." + x.method());
     };
   }
@@ -1057,7 +1088,9 @@ class CodeGen {
   }
 
   private static String escErl(String s) {
-    return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    return s.replace("\\", "\\\\").replace("\"", "\\\"")
+        .replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+        .replace("\b", "\\b").replace("\f", "\\f").replace("\0", "\\0");
   }
 
   /** int/int -> div (Java semantics); anything float-ish -> /. */
@@ -1127,6 +1160,12 @@ class CodeGen {
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
           if (vr.name().equals("String")) yield x.method().equals("valueOf") ? "String" : null;
           if (vr.name().equals("Arrays")) yield x.method().equals("asList") ? "List" : null;
+          if (vr.name().equals("List") && !varTypes.containsKey("List")) {
+            yield x.method().equals("of") ? "List" : null;
+          }
+          if (vr.name().equals("Map") && !varTypes.containsKey("Map")) {
+            yield x.method().equals("of") ? "Map" : null;
+          }
           if (!varTypes.containsKey(vr.name())) {
             ClassInfo ci = classes.get(vr.name());
             if (ci != null) yield ci.methods().get(x.method() + "/" + x.args().size());
@@ -1146,6 +1185,7 @@ class CodeGen {
             case "toUpperCase", "toLowerCase", "trim", "strip", "substring", "replace",
                 "repeat" -> "String";
             case "split" -> "String[]";
+            case "toCharArray" -> "List";
             default -> null;
           };
         }
@@ -1243,15 +1283,26 @@ class CodeGen {
     return n;
   }
 
-  /** Break/continue belonging to THIS loop (does not descend into nested loops). */
+  /**
+   * Break/continue belonging to THIS loop: reachable through any non-loop compound
+   * statement (if/try/switch), but not through nested loops (incl. SeqStmt's for-while).
+   */
   private boolean hasBreakContinue(Block b) {
     for (Stmt s : b.stmts()) {
       if (s instanceof BreakStmt || s instanceof ContinueStmt) return true;
-      if (s instanceof IfStmt it
-          && (hasBreakContinue(it.thenBlock())
-              || (it.elseBlock() != null && hasBreakContinue(it.elseBlock())))) {
-        return true;
-      }
+      boolean nested = switch (s) {
+        case IfStmt it -> hasBreakContinue(it.thenBlock())
+            || (it.elseBlock() != null && hasBreakContinue(it.elseBlock()));
+        case TryStmt it -> hasBreakContinue(it.tryBlock()) || hasBreakContinue(it.catchBlock());
+        case SwitchStmt it -> {
+          for (SwitchCase c : it.cases()) {
+            if (hasBreakContinue(c.body())) yield true;
+          }
+          yield it.defaultBlock() != null && hasBreakContinue(it.defaultBlock());
+        }
+        default -> false;
+      };
+      if (nested) return true;
     }
     return false;
   }

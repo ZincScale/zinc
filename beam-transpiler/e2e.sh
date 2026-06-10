@@ -9,14 +9,14 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
   [countdown]=15
   [structs]=185
   [arrays]=117
-  [strings]=hi-BEAM-3
+  [strings]=$'hi-BEAM-3\nline1\nline2\nsay "hi"'
   [bools]=yes
   [elseif]=2
   [floats]=5.0
@@ -28,11 +28,12 @@ declare -A want=(
   [atoms_tuples]=$'3\n42\nok'
   [lambdas]=22
   [hashmap]=12
-  [trycatch]=$'7\ncaught'
+  [trycatch]=$'7\ncaught\n2'
   [javastrings]=$'12\nHELLO, BEAM!\nBEAM\n2\nyes\n7'
   [javacollections]=$'2\n5\n41\ntrue'
-  [actor_args]=42
+  [actor_args]=43
   [switchenum]=$'cool\nmany'
+  [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
 )
 fail=0
 for ex in "${examples[@]}"; do

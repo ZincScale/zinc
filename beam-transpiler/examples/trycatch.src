@@ -13,5 +13,20 @@ public class Main {
     } catch (Exception e) {
       System.out.println("caught");
     }
+    int n = 0;
+    while (true) {               // break inside catch leaves the LOOP, not the program
+      try {
+        n = n + 1;
+        if (n > 2) {
+          int boom = 1 / 0;
+        }
+      } catch (Exception e) {
+        break;
+      }
+    }
+    // LANGUAGE SEMANTIC (differs from Java): try is transactional — if it throws,
+    // outer vars revert to their try-entry values. Iter 3 increments n to 3, crashes,
+    // reverts to 2. Java would print 3.
+    System.out.println(n);       // 2
   }
 }

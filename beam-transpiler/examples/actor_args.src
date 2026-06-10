@@ -1,8 +1,14 @@
-// Constructor args (restart re-runs the SAME constructor) + typed handle params
+// Constructor args (restart re-runs the SAME constructor), typed handle params,
+// and `this` (self-casts via the hidden '$self' registered name).
 actor Counter {
   int count;
   Counter(int start) { count = start; }
   void incr()        { count = count + 1; }
+  int kick() {                  // sync call that queues two self-casts behind itself
+    this.incr();
+    this.incr();
+    return 0;
+  }
   int get()          { return count; }
 }
 
@@ -14,7 +20,7 @@ public class Main {
   public static void main(String[] args) {
     var c = spawn Counter(40);
     bump(c);
-    bump(c);
-    System.out.println(c.get());  // 42
+    c.kick();
+    System.out.println(c.get());  // 40 +1 +2 = 43
   }
 }

@@ -80,16 +80,36 @@ final class Lexer {
         }
         continue;
       }
-      // string literal "..." (raw content kept; interpolation parsed later)
+      // string literal with Java escape sequences decoded here; re-encoded at emit
       if (c == '"') {
-        int start = i + 1;
+        var buf = new StringBuilder();
         i++;
         while (i < n && src.charAt(i) != '"') {
-          if (src.charAt(i) == '\n') line++;
+          char ch = src.charAt(i);
+          if (ch == '\n') line++;
+          if (ch == '\\') {
+            if (i + 1 >= n) throw new CompileError("unterminated string at line " + line);
+            char e = src.charAt(i + 1);
+            buf.append(switch (e) {
+              case 'n' -> '\n';
+              case 't' -> '\t';
+              case 'r' -> '\r';
+              case 'b' -> '\b';
+              case 'f' -> '\f';
+              case '0' -> '\0';
+              case '"' -> '"';
+              case '\'' -> '\'';
+              case '\\' -> '\\';
+              default -> throw new CompileError("unknown escape \\" + e + " at line " + line);
+            });
+            i += 2;
+            continue;
+          }
+          buf.append(ch);
           i++;
         }
         if (i >= n) throw new CompileError("unterminated string at line " + line);
-        toks.add(new Token(TokKind.STR_LIT, src.substring(start, i), line));
+        toks.add(new Token(TokKind.STR_LIT, buf.toString(), line));
         i++; // closing quote
         continue;
       }

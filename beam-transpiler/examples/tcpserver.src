@@ -1,0 +1,59 @@
+// TCP line server: Acceptor actor + one Conn actor per connection.
+// main() doubles as the client so the run is self-contained and deterministic.
+import erlang.gen_tcp;
+import erlang.inet;
+import erlang.erlang;
+
+actor Conn {
+  void serve(Object sock) {
+    while (true) {
+      try {
+        String line = Erlang.ok(gen_tcp.recv(sock, 0));
+        gen_tcp.send(sock, line.trim().toUpperCase() + "\n");
+      } catch (Exception e) {
+        break;                  // peer closed
+      }
+    }
+  }
+}
+
+actor Acceptor {
+  void run(Object lsock) {
+    while (true) {
+      try {
+        var sock = Erlang.ok(gen_tcp.accept(lsock));
+        var conn = spawn Conn();
+        gen_tcp.controlling_process(sock, erlang.whereis(conn));
+        conn.serve(sock);
+      } catch (Exception e) {
+        break;                  // listener closed
+      }
+    }
+  }
+}
+
+public class Main {
+  public static void main(String[] args) {
+    var opts = List.of(Atom.binary, Tuple.of(Atom.packet, Atom.line),
+        Tuple.of(Atom.active, false), Tuple.of(Atom.reuseaddr, true));
+    var lsock = Erlang.ok(gen_tcp.listen(0, opts));
+    int port = Erlang.ok(inet.port(lsock));
+    var acceptor = spawn Acceptor();
+    acceptor.run(lsock);
+
+    // --- client ---
+    var copts = List.of(Atom.binary, Tuple.of(Atom.packet, Atom.line),
+        Tuple.of(Atom.active, false));
+    var cs = Erlang.ok(gen_tcp.connect("localhost".toCharArray(), port, copts));
+
+    gen_tcp.send(cs, "hello world\n");
+    String r1 = Erlang.ok(gen_tcp.recv(cs, 0, 5000));
+    System.out.println(r1.trim());        // HELLO WORLD
+
+    gen_tcp.send(cs, "  beam me up  \n");
+    String r2 = Erlang.ok(gen_tcp.recv(cs, 0, 5000));
+    System.out.println(r2.trim());        // BEAM ME UP
+
+    gen_tcp.close(cs);
+  }
+}

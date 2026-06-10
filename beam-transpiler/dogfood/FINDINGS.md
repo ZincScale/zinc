@@ -1,5 +1,12 @@
 # Dogfood findings — TCP line server (2026-06-10)
 
+> **STATUS: all resolved in the follow-up round** (same day). GAP-1/4 fixed; GAP-2/3/6
+> implemented (List.of/Map.of, toCharArray, `this` via '$self'); GAP-5 stubs emitted;
+> GAP-7/8 documented/deferred. The natural-Java server is now e2e case `tcpserver`.
+> New decision found while fixing: **try/catch is transactional** — a caught try reverts
+> outer-var mutations to try-entry values (Erlang can't observe partial bindings; differs
+> from Java, documented in examples/trycatch.src).
+
 Program: `tcp_line_server.src` — Acceptor actor + one Conn actor per connection,
 socket handoff via `controlling_process`, main doubles as test client. **Works**
 (HELLO WORLD / BEAM ME UP) on try 2; try 1 deadlocked on GAP-4. Transpiler was NOT
