@@ -2,9 +2,10 @@
 
 ## What this is
 **Legal Java syntax that transpiles to Erlang/BEAM** — classic class ceremony, types,
-semicolons, `System.out.println` — plus extension keywords only where OTP concepts need them
-(`application`, `process`, `spawn`). Java devs get OTP-grade reliability (supervision, self-healing,
-distribution) without writing functional code. The pitch: a lightweight alternative to the
+semicolons, `System.out.println` — with ZERO extension keywords: OTP concepts enter as
+marker interfaces (`implements Application` / `implements Process` — the `Serializable`
+idiom; no annotations), so every file parses in any Java IDE. Java devs get OTP-grade
+reliability (supervision, self-healing, distribution) without writing functional code. The pitch: a lightweight alternative to the
 microservices + Kubernetes tax for small teams. The language is the on-ramp; BEAM is the moat.
 Project-focused: one public class per file, file named after its class, dirs = packages.
 
@@ -161,7 +162,7 @@ opts on cert-less systems. Record: `dogfood/FINDINGS-webdemo.md` (GAP-9, GAP-10)
 ### Next: **the standard library** (GAP-9 — the headline dogfood finding)
 Webdemo code reads `List.of(Tuple.of(Atom.port, 0))` — Erlang in Java clothes; no Java
 dev writes proplists of tagged tuples. The architecture is three layers:
-1. **OTP behaviours = language semantics** (already true: `process` -> gen_server +
+1. **OTP behaviours = language semantics** (already true: `implements Process` -> gen_server +
    supervisor; users never see callbacks).
 2. **OTP stdlib apps = zinc's JDK**: Java-shaped facades backed by OTP. First surfaces:
    `zinc.http.HttpClient` over httpc, Java-shaped (also the one home for the
@@ -179,12 +180,12 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      specs/dialyzer are Erlang's own erased "generics"). Invariant, raw types legal,
      no inference.
    - **Gradual static checking at transpile time** — the point of having generics:
-     every expression is known-typed (declarations, literals, record/process/facade/stdlib
+     every expression is known-typed (declarations, literals, record/Process/facade/stdlib
      signatures) or unknown (`var` from FFI, `Object`); known-vs-known mismatch = error
      (exact nominal match — no subtyping lattice exists yet); unknown flows freely
      (the FFI basement, analogous to Java raw types/casts).
    - **Runtime boundary guards where unknown crosses into known** (Java's hidden
-     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed process
+     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed Process
      method entry (= checked message contracts — messages arrive from anywhere)**,
      typed record fields, insertion into known-type-arg collections. SHALLOW only
      (element at the crossing; never deep-scan a collection). Failure = structured
@@ -194,51 +195,61 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    `util.MathUtil` -> `'util.mathutil'` (Elixir precedent). Collision-free; fixes the
    flat-namespace bug (today `class MathUtil` -> `mathutil` regardless of package).
    Root-package classes unchanged (`main:main()` entry stays).
-   Extension keywords are fine where an OTP concept has no honest Java expression.
-   **Program model.** One program shape. A project has at most one `application` —
-   the explicit root (the name Spring Boot, J2EE, and OTP all agree on; it lowers to
-   an OTP application): it carries the OTP application identity (name/version from
-   zinc.toml; [deps] boot before its tree), declares the root children as process
-   fields, hosts the optional `main(String[] args)`, receives SIGTERM, owns the exit
-   code. The application has no handle, no methods, no callers — it is the boundary,
-   not a unit. A project without an `application` is a library. `process` (renamed
-   from `actor` — the BEAM's own word; no FP baggage for the Java audience) is the
+   NO extension keywords: where an OTP concept needs surfacing, it gets a marker
+   interface — Java's native signal for platform-managed semantics (`Serializable`);
+   annotations rejected. Both markers are prelude (unqualified, like `String`), zero
+   methods, checked by the interface-conformance machinery below.
+   **Program model.** One program shape. A project has at most one class
+   `implements Application` — the explicit root (the name Spring Boot, J2EE, and OTP
+   all agree on; it lowers to an OTP application): it carries the OTP application
+   identity (name/version from zinc.toml; [deps] boot before its tree), declares the
+   root children as Process-typed fields, hosts the optional `main(String[] args)`,
+   receives SIGTERM, owns the exit code. The Application has no handle, no callers —
+   it is the boundary, not a unit. A project without an `Application` is a library.
+   A class `implements Process` (the BEAM's own word — no FP "actor" baggage) is the
    supervised stateful unit: fields (state + child processes), methods (void ⇒ cast,
-   typed ⇒ call), registered-name handle.
+   typed ⇒ call), the instance reference is the handle.
+   **`new` spawns.** For a Process class the instance IS the live process — BEAM has
+   no created-but-not-running state, so zinc invents none (cf. Java collapsing the
+   new/start two-step in `Thread.startVirtualThread`): `new` runs the constructor
+   inside the freshly spawned process (OTP init) and returns the handle; on restart
+   the runtime re-runs `new` with the same args, handle survives. The contract,
+   stated once: Java syntax, marker-declared semantics — `implements Process` is the
+   dev opting into process rules (serialized methods, surviving state, `new` = spawn).
    Liveness (the JVM non-daemon-thread rule): the program exits when `main` (if any)
-   has returned AND no `process` instances are alive; otherwise it runs until stopped. Tool,
+   has returned AND no Process instances are alive; otherwise it runs until stopped. Tool,
    server, and mixed programs fall out of this one rule.
    **Tree shape — composition is supervision, nothing hidden.** The tree is read
-   from the source: the application's process-fields are the root domain; a process's
-   process-fields are its children — born in declaration order, shut down in reverse.
+   from the source: the Application's Process-fields are the root domain; a Process's
+   Process-fields are its children — born in declaration order, shut down in reverse.
    No separate tree declaration.
    - Failure flows down, never up: an owner's death takes its domain (subtree
      restarts fresh, constructors re-run); a child's death never harms its owner;
      crash-looping domains escalate stepwise to the root, then the VM exits
      (systemd's layer, Phase 5).
    - Static children (fields) are permanent — always restarted.
-   - Dynamic children (`spawn` in method bodies) join the spawner's domain,
+   - Dynamic children (`new` in method bodies) join the spawner's domain,
      temporary — die with the owner, not restarted on crash; opt-in restart
      modifier later if a real program earns it. Siblings independent; fail-together
      coupling deferred.
    - Handles orthogonal to domains: lifecycle only; restarts never break handles.
-   Lowering: application -> OTP application + root supervisor; a process with children ->
+   Lowering: Application -> OTP application + root supervisor; a Process with children ->
    generated supervisor pair (owner first, children after, rest_for_one); worker
    processes never contain supervisor code.
    **Process taxonomy.** User code runs in exactly two places: `main` (the entry
    process — temporary child of the root domain, runs once, never restarted; crash
-   logged, program exits nonzero if nothing else is alive) and `process` methods.
+   logged, program exits nonzero if nothing else is alive) and Process methods.
    Supervisors are generated; library processes (FFI deps) belong to their own OTP
    apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
-   raw thread is a `process` with no name, state, or methods; fire-and-forget = cast or
-   temporary spawn; parallel fan-out/join is a stdlib shape (Future/structured task
+   raw thread is a Process with no name, state, or methods; fire-and-forget = cast or
+   a temporary `new`; parallel fan-out/join is a stdlib shape (Future/structured task
    over temporary processes) designed with the stdlib. `Thread.sleep` stays.
    **Instance classes**: module + map term; fields are set by the constructor and then
    immutable — all objects are final. No setters, no field assignment after
    construction; mutable state lives in processes. Locals stay fully mutable (counters,
    temps, accumulators — the existing SSA machinery). Records' `p.x = v` mutation
    sugar is removed for consistency; build a new record instead. Mutability picture:
-   locals mutate freely / object fields never / process fields across calls (serialized
+   locals mutate freely / object fields never / Process fields across calls (serialized
    by the mailbox).
    **Interfaces**: nominal conformance checked at transpile time (`implements` = all
    methods present, signatures match); subtyping in the checker is one flat hop,
@@ -248,9 +259,11 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    guards check for class-typed values. Lambdas satisfy SAM interfaces as plain funs
    (dispatch discriminates fun vs map with one guard); stdlib functional interfaces
    (Function, Predicate, Comparator...) live in the checker, cost nothing at runtime.
+   Marker interfaces (zero methods) cost nothing anywhere; `Application` and `Process`
+   are the two well-known ones, special-cased by the transpiler.
    Deferred: default methods, `interface extends`.
    **Failure semantics — one ladder.** (1) Expected failures are exceptions: Java-style
-   unwind to a typed catch. (2) A throw in a `process` call-method relays to the caller
+   unwind to a typed catch. (2) A throw in a Process call-method relays to the caller
    (catchable there); the process survives, state intact via transactional try; the
    generated wrapper catches ONLY the `{zinc_exc, Class, Fields}` shape — deliberate
    throws relay, bugs fall through. (3) Bugs crash the process; a caller mid-call on a
@@ -278,13 +291,31 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    (which lower to atoms); Tag is for foreign protocols only. Emitter rule, universal
    (Tag / enums / module names): emit an atom quoted whenever it isn't safely bare —
    non-lowercase-identifier shape OR Erlang reserved word (`Tag.end` -> `'end'`).
-   THE V1 SPEC IS CLOSED. Keywords renamed post-close (2026-06-11): `service` ->
-   `application`, `actor` -> `process`. Implementation order (spec leads; current code
-   still has the old flat-sup/script model, `actor`/Atom.* naming, mutable records):
-   next is stdlib API design, then implement spec + stdlib, webdemo rewrite verifies.
+   THE V1 SPEC IS CLOSED. Revised post-close (2026-06-11): extension keywords
+   ELIMINATED — `service`/`actor`/`spawn` are gone; the root is a class `implements
+   Application`, the stateful unit a class `implements Process` (marker interfaces,
+   prelude), `new` on a Process spawns. Zero non-Java syntax. Implementation order
+   (spec leads; current code still has the old keyword/flat-sup/script model, Atom.*
+   naming, mutable records): next is stdlib API design, then implement spec + stdlib,
+   webdemo rewrite verifies.
 2. **Decision #9 (namespace strategy): SETTLED — everything `zinc.*`** (see Open design
-   decisions). Next: stdlib API design against that settled surface: HTTP client +
-   HTTP server first.
+   decisions). Stdlib API design against that settled surface: HTTP client + HTTP
+   server first.
+   **`zinc.http.HttpClient` v1 — designed (2026-06-11).** Java-shaped, owned by zinc,
+   over httpc. `HttpClient.newBuilder().connectTimeout(ms).proxy(host, port).build()`
+   — timeouts are plain-int millis everywhere (no `Duration`); proxy + native-TLS-
+   transport escape hatches are builder options (the firewall finding's sanctioned
+   home). `HttpRequest.newBuilder(url).header(k, v).GET()/.POST(body)/.PUT(body)/
+   .DELETE().timeout(ms).build()`; body is `String` or `byte[]` — one `POST(body)`
+   method, not same-arity overloads (gradual checker accepts both; both lower to
+   binaries, `byte[]` is the native case). Sync `client.send(req)` only — no
+   `sendAsync`/futures (threads cut; fan-out arrives with the stdlib Future shape).
+   Returns `HttpResponse`, a final value: `statusCode()`, `body()` (UTF-8 String),
+   `bodyBytes()` (byte[]), `header(name)`. 4xx/5xx are responses, not exceptions.
+   Expected failures are typed exceptions per the failure ladder:
+   `zinc.http.HttpException` (one-level parent, the catch-all) with
+   `ConnectException`, `TimeoutException`. `HttpClient` is plain config, no hidden
+   state — safe in Process fields.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -378,9 +409,10 @@ made real, and it's pure BEAM strength:
 
 ## Start here next session
 **Design the stdlib surfaces** (see "Next: the standard library" above). The v1 spec is
-closed (keywords now `application`/`process`); decision #9 settled — everything `zinc.*`.
-Next: `zinc.http` client (Java-shaped over httpc, sync `send` only — no threads), then
-`zinc.http` server over cowboy (routing, process-per-request), then `zinc.net` sockets.
+closed — zero extension keywords: `Application`/`Process` marker interfaces, `new`
+spawns. Decision #9 settled (everything `zinc.*`); `zinc.http.HttpClient` designed.
+Next: `zinc.http` server over cowboy (routing, process-per-request), then `zinc.net`
+sockets, then the Future/fan-out shape.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
