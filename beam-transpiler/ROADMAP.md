@@ -409,6 +409,31 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    - Default handler level: info (debug suppressed; enabling is a `zc run` flag /
      release config — Phase 4/5 detail). Under systemd both streams reach
      journald; the split exists for tools and first impressions, not services.
+   **Testing v1 — designed (2026-06-11): marker + convention, lowered onto EUnit.**
+   - Declaration: test classes under `test/`, `implements Test` (prelude marker);
+     every public void method is a test case (JUnit 3 / EUnit convention — no
+     annotations, no new syntax). Test code never ships in releases.
+   - Execution: every test method runs in its own BEAM process (ExUnit's model),
+     parallel by default. Perfect isolation — no shared statics, no ordering
+     effects; a crashing test = a crashed process + crash report, runner
+     unaffected. Actors a test spawns are its dynamic children: test ends, domain
+     dies, everything reclaimed — no teardown callbacks. Supervision is testable
+     for real: crash an Actor, assert the restart
+     (`Assert.fails(() -> c.divideBy(0)); Assert.equals(0, c.value());`).
+   - Assertions: prelude `Assert` — `equals`/`isTrue`/`fails(lambda)` (expected-
+     exception variant's exact shape decided at implementation — no class
+     literals). Failures throw; the ladder reports. Smart messages: the transpiler
+     sees the assertion expression statically and emits operand source + values +
+     file:line (ExUnit's power-assert trick at zero runtime cost — same machinery
+     as Log metadata injection).
+   - Seams: interfaces + hand-written fakes (a lambda suffices for SAMs) —
+     explicit contracts, the Mox stance. No mocking framework; the bytecode magic
+     Java mocks rely on doesn't exist here to honor anyway.
+   - Runner: `zc test` lowers test classes onto EUnit (gleeunit's playbook):
+     generated `*_tests` modules wrap each method in `{spawn,...}`/`{inparallel,
+     ...}`; rebar3 eunit integration, reporting, and exit codes come free.
+     Integration harness (boot the Application, hit it over HTTP) deferred —
+     dogfood scripts cover it until something earns more.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -510,10 +535,11 @@ type, the tree owns the workers. **Distribution: explicitly OUT of v1** — sing
 a designed-later pillar, not an implied feature. Deferred as library surface, not
 architecture: `zinc.net` sockets, JSON path-DSL, timers (sleep + self-kick cast
 already covers periodic work). Logging settled: println = stdout, prelude `Log.*` ->
-BEAM logger (crash reports land there too; transpiler injects file:line). One small
-design remains, settle before/during implementation: the test story (`zc test`).
-Next phase: implement spec + stdlib; webdemo rewritten with zero
-`Tuple.of`/`Atom.*` verifies.
+BEAM logger (crash reports land there too; transpiler injects file:line). Testing
+settled: `implements Test` marker + public-void-method convention, process-per-test
+(ExUnit's model), smart Assert messages, lowered onto EUnit (gleeunit's playbook).
+THE DESIGN BOARD IS CLEAR. Next phase: implement spec + stdlib; webdemo rewritten
+with zero `Tuple.of`/`Atom.*` verifies.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
