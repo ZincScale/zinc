@@ -25,6 +25,7 @@ class CodeGen {
   private final Map<String, RecordDecl> records;  // project-wide, by record name
   private final Map<String, EnumDecl> enums;      // project-wide, by enum name
   private final Map<String, ActorDecl> allActors; // project-wide: spawn/dispatch anywhere
+  private final Map<String, String> actorMods;    // actor simple name -> FQ module
   private final Map<String, ActorDecl> actors = new LinkedHashMap<>(); // this file's
   private final Map<String, String> ffi = new LinkedHashMap<>(); // alias -> erlang module
   private final boolean projectHasActors;
@@ -38,12 +39,13 @@ class CodeGen {
 
   CodeGen(Program program, Map<String, ClassInfo> classes, Map<String, RecordDecl> records,
       Map<String, EnumDecl> enums, Map<String, ActorDecl> allActors,
-      boolean projectHasActors) {
+      Map<String, String> actorMods, boolean projectHasActors) {
     this.program = program;
     this.classes = classes;
     this.records = records;
     this.enums = enums;
     this.allActors = allActors;
+    this.actorMods = actorMods;
     this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
       // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
@@ -134,13 +136,14 @@ class CodeGen {
       + "             restart => temporary, shutdown => 5000, type => worker}]}}.\n";
 
   /** Root supervisor: zinc_dyn_sup + the Application's static children, decl order. */
-  static String rootSupSource(Ast.ApplicationDecl app, Map<String, ActorDecl> actors) {
+  static String rootSupSource(Ast.ApplicationDecl app, Map<String, ActorDecl> actors,
+      Map<String, String> actorMods) {
     var specs = new ArrayList<String>();
     specs.add("#{id => zinc_dyn_sup, start => {zinc_dyn_sup, start_link, []},\n"
         + "             restart => permanent, shutdown => infinity, type => supervisor}");
     if (app != null) {
       for (FieldDecl f : app.fields()) {
-        specs.add(staticChildSpec(f, "'" + f.name() + "'", actors, "Application"));
+        specs.add(staticChildSpec(f, "'" + f.name() + "'", actors, actorMods, "Application"));
       }
     }
     return "-module(zinc_root_sup).\n"
@@ -155,7 +158,7 @@ class CodeGen {
   /** `Counter c = new Counter(0)` as a field -> permanent child spec; nameExpr is the
    *  registered-name term (a literal atom at root; computed from the owner's name below). */
   static String staticChildSpec(FieldDecl f, String nameExpr, Map<String, ActorDecl> actors,
-      String where) {
+      Map<String, String> actorMods, String where) {
     ActorDecl child = actors.get(f.type());
     if (child == null) {
       throw new CompileError(where + " field " + f.name() + ": type " + f.type()
@@ -166,8 +169,9 @@ class CodeGen {
           + f.type() + " " + f.name() + " = new " + f.type() + "(...)");
     }
     boolean pair = hasActorChildren(child, actors);
-    return "#{id => '" + f.name() + "', start => {" + (pair ? child.erlMod() + "_sup"
-        : child.erlMod()) + ", start_link, [" + nameExpr + ", none, ["
+    String childMod = actorMods.get(f.type());
+    return "#{id => '" + f.name() + "', start => {" + atomLit(pair ? childMod + "_sup"
+        : childMod) + ", start_link, [" + nameExpr + ", none, ["
         + literalArgs(sp.args(), f.name()) + "]]},\n             restart => permanent, "
         + "shutdown => " + (pair ? "infinity" : "5000") + ", type => "
         + (pair ? "supervisor" : "worker") + "}";
@@ -222,19 +226,19 @@ class CodeGen {
     var out = new LinkedHashMap<String, String>();
     for (ClassDecl c : program.classes()) {
       resetModuleState();
-      curModule = c.erlMod();
+      curModule = classes.get(c.name()).module();
       curClassName = c.name();
-      out.put(c.erlMod(), genClassModule(c));
+      out.put(curModule, genClassModule(c));
     }
     for (ActorDecl a : actors.values()) {
       resetModuleState();
-      curModule = a.erlMod();
+      curModule = actorMods.get(a.name());
       curClassName = null;
       inActor = true;
-      out.put(a.erlMod(), genActorModule(a));
+      out.put(curModule, genActorModule(a));
       inActor = false;
       if (hasActorChildren(a, allActors)) {
-        out.put(a.erlMod() + "_sup", genPairSup(a));
+        out.put(curModule + "_sup", genPairSup(a));
       }
     }
     if (program.application() != null) {
@@ -253,17 +257,17 @@ class CodeGen {
     for (FieldDecl f : a.fields()) {
       if (!allActors.containsKey(f.type())) continue;
       String nameExpr = "list_to_atom(atom_to_list(Name) ++ \"." + f.name() + "\")";
-      kids.add(staticChildSpec(f, nameExpr, allActors, a.name()));
+      kids.add(staticChildSpec(f, nameExpr, allActors, actorMods, a.name()));
     }
-    String mod = a.erlMod();
-    return "-module(" + mod + "_sup).\n"
+    String mod = actorMods.get(a.name());
+    return "-module(" + atomLit(mod + "_sup") + ").\n"
         + "-behaviour(supervisor).\n"
         + "-export([start_link/3, start_kids/1, init/1]).\n\n"
         + "start_link(Name, Owner, Args) -> supervisor:start_link(?MODULE, {pair, Name, Owner, Args}).\n\n"
         + "start_kids(Name) -> supervisor:start_link(?MODULE, {kids, Name}).\n\n"
         + "init({pair, Name, Owner, Args}) ->\n"
         + "    {ok, {#{strategy => rest_for_one, intensity => 1000, period => 3600},\n"
-        + "          [#{id => owner, start => {" + mod + ", start_link, [Name, Owner, Args]},\n"
+        + "          [#{id => owner, start => {" + atomLit(mod) + ", start_link, [Name, Owner, Args]},\n"
         + "             restart => permanent, shutdown => 5000, type => worker},\n"
         + "           #{id => kids, start => {?MODULE, start_kids, [Name]},\n"
         + "             restart => permanent, shutdown => infinity, type => supervisor}]}};\n"
@@ -288,7 +292,7 @@ class CodeGen {
     }
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
-    return "-module(" + app.erlMod() + ").\n"
+    return "-module(" + curModule + ").\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
         + String.join("\n\n", pieces) + "\n";
@@ -326,7 +330,7 @@ class CodeGen {
     for (var m : c.methods()) defs.add(genFn(m));
     var pieces = new ArrayList<String>();
     var exports = new ArrayList<String>();
-    boolean isMain = c.erlMod().equals("main");
+    boolean isMain = curModule.equals("main");
     if (isMain) {
       exports.add("main/0");
       exports.add("run/0");
@@ -345,7 +349,7 @@ class CodeGen {
     pieces.addAll(defs);
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
-    return "-module(" + c.erlMod() + ").\n"
+    return "-module(" + atomLit(curModule) + ").\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
         + String.join("\n\n", pieces) + "\n";
@@ -410,7 +414,7 @@ class CodeGen {
         + "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg}).");
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
-    return "-module(" + a.erlMod() + ").\n"
+    return "-module(" + atomLit(curModule) + ").\n"
         + "-behaviour(gen_server).\n"
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
@@ -542,9 +546,9 @@ class CodeGen {
               throw new CompileError("spawn " + a.name() + ": constructor takes " + want
                   + " args, got " + sp.args().size());
             }
-            String startMod =
-                hasActorChildren(a, allActors) ? a.erlMod() + "_sup" : a.erlMod();
-            out.add(v + " = zinc_dyn_sup:spawn_child(" + startMod + ", self(), ["
+            String amod = actorMods.get(a.name());
+            String startMod = hasActorChildren(a, allActors) ? amod + "_sup" : amod;
+            out.add(v + " = zinc_dyn_sup:spawn_child(" + atomLit(startMod) + ", self(), ["
                 + genArgs(sp.args(), env) + "])");
             varTypes.put(st.name(), a.name());
           } else if (st.init() instanceof ListLit && st.type().endsWith("[]")) {
@@ -1197,7 +1201,7 @@ class CodeGen {
         if (!ci.methods().containsKey(key)) {
           throw new CompileError("class " + name + " has no method " + key);
         }
-        return ci.module() + ":" + x.method() + "(" + genArgs(x.args(), env) + ")";
+        return atomLit(ci.module()) + ":" + x.method() + "(" + genArgs(x.args(), env) + ")";
       }
       // FFI: erlang module, no arity check (signatures unknown; runtime reports undef)
       String ffiMod = ffi.get(name);

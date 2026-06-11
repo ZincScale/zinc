@@ -19,7 +19,7 @@ public class Main {
     }
     try {
       Path in = Path.of(args[0]);
-      List<Program> files = parseAll(in);
+      List<Src> files = parseAll(in);
 
       // project-wide registries; type names and module names must be unique
       var classes = new LinkedHashMap<String, ClassInfo>();
@@ -32,7 +32,10 @@ public class Main {
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tag", "Tuple", "Erlang",
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
           "String", "Exception", "Actor", "Application");
-      for (Program p : files) {
+      var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
+      for (Src src : files) {
+        Program p = src.prog();
+        String pkg = src.pkg();
         var names = new ArrayList<String>();
         p.classes().forEach(c -> names.add(c.name()));
         p.records().forEach(r -> names.add(r.name()));
@@ -46,8 +49,9 @@ public class Main {
         for (var c : p.classes()) {
           var methods = new LinkedHashMap<String, String>();
           for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
-          classes.put(c.name(), new ClassInfo(c.erlMod(), methods));
-          if (!modules.add(c.erlMod())) {
+          String mod = fqMod(pkg, c.name());
+          classes.put(c.name(), new ClassInfo(mod, methods));
+          if (!modules.add(mod)) {
             throw new CompileError("module name collision: " + c.name());
           }
         }
@@ -55,15 +59,20 @@ public class Main {
         p.enums().forEach(e2 -> enums.put(e2.name(), e2));
         for (var a : p.actors()) {
           actors.put(a.name(), a);
-          if (!modules.add(a.erlMod())) {
+          String mod = fqMod(pkg, a.name());
+          actorMods.put(a.name(), mod);
+          if (!modules.add(mod)) {
             throw new CompileError("module name collision: actor " + a.name());
           }
-          if (!a.fields().isEmpty()) modules.add(a.erlMod() + "_sup"); // supervisor pair
+          if (!a.fields().isEmpty()) modules.add(mod + "_sup"); // supervisor pair
         }
         if (p.application() != null) {
           if (application != null) {
             throw new CompileError("a project has at most one Application: "
                 + application.name() + " and " + p.application().name());
+          }
+          if (!pkg.isEmpty()) {
+            throw new CompileError("v1: the Application must live in the root package");
           }
           application = p.application();
           if (!modules.add(application.erlMod())) {
@@ -88,15 +97,15 @@ public class Main {
       boolean supervised = !actors.isEmpty() || application != null;
       var generated = new LinkedHashMap<String, String>();
       Ast.ApplicationDecl resolvedApp = null;
-      for (Program p : files) {
-        Program resolved = Resolve.spawns(p, actors.keySet());
+      for (Src src : files) {
+        Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
-        generated.putAll(
-            new CodeGen(resolved, classes, records, enums, actors, supervised).generateAll());
+        generated.putAll(new CodeGen(resolved, classes, records, enums, actors, actorMods,
+            supervised).generateAll());
       }
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
-        generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors));
+        generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors, actorMods));
       }
 
       Path outDir = Files.createDirectories(Path.of(args[1]));
@@ -111,10 +120,18 @@ public class Main {
     }
   }
 
-  private static List<Program> parseAll(Path in) throws IOException {
-    var programs = new ArrayList<Program>();
+  /** A parsed file plus its package (= directory path, Java convention). */
+  record Src(Program prog, String pkg) {}
+
+  /** FQ class name = module, as a lowercase dotted atom: util.MathUtil -> 'util.mathutil'. */
+  static String fqMod(String pkg, String name) {
+    return pkg.isEmpty() ? name.toLowerCase() : pkg + "." + name.toLowerCase();
+  }
+
+  private static List<Src> parseAll(Path in) throws IOException {
+    var programs = new ArrayList<Src>();
     if (!Files.isDirectory(in)) {
-      programs.add(parse(in));
+      programs.add(new Src(parse(in), ""));
       return programs;
     }
     var srcFiles = new ArrayList<Path>();
@@ -124,8 +141,11 @@ public class Main {
     if (srcFiles.isEmpty()) throw new CompileError("no .zinc files under " + in);
     for (Path p : srcFiles) {
       Program prog = parse(p);
-      checkFileName(in.relativize(p), prog);
-      programs.add(prog);
+      Path rel = in.relativize(p);
+      checkFileName(rel, prog);
+      String pkg = rel.getParent() == null ? ""
+          : rel.getParent().toString().replace('/', '.').toLowerCase();
+      programs.add(new Src(prog, pkg));
     }
     return programs;
   }
