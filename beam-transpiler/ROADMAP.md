@@ -347,8 +347,23 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      domain. A handler bug crashes that request only — 500 + log; every other
      in-flight request and the server itself untouched. Return `Response` for
      expected outcomes; no try/catch ceremony. Uncaught zinc exceptions = same 500.
-   - Deferred, named: JSON (own design — next stdlib topic after sockets), TLS
-     listen config, middleware/filters, static files, websockets/streaming.
+   - Deferred, named: TLS listen config, middleware/filters, static files,
+     websockets/streaming.
+   **JSON v1 — designed (2026-06-11): typed codecs + dynamic access; no path DSL.**
+   Backed by OTP 27's built-in `json` module — zero deps.
+   - The workhorse: the transpiler derives codecs on every record —
+     `User.fromJson(s)` (generated static: parse + shape-validate, typed
+     `{zinc_badtype...}` crash on mismatch) and `u.toJson()`. No class literals, no
+     reflection, no annotations: records are closed final values with statically
+     known fields, so derivation is pure codegen; nested records compose. Lenient
+     on extra fields, crash on missing; nullable/defaults story later.
+   - The fallback, for foreign JSON: `Json.parse(s)` returns unknown-typed data
+     (maps/lists/scalars); `var` chaining flows freely (the FFI rule), and the
+     typed bind at the end is the guarded crossing — Python ergonomics with a
+     checked boundary, ladder failure mode (no cast ceremony, no
+     ClassCastException mysteries).
+   - Deferred: path-string accessors (JsonPath/`at()`-style) — convenience over
+     the fallback, adds a string mini-language; revisit if dogfoods earn it.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -445,8 +460,9 @@ made real, and it's pure BEAM strength:
 closed — zero extension keywords: `Application`/`Process` marker interfaces, `new`
 spawns. Decision #9 settled (everything `zinc.*`); `zinc.http` client AND server
 designed (client over httpc; server over cowboy — Router table, Handler SAM,
-process-per-request). Next: `zinc.net` sockets, then the Future/fan-out shape, then
-JSON.
+process-per-request); JSON designed (derived record codecs + dynamic var-chaining).
+Next: the Future/fan-out shape (one real decision: failure semantics at the join),
+then `zinc.net` sockets (lowering details only — the shape is proven).
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
