@@ -6,7 +6,12 @@ final class Ast {
   private Ast() {}
 
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
-      List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application) {}
+      List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application,
+      List<ExceptionDecl> exceptions) {}
+
+  /** class NotFound extends Exception { String message; } — the one sanctioned extends.
+   *  Final value; thrown as erlang:error({zinc_exc, 'fq.tag', FieldsMap}). */
+  record ExceptionDecl(String name, List<FieldDecl> fields) {}
 
   /** class Main implements Application { Actor fields = root children; optional main. }
    *  The explicit root: lowers to the generated root supervisor's static children. */
@@ -92,8 +97,14 @@ final class Ast {
   /** classic for desugared to { init; while }, sharing the enclosing scope. */
   record SeqStmt(List<Stmt> stmts) implements Stmt {}
 
-  /** try {..} catch (Exception e) {..} -> try .. catch error:E -> .. end */
-  record TryStmt(Block tryBlock, String exVar, Block catchBlock) implements Stmt {}
+  /** try {..} catch (NotFound e) {..} catch (Exception e) {..} — clauses match in order;
+   *  catch (Exception e) is the catch-all and also catches native BEAM errors. */
+  record TryStmt(Block tryBlock, List<CatchClause> clauses) implements Stmt {}
+
+  record CatchClause(String exType, String var, Block body) {}
+
+  /** throw new NotFound("msg") -> erlang:error({zinc_exc, 'fq.tag', FieldsMap}) */
+  record ThrowStmt(String exType, List<Expr> args) implements Stmt {}
 
   sealed interface Expr {}
 

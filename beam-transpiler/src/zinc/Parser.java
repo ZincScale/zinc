@@ -60,10 +60,11 @@ class Parser {
     var actors = new ArrayList<ActorDecl>();
     var enums = new ArrayList<EnumDecl>();
     var application = new ApplicationDecl[1];
+    var exceptions = new ArrayList<ExceptionDecl>();
     while (!check(TokKind.EOF)) {
       skipModifiers();
       if (checkIdent("class")) {
-        parseClassLike(classes, actors, application);
+        parseClassLike(classes, actors, application, exceptions);
       } else if (checkIdent("record")) {
         records.add(parseRecord());
       } else if (checkIdent("enum")) {
@@ -73,7 +74,7 @@ class Parser {
             + cur().line());
       }
     }
-    return new Program(imports, classes, records, actors, enums, application[0]);
+    return new Program(imports, classes, records, actors, enums, application[0], exceptions);
   }
 
   private EnumDecl parseEnum() {
@@ -118,11 +119,21 @@ class Parser {
     return t.toString();
   }
 
-  /** class Name [implements Application|Actor] { ... } — markers select the lowering. */
+  /** class Name [implements Application|Actor | extends Exception] { ... } */
   private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors,
-      ApplicationDecl[] application) {
+      ApplicationDecl[] application, List<ExceptionDecl> exceptions) {
     advance(); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
+    if (checkIdent("extends")) {
+      advance();
+      String parent = expect(TokKind.IDENT, "parent type").text();
+      if (!parent.equals("Exception")) {
+        throw new CompileError("class " + name + " extends " + parent
+            + ": 'extends Exception' is the one sanctioned extends (v1)");
+      }
+      exceptions.add(parseExceptionBody(name));
+      return;
+    }
     String marker = null;
     if (checkIdent("implements")) {
       advance();
@@ -197,6 +208,21 @@ class Parser {
     return new RecordDecl(name, comps);
   }
 
+  /** Exception body: fields only — final values, positional construction at throw. */
+  private ExceptionDecl parseExceptionBody(String name) {
+    expect(TokKind.LBRACE, "'{'");
+    var fields = new ArrayList<FieldDecl>();
+    while (!check(TokKind.RBRACE)) {
+      skipModifiers();
+      String type = parseType();
+      String fieldName = expect(TokKind.IDENT, "field name").text();
+      expect(TokKind.SEMI, "';' (exception classes hold fields only, v1)");
+      fields.add(new FieldDecl(type, fieldName, null));
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ExceptionDecl(name, fields);
+  }
+
   private ActorDecl parseActorBody(String name) {
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
@@ -263,6 +289,25 @@ class Parser {
         return new ContinueStmt();
       default:
         if (checkIdent("try")) return parseTry();
+        if (checkIdent("throw")) {
+          advance();
+          if (!checkIdent("new")) {
+            throw new CompileError("v1: throw takes a new exception — throw new X(...), at line "
+                + cur().line());
+          }
+          advance();
+          String exType = expect(TokKind.IDENT, "exception type").text();
+          expect(TokKind.LPAREN, "'('");
+          var args = new ArrayList<Expr>();
+          if (!check(TokKind.RPAREN)) {
+            do {
+              args.add(parseExpr());
+            } while (match(TokKind.COMMA));
+          }
+          expect(TokKind.RPAREN, "')'");
+          expect(TokKind.SEMI, "';'");
+          return new ThrowStmt(exType, args);
+        }
         if (checkIdent("switch") && toks.get(pos + 1).kind() == TokKind.LPAREN) {
           return parseSwitch();
         }
@@ -314,12 +359,16 @@ class Parser {
     if (!checkIdent("catch")) {
       throw new CompileError("Parse error: expected 'catch' at line " + cur().line());
     }
-    advance();
-    expect(TokKind.LPAREN, "'('");
-    expect(TokKind.IDENT, "exception type"); // type is ignored: one catch-all clause (v1)
-    String exVar = expect(TokKind.IDENT, "exception variable").text();
-    expect(TokKind.RPAREN, "')'");
-    return new TryStmt(tryBlock, exVar, parseBlock());
+    var clauses = new ArrayList<CatchClause>();
+    while (checkIdent("catch")) {
+      advance();
+      expect(TokKind.LPAREN, "'('");
+      String exType = expect(TokKind.IDENT, "exception type").text();
+      String exVar = expect(TokKind.IDENT, "exception variable").text();
+      expect(TokKind.RPAREN, "')'");
+      clauses.add(new CatchClause(exType, exVar, parseBlock()));
+    }
+    return new TryStmt(tryBlock, clauses);
   }
 
   /** IDENT ('[' ']')* IDENT, or 'var' IDENT — a local declaration. */

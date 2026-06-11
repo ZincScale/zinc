@@ -33,6 +33,8 @@ public class Main {
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
           "String", "Exception", "Actor", "Application");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
+      var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
+      var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
       for (Src src : files) {
         Program p = src.prog();
         String pkg = src.pkg();
@@ -42,6 +44,7 @@ public class Main {
         p.actors().forEach(a -> names.add(a.name()));
         p.enums().forEach(e2 -> names.add(e2.name()));
         if (p.application() != null) names.add(p.application().name());
+        p.exceptions().forEach(x -> names.add(x.name()));
         for (String n : names) {
           if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
           if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
@@ -57,6 +60,10 @@ public class Main {
         }
         p.records().forEach(r -> records.put(r.name(), r));
         p.enums().forEach(e2 -> enums.put(e2.name(), e2));
+        for (var x : p.exceptions()) {
+          exceptions.put(x.name(), x);
+          excTags.put(x.name(), fqMod(pkg, x.name())); // tag = FQ name, no module emitted
+        }
         for (var a : p.actors()) {
           actors.put(a.name(), a);
           String mod = fqMod(pkg, a.name());
@@ -101,7 +108,7 @@ public class Main {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
         generated.putAll(new CodeGen(resolved, classes, records, enums, actors, actorMods,
-            supervised).generateAll());
+            exceptions, excTags, supervised).generateAll());
       }
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);

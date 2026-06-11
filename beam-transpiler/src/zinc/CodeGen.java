@@ -26,6 +26,8 @@ class CodeGen {
   private final Map<String, EnumDecl> enums;      // project-wide, by enum name
   private final Map<String, ActorDecl> allActors; // project-wide: spawn/dispatch anywhere
   private final Map<String, String> actorMods;    // actor simple name -> FQ module
+  private final Map<String, Ast.ExceptionDecl> exceptions; // project-wide
+  private final Map<String, String> excTags;      // exception simple name -> FQ tag
   private final Map<String, ActorDecl> actors = new LinkedHashMap<>(); // this file's
   private final Map<String, String> ffi = new LinkedHashMap<>(); // alias -> erlang module
   private final boolean projectHasActors;
@@ -39,13 +41,16 @@ class CodeGen {
 
   CodeGen(Program program, Map<String, ClassInfo> classes, Map<String, RecordDecl> records,
       Map<String, EnumDecl> enums, Map<String, ActorDecl> allActors,
-      Map<String, String> actorMods, boolean projectHasActors) {
+      Map<String, String> actorMods, Map<String, Ast.ExceptionDecl> exceptions,
+      Map<String, String> excTags, boolean projectHasActors) {
     this.program = program;
     this.classes = classes;
     this.records = records;
     this.enums = enums;
     this.allActors = allActors;
     this.actorMods = actorMods;
+    this.exceptions = exceptions;
+    this.excTags = excTags;
     this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
       // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
@@ -90,11 +95,26 @@ class CodeGen {
   private static final String IDX_HELPER =
       "'$idx'(B, P) -> case binary:match(B, P) of nomatch -> -1; {Pos, _} -> Pos end.";
 
+  /** catch (Exception e): zinc exceptions unwrap; native errors render a message. */
+  private static final String EXNORM_HELPER =
+      "'$exnorm'({zinc_exc, _, F}) -> F;\n"
+      + "'$exnorm'(R) -> #{'$class' => 'java.lang.exception',\n"
+      + "    message => iolist_to_binary(io_lib:format(\"~p\", [R]))}.";
+
+  /** Typed actor call: a deliberate throw in the callee relays here, catchable;\n
+   *  bugs crash the callee and this caller exits with the same reason (ladder). */
+  private static final String CALL_HELPER =
+      "'$call'(N, M) -> case gen_server:call(N, M) of\n"
+      + "    {'$zinc_relay', {zinc_exc, _, _} = E} -> erlang:error(E);\n"
+      + "    V -> V end.";
+
   // per-output-module usage flags: helpers are emitted only when referenced
   private boolean useFmt;
   private boolean useSfx;
   private boolean useOk;
   private boolean useIdx;
+  private boolean useExnorm;
+  private boolean useCall;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -102,6 +122,8 @@ class CodeGen {
     if (useSfx) out.add(SFX_HELPER);
     if (useOk) out.add(OK_HELPER);
     if (useIdx) out.add(IDX_HELPER);
+    if (useExnorm) out.add(EXNORM_HELPER);
+    if (useCall) out.add(CALL_HELPER);
     return out;
   }
 
@@ -111,6 +133,8 @@ class CodeGen {
     useSfx = false;
     useOk = false;
     useIdx = false;
+    useExnorm = false;
+    useCall = false;
   }
 
   /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
@@ -517,6 +541,14 @@ class CodeGen {
         : "{" + m.name() + ", " + String.join(", ", params) + "}";
     String head = isCall ? "handle_call(" + msg + ", _From, State)"
         : "handle_cast(" + msg + ", State)";
+    if (isCall) {
+      // ladder rung 2: a deliberate throw relays to the caller; the actor survives with
+      // its ENTRY state (transactional). Only the {zinc_exc,..} shape is caught —
+      // bugs fall through and crash the process (rung 3). Casts have no caller: crash.
+      return head + " ->\n    try\n" + block(lines, "        ") + "\n"
+          + "    catch error:{zinc_exc, _, _} = ZE -> {reply, {'$zinc_relay', ZE}, State}\n"
+          + "    end";
+    }
     return head + " ->\n" + block(lines, "        ");
   }
 
@@ -627,6 +659,7 @@ class CodeGen {
         case WhileStmt st -> out.add(genWhile(st, env));
         case SeqStmt st -> out.addAll(genStmts(st.stmts(), env, false, loopMut));
         case TryStmt st -> out.add(genTry(st, env, loopMut));
+        case Ast.ThrowStmt st -> out.add(genThrow(st, env));
       }
     }
     return out;
@@ -653,6 +686,26 @@ class CodeGen {
     String v = fresh(vr.name());
     env.put(vr.name(), v);
     return v + " = " + rhs;
+  }
+
+  /** throw new NotFound("x") -> erlang:error({zinc_exc, 'fq.tag', FieldsMap}). */
+  private String genThrow(Ast.ThrowStmt s, Map<String, String> env) {
+    Ast.ExceptionDecl x = exceptions.get(s.exType());
+    if (x == null) {
+      throw new CompileError("throw new " + s.exType() + ": unknown exception class"
+          + " — declare it: class " + s.exType() + " extends Exception { ... }");
+    }
+    if (s.args().size() != x.fields().size()) {
+      throw new CompileError("throw new " + s.exType() + ": takes " + x.fields().size()
+          + " args (its fields, in order), got " + s.args().size());
+    }
+    String tag = atomLit(excTags.get(s.exType()));
+    var entries = new ArrayList<String>();
+    entries.add("'$class' => " + tag);
+    for (int i = 0; i < x.fields().size(); i++) {
+      entries.add(x.fields().get(i).name() + " => " + genExpr(s.args().get(i), env));
+    }
+    return "erlang:error({zinc_exc, " + tag + ", #{" + String.join(", ", entries) + "}})";
   }
 
   private static String envGet(Map<String, String> env, String name) {
@@ -768,22 +821,44 @@ class CodeGen {
   private String genTry(TryStmt s, Map<String, String> env, List<String> loopMut) {
     var assigned = new LinkedHashSet<String>();
     collectAssigned(s.tryBlock(), assigned);
-    collectAssigned(s.catchBlock(), assigned);
+    for (Ast.CatchClause c : s.clauses()) collectAssigned(c.body(), assigned);
     var phi = assigned.stream().filter(env::containsKey).toList();
 
     var tEnv = new HashMap<>(env);
     List<String> tCode = genStmts(s.tryBlock().stmts(), tEnv, false, loopMut);
     boolean tJump = endsInJump(s.tryBlock());
 
-    var cEnv = new HashMap<>(env);
-    String ev = fresh(s.exVar());
-    cEnv.put(s.exVar(), ev);
-    List<String> cCode = genStmts(s.catchBlock().stmts(), cEnv, false, loopMut);
-    boolean cJump = endsInJump(s.catchBlock());
+    var arms = new ArrayList<String>();
+    for (Ast.CatchClause c : s.clauses()) {
+      var cEnv = new HashMap<>(env);
+      String ev = fresh(c.var());
+      cEnv.put(c.var(), ev);
+      varTypes.put(c.var(), c.exType());
+      List<String> cCode;
+      String head;
+      if (c.exType().equals("Exception")) {
+        // catch-all: zinc exceptions unwrap to their fields map; native BEAM errors
+        // (badarith ~ ArithmeticException) normalize to #{message => rendered}
+        useExnorm = true;
+        String raw = fresh("raw");
+        head = "error:" + raw + " ->";
+        cCode = new ArrayList<>(List.of(ev + " = '$exnorm'(" + raw + ")"));
+        cCode.addAll(genStmts(c.body().stmts(), cEnv, false, loopMut));
+      } else {
+        String tag = excTags.get(c.exType());
+        if (tag == null) {
+          throw new CompileError("catch (" + c.exType() + "): unknown exception class"
+              + " — declare it: class " + c.exType() + " extends Exception { ... }");
+        }
+        head = "error:{zinc_exc, " + atomLit(tag) + ", " + ev + "} ->";
+        cCode = genStmts(c.body().stmts(), cEnv, false, loopMut);
+      }
+      boolean cJump = endsInJump(c.body());
+      arms.add(head + "\n" + block(armLines(cCode, cEnv, cJump, phi), "        "));
+    }
 
     String body = "try\n" + block(armLines(tCode, tEnv, tJump, phi), "        ") + "\n"
-        + "catch error:" + ev + " ->\n"
-        + block(armLines(cCode, cEnv, cJump, phi), "        ") + "\n"
+        + "catch " + String.join(";\n", arms) + "\n"
         + "end";
     return bindPhi(phi, env, body);
   }
@@ -1105,8 +1180,22 @@ class CodeGen {
               + " has no method " + x.method() + "/" + arity));
       String msg = x.args().isEmpty() ? "{" + x.method() + "}"
           : "{" + x.method() + ", " + genArgs(x.args(), env) + "}";
-      String kind = m.retType().equals("void") ? "cast" : "call";
-      return "gen_server:" + kind + "(" + genExpr(x.target(), env) + ", " + msg + ")";
+      if (m.retType().equals("void")) {
+        return "gen_server:cast(" + genExpr(x.target(), env) + ", " + msg + ")";
+      }
+      useCall = true; // typed call: unwraps relayed exceptions (failure-ladder rung 2)
+      return "'$call'(" + genExpr(x.target(), env) + ", " + msg + ")";
+    }
+    // exception value: getMessage() + field accessors (final values, like records)
+    if (tt != null && (exceptions.containsKey(tt) || tt.equals("Exception"))
+        && x.args().isEmpty()) {
+      if (x.method().equals("getMessage")) {
+        return "maps:get(message, " + genExpr(x.target(), env) + ", <<>>)";
+      }
+      Ast.ExceptionDecl xd = exceptions.get(tt);
+      if (xd != null && xd.fields().stream().anyMatch(f -> f.name().equals(x.method()))) {
+        return "maps:get(" + x.method() + ", " + genExpr(x.target(), env) + ")";
+      }
     }
     RecordDecl r = tt == null ? null : records.get(tt);
     if (r != null && x.args().isEmpty()
@@ -1413,6 +1502,14 @@ class CodeGen {
             default -> null;
           };
         }
+        if (tt != null && (exceptions.containsKey(tt) || tt.equals("Exception"))) {
+          if (x.method().equals("getMessage")) yield "String";
+          Ast.ExceptionDecl xd = exceptions.get(tt);
+          if (xd != null) {
+            yield xd.fields().stream().filter(f -> f.name().equals(x.method()))
+                .map(FieldDecl::type).findFirst().orElse(null);
+          }
+        }
         RecordDecl r = tt == null ? null : records.get(tt);
         if (r != null) {
           yield r.components().stream().filter(c -> c.name().equals(x.method()))
@@ -1439,7 +1536,8 @@ class CodeGen {
       if (s instanceof WhileStmt it && hasReturn(it.body())) return true;
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
       if (s instanceof TryStmt it
-          && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
+          && (hasReturn(it.tryBlock())
+              || it.clauses().stream().anyMatch(c -> hasReturn(c.body())))) return true;
       if (s instanceof SwitchStmt it && switchHasReturn(it)) return true;
     }
     return false;
@@ -1463,7 +1561,8 @@ class CodeGen {
       if (s instanceof WhileStmt it && hasReturn(it.body())) return true;
       if (s instanceof SeqStmt it && hasReturn(new Block(it.stmts()))) return true;
       if (s instanceof TryStmt it
-          && (hasReturn(it.tryBlock()) || hasReturn(it.catchBlock()))) return true;
+          && (hasReturn(it.tryBlock())
+              || it.clauses().stream().anyMatch(c -> hasReturn(c.body())))) return true;
       if (s instanceof SwitchStmt it && switchHasReturn(it)) return true;
     }
     return false;
@@ -1481,7 +1580,8 @@ class CodeGen {
         case ForEachStmt st -> n += countReturns(st.body());
         case WhileStmt st -> n += countReturns(st.body());
         case SeqStmt st -> n += countReturns(new Block(st.stmts()));
-        case TryStmt st -> n += countReturns(st.tryBlock()) + countReturns(st.catchBlock());
+        case TryStmt st -> n += countReturns(st.tryBlock())
+            + st.clauses().stream().mapToInt(c -> countReturns(c.body())).sum();
         case SwitchStmt st -> {
           for (SwitchCase c : st.cases()) n += countReturns(c.body());
           if (st.defaultBlock() != null) n += countReturns(st.defaultBlock());
@@ -1502,7 +1602,8 @@ class CodeGen {
       boolean nested = switch (s) {
         case IfStmt it -> hasBreakContinue(it.thenBlock())
             || (it.elseBlock() != null && hasBreakContinue(it.elseBlock()));
-        case TryStmt it -> hasBreakContinue(it.tryBlock()) || hasBreakContinue(it.catchBlock());
+        case TryStmt it -> hasBreakContinue(it.tryBlock())
+            || it.clauses().stream().anyMatch(c -> hasBreakContinue(c.body()));
         case SwitchStmt it -> {
           for (SwitchCase c : it.cases()) {
             if (hasBreakContinue(c.body())) yield true;
@@ -1547,7 +1648,7 @@ class CodeGen {
         case SeqStmt st -> collectAssigned(new Block(st.stmts()), out);
         case TryStmt st -> {
           collectAssigned(st.tryBlock(), out);
-          collectAssigned(st.catchBlock(), out);
+          for (Ast.CatchClause c : st.clauses()) collectAssigned(c.body(), out);
         }
         case ExprStmt st -> {
           // collection-mutator statements rebind the receiver
@@ -1607,9 +1708,12 @@ class CodeGen {
           blockRefs(st.body(), out);
         }
         case SeqStmt st -> blockRefs(new Block(st.stmts()), out);
+        case Ast.ThrowStmt st -> {
+          for (Expr a : st.args()) exprRefs(a, out);
+        }
         case TryStmt st -> {
           blockRefs(st.tryBlock(), out);
-          blockRefs(st.catchBlock(), out);
+          for (Ast.CatchClause c : st.clauses()) blockRefs(c.body(), out);
         }
         case BreakStmt st -> {}
         case ContinueStmt st -> {}

@@ -53,7 +53,8 @@ final class Resolve {
   static Program spawns(Program p, Set<String> actorNames) {
     var r = new Resolve(actorNames);
     return new Program(p.imports(), p.classes().stream().map(r::clazz).toList(), p.records(),
-        p.actors().stream().map(r::actor).toList(), p.enums(), r.app(p.application()));
+        p.actors().stream().map(r::actor).toList(), p.enums(), r.app(p.application()),
+        p.exceptions());
   }
 
   private ApplicationDecl app(ApplicationDecl a) {
@@ -105,7 +106,11 @@ final class Resolve {
       case BreakStmt x -> x;
       case ContinueStmt x -> x;
       case SeqStmt x -> new SeqStmt(x.stmts().stream().map(this::stmt).toList());
-      case TryStmt x -> new TryStmt(block(x.tryBlock()), x.exVar(), block(x.catchBlock()));
+      case TryStmt x -> new TryStmt(block(x.tryBlock()),
+          x.clauses().stream()
+              .map(c -> new Ast.CatchClause(c.exType(), c.var(), block(c.body()))).toList());
+      case Ast.ThrowStmt x ->
+          new Ast.ThrowStmt(x.exType(), x.args().stream().map(this::expr).toList());
     };
   }
 
