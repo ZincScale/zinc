@@ -3,7 +3,7 @@
 ## What this is
 **Legal Java syntax that transpiles to Erlang/BEAM** — classic class ceremony, types,
 semicolons, `System.out.println` — with ZERO extension keywords: OTP concepts enter as
-marker interfaces (`implements Application` / `implements Process` — the `Serializable`
+marker interfaces (`implements Application` / `implements Actor` — the `Serializable`
 idiom; no annotations), so every file parses in any Java IDE. Java devs get OTP-grade
 reliability (supervision, self-healing, distribution) without writing functional code. The pitch: a lightweight alternative to the
 microservices + Kubernetes tax for small teams. The language is the on-ramp; BEAM is the moat.
@@ -162,7 +162,7 @@ opts on cert-less systems. Record: `dogfood/FINDINGS-webdemo.md` (GAP-9, GAP-10)
 ### Next: **the standard library** (GAP-9 — the headline dogfood finding)
 Webdemo code reads `List.of(Tuple.of(Atom.port, 0))` — Erlang in Java clothes; no Java
 dev writes proplists of tagged tuples. The architecture is three layers:
-1. **OTP behaviours = language semantics** (already true: `implements Process` -> gen_server +
+1. **OTP behaviours = language semantics** (already true: `implements Actor` -> gen_server +
    supervisor; users never see callbacks).
 2. **OTP stdlib apps = zinc's JDK**: Java-shaped facades backed by OTP. First surfaces:
    `zinc.http.HttpClient` over httpc, Java-shaped (also the one home for the
@@ -180,12 +180,12 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      specs/dialyzer are Erlang's own erased "generics"). Invariant, raw types legal,
      no inference.
    - **Gradual static checking at transpile time** — the point of having generics:
-     every expression is known-typed (declarations, literals, record/Process/facade/stdlib
+     every expression is known-typed (declarations, literals, record/Actor/facade/stdlib
      signatures) or unknown (`var` from FFI, `Object`); known-vs-known mismatch = error
      (exact nominal match — no subtyping lattice exists yet); unknown flows freely
      (the FFI basement, analogous to Java raw types/casts).
    - **Runtime boundary guards where unknown crosses into known** (Java's hidden
-     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed Process
+     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed Actor
      method entry (= checked message contracts — messages arrive from anywhere)**,
      typed record fields, insertion into known-type-arg collections. SHALLOW only
      (element at the crossing; never deep-scan a collection). Failure = structured
@@ -203,13 +203,14 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    `implements Application` — the explicit root (the name Spring Boot, J2EE, and OTP
    all agree on; it lowers to an OTP application): it carries the OTP application
    identity (name/version from zinc.toml; [deps] boot before its tree), declares the
-   root children as Process-typed fields, hosts the optional `main(String[] args)`,
+   root children as Actor-typed fields, hosts the optional `main(String[] args)`,
    receives SIGTERM, owns the exit code. The Application has no handle, no callers —
    it is the boundary, not a unit. A project without an `Application` is a library.
-   A class `implements Process` (the BEAM's own word — no FP "actor" baggage) is the
+   A class `implements Actor` (the industry's word for it — Erlang/Akka lineage;
+   also frees lowercase "process" to mean only the BEAM thing it lowers to) is the
    supervised stateful unit: fields (state + child processes), methods (void ⇒ cast,
    typed ⇒ call), the instance reference is the handle.
-   **`new` spawns.** For a Process class the instance IS the live process — BEAM has
+   **`new` spawns.** For an Actor class the instance IS the live process — BEAM has
    no created-but-not-running state, so zinc invents none (cf. Java collapsing the
    new/start two-step in `Thread.startVirtualThread`): `new` runs the constructor
    inside the freshly spawned process (OTP init) and returns the handle; on restart
@@ -217,14 +218,14 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    when the constructor has completed (start_link semantics) — boot is
    deterministic: each child is fully constructed before the next sibling is born.
    Constructors stay cheap; heavy async work starts via a cast, not in the ctor. The contract,
-   stated once: Java syntax, marker-declared semantics — `implements Process` is the
+   stated once: Java syntax, marker-declared semantics — `implements Actor` is the
    dev opting into process rules (serialized methods, surviving state, `new` = spawn).
    Liveness (the JVM non-daemon-thread rule): the program exits when `main` (if any)
-   has returned AND no Process instances are alive; otherwise it runs until stopped. Tool,
+   has returned AND no Actor instances are alive; otherwise it runs until stopped. Tool,
    server, and mixed programs fall out of this one rule.
    **Tree shape — composition is supervision, nothing hidden.** The tree is read
-   from the source: the Application's Process-fields are the root domain; a Process's
-   Process-fields are its children — born in declaration order, shut down in reverse.
+   from the source: the Application's Actor-fields are the root domain; an Actor's
+   Actor-fields are its children — born in declaration order, shut down in reverse.
    No separate tree declaration.
    - Failure flows down, never up: an owner's death takes its domain (subtree
      restarts fresh, constructors re-run); a child's death never harms its owner;
@@ -236,19 +237,19 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      modifier later if a real program earns it. Siblings independent; fail-together
      coupling deferred.
    - Handles orthogonal to domains: lifecycle only; restarts never break handles.
-   Lowering: Application -> OTP application + root supervisor; a Process with children ->
+   Lowering: Application -> OTP application + root supervisor; an Actor with children ->
    generated supervisor pair (owner first, children after, rest_for_one); worker
    processes never contain supervisor code.
    **Execution model.** All user code runs inside a BEAM process — no exceptions,
-   no other execution contexts. Users create processes only via `new` on a Process
+   no other execution contexts. Users create processes only via `new` on an Actor
    class (supervised, per the tree). Every other process is runtime- or stdlib-owned
    and temporary — `main`'s entry process (child of the root domain, runs once;
    crash logged, program exits nonzero if nothing else is alive), HTTP request
    handlers: spawned in the owning domain, never restarted, die with their owner. Supervisors are generated-only; library
    processes (FFI deps) belong to their own OTP apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
-   raw thread is a Process with no name, state, or methods; fire-and-forget = cast or
+   raw thread is an Actor with no name, state, or methods; fire-and-forget = cast or
    a temporary `new`; parallel fan-out/join is NOT a new shape — it is the
-   worker-Process idiom: construct (cheap ctor), kick (cast), join (call); mailbox
+   worker-Actor idiom: construct (cheap ctor), kick (cast), join (call); mailbox
    FIFO makes the naive code correct (the join call queues behind the kick cast and
    cannot be answered early). No Future type — the supervision tree already owns the
    workers (dynamic children: owner dies ⇒ tasks die; task crashes ⇒ ladder applies
@@ -259,7 +260,7 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    construction; mutable state lives in processes. Locals stay fully mutable (counters,
    temps, accumulators — the existing SSA machinery). Records' `p.x = v` mutation
    sugar is removed for consistency; build a new record instead. Mutability picture:
-   locals mutate freely / object fields never / Process fields across calls (serialized
+   locals mutate freely / object fields never / Actor fields across calls (serialized
    by the mailbox).
    **Interfaces**: nominal conformance checked at transpile time (`implements` = all
    methods present, signatures match); subtyping in the checker is one flat hop,
@@ -269,11 +270,11 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    guards check for class-typed values. Lambdas satisfy SAM interfaces as plain funs
    (dispatch discriminates fun vs map with one guard); stdlib functional interfaces
    (Function, Predicate, Comparator...) live in the checker, cost nothing at runtime.
-   Marker interfaces (zero methods) cost nothing anywhere; `Application` and `Process`
+   Marker interfaces (zero methods) cost nothing anywhere; `Application` and `Actor`
    are the two well-known ones, special-cased by the transpiler.
    Deferred: default methods, `interface extends`.
    **Failure semantics — one ladder.** (1) Expected failures are exceptions: Java-style
-   unwind to a typed catch. (2) A throw in a Process call-method relays to the caller
+   unwind to a typed catch. (2) A throw in an Actor call-method relays to the caller
    (catchable there); the process survives, state intact via transactional try; the
    generated wrapper catches ONLY the `{zinc_exc, Class, Fields}` shape — deliberate
    throws relay, bugs fall through. (3) Bugs crash the process; a caller mid-call on a
@@ -303,8 +304,8 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    non-lowercase-identifier shape OR Erlang reserved word (`Tag.end` -> `'end'`).
    THE V1 SPEC IS CLOSED. Revised post-close (2026-06-11): extension keywords
    ELIMINATED — `service`/`actor`/`spawn` are gone; the root is a class `implements
-   Application`, the stateful unit a class `implements Process` (marker interfaces,
-   prelude), `new` on a Process spawns. Zero non-Java syntax. Implementation order
+   Application`, the stateful unit a class `implements Actor` (marker interfaces,
+   prelude), `new` on an Actor spawns. Zero non-Java syntax. Implementation order
    (spec leads; current code still has the old keyword/flat-sup/script model, Atom.*
    naming, mutable records): next is stdlib API design, then implement spec + stdlib,
    webdemo rewrite verifies.
@@ -319,18 +320,18 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    .DELETE().timeout(ms).build()`; body is `String` or `byte[]` — one `POST(body)`
    method, not same-arity overloads (gradual checker accepts both; both lower to
    binaries, `byte[]` is the native case). Sync `client.send(req)` only — no
-   `sendAsync`/futures (threads cut; fan-out = the worker-Process idiom).
+   `sendAsync`/futures (threads cut; fan-out = the worker-Actor idiom).
    Returns `HttpResponse`, a final value: `statusCode()`, `body()` (UTF-8 String),
    `bodyBytes()` (byte[]), `header(name)`. 4xx/5xx are responses, not exceptions.
    Expected failures are typed exceptions per the failure ladder:
    `zinc.http.HttpException` (one-level parent, the catch-all) with
    `ConnectException`, `TimeoutException`. `HttpClient` is plain config, no hidden
-   state — safe in Process fields.
+   state — safe in Actor fields.
    **`zinc.http` server v1 — designed (2026-06-11).** Backed by cowboy;
    process-per-request is cowboy's native model — surfaced, not hidden.
-   - `HttpServer` is a stdlib Process: `new HttpServer(port, router)` spawns it
+   - `HttpServer` is a stdlib Actor: `new HttpServer(port, router)` spawns it
      listening; as a field it is a static child — supervised, restarted, shut down
-     with the tree. Declaration order does real work: state Processes declared
+     with the tree. Declaration order does real work: state Actors declared
      before the server are born first; handlers close over their handles.
        final Store store = new Store();
        final HttpServer server = new HttpServer(8080, Router.create()
@@ -342,7 +343,7 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      unmatched = 404 for free.
    - `Handler` is a SAM interface (`Response handle(Request req)`): lambdas work; a
      class `implements Handler` when a route family grows. Handlers are stateless;
-     state = closed-over Process handles.
+     state = closed-over Actor handles.
    - `Request`/`Response` are final values. Request: `method()`, `path()`,
      `pathParam(n)`, `queryParam(n)`, `header(n)`, `body()`/`bodyBytes()` — body
      materialized before the handler runs (no lazy streams in v1). Response: static
@@ -464,11 +465,11 @@ made real, and it's pure BEAM strength:
 
 ## Start here next session
 **Design the stdlib surfaces** (see "Next: the standard library" above). The v1 spec is
-closed — zero extension keywords: `Application`/`Process` marker interfaces, `new`
+closed — zero extension keywords: `Application`/`Actor` marker interfaces, `new`
 spawns. Decision #9 settled (everything `zinc.*`); `zinc.http` client AND server
 designed (client over httpc; server over cowboy — Router table, Handler SAM,
 process-per-request); JSON designed (derived record codecs + dynamic var-chaining).
-Fan-out/join: settled, NOT a stdlib shape — the worker-Process idiom (kick-cast +
+Fan-out/join: settled, NOT a stdlib shape — the worker-Actor idiom (kick-cast +
 join-call, mailbox FIFO makes it correct); no Future type, the tree owns the workers.
 Next: `zinc.net` sockets (lowering details only — the shape is proven). Distribution
 is the one undesigned pillar — explicitly out of v1 scope or design later.
