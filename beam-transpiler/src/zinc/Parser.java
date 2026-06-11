@@ -59,10 +59,11 @@ class Parser {
     var records = new ArrayList<RecordDecl>();
     var actors = new ArrayList<ActorDecl>();
     var enums = new ArrayList<EnumDecl>();
+    var application = new ApplicationDecl[1];
     while (!check(TokKind.EOF)) {
       skipModifiers();
       if (checkIdent("class")) {
-        parseClassLike(classes, actors);
+        parseClassLike(classes, actors, application);
       } else if (checkIdent("record")) {
         records.add(parseRecord());
       } else if (checkIdent("enum")) {
@@ -72,7 +73,7 @@ class Parser {
             + cur().line());
       }
     }
-    return new Program(imports, classes, records, actors, enums);
+    return new Program(imports, classes, records, actors, enums, application[0]);
   }
 
   private EnumDecl parseEnum() {
@@ -118,7 +119,8 @@ class Parser {
   }
 
   /** class Name [implements Application|Actor] { ... } — markers select the lowering. */
-  private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors) {
+  private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors,
+      ApplicationDecl[] application) {
     advance(); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
     String marker = null;
@@ -126,11 +128,27 @@ class Parser {
       advance();
       marker = expect(TokKind.IDENT, "interface name").text();
     }
-    if (marker == null || marker.equals("Application")) {
-      // Application tree semantics (Actor fields = root children) land in P2.
+    if (marker == null) {
       classes.add(parseClassBody(name));
     } else if (marker.equals("Actor")) {
       actors.add(parseActorBody(name));
+    } else if (marker.equals("Application")) {
+      if (application[0] != null) {
+        throw new CompileError("more than one Application in this file");
+      }
+      ActorDecl body = parseActorBody(name); // same body shape: fields + methods
+      if (body.ctor() != null) {
+        throw new CompileError("Application " + name + " cannot have a constructor");
+      }
+      MethodDecl main = null;
+      for (MethodDecl m : body.methods()) {
+        if (!m.name().equals("main")) {
+          throw new CompileError("Application " + name + " can only declare main(String[]):"
+              + " it is the boundary, not a unit — methods live on Actors");
+        }
+        main = m;
+      }
+      application[0] = new ApplicationDecl(name, body.fields(), main);
     } else {
       throw new CompileError("unknown interface '" + marker
           + "': v1 markers are Application and Actor, at line " + cur().line());

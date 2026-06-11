@@ -12,7 +12,8 @@ import zinc.Ast.*;
 /**
  * Lowers one source file (classes, records, actors) to Erlang modules.
  * Class -> module of functions; record -> map (new -> literal, accessor -> maps:get);
- * actor -> gen_server module (void method = cast, typed = call), one project actor_sup.
+ * Actor -> gen_server module (void method = cast, typed = call); Application -> root
+ * supervisor static children; dynamic new -> zinc_dyn_sup (temporary, die with owner).
  * Core lowerings unchanged from the validated set: SSA locals, loops -> tail recursion,
  * if-phi, early return via throw, break/continue via loop-scoped throw.
  */
@@ -116,19 +117,82 @@ class CodeGen {
     return pad + String.join(",\n", code).replace("\n", "\n" + pad);
   }
 
-  static final String SUP_SOURCE = "-module(actor_sup).\n"
+  /** Dynamic children: temporary (never restarted), die with their spawner (monitor). */
+  static final String DYN_SUP_SOURCE = "-module(zinc_dyn_sup).\n"
       + "-behaviour(supervisor).\n"
-      + "-export([start_link/0, spawn_child/2, init/1]).\n\n"
-      + "start_link() -> supervisor:start_link({local, actor_sup}, ?MODULE, []).\n\n"
-      + "spawn_child(Mod, Args) ->\n"
+      + "-export([start_link/0, spawn_child/3, do_start/4, init/1]).\n\n"
+      + "start_link() -> supervisor:start_link({local, zinc_dyn_sup}, ?MODULE, []).\n\n"
+      + "spawn_child(StartMod, Owner, Args) ->\n"
       + "    N = erlang:unique_integer([positive]),\n"
-      + "    Name = list_to_atom(atom_to_list(Mod) ++ \"_\" ++ integer_to_list(N)),\n"
-      + "    {ok, _} = supervisor:start_child(actor_sup,\n"
-      + "        #{id => Name, start => {Mod, start_link, [Name, Args]}, restart => permanent,\n"
-      + "          shutdown => 5000, type => worker, modules => [Mod]}),\n"
+      + "    Name = list_to_atom(atom_to_list(StartMod) ++ \"_\" ++ integer_to_list(N)),\n"
+      + "    {ok, _} = supervisor:start_child(zinc_dyn_sup, [StartMod, Name, Owner, Args]),\n"
       + "    Name.\n\n"
+      + "do_start(StartMod, Name, Owner, Args) -> StartMod:start_link(Name, Owner, Args).\n\n"
       + "init([]) ->\n"
-      + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600}, []}}.\n";
+      + "    {ok, {#{strategy => simple_one_for_one, intensity => 1000, period => 3600},\n"
+      + "          [#{id => zinc_dyn, start => {zinc_dyn_sup, do_start, []},\n"
+      + "             restart => temporary, shutdown => 5000, type => worker}]}}.\n";
+
+  /** Root supervisor: zinc_dyn_sup + the Application's static children, decl order. */
+  static String rootSupSource(Ast.ApplicationDecl app, Map<String, ActorDecl> actors) {
+    var specs = new ArrayList<String>();
+    specs.add("#{id => zinc_dyn_sup, start => {zinc_dyn_sup, start_link, []},\n"
+        + "             restart => permanent, shutdown => infinity, type => supervisor}");
+    if (app != null) {
+      for (FieldDecl f : app.fields()) {
+        specs.add(staticChildSpec(f, "'" + f.name() + "'", actors, "Application"));
+      }
+    }
+    return "-module(zinc_root_sup).\n"
+        + "-behaviour(supervisor).\n"
+        + "-export([start_link/0, init/1]).\n\n"
+        + "start_link() -> supervisor:start_link({local, zinc_root_sup}, ?MODULE, []).\n\n"
+        + "init([]) ->\n"
+        + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600},\n"
+        + "          [" + String.join(",\n           ", specs) + "]}}.\n";
+  }
+
+  /** `Counter c = new Counter(0)` as a field -> permanent child spec; nameExpr is the
+   *  registered-name term (a literal atom at root; computed from the owner's name below). */
+  static String staticChildSpec(FieldDecl f, String nameExpr, Map<String, ActorDecl> actors,
+      String where) {
+    ActorDecl child = actors.get(f.type());
+    if (child == null) {
+      throw new CompileError(where + " field " + f.name() + ": type " + f.type()
+          + " is not an Actor — static children are Actor-typed fields (v1)");
+    }
+    if (!(f.init() instanceof SpawnExpr sp) || !sp.actorName().equals(f.type())) {
+      throw new CompileError(where + " field " + f.name() + " must be initialized: "
+          + f.type() + " " + f.name() + " = new " + f.type() + "(...)");
+    }
+    boolean pair = hasActorChildren(child, actors);
+    return "#{id => '" + f.name() + "', start => {" + (pair ? child.erlMod() + "_sup"
+        : child.erlMod()) + ", start_link, [" + nameExpr + ", none, ["
+        + literalArgs(sp.args(), f.name()) + "]]},\n             restart => permanent, "
+        + "shutdown => " + (pair ? "infinity" : "5000") + ", type => "
+        + (pair ? "supervisor" : "worker") + "}";
+  }
+
+  /** An Actor with Actor-typed fields lowers to a supervisor pair (its own domain). */
+  static boolean hasActorChildren(ActorDecl a, Map<String, ActorDecl> actors) {
+    return a.fields().stream().anyMatch(f -> actors.containsKey(f.type()));
+  }
+
+  /** Static child ctor args live in supervisor specs: restart re-runs the SAME ctor. */
+  private static String literalArgs(List<Expr> args, String where) {
+    var out = new ArrayList<String>();
+    for (Expr e : args) {
+      out.add(switch (e) {
+        case IntLit x -> String.valueOf(x.value());
+        case FloatLit x -> String.valueOf(x.value());
+        case BoolLit x -> String.valueOf(x.value());
+        case StrLit x -> "<<\"" + escErl(x.text()) + "\"/utf8>>";
+        default -> throw new CompileError("static child '" + where
+            + "': constructor args must be literals (v1)");
+      });
+    }
+    return String.join(", ", out);
+  }
 
   private String fresh(String base) {
     String cap = base.isEmpty() ? "V" : Character.toUpperCase(base.charAt(0)) + base.substring(1);
@@ -155,8 +219,92 @@ class CodeGen {
       inActor = true;
       out.put(a.erlMod(), genActorModule(a));
       inActor = false;
+      if (hasActorChildren(a, allActors)) {
+        out.put(a.erlMod() + "_sup", genPairSup(a));
+      }
+    }
+    if (program.application() != null) {
+      resetModuleState();
+      curModule = program.application().erlMod();
+      curClassName = program.application().name();
+      out.put(curModule, genApplicationModule(program.application()));
     }
     return out;
+  }
+
+  /** Actor with Actor children -> its own domain: rest_for_one [owner, kids(one_for_one)].
+   *  Owner crash takes the domain (fresh ctors); a child crash restarts only itself. */
+  private String genPairSup(ActorDecl a) {
+    var kids = new ArrayList<String>();
+    for (FieldDecl f : a.fields()) {
+      if (!allActors.containsKey(f.type())) continue;
+      String nameExpr = "list_to_atom(atom_to_list(Name) ++ \"." + f.name() + "\")";
+      kids.add(staticChildSpec(f, nameExpr, allActors, a.name()));
+    }
+    String mod = a.erlMod();
+    return "-module(" + mod + "_sup).\n"
+        + "-behaviour(supervisor).\n"
+        + "-export([start_link/3, start_kids/1, init/1]).\n\n"
+        + "start_link(Name, Owner, Args) -> supervisor:start_link(?MODULE, {pair, Name, Owner, Args}).\n\n"
+        + "start_kids(Name) -> supervisor:start_link(?MODULE, {kids, Name}).\n\n"
+        + "init({pair, Name, Owner, Args}) ->\n"
+        + "    {ok, {#{strategy => rest_for_one, intensity => 1000, period => 3600},\n"
+        + "          [#{id => owner, start => {" + mod + ", start_link, [Name, Owner, Args]},\n"
+        + "             restart => permanent, shutdown => 5000, type => worker},\n"
+        + "           #{id => kids, start => {?MODULE, start_kids, [Name]},\n"
+        + "             restart => permanent, shutdown => infinity, type => supervisor}]}};\n"
+        + "init({kids, Name}) ->\n"
+        + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600},\n"
+        + "          [" + String.join(",\n           ", kids) + "]}}.\n";
+  }
+
+  /** The explicit root: boot the tree, host optional main, own the liveness rule. */
+  private String genApplicationModule(Ast.ApplicationDecl app) {
+    var exports = new ArrayList<String>(List.of("main/0", "run/0"));
+    var pieces = new ArrayList<String>();
+    String boot = "    logger:set_primary_config(level, none),\n"
+        + "    {ok, _} = zinc_root_sup:start_link(),\n";
+    pieces.add("main() ->\n" + boot + (app.main() != null ? "    user_main([])." : "    ok."));
+    // liveness: static children alive -> serve until stopped; none -> exit after main
+    pieces.add(!app.fields().isEmpty() ? "run() -> main(), timer:sleep(infinity)."
+        : "run() -> main().");
+    if (app.main() != null) {
+      exports.add("user_main/1");
+      pieces.add(genAppMain(app));
+    }
+    pieces.addAll(helpers);
+    pieces.addAll(usedHelpers());
+    return "-module(" + app.erlMod() + ").\n"
+        + "-export([" + String.join(", ", exports) + "]).\n"
+        + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
+        + String.join("\n\n", pieces) + "\n";
+  }
+
+  /** main(String[] args) with the Application's Actor fields bound to their handles
+   *  (root children register under the field name — declaration is composition). */
+  private String genAppMain(Ast.ApplicationDecl app) {
+    varTypes = new HashMap<>();
+    var env = new HashMap<String, String>();
+    for (FieldDecl f : app.fields()) {
+      env.put(f.name(), "'" + f.name() + "'");
+      varTypes.put(f.name(), f.type());
+    }
+    MethodDecl m = app.main();
+    var params = new ArrayList<String>();
+    for (Param p : m.params()) {
+      String v = fresh(p.name());
+      env.put(p.name(), v);
+      varTypes.put(p.name(), p.type());
+      params.add(v);
+    }
+    List<String> stmts = genStmts(m.body().stmts(), env, true, null);
+    if (stmts.isEmpty()) stmts = List.of("ok");
+    String head = fnName(m.name()) + "(" + String.join(", ", params) + ")";
+    if (needsThrow(m.body())) {
+      return head + " ->\n    try\n" + block(stmts, "        ")
+          + "\n    catch throw:{'$ret', V} -> V end.";
+    }
+    return head + " ->\n" + block(stmts, "        ") + ".";
   }
 
   private String genClassModule(ClassDecl c) {
@@ -167,12 +315,14 @@ class CodeGen {
     boolean isMain = c.erlMod().equals("main");
     if (isMain) {
       exports.add("main/0");
+      exports.add("run/0");
       pieces.add(projectHasActors
           ? "main() ->\n"
               + "    logger:set_primary_config(level, none),\n"
-              + "    {ok, _} = actor_sup:start_link(),\n"
+              + "    {ok, _} = zinc_root_sup:start_link(),\n"
               + "    user_main([])."
           : "main() -> user_main([]).");
+      pieces.add("run() -> main()."); // script: no static children, exit after main
     }
     for (var m : c.methods()) {
       String n = isMain && m.name().equals("main") ? "user_main" : m.name();
@@ -224,12 +374,13 @@ class CodeGen {
       }
     }
     var exports = new ArrayList<>(
-        List.of("start_link/2", "init/1", "handle_call/3", "handle_cast/2"));
+        List.of("start_link/3", "init/1", "handle_call/3", "handle_cast/2", "handle_info/2"));
 
     var pieces = new ArrayList<String>();
-    // [Name | Args]: init needs the registered name to seed '$self' (the `this` handle)
-    pieces.add("start_link(Name, Args) -> "
-        + "gen_server:start_link({local, Name}, ?MODULE, [Name | Args], []).");
+    // [Name, Owner | Args]: init seeds '$self' from Name; Owner = spawner pid for
+    // dynamic children (monitored: die with the owner) or none for static children.
+    pieces.add("start_link(Name, Owner, Args) -> "
+        + "gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).");
     pieces.add(genInit(a));
     // no user catch-all clauses: unknown messages crash the actor, the supervisor heals it
     // (the stubs below keep that semantic and silence the behaviour warning)
@@ -239,6 +390,10 @@ class CodeGen {
     pieces.add(calls.isEmpty()
         ? "handle_call(Msg, _From, _State) -> erlang:error({unknown_call, Msg})."
         : String.join(";\n", calls) + ".");
+    // dynamic child: the monitored owner died -> die with it (temporary, no restart)
+    pieces.add("handle_info({'DOWN', _Ref, process, _Pid, _Reason}, State) -> "
+        + "{stop, normal, State};\n"
+        + "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg}).");
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
     return "-module(" + a.erlMod() + ").\n"
@@ -254,7 +409,8 @@ class CodeGen {
     String self = fresh("self");
     env.put("this", self);
     varTypes.put("this", a.name());
-    var ps = new ArrayList<String>(List.of(self));
+    String owner = fresh("owner");
+    var ps = new ArrayList<String>(List.of(self, owner));
     if (a.ctor() != null) {
       for (Param p : a.ctor().params()) {
         String v = fresh(p.name());
@@ -265,9 +421,18 @@ class CodeGen {
     }
     String head = "init([" + String.join(", ", ps) + "])";
     var lines = new ArrayList<String>();
+    // dynamic child: watch the spawner; its death is ours (none = static, supervised)
+    lines.add("case " + owner + " of none -> ok; _ -> erlang:monitor(process, " + owner
+        + ") end");
     for (FieldDecl f : a.fields()) {
       String v = fresh(f.name());
-      lines.add(v + " = " + (f.init() == null ? defaultFor(f.type()) : genExpr(f.init(), env)));
+      if (allActors.containsKey(f.type())) {
+        // static child: started by this actor's pair supervisor AFTER init returns;
+        // the handle is deterministic (owner.field), so we can bind it here
+        lines.add(v + " = list_to_atom(atom_to_list(" + self + ") ++ \"." + f.name() + "\")");
+      } else {
+        lines.add(v + " = " + (f.init() == null ? defaultFor(f.type()) : genExpr(f.init(), env)));
+      }
       env.put(f.name(), v);
       varTypes.put(f.name(), f.type());
     }
@@ -363,7 +528,9 @@ class CodeGen {
               throw new CompileError("spawn " + a.name() + ": constructor takes " + want
                   + " args, got " + sp.args().size());
             }
-            out.add(v + " = actor_sup:spawn_child(" + a.erlMod() + ", ["
+            String startMod =
+                hasActorChildren(a, allActors) ? a.erlMod() + "_sup" : a.erlMod();
+            out.add(v + " = zinc_dyn_sup:spawn_child(" + startMod + ", self(), ["
                 + genArgs(sp.args(), env) + "])");
             varTypes.put(st.name(), a.name());
           } else if (st.init() instanceof ListLit && st.type().endsWith("[]")) {

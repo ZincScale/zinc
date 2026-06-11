@@ -230,7 +230,7 @@ public class Zc {
       }
     }
     cmd.add("-eval");
-    cmd.add("main:main(), init:stop().");
+    cmd.add("main:run(), init:stop().");
     exec(dir, cmd.toArray(String[]::new));
   }
 

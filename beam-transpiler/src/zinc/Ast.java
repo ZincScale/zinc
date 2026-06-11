@@ -6,7 +6,15 @@ final class Ast {
   private Ast() {}
 
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
-      List<ActorDecl> actors, List<EnumDecl> enums) {}
+      List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application) {}
+
+  /** class Main implements Application { Actor fields = root children; optional main. }
+   *  The explicit root: lowers to the generated root supervisor's static children. */
+  record ApplicationDecl(String name, List<FieldDecl> fields, MethodDecl main) {
+    String erlMod() {
+      return name.toLowerCase();
+    }
+  }
 
   /** enum Color { RED, GREEN } — values lower to atoms 'RED', 'GREEN'. */
   record EnumDecl(String name, List<String> values) {}

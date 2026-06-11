@@ -3,6 +3,7 @@ package zinc;
 import java.util.List;
 import java.util.Set;
 import zinc.Ast.ActorDecl;
+import zinc.Ast.ApplicationDecl;
 import zinc.Ast.ArrayNewExpr;
 import zinc.Ast.AssignStmt;
 import zinc.Ast.Binary;
@@ -52,7 +53,14 @@ final class Resolve {
   static Program spawns(Program p, Set<String> actorNames) {
     var r = new Resolve(actorNames);
     return new Program(p.imports(), p.classes().stream().map(r::clazz).toList(), p.records(),
-        p.actors().stream().map(r::actor).toList(), p.enums());
+        p.actors().stream().map(r::actor).toList(), p.enums(), r.app(p.application()));
+  }
+
+  private ApplicationDecl app(ApplicationDecl a) {
+    if (a == null) return null;
+    List<FieldDecl> fields = a.fields().stream()
+        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()))).toList();
+    return new ApplicationDecl(a.name(), fields, a.main() == null ? null : method(a.main()));
   }
 
   private ClassDecl clazz(ClassDecl c) {

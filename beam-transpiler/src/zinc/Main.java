@@ -26,7 +26,8 @@ public class Main {
       var records = new LinkedHashMap<String, Ast.RecordDecl>();
       var enums = new LinkedHashMap<String, Ast.EnumDecl>();
       var actors = new LinkedHashMap<String, Ast.ActorDecl>();
-      var modules = new java.util.HashSet<String>(List.of("actor_sup"));
+      Ast.ApplicationDecl application = null;
+      var modules = new java.util.HashSet<String>(List.of("zinc_root_sup", "zinc_dyn_sup"));
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tuple", "Erlang",
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
@@ -37,6 +38,7 @@ public class Main {
         p.records().forEach(r -> names.add(r.name()));
         p.actors().forEach(a -> names.add(a.name()));
         p.enums().forEach(e2 -> names.add(e2.name()));
+        if (p.application() != null) names.add(p.application().name());
         for (String n : names) {
           if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
           if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
@@ -56,22 +58,46 @@ public class Main {
           if (!modules.add(a.erlMod())) {
             throw new CompileError("module name collision: actor " + a.name());
           }
+          if (!a.fields().isEmpty()) modules.add(a.erlMod() + "_sup"); // supervisor pair
+        }
+        if (p.application() != null) {
+          if (application != null) {
+            throw new CompileError("a project has at most one Application: "
+                + application.name() + " and " + p.application().name());
+          }
+          application = p.application();
+          if (!modules.add(application.erlMod())) {
+            throw new CompileError("module name collision: " + application.name());
+          }
         }
       }
-      ClassInfo entry = classes.get("Main");
-      if (entry == null || !entry.methods().containsKey("main/1")) {
-        throw new CompileError("project needs a class Main with main(String[] args)");
+      if (application != null) {
+        if (!application.name().equals("Main")) {
+          // v1: the entry module is hardwired to main:main()/main:run()
+          throw new CompileError("v1: the Application class must be named Main");
+        }
+      } else {
+        ClassInfo entry = classes.get("Main");
+        if (entry == null || !entry.methods().containsKey("main/1")) {
+          throw new CompileError(
+              "project needs a class Main with main(String[] args), or an Application");
+        }
       }
 
       // generate everything before writing anything: no partial output on a compile error
-      boolean hasActors = !actors.isEmpty();
+      boolean supervised = !actors.isEmpty() || application != null;
       var generated = new LinkedHashMap<String, String>();
+      Ast.ApplicationDecl resolvedApp = null;
       for (Program p : files) {
         Program resolved = Resolve.spawns(p, actors.keySet());
+        if (resolved.application() != null) resolvedApp = resolved.application();
         generated.putAll(
-            new CodeGen(resolved, classes, records, enums, actors, hasActors).generateAll());
+            new CodeGen(resolved, classes, records, enums, actors, supervised).generateAll());
       }
-      if (hasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
+      if (supervised) {
+        generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
+        generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors));
+      }
 
       Path outDir = Files.createDirectories(Path.of(args[1]));
       for (var e : generated.entrySet()) {
@@ -113,6 +139,7 @@ public class Main {
     prog.records().forEach(r -> names.add(r.name()));
     prog.actors().forEach(a -> names.add(a.name()));
     prog.enums().forEach(e -> names.add(e.name()));
+    if (prog.application() != null) names.add(prog.application().name());
     if (!names.contains(stem)) {
       throw new CompileError(rel + " must declare a type named '" + stem + "'");
     }

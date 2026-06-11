@@ -1,0 +1,22 @@
+// composition is supervision: an Actor's Actor-typed fields are its children
+// (Owner lowers to a supervisor pair; inner's handle is deterministic: owner.inner)
+class Counter implements Actor {
+  int count = 0;
+  void add(int n) { count = count + n; }
+  int get()       { return count; }
+}
+
+class Owner implements Actor {
+  Counter inner = new Counter();
+  void bump(int n) { inner.add(n); }
+  int total()      { return inner.get(); }
+}
+
+public class Main {
+  public static void main(String[] args) {
+    var o = new Owner();
+    o.bump(4);
+    o.bump(3);
+    System.out.println(o.total());  // 7
+  }
+}
