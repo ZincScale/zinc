@@ -35,6 +35,9 @@ public class Main {
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
+      var interfaces = new LinkedHashMap<String, Ast.InterfaceDecl>();
+      var instClasses = new LinkedHashMap<String, Ast.InstanceClassDecl>();
+      var instMods = new LinkedHashMap<String, String>();  // simple name -> FQ module
       for (Src src : files) {
         Program p = src.prog();
         String pkg = src.pkg();
@@ -45,6 +48,8 @@ public class Main {
         p.enums().forEach(e2 -> names.add(e2.name()));
         if (p.application() != null) names.add(p.application().name());
         p.exceptions().forEach(x -> names.add(x.name()));
+        p.interfaces().forEach(i -> names.add(i.name()));
+        p.instanceClasses().forEach(c -> names.add(c.name()));
         for (String n : names) {
           if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
           if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
@@ -63,6 +68,15 @@ public class Main {
         for (var x : p.exceptions()) {
           exceptions.put(x.name(), x);
           excTags.put(x.name(), fqMod(pkg, x.name())); // tag = FQ name, no module emitted
+        }
+        p.interfaces().forEach(i -> interfaces.put(i.name(), i));
+        for (var c : p.instanceClasses()) {
+          instClasses.put(c.name(), c);
+          String mod = fqMod(pkg, c.name());
+          instMods.put(c.name(), mod);
+          if (!modules.add(mod)) {
+            throw new CompileError("module name collision: " + c.name());
+          }
         }
         for (var a : p.actors()) {
           actors.put(a.name(), a);
@@ -87,6 +101,28 @@ public class Main {
           }
         }
       }
+      // nominal conformance: implements = every interface method present, signature match
+      for (var c : instClasses.values()) {
+        Ast.InterfaceDecl iface = interfaces.get(c.iface());
+        if (iface == null) {
+          throw new CompileError("class " + c.name() + " implements " + c.iface()
+              + ": unknown interface");
+        }
+        for (var sig : iface.sigs()) {
+          var impl = c.methods().stream().filter(m -> m.name().equals(sig.name())
+              && m.params().size() == sig.params().size()).findFirst();
+          if (impl.isEmpty()) {
+            throw new CompileError("class " + c.name() + " implements " + c.iface()
+                + " but is missing " + sig.retType() + " " + sig.name() + "/"
+                + sig.params().size());
+          }
+          if (!impl.get().retType().equals(sig.retType())) {
+            throw new CompileError("class " + c.name() + "." + sig.name()
+                + ": return type " + impl.get().retType() + " does not match "
+                + c.iface() + "'s " + sig.retType());
+          }
+        }
+      }
       if (application != null) {
         if (!application.name().equals("Main")) {
           // v1: the entry module is hardwired to main:main()/main:run()
@@ -108,7 +144,7 @@ public class Main {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
         generated.putAll(new CodeGen(resolved, classes, records, enums, actors, actorMods,
-            exceptions, excTags, supervised).generateAll());
+            exceptions, excTags, interfaces, instClasses, instMods, supervised).generateAll());
       }
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);

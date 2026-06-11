@@ -28,6 +28,9 @@ class CodeGen {
   private final Map<String, String> actorMods;    // actor simple name -> FQ module
   private final Map<String, Ast.ExceptionDecl> exceptions; // project-wide
   private final Map<String, String> excTags;      // exception simple name -> FQ tag
+  private final Map<String, Ast.InterfaceDecl> interfaces;
+  private final Map<String, Ast.InstanceClassDecl> instClasses;
+  private final Map<String, String> instMods;     // instance class simple name -> FQ module
   private final Map<String, ActorDecl> actors = new LinkedHashMap<>(); // this file's
   private final Map<String, String> ffi = new LinkedHashMap<>(); // alias -> erlang module
   private final boolean projectHasActors;
@@ -42,7 +45,9 @@ class CodeGen {
   CodeGen(Program program, Map<String, ClassInfo> classes, Map<String, RecordDecl> records,
       Map<String, EnumDecl> enums, Map<String, ActorDecl> allActors,
       Map<String, String> actorMods, Map<String, Ast.ExceptionDecl> exceptions,
-      Map<String, String> excTags, boolean projectHasActors) {
+      Map<String, String> excTags, Map<String, Ast.InterfaceDecl> interfaces,
+      Map<String, Ast.InstanceClassDecl> instClasses, Map<String, String> instMods,
+      boolean projectHasActors) {
     this.program = program;
     this.classes = classes;
     this.records = records;
@@ -51,6 +56,9 @@ class CodeGen {
     this.actorMods = actorMods;
     this.exceptions = exceptions;
     this.excTags = excTags;
+    this.interfaces = interfaces;
+    this.instClasses = instClasses;
+    this.instMods = instMods;
     this.projectHasActors = projectHasActors;
     for (Import im : program.imports()) {
       // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
@@ -127,8 +135,42 @@ class CodeGen {
     return out;
   }
 
+  private final java.util.Set<String> dispHelpers = new java.util.HashSet<>();
+
+  /** Gradual checking: known-vs-known mismatch is an error; unknown flows free. */
+  private void checkBind(String declared, String got, String where) {
+    if (got == null || declared.equals(got)) return;            // unknown flows; exact ok
+    if (declared.equals("double") && got.equals("int")) return; // widening
+    Ast.InstanceClassDecl ic = instClasses.get(got);
+    if (ic != null && ic.iface().equals(declared)) return;      // one-hop subtyping
+    boolean dn = isNominal(declared) || isPrim(declared);
+    boolean gn = isNominal(got) || isPrim(got);
+    if (dn && gn) {
+      throw new CompileError(where + ": cannot bind a " + got + " to " + declared
+          + " (known-vs-known mismatch; exact nominal match required)");
+    }
+  }
+
+  private boolean isPrim(String t) {
+    return t.equals("int") || t.equals("double") || t.equals("boolean") || t.equals("String");
+  }
+
+  private boolean isNominal(String t) {
+    return records.containsKey(t) || instClasses.containsKey(t) || interfaces.containsKey(t)
+        || allActors.containsKey(t) || exceptions.containsKey(t) || enums.containsKey(t);
+  }
+
+  private void checkInstanceMethod(Ast.InstanceClassDecl ic, MethodCall x) {
+    if (ic.methods().stream().noneMatch(m -> m.name().equals(x.method())
+        && m.params().size() == x.args().size())) {
+      throw new CompileError("class " + ic.name() + " has no method " + x.method() + "/"
+          + x.args().size());
+    }
+  }
+
   private void resetModuleState() {
     helpers = new ArrayList<>();
+    dispHelpers.clear();
     useFmt = false;
     useSfx = false;
     useOk = false;
@@ -265,6 +307,12 @@ class CodeGen {
         out.put(curModule + "_sup", genPairSup(a));
       }
     }
+    for (Ast.InstanceClassDecl c : program.instanceClasses()) {
+      resetModuleState();
+      curModule = instMods.get(c.name());
+      curClassName = c.name();
+      out.put(curModule, genInstanceClassModule(c));
+    }
     if (program.application() != null) {
       resetModuleState();
       curModule = program.application().erlMod();
@@ -272,6 +320,85 @@ class CodeGen {
       out.put(curModule, genApplicationModule(program.application()));
     }
     return out;
+  }
+
+  /** Instance class -> module: new/N builds the map ('$class' => module atom, fields
+   *  ctor-set then immutable); each method takes the instance as its first arg. */
+  private String genInstanceClassModule(Ast.InstanceClassDecl c) {
+    var exports = new ArrayList<String>();
+    var pieces = new ArrayList<String>();
+
+    // new(CtorArgs) -> #{'$class' => 'mod', field => ...}
+    varTypes = new HashMap<>();
+    var env = new HashMap<String, String>();
+    var ps = new ArrayList<String>();
+    if (c.ctor() != null) {
+      for (Param p : c.ctor().params()) {
+        String v = fresh(p.name());
+        env.put(p.name(), v);
+        varTypes.put(p.name(), p.type());
+        ps.add(v);
+      }
+    }
+    var lines = new ArrayList<String>();
+    for (FieldDecl f : c.fields()) {
+      String v = fresh(f.name());
+      lines.add(v + " = " + (f.init() == null ? defaultFor(f.type()) : genExpr(f.init(), env)));
+      env.put(f.name(), v);
+      varTypes.put(f.name(), f.type());
+    }
+    if (c.ctor() != null) {
+      if (countReturns(c.ctor().body()) > 0) {
+        throw new CompileError("class " + c.name() + ": constructor cannot return");
+      }
+      lines.addAll(genStmts(c.ctor().body().stmts(), env, false, null));
+    }
+    var entries = new ArrayList<String>(List.of("'$class' => " + atomLit(curModule)));
+    for (FieldDecl f : c.fields()) entries.add(f.name() + " => " + envGet(env, f.name()));
+    lines.add("#{" + String.join(", ", entries) + "}");
+    exports.add("new/" + ps.size());
+    pieces.add("new(" + String.join(", ", ps) + ") ->\n" + block(lines, "        ") + ".");
+
+    for (MethodDecl m : c.methods()) {
+      exports.add(m.name() + "/" + (m.params().size() + 1));
+      pieces.add(genInstanceMethod(c, m));
+    }
+    pieces.addAll(helpers);
+    pieces.addAll(usedHelpers());
+    return "-module(" + atomLit(curModule) + ").\n"
+        + "-export([" + String.join(", ", exports) + "]).\n"
+        + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
+        + String.join("\n\n", pieces) + "\n";
+  }
+
+  private String genInstanceMethod(Ast.InstanceClassDecl c, MethodDecl m) {
+    varTypes = new HashMap<>();
+    var env = new HashMap<String, String>();
+    String self = fresh("this");
+    env.put("this", self);
+    varTypes.put("this", c.name());
+    var params = new ArrayList<String>(List.of(self));
+    for (Param p : m.params()) {
+      String v = fresh(p.name());
+      env.put(p.name(), v);
+      varTypes.put(p.name(), p.type());
+      params.add(v);
+    }
+    var lines = new ArrayList<String>();
+    for (FieldDecl f : c.fields()) {
+      String v = fresh(f.name());
+      lines.add(v + " = maps:get(" + f.name() + ", " + self + ")");
+      env.put(f.name(), v);
+      varTypes.put(f.name(), f.type());
+    }
+    List<String> stmts = genStmts(m.body().stmts(), env, true, null);
+    lines.addAll(stmts.isEmpty() ? List.of("ok") : stmts);
+    String head = m.name() + "(" + String.join(", ", params) + ")";
+    if (needsThrow(m.body())) {
+      return head + " ->\n    try\n" + block(lines, "        ")
+          + "\n    catch throw:{'$ret', V} -> V end.";
+    }
+    return head + " ->\n" + block(lines, "        ") + ".";
   }
 
   /** Actor with Actor children -> its own domain: rest_for_one [owner, kids(one_for_one)].
@@ -570,6 +697,9 @@ class CodeGen {
       switch (s) {
         case VarStmt st -> {
           String v = fresh(st.name());
+          if (!st.type().equals("var") && st.init() != null) {
+            checkBind(st.type(), exprType(st.init()), st.name());
+          }
           if (st.init() instanceof SpawnExpr sp) {
             ActorDecl a = allActors.get(sp.actorName());
             if (a == null) throw new CompileError("unknown actor: " + sp.actorName());
@@ -1041,6 +1171,15 @@ class CodeGen {
           if (!x.args().isEmpty()) throw new CompileError("new ArrayList takes no args (v1)");
           yield "[]";
         }
+        Ast.InstanceClassDecl ic = instClasses.get(x.typeName());
+        if (ic != null) {
+          int want = ic.ctor() == null ? 0 : ic.ctor().params().size();
+          if (x.args().size() != want) {
+            throw new CompileError("new " + x.typeName() + ": constructor takes " + want
+                + " args, got " + x.args().size());
+          }
+          yield atomLit(instMods.get(x.typeName())) + ":new(" + genArgs(x.args(), env) + ")";
+        }
         RecordDecl r = records.get(x.typeName());
         if (r == null) throw new CompileError("unknown record type: " + x.typeName());
         if (r.components().size() != x.args().size()) {
@@ -1048,6 +1187,7 @@ class CodeGen {
               + r.components().size() + " args, got " + x.args().size());
         }
         var entries = new ArrayList<String>();
+        entries.add("'$class' => " + atomLit(x.typeName().toLowerCase()));
         for (int i = 0; i < x.args().size(); i++) {
           entries.add(r.components().get(i).name() + " => " + genExpr(x.args().get(i), env));
         }
@@ -1185,6 +1325,36 @@ class CodeGen {
       }
       useCall = true; // typed call: unwraps relayed exceptions (failure-ladder rung 2)
       return "'$call'(" + genExpr(x.target(), env) + ", " + msg + ")";
+    }
+    // instance class (static type known): direct module call, instance as first arg
+    Ast.InstanceClassDecl ic = tt == null ? null : instClasses.get(tt);
+    if (ic != null) {
+      checkInstanceMethod(ic, x);
+      return atomLit(instMods.get(tt)) + ":" + x.method() + "("
+          + genExpr(x.target(), env)
+          + (x.args().isEmpty() ? "" : ", " + genArgs(x.args(), env)) + ")";
+    }
+    // interface-typed: dynamic dispatch via '$class'; one guard discriminates a SAM fun.
+    // Named top-level helper per method/arity — never inline funs in generated code.
+    if (tt != null && interfaces.containsKey(tt)) {
+      Ast.InterfaceDecl iface = interfaces.get(tt);
+      if (iface.sigs().stream().noneMatch(s2 -> s2.name().equals(x.method())
+          && s2.params().size() == x.args().size())) {
+        throw new CompileError("interface " + tt + " has no method " + x.method() + "/"
+            + x.args().size());
+      }
+      String h = "'$disp_" + x.method() + "_" + x.args().size() + "'";
+      if (dispHelpers.add(h)) {
+        var as = new ArrayList<String>();
+        for (int i = 1; i <= x.args().size(); i++) as.add("A" + i);
+        String tail = as.isEmpty() ? "" : ", " + String.join(", ", as);
+        helpers.add(h + "(O" + tail + ") when is_function(O) -> O("
+            + String.join(", ", as) + ");\n"
+            + h + "(O" + tail + ") -> (maps:get('$class', O)):" + x.method() + "(O" + tail
+            + ").");
+      }
+      return h + "(" + genExpr(x.target(), env)
+          + (x.args().isEmpty() ? "" : ", " + genArgs(x.args(), env)) + ")";
     }
     // exception value: getMessage() + field accessors (final values, like records)
     if (tt != null && (exceptions.containsKey(tt) || tt.equals("Exception"))
@@ -1501,6 +1671,15 @@ class CodeGen {
             case "containsKey", "isEmpty" -> "boolean";
             default -> null;
           };
+        }
+        Ast.InstanceClassDecl icc = tt == null ? null : instClasses.get(tt);
+        if (icc != null) {
+          yield icc.methods().stream().filter(m -> m.name().equals(x.method()))
+              .map(MethodDecl::retType).findFirst().orElse(null);
+        }
+        if (tt != null && interfaces.containsKey(tt)) {
+          yield interfaces.get(tt).sigs().stream().filter(s2 -> s2.name().equals(x.method()))
+              .map(MethodDecl::retType).findFirst().orElse(null);
         }
         if (tt != null && (exceptions.containsKey(tt) || tt.equals("Exception"))) {
           if (x.method().equals("getMessage")) yield "String";

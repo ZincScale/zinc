@@ -54,7 +54,16 @@ final class Resolve {
     var r = new Resolve(actorNames);
     return new Program(p.imports(), p.classes().stream().map(r::clazz).toList(), p.records(),
         p.actors().stream().map(r::actor).toList(), p.enums(), r.app(p.application()),
-        p.exceptions());
+        p.exceptions(), p.interfaces(),
+        p.instanceClasses().stream().map(r::instClass).toList());
+  }
+
+  private Ast.InstanceClassDecl instClass(Ast.InstanceClassDecl c) {
+    List<FieldDecl> fields = c.fields().stream()
+        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()))).toList();
+    return new Ast.InstanceClassDecl(c.name(), c.iface(), fields,
+        c.ctor() == null ? null : method(c.ctor()),
+        c.methods().stream().map(this::method).toList());
   }
 
   private ApplicationDecl app(ApplicationDecl a) {

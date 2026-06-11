@@ -7,7 +7,16 @@ final class Ast {
 
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
       List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application,
-      List<ExceptionDecl> exceptions) {}
+      List<ExceptionDecl> exceptions, List<InterfaceDecl> interfaces,
+      List<InstanceClassDecl> instanceClasses) {}
+
+  /** interface Greeter { String greet(String n); } — signatures only; SAM if one. */
+  record InterfaceDecl(String name, List<MethodDecl> sigs) {}
+
+  /** class English implements Greeter { ... } — instance class: module + map term,
+   *  '$class' => module atom (dispatch + boundary guards), fields ctor-set then immutable. */
+  record InstanceClassDecl(String name, String iface, List<FieldDecl> fields,
+      MethodDecl ctor, List<MethodDecl> methods) {}
 
   /** class NotFound extends Exception { String message; } — the one sanctioned extends.
    *  Final value; thrown as erlang:error({zinc_exc, 'fq.tag', FieldsMap}). */

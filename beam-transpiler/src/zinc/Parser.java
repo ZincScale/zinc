@@ -61,20 +61,43 @@ class Parser {
     var enums = new ArrayList<EnumDecl>();
     var application = new ApplicationDecl[1];
     var exceptions = new ArrayList<ExceptionDecl>();
+    var interfaces = new ArrayList<InterfaceDecl>();
+    var instanceClasses = new ArrayList<InstanceClassDecl>();
     while (!check(TokKind.EOF)) {
       skipModifiers();
       if (checkIdent("class")) {
-        parseClassLike(classes, actors, application, exceptions);
+        parseClassLike(classes, actors, application, exceptions, instanceClasses);
+      } else if (checkIdent("interface")) {
+        interfaces.add(parseInterface());
       } else if (checkIdent("record")) {
         records.add(parseRecord());
       } else if (checkIdent("enum")) {
         enums.add(parseEnum());
       } else {
-        throw new CompileError("Parse error: expected class, record or enum at line "
+        throw new CompileError("Parse error: expected class, interface, record or enum at line "
             + cur().line());
       }
     }
-    return new Program(imports, classes, records, actors, enums, application[0], exceptions);
+    return new Program(imports, classes, records, actors, enums, application[0], exceptions,
+        interfaces, instanceClasses);
+  }
+
+  /** interface Name { Ret m(T a); ... } — signatures only (no default methods, v1). */
+  private InterfaceDecl parseInterface() {
+    advance(); // 'interface'
+    String name = expect(TokKind.IDENT, "interface name").text();
+    expect(TokKind.LBRACE, "'{'");
+    var sigs = new ArrayList<MethodDecl>();
+    while (!check(TokKind.RBRACE)) {
+      skipModifiers();
+      String ret = parseType();
+      String mName = expect(TokKind.IDENT, "method name").text();
+      List<Param> params = parseParams();
+      expect(TokKind.SEMI, "';' (interface methods have no body — default methods: later)");
+      sigs.add(new MethodDecl(ret, mName, params, null));
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new InterfaceDecl(name, sigs);
   }
 
   private EnumDecl parseEnum() {
@@ -119,9 +142,10 @@ class Parser {
     return t.toString();
   }
 
-  /** class Name [implements Application|Actor | extends Exception] { ... } */
+  /** class Name [implements Application|Actor|<Interface> | extends Exception] { ... } */
   private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors,
-      ApplicationDecl[] application, List<ExceptionDecl> exceptions) {
+      ApplicationDecl[] application, List<ExceptionDecl> exceptions,
+      List<InstanceClassDecl> instanceClasses) {
     advance(); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
     if (checkIdent("extends")) {
@@ -161,8 +185,10 @@ class Parser {
       }
       application[0] = new ApplicationDecl(name, body.fields(), main);
     } else {
-      throw new CompileError("unknown interface '" + marker
-          + "': v1 markers are Application and Actor, at line " + cur().line());
+      // user interface: an instance class — module + map term, ctor-set immutable fields
+      ActorDecl body = parseActorBody(name);
+      instanceClasses.add(
+          new InstanceClassDecl(name, marker, body.fields(), body.ctor(), body.methods()));
     }
   }
 
