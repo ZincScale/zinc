@@ -203,8 +203,17 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    sugar is removed for consistency; build a new record instead. Mutability picture:
    locals mutate freely / object fields never / actor fields across calls (serialized
    by the mailbox).
-   Still to design (each WITH its checking story): interfaces / lambda target types,
-   user-defined exceptions/throw, quoted atoms (GAP-10).
+   **Interfaces**: nominal conformance checked at transpile time (`implements` = all
+   methods present, signatures match); subtyping in the checker is one flat hop,
+   class -> interface. Runtime: instance maps carry `'$class' => 'pkg.classname'`
+   (Elixir `__struct__` precedent); interface call = Erlang dynamic module call
+   (`(maps:get('$class', O)):method(O, ...)`). The same tag is what runtime boundary
+   guards check for class-typed values. Lambdas satisfy SAM interfaces as plain funs
+   (dispatch discriminates fun vs map with one guard); stdlib functional interfaces
+   (Function, Predicate, Comparator...) live in the checker, cost nothing at runtime.
+   Deferred: default methods, `interface extends`.
+   Still to design (each WITH its checking story): user-defined exceptions/throw,
+   quoted atoms (GAP-10).
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
