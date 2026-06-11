@@ -196,8 +196,15 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    **`actor`** stays as the identity construct; extension keywords are fine where an
    OTP concept has no honest Java expression. Raw processes (thread-shaped concurrent
    execution) are a separate surface, still to design.
-   Still to design (each WITH its checking story): instance classes, interfaces /
-   lambda target types, user-defined exceptions/throw, quoted atoms (GAP-10).
+   **Instance classes**: module + map term; fields are set by the constructor and then
+   immutable — all objects are final. No setters, no field assignment after
+   construction; mutable state lives in actors. Locals stay fully mutable (counters,
+   temps, accumulators — the existing SSA machinery). Records' `p.x = v` mutation
+   sugar is removed for consistency; build a new record instead. Mutability picture:
+   locals mutate freely / object fields never / actor fields across calls (serialized
+   by the mailbox).
+   Still to design (each WITH its checking story): interfaces / lambda target types,
+   user-defined exceptions/throw, quoted atoms (GAP-10).
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
