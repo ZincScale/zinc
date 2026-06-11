@@ -164,9 +164,10 @@ dev writes proplists of tagged tuples. The architecture is three layers:
 1. **OTP behaviours = language semantics** (already true: `process` -> gen_server +
    supervisor; users never see callbacks).
 2. **OTP stdlib apps = zinc's JDK**: Java-shaped facades backed by OTP. First surfaces:
-   `java.net.http.HttpClient`-shaped client over httpc (also the one home for the
+   `zinc.http.HttpClient` over httpc, Java-shaped (also the one home for the
    corp-proxy / native-transport escape hatches the firewall finding motivates) and
-   `ServerSocket`-shaped sockets over gen_tcp. Collections facade already exists.
+   `zinc.net` sockets over gen_tcp. Collections facade already exists. Namespaces:
+   decision #9, settled — everything `zinc.*`, no `java.*`.
 3. **Third-party BEAM packages = FFI** (`import erlang.*` stays the basement door), with
    curated wrappers only where earned — an HTTP server/router API over cowboy first
    (also dissolves GAP-10's `'_'` quoted-atom hack).
@@ -280,10 +281,10 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    THE V1 SPEC IS CLOSED. Keywords renamed post-close (2026-06-11): `service` ->
    `application`, `actor` -> `process`. Implementation order (spec leads; current code
    still has the old flat-sup/script model, `actor`/Atom.* naming, mutable records):
-   next is decision #9,
-   stdlib API design, then implement spec + stdlib, webdemo rewrite verifies.
-2. **Open decision #9** (namespace strategy), then stdlib API design against that
-   settled surface: HTTP client + HTTP server first.
+   next is stdlib API design, then implement spec + stdlib, webdemo rewrite verifies.
+2. **Decision #9 (namespace strategy): SETTLED — everything `zinc.*`** (see Open design
+   decisions). Next: stdlib API design against that settled surface: HTTP client +
+   HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -366,18 +367,22 @@ made real, and it's pure BEAM strength:
    prebuilt ones; decide early in Phase 4.2.
 8. **`zc.toml` shape** — project manifest (name, version, toolchain pin, deps later in
    Phase 2-FFI era). Keep minimal; decide at `zc new`.
-9. **stdlib namespace strategy** — mirror JDK names exactly where semantics genuinely
-   match (`java.net.http.HttpClient`, `ServerSocket` — muscle memory, copy-paste compat)
-   vs `zinc.*` where BEAM shows through (timeouts, binaries, processes). Leaning: JDK
-   names when faithful, `zinc.*` otherwise. Must be settled before stdlib v1 code.
+9. **stdlib namespace strategy — SETTLED (2026-06-11): everything `zinc.*`.** The
+   language is a Java facade over Erlang; `java.*` names would promise JDK contracts
+   the BEAM can't keep (threads, async, blocking-IO semantics). `zinc.*` owns the
+   semantics; APIs stay Java-shaped so muscle memory transfers. Core facade (`String`,
+   `List`, `Map`, `System.out`...) is an unqualified prelude, unchanged. New surfaces
+   flat under zinc: `zinc.http` (client over httpc, server over cowboy), `zinc.net`
+   (sockets over gen_tcp). `java.*` is reserved — declaring or importing it is a
+   transpile error that names the zinc equivalent.
 
 ## Start here next session
-**Continue the language v1 completeness spec** (see "Next: the standard library" above).
-Generics are settled (erase + gradual static checks + runtime boundary guards); design
-the remaining decisions the same way — instance classes, interfaces / lambda target
-types, user exceptions, quoted atoms — each with its checking story. Then decision #9,
-then HTTP client + server facades. Webdemo rewritten with zero `Tuple.of`/`Atom.*`
-verifies the result.
+**Design the stdlib surfaces** (see "Next: the standard library" above). The v1 spec is
+closed (keywords now `application`/`process`); decision #9 settled — everything `zinc.*`.
+Next: `zinc.http` client (Java-shaped over httpc, sync `send` only — no threads), then
+`zinc.http` server over cowboy (routing, process-per-request), then `zinc.net` sockets.
+Code is implemented only after the major designs are finished; webdemo rewritten with
+zero `Tuple.of`/`Atom.*` verifies the result.
 ```
 cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 23/23 e2e + zc + webdemo
 ```
