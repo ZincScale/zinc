@@ -482,7 +482,11 @@ class CodeGen {
   private String genApplicationModule(Ast.ApplicationDecl app) {
     var exports = new ArrayList<String>(List.of("main/0", "run/0"));
     var pieces = new ArrayList<String>();
-    String boot = "    logger:set_primary_config(level, none),\n"
+    String boot = "    logger:set_primary_config(level, info),\n"
+        + "    logger:remove_handler(default),\n"
+        + "    ok = logger:add_handler(default, logger_std_h,\n"
+        + "        #{config => #{type => standard_error},\n"
+        + "          filters => [{progress, {fun logger_filters:progress/2, stop}}]}),\n"
         + "    {ok, _} = zinc_root_sup:start_link(),\n";
     pieces.add("main() ->\n" + boot + (app.main() != null ? "    user_main([])." : "    ok."));
     // liveness: static children alive -> serve until stopped; none -> exit after main
@@ -538,10 +542,20 @@ class CodeGen {
       exports.add("run/0");
       pieces.add(projectHasActors
           ? "main() ->\n"
-              + "    logger:set_primary_config(level, none),\n"
+              + "    logger:set_primary_config(level, info),\n"
+        + "    logger:remove_handler(default),\n"
+        + "    ok = logger:add_handler(default, logger_std_h,\n"
+        + "        #{config => #{type => standard_error},\n"
+        + "          filters => [{progress, {fun logger_filters:progress/2, stop}}]}),\n"
               + "    {ok, _} = zinc_root_sup:start_link(),\n"
               + "    user_main([])."
-          : "main() -> user_main([]).");
+          : "main() ->\n"
+              + "    logger:set_primary_config(level, info),\n"
+          + "    logger:remove_handler(default),\n"
+          + "    ok = logger:add_handler(default, logger_std_h,\n"
+          + "        #{config => #{type => standard_error},\n"
+          + "          filters => [{progress, {fun logger_filters:progress/2, stop}}]}),\n"
+              + "    user_main([]).");
       pieces.add("run() -> main()."); // script: no static children, exit after main
     }
     for (var m : c.methods()) {
@@ -1462,6 +1476,21 @@ class CodeGen {
         if (x.method().equals("sleep")) {
           return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
         }
+      }
+      case "Log" -> {
+        // println is the dumb stdout pipe; Log.* is the BEAM logger stream, where
+        // supervisor crash reports already land. Module metadata injected statically.
+        String lvl = switch (x.method()) {
+          case "debug" -> "debug";
+          case "info" -> "info";
+          case "warn" -> "warning";
+          case "error" -> "error";
+          default -> throw new CompileError("unsupported: Log." + x.method()
+              + " (debug/info/warn/error)");
+        };
+        String fmt = isStr(x.args().get(0)) ? "~ts" : "~p";
+        return "logger:" + lvl + "(\"" + fmt + "\", [" + genExpr(x.args().get(0), env)
+            + "], #{module => " + atomLit(curModule) + "})";
       }
       case "Tag" -> {
         // Tag.of("literal") -> the atom, resolved at transpile time (atoms aren't GC'd;

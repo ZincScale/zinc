@@ -1,0 +1,9 @@
+// println is the dumb stdout pipe; Log.* is the logger stream (stderr handler here,
+// journald under systemd) where crash reports already land. Streams never mix.
+public class Main {
+  public static void main(String[] args) {
+    Log.info("boot ok");                 // -> logger (stderr): NOT in stdout below
+    Log.warn("about to be clean");
+    System.out.println("clean stdout");  // the only thing this program prints
+  }
+}

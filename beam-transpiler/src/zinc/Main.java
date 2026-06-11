@@ -31,7 +31,7 @@ public class Main {
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tag", "Tuple", "Erlang",
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
-          "String", "Exception", "Actor", "Application");
+          "String", "Exception", "Actor", "Application", "Log");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
