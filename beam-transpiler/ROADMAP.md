@@ -372,6 +372,32 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      ClassCastException mysteries).
    - Deferred: path-string accessors (JsonPath/`at()`-style) — convenience over
      the fallback, adds a string mini-language; revisit if dogfoods earn it.
+   **Resource doctrine + `zinc.sql` v1 — designed (2026-06-11).** Doctrine, stated
+   once: long-lived resources are Actors — acquisition in the constructor,
+   self-healing by restart, release by crash (the BEAM closes what a dead process
+   owned). A pool is a supervision subtree, not a library trick.
+   - `Db` is a stdlib Actor: `new Db(url, n)` spawns the pool parent + n connection
+     Actors (permanent children). Connection ctor connects ⇒ fail-fast boot (DB
+     down ⇒ crash-loop ⇒ escalate ⇒ VM exit nonzero ⇒ systemd; no half-up
+     service); dropped connection self-heals (restart reconnects); mid-query crash
+     closes the socket ⇒ Postgres rolls back server-side. The reconnect logic Java
+     pools hand-write IS the supervision tree doing its job.
+   - Queries don't serialize through the pool (poolboy shape): `db.query(sql,
+     params...)` = checkout (fast pool call, hands back a connection) → query runs
+     as a call to that connection Actor (n queries on n connections in parallel) →
+     checkin. Pool exhausted ⇒ caller blocks; timeout (plain-int ms) ⇒
+     `zinc.sql.SqlException`.
+   - Transactions are a lambda — begin/commit/rollback unmismatchable:
+     `db.transaction(tx -> { tx.exec(...); tx.exec(...); })`. One connection for
+     the duration; return ⇒ commit; throw ⇒ rollback + relay (ladder rung 2,
+     catchable); crash ⇒ disconnect rolls back (rung 3). The ladder maps onto SQL
+     transaction semantics with zero new rules.
+   - Rows: dynamic (var-chaining, like foreign JSON) + derived record mapping
+     `User.from(rows)` — same pure codegen as `fromJson`, matched by column name.
+     No ORM, no annotations, no class literals. Params positional, always prepared
+     statements underneath — injection-safe by default; no string-concat path.
+   - Postgres first (epgsql via FFI, vendored like cowboy); MySQL later, same
+     shape. Migrations deferred — operational tooling, not language.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -464,15 +490,18 @@ made real, and it's pure BEAM strength:
    transpile error that names the zinc equivalent.
 
 ## Start here next session
-**Design the stdlib surfaces** (see "Next: the standard library" above). The v1 spec is
-closed — zero extension keywords: `Application`/`Actor` marker interfaces, `new`
-spawns. Decision #9 settled (everything `zinc.*`); `zinc.http` client AND server
-designed (client over httpc; server over cowboy — Router table, Handler SAM,
-process-per-request); JSON designed (derived record codecs + dynamic var-chaining).
-Fan-out/join: settled, NOT a stdlib shape — the worker-Actor idiom (kick-cast +
-join-call, mailbox FIFO makes it correct); no Future type, the tree owns the workers.
-Next: `zinc.net` sockets (lowering details only — the shape is proven). Distribution
-is the one undesigned pillar — explicitly out of v1 scope or design later.
+**MAJOR MUSCLE DESIGNS: COMPLETE.** The v1 spec is closed — zero extension keywords:
+`Application`/`Actor` marker interfaces, `new` spawns. Decision #9 settled
+(everything `zinc.*`). Designed: `zinc.http` client + server; JSON (derived record
+codecs + dynamic var-chaining); `zinc.sql` (pool as supervision subtree, lambda
+transactions, derived row mapping). Fan-out/join: the worker-Actor idiom — no Future
+type, the tree owns the workers. **Distribution: explicitly OUT of v1** — single-node;
+a designed-later pillar, not an implied feature. Deferred as library surface, not
+architecture: `zinc.net` sockets, JSON path-DSL, timers (sleep + self-kick cast
+already covers periodic work). Small designs remaining, settle before/during
+implementation: logging (println -> logger; crash reports come standard), the test
+story (`zc test`). Next phase: implement spec + stdlib; webdemo rewritten with zero
+`Tuple.of`/`Atom.*` verifies.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
