@@ -153,6 +153,7 @@ class CodeGen {
   private boolean useChk;
   private boolean useJget;
   private boolean usedHttp;
+  private boolean usedServer;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -238,6 +239,10 @@ class CodeGen {
     return usedHttp;
   }
 
+  boolean usedServer() {
+    return usedServer;
+  }
+
   private void resetModuleState() {
     helpers = new ArrayList<>();
     dispHelpers.clear();
@@ -303,6 +308,83 @@ class CodeGen {
       + "    erlang:error({zinc_exc, Tag, #{'$class' => Tag,\n"
       + "        message => iolist_to_binary(io_lib:format(\"~p\", [R]))}}).\n";
 
+
+  /** zinc.http server over cowboy: HttpServer is a stdlib Actor (new = listening);
+   *  process-per-request is cowboy's native model — a handler crash 500s that request
+   *  only. Routes: {Method, Path, Handler}; {id} segments become cowboy bindings. */
+  static final String SERVER_SOURCE = "-module('zinc.httpserver').\n"
+      + "-behaviour(gen_server).\n"
+      + "-export([start_link/3, start_boot/2, route/4, init/1, handle_call/3,\n"
+      + "         handle_cast/2, handle_info/2]).\n"
+      + "-export([cowboy_init/2]).\n\n"
+      + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n\n"
+      + "start_link(Name, Owner, Args) ->\n"
+      + "    gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).\n\n"
+      + "route(R, M, P, H) -> R ++ [{M, P, H}].\n\n"
+      + "init([Name, Owner, Port, Routes]) ->\n"
+      + "    case Owner of none -> ok; _ -> erlang:monitor(process, Owner) end,\n"
+      + "    {ok, _} = application:ensure_all_started(cowboy),\n"
+      + "    ByPath = lists:foldl(fun({M, P, H}, Acc) ->\n"
+      + "        Acc#{P => maps:put(M, H, maps:get(P, Acc, #{}))}\n"
+      + "    end, #{}, Routes),\n"
+      + "    Paths = [{cowpath(P), ?MODULE, {init, Ms}} || {P, Ms} <- maps:to_list(ByPath)],\n"
+      + "    Dispatch = cowboy_router:compile([{'_', Paths}]),\n"
+      + "    {ok, _} = cowboy:start_clear({zinc_http, Name}, [{port, Port}],\n"
+      + "        #{env => #{dispatch => Dispatch}}),\n"
+      + "    {ok, #{'$self' => Name}}.\n\n"
+      + "%% {id} -> :id, trailing /* -> [...]\n"
+      + "cowpath(P) ->\n"
+      + "    P1 = binary:replace(P, <<\"{\">>, <<\":\">>, [global]),\n"
+      + "    P2 = binary:replace(P1, <<\"}\">>, <<>>, [global]),\n"
+      + "    binary_to_list(binary:replace(P2, <<\"/*\">>, <<\"/[...]\">>)).\n\n"
+      + "handle_call(Msg, _From, _State) -> erlang:error({unknown_call, Msg}).\n"
+      + "handle_cast(Msg, _State) -> erlang:error({unknown_cast, Msg}).\n"
+      + "handle_info({'DOWN', _Ref, process, _Pid, _Reason}, State) -> {stop, normal, State};\n"
+      + "handle_info(_Msg, State) -> {noreply, State}.\n\n"
+      + "%% cowboy 2.x handler: runs in the request process; crash = 500 for this request\n"
+      + "cowboy_init(Req0, {init, Methods}) ->\n"
+      + "    M = method_atom(cowboy_req:method(Req0)),\n"
+      + "    case maps:find(M, Methods) of\n"
+      + "        error -> {ok, cowboy_req:reply(405, #{}, <<>>, Req0), {init, Methods}};\n"
+      + "        {ok, H} ->\n"
+      + "            {ok, Body, Req1} = read_all(Req0, <<>>),\n"
+      + "            PathParams = maps:fold(fun(K, V, A) ->\n"
+      + "                maps:put(atom_to_binary(K, utf8), V, A) end,\n"
+      + "                #{}, cowboy_req:bindings(Req1)),\n"
+      + "            ZReq = #{method => M, path => cowboy_req:path(Req1),\n"
+      + "                     path_params => PathParams,\n"
+      + "                     query => cowboy_req:parse_qs(Req1),\n"
+      + "                     headers => cowboy_req:headers(Req1), body => Body},\n"
+      + "            ZResp = invoke(H, ZReq),\n"
+      + "            RHeaders = maps:from_list(maps:get(headers, ZResp, [])),\n"
+      + "            Req2 = cowboy_req:reply(maps:get(status, ZResp, 200), RHeaders,\n"
+      + "                maps:get(body, ZResp, <<>>), Req1),\n"
+      + "            {ok, Req2, {init, Methods}}\n"
+      + "    end.\n\n"
+      + "init(Req, State) -> cowboy_init(Req, State).\n\n"
+      + "read_all(Req, Acc) ->\n"
+      + "    case cowboy_req:read_body(Req) of\n"
+      + "        {ok, B, R} -> {ok, <<Acc/binary, B/binary>>, R};\n"
+      + "        {more, B, R} -> read_all(R, <<Acc/binary, B/binary>>)\n"
+      + "    end.\n\n"
+      + "invoke(H, ZReq) when is_function(H) -> H(ZReq);\n"
+      + "invoke(H, ZReq) -> (maps:get('$class', H)):handle(H, ZReq).\n\n"
+      + "method_atom(<<\"GET\">>) -> get;\n"
+      + "method_atom(<<\"POST\">>) -> post;\n"
+      + "method_atom(<<\"PUT\">>) -> put;\n"
+      + "method_atom(<<\"DELETE\">>) -> delete;\n"
+      + "method_atom(B) -> binary_to_atom(string:lowercase(B), utf8).\n"
+      + "\n"
+      + "%% Request/Response accessors used by the facade\n"
+      + "-export([req_path_param/2, req_query/2, req_header/2]).\n"
+      + "req_path_param(R, N) -> maps:get(N, maps:get(path_params, R, #{}), <<>>).\n"
+      + "req_query(R, N) ->\n"
+      + "    case lists:keyfind(N, 1, maps:get(query, R, [])) of\n"
+      + "        false -> <<>>;\n"
+      + "        {_, V} -> V\n"
+      + "    end.\n"
+      + "req_header(R, N) -> maps:get(N, maps:get(headers, R, #{}), <<>>).\n";
+
   /** Stdlib exceptions: name -> FQ tag. One-level hierarchy via BUILTIN_EXC_CHILDREN. */
   static final String[][] BUILTIN_EXCEPTIONS = {
       {"HttpException", "zinc.http.httpexception"},
@@ -335,7 +417,7 @@ class CodeGen {
         + "             restart => permanent, shutdown => infinity, type => supervisor}");
     if (app != null) {
       for (FieldDecl f : app.fields()) {
-        specs.add(staticChildSpec(f, "'" + f.name() + "'", actors, actorMods, "Application"));
+        specs.add(appChildSpec(f, actors, actorMods));
       }
     }
     return "-module(zinc_root_sup).\n"
@@ -345,6 +427,29 @@ class CodeGen {
         + "init([]) ->\n"
         + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600},\n"
         + "          [" + String.join(",\n           ", specs) + "]}}.\n";
+  }
+
+  /** Application field -> root child: ctor args come from the generated
+   *  '\$childargs_<field>'/0 (siblings as handles, full expressions — not just literals). */
+  static String appChildSpec(FieldDecl f, Map<String, ActorDecl> actors,
+      Map<String, String> actorMods) {
+    String startMod;
+    boolean pair = false;
+    if (f.type().equals("HttpServer")) {
+      startMod = "zinc.httpserver";
+    } else {
+      ActorDecl child = actors.get(f.type());
+      if (child == null) {
+        throw new CompileError("Application field " + f.name() + ": type " + f.type()
+            + " is not an Actor — static children are Actor-typed fields (v1)");
+      }
+      pair = hasActorChildren(child, actors);
+      startMod = actorMods.get(f.type()) + (pair ? "_sup" : "");
+    }
+    return "#{id => '" + f.name() + "', start => {" + atomLit(startMod)
+        + ", start_boot, ['" + f.name() + "', {main, '$childargs_" + f.name() + "'}]},\n"
+        + "             restart => permanent, shutdown => " + (pair ? "infinity" : "5000")
+        + ", type => " + (pair ? "supervisor" : "worker") + "}";
   }
 
   /** `Counter c = new Counter(0)` as a field -> permanent child spec; nameExpr is the
@@ -539,8 +644,9 @@ class CodeGen {
     String mod = actorMods.get(a.name());
     return "-module(" + atomLit(mod + "_sup") + ").\n"
         + "-behaviour(supervisor).\n"
-        + "-export([start_link/3, start_kids/1, init/1]).\n\n"
+        + "-export([start_link/3, start_boot/2, start_kids/1, init/1]).\n\n"
         + "start_link(Name, Owner, Args) -> supervisor:start_link(?MODULE, {pair, Name, Owner, Args}).\n\n"
+        + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n\n"
         + "start_kids(Name) -> supervisor:start_link(?MODULE, {kids, Name}).\n\n"
         + "init({pair, Name, Owner, Args}) ->\n"
         + "    {ok, {#{strategy => rest_for_one, intensity => 1000, period => 3600},\n"
@@ -567,6 +673,23 @@ class CodeGen {
     // liveness: static children alive -> serve until stopped; none -> exit after main
     pieces.add(!app.fields().isEmpty() ? "run() -> main(), timer:sleep(infinity)."
         : "run() -> main().");
+    var fEnv = new HashMap<String, String>();
+    var fTypes = new HashMap<String, String>();
+    for (FieldDecl f : app.fields()) {
+      varTypes = new HashMap<>(fTypes);
+      List<Expr> args = switch (f.init()) {
+        case SpawnExpr sp -> sp.args();
+        case NewExpr nx when nx.typeName().equals(f.type()) -> nx.args();
+        case null, default -> throw new CompileError("Application field " + f.name()
+            + " must be initialized: " + f.type() + " " + f.name() + " = new "
+            + f.type() + "(...)");
+      };
+      exports.add("'$childargs_" + f.name() + "'/0");
+      pieces.add("'$childargs_" + f.name() + "'() ->\n    ["
+          + genArgs(args, new HashMap<>(fEnv)) + "].");
+      fEnv.put(f.name(), "'" + f.name() + "'");
+      fTypes.put(f.name(), f.type());
+    }
     if (app.main() != null) {
       exports.add("user_main/1");
       pieces.add(genAppMain(app));
@@ -682,14 +805,16 @@ class CodeGen {
         calls.add(genHandler(a, m, true));
       }
     }
-    var exports = new ArrayList<>(
-        List.of("start_link/3", "init/1", "handle_call/3", "handle_cast/2", "handle_info/2"));
+    var exports = new ArrayList<>(List.of("start_link/3", "start_boot/2", "init/1",
+        "handle_call/3", "handle_cast/2", "handle_info/2"));
 
     var pieces = new ArrayList<String>();
     // [Name, Owner | Args]: init seeds '$self' from Name; Owner = spawner pid for
     // dynamic children (monitored: die with the owner) or none for static children.
     pieces.add("start_link(Name, Owner, Args) -> "
         + "gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).");
+    // boot-time ctor args come from a generated function (siblings referenced by handle)
+    pieces.add("start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).");
     pieces.add(genInit(a));
     // no user catch-all clauses: unknown messages crash the actor, the supervisor heals it
     // (the stubs below keep that semantic and silence the behaviour warning)
@@ -1530,6 +1655,33 @@ class CodeGen {
           case "build" -> genExpr(x.target(), env);
           default -> throw new CompileError("unsupported: HttpRequest builder " + x.method());
         };
+        case "Router" -> switch (x.method()) {
+          case "get", "post", "put", "delete" ->
+              "'zinc.httpserver':route(" + genExpr(x.target(), env) + ", " + x.method()
+                  + ", " + genArgs(x.args(), env) + ")";
+          default -> throw new CompileError("unsupported: Router." + x.method());
+        };
+        case "Request" -> switch (x.method()) {
+          case "method" -> "atom_to_binary(maps:get(method, " + genExpr(x.target(), env)
+              + "), utf8)";
+          case "path" -> "maps:get(path, " + genExpr(x.target(), env) + ")";
+          case "body", "bodyBytes" -> "maps:get(body, " + genExpr(x.target(), env) + ")";
+          case "pathParam" -> "'zinc.httpserver':req_path_param(" + genExpr(x.target(), env)
+              + ", " + genExpr(x.args().get(0), env) + ")";
+          case "queryParam" -> "'zinc.httpserver':req_query(" + genExpr(x.target(), env)
+              + ", " + genExpr(x.args().get(0), env) + ")";
+          case "header" -> "'zinc.httpserver':req_header(" + genExpr(x.target(), env)
+              + ", " + genExpr(x.args().get(0), env) + ")";
+          default -> throw new CompileError("unsupported: Request." + x.method());
+        };
+        case "Response" -> switch (x.method()) {
+          case "header" -> "maps:put(headers, maps:get(headers, " + genExpr(x.target(), env)
+              + ", []) ++ [{" + genArgs(x.args(), env) + "}], " + genExpr(x.target(), env)
+              + ")";
+          case "body" -> "maps:put(body, " + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.target(), env) + ")";
+          default -> throw new CompileError("unsupported: Response." + x.method());
+        };
         case "HttpClient" -> x.method().equals("send")
             ? "'zinc.http':send(" + genExpr(x.target(), env) + ", "
                 + genExpr(x.args().get(0), env) + ")"
@@ -1692,6 +1844,23 @@ class CodeGen {
         String fmt = isStr(x.args().get(0)) ? "~ts" : "~p";
         return "logger:" + lvl + "(\"" + fmt + "\", [" + genExpr(x.args().get(0), env)
             + "], #{module => " + atomLit(curModule) + "})";
+      }
+      case "Router" -> {
+        if (x.method().equals("create") && x.args().isEmpty()) {
+          usedServer = true;
+          return "[]";
+        }
+        throw new CompileError("unsupported: Router." + x.method() + " (create)");
+      }
+      case "Response" -> {
+        usedServer = true;
+        if (x.method().equals("ok") && x.args().size() == 1) {
+          return "#{status => 200, body => " + genExpr(x.args().get(0), env) + "}";
+        }
+        if (x.method().equals("status") && x.args().size() == 1) {
+          return "#{status => " + genExpr(x.args().get(0), env) + ", body => <<>>}";
+        }
+        throw new CompileError("unsupported: Response." + x.method() + " (ok/status)");
       }
       case "Json" -> {
         if (x.method().equals("parse") && x.args().size() == 1) {
@@ -1958,6 +2127,8 @@ class CodeGen {
             yield vr.name();
           }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
+          if (vr.name().equals("Router")) yield "Router";
+          if (vr.name().equals("Response")) yield "Response";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
@@ -2015,6 +2186,14 @@ class CodeGen {
           yield x.method().equals("build") ? "HttpRequest" : "HttpRequestBuilder";
         }
         if ("HttpClient".equals(tt)) yield x.method().equals("send") ? "HttpResponse" : null;
+        if ("Router".equals(tt)) yield "Router";
+        if ("Response".equals(tt)) yield "Response";
+        if ("Request".equals(tt)) {
+          yield switch (x.method()) {
+            case "method", "path", "pathParam", "queryParam", "header", "body" -> "String";
+            default -> null;
+          };
+        }
         if ("HttpResponse".equals(tt)) {
           yield switch (x.method()) {
             case "statusCode" -> "int";

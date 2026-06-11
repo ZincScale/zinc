@@ -33,7 +33,8 @@ public class Main {
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
           "String", "Exception", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
-          "HttpException", "ConnectException", "TimeoutException", "Json");
+          "HttpException", "ConnectException", "TimeoutException", "Json",
+          "Router", "Response", "Request", "HttpServer", "Handler");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
@@ -43,6 +44,9 @@ public class Main {
         excTags.put(bx[0], bx[1]);
       }
       var interfaces = new LinkedHashMap<String, Ast.InterfaceDecl>();
+      interfaces.put("Handler", new Ast.InterfaceDecl("Handler",
+          List.of(new Ast.MethodDecl("Response", "handle",
+              List.of(new Ast.Param("Request", "req")), null))));
       var instClasses = new LinkedHashMap<String, Ast.InstanceClassDecl>();
       var instMods = new LinkedHashMap<String, String>();  // simple name -> FQ module
       for (Src src : files) {
@@ -148,6 +152,7 @@ public class Main {
       var generated = new LinkedHashMap<String, String>();
       Ast.ApplicationDecl resolvedApp = null;
       boolean anyHttp = false;
+      boolean anyServer = false;
       for (Src src : files) {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
@@ -155,8 +160,10 @@ public class Main {
             exceptions, excTags, interfaces, instClasses, instMods, supervised);
         generated.putAll(cg.generateAll());
         anyHttp |= cg.usedHttp();
+        anyServer |= cg.usedServer();
       }
       if (anyHttp) generated.put("zinc.http", CodeGen.HTTP_SOURCE);
+      if (anyServer) generated.put("zinc.httpserver", CodeGen.SERVER_SOURCE);
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
         generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors, actorMods));
