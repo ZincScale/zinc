@@ -213,7 +213,10 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    no created-but-not-running state, so zinc invents none (cf. Java collapsing the
    new/start two-step in `Thread.startVirtualThread`): `new` runs the constructor
    inside the freshly spawned process (OTP init) and returns the handle; on restart
-   the runtime re-runs `new` with the same args, handle survives. The contract,
+   the runtime re-runs `new` with the same args, handle survives. `new` returns only
+   when the constructor has completed (start_link semantics) — boot is
+   deterministic: each child is fully constructed before the next sibling is born.
+   Constructors stay cheap; heavy async work starts via a cast, not in the ctor. The contract,
    stated once: Java syntax, marker-declared semantics — `implements Process` is the
    dev opting into process rules (serialized methods, surviving state, `new` = spawn).
    Liveness (the JVM non-daemon-thread rule): the program exits when `main` (if any)
@@ -241,12 +244,16 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    class (supervised, per the tree). Every other process is runtime- or stdlib-owned
    and temporary — `main`'s entry process (child of the root domain, runs once;
    crash logged, program exits nonzero if nothing else is alive), HTTP request
-   handlers, the Future/fan-out shape later: spawned in the owning domain, never
-   restarted, die with their owner. Supervisors are generated-only; library
+   handlers: spawned in the owning domain, never restarted, die with their owner. Supervisors are generated-only; library
    processes (FFI deps) belong to their own OTP apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
    raw thread is a Process with no name, state, or methods; fire-and-forget = cast or
-   a temporary `new`; parallel fan-out/join is a stdlib shape (Future/structured task
-   over temporary processes) designed with the stdlib. `Thread.sleep` stays.
+   a temporary `new`; parallel fan-out/join is NOT a new shape — it is the
+   worker-Process idiom: construct (cheap ctor), kick (cast), join (call); mailbox
+   FIFO makes the naive code correct (the join call queues behind the kick cast and
+   cannot be answered early). No Future type — the supervision tree already owns the
+   workers (dynamic children: owner dies ⇒ tasks die; task crashes ⇒ ladder applies
+   at the join call). Java needed Future/StructuredTaskScope because it has no
+   ownership tree. `Thread.sleep` stays.
    **Instance classes**: module + map term; fields are set by the constructor and then
    immutable — all objects are final. No setters, no field assignment after
    construction; mutable state lives in processes. Locals stay fully mutable (counters,
@@ -312,7 +319,7 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    .DELETE().timeout(ms).build()`; body is `String` or `byte[]` — one `POST(body)`
    method, not same-arity overloads (gradual checker accepts both; both lower to
    binaries, `byte[]` is the native case). Sync `client.send(req)` only — no
-   `sendAsync`/futures (threads cut; fan-out arrives with the stdlib Future shape).
+   `sendAsync`/futures (threads cut; fan-out = the worker-Process idiom).
    Returns `HttpResponse`, a final value: `statusCode()`, `body()` (UTF-8 String),
    `bodyBytes()` (byte[]), `header(name)`. 4xx/5xx are responses, not exceptions.
    Expected failures are typed exceptions per the failure ladder:
@@ -461,8 +468,10 @@ closed — zero extension keywords: `Application`/`Process` marker interfaces, `
 spawns. Decision #9 settled (everything `zinc.*`); `zinc.http` client AND server
 designed (client over httpc; server over cowboy — Router table, Handler SAM,
 process-per-request); JSON designed (derived record codecs + dynamic var-chaining).
-Next: the Future/fan-out shape (one real decision: failure semantics at the join),
-then `zinc.net` sockets (lowering details only — the shape is proven).
+Fan-out/join: settled, NOT a stdlib shape — the worker-Process idiom (kick-cast +
+join-call, mailbox FIFO makes it correct); no Future type, the tree owns the workers.
+Next: `zinc.net` sockets (lowering details only — the shape is proven). Distribution
+is the one undesigned pillar — explicitly out of v1 scope or design later.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
