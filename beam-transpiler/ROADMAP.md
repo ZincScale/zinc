@@ -398,6 +398,17 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      statements underneath — injection-safe by default; no string-concat path.
    - Postgres first (epgsql via FFI, vendored like cowboy); MySQL later, same
      shape. Migrations deferred — operational tooling, not language.
+   **Logging v1 — designed (2026-06-11): the println/Log split.**
+   - `System.out.println` stays honest stdout (`System.err` stderr) — Java
+     behavior; CLI tools and hello-world produce clean, undecorated output.
+   - `Log` joins the prelude: `Log.debug/info/warn/error(msg)` -> BEAM `logger`,
+     where supervisor crash reports already land — app logging and runtime
+     telemetry in one structured stream, one configuration. The transpiler injects
+     module + file:line metadata at zero cost (known statically — no
+     stack-walking like Java logging frameworks).
+   - Default handler level: info (debug suppressed; enabling is a `zc run` flag /
+     release config — Phase 4/5 detail). Under systemd both streams reach
+     journald; the split exists for tools and first impressions, not services.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -498,9 +509,10 @@ transactions, derived row mapping). Fan-out/join: the worker-Actor idiom — no 
 type, the tree owns the workers. **Distribution: explicitly OUT of v1** — single-node;
 a designed-later pillar, not an implied feature. Deferred as library surface, not
 architecture: `zinc.net` sockets, JSON path-DSL, timers (sleep + self-kick cast
-already covers periodic work). Small designs remaining, settle before/during
-implementation: logging (println -> logger; crash reports come standard), the test
-story (`zc test`). Next phase: implement spec + stdlib; webdemo rewritten with zero
+already covers periodic work). Logging settled: println = stdout, prelude `Log.*` ->
+BEAM logger (crash reports land there too; transpiler injects file:line). One small
+design remains, settle before/during implementation: the test story (`zc test`).
+Next phase: implement spec + stdlib; webdemo rewritten with zero
 `Tuple.of`/`Atom.*` verifies.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
