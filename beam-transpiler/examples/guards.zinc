@@ -1,0 +1,18 @@
+// runtime boundary guards: unknown (FFI) crossing into known = guarded; failure is a
+// structured {zinc_badtype, Expected, Got, Module} error -- catchable, supervisable
+import erlang.lists;
+
+public class Main {
+  public static void main(String[] args) {
+    var raw = lists.nth(1, List.of("oops"));  // unknown-typed: FFI basement
+    try {
+      int n = raw;                            // typed bind = guarded crossing -> crash
+      System.out.println(n);
+    } catch (Exception e) {
+      System.out.println("badtype caught");
+    }
+    var ok = lists.nth(1, List.of(41));
+    int m = ok;                               // guard passes: it really is an integer
+    System.out.println(m + 1);                // 42
+  }
+}

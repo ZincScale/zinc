@@ -131,10 +131,24 @@ class Parser {
     }
   }
 
-  /** Base type or array type: int, double, String, Point, int[], void, var. */
+  /** Base, generic or array type: int, List<String>, Map<String, Integer>, int[], var.
+   *  Generics are ERASED at lowering; type args feed static checks + boundary guards. */
   private String parseType() {
     if (match(TokKind.KW_VAR)) return "var";
     var t = new StringBuilder(expect(TokKind.IDENT, "type").text());
+    if (check(TokKind.LT)) {
+      int save = pos;
+      advance();
+      var args = new ArrayList<String>();
+      args.add(parseType());
+      while (match(TokKind.COMMA)) args.add(parseType());
+      if (check(TokKind.GT)) {
+        advance();
+        t.append("<").append(String.join(", ", args)).append(">");
+      } else {
+        pos = save; // was a comparison, not type args
+      }
+    }
     while (check(TokKind.LBRACKET) && toks.get(pos + 1).kind() == TokKind.RBRACKET) {
       pos += 2;
       t.append("[]");
@@ -403,12 +417,32 @@ class Parser {
     if (!check(TokKind.IDENT)) return false;
     int save = pos;
     advance();
+    skipTypeArgs();
     while (check(TokKind.LBRACKET) && toks.get(pos + 1).kind() == TokKind.RBRACKET) {
       pos += 2;
     }
     boolean decl = check(TokKind.IDENT);
     pos = save;
     return decl;
+  }
+
+  /** Best-effort skip of a balanced <...> in a type position (lookahead only). */
+  private void skipTypeArgs() {
+    if (!check(TokKind.LT)) return;
+    int depth = 0;
+    int p = pos;
+    while (p < toks.size()) {
+      TokKind k = toks.get(p).kind();
+      if (k == TokKind.LT) depth++;
+      else if (k == TokKind.GT && --depth == 0) {
+        pos = p + 1;
+        return;
+      } else if (k != TokKind.IDENT && k != TokKind.COMMA && k != TokKind.LBRACKET
+          && k != TokKind.RBRACKET) {
+        return; // not type args (e.g. a < b comparison)
+      }
+      p++;
+    }
   }
 
   private Stmt parseLocalDecl() {

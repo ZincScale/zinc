@@ -116,6 +116,20 @@ class CodeGen {
       + "    {'$zinc_relay', {zinc_exc, _, _} = E} -> erlang:error(E);\n"
       + "    V -> V end.";
 
+  /** Boundary guard: unknown crossing into known. SHALLOW; failure = structured crash
+   *  for supervision. Default ON (build flag to strip later if profiling justifies). */
+  private static final String CHK_HELPER =
+      "'$chk'(V, integer) when is_integer(V) -> V;\n"
+      + "'$chk'(V, float) when is_float(V) -> V;\n"
+      + "'$chk'(V, boolean) when is_boolean(V) -> V;\n"
+      + "'$chk'(V, string) when is_binary(V) -> V;\n"
+      + "'$chk'(V, actor) when is_atom(V) -> V;\n"
+      + "'$chk'(V, {class, T}) when is_map(V) ->\n"
+      + "    case maps:get('$class', V, undefined) of T -> V;\n"
+      + "        _ -> erlang:error({zinc_badtype, T, V, ?MODULE}) end;\n"
+      + "'$chk'(V, {iface, _}) when is_function(V); is_map(V) -> V;\n"
+      + "'$chk'(V, Spec) -> erlang:error({zinc_badtype, Spec, V, ?MODULE}).";
+
   // per-output-module usage flags: helpers are emitted only when referenced
   private boolean useFmt;
   private boolean useSfx;
@@ -123,6 +137,7 @@ class CodeGen {
   private boolean useIdx;
   private boolean useExnorm;
   private boolean useCall;
+  private boolean useChk;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -132,6 +147,7 @@ class CodeGen {
     if (useIdx) out.add(IDX_HELPER);
     if (useExnorm) out.add(EXNORM_HELPER);
     if (useCall) out.add(CALL_HELPER);
+    if (useChk) out.add(CHK_HELPER);
     return out;
   }
 
@@ -149,6 +165,40 @@ class CodeGen {
       throw new CompileError(where + ": cannot bind a " + got + " to " + declared
           + " (known-vs-known mismatch; exact nominal match required)");
     }
+  }
+
+  /** List<String> -> List; type args feed checks/guards, never the lowering. */
+  static String baseType(String t) {
+    int i = t.indexOf('<');
+    return i < 0 ? t : t.substring(0, i);
+  }
+
+  /** List<String> -> [String]; Map<String, Integer> -> [String, Integer]; else []. */
+  static List<String> typeArgs(String t) {
+    int i = t.indexOf('<');
+    if (i < 0 || !t.endsWith(">")) return List.of();
+    var out = new ArrayList<String>();
+    for (String a : t.substring(i + 1, t.length() - 1).split(",")) out.add(a.trim());
+    return out;
+  }
+
+  /** Runtime boundary guard spec for a declared type; null = not guardable (flows free). */
+  private String typeSpec(String t) {
+    String b = baseType(t);
+    return switch (b) {
+      case "int" -> "integer";
+      case "double" -> "float";
+      case "boolean" -> "boolean";
+      case "String" -> "string";
+      default -> {
+        if (records.containsKey(b)) yield "{class, " + atomLit(b.toLowerCase()) + "}";
+        if (instClasses.containsKey(b)) yield "{class, " + atomLit(instMods.get(b)) + "}";
+        if (exceptions.containsKey(b)) yield "{class, " + atomLit(excTags.get(b)) + "}";
+        if (interfaces.containsKey(b)) yield "{iface, " + atomLit(b.toLowerCase()) + "}";
+        if (allActors.containsKey(b)) yield "actor";
+        yield null;
+      }
+    };
   }
 
   private boolean isPrim(String t) {
@@ -177,6 +227,7 @@ class CodeGen {
     useIdx = false;
     useExnorm = false;
     useCall = false;
+    useChk = false;
   }
 
   /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
@@ -637,6 +688,15 @@ class CodeGen {
       params.add(v);
     }
     var lines = new ArrayList<String>();
+    for (Param p : m.params()) {
+      String spec = typeSpec(p.type());
+      if (spec != null) {
+        useChk = true; // typed method entry: messages arrive from anywhere
+        String gv = fresh(p.name());
+        lines.add(gv + " = '$chk'(" + env.get(p.name()) + ", " + spec + ")");
+        env.put(p.name(), gv);
+      }
+    }
     String self = fresh("self");
     lines.add(self + " = maps:get('$self', State)");
     env.put("this", self);
@@ -717,7 +777,13 @@ class CodeGen {
             out.add(v + " = array:from_list(" + genExpr(st.init(), env) + ")");
             varTypes.put(st.name(), st.type());
           } else {
-            out.add(v + " = " + genExpr(st.init(), env));
+            String spec = st.type().equals("var") ? null : typeSpec(st.type());
+            if (spec != null && exprType(st.init()) == null) {
+              useChk = true; // typed bind from unknown: guarded crossing
+              out.add(v + " = '$chk'(" + genExpr(st.init(), env) + ", " + spec + ")");
+            } else {
+              out.add(v + " = " + genExpr(st.init(), env));
+            }
             varTypes.put(st.name(),
                 st.type().equals("var") ? exprType(st.init()) : st.type());
           }
@@ -799,17 +865,19 @@ class CodeGen {
   private String genMutator(MethodCall mc, Map<String, String> env) {
     if (!(mc.target() instanceof VarRef vr) || !env.containsKey(vr.name())) return null;
     String vt = varTypes.get(vr.name());
-    boolean isMap = "HashMap".equals(vt) || "Map".equals(vt);
-    boolean isList = "ArrayList".equals(vt) || "List".equals(vt);
+    String vb = vt == null ? null : baseType(vt);
+    boolean isMap = "HashMap".equals(vb) || "Map".equals(vb);
+    boolean isList = "ArrayList".equals(vb) || "List".equals(vb);
     String cur = envGet(env, vr.name());
     String rhs;
+    List<String> targs = vt == null ? List.of() : typeArgs(vt);
     if (isMap && mc.method().equals("put")) {
-      rhs = "maps:put(" + genExpr(mc.args().get(0), env) + ", "
-          + genExpr(mc.args().get(1), env) + ", " + cur + ")";
+      rhs = "maps:put(" + guarded(mc.args().get(0), targs, 0, env) + ", "
+          + guarded(mc.args().get(1), targs, 1, env) + ", " + cur + ")";
     } else if (isMap && mc.method().equals("remove")) {
       rhs = "maps:remove(" + genExpr(mc.args().get(0), env) + ", " + cur + ")";
     } else if (isList && mc.method().equals("add")) {
-      rhs = cur + " ++ [" + genExpr(mc.args().get(0), env) + "]"; // O(n); buffer tier later
+      rhs = cur + " ++ [" + guarded(mc.args().get(0), targs, 0, env) + "]"; // O(n); buffer tier later
     } else {
       return null;
     }
@@ -836,6 +904,16 @@ class CodeGen {
       entries.add(x.fields().get(i).name() + " => " + genExpr(s.args().get(i), env));
     }
     return "erlang:error({zinc_exc, " + tag + ", #{" + String.join(", ", entries) + "}})";
+  }
+
+  /** Collection insert: guard the element when the type arg is known and the value isn't. */
+  private String guarded(Expr e, List<String> targs, int i, Map<String, String> env) {
+    String gen = genExpr(e, env);
+    if (i >= targs.size() || exprType(e) != null) return gen;
+    String spec = typeSpec(targs.get(i));
+    if (spec == null) return gen;
+    useChk = true;
+    return "'$chk'(" + gen + ", " + spec + ")";
   }
 
   private static String envGet(Map<String, String> env, String name) {
@@ -1308,8 +1386,9 @@ class CodeGen {
     // facade dispatch by the receiver's STATIC type — works on chains, not just vars
     String tt = exprType(x.target());
     if ("String".equals(tt)) return genStringMethod(x, env);
-    if ("ArrayList".equals(tt) || "List".equals(tt)) return genListMethod(x, env);
-    if ("HashMap".equals(tt) || "Map".equals(tt)) return genMapMethod(x, env);
+    String tb = tt == null ? null : baseType(tt);
+    if ("ArrayList".equals(tb) || "List".equals(tb)) return genListMethod(x, env);
+    if ("HashMap".equals(tb) || "Map".equals(tb)) return genMapMethod(x, env);
     // actor handle: anything statically typed as an actor (var from spawn, params, fields)
     ActorDecl actor = tt == null ? null : allActors.get(tt);
     if (actor != null) {
@@ -1657,6 +1736,7 @@ class CodeGen {
             default -> null;
           };
         }
+        tt = tt == null ? null : baseType(tt);
         if ("ArrayList".equals(tt) || "List".equals(tt)) {
           yield switch (x.method()) {
             case "size" -> "int";
