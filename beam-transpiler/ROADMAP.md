@@ -534,9 +534,21 @@ on the new surface and green** — Application tree (Store actor + HttpServer ch
 Router lambdas, derived JSON codecs, zero FFI / `Tuple.of` / `Tag.*` in user code:
 GAP-9 + GAP-10 closed, cowboy side verified (see `dogfood/FINDINGS-webdemo.md` round 2;
 SAM contextual lambda typing landed with it).
-Remaining designed-but-unimplemented stdlib: **Testing v1** (`implements Test` ->
-EUnit via `zc test`) and **`zinc.sql`** (needs a Postgres to test against). Then
-Phase 4 (toolchain/installer) per the phases above.
+**Testing v1: IMPLEMENTED (2026-06-11).** `implements Test` under `test/` (methods
+only; public void zero-arg = test case, rest helpers); lowers to an EUnit module —
+`{setup, boot-dyn-sup, {inparallel, [{Name, {timeout, 60, {spawn, Case}}}]}}` —
+process-per-test, parallel, actors a test spawns die with the test process (dynamic
+children). Prelude `Assert.equals/isTrue/fails(zero-arg lambda)`; failures are
+`{zinc_assert, #{expected, got, expr}}` with the operand's SOURCE TEXT (mini
+unparser; file:line waits on source maps, Phase 4.3). `zc test` = rebar3 eunit
+(test profile extra_src_dirs test/ recursive; test/zinc_gen never ships); plugin
+transpiles src+test in ONE run (tests see src types). Verified in zc/test.sh:
+green suite exit 0, red suite exit 1 + structured report. Noted: the
+crash-then-assert-restart example needs a STATIC child — dynamic children are
+temporary by design; restart assertions wait on the integration harness
+(boot-the-Application) or the opt-in restart modifier.
+Remaining designed-but-unimplemented stdlib: **`zinc.sql`** (needs a Postgres to
+test against). Then Phase 4 (toolchain/installer) per the phases above.
 ```
-cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 30/30 e2e + zc + webdemo
+cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 30/30 e2e + zc(run+test) + webdemo
 ```

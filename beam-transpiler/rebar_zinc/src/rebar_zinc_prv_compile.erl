@@ -34,21 +34,33 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 compile_app(App, Cfg) ->
-    SrcDir = filename:join(rebar_app_info:dir(App), "src"),
-    case filelib:wildcard("**/*.zinc", SrcDir) of
+    Dir = rebar_app_info:dir(App),
+    SrcDir = filename:join(Dir, "src"),
+    TestDir = filename:join(Dir, "test"),
+    Srcs = filelib:wildcard("**/*.zinc", SrcDir),
+    Tests = filelib:wildcard("**/*.zinc", TestDir),
+    case Srcs of
         [] ->
             ok;
-        Srcs ->
+        _ ->
             OutDir = filename:join(SrcDir, "zinc_gen"),
+            TestOut = filename:join(TestDir, "zinc_gen"),
             clean_generated(OutDir),
-            Cmd = lists:flatten(io_lib:format("~ts ~ts ~ts ~ts",
+            clean_generated(TestOut),
+            %% test/**/*.zinc rides along: one transpiler run sees the whole project
+            %% (tests reference src types); test output never lands under src/
+            TestArgs = case Tests of
+                           [] -> "";
+                           _ -> io_lib:format(" ~ts ~ts", [TestDir, TestOut])
+                       end,
+            Cmd = lists:flatten(io_lib:format("~ts ~ts ~ts ~ts~ts",
                                               [java_cmd(Cfg), compiler_main(Cfg),
-                                               SrcDir, OutDir])),
+                                               SrcDir, OutDir, TestArgs])),
             rebar_api:debug("zinc: ~ts", [Cmd]),
             case rebar_utils:sh(Cmd, [{use_stdout, false}, return_on_error]) of
                 {ok, _} ->
                     rebar_api:info("zinc: transpiled ~b file(s) -> ~ts",
-                                   [length(Srcs), OutDir]);
+                                   [length(Srcs) + length(Tests), OutDir]);
                 {error, {_Code, Output}} ->
                     rebar_api:abort("zinc transpile failed:~n~ts", [Output])
             end

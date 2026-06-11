@@ -8,7 +8,12 @@ final class Ast {
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
       List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application,
       List<ExceptionDecl> exceptions, List<InterfaceDecl> interfaces,
-      List<InstanceClassDecl> instanceClasses) {}
+      List<InstanceClassDecl> instanceClasses, List<TestDecl> tests) {}
+
+  /** class CalcTest implements Test { public void addsUp() {...} } — every public void
+   *  zero-arg method is a test case (JUnit 3 / EUnit convention), the rest helpers.
+   *  Lowers to an EUnit module: process-per-test, parallel. Never ships in releases. */
+  record TestDecl(String name, List<MethodDecl> methods, List<String> testMethods) {}
 
   /** interface Greeter { String greet(String n); } — signatures only; SAM if one. */
   record InterfaceDecl(String name, List<MethodDecl> sigs) {}

@@ -63,10 +63,11 @@ class Parser {
     var exceptions = new ArrayList<ExceptionDecl>();
     var interfaces = new ArrayList<InterfaceDecl>();
     var instanceClasses = new ArrayList<InstanceClassDecl>();
+    var tests = new ArrayList<TestDecl>();
     while (!check(TokKind.EOF)) {
       skipModifiers();
       if (checkIdent("class")) {
-        parseClassLike(classes, actors, application, exceptions, instanceClasses);
+        parseClassLike(classes, actors, application, exceptions, instanceClasses, tests);
       } else if (checkIdent("interface")) {
         interfaces.add(parseInterface());
       } else if (checkIdent("record")) {
@@ -79,7 +80,7 @@ class Parser {
       }
     }
     return new Program(imports, classes, records, actors, enums, application[0], exceptions,
-        interfaces, instanceClasses);
+        interfaces, instanceClasses, tests);
   }
 
   /** interface Name { Ret m(T a); ... } — signatures only (no default methods, v1). */
@@ -125,10 +126,13 @@ class Parser {
     return new Import(path);
   }
 
-  private void skipModifiers() {
+  /** Skips modifiers; returns the set seen (test-case selection needs 'public'). */
+  private Set<String> skipModifiers() {
+    var seen = new java.util.HashSet<String>();
     while (check(TokKind.IDENT) && MODIFIERS.contains(cur().text())) {
-      advance();
+      seen.add(advance().text());
     }
+    return seen;
   }
 
   /** Base, generic or array type: int, List<String>, Map<String, Integer>, int[], var.
@@ -156,10 +160,10 @@ class Parser {
     return t.toString();
   }
 
-  /** class Name [implements Application|Actor|<Interface> | extends Exception] { ... } */
+  /** class Name [implements Application|Actor|Test|<Interface> | extends Exception] { ... } */
   private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors,
       ApplicationDecl[] application, List<ExceptionDecl> exceptions,
-      List<InstanceClassDecl> instanceClasses) {
+      List<InstanceClassDecl> instanceClasses, List<TestDecl> tests) {
     advance(); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
     if (checkIdent("extends")) {
@@ -181,6 +185,8 @@ class Parser {
       classes.add(parseClassBody(name));
     } else if (marker.equals("Actor")) {
       actors.add(parseActorBody(name));
+    } else if (marker.equals("Test")) {
+      tests.add(parseTestBody(name));
     } else if (marker.equals("Application")) {
       if (application[0] != null) {
         throw new CompileError("more than one Application in this file");
@@ -215,6 +221,28 @@ class Parser {
     }
     expect(TokKind.RBRACE, "'}'");
     return new ClassDecl(name, methods);
+  }
+
+  /** Test class: methods only (no fields/ctor — state lives in spawned Actors, reclaimed
+   *  when the test's process dies); public void zero-arg = test case, rest helpers. */
+  private TestDecl parseTestBody(String name) {
+    expect(TokKind.LBRACE, "'{'");
+    var methods = new ArrayList<MethodDecl>();
+    var testNames = new ArrayList<String>();
+    while (!check(TokKind.RBRACE)) {
+      Set<String> mods = skipModifiers();
+      MethodDecl m = parseMethod();
+      methods.add(m);
+      if (mods.contains("public") && m.retType().equals("void") && m.params().isEmpty()) {
+        testNames.add(m.name());
+      }
+    }
+    expect(TokKind.RBRACE, "'}'");
+    if (testNames.isEmpty()) {
+      throw new CompileError("test class " + name
+          + " has no test cases: a test is a public void method with no parameters");
+    }
+    return new TestDecl(name, methods, testNames);
   }
 
   private MethodDecl parseMethod() {

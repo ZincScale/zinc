@@ -130,6 +130,22 @@ class CodeGen {
       + "'$chk'(V, {iface, _}) when is_function(V); is_map(V) -> V;\n"
       + "'$chk'(V, Spec) -> erlang:error({zinc_badtype, Spec, V, ?MODULE}).";
 
+  /** Assert failures are structured errors; EUnit reports them, the ladder owns them.
+   *  Src is the operand's source text — the power-assert trick at zero runtime cost
+   *  (== not =:= so ints and doubles compare by value, Java's widening). */
+  private static final String ASSERT_HELPERS =
+      "'$assert_eq'(E, A, _) when E == A -> ok;\n"
+      + "'$assert_eq'(E, A, Src) ->\n"
+      + "    erlang:error({zinc_assert, #{expected => E, got => A, expr => Src}}).\n"
+      + "'$assert_true'(true, _) -> ok;\n"
+      + "'$assert_true'(V, Src) ->\n"
+      + "    erlang:error({zinc_assert, #{expected => true, got => V, expr => Src}}).\n"
+      + "'$assert_fails'(F, Src) ->\n"
+      + "    R = try F() of _ -> returned catch _:_ -> crashed end,\n"
+      + "    case R of crashed -> ok;\n"
+      + "        returned -> erlang:error({zinc_assert,\n"
+      + "            #{expected => crash, got => returned, expr => Src}}) end.";
+
   private static final String JGET_HELPER =
       "'$jget'(M, K, Spec) ->\n"
       + "    case maps:find(K, M) of\n"
@@ -152,6 +168,7 @@ class CodeGen {
   private boolean useCall;
   private boolean useChk;
   private boolean useJget;
+  private boolean useAssert;
   private boolean usedHttp;
   private boolean usedServer;
 
@@ -165,6 +182,7 @@ class CodeGen {
     if (useCall) out.add(CALL_HELPER);
     if (useChk) out.add(CHK_HELPER);
     if (useJget) out.add(JGET_HELPER);
+    if (useAssert) out.add(ASSERT_HELPERS);
     return out;
   }
 
@@ -546,6 +564,12 @@ class CodeGen {
       curClassName = c.name();
       out.put(curModule, genInstanceClassModule(c));
     }
+    for (Ast.TestDecl t : program.tests()) {
+      resetModuleState();
+      curModule = classes.get(t.name()).module();
+      curClassName = t.name();
+      out.put(curModule, genTestModule(t));
+    }
     if (program.application() != null) {
       resetModuleState();
       curModule = program.application().erlMod();
@@ -769,6 +793,80 @@ class CodeGen {
         + "-export([" + String.join(", ", exports) + "]).\n"
         + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
         + String.join("\n\n", pieces) + "\n";
+  }
+
+  /** Test class -> EUnit module: '$zinc_test_'/0 is the generator EUnit discovers
+   *  (name ends in _test_); every case runs in its own process ({spawn}), all cases
+   *  in parallel ({inparallel}) — perfect isolation, ExUnit's model. Actors a test
+   *  spawns are its dynamic children: the test process dies, the domain dies. */
+  private String genTestModule(Ast.TestDecl t) {
+    var defs = new ArrayList<String>();
+    for (var m : t.methods()) defs.add(genFn(m));
+    var exports = new ArrayList<String>(List.of("'$zinc_test_'/0"));
+    for (var m : t.methods()) exports.add(m.name() + "/" + m.params().size());
+    var entries = new ArrayList<String>();
+    for (String name : t.testMethods()) {
+      entries.add("{<<\"" + t.name() + "." + name + "\">>, {timeout, 60, {spawn, fun "
+          + name + "/0}}}");
+    }
+    var pieces = new ArrayList<String>();
+    pieces.add("'$zinc_test_'() ->\n"
+        + "    {setup, fun '$zinc_boot'/0,\n"
+        + "     {inparallel,\n"
+        + "      [" + String.join(",\n       ", entries) + "]}}.");
+    // dyn_sup must be up for tests that spawn actors; idempotent across modules
+    pieces.add(projectHasActors
+        ? "'$zinc_boot'() ->\n"
+            + "    case whereis(zinc_dyn_sup) of\n"
+            + "        undefined -> {ok, P} = zinc_dyn_sup:start_link(), erlang:unlink(P), ok;\n"
+            + "        _ -> ok\n"
+            + "    end."
+        : "'$zinc_boot'() -> ok.");
+    pieces.addAll(defs);
+    pieces.addAll(helpers);
+    pieces.addAll(usedHelpers());
+    return "-module(" + atomLit(curModule) + ").\n"
+        + "-export([" + String.join(", ", exports) + "]).\n"
+        + "-compile([nowarn_unused_vars, nowarn_unused_function]).\n\n"
+        + String.join("\n\n", pieces) + "\n";
+  }
+
+  /** Operand source text as an Erlang binary, for assert failure messages. */
+  private static String srcBin(Expr e) {
+    return "<<\"" + exprSrc(e).replace("\\", "\\\\").replace("\"", "\\\"") + "\">>";
+  }
+
+  /** Minimal unparser — renders the common shapes; enough to recognize the operand. */
+  private static String exprSrc(Expr e) {
+    return switch (e) {
+      case IntLit x -> String.valueOf(x.value());
+      case FloatLit x -> String.valueOf(x.value());
+      case BoolLit x -> String.valueOf(x.value());
+      case StrLit x -> "\"" + x.text() + "\"";
+      case VarRef x -> x.name();
+      case FieldAccess x -> exprSrc(x.obj()) + "." + x.field();
+      case Index x -> exprSrc(x.obj()) + "[" + exprSrc(x.index()) + "]";
+      case Binary x -> exprSrc(x.left()) + " " + x.op() + " " + exprSrc(x.right());
+      case Unary x -> x.op() + exprSrc(x.operand());
+      case Call x -> x.callee() + "(" + srcList(x.args()) + ")";
+      case MethodCall x -> exprSrc(x.target()) + "." + x.method() + "(" + srcList(x.args()) + ")";
+      case NewExpr x -> "new " + x.typeName() + "(" + srcList(x.args()) + ")";
+      case SpawnExpr x -> "new " + x.actorName() + "(" + srcList(x.args()) + ")";
+      case LambdaExpr x -> {
+        List<Stmt> ss = x.body().stmts();
+        String body = ss.size() == 1 ? switch (ss.get(0)) {
+          case ExprStmt st -> exprSrc(st.expr());
+          case ReturnStmt st -> exprSrc(st.value());
+          default -> "...";
+        } : "...";
+        yield "(" + String.join(", ", x.params()) + ") -> " + body;
+      }
+      case null, default -> "expr";
+    };
+  }
+
+  private static String srcList(List<Expr> es) {
+    return String.join(", ", es.stream().map(CodeGen::exprSrc).toList());
   }
 
   private String genFn(MethodDecl m) {
@@ -1890,6 +1988,27 @@ class CodeGen {
           return "json:decode(" + genExpr(x.args().get(0), env) + ")";
         }
         throw new CompileError("unsupported: Json." + x.method() + " (parse)");
+      }
+      case "Assert" -> {
+        useAssert = true;
+        if (x.method().equals("equals") && x.args().size() == 2) {
+          return "'$assert_eq'(" + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.args().get(1), env) + ", " + srcBin(x.args().get(1)) + ")";
+        }
+        if (x.method().equals("isTrue") && x.args().size() == 1) {
+          return "'$assert_true'(" + genExpr(x.args().get(0), env) + ", "
+              + srcBin(x.args().get(0)) + ")";
+        }
+        if (x.method().equals("fails") && x.args().size() == 1) {
+          if (!(x.args().get(0) instanceof LambdaExpr lx) || !lx.params().isEmpty()) {
+            throw new CompileError("Assert.fails takes a zero-arg lambda: "
+                + "Assert.fails(() -> c.boom())");
+          }
+          return "'$assert_fails'(" + genExpr(x.args().get(0), env) + ", "
+              + srcBin(x.args().get(0)) + ")";
+        }
+        throw new CompileError("unsupported: Assert." + x.method()
+            + " (equals/isTrue/fails)");
       }
       case "HttpClient" -> {
         if (x.method().equals("newBuilder") && x.args().isEmpty()) {

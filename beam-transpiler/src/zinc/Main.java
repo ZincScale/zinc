@@ -13,13 +13,14 @@ import zinc.CodeGen.ClassInfo;
 
 public class Main {
   public static void main(String[] args) throws IOException {
-    if (args.length != 2) {
-      System.err.println("usage: Main <File.zinc | project-dir> <outdir>");
+    if (args.length != 2 && args.length != 4) {
+      System.err.println("usage: Main <File.zinc | project-dir> <outdir> [<testdir> <testoutdir>]");
       System.exit(2);
     }
     try {
       Path in = Path.of(args[0]);
-      List<Src> files = parseAll(in);
+      List<Src> files = new ArrayList<>(parseAll(in, false));
+      if (args.length == 4) files.addAll(parseAll(Path.of(args[2]), true));
 
       // project-wide registries; type names and module names must be unique
       var classes = new LinkedHashMap<String, ClassInfo>();
@@ -34,7 +35,7 @@ public class Main {
           "String", "Exception", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json",
-          "Router", "Response", "Request", "HttpServer", "Handler");
+          "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
@@ -61,6 +62,7 @@ public class Main {
         p.exceptions().forEach(x -> names.add(x.name()));
         p.interfaces().forEach(i -> names.add(i.name()));
         p.instanceClasses().forEach(c -> names.add(c.name()));
+        p.tests().forEach(t -> names.add(t.name()));
         for (String n : names) {
           if (reserved.contains(n)) throw new CompileError("'" + n + "' is a reserved name");
           if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
@@ -87,6 +89,19 @@ public class Main {
           instMods.put(c.name(), mod);
           if (!modules.add(mod)) {
             throw new CompileError("module name collision: " + c.name());
+          }
+        }
+        for (var t : p.tests()) {
+          if (!src.test()) {
+            throw new CompileError("test class " + t.name()
+                + " must live under test/ — test code never ships in releases");
+          }
+          var methods = new LinkedHashMap<String, String>();
+          for (var m : t.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
+          String mod = fqMod(pkg, t.name());
+          classes.put(t.name(), new ClassInfo(mod, methods));
+          if (!modules.add(mod)) {
+            throw new CompileError("module name collision: " + t.name());
           }
         }
         for (var a : p.actors()) {
@@ -150,6 +165,7 @@ public class Main {
       // generate everything before writing anything: no partial output on a compile error
       boolean supervised = !actors.isEmpty() || application != null;
       var generated = new LinkedHashMap<String, String>();
+      var generatedTest = new LinkedHashMap<String, String>();
       Ast.ApplicationDecl resolvedApp = null;
       boolean anyHttp = false;
       boolean anyServer = false;
@@ -158,7 +174,7 @@ public class Main {
         if (resolved.application() != null) resolvedApp = resolved.application();
         var cg = new CodeGen(resolved, classes, records, enums, actors, actorMods,
             exceptions, excTags, interfaces, instClasses, instMods, supervised);
-        generated.putAll(cg.generateAll());
+        (src.test() ? generatedTest : generated).putAll(cg.generateAll());
         anyHttp |= cg.usedHttp();
         anyServer |= cg.usedServer();
       }
@@ -175,38 +191,51 @@ public class Main {
         Files.writeString(path, e.getValue());
         System.out.println(path);
       }
+      if (args.length == 4 && !generatedTest.isEmpty()) {
+        Path testOutDir = Files.createDirectories(Path.of(args[3]));
+        for (var e : generatedTest.entrySet()) {
+          Path path = testOutDir.resolve(e.getKey() + ".erl");
+          Files.writeString(path, e.getValue());
+          System.out.println(path);
+        }
+      }
     } catch (CompileError e) {
       System.err.println(e.getMessage());
       System.exit(1);
     }
   }
 
-  /** A parsed file plus its package (= directory path, Java convention). */
-  record Src(Program prog, String pkg) {}
+  /** A parsed file plus its package (= directory path, Java convention) and origin
+   *  (test/ files: test classes allowed, output routed to the test outdir). */
+  record Src(Program prog, String pkg, boolean test) {}
 
   /** FQ class name = module, as a lowercase dotted atom: util.MathUtil -> 'util.mathutil'. */
   static String fqMod(String pkg, String name) {
     return pkg.isEmpty() ? name.toLowerCase() : pkg + "." + name.toLowerCase();
   }
 
-  private static List<Src> parseAll(Path in) throws IOException {
+  private static List<Src> parseAll(Path in, boolean test) throws IOException {
     var programs = new ArrayList<Src>();
     if (!Files.isDirectory(in)) {
-      programs.add(new Src(parse(in), ""));
+      if (test) return programs; // no test dir: nothing to do
+      programs.add(new Src(parse(in), "", false));
       return programs;
     }
     var srcFiles = new ArrayList<Path>();
     try (var walk = Files.walk(in)) {
       walk.filter(p -> p.toString().endsWith(".zinc")).sorted().forEach(srcFiles::add);
     }
-    if (srcFiles.isEmpty()) throw new CompileError("no .zinc files under " + in);
+    if (srcFiles.isEmpty()) {
+      if (test) return programs;
+      throw new CompileError("no .zinc files under " + in);
+    }
     for (Path p : srcFiles) {
       Program prog = parse(p);
       Path rel = in.relativize(p);
       checkFileName(rel, prog);
       String pkg = rel.getParent() == null ? ""
           : rel.getParent().toString().replace('/', '.').toLowerCase();
-      programs.add(new Src(prog, pkg));
+      programs.add(new Src(prog, pkg, test));
     }
     return programs;
   }
@@ -220,6 +249,7 @@ public class Main {
     prog.records().forEach(r -> names.add(r.name()));
     prog.actors().forEach(a -> names.add(a.name()));
     prog.enums().forEach(e -> names.add(e.name()));
+    prog.tests().forEach(t -> names.add(t.name()));
     if (prog.application() != null) names.add(prog.application().name());
     if (!names.contains(stem)) {
       throw new CompileError(rel + " must declare a type named '" + stem + "'");

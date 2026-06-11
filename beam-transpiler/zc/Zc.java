@@ -38,6 +38,13 @@ public class Zc {
         build(dir);
         run(dir);
       }
+      case "test" -> {
+        Path dir = projectDir(args);
+        var cfg = loadToml(dir);
+        ensureGenerated(dir, cfg);
+        vendorDeps(dir, cfg);
+        exec(dir, "rebar3", "eunit");
+      }
       case "clean" -> {
         Path dir = projectDir(args);
         ensureGenerated(dir, loadToml(dir));
@@ -94,7 +101,7 @@ public class Zc {
         }
         """.formatted(base));
     Files.writeString(dir.resolve(".gitignore"),
-        "_build/\n_checkouts/\nsrc/zinc_gen/\nrebar.config\nsrc/*.app.src\n");
+        "_build/\n_checkouts/\nsrc/zinc_gen/\ntest/zinc_gen/\nrebar.config\nsrc/*.app.src\n");
     ensureGenerated(dir, loadToml(dir));
     System.out.println("created " + name + "/");
     System.out.println("  zinc.toml  src/Main.zinc");
@@ -121,6 +128,7 @@ public class Zc {
         {provider_hooks, [{pre, [{compile, {zinc, compile}}]},
                           {post, [{clean, {zinc, clean}}]}]}.
         {src_dirs, [{"src", [{recursive, true}]}]}.
+        {profiles, [{test, [{extra_src_dirs, [{"test", [{recursive, true}]}]}]}]}.
         {deps, [%s]}.
         """.formatted(String.join(", ", depList)));
     Files.writeString(dir.resolve("src/" + name + ".app.src"), """
@@ -295,6 +303,7 @@ public class Zc {
           zc init <name>        create a new project (zinc.toml, src/Main.zinc)
           zc build [dir]        transpile .zinc + compile (rebar3 under the hood)
           zc run [dir]          build, then run main()
+          zc test [dir]         run test/**/*.zinc test classes (EUnit underneath)
           zc clean [dir]        remove build output and generated .erl
           zc add <name@ver>     add a hex dependency to zinc.toml
           zc deps [dir]         list dependencies

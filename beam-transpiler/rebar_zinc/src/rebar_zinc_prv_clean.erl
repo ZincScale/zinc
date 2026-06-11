@@ -13,7 +13,7 @@ init(State) ->
         {example, "rebar3 zinc clean"},
         {opts, []},
         {short_desc, "Remove zinc-generated Erlang sources"},
-        {desc, "Deletes src/zinc_gen/ in each project app."}
+        {desc, "Deletes src/zinc_gen/ and test/zinc_gen/ in each project app."}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -24,8 +24,9 @@ do(State) ->
            end,
     lists:foreach(
       fun(A) ->
-              Gen = filename:join([rebar_app_info:dir(A), "src", "zinc_gen"]),
-              rebar_file_utils:rm_rf(Gen)
+              Dir = rebar_app_info:dir(A),
+              rebar_file_utils:rm_rf(filename:join([Dir, "src", "zinc_gen"])),
+              rebar_file_utils:rm_rf(filename:join([Dir, "test", "zinc_gen"]))
       end, Apps),
     {ok, State}.
 

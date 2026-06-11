@@ -55,7 +55,13 @@ final class Resolve {
     return new Program(p.imports(), p.classes().stream().map(r::clazz).toList(), p.records(),
         p.actors().stream().map(r::actor).toList(), p.enums(), r.app(p.application()),
         p.exceptions(), p.interfaces(),
-        p.instanceClasses().stream().map(r::instClass).toList());
+        p.instanceClasses().stream().map(r::instClass).toList(),
+        p.tests().stream().map(r::test).toList());
+  }
+
+  private Ast.TestDecl test(Ast.TestDecl t) {
+    return new Ast.TestDecl(t.name(), t.methods().stream().map(this::method).toList(),
+        t.testMethods());
   }
 
   private Ast.InstanceClassDecl instClass(Ast.InstanceClassDecl c) {
