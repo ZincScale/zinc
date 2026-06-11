@@ -189,6 +189,13 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      (element at the crossing; never deep-scan a collection). Failure = structured
      `{zinc_badtype, expected, got, loc}` crash for supervision. Default ON; build
      flag to strip later if profiling justifies.
+   **Modules**: fully-qualified class name = module, as a lowercase dotted atom —
+   `util.MathUtil` -> `'util.mathutil'` (Elixir precedent). Collision-free; fixes the
+   flat-namespace bug (today `class MathUtil` -> `mathutil` regardless of package).
+   Root-package classes unchanged (`main:main()` entry stays).
+   **`actor`** stays as the identity construct; extension keywords are fine where an
+   OTP concept has no honest Java expression. Raw processes (thread-shaped concurrent
+   execution) are a separate surface, still to design.
    Still to design (each WITH its checking story): instance classes, interfaces /
    lambda target types, user-defined exceptions/throw, quoted atoms (GAP-10).
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
