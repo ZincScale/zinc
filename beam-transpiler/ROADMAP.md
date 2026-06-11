@@ -193,9 +193,35 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    `util.MathUtil` -> `'util.mathutil'` (Elixir precedent). Collision-free; fixes the
    flat-namespace bug (today `class MathUtil` -> `mathutil` regardless of package).
    Root-package classes unchanged (`main:main()` entry stays).
-   **`actor`** stays as the identity construct; extension keywords are fine where an
-   OTP concept has no honest Java expression. Raw processes (thread-shaped concurrent
-   execution) are a separate surface, still to design.
+   Extension keywords are fine where an OTP concept has no honest Java expression.
+   **Program model.** One program shape. A project has at most one `service` — the
+   explicit root: it carries the OTP application identity (name/version from
+   zinc.toml; [deps] boot before its tree), declares the root children as actor
+   fields, hosts the optional `main(String[] args)`, receives SIGTERM, owns the exit
+   code. The service has no handle, no methods, no callers — it is the boundary, not
+   a unit. A project without a `service` is a library. `actor` stays the supervised
+   stateful unit: fields (state + child actors), methods (void ⇒ cast,
+   typed ⇒ call), registered-name handle.
+   Liveness (the JVM non-daemon-thread rule): the program exits when `main` (if any)
+   has returned AND no actors are alive; otherwise it runs until stopped. Tool,
+   server, and mixed programs fall out of this one rule.
+   **Tree shape — composition is supervision, nothing hidden.** The tree is read
+   from the source: the service's actor-fields are the root domain; an actor's
+   actor-fields are its children — born in declaration order, shut down in reverse.
+   No separate tree declaration.
+   - Failure flows down, never up: an owner's death takes its domain (subtree
+     restarts fresh, constructors re-run); a child's death never harms its owner;
+     crash-looping domains escalate stepwise to the root, then the VM exits
+     (systemd's layer, Phase 5).
+   - Static children (fields) are permanent — always restarted.
+   - Dynamic children (`spawn` in method bodies) join the spawner's domain,
+     temporary — die with the owner, not restarted on crash; opt-in restart
+     modifier later if a real program earns it. Siblings independent; fail-together
+     coupling deferred.
+   - Handles orthogonal to domains: lifecycle only; restarts never break handles.
+   Lowering: service -> OTP application + root supervisor; an actor with children ->
+   generated supervisor pair (owner first, children after, rest_for_one); worker
+   processes never contain supervisor code.
    **Instance classes**: module + map term; fields are set by the constructor and then
    immutable — all objects are final. No setters, no field assignment after
    construction; mutable state lives in actors. Locals stay fully mutable (counters,
