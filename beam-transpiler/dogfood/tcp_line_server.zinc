@@ -5,7 +5,7 @@ import erlang.inet;
 import erlang.erlang;
 import erlang.io_lib;
 
-actor Conn {
+class Conn implements Actor {
   void serve(Object sock) {
     // workaround GAP-4: lexer has no escape sequences, "\n" is backslash-n
     String nl = erlang.list_to_binary(io_lib.nl());
@@ -22,13 +22,13 @@ actor Conn {
   }
 }
 
-actor Acceptor {
+class Acceptor implements Actor {
   void run(Object lsock) {
     boolean up = true;
     while (up) {
       try {
         var sock = Erlang.ok(gen_tcp.accept(lsock));
-        var conn = spawn Conn();
+        var conn = new Conn();
         gen_tcp.controlling_process(sock, erlang.whereis(conn));
         conn.serve(sock);
       } catch (Exception e) {
@@ -48,7 +48,7 @@ public class Main {
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
 
-    var acceptor = spawn Acceptor();
+    var acceptor = new Acceptor();
     acceptor.run(lsock);
 
     // --- client side ---

@@ -1,6 +1,6 @@
 // THE headline demo: a handler crashes the actor, the generated supervisor
 // restarts it, and the SAME handle keeps serving. Zero supervision code here.
-actor Counter {
+class Counter implements Actor {
   int count = 0;
   void incr() { count = count + 1; }
   int get()   { return count; }
@@ -9,7 +9,7 @@ actor Counter {
 
 public class Main {
   public static void main(String[] args) {
-    var c = spawn Counter();
+    var c = new Counter();
     c.incr();
     c.incr();
     c.incr();

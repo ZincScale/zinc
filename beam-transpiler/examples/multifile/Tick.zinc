@@ -1,4 +1,4 @@
-actor Tick {
+class Tick implements Actor {
   int n = 0;
   void inc() { n = n + 1; }
   int get()  { return n; }

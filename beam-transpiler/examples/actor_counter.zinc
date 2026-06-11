@@ -1,5 +1,5 @@
 // happy path: actor -> gen_server; void method -> cast, typed method -> call
-actor Counter {
+class Counter implements Actor {
   int count = 0;
   void incr()       { count = count + 1; }
   void add(int n)   { count = count + n; }
@@ -8,7 +8,7 @@ actor Counter {
 
 public class Main {
   public static void main(String[] args) {
-    var c = spawn Counter();
+    var c = new Counter();
     c.incr();
     c.incr();
     c.add(5);

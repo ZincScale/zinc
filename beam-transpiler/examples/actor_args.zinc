@@ -1,6 +1,6 @@
 // Constructor args (restart re-runs the SAME constructor), typed handle params,
 // and `this` (self-casts via the hidden '$self' registered name).
-actor Counter {
+class Counter implements Actor {
   int count;
   Counter(int start) { count = start; }
   void incr()        { count = count + 1; }
@@ -18,7 +18,7 @@ public class Main {
   }
 
   public static void main(String[] args) {
-    var c = spawn Counter(40);
+    var c = new Counter(40);
     bump(c);
     c.kick();
     System.out.println(c.get());  // 40 +1 +2 = 43

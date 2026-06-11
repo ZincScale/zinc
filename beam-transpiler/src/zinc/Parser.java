@@ -61,16 +61,14 @@ class Parser {
     var enums = new ArrayList<EnumDecl>();
     while (!check(TokKind.EOF)) {
       skipModifiers();
-      if (check(TokKind.KW_ACTOR)) {
-        actors.add(parseActor());
-      } else if (checkIdent("class")) {
-        classes.add(parseClass());
+      if (checkIdent("class")) {
+        parseClassLike(classes, actors);
       } else if (checkIdent("record")) {
         records.add(parseRecord());
       } else if (checkIdent("enum")) {
         enums.add(parseEnum());
       } else {
-        throw new CompileError("Parse error: expected class, record, enum or actor at line "
+        throw new CompileError("Parse error: expected class, record or enum at line "
             + cur().line());
       }
     }
@@ -119,9 +117,27 @@ class Parser {
     return t.toString();
   }
 
-  private ClassDecl parseClass() {
+  /** class Name [implements Application|Actor] { ... } — markers select the lowering. */
+  private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors) {
     advance(); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
+    String marker = null;
+    if (checkIdent("implements")) {
+      advance();
+      marker = expect(TokKind.IDENT, "interface name").text();
+    }
+    if (marker == null || marker.equals("Application")) {
+      // Application tree semantics (Actor fields = root children) land in P2.
+      classes.add(parseClassBody(name));
+    } else if (marker.equals("Actor")) {
+      actors.add(parseActorBody(name));
+    } else {
+      throw new CompileError("unknown interface '" + marker
+          + "': v1 markers are Application and Actor, at line " + cur().line());
+    }
+  }
+
+  private ClassDecl parseClassBody(String name) {
     expect(TokKind.LBRACE, "'{'");
     var methods = new ArrayList<MethodDecl>();
     while (!check(TokKind.RBRACE)) {
@@ -163,9 +179,7 @@ class Parser {
     return new RecordDecl(name, comps);
   }
 
-  private ActorDecl parseActor() {
-    expect(TokKind.KW_ACTOR, "'actor'");
-    String name = expect(TokKind.IDENT, "actor name").text();
+  private ActorDecl parseActorBody(String name) {
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
     var methods = new ArrayList<MethodDecl>();
@@ -174,7 +188,7 @@ class Parser {
       skipModifiers();
       String type = parseType();
       if (type.equals(name) && check(TokKind.LPAREN)) { // constructor
-        if (ctor != null) throw new CompileError("actor " + name + ": duplicate constructor");
+        if (ctor != null) throw new CompileError("Actor " + name + ": duplicate constructor");
         ctor = new MethodDecl("", name, parseParams(), parseBlock());
         continue;
       }
@@ -578,19 +592,6 @@ class Parser {
       return new BoolLit(false);
     }
     if (check(TokKind.STR_LIT)) return new StrLit(advance().text());
-    if (check(TokKind.KW_SPAWN)) {
-      advance();
-      String name = expect(TokKind.IDENT, "actor name").text();
-      expect(TokKind.LPAREN, "'('");
-      var args = new ArrayList<Expr>();
-      if (!check(TokKind.RPAREN)) {
-        do {
-          args.add(parseExpr());
-        } while (match(TokKind.COMMA));
-      }
-      expect(TokKind.RPAREN, "')'");
-      return new SpawnExpr(name, args);
-    }
     if (checkIdent("new")) {
       advance();
       String type = expect(TokKind.IDENT, "type name").text();

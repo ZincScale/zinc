@@ -30,7 +30,7 @@ public class Main {
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tuple", "Erlang",
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
-          "String", "Exception");
+          "String", "Exception", "Actor", "Application");
       for (Program p : files) {
         var names = new ArrayList<String>();
         p.classes().forEach(c -> names.add(c.name()));
@@ -67,8 +67,9 @@ public class Main {
       boolean hasActors = !actors.isEmpty();
       var generated = new LinkedHashMap<String, String>();
       for (Program p : files) {
+        Program resolved = Resolve.spawns(p, actors.keySet());
         generated.putAll(
-            new CodeGen(p, classes, records, enums, actors, hasActors).generateAll());
+            new CodeGen(resolved, classes, records, enums, actors, hasActors).generateAll());
       }
       if (hasActors) generated.put("actor_sup", CodeGen.SUP_SOURCE);
 

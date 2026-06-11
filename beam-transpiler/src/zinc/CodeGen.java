@@ -856,8 +856,8 @@ class CodeGen {
       }
       case MethodCall x -> genMethodCall(x, env);
       case SpawnExpr x ->
-          throw new CompileError("spawn must be bound directly: var x = spawn "
-              + x.actorName() + "()  (v1)");
+          throw new CompileError("an Actor must be bound directly: var x = new "
+              + x.actorName() + "(...)  (v1)");
       case LambdaExpr x -> genLambda(x, env);
     };
   }

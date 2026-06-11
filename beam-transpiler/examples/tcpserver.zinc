@@ -4,7 +4,7 @@ import erlang.gen_tcp;
 import erlang.inet;
 import erlang.erlang;
 
-actor Conn {
+class Conn implements Actor {
   void serve(Object sock) {
     while (true) {
       try {
@@ -17,12 +17,12 @@ actor Conn {
   }
 }
 
-actor Acceptor {
+class Acceptor implements Actor {
   void run(Object lsock) {
     while (true) {
       try {
         var sock = Erlang.ok(gen_tcp.accept(lsock));
-        var conn = spawn Conn();
+        var conn = new Conn();
         gen_tcp.controlling_process(sock, erlang.whereis(conn));
         conn.serve(sock);
       } catch (Exception e) {
@@ -38,7 +38,7 @@ public class Main {
         Tuple.of(Atom.active, false), Tuple.of(Atom.reuseaddr, true));
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
-    var acceptor = spawn Acceptor();
+    var acceptor = new Acceptor();
     acceptor.run(lsock);
 
     // --- client ---
