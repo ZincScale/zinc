@@ -526,22 +526,17 @@ made real, and it's pure BEAM strength:
    transpile error that names the zinc equivalent.
 
 ## Start here next session
-**MAJOR MUSCLE DESIGNS: COMPLETE.** The v1 spec is closed — zero extension keywords:
-`Application`/`Actor` marker interfaces, `new` spawns. Decision #9 settled
-(everything `zinc.*`). Designed: `zinc.http` client + server; JSON (derived record
-codecs + dynamic var-chaining); `zinc.sql` (pool as supervision subtree, lambda
-transactions, derived row mapping). Fan-out/join: the worker-Actor idiom — no Future
-type, the tree owns the workers. **Distribution: explicitly OUT of v1** — single-node;
-a designed-later pillar, not an implied feature. Deferred as library surface, not
-architecture: `zinc.net` sockets, JSON path-DSL, timers (sleep + self-kick cast
-already covers periodic work). Logging settled: println = stdout, prelude `Log.*` ->
-BEAM logger (crash reports land there too; transpiler injects file:line). Testing
-settled: `implements Test` marker + public-void-method convention, process-per-test
-(ExUnit's model), smart Assert messages, lowered onto EUnit (gleeunit's playbook).
-THE DESIGN BOARD IS CLEAR. Next phase: implement spec + stdlib; webdemo rewritten
-with zero `Tuple.of`/`Atom.*` verifies.
-Code is implemented only after the major designs are finished; webdemo rewritten with
-zero `Tuple.of`/`Atom.*` verifies the result.
+**SPEC + STDLIB: IMPLEMENTED AND VERIFIED (2026-06-11).** The v1 spec is code: marker
+interfaces + `new` spawns (P1), supervision-tree codegen (P2), Tag/final-records/FQ
+modules/exceptions (P3), interfaces + instance classes + generics + boundary guards
+(P4), stdlib Log / HttpClient / JSON / HttpServer-over-cowboy (P5). **Webdemo rewritten
+on the new surface and green** — Application tree (Store actor + HttpServer child),
+Router lambdas, derived JSON codecs, zero FFI / `Tuple.of` / `Tag.*` in user code:
+GAP-9 + GAP-10 closed, cowboy side verified (see `dogfood/FINDINGS-webdemo.md` round 2;
+SAM contextual lambda typing landed with it).
+Remaining designed-but-unimplemented stdlib: **Testing v1** (`implements Test` ->
+EUnit via `zc test`) and **`zinc.sql`** (needs a Postgres to test against). Then
+Phase 4 (toolchain/installer) per the phases above.
 ```
-cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 23/23 e2e + zc + webdemo
+cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 30/30 e2e + zc + webdemo
 ```

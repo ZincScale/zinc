@@ -722,6 +722,15 @@ class Parser {
     if (checkIdent("new")) {
       advance();
       String type = expect(TokKind.IDENT, "type name").text();
+      if (check(TokKind.LT)) { // type args, ERASED: new HashMap<String, User>() / diamond
+        advance();
+        if (!match(TokKind.GT)) {
+          do {
+            parseType();
+          } while (match(TokKind.COMMA));
+          expect(TokKind.GT, "'>'");
+        }
+      }
       if (match(TokKind.LBRACKET)) { // new int[n]
         Expr size = parseExpr();
         expect(TokKind.RBRACKET, "']'");

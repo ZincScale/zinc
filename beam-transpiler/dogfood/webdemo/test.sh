@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Cowboy dogfood: zc run inside docker (zc vendors cowboy+deps into _checkouts first).
+# The Application serves forever (static children), so timeout reaping it is the
+# expected exit; the assertion is on main()'s client output.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,11 +13,15 @@ got=$(docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$ROOT":/work -v "$JAVA_DIR":/java -v "$REBAR3":/usr/local/bin/rebar3 \
   -e PATH="/java/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
   -w /work/dogfood/webdemo erlang:slim \
-  sh -c 'timeout 120 /work/bin/zc run' | tail -1)
+  sh -c 'timeout 120 /work/bin/zc run; true' | tail -3)
 
-if [ "$got" = "hello from zinc" ]; then
-  echo "PASS  webdemo  ->  $got"
+want=$(printf '201\nvin\nhello from zinc')
+
+if [ "$got" = "$want" ]; then
+  echo "PASS  webdemo"
 else
-  echo "FAIL  webdemo  ->  got '$got'  want 'hello from zinc'"
+  echo "FAIL  webdemo"
+  echo "--- want ---"; echo "$want"
+  echo "--- got ----"; echo "$got"
   exit 1
 fi

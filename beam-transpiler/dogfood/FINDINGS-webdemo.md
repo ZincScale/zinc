@@ -47,3 +47,31 @@ A zinc class IS a cowboy handler (cowboy calls `handler:init/2` by module name);
 hex deps transparent to the program; `ranch:get_port` / port-0 ephemeral listen;
 `application:ensure_all_started` via FFI; charlist interop via `toCharArray` (GAP-3
 fix) carrying its weight for httpc/list_to_atom.
+
+---
+
+# Round 2 — webdemo rewrite on zinc.http server (2026-06-11)
+
+Program rewritten: Application tree (Store actor + HttpServer child), Router table with
+`{id}` params, lambda + `implements Handler` handlers, derived JSON codecs over the wire,
+client side on zinc HttpClient. **PASSES** — zero FFI imports, zero `Tuple.of`/`Tag.*`
+in user code: GAP-9 and GAP-10 verified CLOSED. This run verified the P5d cowboy side
+(route compile, process-per-request, bindings, body read, reply).
+
+## Fixes landed (transpiler)
+
+- **SAM contextual lambda typing**: a lambda in a SAM-interface position (Router handler
+  args, interface-typed binds) gets its params typed from the interface method — so
+  `req -> req.pathParam("id")` dispatches the Request facade. Previously lambda params
+  were always unknown-typed.
+- **`new HashMap<String, User>()`**: type args after `new` didn't parse; now parsed and
+  erased (diamond too).
+- **collectAssigned actor-aware**: `store.put(..)` on an Actor handle was counted as a
+  collection mutation -> bogus "must be effectively final" error in lambdas (and a
+  needless loop-thread). Now skipped when the receiver's static type is an Actor.
+- **zinc.httpserver module**: mid-module `-export` (erlc error: attribute after function
+  definitions) + `init/2` — the function cowboy actually calls — was not exported.
+  Caught only here: no e2e case emits this module.
+- **Response.header target duplication**: codegen emitted the receiver expr twice
+  (an effectful target — e.g. an actor call — would run twice per request). Now a single
+  `resp_header/3` helper.

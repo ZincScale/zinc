@@ -316,7 +316,8 @@ class CodeGen {
       + "-behaviour(gen_server).\n"
       + "-export([start_link/3, start_boot/2, route/4, init/1, handle_call/3,\n"
       + "         handle_cast/2, handle_info/2]).\n"
-      + "-export([cowboy_init/2]).\n\n"
+      + "-export([init/2, cowboy_init/2]).\n"
+      + "-export([req_path_param/2, req_query/2, req_header/2, resp_header/3]).\n\n"
       + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n\n"
       + "start_link(Name, Owner, Args) ->\n"
       + "    gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).\n\n"
@@ -376,7 +377,8 @@ class CodeGen {
       + "method_atom(B) -> binary_to_atom(string:lowercase(B), utf8).\n"
       + "\n"
       + "%% Request/Response accessors used by the facade\n"
-      + "-export([req_path_param/2, req_query/2, req_header/2]).\n"
+      + "resp_header(R, K, V) ->\n"
+      + "    maps:put(headers, maps:get(headers, R, []) ++ [{K, V}], R).\n"
       + "req_path_param(R, N) -> maps:get(N, maps:get(path_params, R, #{}), <<>>).\n"
       + "req_query(R, N) ->\n"
       + "    case lists:keyfind(N, 1, maps:get(query, R, [])) of\n"
@@ -990,6 +992,10 @@ class CodeGen {
           } else if (st.init() instanceof ListLit && st.type().endsWith("[]")) {
             out.add(v + " = array:from_list(" + genExpr(st.init(), env) + ")");
             varTypes.put(st.name(), st.type());
+          } else if (st.init() instanceof LambdaExpr && interfaces.containsKey(st.type())) {
+            // SAM bind: the interface types the lambda's params
+            out.add(v + " = " + genSamArg(st.init(), env, st.type()));
+            varTypes.put(st.name(), st.type());
           } else {
             String spec = st.type().equals("var") ? null : typeSpec(st.type());
             if (spec != null && exprType(st.init()) == null) {
@@ -1552,12 +1558,27 @@ class CodeGen {
       case SpawnExpr x ->
           throw new CompileError("an Actor must be bound directly: var x = new "
               + x.actorName() + "(...)  (v1)");
-      case LambdaExpr x -> genLambda(x, env);
+      case LambdaExpr x -> genLambda(x, env, null);
     };
   }
 
-  /** Erlang fun; Java's effectively-final capture rule == Erlang's semantics, enforced. */
-  private String genLambda(LambdaExpr x, Map<String, String> env) {
+  /** Lambda in a SAM-interface position: params take the interface method's types,
+   *  so facade dispatch works inside the body (req -> req.pathParam("id")). */
+  private String genSamArg(Expr e, Map<String, String> env, String ifaceName) {
+    if (e instanceof LambdaExpr lx) {
+      Ast.InterfaceDecl iface = interfaces.get(ifaceName);
+      if (iface != null && iface.sigs().size() == 1
+          && iface.sigs().get(0).params().size() == lx.params().size()) {
+        return genLambda(lx, env,
+            iface.sigs().get(0).params().stream().map(Param::type).toList());
+      }
+    }
+    return genExpr(e, env);
+  }
+
+  /** Erlang fun; Java's effectively-final capture rule == Erlang's semantics, enforced.
+   *  paramTypes (from a SAM context) type the params; null = unknown (the FFI rule). */
+  private String genLambda(LambdaExpr x, Map<String, String> env, List<String> paramTypes) {
     var bad = new LinkedHashSet<String>();
     collectAssigned(x.body(), bad);
     for (String b : bad) {
@@ -1569,9 +1590,11 @@ class CodeGen {
     var lenv = new HashMap<>(env);
     var savedTypes = new HashMap<String, String>();
     var ps = new ArrayList<String>();
-    for (String p : x.params()) {
+    for (int i = 0; i < x.params().size(); i++) {
+      String p = x.params().get(i);
       savedTypes.put(p, varTypes.get(p));
-      varTypes.remove(p);
+      String pt = paramTypes == null || i >= paramTypes.size() ? null : paramTypes.get(i);
+      if (pt == null) varTypes.remove(p); else varTypes.put(p, pt);
       String v = fresh(p);
       lenv.put(p, v);
       ps.add(v);
@@ -1658,7 +1681,8 @@ class CodeGen {
         case "Router" -> switch (x.method()) {
           case "get", "post", "put", "delete" ->
               "'zinc.httpserver':route(" + genExpr(x.target(), env) + ", " + x.method()
-                  + ", " + genArgs(x.args(), env) + ")";
+                  + ", " + genExpr(x.args().get(0), env) + ", "
+                  + genSamArg(x.args().get(1), env, "Handler") + ")";
           default -> throw new CompileError("unsupported: Router." + x.method());
         };
         case "Request" -> switch (x.method()) {
@@ -1675,9 +1699,8 @@ class CodeGen {
           default -> throw new CompileError("unsupported: Request." + x.method());
         };
         case "Response" -> switch (x.method()) {
-          case "header" -> "maps:put(headers, maps:get(headers, " + genExpr(x.target(), env)
-              + ", []) ++ [{" + genArgs(x.args(), env) + "}], " + genExpr(x.target(), env)
-              + ")";
+          case "header" -> "'zinc.httpserver':resp_header(" + genExpr(x.target(), env)
+              + ", " + genArgs(x.args(), env) + ")";
           case "body" -> "maps:put(body, " + genExpr(x.args().get(0), env) + ", "
               + genExpr(x.target(), env) + ")";
           default -> throw new CompileError("unsupported: Response." + x.method());
@@ -2360,9 +2383,11 @@ class CodeGen {
           for (Ast.CatchClause c : st.clauses()) collectAssigned(c.body(), out);
         }
         case ExprStmt st -> {
-          // collection-mutator statements rebind the receiver
+          // collection-mutator statements rebind the receiver — but a same-named
+          // method on an Actor handle is a cast, no rebind
           if (st.expr() instanceof MethodCall mc && mc.target() instanceof VarRef vr
-              && List.of("put", "remove", "add").contains(mc.method())) {
+              && List.of("put", "remove", "add").contains(mc.method())
+              && !allActors.containsKey(String.valueOf(varTypes.get(vr.name())))) {
             out.add(vr.name());
           }
         }
