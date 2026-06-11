@@ -236,11 +236,14 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    Lowering: Application -> OTP application + root supervisor; a Process with children ->
    generated supervisor pair (owner first, children after, rest_for_one); worker
    processes never contain supervisor code.
-   **Process taxonomy.** User code runs in exactly two places: `main` (the entry
-   process — temporary child of the root domain, runs once, never restarted; crash
-   logged, program exits nonzero if nothing else is alive) and Process methods.
-   Supervisors are generated; library processes (FFI deps) belong to their own OTP
-   apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
+   **Execution model.** All user code runs inside a BEAM process — no exceptions,
+   no other execution contexts. Users create processes only via `new` on a Process
+   class (supervised, per the tree). Every other process is runtime- or stdlib-owned
+   and temporary — `main`'s entry process (child of the root domain, runs once;
+   crash logged, program exits nonzero if nothing else is alive), HTTP request
+   handlers, the Future/fan-out shape later: spawned in the owning domain, never
+   restarted, die with their owner. Supervisors are generated-only; library
+   processes (FFI deps) belong to their own OTP apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
    raw thread is a Process with no name, state, or methods; fire-and-forget = cast or
    a temporary `new`; parallel fan-out/join is a stdlib shape (Future/structured task
    over temporary processes) designed with the stdlib. `Thread.sleep` stays.
@@ -316,6 +319,36 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    `zinc.http.HttpException` (one-level parent, the catch-all) with
    `ConnectException`, `TimeoutException`. `HttpClient` is plain config, no hidden
    state — safe in Process fields.
+   **`zinc.http` server v1 — designed (2026-06-11).** Backed by cowboy;
+   process-per-request is cowboy's native model — surfaced, not hidden.
+   - `HttpServer` is a stdlib Process: `new HttpServer(port, router)` spawns it
+     listening; as a field it is a static child — supervised, restarted, shut down
+     with the tree. Declaration order does real work: state Processes declared
+     before the server are born first; handlers close over their handles.
+       final Store store = new Store();
+       final HttpServer server = new HttpServer(8080, Router.create()
+           .get("/users/{id}", req -> Response.ok(store.get(req.pathParam("id")))));
+   - Routing is a programmatic table (Javalin/Spark — the no-annotation Java idiom):
+     `Router.create().get(path, h).post(...)`, an immutable value. `{id}` path
+     params (Spring/JAX-RS muscle memory) read via `pathParam("id")`; trailing `/*`
+     wildcard. Lowers to cowboy_router dispatch — GAP-10's `'_'` hack disappears;
+     unmatched = 404 for free.
+   - `Handler` is a SAM interface (`Response handle(Request req)`): lambdas work; a
+     class `implements Handler` when a route family grows. Handlers are stateless;
+     state = closed-over Process handles.
+   - `Request`/`Response` are final values. Request: `method()`, `path()`,
+     `pathParam(n)`, `queryParam(n)`, `header(n)`, `body()`/`bodyBytes()` — body
+     materialized before the handler runs (no lazy streams in v1). Response: static
+     factories + immutable chain — `Response.ok(body)`, `Response.status(404)`,
+     `.header(k, v)`, `.body(body)`; body String or byte[] (same rule as the
+     client). Naming rule in zinc.http: `Http*` = client side (built and sent),
+     bare `Request`/`Response` = handler side (received and returned).
+   - Failure: each request runs in its own temporary process in the server's
+     domain. A handler bug crashes that request only — 500 + log; every other
+     in-flight request and the server itself untouched. Return `Response` for
+     expected outcomes; no try/catch ceremony. Uncaught zinc exceptions = same 500.
+   - Deferred, named: JSON (own design — next stdlib topic after sockets), TLS
+     listen config, middleware/filters, static files, websockets/streaming.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -410,9 +443,10 @@ made real, and it's pure BEAM strength:
 ## Start here next session
 **Design the stdlib surfaces** (see "Next: the standard library" above). The v1 spec is
 closed — zero extension keywords: `Application`/`Process` marker interfaces, `new`
-spawns. Decision #9 settled (everything `zinc.*`); `zinc.http.HttpClient` designed.
-Next: `zinc.http` server over cowboy (routing, process-per-request), then `zinc.net`
-sockets, then the Future/fan-out shape.
+spawns. Decision #9 settled (everything `zinc.*`); `zinc.http` client AND server
+designed (client over httpc; server over cowboy — Router table, Handler SAM,
+process-per-request). Next: `zinc.net` sockets, then the Future/fan-out shape, then
+JSON.
 Code is implemented only after the major designs are finished; webdemo rewritten with
 zero `Tuple.of`/`Atom.*` verifies the result.
 ```
