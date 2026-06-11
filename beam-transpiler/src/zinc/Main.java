@@ -33,7 +33,7 @@ public class Main {
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
           "String", "Exception", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
-          "HttpException", "ConnectException", "TimeoutException");
+          "HttpException", "ConnectException", "TimeoutException", "Json");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom

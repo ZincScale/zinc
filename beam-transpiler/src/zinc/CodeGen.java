@@ -130,6 +130,19 @@ class CodeGen {
       + "'$chk'(V, {iface, _}) when is_function(V); is_map(V) -> V;\n"
       + "'$chk'(V, Spec) -> erlang:error({zinc_badtype, Spec, V, ?MODULE}).";
 
+  private static final String JGET_HELPER =
+      "'$jget'(M, K, Spec) ->\n"
+      + "    case maps:find(K, M) of\n"
+      + "        error -> erlang:error({zinc_badtype, {missing, K}, M, ?MODULE});\n"
+      + "        {ok, V} -> '$jchk'(V, Spec)\n"
+      + "    end.\n"
+      + "'$jchk'(V, integer) when is_integer(V) -> V;\n"
+      + "'$jchk'(V, number) when is_number(V) -> V;\n"
+      + "'$jchk'(V, boolean) when is_boolean(V) -> V;\n"
+      + "'$jchk'(V, string) when is_binary(V) -> V;\n"
+      + "'$jchk'(V, raw) -> V;\n"
+      + "'$jchk'(V, Spec) -> erlang:error({zinc_badtype, Spec, V, ?MODULE}).";
+
   // per-output-module usage flags: helpers are emitted only when referenced
   private boolean useFmt;
   private boolean useSfx;
@@ -138,6 +151,7 @@ class CodeGen {
   private boolean useExnorm;
   private boolean useCall;
   private boolean useChk;
+  private boolean useJget;
   private boolean usedHttp;
 
   private List<String> usedHelpers() {
@@ -149,6 +163,7 @@ class CodeGen {
     if (useExnorm) out.add(EXNORM_HELPER);
     if (useCall) out.add(CALL_HELPER);
     if (useChk) out.add(CHK_HELPER);
+    if (useJget) out.add(JGET_HELPER);
     return out;
   }
 
@@ -233,6 +248,8 @@ class CodeGen {
     useExnorm = false;
     useCall = false;
     useChk = false;
+    useJget = false;
+    jsonEmitted.clear();
   }
 
   /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
@@ -1577,12 +1594,84 @@ class CodeGen {
         && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
       return "maps:get(" + x.method() + ", " + genExpr(x.target(), env) + ")";
     }
+    if (r != null && x.method().equals("toJson") && x.args().isEmpty()) {
+      emitJsonTo(r);
+      return "'$tojson_" + r.name().toLowerCase() + "'(" + genExpr(x.target(), env) + ")";
+    }
+    // dynamic var-chaining over foreign JSON (the FFI rule: unknown flows freely);
+    // the typed bind at the end of the chain is the guarded crossing
+    if (tt == null && x.method().equals("get") && x.args().size() == 1) {
+      return "maps:get(" + genExpr(x.args().get(0), env) + ", "
+          + genExpr(x.target(), env) + ")";
+    }
     throw new CompileError("unknown method call ." + x.method()
         + " (receiver type: " + (tt == null ? "unknown" : tt) + ")");
   }
 
+  /** Derived JSON codecs: pure codegen from the record shape — no class literals,
+   *  no reflection. Lenient on extra fields; missing = {zinc_badtype,{missing,K},..}. */
+  private final java.util.Set<String> jsonEmitted = new java.util.HashSet<>();
+
+  private static String jsonSpec(String t) {
+    return switch (t) {
+      case "int" -> "integer";
+      case "double" -> "number";
+      case "boolean" -> "boolean";
+      case "String" -> "string";
+      default -> "raw";
+    };
+  }
+
+  private void emitJsonFrom(RecordDecl r) {
+    String low = r.name().toLowerCase();
+    if (!jsonEmitted.add("from_" + low)) return;
+    useJget = true;
+    var fields = new ArrayList<String>();
+    fields.add("'$class' => " + atomLit(low));
+    for (Param c2 : r.components()) {
+      RecordDecl sub = records.get(baseType(c2.type()));
+      String acc;
+      if (sub != null) {
+        emitJsonFrom(sub);
+        acc = "'$jmap_" + sub.name().toLowerCase() + "'('$jget'(M, <<\"" + c2.name()
+            + "\">>, raw))";
+      } else {
+        acc = "'$jget'(M, <<\"" + c2.name() + "\">>, " + jsonSpec(c2.type()) + ")";
+      }
+      fields.add(c2.name() + " => " + acc);
+    }
+    helpers.add("'$fromjson_" + low + "'(B) -> '$jmap_" + low + "'(json:decode(B)).");
+    helpers.add("'$jmap_" + low + "'(M) ->\n    #{" + String.join(",\n      ", fields)
+        + "}.");
+  }
+
+  private void emitJsonTo(RecordDecl r) {
+    String low = r.name().toLowerCase();
+    if (!jsonEmitted.add("to_" + low)) return;
+    var fields = new ArrayList<String>();
+    for (Param c2 : r.components()) {
+      RecordDecl sub = records.get(baseType(c2.type()));
+      String v = "maps:get(" + c2.name() + ", R)";
+      if (sub != null) {
+        emitJsonTo(sub);
+        v = "'$jenc_" + sub.name().toLowerCase() + "'(" + v + ")";
+      }
+      fields.add("<<\"" + c2.name() + "\">> => " + v);
+    }
+    helpers.add("'$jenc_" + low + "'(R) ->\n    #{" + String.join(",\n      ", fields)
+        + "}.");
+    helpers.add("'$tojson_" + low + "'(R) -> iolist_to_binary(json:encode('$jenc_" + low
+        + "'(R))).");
+  }
+
   /** Builtin namespaces, actor handles, class statics, FFI — all keyed by a bare name. */
   private String genNamespaceCall(String name, MethodCall x, Map<String, String> env) {
+    RecordDecl jr = records.get(name);
+    if (jr != null && x.method().equals("fromJson") && x.args().size() == 1) {
+      emitJsonFrom(jr);
+      return "'$fromjson_" + jr.name().toLowerCase() + "'(" + genExpr(x.args().get(0), env)
+          + ")";
+    }
     switch (name) {
       case "Thread" -> {
         if (x.method().equals("sleep")) {
@@ -1603,6 +1692,12 @@ class CodeGen {
         String fmt = isStr(x.args().get(0)) ? "~ts" : "~p";
         return "logger:" + lvl + "(\"" + fmt + "\", [" + genExpr(x.args().get(0), env)
             + "], #{module => " + atomLit(curModule) + "})";
+      }
+      case "Json" -> {
+        if (x.method().equals("parse") && x.args().size() == 1) {
+          return "json:decode(" + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: Json." + x.method() + " (parse)");
       }
       case "HttpClient" -> {
         if (x.method().equals("newBuilder") && x.args().isEmpty()) {
@@ -1859,6 +1954,9 @@ class CodeGen {
         if (x.target() instanceof VarRef vr) {
           if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
           if (vr.name().equals("HttpClient")) yield "HttpClientBuilder";
+          if (records.containsKey(vr.name()) && x.method().equals("fromJson")) {
+            yield vr.name();
+          }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
@@ -1943,6 +2041,7 @@ class CodeGen {
         }
         RecordDecl r = tt == null ? null : records.get(tt);
         if (r != null) {
+          if (x.method().equals("toJson")) yield "String";
           yield r.components().stream().filter(c -> c.name().equals(x.method()))
               .map(Param::type).findFirst().orElse(null);
         }
