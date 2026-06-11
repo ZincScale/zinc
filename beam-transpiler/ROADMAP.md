@@ -3,7 +3,7 @@
 ## What this is
 **Legal Java syntax that transpiles to Erlang/BEAM** — classic class ceremony, types,
 semicolons, `System.out.println` — plus extension keywords only where OTP concepts need them
-(`actor`, `spawn`). Java devs get OTP-grade reliability (supervision, self-healing,
+(`application`, `process`, `spawn`). Java devs get OTP-grade reliability (supervision, self-healing,
 distribution) without writing functional code. The pitch: a lightweight alternative to the
 microservices + Kubernetes tax for small teams. The language is the on-ramp; BEAM is the moat.
 Project-focused: one public class per file, file named after its class, dirs = packages.
@@ -15,7 +15,7 @@ a supervisor — and gets a service that heals itself.
 ## The end-to-end pipeline (what every phase slots into)
 ```
 file.zinc ──lex/parse──► AST ──codegen──► N .erl modules ──erlc──► .beam ──erl──► running BEAM
-            (Java transpiler)            main + actor modules                    supervised app
+            (Java transpiler)            main + process modules                  supervised app
                                          + generated supervisor
 └────────────────────────────── today: e2e.sh + Docker ─────────────────────────────────────┘
 └────────────────────────────── Phase 4: `zc build` / `zc run` (managed runtime, no Docker) ─┘
@@ -161,7 +161,7 @@ opts on cert-less systems. Record: `dogfood/FINDINGS-webdemo.md` (GAP-9, GAP-10)
 ### Next: **the standard library** (GAP-9 — the headline dogfood finding)
 Webdemo code reads `List.of(Tuple.of(Atom.port, 0))` — Erlang in Java clothes; no Java
 dev writes proplists of tagged tuples. The architecture is three layers:
-1. **OTP behaviours = language semantics** (already true: `actor` -> gen_server +
+1. **OTP behaviours = language semantics** (already true: `process` -> gen_server +
    supervisor; users never see callbacks).
 2. **OTP stdlib apps = zinc's JDK**: Java-shaped facades backed by OTP. First surfaces:
    `java.net.http.HttpClient`-shaped client over httpc (also the one home for the
@@ -178,12 +178,12 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      specs/dialyzer are Erlang's own erased "generics"). Invariant, raw types legal,
      no inference.
    - **Gradual static checking at transpile time** — the point of having generics:
-     every expression is known-typed (declarations, literals, record/actor/facade/stdlib
+     every expression is known-typed (declarations, literals, record/process/facade/stdlib
      signatures) or unknown (`var` from FFI, `Object`); known-vs-known mismatch = error
      (exact nominal match — no subtyping lattice exists yet); unknown flows freely
      (the FFI basement, analogous to Java raw types/casts).
    - **Runtime boundary guards where unknown crosses into known** (Java's hidden
-     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed actor
+     `checkcast`, BEAM-idiomatic as guards + let-it-crash): typed binds, **typed process
      method entry (= checked message contracts — messages arrive from anywhere)**,
      typed record fields, insertion into known-type-arg collections. SHALLOW only
      (element at the crossing; never deep-scan a collection). Failure = structured
@@ -194,20 +194,22 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    flat-namespace bug (today `class MathUtil` -> `mathutil` regardless of package).
    Root-package classes unchanged (`main:main()` entry stays).
    Extension keywords are fine where an OTP concept has no honest Java expression.
-   **Program model.** One program shape. A project has at most one `service` — the
-   explicit root: it carries the OTP application identity (name/version from
-   zinc.toml; [deps] boot before its tree), declares the root children as actor
+   **Program model.** One program shape. A project has at most one `application` —
+   the explicit root (the name Spring Boot, J2EE, and OTP all agree on; it lowers to
+   an OTP application): it carries the OTP application identity (name/version from
+   zinc.toml; [deps] boot before its tree), declares the root children as process
    fields, hosts the optional `main(String[] args)`, receives SIGTERM, owns the exit
-   code. The service has no handle, no methods, no callers — it is the boundary, not
-   a unit. A project without a `service` is a library. `actor` stays the supervised
-   stateful unit: fields (state + child actors), methods (void ⇒ cast,
+   code. The application has no handle, no methods, no callers — it is the boundary,
+   not a unit. A project without an `application` is a library. `process` (renamed
+   from `actor` — the BEAM's own word; no FP baggage for the Java audience) is the
+   supervised stateful unit: fields (state + child processes), methods (void ⇒ cast,
    typed ⇒ call), registered-name handle.
    Liveness (the JVM non-daemon-thread rule): the program exits when `main` (if any)
-   has returned AND no actors are alive; otherwise it runs until stopped. Tool,
+   has returned AND no `process` instances are alive; otherwise it runs until stopped. Tool,
    server, and mixed programs fall out of this one rule.
    **Tree shape — composition is supervision, nothing hidden.** The tree is read
-   from the source: the service's actor-fields are the root domain; an actor's
-   actor-fields are its children — born in declaration order, shut down in reverse.
+   from the source: the application's process-fields are the root domain; a process's
+   process-fields are its children — born in declaration order, shut down in reverse.
    No separate tree declaration.
    - Failure flows down, never up: an owner's death takes its domain (subtree
      restarts fresh, constructors re-run); a child's death never harms its owner;
@@ -219,23 +221,23 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      modifier later if a real program earns it. Siblings independent; fail-together
      coupling deferred.
    - Handles orthogonal to domains: lifecycle only; restarts never break handles.
-   Lowering: service -> OTP application + root supervisor; an actor with children ->
+   Lowering: application -> OTP application + root supervisor; a process with children ->
    generated supervisor pair (owner first, children after, rest_for_one); worker
    processes never contain supervisor code.
    **Process taxonomy.** User code runs in exactly two places: `main` (the entry
    process — temporary child of the root domain, runs once, never restarted; crash
-   logged, program exits nonzero if nothing else is alive) and actor methods.
+   logged, program exits nonzero if nothing else is alive) and `process` methods.
    Supervisors are generated; library processes (FFI deps) belong to their own OTP
    apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
-   raw thread is an actor with no name, state, or methods; fire-and-forget = cast or
+   raw thread is a `process` with no name, state, or methods; fire-and-forget = cast or
    temporary spawn; parallel fan-out/join is a stdlib shape (Future/structured task
    over temporary processes) designed with the stdlib. `Thread.sleep` stays.
    **Instance classes**: module + map term; fields are set by the constructor and then
    immutable — all objects are final. No setters, no field assignment after
-   construction; mutable state lives in actors. Locals stay fully mutable (counters,
+   construction; mutable state lives in processes. Locals stay fully mutable (counters,
    temps, accumulators — the existing SSA machinery). Records' `p.x = v` mutation
    sugar is removed for consistency; build a new record instead. Mutability picture:
-   locals mutate freely / object fields never / actor fields across calls (serialized
+   locals mutate freely / object fields never / process fields across calls (serialized
    by the mailbox).
    **Interfaces**: nominal conformance checked at transpile time (`implements` = all
    methods present, signatures match); subtyping in the checker is one flat hop,
@@ -247,11 +249,11 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    (Function, Predicate, Comparator...) live in the checker, cost nothing at runtime.
    Deferred: default methods, `interface extends`.
    **Failure semantics — one ladder.** (1) Expected failures are exceptions: Java-style
-   unwind to a typed catch. (2) A throw in an actor call-method relays to the caller
-   (catchable there); the actor survives, state intact via transactional try; the
+   unwind to a typed catch. (2) A throw in a `process` call-method relays to the caller
+   (catchable there); the process survives, state intact via transactional try; the
    generated wrapper catches ONLY the `{zinc_exc, Class, Fields}` shape — deliberate
    throws relay, bugs fall through. (3) Bugs crash the process; a caller mid-call on a
-   crashed actor exits with the same reason — not catchable in v1 (no retry against
+   crashed process exits with the same reason — not catchable in v1 (no retry against
    broken state); crash is transitive along a request. (4) Crashes hit domain policy
    (tree rules above). (5) Crash loops escalate to root -> VM exit nonzero -> systemd.
    Exception surface: `class NotFound extends Exception` — the one sanctioned
@@ -260,7 +262,7 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    FieldsMap})`. Typed catch matches the tag, clauses in order; `catch (Exception e)`
    is the catch-all and also catches native BEAM errors (badarith ~
    ArithmeticException; `getMessage()` renders the reason). Exceptions in cast methods
-   crash the actor — no caller to relay to. Philosophy, stated once: catch only what
+   crash the process — no caller to relay to. Philosophy, stated once: catch only what
    you have a plan for (input/network/external failures); everything else crashes —
    process granularity + supervision IS the recovery story. Deferred: `finally`,
    try-with-resources, exception hierarchies beyond one level.
@@ -275,8 +277,10 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    (which lower to atoms); Tag is for foreign protocols only. Emitter rule, universal
    (Tag / enums / module names): emit an atom quoted whenever it isn't safely bare —
    non-lowercase-identifier shape OR Erlang reserved word (`Tag.end` -> `'end'`).
-   THE V1 SPEC IS CLOSED. Implementation order (spec leads; current code still has the
-   old flat-sup/script model, Atom.* naming, mutable records): next is decision #9,
+   THE V1 SPEC IS CLOSED. Keywords renamed post-close (2026-06-11): `service` ->
+   `application`, `actor` -> `process`. Implementation order (spec leads; current code
+   still has the old flat-sup/script model, `actor`/Atom.* naming, mutable records):
+   next is decision #9,
    stdlib API design, then implement spec + stdlib, webdemo rewrite verifies.
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
