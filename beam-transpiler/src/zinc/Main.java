@@ -31,10 +31,17 @@ public class Main {
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tag", "Tuple", "Erlang",
           "HashMap", "Map", "ArrayList", "List", "Math", "Integer", "Arrays", "Object",
-          "String", "Exception", "Actor", "Application", "Log");
+          "String", "Exception", "Actor", "Application", "Log",
+          "HttpClient", "HttpRequest", "HttpResponse",
+          "HttpException", "ConnectException", "TimeoutException");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
+      for (String[] bx : CodeGen.BUILTIN_EXCEPTIONS) {
+        exceptions.put(bx[0], new Ast.ExceptionDecl(bx[0],
+            List.of(new Ast.FieldDecl("String", "message", null))));
+        excTags.put(bx[0], bx[1]);
+      }
       var interfaces = new LinkedHashMap<String, Ast.InterfaceDecl>();
       var instClasses = new LinkedHashMap<String, Ast.InstanceClassDecl>();
       var instMods = new LinkedHashMap<String, String>();  // simple name -> FQ module
@@ -140,12 +147,16 @@ public class Main {
       boolean supervised = !actors.isEmpty() || application != null;
       var generated = new LinkedHashMap<String, String>();
       Ast.ApplicationDecl resolvedApp = null;
+      boolean anyHttp = false;
       for (Src src : files) {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
-        generated.putAll(new CodeGen(resolved, classes, records, enums, actors, actorMods,
-            exceptions, excTags, interfaces, instClasses, instMods, supervised).generateAll());
+        var cg = new CodeGen(resolved, classes, records, enums, actors, actorMods,
+            exceptions, excTags, interfaces, instClasses, instMods, supervised);
+        generated.putAll(cg.generateAll());
+        anyHttp |= cg.usedHttp();
       }
+      if (anyHttp) generated.put("zinc.http", CodeGen.HTTP_SOURCE);
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
         generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors, actorMods));

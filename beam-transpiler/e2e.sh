@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -28,6 +28,7 @@ declare -A want=(
   [interfaces]=$'hello zinc\nbeam!\nlambda fun'
   [guards]=$'badtype caught\n42'
   [logging]='clean stdout'
+  [http_client]=$'200\nzinc!\nconnect refused caught'
   [actor_selfheal]=$'3\n0\n1'
   [ffi]="BEAM-9"
   [atoms_tuples]=$'3\n42\nok'

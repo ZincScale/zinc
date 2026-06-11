@@ -138,6 +138,7 @@ class CodeGen {
   private boolean useExnorm;
   private boolean useCall;
   private boolean useChk;
+  private boolean usedHttp;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -218,6 +219,10 @@ class CodeGen {
     }
   }
 
+  boolean usedHttp() {
+    return usedHttp;
+  }
+
   private void resetModuleState() {
     helpers = new ArrayList<>();
     dispHelpers.clear();
@@ -235,6 +240,59 @@ class CodeGen {
     if (code.isEmpty()) return pad + "ok";
     return pad + String.join(",\n", code).replace("\n", "\n" + pad);
   }
+
+
+  /** zinc.http client over httpc — Java-shaped, sync send only (fan-out = worker Actors). */
+  static final String HTTP_SOURCE = "-module('zinc.http').\n"
+      + "-export([send/2, add_header/3, with_body/3, header/2]).\n\n"
+      + "add_header(R, K, V) -> maps:put(headers, maps:get(headers, R, []) ++ [{K, V}], R).\n\n"
+      + "with_body(R, M, B) -> maps:put(method, M, maps:put(body, B, R)).\n\n"
+      + "header(Resp, Name) ->\n"
+      + "    case lists:keyfind(string:lowercase(Name), 1, maps:get(headers, Resp, [])) of\n"
+      + "        false -> <<>>;\n"
+      + "        {_, V} -> V\n"
+      + "    end.\n\n"
+      + "send(Client, Req) ->\n"
+      + "    {ok, _} = application:ensure_all_started(inets),\n"
+      + "    {ok, _} = application:ensure_all_started(ssl),\n"
+      + "    ok = set_proxy(Client),\n"
+      + "    Url = binary_to_list(maps:get(url, Req)),\n"
+      + "    Headers = [{binary_to_list(K), binary_to_list(V)}\n"
+      + "               || {K, V} <- maps:get(headers, Req, [])],\n"
+      + "    HttpOpts = [{timeout, maps:get(timeout, Req, 30000)},\n"
+      + "                {connect_timeout, maps:get(connect_timeout, Client, 5000)},\n"
+      + "                {ssl, [{verify, verify_none}]}],\n"
+      + "    Method = maps:get(method, Req, get),\n"
+      + "    Request = case Method of\n"
+      + "        get -> {Url, Headers};\n"
+      + "        delete -> {Url, Headers};\n"
+      + "        _ -> {Url, Headers, \"application/octet-stream\", maps:get(body, Req, <<>>)}\n"
+      + "    end,\n"
+      + "    case httpc:request(Method, Request, HttpOpts, [{body_format, binary}]) of\n"
+      + "        {ok, {{_, Status, _}, RespHeaders, Body}} ->\n"
+      + "            #{status => Status, body => Body,\n"
+      + "              headers => [{iolist_to_binary(string:lowercase(K)), iolist_to_binary(V)}\n"
+      + "                          || {K, V} <- RespHeaders]};\n"
+      + "        {error, {failed_connect, _} = R} -> raise('zinc.http.connectexception', R);\n"
+      + "        {error, timeout} -> raise('zinc.http.timeoutexception', timeout);\n"
+      + "        {error, R} -> raise('zinc.http.httpexception', R)\n"
+      + "    end.\n\n"
+      + "set_proxy(Client) ->\n"
+      + "    case maps:get(proxy, Client, none) of\n"
+      + "        none -> ok;\n"
+      + "        {H, P} -> ok = httpc:set_options([{proxy, {{binary_to_list(H), P}, []}}]), ok\n"
+      + "    end.\n\n"
+      + "raise(Tag, R) ->\n"
+      + "    erlang:error({zinc_exc, Tag, #{'$class' => Tag,\n"
+      + "        message => iolist_to_binary(io_lib:format(\"~p\", [R]))}}).\n";
+
+  /** Stdlib exceptions: name -> FQ tag. One-level hierarchy via BUILTIN_EXC_CHILDREN. */
+  static final String[][] BUILTIN_EXCEPTIONS = {
+      {"HttpException", "zinc.http.httpexception"},
+      {"ConnectException", "zinc.http.connectexception"},
+      {"TimeoutException", "zinc.http.timeoutexception"}};
+  static final Map<String, List<String>> BUILTIN_EXC_CHILDREN =
+      Map.of("HttpException", List.of("ConnectException", "TimeoutException"));
 
   /** Dynamic children: temporary (never restarted), die with their spawner (monitor). */
   static final String DYN_SUP_SOURCE = "-module(zinc_dyn_sup).\n"
@@ -1072,7 +1130,17 @@ class CodeGen {
           throw new CompileError("catch (" + c.exType() + "): unknown exception class"
               + " — declare it: class " + c.exType() + " extends Exception { ... }");
         }
-        head = "error:{zinc_exc, " + atomLit(tag) + ", " + ev + "} ->";
+        List<String> kids = BUILTIN_EXC_CHILDREN.getOrDefault(c.exType(), List.of());
+        if (kids.isEmpty()) {
+          head = "error:{zinc_exc, " + atomLit(tag) + ", " + ev + "} ->";
+        } else {
+          String tv = fresh("t");
+          var conds = new ArrayList<String>();
+          conds.add(tv + " =:= " + atomLit(tag));
+          for (String k : kids) conds.add(tv + " =:= " + atomLit(excTags.get(k)));
+          head = "error:{zinc_exc, " + tv + ", " + ev + "} when "
+              + String.join("; ", conds) + " ->";
+        }
         cCode = genStmts(c.body().stmts(), cEnv, false, loopMut);
       }
       boolean cJump = endsInJump(c.body());
@@ -1419,6 +1487,50 @@ class CodeGen {
       useCall = true; // typed call: unwraps relayed exceptions (failure-ladder rung 2)
       return "'$call'(" + genExpr(x.target(), env) + ", " + msg + ")";
     }
+    String recvH = null;
+    if (tt != null) {
+      recvH = switch (tt) {
+        case "HttpClientBuilder" -> switch (x.method()) {
+          case "connectTimeout" ->
+              "maps:put(connect_timeout, " + genExpr(x.args().get(0), env) + ", "
+                  + genExpr(x.target(), env) + ")";
+          case "proxy" -> "maps:put(proxy, {" + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.args().get(1), env) + "}, " + genExpr(x.target(), env) + ")";
+          case "build" -> genExpr(x.target(), env);
+          default -> throw new CompileError("unsupported: HttpClient builder " + x.method());
+        };
+        case "HttpRequestBuilder" -> switch (x.method()) {
+          case "header" -> "'zinc.http':add_header(" + genExpr(x.target(), env) + ", "
+              + genArgs(x.args(), env) + ")";
+          case "GET" -> "maps:put(method, get, " + genExpr(x.target(), env) + ")";
+          case "DELETE" -> "maps:put(method, delete, " + genExpr(x.target(), env) + ")";
+          case "POST" -> "'zinc.http':with_body(" + genExpr(x.target(), env) + ", post, "
+              + genExpr(x.args().get(0), env) + ")";
+          case "PUT" -> "'zinc.http':with_body(" + genExpr(x.target(), env) + ", put, "
+              + genExpr(x.args().get(0), env) + ")";
+          case "timeout" -> "maps:put(timeout, " + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.target(), env) + ")";
+          case "build" -> genExpr(x.target(), env);
+          default -> throw new CompileError("unsupported: HttpRequest builder " + x.method());
+        };
+        case "HttpClient" -> x.method().equals("send")
+            ? "'zinc.http':send(" + genExpr(x.target(), env) + ", "
+                + genExpr(x.args().get(0), env) + ")"
+            : null;
+        case "HttpResponse" -> switch (x.method()) {
+          case "statusCode" -> "maps:get(status, " + genExpr(x.target(), env) + ")";
+          case "body", "bodyBytes" -> "maps:get(body, " + genExpr(x.target(), env) + ")";
+          case "header" -> "'zinc.http':header(" + genExpr(x.target(), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+          default -> throw new CompileError("unsupported: HttpResponse." + x.method());
+        };
+        default -> null;
+      };
+    }
+    if (recvH != null) {
+      usedHttp = true;
+      return recvH;
+    }
     // instance class (static type known): direct module call, instance as first arg
     Ast.InstanceClassDecl ic = tt == null ? null : instClasses.get(tt);
     if (ic != null) {
@@ -1491,6 +1603,21 @@ class CodeGen {
         String fmt = isStr(x.args().get(0)) ? "~ts" : "~p";
         return "logger:" + lvl + "(\"" + fmt + "\", [" + genExpr(x.args().get(0), env)
             + "], #{module => " + atomLit(curModule) + "})";
+      }
+      case "HttpClient" -> {
+        if (x.method().equals("newBuilder") && x.args().isEmpty()) {
+          usedHttp = true;
+          return "#{}";
+        }
+        throw new CompileError("unsupported: HttpClient." + x.method());
+      }
+      case "HttpRequest" -> {
+        if (x.method().equals("newBuilder") && x.args().size() == 1) {
+          usedHttp = true;
+          return "#{url => " + genExpr(x.args().get(0), env) + ", method => get}";
+        }
+        throw new CompileError("unsupported: HttpRequest." + x.method()
+            + " (newBuilder(url))");
       }
       case "Tag" -> {
         // Tag.of("literal") -> the atom, resolved at transpile time (atoms aren't GC'd;
@@ -1731,6 +1858,8 @@ class CodeGen {
       case MethodCall x -> {
         if (x.target() instanceof VarRef vr) {
           if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
+          if (vr.name().equals("HttpClient")) yield "HttpClientBuilder";
+          if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
@@ -1778,6 +1907,20 @@ class CodeGen {
           yield switch (x.method()) {
             case "size" -> "int";
             case "containsKey", "isEmpty" -> "boolean";
+            default -> null;
+          };
+        }
+        if ("HttpClientBuilder".equals(tt)) {
+          yield x.method().equals("build") ? "HttpClient" : "HttpClientBuilder";
+        }
+        if ("HttpRequestBuilder".equals(tt)) {
+          yield x.method().equals("build") ? "HttpRequest" : "HttpRequestBuilder";
+        }
+        if ("HttpClient".equals(tt)) yield x.method().equals("send") ? "HttpResponse" : null;
+        if ("HttpResponse".equals(tt)) {
+          yield switch (x.method()) {
+            case "statusCode" -> "int";
+            case "body", "header" -> "String";
             default -> null;
           };
         }

@@ -1,0 +1,37 @@
+// zinc.http.HttpClient over httpc -- sync send, builders, ladder exceptions.
+// main() doubles as a canned one-shot HTTP server so the run is self-contained.
+import erlang.gen_tcp;
+import erlang.inet;
+
+class OneShot implements Actor {
+  void serve(Object lsock) {
+    var s = Erlang.ok(gen_tcp.accept(lsock));
+    var ignored = gen_tcp.recv(s, 0);   // request head
+    gen_tcp.send(s, "HTTP/1.1 200 OK\r\ncontent-length: 5\r\nconnection: close\r\n\r\nzinc!");
+    gen_tcp.close(s);
+  }
+}
+
+public class Main {
+  public static void main(String[] args) {
+    var opts = List.of(Tag.binary, Tuple.of(Tag.active, false), Tuple.of(Tag.reuseaddr, true));
+    var lsock = Erlang.ok(gen_tcp.listen(0, opts));
+    int port = Erlang.ok(inet.port(lsock));
+    var srv = new OneShot();
+    srv.serve(lsock);                                   // cast: accepts in background
+
+    var client = HttpClient.newBuilder().connectTimeout(2000).build();
+    var req = HttpRequest.newBuilder("http://127.0.0.1:" + port + "/")
+        .header("accept", "text/plain").GET().timeout(3000).build();
+    HttpResponse resp = client.send(req);
+    System.out.println(resp.statusCode());              // 200
+    System.out.println(resp.body());                    // zinc!
+
+    try {
+      var bad = HttpRequest.newBuilder("http://127.0.0.1:1/none").timeout(2000).build();
+      client.send(bad);
+    } catch (HttpException e) {
+      System.out.println("connect refused caught");     // ConnectException matches parent
+    }
+  }
+}
