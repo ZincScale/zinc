@@ -246,8 +246,25 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    (dispatch discriminates fun vs map with one guard); stdlib functional interfaces
    (Function, Predicate, Comparator...) live in the checker, cost nothing at runtime.
    Deferred: default methods, `interface extends`.
-   Still to design (each WITH its checking story): user-defined exceptions/throw,
-   quoted atoms (GAP-10).
+   **Failure semantics — one ladder.** (1) Expected failures are exceptions: Java-style
+   unwind to a typed catch. (2) A throw in an actor call-method relays to the caller
+   (catchable there); the actor survives, state intact via transactional try; the
+   generated wrapper catches ONLY the `{zinc_exc, Class, Fields}` shape — deliberate
+   throws relay, bugs fall through. (3) Bugs crash the process; a caller mid-call on a
+   crashed actor exits with the same reason — not catchable in v1 (no retry against
+   broken state); crash is transitive along a request. (4) Crashes hit domain policy
+   (tree rules above). (5) Crash loops escalate to root -> VM exit nonzero -> systemd.
+   Exception surface: `class NotFound extends Exception` — the one sanctioned
+   `extends`; exception classes are final values, `message` by convention. All
+   unchecked, no `throws` clauses. `throw` -> `erlang:error({zinc_exc, 'pkg.notfound',
+   FieldsMap})`. Typed catch matches the tag, clauses in order; `catch (Exception e)`
+   is the catch-all and also catches native BEAM errors (badarith ~
+   ArithmeticException; `getMessage()` renders the reason). Exceptions in cast methods
+   crash the actor — no caller to relay to. Philosophy, stated once: catch only what
+   you have a plan for (input/network/external failures); everything else crashes —
+   process granularity + supervision IS the recovery story. Deferred: `finally`,
+   try-with-resources, exception hierarchies beyond one level.
+   Still to design: quoted atoms (GAP-10).
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
