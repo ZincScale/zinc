@@ -222,6 +222,14 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    Lowering: service -> OTP application + root supervisor; an actor with children ->
    generated supervisor pair (owner first, children after, rest_for_one); worker
    processes never contain supervisor code.
+   **Process taxonomy.** User code runs in exactly two places: `main` (the entry
+   process — temporary child of the root domain, runs once, never restarted; crash
+   logged, program exits nonzero if nothing else is alive) and actor methods.
+   Supervisors are generated; library processes (FFI deps) belong to their own OTP
+   apps. Threads are CUT: `Thread.startVirtualThread` never enters the language — a
+   raw thread is an actor with no name, state, or methods; fire-and-forget = cast or
+   temporary spawn; parallel fan-out/join is a stdlib shape (Future/structured task
+   over temporary processes) designed with the stdlib. `Thread.sleep` stays.
    **Instance classes**: module + map term; fields are set by the constructor and then
    immutable — all objects are final. No setters, no field assignment after
    construction; mutable state lives in actors. Locals stay fully mutable (counters,
