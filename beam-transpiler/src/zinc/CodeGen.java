@@ -576,19 +576,10 @@ class CodeGen {
           out.add(v + " = " + rhs);
           env.put(st.name(), v);
         }
-        case FieldAssignStmt st -> {
-          String cur = envGet(env, st.objVar());
-          String fe = switch (st.op()) {
-            case "=" -> genExpr(st.value(), env);
-            case "+=" -> "maps:get(" + st.field() + ", " + cur + ") + " + genExpr(st.value(), env);
-            case "-=" -> "maps:get(" + st.field() + ", " + cur + ") - " + genExpr(st.value(), env);
-            case "*=" -> "maps:get(" + st.field() + ", " + cur + ") * " + genExpr(st.value(), env);
-            default -> throw new CompileError("bad assign op " + st.op());
-          };
-          String v = fresh(st.objVar());
-          out.add(v + " = " + cur + "#{" + st.field() + " := " + fe + "}");
-          env.put(st.objVar(), v);
-        }
+        case FieldAssignStmt st -> throw new CompileError(
+            "objects are final values — fields never mutate after construction: build a new "
+                + "record instead (" + st.objVar() + " = new ...). Locals stay mutable; "
+                + "mutable state lives in Actors.");
         case ReturnStmt st -> {
           String e = st.value() == null ? "ok" : genExpr(st.value(), env);
           out.add((topLevel && last) ? e : "throw({'$ret', " + e + "})");

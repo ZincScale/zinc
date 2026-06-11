@@ -3,8 +3,8 @@ record Point(int x, int y) {}
 public class Main {
   public static void main(String[] args) {
     Point p = new Point(170, 4);
-    p.x = 180;             // extension: mutation sugar over functional map update
-    p.x += 5;
+    p = new Point(p.x() + 10, p.y());   // records are final values: build a new one
+    p = new Point(p.x() + 5, p.y());    // (locals stay mutable: rebinding is fine)
     System.out.println(p.x());  // 185
   }
 }
