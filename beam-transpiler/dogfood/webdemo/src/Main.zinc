@@ -8,25 +8,25 @@ import erlang.erlang;
 
 public class Main {
   public static void main(String[] args) {
-    application.ensure_all_started(Atom.cowboy);
-    // GAP: Atom.x can't express the quoted atom '_' (cowboy's match-any host)
+    application.ensure_all_started(Tag.cowboy);
+    // GAP: Tag.x can't express the quoted atom '_' (cowboy's match-any host)
     var any = erlang.list_to_atom("_".toCharArray());
     var routes = List.of(Tuple.of(any,
-        List.of(Tuple.of("/", Atom.handler, Atom.undefined))));
+        List.of(Tuple.of("/", Tag.handler, Tag.undefined))));
     var dispatch = cowboy_router.compile(routes);
-    var opts = List.of(Tuple.of(Atom.port, 0));
-    Erlang.ok(cowboy.start_clear(Atom.web, opts,
-        Map.of(Atom.env, Map.of(Atom.dispatch, dispatch))));
-    int port = ranch.get_port(Atom.web);
+    var opts = List.of(Tuple.of(Tag.port, 0));
+    Erlang.ok(cowboy.start_clear(Tag.web, opts,
+        Map.of(Tag.env, Map.of(Tag.dispatch, dispatch))));
+    int port = ranch.get_port(Tag.web);
 
     // --- client ---
-    application.ensure_all_started(Atom.inets);
+    application.ensure_all_started(Tag.inets);
     String url = "http://localhost:" + port + "/";
     // request/4: explicit ssl opt, else httpc's defaults crash on cert-less systems
     // (pubkey_os_cacerts: no_cacerts_found -- even for plain http URLs)
-    var sslOpt = Tuple.of(Atom.ssl, List.of(Tuple.of(Atom.verify, Atom.verify_none)));
+    var sslOpt = Tuple.of(Tag.ssl, List.of(Tuple.of(Tag.verify, Tag.verify_none)));
     var req = Tuple.of(url.toCharArray(), List.of());  // GAP: httpc wants charlists
-    var resp = Erlang.ok(httpc.request(Atom.get, req, List.of(sslOpt), List.of()));
+    var resp = Erlang.ok(httpc.request(Tag.get, req, List.of(sslOpt), List.of()));
     String body = erlang.list_to_binary(Tuple.get(resp, 2));
     System.out.println(body.trim());   // hello from zinc
   }

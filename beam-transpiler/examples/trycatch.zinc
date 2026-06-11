@@ -9,7 +9,7 @@ public class Main {
     }
     System.out.println(x);       // 7
     try {
-      Erlang.ok(Tuple.of(Atom.error, Atom.nope));   // raises {badmatch, ...}
+      Erlang.ok(Tuple.of(Tag.error, Tag.nope));   // raises {badmatch, ...}
     } catch (Exception e) {
       System.out.println("caught");
     }

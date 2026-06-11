@@ -34,16 +34,16 @@ class Acceptor implements Actor {
 
 public class Main {
   public static void main(String[] args) {
-    var opts = List.of(Atom.binary, Tuple.of(Atom.packet, Atom.line),
-        Tuple.of(Atom.active, false), Tuple.of(Atom.reuseaddr, true));
+    var opts = List.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
+        Tuple.of(Tag.active, false), Tuple.of(Tag.reuseaddr, true));
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
     var acceptor = new Acceptor();
     acceptor.run(lsock);
 
     // --- client ---
-    var copts = List.of(Atom.binary, Tuple.of(Atom.packet, Atom.line),
-        Tuple.of(Atom.active, false));
+    var copts = List.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
+        Tuple.of(Tag.active, false));
     var cs = Erlang.ok(gen_tcp.connect("localhost".toCharArray(), port, copts));
 
     gen_tcp.send(cs, "hello world\n");

@@ -178,6 +178,20 @@ class CodeGen {
     return a.fields().stream().anyMatch(f -> actors.containsKey(f.type()));
   }
 
+  private static final java.util.Set<String> ERL_RESERVED = java.util.Set.of("after", "and",
+      "andalso", "band", "begin", "bnot", "bor", "bsl", "bsr", "bxor", "case", "catch",
+      "cond", "div", "else", "end", "fun", "if", "let", "maybe", "not", "of", "or",
+      "orelse", "receive", "rem", "try", "when", "xor");
+
+  /** Universal atom emitter: bare only when safely bare, else quoted (escaped). */
+  static String atomLit(String name) {
+    if (name.length() > 255) {
+      throw new CompileError("atom longer than 255 chars: " + name.substring(0, 40) + "...");
+    }
+    if (name.matches("[a-z][a-zA-Z0-9_]*") && !ERL_RESERVED.contains(name)) return name;
+    return "'" + name.replace("\\", "\\\\").replace("'", "\\'") + "'";
+  }
+
   /** Static child ctor args live in supervisor specs: restart re-runs the SAME ctor. */
   private static String literalArgs(List<Expr> args, String where) {
     var out = new ArrayList<String>();
@@ -971,12 +985,13 @@ class CodeGen {
       }
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !env.containsKey(vr.name())) {
-          // Atom.ok -> the atom ok; Color.RED -> 'RED' (enum values are atoms)
+          // Tag.ok -> the atom ok; Color.RED -> 'RED' (enum values are atoms)
+          if (vr.name().equals("Tag")) {
+            yield atomLit(x.field());
+          }
           if (vr.name().equals("Atom")) {
-            if (!x.field().matches("[a-z][a-zA-Z0-9_]*")) {
-              throw new CompileError("Atom." + x.field() + ": atoms must start lowercase");
-            }
-            yield x.field();
+            throw new CompileError("Atom.* was renamed: use Tag." + x.field()
+                + " (Tag.of(\"...\") for non-identifier shapes)");
           }
           EnumDecl ed = enums.get(vr.name());
           if (ed != null) {
@@ -1114,6 +1129,15 @@ class CodeGen {
         if (x.method().equals("sleep")) {
           return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
         }
+      }
+      case "Tag" -> {
+        // Tag.of("literal") -> the atom, resolved at transpile time (atoms aren't GC'd;
+        // dynamic atom minting stays an explicit FFI act: erlang list_to_atom)
+        if (x.method().equals("of") && x.args().size() == 1
+            && x.args().get(0) instanceof StrLit s) {
+          return atomLit(s.text());
+        }
+        throw new CompileError("Tag.of takes exactly one compile-time string literal");
       }
       case "Tuple" -> {
         if (x.method().equals("of")) {
@@ -1317,7 +1341,7 @@ class CodeGen {
       case NewExpr x -> x.typeName();
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
-          if (vr.name().equals("Atom")) yield "Atom";
+          if (vr.name().equals("Tag")) yield "Tag";
           if (enums.containsKey(vr.name())) yield vr.name();
         }
         yield x.field().equals("length") ? "int" : null;
@@ -1344,6 +1368,7 @@ class CodeGen {
       }
       case MethodCall x -> {
         if (x.target() instanceof VarRef vr) {
+          if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
