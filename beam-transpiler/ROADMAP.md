@@ -264,7 +264,20 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    you have a plan for (input/network/external failures); everything else crashes —
    process granularity + supervision IS the recovery story. Deferred: `finally`,
    try-with-resources, exception hierarchies beyond one level.
-   Still to design: quoted atoms (GAP-10).
+   **Tags (atoms; closes GAP-10)**: `Tag.x` / `Tag.of("literal")` produce Erlang atoms
+   — the FFI surface formerly `Atom.*`, renamed: a Tag labels protocol shapes (Erlang's
+   own "tagged tuple" idiom); docs state "Tag = Erlang atom" once. `Tag.of("_")` ->
+   `'_'`, resolved at transpile time; argument must be a compile-time string literal
+   (atoms aren't GC'd — runtime minting is a leak; dynamic creation stays explicit via
+   FFI `list_to_atom`). Covers names unwritable as `Tag.x`: non-identifier shapes
+   (`_`, dots, uppercase) and Java-keyword names (`Tag.of("if")`). 255-char limit
+   checked; `Tag.ok` ≡ `Tag.of("ok")`. User code models its own constants as enums
+   (which lower to atoms); Tag is for foreign protocols only. Emitter rule, universal
+   (Tag / enums / module names): emit an atom quoted whenever it isn't safely bare —
+   non-lowercase-identifier shape OR Erlang reserved word (`Tag.end` -> `'end'`).
+   THE V1 SPEC IS CLOSED. Implementation order (spec leads; current code still has the
+   old flat-sup/script model, Atom.* naming, mutable records): next is decision #9,
+   stdlib API design, then implement spec + stdlib, webdemo rewrite verifies.
 2. **Open decision #9** (namespace strategy), then stdlib API design against that
    settled surface: HTTP client + HTTP server first.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
