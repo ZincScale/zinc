@@ -453,14 +453,31 @@ Interleave as needed — all incremental on the existing codegen:
   free (the FFI rule), runtime guards unchanged. Negative harness:
   `examples/neg/*.zinc` must fail transpile with the expected message (e2e).
 - **DONE (2026-06-12): modifiers enforced** — see settled decision #10.
-- **TODO: e2e harness hardening.** e2e asserts stdout only — add (a) exit-code
-  asserts (a case that prints right but exits nonzero passes today), (b) stderr
-  asserts where the contract is about stderr (logging case: Log.* must land on
-  stderr, println on stdout — currently only stdout's cleanliness is checked;
-  crash reports), (c) clean-VM-exit assert for the `close`/drain case (the print
-  arriving proves close ran, nothing proves the drain finished orderly). The
-  zc/test.sh count-assert lesson generalizes: assert the OBSERVABLE CONTRACT,
-  not a proxy for it.
+- **Collections-performance audit (2026-06-12) — findings + PROPOSAL (pending user).**
+  Measured on this box (erlang:slim, 50k iterations): `xs.add(x)` in a loop =
+  **3813 ms** (lowered `Cur ++ [X]`, O(n) each = O(n²) total); the same loop on the
+  array module = **8 ms** (475×); `xs.get(i)` index-for over a list = **2260 ms**
+  (lists:nth O(n) each). These are THE two everyday Java idioms — accumulate-into-list
+  and index-for — so today's lowerings violate the LOWERING_SPEC forbidden tier
+  ("never back arrays with list-update") in spirit.
+  **Proposal:** split the two types we already distinguish — `ArrayList<T>` re-backed
+  by the array module (a growable indexed VALUE: get/set/add O(log n), size O(1) —
+  Java-shaped and fast); `List<T>` stays an Erlang list (literals, List.of, sql rows,
+  split results — iteration-first data; for-each already lowers to direct recursion,
+  the validated fast path). `toArray`/`Arrays.asList` remain the explicit bridges.
+  **Already right (audited, no action):** for-each = direct tail recursion (1.85–2×
+  foldl, beam-lab); `s += ...` = amortized-O(1) binary append (StringBuilder is
+  UNNECESSARY in zinc — document this; concat chains flatten to one construction);
+  maps = maps:* O(log n); `T[]` = array module incl. index-assign; String.split
+  returns an array. **Notes:** string:length is grapheme-counting O(n) (semantically
+  right; document "don't loop on length()"); '$idx' indexOf returns byte offsets.
+  **Facade muscle gaps to fill incrementally (no design needed):** List.indexOf/
+  sort/reverse/addAll, String.join/charAt/compareTo/format, Map iteration shape
+  (entrySet/forEach), Math.pow/sqrt/floor/ceil/round, Arrays.sort/fill.
+- **DONE (2026-06-12): e2e harness hardening** — exit code asserted on every case
+  (right output + dirty exit = FAIL), 120s timeout guards hangs, per-case stderr
+  contracts (logging: Log warning on stderr; selfheal: supervisor child_terminated
+  report). Principle: assert the OBSERVABLE CONTRACT, not a proxy for it.
 
 ## Phase 4: **SDK & toolchain — the one-stop shop**
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
