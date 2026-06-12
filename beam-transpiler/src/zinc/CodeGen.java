@@ -171,6 +171,7 @@ class CodeGen {
   private boolean useAssert;
   private boolean usedHttp;
   private boolean usedServer;
+  private boolean usedSql;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -259,6 +260,10 @@ class CodeGen {
 
   boolean usedServer() {
     return usedServer;
+  }
+
+  boolean usedSql() {
+    return usedSql;
   }
 
   private void resetModuleState() {
@@ -405,11 +410,188 @@ class CodeGen {
       + "    end.\n"
       + "req_header(R, N) -> maps:get(N, maps:get(headers, R, #{}), <<>>).\n";
 
+  /** zinc.sql over epgsql: the pool is a supervision subtree, not a library trick —
+   *  pool_sup (rest_for_one) owns the manager (registered under the Db handle) and a
+   *  one_for_one conn_sup of permanent connections. Connections connect in init
+   *  (DB down at boot = crash-loop = fail-fast; a dropped connection self-heals by
+   *  restart) and check themselves in. Checkout monitors the borrower: a borrower
+   *  crash kills the held connection — Postgres rolls back server-side, the
+   *  supervisor reconnects. One module, roles discriminated by the init argument. */
+  static final String SQL_SOURCE = "-module('zinc.sql').\n"
+      + "-behaviour(gen_server).\n"
+      + "-export([start_link/3, start_boot/2, init/1, handle_call/3, handle_cast/2,\n"
+      + "         handle_info/2, terminate/2]).\n"
+      + "-export([start_mgr/1, start_conn_sup/3, start_conn/2]).\n"
+      + "-export([query/3, exec/3, transaction/2, conn_query/3, conn_exec/3]).\n\n"
+      + "-define(CHECKOUT_TIMEOUT, 5000).\n\n"
+      + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n\n"
+      + "start_link(Name, _Owner, [Url, N]) ->\n"
+      + "    supervisor:start_link(?MODULE, {pool, Name, Url, N}).\n\n"
+      + "start_mgr(Name) -> gen_server:start_link({local, Name}, ?MODULE, {mgr, Name}, []).\n"
+      + "start_conn_sup(Name, Url, N) ->\n"
+      + "    supervisor:start_link(?MODULE, {conns, Name, Url, N}).\n"
+      + "start_conn(Name, Url) -> gen_server:start_link(?MODULE, {conn, Name, Url}, []).\n\n"
+      + "%% supervisor roles\n"
+      + "init({pool, Name, Url, N}) ->\n"
+      + "    {ok, {#{strategy => rest_for_one, intensity => 1000, period => 3600},\n"
+      + "          [#{id => mgr, start => {?MODULE, start_mgr, [Name]},\n"
+      + "             restart => permanent, shutdown => 5000, type => worker},\n"
+      + "           #{id => conns, start => {?MODULE, start_conn_sup, [Name, Url, N]},\n"
+      + "             restart => permanent, shutdown => infinity, type => supervisor}]}};\n"
+      + "init({conns, Name, Url, N}) ->\n"
+      + "    {ok, {#{strategy => one_for_one, intensity => 1000, period => 3600},\n"
+      + "          [#{id => {conn, I}, start => {?MODULE, start_conn, [Name, Url]},\n"
+      + "             restart => permanent, shutdown => 5000, type => worker}\n"
+      + "           || I <- lists:seq(1, N)]}};\n"
+      + "%% pool manager: free conns, FIFO waiters (with deadlines), borrower monitors\n"
+      + "init({mgr, _Name}) ->\n"
+      + "    {ok, #{free => [], waiting => queue:new(), borrowed => #{}, conns => #{}}};\n"
+      + "%% connection: connect in the constructor (fail-fast boot, restart reconnects)\n"
+      + "init({conn, Mgr, Url}) ->\n"
+      + "    process_flag(trap_exit, true),\n"
+      + "    {ok, C} = epgsql:connect(conn_opts(Url)),\n"
+      + "    gen_server:cast(Mgr, {checkin_new, self()}),\n"
+      + "    {ok, #{conn => C}}.\n\n"
+      + "conn_opts(Url) ->\n"
+      + "    U = uri_string:parse(Url),\n"
+      + "    [User, Pass] = case binary:split(maps:get(userinfo, U, <<>>), <<\":\">>) of\n"
+      + "        [Us] -> [Us, <<>>];\n"
+      + "        [Us, Pw] -> [Us, Pw]\n"
+      + "    end,\n"
+      + "    Db = case maps:get(path, U, <<>>) of\n"
+      + "        <<\"/\", D/binary>> -> D;\n"
+      + "        Other -> Other\n"
+      + "    end,\n"
+      + "    #{host => binary_to_list(maps:get(host, U, <<\"127.0.0.1\">>)),\n"
+      + "      port => maps:get(port, U, 5432),\n"
+      + "      username => binary_to_list(User), password => binary_to_list(Pass),\n"
+      + "      database => binary_to_list(Db)}.\n\n"
+      + "handle_call({checkout, Deadline}, {Pid, _} = From, S = #{free := Free}) ->\n"
+      + "    case Free of\n"
+      + "        [C | Rest] -> {reply, C, lend(C, Pid, S#{free := Rest})};\n"
+      + "        [] -> {noreply, S#{waiting := queue:in({From, Pid, Deadline},\n"
+      + "                                              maps:get(waiting, S))}}\n"
+      + "    end;\n"
+      + "%% connection role: every statement is parse/bind/execute — prepared, positional\n"
+      + "handle_call({q, Sql, Params}, _From, S = #{conn := C}) ->\n"
+      + "    {reply, case epgsql:equery(C, Sql, Params) of\n"
+      + "        {ok, Cols, Rows} -> {rows, rows_to_maps(Cols, Rows)};\n"
+      + "        {ok, Count} -> {count, Count};\n"
+      + "        {ok, Count, Cols, Rows} -> {both, Count, rows_to_maps(Cols, Rows)};\n"
+      + "        {error, E} -> {sqlerror, fmt_err(E)}\n"
+      + "    end, S};\n"
+      + "handle_call({tx, Cmd}, _From, S = #{conn := C}) ->\n"
+      + "    {reply, case epgsql:squery(C, Cmd) of\n"
+      + "        {error, E} -> {sqlerror, fmt_err(E)};\n"
+      + "        _Ok -> ok\n"
+      + "    end, S};\n"
+      + "handle_call(Msg, _From, _State) -> erlang:error({unknown_call, Msg}).\n\n"
+      + "handle_cast({checkin_new, C}, S = #{conns := Conns}) ->\n"
+      + "    Ref = erlang:monitor(process, C),\n"
+      + "    {noreply, give(C, S#{conns := Conns#{C => Ref}})};\n"
+      + "handle_cast({checkin, C}, S = #{borrowed := B}) ->\n"
+      + "    case maps:take(C, B) of\n"
+      + "        {Ref, B2} -> erlang:demonitor(Ref, [flush]),\n"
+      + "                     {noreply, give(C, S#{borrowed := B2})};\n"
+      + "        error -> {noreply, S}  %% conn died while borrowed: stale checkin\n"
+      + "    end;\n"
+      + "handle_cast(Msg, _State) -> erlang:error({unknown_cast, Msg}).\n\n"
+      + "lend(C, Pid, S = #{borrowed := B}) ->\n"
+      + "    Ref = erlang:monitor(process, Pid),\n"
+      + "    S#{borrowed := B#{C => Ref}}.\n\n"
+      + "%% hand a free conn to the first waiter still inside its deadline, else shelve it\n"
+      + "give(C, S = #{waiting := W, free := Free}) ->\n"
+      + "    case queue:out(W) of\n"
+      + "        {empty, _} -> S#{free := [C | Free]};\n"
+      + "        {{value, {From, Pid, Deadline}}, W2} ->\n"
+      + "            case erlang:monotonic_time(millisecond) =< Deadline of\n"
+      + "                true -> gen_server:reply(From, C), lend(C, Pid, S#{waiting := W2});\n"
+      + "                false -> give(C, S#{waiting := W2})\n"
+      + "            end\n"
+      + "    end.\n\n"
+      + "%% conn role: epgsql (linked) died -> crash too, the supervisor reconnects\n"
+      + "handle_info({'EXIT', _Pid, Reason}, S = #{conn := _}) -> {stop, Reason, S};\n"
+      + "handle_info({'DOWN', Ref, process, Pid, _R},\n"
+      + "            S = #{conns := Conns, free := Free, borrowed := B}) ->\n"
+      + "    case maps:take(Pid, Conns) of\n"
+      + "        {_CRef, Conns2} ->  %% a connection died: forget it everywhere\n"
+      + "            S2 = S#{conns := Conns2, free := lists:delete(Pid, Free)},\n"
+      + "            case maps:take(Pid, B) of\n"
+      + "                {BRef, B2} -> erlang:demonitor(BRef, [flush]),\n"
+      + "                              {noreply, S2#{borrowed := B2}};\n"
+      + "                error -> {noreply, S2}\n"
+      + "            end;\n"
+      + "        error ->  %% a borrower died holding a conn: kill it (server-side\n"
+      + "            %% rollback), the supervisor replaces it with a fresh one\n"
+      + "            Held = [C || {C, R} <- maps:to_list(B), R =:= Ref],\n"
+      + "            lists:foreach(fun(C) -> exit(C, kill) end, Held),\n"
+      + "            {noreply, S#{borrowed := maps:without(Held, B)}}\n"
+      + "    end;\n"
+      + "handle_info(_Msg, State) -> {noreply, State}.\n\n"
+      + "%% close() idiom, hand-written: release the socket on orderly stop only\n"
+      + "terminate(Reason, #{conn := C}) when Reason == normal; Reason == shutdown;\n"
+      + "        is_tuple(Reason), element(1, Reason) == shutdown ->\n"
+      + "    epgsql:close(C), ok;\n"
+      + "terminate(_Reason, _State) -> ok.\n\n"
+      + "%% #column name is element 2 across epgsql 4.x; values arrive pre-decoded\n"
+      + "rows_to_maps(Cols, Rows) ->\n"
+      + "    Names = [element(2, Col) || Col <- Cols],\n"
+      + "    [maps:from_list(lists:zip(Names, tuple_to_list(R))) || R <- Rows].\n\n"
+      + "fmt_err({error, _Sev, _Code, Codename, Msg, _Extra}) ->\n"
+      + "    iolist_to_binary([atom_to_binary(Codename, utf8), <<\": \">>, Msg]);\n"
+      + "fmt_err(E) -> iolist_to_binary(io_lib:format(\"~p\", [E])).\n\n"
+      + "%% client side (runs in the caller's process)\n"
+      + "query(Pool, Sql, Params) -> with_conn(Pool, {q, Sql, Params}, rows).\n"
+      + "exec(Pool, Sql, Params) -> with_conn(Pool, {q, Sql, Params}, count).\n\n"
+      + "with_conn(Pool, Msg, Want) ->\n"
+      + "    C = checkout(Pool),\n"
+      + "    try pick(Want, gen_server:call(C, Msg, infinity))\n"
+      + "    after gen_server:cast(Pool, {checkin, C})\n"
+      + "    end.\n\n"
+      + "conn_query(C, Sql, Params) -> pick(rows, gen_server:call(C, {q, Sql, Params}, infinity)).\n"
+      + "conn_exec(C, Sql, Params) -> pick(count, gen_server:call(C, {q, Sql, Params}, infinity)).\n\n"
+      + "pick(rows, {rows, R}) -> R;\n"
+      + "pick(rows, {count, _}) -> [];\n"
+      + "pick(rows, {both, _, R}) -> R;\n"
+      + "pick(count, {rows, R}) -> length(R);\n"
+      + "pick(count, {count, N}) -> N;\n"
+      + "pick(count, {both, N, _}) -> N;\n"
+      + "pick(_, {sqlerror, M}) -> raise(M).\n\n"
+      + "checkout(Pool) ->\n"
+      + "    Deadline = erlang:monotonic_time(millisecond) + ?CHECKOUT_TIMEOUT,\n"
+      + "    try gen_server:call(Pool, {checkout, Deadline}, ?CHECKOUT_TIMEOUT)\n"
+      + "    catch exit:{timeout, _} -> raise(<<\"pool checkout timed out\">>)\n"
+      + "    end.\n\n"
+      + "%% one connection for the duration; return = COMMIT, any escape = ROLLBACK +\n"
+      + "%% re-raise (a thrown zinc exception stays catchable, a bug stays a crash)\n"
+      + "transaction(Pool, F) ->\n"
+      + "    C = checkout(Pool),\n"
+      + "    try\n"
+      + "        tx(C, <<\"BEGIN\">>),\n"
+      + "        R = F(C),\n"
+      + "        tx(C, <<\"COMMIT\">>),\n"
+      + "        R\n"
+      + "    catch Class:Reason:ST ->\n"
+      + "        try tx(C, <<\"ROLLBACK\">>) catch _:_ -> ok end,\n"
+      + "        erlang:raise(Class, Reason, ST)\n"
+      + "    after\n"
+      + "        gen_server:cast(Pool, {checkin, C})\n"
+      + "    end.\n\n"
+      + "tx(C, Cmd) ->\n"
+      + "    case gen_server:call(C, {tx, Cmd}, infinity) of\n"
+      + "        ok -> ok;\n"
+      + "        {sqlerror, M} -> raise(M)\n"
+      + "    end.\n\n"
+      + "raise(M) ->\n"
+      + "    erlang:error({zinc_exc, 'zinc.sql.sqlexception',\n"
+      + "        #{'$class' => 'zinc.sql.sqlexception', message => M}}).\n";
+
   /** Stdlib exceptions: name -> FQ tag. One-level hierarchy via BUILTIN_EXC_CHILDREN. */
   static final String[][] BUILTIN_EXCEPTIONS = {
       {"HttpException", "zinc.http.httpexception"},
       {"ConnectException", "zinc.http.connectexception"},
-      {"TimeoutException", "zinc.http.timeoutexception"}};
+      {"TimeoutException", "zinc.http.timeoutexception"},
+      {"SqlException", "zinc.sql.sqlexception"}};
   static final Map<String, List<String>> BUILTIN_EXC_CHILDREN =
       Map.of("HttpException", List.of("ConnectException", "TimeoutException"));
 
@@ -457,6 +639,9 @@ class CodeGen {
     boolean pair = false;
     if (f.type().equals("HttpServer")) {
       startMod = "zinc.httpserver";
+    } else if (f.type().equals("Db")) {
+      startMod = "zinc.sql"; // the pool is a supervision subtree
+      pair = true;
     } else {
       ActorDecl child = actors.get(f.type());
       if (child == null) {
@@ -891,10 +1076,27 @@ class CodeGen {
 
   // ---- actors ----
 
+  /** close() — finally at process granularity (AutoCloseable idiom): runs as
+   *  terminate/2 on ORDERLY stop only, never on the actor's own crash (crashed
+   *  state is untrustworthy; the crash path's cleanup is rollback/supervision). */
+  static MethodDecl closeHook(ActorDecl a) {
+    for (MethodDecl m : a.methods()) {
+      if (!m.name().equals("close")) continue;
+      if (!m.retType().equals("void") || !m.params().isEmpty()) {
+        throw new CompileError("actor " + a.name()
+            + ".close: the shutdown hook is 'public void close()' (no params)");
+      }
+      return m;
+    }
+    return null;
+  }
+
   private String genActorModule(ActorDecl a) {
+    MethodDecl close = closeHook(a);
     var casts = new ArrayList<String>();
     var calls = new ArrayList<String>();
     for (MethodDecl m : a.methods()) {
+      if (m == close) continue;
       if (m.retType().equals("void")) {
         if (hasReturn(m.body())) {
           throw new CompileError("actor " + a.name() + "." + m.name()
@@ -907,6 +1109,7 @@ class CodeGen {
     }
     var exports = new ArrayList<>(List.of("start_link/3", "start_boot/2", "init/1",
         "handle_call/3", "handle_cast/2", "handle_info/2"));
+    if (close != null) exports.add("terminate/2");
 
     var pieces = new ArrayList<String>();
     // [Name, Owner | Args]: init seeds '$self' from Name; Owner = spawner pid for
@@ -927,7 +1130,13 @@ class CodeGen {
     // dynamic child: the monitored owner died -> die with it (temporary, no restart)
     pieces.add("handle_info({'DOWN', _Ref, process, _Pid, _Reason}, State) -> "
         + "{stop, normal, State};\n"
-        + "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg}).");
+        + (close == null
+            ? "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg})."
+            // trap_exit means 'EXIT' arrives as info on orderly shutdown: let
+            // gen_server's default exit handling run terminate, don't crash on it
+            : "handle_info({'EXIT', _Pid, Reason}, State) -> {stop, Reason, State};\n"
+              + "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg})."));
+    if (close != null) pieces.add(genCloseTerminate(a, close));
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
     return "-module(" + atomLit(curModule) + ").\n"
@@ -955,6 +1164,8 @@ class CodeGen {
     }
     String head = "init([" + String.join(", ", ps) + "])";
     var lines = new ArrayList<String>();
+    // close(): orderly shutdown must reach terminate/2, so exits become signals
+    if (closeHook(a) != null) lines.add("process_flag(trap_exit, true)");
     // dynamic child: watch the spawner; its death is ours (none = static, supervised)
     lines.add("case " + owner + " of none -> ok; _ -> erlang:monitor(process, " + owner
         + ") end");
@@ -978,6 +1189,40 @@ class CodeGen {
     }
     lines.add("{ok, " + stateMap(a, env) + "}");
     return head + " ->\n" + block(lines, "        ") + ".";
+  }
+
+  /** terminate/2 for close(): orderly reasons only (normal, shutdown, {shutdown,_});
+   *  any other reason is the actor's own crash — close does NOT run (best-effort by
+   *  construction: anything that MUST happen belongs in a transaction, not a hook). */
+  private String genCloseTerminate(ActorDecl a, MethodDecl close) {
+    if (hasReturn(close.body())) {
+      throw new CompileError("actor " + a.name()
+          + ".close: void methods cannot return a value");
+    }
+    varTypes = new HashMap<>();
+    var env = new HashMap<String, String>();
+    var lines = new ArrayList<String>();
+    var refs = new LinkedHashSet<String>();
+    blockRefs(close.body(), refs);
+    if (refs.contains("this")) {
+      String self = fresh("self");
+      lines.add(self + " = maps:get('$self', State)");
+      env.put("this", self);
+    }
+    varTypes.put("this", a.name());
+    for (FieldDecl f : a.fields()) {
+      varTypes.put(f.name(), f.type());
+      if (!refs.contains(f.name())) continue; // unused fields: no dead binds
+      String v = fresh(f.name());
+      lines.add(v + " = maps:get(" + f.name() + ", State)");
+      env.put(f.name(), v);
+    }
+    lines.addAll(genStmts(close.body().stmts(), env, false, null));
+    lines.add("ok");
+    return "terminate(Reason, State) when Reason == normal; Reason == shutdown;\n"
+        + "        is_tuple(Reason), element(1, Reason) == shutdown ->\n"
+        + block(lines, "    ") + ";\n"
+        + "terminate(_Reason, _State) -> ok.";
   }
 
   private static String defaultFor(String type) {
@@ -1577,6 +1822,12 @@ class CodeGen {
           if (!x.args().isEmpty()) throw new CompileError("new ArrayList takes no args (v1)");
           yield "[]";
         }
+        if (x.typeName().equals("Db") || x.typeName().equals("HttpServer")) {
+          // long-lived resources live in the tree: ctor acquires, restart heals
+          throw new CompileError("v1: " + x.typeName()
+              + " is a static child — declare it as an Application field: "
+              + x.typeName() + " x = new " + x.typeName() + "(...)");
+        }
         Ast.InstanceClassDecl ic = instClasses.get(x.typeName());
         if (ic != null) {
           int want = ic.ctor() == null ? 0 : ic.ctor().params().size();
@@ -1738,6 +1989,10 @@ class CodeGen {
     ActorDecl actor = tt == null ? null : allActors.get(tt);
     if (actor != null) {
       int arity = x.args().size();
+      if (x.method().equals("close") && arity == 0 && closeHook(actor) != null) {
+        throw new CompileError("actor " + actor.name() + ".close() runs automatically "
+            + "on orderly stop — it cannot be called directly");
+      }
       MethodDecl m = actor.methods().stream()
           .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
           .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
@@ -1749,6 +2004,38 @@ class CodeGen {
       }
       useCall = true; // typed call: unwraps relayed exceptions (failure-ladder rung 2)
       return "'$call'(" + genExpr(x.target(), env) + ", " + msg + ")";
+    }
+    // zinc.sql: db.query/exec are varargs (sql, params...); transaction takes a
+    // one-arg lambda — begin/commit/rollback are unmismatchable by construction
+    if ("Db".equals(tt) || "Tx".equals(tt)) {
+      usedSql = true;
+      boolean isTx = "Tx".equals(tt);
+      switch (x.method()) {
+        case "query", "exec" -> {
+          if (x.args().isEmpty()) {
+            throw new CompileError(tt + "." + x.method() + " takes (sql, params...)");
+          }
+          String fn = (isTx ? "conn_" : "") + (x.method().equals("query") ? "query" : "exec");
+          var ps = new ArrayList<String>();
+          for (Expr p : x.args().subList(1, x.args().size())) ps.add(genExpr(p, env));
+          return "'zinc.sql':" + fn + "(" + genExpr(x.target(), env) + ", "
+              + genExpr(x.args().get(0), env) + ", [" + String.join(", ", ps) + "])";
+        }
+        case "transaction" -> {
+          if (isTx) {
+            throw new CompileError("transactions do not nest (v1)");
+          }
+          if (x.args().size() != 1 || !(x.args().get(0) instanceof LambdaExpr lx)
+              || lx.params().size() != 1) {
+            throw new CompileError(
+                "db.transaction takes a one-arg lambda: db.transaction(tx -> { ... })");
+          }
+          return "'zinc.sql':transaction(" + genExpr(x.target(), env) + ", "
+              + genLambda(lx, env, List.of("Tx")) + ")";
+        }
+        default -> throw new CompileError("unsupported: " + tt + "." + x.method()
+            + " (query/exec" + (isTx ? "" : "/transaction") + ")");
+      }
     }
     String recvH = null;
     if (tt != null) {
@@ -1944,6 +2231,17 @@ class CodeGen {
       emitJsonFrom(jr);
       return "'$fromjson_" + jr.name().toLowerCase() + "'(" + genExpr(x.args().get(0), env)
           + ")";
+    }
+    // User.from(rows): rows are maps keyed by column name — same derived codec as
+    // fromJson ('$jmap'), matched by name, crash-on-missing, lenient on extras
+    if (jr != null && x.method().equals("from") && x.args().size() == 1) {
+      emitJsonFrom(jr);
+      String low = jr.name().toLowerCase();
+      if (jsonEmitted.add("rows_" + low)) {
+        helpers.add("'$fromrows_" + low + "'(Rows) -> ['$jmap_" + low
+            + "'(R) || R <- Rows].");
+      }
+      return "'$fromrows_" + low + "'(" + genExpr(x.args().get(0), env) + ")";
     }
     switch (name) {
       case "Thread" -> {
@@ -2268,6 +2566,9 @@ class CodeGen {
           if (records.containsKey(vr.name()) && x.method().equals("fromJson")) {
             yield vr.name();
           }
+          if (records.containsKey(vr.name()) && x.method().equals("from")) {
+            yield "List<" + vr.name() + ">";
+          }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
           if (vr.name().equals("Router")) yield "Router";
           if (vr.name().equals("Response")) yield "Response";
@@ -2305,12 +2606,14 @@ class CodeGen {
             default -> null;
           };
         }
+        List<String> targs = tt == null ? List.of() : typeArgs(tt);
         tt = tt == null ? null : baseType(tt);
         if ("ArrayList".equals(tt) || "List".equals(tt)) {
           yield switch (x.method()) {
             case "size" -> "int";
             case "contains", "isEmpty" -> "boolean";
             case "toArray" -> "Object[]";
+            case "get" -> targs.size() == 1 ? targs.get(0) : null; // element type
             default -> null;
           };
         }
@@ -2341,6 +2644,13 @@ class CodeGen {
             case "statusCode" -> "int";
             case "body", "header" -> "String";
             default -> null;
+          };
+        }
+        if ("Db".equals(tt) || "Tx".equals(tt)) {
+          yield switch (x.method()) {
+            case "query" -> "List";
+            case "exec" -> "int";
+            default -> null; // transaction: the lambda's result, unknown (v1)
           };
         }
         Ast.InstanceClassDecl icc = tt == null ? null : instClasses.get(tt);

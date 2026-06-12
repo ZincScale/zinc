@@ -35,7 +35,8 @@ public class Main {
           "String", "Exception", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json",
-          "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert");
+          "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",
+          "Db", "Tx", "SqlException");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
@@ -169,6 +170,7 @@ public class Main {
       Ast.ApplicationDecl resolvedApp = null;
       boolean anyHttp = false;
       boolean anyServer = false;
+      boolean anySql = false;
       for (Src src : files) {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
@@ -177,9 +179,18 @@ public class Main {
         (src.test() ? generatedTest : generated).putAll(cg.generateAll());
         anyHttp |= cg.usedHttp();
         anyServer |= cg.usedServer();
+        anySql |= cg.usedSql();
+      }
+      if (resolvedApp != null) {
+        // stdlib-Actor fields pull in their runtime module via the child spec alone
+        for (var f : resolvedApp.fields()) {
+          anyServer |= f.type().equals("HttpServer");
+          anySql |= f.type().equals("Db");
+        }
       }
       if (anyHttp) generated.put("zinc.http", CodeGen.HTTP_SOURCE);
       if (anyServer) generated.put("zinc.httpserver", CodeGen.SERVER_SOURCE);
+      if (anySql) generated.put("zinc.sql", CodeGen.SQL_SOURCE);
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
         generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors, actorMods));

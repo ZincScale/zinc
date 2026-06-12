@@ -571,9 +571,43 @@ zinc resources live in processes, not blocks. Implement alongside zinc.sql (its
 connection actors are the first real user). `System.exit` stays unbuilt until a
 dogfood (batch-job shape) earns it. Ctrl-C foreground = BEAM BREAK-menu wart,
 Phase 4 zc-run polish; PID-1 exec in release start script = Phase 5 detail.
-Remaining designed-but-unimplemented stdlib: **`zinc.sql`** (needs a Postgres to
-test against) + `close()` above. Then Phase 4 (toolchain/installer) per the phases
-above.
+**zinc.sql + close(): IMPLEMENTED AND VERIFIED (2026-06-12).**
+- `close()` is code: an Actor may declare `public void close()` — init sets
+  trap_exit, terminate/2 runs the body on orderly reasons only (normal, shutdown,
+  {shutdown,_}); never on the actor's own crash; excluded from cast dispatch and
+  direct calls are a transpile error. e2e `close` proves the print arrives via the
+  script-mode drain (eval-process exit -> linked root sup -> reverse-order tree
+  shutdown), deterministic over repeated runs.
+- `zinc.sql` is code: 'zinc.sql' runtime module emitted on use — pool_sup
+  (rest_for_one) owns the manager (registered under the Db handle) + a one_for_one
+  conn_sup of permanent connections (the P2 pair shape; a manager crash reconnects
+  everything, a conn crash reconnects one). Connections epgsql:connect in init
+  (fail-fast boot, restart-reconnect) and check themselves in; checkout monitors
+  the borrower — a borrower crash kills the held conn (Postgres rolls back
+  server-side, supervisor replaces it); waiters carry deadlines (pool exhausted
+  blocks, then SqlException; expired waiters dropped at hand-out). Every statement
+  is epgsql:equery — prepared + positional, no string-concat path. SQL errors are
+  domain errors: builtin SqlException (zinc.sql.sqlexception), catchable; the conn
+  survives. Conn terminate = the close() idiom hand-written (epgsql:close on
+  orderly stop). Facade: `db.query/exec(sql, params...)` (varargs; query -> rows
+  as list of column-name maps, exec -> count), `db.transaction(tx -> {...})`
+  (lambda param contextually typed Tx; return = COMMIT, throw/crash = ROLLBACK +
+  re-raise on the ladder; nesting = transpile error), `User.from(rows)` derived
+  row mapping reusing the '$jmap' JSON codec (match by column name,
+  crash-on-missing, lenient extras), dynamic rows via unknown .get var-chaining
+  with guarded typed binds. Db is an Application field (static child, supervisor
+  type/infinity shutdown); `new Db` elsewhere = transpile error pointing at the
+  tree. List<T>.get(i) now yields the element type (typed rows compose).
+  Verified against real Postgres: `dogfood/sqldemo/` (epgsql 4.7.1 vendored by zc
+  through the corp firewall, postgres:16-alpine on a shared docker network) —
+  insert/query/derived mapping/commit/rollback-on-throw/SqlException all
+  asserted, SIGTERM drain observed. Known v1 waits (in FINDINGS-sqldemo.md):
+  checkout/query timeouts not configurable; camelCase record fields vs
+  snake_case columns unaddressed; no LISTEN/NOTIFY.
+Next: **Phase 4 (toolchain/installer)** per the phases above — managed runtime
+(pinned JRE + OTP under ~/.zc), `zc` the only visible tool; open decisions #6
+(language name) and #7 (portable OTP) come due there. `System.exit` still waits
+on a batch-job dogfood.
 ```
-cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 30/30 e2e + zc(run+test) + webdemo
+cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh && ./dogfood/sqldemo/test.sh   # green baseline: 31/31 e2e + zc(run+test) + webdemo + sqldemo
 ```
