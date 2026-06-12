@@ -90,36 +90,87 @@ final class Ast {
 
   record Block(List<Stmt> stmts) {}
 
-  sealed interface Stmt {}
-
-  /** type is the declared type, or "var" to infer from init. */
-  record VarStmt(String type, String name, Expr init, boolean isFinal) implements Stmt {
-    VarStmt(String type, String name, Expr init) {
-      this(type, name, init, false);
+  /** Statements carry their source line (0 = synthetic/desugared) — the spine of
+   *  source maps: transpile errors and Assert messages cite <file>:<line>. */
+  sealed interface Stmt {
+    default int line() {
+      return 0;
     }
   }
 
-  record AssignStmt(String name, String op, Expr value) implements Stmt {}
+  /** type is the declared type, or "var" to infer from init. */
+  record VarStmt(String type, String name, Expr init, boolean isFinal, int line)
+      implements Stmt {
+    VarStmt(String type, String name, Expr init) {
+      this(type, name, init, false, 0);
+    }
 
-  record FieldAssignStmt(String objVar, String field, String op, Expr value) implements Stmt {}
+    VarStmt(String type, String name, Expr init, boolean isFinal) {
+      this(type, name, init, isFinal, 0);
+    }
+  }
+
+  record AssignStmt(String name, String op, Expr value, int line) implements Stmt {
+    AssignStmt(String name, String op, Expr value) {
+      this(name, op, value, 0);
+    }
+  }
+
+  record FieldAssignStmt(String objVar, String field, String op, Expr value, int line)
+      implements Stmt {
+    FieldAssignStmt(String objVar, String field, String op, Expr value) {
+      this(objVar, field, op, value, 0);
+    }
+  }
 
   /** xs[i] = v  -> SSA rebind via array:set (receiver must be T[]). */
-  record IndexAssignStmt(String arrVar, Expr index, String op, Expr value) implements Stmt {}
+  record IndexAssignStmt(String arrVar, Expr index, String op, Expr value, int line)
+      implements Stmt {
+    IndexAssignStmt(String arrVar, Expr index, String op, Expr value) {
+      this(arrVar, index, op, value, 0);
+    }
+  }
 
   /** Arrow switch; labels are constants (or bare enum values when the subject is an enum). */
-  record SwitchStmt(Expr subject, List<SwitchCase> cases, Block defaultBlock) implements Stmt {}
+  record SwitchStmt(Expr subject, List<SwitchCase> cases, Block defaultBlock, int line)
+      implements Stmt {
+    SwitchStmt(Expr subject, List<SwitchCase> cases, Block defaultBlock) {
+      this(subject, cases, defaultBlock, 0);
+    }
+  }
 
   record SwitchCase(List<Expr> labels, Block body) {}
 
-  record IfStmt(Expr cond, Block thenBlock, Block elseBlock) implements Stmt {}
+  record IfStmt(Expr cond, Block thenBlock, Block elseBlock, int line) implements Stmt {
+    IfStmt(Expr cond, Block thenBlock, Block elseBlock) {
+      this(cond, thenBlock, elseBlock, 0);
+    }
+  }
 
-  record ForEachStmt(String varType, String varName, Expr iterable, Block body) implements Stmt {}
+  record ForEachStmt(String varType, String varName, Expr iterable, Block body, int line)
+      implements Stmt {
+    ForEachStmt(String varType, String varName, Expr iterable, Block body) {
+      this(varType, varName, iterable, body, 0);
+    }
+  }
 
-  record WhileStmt(Expr cond, Block body) implements Stmt {}
+  record WhileStmt(Expr cond, Block body, int line) implements Stmt {
+    WhileStmt(Expr cond, Block body) {
+      this(cond, body, 0);
+    }
+  }
 
-  record ReturnStmt(Expr value) implements Stmt {}
+  record ReturnStmt(Expr value, int line) implements Stmt {
+    ReturnStmt(Expr value) {
+      this(value, 0);
+    }
+  }
 
-  record ExprStmt(Expr expr) implements Stmt {}
+  record ExprStmt(Expr expr, int line) implements Stmt {
+    ExprStmt(Expr expr) {
+      this(expr, 0);
+    }
+  }
 
   record BreakStmt() implements Stmt {}
 
@@ -130,12 +181,20 @@ final class Ast {
 
   /** try {..} catch (NotFound e) {..} catch (Exception e) {..} — clauses match in order;
    *  catch (Exception e) is the catch-all and also catches native BEAM errors. */
-  record TryStmt(Block tryBlock, List<CatchClause> clauses) implements Stmt {}
+  record TryStmt(Block tryBlock, List<CatchClause> clauses, int line) implements Stmt {
+    TryStmt(Block tryBlock, List<CatchClause> clauses) {
+      this(tryBlock, clauses, 0);
+    }
+  }
 
   record CatchClause(String exType, String var, Block body) {}
 
   /** throw new NotFound("msg") -> erlang:error({zinc_exc, 'fq.tag', FieldsMap}) */
-  record ThrowStmt(String exType, List<Expr> args) implements Stmt {}
+  record ThrowStmt(String exType, List<Expr> args, int line) implements Stmt {
+    ThrowStmt(String exType, List<Expr> args) {
+      this(exType, args, 0);
+    }
+  }
 
   sealed interface Expr {}
 

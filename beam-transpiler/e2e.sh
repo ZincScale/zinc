@@ -57,7 +57,7 @@ declare -A wanterr=(
   [arg_type]="f arg 1 ('x'): cannot bind a String to int"
   [actor_arg]="C.bump arg 1 ('by'): cannot bind a String to int"
   [field_init]="field n: cannot bind a String to int"
-  [reassign]="x: cannot bind a String to int"
+  [reassign]="reassign.zinc:2: x: cannot bind a String to int"
   [record_ctor]="new Point arg 1 ('x'): cannot bind a String to int"
   [void_value]="cannot use a void method's result"
   [spawn_arg]="new Counter arg 1 ('start'): cannot bind a String to int"
@@ -69,7 +69,7 @@ declare -A wanterr=(
   [mod_static_actor]="C.get: 'static' does not belong here"
   [mod_private_actor]="C.get: cannot be private"
   [mod_private_cross]="Util.secret is private"
-  [mod_final_local]="final variable 'x' cannot be reassigned"
+  [mod_final_local]="mod_final_local.zinc:4: final variable 'x' cannot be reassigned"
   [mod_final_field]="final field 'n' cannot be reassigned"
   [mod_main_nonpublic]="public static void main"
 )

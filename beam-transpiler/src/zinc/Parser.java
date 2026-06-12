@@ -401,7 +401,38 @@ class Parser {
         || k == TokKind.STAR_EQ;
   }
 
+  /** Statements get their source line here — one site, every statement kind. */
   private Stmt parseStmt() {
+    int ln = cur().line();
+    return withLine(parseStmt0(), ln);
+  }
+
+  private static Stmt withLine(Stmt s, int ln) {
+    return switch (s) {
+      case VarStmt x -> new VarStmt(x.type(), x.name(), x.init(), x.isFinal(), ln);
+      case AssignStmt x -> new AssignStmt(x.name(), x.op(), x.value(), ln);
+      case FieldAssignStmt x -> new FieldAssignStmt(x.objVar(), x.field(), x.op(),
+          x.value(), ln);
+      case IndexAssignStmt x -> new IndexAssignStmt(x.arrVar(), x.index(), x.op(),
+          x.value(), ln);
+      case SwitchStmt x -> new SwitchStmt(x.subject(), x.cases(), x.defaultBlock(), ln);
+      case IfStmt x -> new IfStmt(x.cond(), x.thenBlock(), x.elseBlock(), ln);
+      case ForEachStmt x -> new ForEachStmt(x.varType(), x.varName(), x.iterable(),
+          x.body(), ln);
+      case WhileStmt x -> new WhileStmt(x.cond(), x.body(), ln);
+      case ReturnStmt x -> new ReturnStmt(x.value(), ln);
+      case ExprStmt x -> new ExprStmt(x.expr(), ln);
+      case ThrowStmt x -> new ThrowStmt(x.exType(), x.args(), ln);
+      case TryStmt x -> new TryStmt(x.tryBlock(), x.clauses(), ln);
+      // desugared classic for: stamp the parts that came from this source line
+      case SeqStmt x -> new SeqStmt(x.stmts().stream()
+          .map(st -> st.line() == 0 ? withLine(st, ln) : st).toList());
+      case BreakStmt x -> x;
+      case ContinueStmt x -> x;
+    };
+  }
+
+  private Stmt parseStmt0() {
     switch (cur().kind()) {
       case KW_IF:
         return parseIf();

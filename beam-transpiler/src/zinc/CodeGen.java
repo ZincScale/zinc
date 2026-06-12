@@ -20,6 +20,7 @@ import zinc.Ast.*;
 class CodeGen {
   record ClassInfo(String module, Map<String, MethodDecl> methods) {} // "name/arity" -> decl
 
+  private final String srcFile; // display path of this file, for <file>:<line> errors
   private final Program program;
   private final Map<String, ClassInfo> classes;   // project-wide, by class name
   private final Map<String, RecordDecl> records;  // project-wide, by record name
@@ -38,18 +39,21 @@ class CodeGen {
   private String curModule;
   private String curClassName;
   private String curRetType; // enclosing method's declared return type; null = unknown
+  private int curLine;       // line of the statement being lowered; 0 = unknown
   private final Set<String> finalVars = new LinkedHashSet<>(); // per method body
   private boolean inActor = false;
   private Map<String, String> varTypes = new HashMap<>();       // var -> type, per method
   private int ctr = 0;
   private List<String> helpers = new ArrayList<>();
 
-  CodeGen(Program program, Map<String, ClassInfo> classes, Map<String, RecordDecl> records,
+  CodeGen(String srcFile, Program program, Map<String, ClassInfo> classes,
+      Map<String, RecordDecl> records,
       Map<String, EnumDecl> enums, Map<String, ActorDecl> allActors,
       Map<String, String> actorMods, Map<String, Ast.ExceptionDecl> exceptions,
       Map<String, String> excTags, Map<String, Ast.InterfaceDecl> interfaces,
       Map<String, Ast.InstanceClassDecl> instClasses, Map<String, String> instMods,
       boolean projectHasActors) {
+    this.srcFile = srcFile;
     this.program = program;
     this.classes = classes;
     this.records = records;
@@ -1075,9 +1079,11 @@ class CodeGen {
         + String.join("\n\n", pieces) + "\n";
   }
 
-  /** Operand source text as an Erlang binary, for assert failure messages. */
-  private static String srcBin(Expr e) {
-    return "<<\"" + exprSrc(e).replace("\\", "\\\\").replace("\"", "\\\"") + "\">>";
+  /** Operand source text as an Erlang binary, for assert failure messages —
+   *  prefixed <file>:<line> (the statement being lowered) so failures jump to source. */
+  private String srcBin(Expr e) {
+    String loc = curLine > 0 ? srcFile + ":" + curLine + ": " : "";
+    return "<<\"" + (loc + exprSrc(e)).replace("\\", "\\\\").replace("\"", "\\\"") + "\">>";
   }
 
   /** Minimal unparser — renders the common shapes; enough to recognize the operand. */
@@ -1389,12 +1395,33 @@ class CodeGen {
 
   // ---- statements ----
 
+  /** Any CompileError below a statement gets the statement's <file>:<line> prefix —
+   *  nested blocks prefix first, the outer pass-through keeps it single. */
+  private CompileError at(CompileError e) {
+    if (curLine > 0 && !e.getMessage().startsWith(srcFile + ":")) {
+      return new CompileError(srcFile + ":" + curLine + ": " + e.getMessage());
+    }
+    return e;
+  }
+
   private List<String> genStmts(List<Stmt> stmts, Map<String, String> env,
       boolean topLevel, List<String> loopMut) {
     var out = new ArrayList<String>();
     for (int i = 0; i < stmts.size(); i++) {
       Stmt s = stmts.get(i);
       boolean last = i == stmts.size() - 1;
+      if (s.line() > 0) curLine = s.line();
+      try {
+        genStmt(s, out, env, topLevel, last, loopMut);
+      } catch (CompileError e) {
+        throw at(e);
+      }
+    }
+    return out;
+  }
+
+  private void genStmt(Stmt s, List<String> out, Map<String, String> env,
+      boolean topLevel, boolean last, List<String> loopMut) {
       switch (s) {
         case VarStmt st -> {
           String v = fresh(st.name());
@@ -1527,8 +1554,6 @@ class CodeGen {
         case TryStmt st -> out.add(genTry(st, env, loopMut));
         case Ast.ThrowStmt st -> out.add(genThrow(st, env));
       }
-    }
-    return out;
   }
 
   /** m.put/m.remove/list.add as a statement: emit `New = ..., env rebind`; null if not one. */

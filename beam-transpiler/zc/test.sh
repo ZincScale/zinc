@@ -68,7 +68,10 @@ class CounterTest implements Test {
   }
 }
 EOF
-if /work/bin/zc test 1>&2; then echo RED-NOT-CAUGHT; else echo RED-OK; fi
+red=$(/work/bin/zc test 2>&1); rstatus=$?
+echo "$red" 1>&2
+# failures must cite the .zinc source line (assert source maps), and exit 1
+if [ $rstatus -ne 0 ] && echo "$red" | grep -q "CounterTest.zinc:"; then echo RED-OK; fi
 '
 got=$(run_in_docker "$fixture" | tail -2 | tr '\n' ' ')
 

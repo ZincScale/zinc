@@ -100,32 +100,35 @@ final class Resolve {
 
   private Stmt stmt(Stmt s) {
     return switch (s) {
-      case VarStmt x -> new VarStmt(x.type(), x.name(), expr(x.init()), x.isFinal());
-      case AssignStmt x -> new AssignStmt(x.name(), x.op(), expr(x.value()));
+      case VarStmt x -> new VarStmt(x.type(), x.name(), expr(x.init()), x.isFinal(), x.line());
+      case AssignStmt x -> new AssignStmt(x.name(), x.op(), expr(x.value()), x.line());
       case FieldAssignStmt x ->
-          new FieldAssignStmt(x.objVar(), x.field(), x.op(), expr(x.value()));
+          new FieldAssignStmt(x.objVar(), x.field(), x.op(), expr(x.value()), x.line());
       case IndexAssignStmt x ->
-          new IndexAssignStmt(x.arrVar(), expr(x.index()), x.op(), expr(x.value()));
+          new IndexAssignStmt(x.arrVar(), expr(x.index()), x.op(), expr(x.value()), x.line());
       case SwitchStmt x -> new SwitchStmt(expr(x.subject()),
           x.cases().stream()
               .map(c -> new SwitchCase(c.labels().stream().map(this::expr).toList(),
                   block(c.body())))
               .toList(),
-          block(x.defaultBlock()));
-      case IfStmt x -> new IfStmt(expr(x.cond()), block(x.thenBlock()), block(x.elseBlock()));
+          block(x.defaultBlock()), x.line());
+      case IfStmt x -> new IfStmt(expr(x.cond()), block(x.thenBlock()), block(x.elseBlock()),
+          x.line());
       case ForEachStmt x ->
-          new ForEachStmt(x.varType(), x.varName(), expr(x.iterable()), block(x.body()));
-      case WhileStmt x -> new WhileStmt(expr(x.cond()), block(x.body()));
-      case ReturnStmt x -> new ReturnStmt(expr(x.value()));
-      case ExprStmt x -> new ExprStmt(expr(x.expr()));
+          new ForEachStmt(x.varType(), x.varName(), expr(x.iterable()), block(x.body()),
+              x.line());
+      case WhileStmt x -> new WhileStmt(expr(x.cond()), block(x.body()), x.line());
+      case ReturnStmt x -> new ReturnStmt(expr(x.value()), x.line());
+      case ExprStmt x -> new ExprStmt(expr(x.expr()), x.line());
       case BreakStmt x -> x;
       case ContinueStmt x -> x;
       case SeqStmt x -> new SeqStmt(x.stmts().stream().map(this::stmt).toList());
       case TryStmt x -> new TryStmt(block(x.tryBlock()),
           x.clauses().stream()
-              .map(c -> new Ast.CatchClause(c.exType(), c.var(), block(c.body()))).toList());
+              .map(c -> new Ast.CatchClause(c.exType(), c.var(), block(c.body()))).toList(),
+          x.line());
       case Ast.ThrowStmt x ->
-          new Ast.ThrowStmt(x.exType(), x.args().stream().map(this::expr).toList());
+          new Ast.ThrowStmt(x.exType(), x.args().stream().map(this::expr).toList(), x.line());
     };
   }
 

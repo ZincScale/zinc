@@ -183,9 +183,15 @@ public class Main {
       for (Src src : files) {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
-        var cg = new CodeGen(resolved, classes, records, enums, actors, actorMods,
+        var cg = new CodeGen(src.file(), resolved, classes, records, enums, actors, actorMods,
             exceptions, excTags, interfaces, instClasses, instMods, supervised);
-        (src.test() ? generatedTest : generated).putAll(cg.generateAll());
+        try {
+          (src.test() ? generatedTest : generated).putAll(cg.generateAll());
+        } catch (CompileError e) {
+          // statement-level errors carry <file>:<line> already; decl-level get the file
+          throw e.getMessage().startsWith(src.file() + ":") ? e
+              : new CompileError(src.file() + ": " + e.getMessage());
+        }
         anyHttp |= cg.usedHttp();
         anyServer |= cg.usedServer();
         anySql |= cg.usedSql();
@@ -225,9 +231,10 @@ public class Main {
     }
   }
 
-  /** A parsed file plus its package (= directory path, Java convention) and origin
-   *  (test/ files: test classes allowed, output routed to the test outdir). */
-  record Src(Program prog, String pkg, boolean test) {}
+  /** A parsed file plus its package (= directory path, Java convention), origin
+   *  (test/ files: test classes allowed, output routed to the test outdir), and
+   *  display path for <file>:<line> diagnostics. */
+  record Src(Program prog, String pkg, boolean test, String file) {}
 
   /** FQ class name = module, as a lowercase dotted atom: util.MathUtil -> 'util.mathutil'. */
   static String fqMod(String pkg, String name) {
@@ -238,7 +245,7 @@ public class Main {
     var programs = new ArrayList<Src>();
     if (!Files.isDirectory(in)) {
       if (test) return programs; // no test dir: nothing to do
-      programs.add(new Src(parse(in), "", false));
+      programs.add(new Src(parse(in), "", false, in.getFileName().toString()));
       return programs;
     }
     var srcFiles = new ArrayList<Path>();
@@ -255,7 +262,7 @@ public class Main {
       checkFileName(rel, prog);
       String pkg = rel.getParent() == null ? ""
           : rel.getParent().toString().replace('/', '.').toLowerCase();
-      programs.add(new Src(prog, pkg, test));
+      programs.add(new Src(prog, pkg, test, rel.toString()));
     }
     return programs;
   }
@@ -277,6 +284,10 @@ public class Main {
   }
 
   private static Program parse(Path file) throws IOException {
-    return new Parser(Lexer.lex(Files.readString(file))).parseProgram();
+    try {
+      return new Parser(Lexer.lex(Files.readString(file))).parseProgram();
+    } catch (CompileError e) {
+      throw new CompileError(file.getFileName() + ": " + e.getMessage());
+    }
   }
 }
