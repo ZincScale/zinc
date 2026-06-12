@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -44,6 +44,12 @@ declare -A want=(
   [close]=$'1\nclosed db'
   [modifiers]=$'21\ns3cret'
   [arraylist]=$'500000\n250000\n7\n999997'
+  [warn_iget]=$'8\n3'
+)
+# transpile-warning contracts (substring against transpile stderr): warnings must
+# fire where promised — and carry file:line
+declare -A wantwarn=(
+  [warn_iget]="warn_iget.zinc:6: ImmutableList.get is O(n)"
 )
 # stderr contracts (substring match): streams are part of the language contract —
 # Log.*/crash reports land on stderr, println on stdout
@@ -120,6 +126,10 @@ for ex in "${examples[@]}"; do
   elif [ -n "${wantstderr[$ex]:-}" ] && ! grep -qF "${wantstderr[$ex]}" "$dir/run.err"; then
     echo "FAIL  $ex  ->  stderr missing '${wantstderr[$ex]}'"
     echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
+    fail=1
+  elif [ -n "${wantwarn[$ex]:-}" ] && ! grep -qF "${wantwarn[$ex]}" "$dir/transpile.err"; then
+    echo "FAIL  $ex  ->  transpile warning missing '${wantwarn[$ex]}'"
+    echo "----- transpile stderr -----"; sed 's/^/    /' "$dir/transpile.err"
     fail=1
   else
     echo "PASS  $ex  ->  $got"

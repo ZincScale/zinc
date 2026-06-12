@@ -2661,13 +2661,29 @@ class CodeGen {
     };
   }
 
+  /** O(n)-on-ImmutableList warning (user policy 2026-06-12): get/size are O(1) in
+   *  Java muscle memory but linear on a linked list — flag every use, name the fix.
+   *  contains is exempt: O(n) in Java too, and zinc has nothing faster to point at. */
+  private void warnLinear(String what, String fix) {
+    System.err.println("warning: " + srcFile + (curLine > 0 ? ":" + curLine : "")
+        + ": " + what + " — " + fix);
+  }
+
   /** ImmutableList: the receive/iterate type — an Erlang list. Read ops only;
    *  for-each is the intended access (direct recursion, the validated fast path). */
   private String genListMethod(MethodCall x, Map<String, String> env) {
     String r = genExpr(x.target(), env);
     return switch (x.method()) {
-      case "get" -> "lists:nth((" + genExpr(x.args().get(0), env) + ") + 1, " + r + ")";
-      case "size" -> "length(" + r + ")";
+      case "get" -> {
+        warnLinear("ImmutableList.get is O(n)",
+            "for indexing use new ArrayList<>(xs); to walk it use for-each");
+        yield "lists:nth((" + genExpr(x.args().get(0), env) + ") + 1, " + r + ")";
+      }
+      case "size" -> {
+        warnLinear("ImmutableList.size is O(n) (walks the list)",
+            "ArrayList.size is O(1)");
+        yield "length(" + r + ")";
+      }
       case "contains" -> "lists:member(" + genExpr(x.args().get(0), env) + ", " + r + ")";
       case "isEmpty" -> "(" + r + " =:= [])";
       case "toArray" -> "array:from_list(" + r + ")";
