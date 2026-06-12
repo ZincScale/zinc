@@ -41,14 +41,22 @@ public class Zc {
       case "test" -> {
         Path dir = projectDir(args);
         var cfg = loadToml(dir);
+        useManagedOtp(cfg);
         ensureGenerated(dir, cfg);
         vendorDeps(dir, cfg);
-        exec(dir, "rebar3", "eunit");
+        // two passes: rebar snapshots the test dir BEFORE the pre-compile hook
+        // transpiles .zinc -> zinc_gen/*.erl, so a fresh project's first eunit
+        // run would see zero tests. The compile pass materializes the .erl files;
+        // eunit then picks them up. (Incremental, so the cost is one no-op pass.)
+        exec(dir, rebarCmd("as", "test", "compile"));
+        exec(dir, rebarCmd("eunit"));
       }
       case "clean" -> {
         Path dir = projectDir(args);
-        ensureGenerated(dir, loadToml(dir));
-        exec(dir, "rebar3", "clean");
+        var cfg = loadToml(dir);
+        useManagedOtp(cfg);
+        ensureGenerated(dir, cfg);
+        exec(dir, rebarCmd("clean"));
       }
       case "deps" -> {
         var cfg = loadToml(projectDir(args));
@@ -58,6 +66,15 @@ public class Zc {
         if (args.length < 2) die("usage: zc add <name@version>  (hex package)");
         add(projectDir(new String[] {""}), args[1]);
       }
+      case "toolchain" -> {
+        if (args.length < 2) die("usage: zc toolchain <install [version] | list>");
+        switch (args[1]) {
+          case "install" -> toolchainInstall(args.length >= 3 ? args[2] : pinFromCwd());
+          case "list" -> toolchainList();
+          default -> die("usage: zc toolchain <install [version] | list>");
+        }
+      }
+      case "doctor" -> doctor();
       case "fmt" -> die("zc fmt: not implemented yet");
       case "version", "--version", "-v" -> System.out.println("zc 0.1.0 (zinc on BEAM)");
       default -> {
@@ -113,6 +130,10 @@ public class Zc {
   static void ensureGenerated(Path dir, Map<String, Map<String, String>> cfg) throws IOException {
     var project = cfg.getOrDefault("project", Map.of());
     String name = project.getOrDefault("name", dir.toAbsolutePath().getFileName().toString());
+    if (!name.matches("[a-z][a-z0-9_]*")) {
+      die("zc: project name '" + name + "' must be a valid OTP application name: "
+          + "lowercase letter first, then [a-z0-9_] (set [project] name in zinc.toml)");
+    }
     String vsn = project.getOrDefault("version", "0.1.0");
     var deps = cfg.getOrDefault("deps", Map.of());
 
@@ -214,17 +235,242 @@ public class Zc {
     return v + ".0.0".substring(0, 2 * (3 - v.split("\\.").length));
   }
 
+  // ---- managed toolchain: ~/.zc/otp/<ver> (rustup model — users never apt-install
+  // erlang). Prebuilt portable OTP from hexpm/bob (builds.hex.pm, the Livebook/burrito
+  // source; decision #7: reuse, don't build — revisit if compliance demands it).
+  // Downloads go through Java TLS: corp egress drops Erlang's TLS fingerprint, Java passes.
+
+  static final String[] OTP_FLAVORS = {"ubuntu-22.04", "ubuntu-24.04"};
+
+  static Path zcHome() {
+    String h = System.getenv("ZC_HOME");
+    return h != null ? Path.of(h) : Path.of(System.getProperty("user.home"), ".zc");
+  }
+
+  static String pinFromCwd() throws IOException {
+    Path here = Path.of(".");
+    if (!Files.exists(here.resolve("zinc.toml"))) {
+      die("zc toolchain install: give a version, or run inside a project ([otp] pin)");
+    }
+    String pin = loadToml(here).getOrDefault("otp", Map.of()).get("version");
+    if (pin == null) die("zc toolchain install: zinc.toml has no [otp] version");
+    return pin;
+  }
+
+  static void toolchainInstall(String pin) throws Exception {
+    var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+    if (resolveOtp(pin) != null) {
+      System.out.println("zc: OTP " + resolveOtp(pin).getFileName() + " already installed");
+      ensureRebar3(client);
+      return;
+    }
+    for (String flavor : OTP_FLAVORS) {
+      String base = "https://builds.hex.pm/builds/otp/" + flavor + "/";
+      var builds = client.send(HttpRequest.newBuilder(URI.create(base + "builds.txt")).build(),
+          HttpResponse.BodyHandlers.ofString());
+      if (builds.statusCode() != 200) continue;
+      String best = null;
+      String sha = null;
+      for (String line : builds.body().split("\n")) {
+        String[] f = line.strip().split("\\s+");
+        if (f.length < 4 || !f[0].startsWith("OTP-") || f[0].contains("-rc")) continue;
+        String v = f[0].substring(4);
+        if (!(v.equals(pin) || v.startsWith(pin + "."))) continue;
+        if (best == null || cmpVersion(v, best) > 0) {
+          best = v;
+          sha = f[3];
+        }
+      }
+      if (best == null) continue;
+      System.out.println("zc: downloading OTP " + best + " (" + flavor + ") ...");
+      var tgz = client.send(
+          HttpRequest.newBuilder(URI.create(base + "OTP-" + best + ".tar.gz")).build(),
+          HttpResponse.BodyHandlers.ofByteArray());
+      if (tgz.statusCode() != 200) continue;
+      String got = sha256(tgz.body());
+      if (!got.equalsIgnoreCase(sha)) {
+        die("zc: OTP " + best + " checksum mismatch (want " + sha + ", got " + got + ")");
+      }
+      Path tmp = Files.createTempDirectory("zc-otp");
+      Path tarball = tmp.resolve("otp.tar.gz");
+      Files.write(tarball, tgz.body());
+      exec(tmp, "tar", "xzf", tarball.toString());
+      Path root = tmp.resolve("OTP-" + best);
+      if (!Files.isDirectory(root)) root = tmp; // tolerate flat tarballs
+      execQuiet(root, "sh", "Install", "-minimal", root.toAbsolutePath().toString());
+      // sanity: erl boots and crypto's NIFs load against THIS box's libs — the
+      // check is what picks the flavor, not platform guesswork
+      if (!sanityOtp(root)) {
+        System.out.println("zc: OTP " + best + " (" + flavor + ") does not run here, "
+            + "trying next flavor");
+        continue;
+      }
+      Path dst = zcHome().resolve("otp").resolve(best);
+      Files.createDirectories(dst.getParent());
+      Files.move(root, dst);
+      // Install burned the tmp path into the launch scripts: re-run against the new home
+      execQuiet(dst, "sh", "Install", "-minimal", dst.toAbsolutePath().toString());
+      if (!sanityOtp(dst)) die("zc: OTP " + best + " failed sanity after move");
+      Files.writeString(dst.resolve(".zc-flavor"), flavor + "\n");
+      System.out.println("zc: installed OTP " + best + " -> " + dst);
+      ensureRebar3(client);
+      return;
+    }
+    die("zc: no runnable OTP build found for pin '" + pin + "' (flavors: "
+        + String.join(", ", OTP_FLAVORS) + ")");
+  }
+
+  /** rebar3 is one escript — managed next to the OTP it runs on. */
+  static void ensureRebar3(HttpClient client) throws Exception {
+    Path dst = zcHome().resolve("bin").resolve("rebar3");
+    if (Files.exists(dst)) return;
+    String url = "https://github.com/erlang/rebar3/releases/latest/download/rebar3";
+    System.out.println("zc: downloading rebar3 ...");
+    var resp = client.send(HttpRequest.newBuilder(URI.create(url)).build(),
+        HttpResponse.BodyHandlers.ofByteArray());
+    if (resp.statusCode() != 200) die("zc: fetch " + url + " -> HTTP " + resp.statusCode());
+    Files.createDirectories(dst.getParent());
+    Files.write(dst, resp.body());
+    dst.toFile().setExecutable(true);
+    System.out.println("zc: installed rebar3 -> " + dst);
+  }
+
+  /** Managed escript when present (~/.zc, then the legacy cache), else PATH rebar3. */
+  static String[] rebarCmd(String... args) {
+    var cmd = new ArrayList<String>();
+    String escript = managedOtpBin != null
+        ? managedOtpBin.resolve("escript").toString() : "escript";
+    Path managed = zcHome().resolve("bin").resolve("rebar3");
+    Path cached = Path.of(System.getProperty("user.home"), ".cache", "zinc", "rebar3");
+    if (Files.exists(managed)) {
+      cmd.addAll(List.of(escript, managed.toString()));
+    } else if (Files.exists(cached) && managedOtpBin != null) {
+      cmd.addAll(List.of(escript, cached.toString()));
+    } else {
+      cmd.add("rebar3");
+    }
+    cmd.addAll(List.of(args));
+    return cmd.toArray(String[]::new);
+  }
+
+  static boolean sanityOtp(Path root) {
+    try {
+      var pb = new ProcessBuilder(root.resolve("bin/erl").toString(), "-noshell", "-eval",
+          "{ok,_}=application:ensure_all_started(crypto),io:format(\"ok\"),init:stop().");
+      pb.redirectErrorStream(false);
+      Process p = pb.start();
+      String out = new String(p.getInputStream().readAllBytes());
+      return p.waitFor() == 0 && out.contains("ok");
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  static void toolchainList() throws IOException {
+    Path otp = zcHome().resolve("otp");
+    if (!Files.isDirectory(otp)) {
+      System.out.println("no toolchains installed (zc toolchain install <version>)");
+      return;
+    }
+    try (DirectoryStream<Path> ds = Files.newDirectoryStream(otp)) {
+      for (Path d : ds) {
+        if (!Files.isDirectory(d)) continue;
+        String flavor = Files.exists(d.resolve(".zc-flavor"))
+            ? Files.readString(d.resolve(".zc-flavor")).strip() : "?";
+        System.out.println("otp " + d.getFileName() + "  (" + flavor + ")  " + d);
+      }
+    }
+  }
+
+  /** Highest installed OTP matching the pin ("29" matches 29.0.1), or null. */
+  static Path resolveOtp(String pin) throws IOException {
+    Path otp = zcHome().resolve("otp");
+    if (pin == null || !Files.isDirectory(otp)) return null;
+    Path best = null;
+    try (DirectoryStream<Path> ds = Files.newDirectoryStream(otp)) {
+      for (Path d : ds) {
+        String v = d.getFileName().toString();
+        if (!Files.isDirectory(d.resolve("bin"))) continue;
+        if (!(v.equals(pin) || v.startsWith(pin + "."))) continue;
+        if (best == null || cmpVersion(v, best.getFileName().toString()) > 0) best = d;
+      }
+    }
+    return best;
+  }
+
+  static int cmpVersion(String a, String b) {
+    String[] xs = a.split("\\."), ys = b.split("\\.");
+    for (int i = 0; i < Math.max(xs.length, ys.length); i++) {
+      int x = i < xs.length ? Integer.parseInt(xs[i]) : 0;
+      int y = i < ys.length ? Integer.parseInt(ys[i]) : 0;
+      if (x != y) return Integer.compare(x, y);
+    }
+    return 0;
+  }
+
+  static String sha256(byte[] data) throws Exception {
+    var md = java.security.MessageDigest.getInstance("SHA-256");
+    var sb = new StringBuilder();
+    for (byte b : md.digest(data)) sb.append(String.format("%02x", b));
+    return sb.toString();
+  }
+
+  static void doctor() throws Exception {
+    System.out.println("zc 0.1.0");
+    System.out.println("  ZINC_HOME  " + home);
+    System.out.println("  ZC_HOME    " + zcHome());
+    System.out.println("  java       " + System.getProperty("java.version") + " ("
+        + System.getProperty("java.home") + ")");
+    toolchainList();
+    Path here = Path.of(".");
+    if (Files.exists(here.resolve("zinc.toml"))) {
+      String pin = loadToml(here).getOrDefault("otp", Map.of()).get("version");
+      Path managed = resolveOtp(pin);
+      System.out.println("  project    [otp] " + pin + " -> "
+          + (managed != null ? "managed " + managed
+             : "PATH erl (zc toolchain install " + pin + " to manage)"));
+    }
+    Path rebarManaged = zcHome().resolve("bin").resolve("rebar3");
+    Path rebarCached = Path.of(System.getProperty("user.home"), ".cache", "zinc", "rebar3");
+    System.out.println("  rebar3     " + (Files.exists(rebarManaged) ? rebarManaged
+        : Files.exists(rebarCached) ? rebarCached + " (legacy cache)" : "PATH"));
+  }
+
+  /** Like exec but output only matters on failure. */
+  static void execQuiet(Path dir, String... cmd) throws Exception {
+    var pb = new ProcessBuilder(cmd).directory(dir.toFile());
+    pb.redirectErrorStream(true);
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    if (p.waitFor() != 0) {
+      System.err.print(out);
+      die("zc: " + String.join(" ", cmd) + " failed");
+    }
+  }
+
   // ---- build / run ----
+
+  static Path managedOtpBin; // from the project's [otp] pin, when installed
+
+  /** Resolve the [otp] pin against ~/.zc/otp; all child processes (rebar3, erlc, erl)
+   *  then see the managed toolchain first on PATH. No pin or not installed = PATH/docker
+   *  as before. */
+  static void useManagedOtp(Map<String, Map<String, String>> cfg) throws IOException {
+    Path otp = resolveOtp(cfg.getOrDefault("otp", Map.of()).get("version"));
+    if (otp != null) managedOtpBin = otp.resolve("bin");
+  }
 
   static void build(Path dir) throws Exception {
     var cfg = loadToml(dir);
+    useManagedOtp(cfg);
     ensureGenerated(dir, cfg);
     vendorDeps(dir, cfg);
-    exec(dir, "rebar3", "compile");
+    exec(dir, rebarCmd("compile"));
   }
 
   static void run(Path dir) throws Exception {
-    var cmd = new ArrayList<>(List.of("erl", "-noshell"));
+    String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
+    var cmd = new ArrayList<>(List.of(erl, "-noshell"));
     for (String d : List.of("_build/default/lib", "_build/default/checkouts")) {
       Path base = dir.resolve(d);
       if (!Files.isDirectory(base)) continue;
@@ -245,6 +491,10 @@ public class Zc {
   static void exec(Path dir, String... cmd) throws Exception {
     var pb = new ProcessBuilder(cmd).directory(dir.toFile()).inheritIO();
     pb.environment().put("ZINC_HOME", home.toString());
+    if (managedOtpBin != null) {
+      pb.environment().put("PATH",
+          managedOtpBin + ":" + pb.environment().getOrDefault("PATH", ""));
+    }
     int code = pb.start().waitFor();
     if (code != 0) System.exit(code);
   }
@@ -307,6 +557,9 @@ public class Zc {
           zc clean [dir]        remove build output and generated .erl
           zc add <name@ver>     add a hex dependency to zinc.toml
           zc deps [dir]         list dependencies
+          zc toolchain install [ver]   install a managed OTP into ~/.zc/otp (rustup model)
+          zc toolchain list            list managed toolchains
+          zc doctor             check the install: versions, toolchains, resolution
           zc fmt                (not implemented yet)
           zc version            show version
         """);

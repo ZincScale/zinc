@@ -55,7 +55,11 @@ class CounterTest implements Test {
   }
 }
 EOF
-/work/bin/zc test 1>&2 && echo GREEN-OK
+# assert on the COUNT, not just the exit code: a discovery bug that runs zero
+# tests also exits 0 (this bit us once — fresh projects ran 0 tests)
+green=$(/work/bin/zc test 2>&1); status=$?
+echo "$green" 1>&2
+if [ $status -eq 0 ] && echo "$green" | grep -q "2 tests, 0 failures"; then echo GREEN-OK; fi
 cat > test/CounterTest.zinc <<EOF
 class CounterTest implements Test {
   public void wrongOnPurpose() {

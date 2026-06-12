@@ -520,8 +520,13 @@ made real, and it's pure BEAM strength:
 1–5 (handle syntax, call/cast rule, supervision model, state mutation, multi-module always)
 — **settled in `PLAN.md`**.
 6. **language name** — TBD; blocks the installer domain + CLI final name, nothing before Phase 4.
-7. **portable OTP distribution** — build our own per-platform OTP tarballs vs reuse existing
-   prebuilt ones; decide early in Phase 4.2.
+7. **portable OTP distribution — SETTLED (2026-06-12): reuse hexpm/bob prebuilt
+   builds** (builds.hex.pm — the Livebook/burrito source; checksummed via builds.txt,
+   maintained by the hex team, zero infra for us). Flavor (ubuntu-22.04, -24.04) is
+   picked EMPIRICALLY at install: download, run `erl` + load crypto NIFs on this box,
+   first flavor that passes wins — no platform guesswork (verified: ubuntu-22.04 runs
+   on el9; ubuntu-20.04 has no OTP-29 builds). Revisit owning the builds only if
+   compliance/reproducibility or macOS/Windows demand it.
 8. **`zc.toml` shape** — project manifest (name, version, toolchain pin, deps later in
    Phase 2-FFI era). Keep minimal; decide at `zc new`.
 9. **stdlib namespace strategy — SETTLED (2026-06-11): everything `zinc.*`.** The
@@ -626,10 +631,30 @@ Phase 4 zc-run polish; PID-1 exec in release start script = Phase 5 detail.
   asserted, SIGTERM drain observed. Known v1 waits (in FINDINGS-sqldemo.md):
   checkout/query timeouts not configurable; camelCase record fields vs
   snake_case columns unaddressed; no LISTEN/NOTIFY.
-Next: **Phase 4 (toolchain/installer)** per the phases above — managed runtime
-(pinned JRE + OTP under ~/.zc), `zc` the only visible tool; open decisions #6
-(language name) and #7 (portable OTP) come due there. `System.exit` still waits
-on a batch-job dogfood.
+**Strictness pass DONE (2026-06-12, "language should be rock solid"):**
+known-vs-known checking completed at every declared-type position + modifiers
+enforced (decision #10 settled). Negative-test harness lives in e2e.sh
+(examples/neg/, expected-message asserts); e2e is 52 cases (32 pos + 20 neg).
+**Phase 4 first slice DONE (2026-06-12): the managed toolchain works.**
+`zc toolchain install [ver]` downloads a pinned portable OTP from builds.hex.pm
+(decision #7: reuse bob builds; sha256-verified, Java TLS through the corp
+firewall) into `~/.zc/otp/<ver>`, runs ./Install, and sanity-checks (erl boots +
+crypto NIFs load) — the check picks the flavor, not platform guesswork. rebar3
+(one escript) is managed at `~/.zc/bin/rebar3`. `zc build/run/test/clean`
+resolve the project's `[otp]` pin against `~/.zc/otp` and prepend its bin to
+child PATH — **`zc init` -> `zc run` now works on a bare host: no docker, no
+system Erlang** (docker remains the CI path). `zc doctor` reports versions,
+toolchains, and pin resolution. Landed with it: project names validated as OTP
+app atoms ([a-z][a-z0-9_]*), and a REAL P8 bug fixed — first `zc test` on a
+fresh project ran 0 tests (rebar snapshots the test dir before the pre-compile
+hook transpiles zinc_gen; eunit then misses the .erl). zc test now runs an
+explicit `as test compile` pass first, and zc/test.sh asserts the TEST COUNT,
+not just the exit code (the old harness was green for the wrong reason).
+Remaining in Phase 4: the curl|sh installer + first-run TUI (4.2 — bundles a
+pinned JRE next to OTP so zc needs no host Java; bootstrap script), `zc run
+file.zinc` single-file mode, Ctrl-C BREAK-menu polish, and error source-maps
+(4.3). **Open decision #6 (language name) is now the blocker for the installer
+domain — needs the user.** `System.exit` still waits on a batch-job dogfood.
 ```
 cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh && ./dogfood/sqldemo/test.sh   # green baseline: 31/31 e2e + zc(run+test) + webdemo + sqldemo
 ```
