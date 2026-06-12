@@ -44,6 +44,12 @@ declare -A want=(
   [close]=$'1\nclosed db'
   [modifiers]=$'21\ns3cret'
 )
+# stderr contracts (substring match): streams are part of the language contract —
+# Log.*/crash reports land on stderr, println on stdout
+declare -A wantstderr=(
+  [logging]="warning: about to be clean"
+  [actor_selfheal]="child_terminated"
+)
 # negative cases: each must FAIL transpile with the expected message fragment
 declare -A wanterr=(
   [return_type]="return: cannot bind a String to int"
@@ -93,16 +99,28 @@ for ex in "${examples[@]}"; do
   if ! $ERL erlc -o "$dir" "$dir"/*.erl 2>"$dir/compile.err"; then
     echo "FAIL  $ex (erlc)"; sed 's/^/    /' "$dir/compile.err"; fail=1; continue
   fi
-  got=$($ERL erl -noshell -pa "$dir" -eval "main:main(), init:stop()." 2>"$dir/run.err")
-  if [ "$got" = "${want[$ex]}" ]; then
-    echo "PASS  $ex  ->  $got"
-  else
+  # timeout: a hung drain/deadlock must fail the case, not the suite
+  got=$($ERL timeout 120 erl -noshell -pa "$dir" -eval "main:main(), init:stop()." \
+        2>"$dir/run.err")
+  code=$?
+  if [ $code -ne 0 ]; then
+    # exit code is part of the contract: right output + dirty exit is a FAIL
+    echo "FAIL  $ex  ->  exit $code (want 0)"
+    echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
+    fail=1
+  elif [ "$got" != "${want[$ex]}" ]; then
     echo "FAIL  $ex  ->  got '$got'  want '${want[$ex]}'"
     for f in "$dir"/*.erl; do
       echo "----- generated $(basename "$f") -----"; sed 's/^/    /' "$f"
     done
     echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
     fail=1
+  elif [ -n "${wantstderr[$ex]:-}" ] && ! grep -qF "${wantstderr[$ex]}" "$dir/run.err"; then
+    echo "FAIL  $ex  ->  stderr missing '${wantstderr[$ex]}'"
+    echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
+    fail=1
+  else
+    echo "PASS  $ex  ->  $got"
   fi
 done
 exit $fail
