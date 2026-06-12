@@ -453,6 +453,14 @@ Interleave as needed — all incremental on the existing codegen:
   free (the FFI rule), runtime guards unchanged. Negative harness:
   `examples/neg/*.zinc` must fail transpile with the expected message (e2e).
 - **DONE (2026-06-12): modifiers enforced** — see settled decision #10.
+- **TODO: e2e harness hardening.** e2e asserts stdout only — add (a) exit-code
+  asserts (a case that prints right but exits nonzero passes today), (b) stderr
+  asserts where the contract is about stderr (logging case: Log.* must land on
+  stderr, println on stdout — currently only stdout's cleanliness is checked;
+  crash reports), (c) clean-VM-exit assert for the `close`/drain case (the print
+  arriving proves close ran, nothing proves the drain finished orderly). The
+  zc/test.sh count-assert lesson generalizes: assert the OBSERVABLE CONTRACT,
+  not a proxy for it.
 
 ## Phase 4: **SDK & toolchain — the one-stop shop**
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
