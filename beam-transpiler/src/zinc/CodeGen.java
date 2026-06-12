@@ -1562,7 +1562,7 @@ class CodeGen {
     String vt = varTypes.get(vr.name());
     String vb = vt == null ? null : baseType(vt);
     boolean isMap = "HashMap".equals(vb) || "Map".equals(vb);
-    boolean isList = "ArrayList".equals(vb) || "List".equals(vb);
+    boolean isArrayList = "ArrayList".equals(vb);
     String cur = envGet(env, vr.name());
     String rhs;
     List<String> targs = vt == null ? List.of() : typeArgs(vt);
@@ -1571,8 +1571,17 @@ class CodeGen {
           + guarded(mc.args().get(1), targs, 1, env) + ", " + cur + ")";
     } else if (isMap && mc.method().equals("remove")) {
       rhs = "maps:remove(" + genExpr(mc.args().get(0), env) + ", " + cur + ")";
-    } else if (isList && mc.method().equals("add")) {
-      rhs = cur + " ++ [" + guarded(mc.args().get(0), targs, 0, env) + "]"; // O(n); buffer tier later
+    } else if (isArrayList && mc.method().equals("add")) {
+      // append at size: O(log n) on the array module (++ on a list was O(n^2) in loops)
+      rhs = "array:set(array:size(" + cur + "), "
+          + guarded(mc.args().get(0), targs, 0, env) + ", " + cur + ")";
+    } else if (isArrayList && mc.method().equals("set") && mc.args().size() == 2) {
+      rhs = "array:set(" + genExpr(mc.args().get(0), env) + ", "
+          + guarded(mc.args().get(1), targs, 0, env) + ", " + cur + ")";
+    } else if ("ImmutableList".equals(vb)
+        && List.of("add", "set", "remove", "clear").contains(mc.method())) {
+      throw new CompileError("ImmutableList is read-only — build with an ArrayList, "
+          + "then ImmutableList.copyOf(xs)");
     } else {
       return null;
     }
@@ -1798,6 +1807,18 @@ class CodeGen {
       if (s.varType().equals("var")) {
         varTypes.put(s.varName(), iterType.substring(0, iterType.length() - 2));
       }
+    } else if (iterType != null && baseType(iterType).equals("ArrayList")) {
+      // one O(n) conversion, then the direct-recursion fast path
+      listCode = "array:to_list(" + listCode + ")";
+      List<String> ts = typeArgs(iterType);
+      if (s.varType().equals("var") && ts.size() == 1) {
+        varTypes.put(s.varName(), ts.get(0));
+      }
+    } else if (iterType != null && baseType(iterType).equals("ImmutableList")) {
+      List<String> ts = typeArgs(iterType);
+      if (s.varType().equals("var") && ts.size() == 1) {
+        varTypes.put(s.varName(), ts.get(0));
+      }
     }
     List<String> mut = mutated(s.body(), env);
     var exclude = new LinkedHashSet<String>();
@@ -1954,8 +1975,16 @@ class CodeGen {
           yield "#{}";
         }
         if (x.typeName().equals("ArrayList")) {
-          if (!x.args().isEmpty()) throw new CompileError("new ArrayList takes no args (v1)");
-          yield "[]";
+          // array-module backed: get/set/add O(log n), size O(1) (a list was O(n)/O(n^2))
+          if (x.args().isEmpty()) yield "array:new()";
+          if (x.args().size() == 1) { // copy-in bridge: new ArrayList<>(immutableList)
+            yield "array:from_list(" + genExpr(x.args().get(0), env) + ")";
+          }
+          throw new CompileError("new ArrayList takes no args, or one list to copy");
+        }
+        if (x.typeName().equals("ImmutableList")) {
+          throw new CompileError(
+              "new ImmutableList: use ImmutableList.of(...) or ImmutableList.copyOf(xs)");
         }
         if (x.typeName().equals("Db") || x.typeName().equals("HttpServer")) {
           // long-lived resources live in the tree: ctor acquires, restart heals
@@ -2140,7 +2169,8 @@ class CodeGen {
     String tt = exprType(x.target());
     if ("String".equals(tt)) return genStringMethod(x, env);
     String tb = tt == null ? null : baseType(tt);
-    if ("ArrayList".equals(tb) || "List".equals(tb)) return genListMethod(x, env);
+    if ("ImmutableList".equals(tb)) return genListMethod(x, env);
+    if ("ArrayList".equals(tb)) return genArrayListMethod(x, env);
     if ("HashMap".equals(tb) || "Map".equals(tb)) return genMapMethod(x, env);
     // actor handle: anything statically typed as an actor (var from spawn, params, fields)
     ActorDecl actor = tt == null ? null : allActors.get(tt);
@@ -2531,10 +2561,20 @@ class CodeGen {
         }
         throw new CompileError("unsupported: Arrays." + x.method());
       }
-      case "List" -> {
-        if (x.method().equals("of") && !env.containsKey("List")) {
+      case "ImmutableList" -> {
+        if (x.method().equals("of") && !env.containsKey("ImmutableList")) {
           return "[" + genArgs(x.args(), env) + "]";
         }
+        if (x.method().equals("copyOf") && x.args().size() == 1
+            && !env.containsKey("ImmutableList")) {
+          // bridge out of an ArrayList (a plain list passes through unchanged)
+          String a = genExpr(x.args().get(0), env);
+          String at = exprType(x.args().get(0));
+          return "ArrayList".equals(at == null ? null : baseType(at))
+              ? "array:to_list(" + a + ")" : a;
+        }
+        throw new CompileError("unsupported: ImmutableList." + x.method()
+            + " (of/copyOf)");
       }
       case "Map" -> {
         if (x.method().equals("of") && !env.containsKey("Map")) {
@@ -2621,6 +2661,8 @@ class CodeGen {
     };
   }
 
+  /** ImmutableList: the receive/iterate type — an Erlang list. Read ops only;
+   *  for-each is the intended access (direct recursion, the validated fast path). */
   private String genListMethod(MethodCall x, Map<String, String> env) {
     String r = genExpr(x.target(), env);
     return switch (x.method()) {
@@ -2629,8 +2671,28 @@ class CodeGen {
       case "contains" -> "lists:member(" + genExpr(x.args().get(0), env) + ", " + r + ")";
       case "isEmpty" -> "(" + r + " =:= [])";
       case "toArray" -> "array:from_list(" + r + ")";
-      case "add" -> throw new CompileError("List.add mutates: use it as a statement");
-      default -> throw new CompileError("unsupported: List." + x.method());
+      case "add", "set", "remove", "clear" -> throw new CompileError(
+          "ImmutableList is read-only — build with an ArrayList, then "
+              + "ImmutableList.copyOf(xs)");
+      default -> throw new CompileError("unsupported: ImmutableList." + x.method());
+    };
+  }
+
+  /** ArrayList: the build/index type — array-module backed, honest costs. */
+  private String genArrayListMethod(MethodCall x, Map<String, String> env) {
+    String r = genExpr(x.target(), env);
+    return switch (x.method()) {
+      case "get" -> "array:get(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "size" -> "array:size(" + r + ")";
+      case "isEmpty" -> "(array:size(" + r + ") =:= 0)";
+      case "contains" -> "lists:member(" + genExpr(x.args().get(0), env)
+          + ", array:to_list(" + r + "))";
+      case "toArray" -> r; // already an array term
+      case "add", "set" -> throw new CompileError(
+          "ArrayList." + x.method() + " mutates: use it as a statement");
+      case "remove" -> throw new CompileError(
+          "ArrayList.remove: not supported (v1) — rebuild without the element");
+      default -> throw new CompileError("unsupported: ArrayList." + x.method());
     };
   }
 
@@ -2737,7 +2799,7 @@ class CodeGen {
             yield vr.name();
           }
           if (records.containsKey(vr.name()) && x.method().equals("from")) {
-            yield "List<" + vr.name() + ">";
+            yield "ImmutableList<" + vr.name() + ">";
           }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
           if (vr.name().equals("Router")) yield "Router";
@@ -2746,9 +2808,11 @@ class CodeGen {
           if (vr.name().equals("Math")) yield exprType(x.args().get(0));
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
           if (vr.name().equals("String")) yield x.method().equals("valueOf") ? "String" : null;
-          if (vr.name().equals("Arrays")) yield x.method().equals("asList") ? "List" : null;
-          if (vr.name().equals("List") && !varTypes.containsKey("List")) {
-            yield x.method().equals("of") ? "List" : null;
+          if (vr.name().equals("Arrays")) {
+            yield x.method().equals("asList") ? "ImmutableList" : null;
+          }
+          if (vr.name().equals("ImmutableList") && !varTypes.containsKey("ImmutableList")) {
+            yield List.of("of", "copyOf").contains(x.method()) ? "ImmutableList" : null;
           }
           if (vr.name().equals("Map") && !varTypes.containsKey("Map")) {
             yield x.method().equals("of") ? "Map" : null;
@@ -2776,13 +2840,13 @@ class CodeGen {
             case "toUpperCase", "toLowerCase", "trim", "strip", "substring", "replace",
                 "repeat" -> "String";
             case "split" -> "String[]";
-            case "toCharArray" -> "List";
+            case "toCharArray" -> "ImmutableList";
             default -> null;
           };
         }
         List<String> targs = tt == null ? List.of() : typeArgs(tt);
         tt = tt == null ? null : baseType(tt);
-        if ("ArrayList".equals(tt) || "List".equals(tt)) {
+        if ("ArrayList".equals(tt) || "ImmutableList".equals(tt)) {
           yield switch (x.method()) {
             case "size" -> "int";
             case "contains", "isEmpty" -> "boolean";
@@ -2822,7 +2886,7 @@ class CodeGen {
         }
         if ("Db".equals(tt) || "Tx".equals(tt)) {
           yield switch (x.method()) {
-            case "query" -> "List";
+            case "query" -> "ImmutableList";
             case "exec" -> "int";
             default -> null; // transaction: the lambda's result, unknown (v1)
           };

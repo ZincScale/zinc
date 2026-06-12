@@ -460,11 +460,17 @@ Interleave as needed — all incremental on the existing codegen:
   (lists:nth O(n) each). These are THE two everyday Java idioms — accumulate-into-list
   and index-for — so today's lowerings violate the LOWERING_SPEC forbidden tier
   ("never back arrays with list-update") in spirit.
-  **Proposal:** split the two types we already distinguish — `ArrayList<T>` re-backed
-  by the array module (a growable indexed VALUE: get/set/add O(log n), size O(1) —
-  Java-shaped and fast); `List<T>` stays an Erlang list (literals, List.of, sql rows,
-  split results — iteration-first data; for-each already lowers to direct recursion,
-  the validated fast path). `toArray`/`Arrays.asList` remain the explicit bridges.
+  **SETTLED + IMPLEMENTED (user decision 2026-06-12): `ImmutableList` + `ArrayList`,
+  different purposes; `List` is NOT a zinc type** (user: no interface games, no dead
+  reserved words — `List` gets no special casing at all, it's an unknown identifier
+  like any other). `ImmutableList<T>` = receive/iterate (Erlang list; of/copyOf
+  factories; get/size/contains/isEmpty + for-each fast path; mutators = transpile
+  error). `ArrayList<T>` = build/index (array module: add appends at size O(log n),
+  get/set O(log n), size O(1); new ArrayList<>(xs) copies in,
+  ImmutableList.copyOf(xs) bridges out; remove deferred). e2e `arraylist` proves it:
+  500k appends + copyOf + iterate — the old ++ lowering would blow the suite timeout.
+  Maps were left as-is (Map/HashMap, no perf hole) — revisit naming consistency
+  (ImmutableMap?) only if it earns it.
   **Already right (audited, no action):** for-each = direct tail recursion (1.85–2×
   foldl, beam-lab); `s += ...` = amortized-O(1) binary append (StringBuilder is
   UNNECESSARY in zinc — document this; concat chains flatten to one construction);

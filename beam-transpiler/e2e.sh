@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -43,6 +43,7 @@ declare -A want=(
   [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
   [close]=$'1\nclosed db'
   [modifiers]=$'21\ns3cret'
+  [arraylist]=$'500000\n250000\n7\n999997'
 )
 # stderr contracts (substring match): streams are part of the language contract —
 # Log.*/crash reports land on stderr, println on stdout
@@ -72,6 +73,7 @@ declare -A wanterr=(
   [mod_final_local]="mod_final_local.zinc:4: final variable 'x' cannot be reassigned"
   [mod_final_field]="final field 'n' cannot be reassigned"
   [mod_main_nonpublic]="public static void main"
+  [immutable_add]="ImmutableList is read-only"
 )
 
 fail=0

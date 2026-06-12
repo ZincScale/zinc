@@ -17,7 +17,7 @@ public class Main implements Application {
     System.out.println(db.exec("insert into users values ($1, $2)", "7", "vin")); // 1
 
     var rows = db.query("select id, name from users where id = $1", "7");
-    List<User> us = User.from(rows);
+    ImmutableList<User> us = User.from(rows);
     System.out.println(us.get(0).name());   // vin   <- derived row mapping
     String id = rows.get(0).get("id");      // dynamic row, guarded typed bind
     System.out.println(id);                 // 7
