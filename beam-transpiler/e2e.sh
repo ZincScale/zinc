@@ -96,6 +96,8 @@ for ex in "${!wanterr[@]}"; do
   fi
 done
 
+# phase 1: transpile everything on the host (no docker involved)
+runnable=()
 for ex in "${examples[@]}"; do
   dir="out/$ex"
   rm -rf "$dir" && mkdir -p "$dir"
@@ -104,14 +106,37 @@ for ex in "${examples[@]}"; do
   if ! "$JAVA" src/zinc/Main.java "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
-  if ! $ERL erlc -o "$dir" "$dir"/*.erl 2>"$dir/compile.err"; then
+  runnable+=("$ex")
+done
+
+# phase 2: ONE container compiles + runs every case (was 2 container spins per case —
+# ~110 per suite; this is the entire docker cost now)
+rm -f out/.codes
+{
+  echo 'set -u'
+  for ex in "${runnable[@]}"; do
+    cat <<EOS
+if erlc -o out/$ex out/$ex/*.erl 2> out/$ex/compile.err; then
+  timeout 120 erl -noshell -pa out/$ex -eval "main:main(), init:stop()." \
+    > out/$ex/run.out 2> out/$ex/run.err
+  echo "$ex:\$?" >> out/.codes
+else
+  echo "$ex:erlc" >> out/.codes
+fi
+EOS
+  done
+} > out/.runner.sh
+$ERL sh out/.runner.sh
+
+# phase 3: assert each case from the artifacts
+for ex in "${runnable[@]}"; do
+  dir="out/$ex"
+  code=$(grep "^$ex:" out/.codes | head -1 | cut -d: -f2)
+  if [ "$code" = "erlc" ]; then
     echo "FAIL  $ex (erlc)"; sed 's/^/    /' "$dir/compile.err"; fail=1; continue
   fi
-  # timeout: a hung drain/deadlock must fail the case, not the suite
-  got=$($ERL timeout 120 erl -noshell -pa "$dir" -eval "main:main(), init:stop()." \
-        2>"$dir/run.err")
-  code=$?
-  if [ $code -ne 0 ]; then
+  got=$(cat "$dir/run.out")
+  if [ "${code:-1}" -ne 0 ]; then
     # exit code is part of the contract: right output + dirty exit is a FAIL
     echo "FAIL  $ex  ->  exit $code (want 0)"
     echo "----- run stderr -----"; sed 's/^/    /' "$dir/run.err"
