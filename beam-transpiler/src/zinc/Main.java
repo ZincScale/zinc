@@ -148,6 +148,10 @@ public class Main {
                 + ": return type " + impl.get().retType() + " does not match "
                 + c.iface() + "'s " + sig.retType());
           }
+          if (impl.get().isPrivate()) {
+            throw new CompileError("class " + c.name() + "." + sig.name()
+                + " implements " + c.iface() + ": interface methods are public");
+          }
         }
       }
       if (application != null) {
@@ -157,9 +161,14 @@ public class Main {
         }
       } else {
         ClassInfo entry = classes.get("Main");
-        if (entry == null || !entry.methods().containsKey("main/1")) {
+        Ast.MethodDecl entryMain = entry == null ? null : entry.methods().get("main/1");
+        if (entryMain == null) {
           throw new CompileError(
               "project needs a class Main with main(String[] args), or an Application");
+        }
+        if (!entryMain.mods().contains("public")) {
+          throw new CompileError(
+              "Main.main: the entrypoint is 'public static void main(String[] args)'");
         }
       }
 

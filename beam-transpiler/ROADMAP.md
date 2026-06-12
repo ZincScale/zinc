@@ -445,19 +445,14 @@ Interleave as needed — all incremental on the existing codegen:
 - **surface `try`/`catch`** — user-facing error handling (throw/catch already proven)
 - **`switch`/`match`** — pattern matching
 - **tuples / multiple return**, optionally **lambdas / first-class functions**
-- **TODO (2026-06-12): finish known-vs-known checking.** The settled P4 doctrine
-  (known-vs-known mismatch = transpile error) is implemented at exactly ONE
-  position: typed local binds. Probes confirm all of these transpile today:
-  `int f() { return "hi"; }` (return vs declared return type), `f("hi")` for
-  `f(int x)` (call args — arity checked, types not, across all dispatch
-  families: class statics, actor methods, instance classes, interfaces, record
-  ctors), `int x = "hi"` as a field init, and `x = "hi"` reassignment of a
-  declared int. Fix = apply the existing checkBind at every declared-type
-  position; unknown still flows free (the FFI rule), runtime guards unchanged.
-  No new design needed.
-- **TODO: enforce modifiers** — surface that parses must mean something; today
-  public/private/protected/static/final are skipped (sole consumer: `public
-  void` zero-arg = test case). Semantics need decision #10 first.
+- **DONE (2026-06-12): known-vs-known checking completed.** checkBind now fires
+  at every declared-type position — returns (incl. void misuse + SAM lambda
+  results), call args across all dispatch families, ctor args (records, instance
+  classes, spawns, exception throws, Application children incl. builtin
+  Db/HttpServer signatures), field inits, reassignments. Unknown still flows
+  free (the FFI rule), runtime guards unchanged. Negative harness:
+  `examples/neg/*.zinc` must fail transpile with the expected message (e2e).
+- **DONE (2026-06-12): modifiers enforced** — see settled decision #10.
 
 ## Phase 4: **SDK & toolchain — the one-stop shop**
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
@@ -537,16 +532,20 @@ made real, and it's pure BEAM strength:
    flat under zinc: `zinc.http` (client over httpc, server over cowboy), `zinc.net`
    (sockets over gen_tcp). `java.*` is reserved — declaring or importing it is a
    transpile error that names the zinc equivalent.
-10. **modifier semantics — OPEN (raised 2026-06-12, proposals not yet settled).**
-   Principle agreed: accepted syntax must be enforced or rejected, never silently
-   decorative. Proposed (pending user decision): `private` = callable only inside
-   the declaring class, honest lowering = not exported from the Erlang module; no
-   modifier = public (don't fake package-private); `protected` = transpile error
-   (no inheritance in zinc); `static` = required on plain-utility-class methods,
-   rejected on instance/Actor methods (consistency with the class-kind truth);
-   `final` = allowed where already true (fields), enforced on locals (no
-   reassign), rejected on classes/methods. Needs mods kept in the AST (parser
-   currently discards them).
+10. **modifier semantics — SETTLED + IMPLEMENTED (2026-06-12, "language should be
+   rock solid").** Principle: accepted syntax is enforced or rejected, never
+   silently decorative. As implemented: `private` = same-class only, transpile
+   error elsewhere, and the honest lowering — private functions are NOT exported
+   from the Erlang module (same-class qualified calls lower to local calls);
+   rejected on Actor methods (an Actor's methods are its protocol; helpers belong
+   in a utility class); interface implementations must be public. No modifier =
+   public (no fake package-private). `protected` = error (no inheritance).
+   `static` = required on utility-class methods, required+public on main,
+   rejected on Actor/instance/Test methods and all fields. `final` = enforced on
+   locals (no reassign; arrays are values so element-assign counts), on actor
+   fields = set at construction (ctor may assign), frozen across messages;
+   rejected on methods (no inheritance). Test classes keep the JUnit-3 shape
+   (public void zero-arg = case). e2e: `modifiers` positive + 8 neg cases.
 
 ## Start here next session
 **SPEC + STDLIB: IMPLEMENTED AND VERIFIED (2026-06-11).** The v1 spec is code: marker

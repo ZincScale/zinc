@@ -38,6 +38,7 @@ class CodeGen {
   private String curModule;
   private String curClassName;
   private String curRetType; // enclosing method's declared return type; null = unknown
+  private final Set<String> finalVars = new LinkedHashSet<>(); // per method body
   private boolean inActor = false;
   private Map<String, String> varTypes = new HashMap<>();       // var -> type, per method
   private int ctr = 0;
@@ -263,6 +264,9 @@ class CodeGen {
         && m2.params().size() == x.args().size()).findFirst().orElseThrow(
             () -> new CompileError("class " + ic.name() + " has no method " + x.method()
                 + "/" + x.args().size()));
+    if (m.isPrivate() && !ic.name().equals(curClassName)) {
+      throw new CompileError(ic.name() + "." + x.method() + " is private");
+    }
     checkArgs(ic.name() + "." + x.method(), m.params(), x.args());
   }
 
@@ -803,6 +807,7 @@ class CodeGen {
 
     // new(CtorArgs) -> #{'$class' => 'mod', field => ...}
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = null; // ctor: returns already rejected below
     var env = new HashMap<String, String>();
     var ps = new ArrayList<String>();
@@ -848,6 +853,7 @@ class CodeGen {
 
   private String genInstanceMethod(Ast.InstanceClassDecl c, MethodDecl m) {
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = m.retType();
     var env = new HashMap<String, String>();
     String self = fresh("this");
@@ -964,6 +970,7 @@ class CodeGen {
    *  (root children register under the field name — declaration is composition). */
   private String genAppMain(Ast.ApplicationDecl app) {
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = app.main().retType();
     var env = new HashMap<String, String>();
     for (FieldDecl f : app.fields()) {
@@ -1016,6 +1023,7 @@ class CodeGen {
       pieces.add("run() -> main()."); // script: no static children, exit after main
     }
     for (var m : c.methods()) {
+      if (m.isPrivate()) continue; // honest lowering: private = not exported
       String n = isMain && m.name().equals("main") ? "user_main" : m.name();
       exports.add(n + "/" + m.params().size());
     }
@@ -1036,7 +1044,10 @@ class CodeGen {
     var defs = new ArrayList<String>();
     for (var m : t.methods()) defs.add(genFn(m));
     var exports = new ArrayList<String>(List.of("'$zinc_test_'/0"));
-    for (var m : t.methods()) exports.add(m.name() + "/" + m.params().size());
+    for (var m : t.methods()) {
+      if (m.isPrivate()) continue;
+      exports.add(m.name() + "/" + m.params().size());
+    }
     var entries = new ArrayList<String>();
     for (String name : t.testMethods()) {
       entries.add("{<<\"" + t.name() + "." + name + "\">>, {timeout, 60, {spawn, fun "
@@ -1104,6 +1115,7 @@ class CodeGen {
 
   private String genFn(MethodDecl m) {
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = m.retType();
     var env = new HashMap<String, String>();
     var params = new ArrayList<String>();
@@ -1142,6 +1154,18 @@ class CodeGen {
 
   private String genActorModule(ActorDecl a) {
     MethodDecl close = closeHook(a);
+    // final fields: set at construction (init or ctor), frozen across messages
+    for (FieldDecl f : a.fields()) {
+      if (!f.mods().contains("final")) continue;
+      for (MethodDecl m : a.methods()) {
+        var assigned = new LinkedHashSet<String>();
+        collectAssigned(m.body(), assigned);
+        if (assigned.contains(f.name())) {
+          throw new CompileError("actor " + a.name() + "." + m.name()
+              + ": final field '" + f.name() + "' cannot be reassigned");
+        }
+      }
+    }
     var casts = new ArrayList<String>();
     var calls = new ArrayList<String>();
     for (MethodDecl m : a.methods()) {
@@ -1197,6 +1221,7 @@ class CodeGen {
 
   private String genInit(ActorDecl a) {
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = null; // ctor: returns already rejected below
     var env = new HashMap<String, String>();
     String self = fresh("self");
@@ -1251,6 +1276,7 @@ class CodeGen {
           + ".close: void methods cannot return a value");
     }
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = "void";
     var env = new HashMap<String, String>();
     var lines = new ArrayList<String>();
@@ -1290,6 +1316,7 @@ class CodeGen {
   /** One handle_cast/handle_call clause: fields seeded via maps:get, SSA body, new state map. */
   private String genHandler(ActorDecl a, MethodDecl m, boolean isCall) {
     varTypes = new HashMap<>();
+    finalVars.clear();
     curRetType = m.retType();
     var env = new HashMap<String, String>();
     var params = new ArrayList<String>();
@@ -1371,6 +1398,7 @@ class CodeGen {
       switch (s) {
         case VarStmt st -> {
           String v = fresh(st.name());
+          if (st.isFinal()) finalVars.add(st.name());
           if (!st.type().equals("var") && st.init() != null) {
             checkBind(st.type(), exprType(st.init()), st.name());
           }
@@ -1411,6 +1439,9 @@ class CodeGen {
           env.put(st.name(), v);
         }
         case AssignStmt st -> {
+          if (finalVars.contains(st.name())) {
+            throw new CompileError("final variable '" + st.name() + "' cannot be reassigned");
+          }
           String cur = envGet(env, st.name());
           String rhs;
           if (st.op().equals("+=") && (isStr(new VarRef(st.name())) || isStr(st.value()))) {
@@ -1465,6 +1496,10 @@ class CodeGen {
           out.add(rebind != null ? rebind : genExpr(st.expr(), env));
         }
         case IndexAssignStmt st -> {
+          if (finalVars.contains(st.arrVar())) {
+            throw new CompileError("final variable '" + st.arrVar()
+                + "' cannot be assigned (zinc arrays are values — final freezes them)");
+          }
           String t = varTypes.get(st.arrVar());
           if (t == null || !t.endsWith("[]")) {
             throw new CompileError("index assignment needs an array-typed variable, '"
@@ -2499,7 +2534,14 @@ class CodeGen {
         if (md == null) {
           throw new CompileError("class " + name + " has no method " + key);
         }
+        if (md.isPrivate() && !name.equals(curClassName)) {
+          throw new CompileError(name + "." + x.method() + " is private");
+        }
         checkArgs(name + "." + x.method(), md.params(), x.args());
+        // same-class qualified call: local function (privates are not exported)
+        if (name.equals(curClassName)) {
+          return fnName(x.method()) + "(" + genArgs(x.args(), env) + ")";
+        }
         return atomLit(ci.module()) + ":" + x.method() + "(" + genArgs(x.args(), env) + ")";
       }
       // FFI: erlang module, no arity check (signatures unknown; runtime reports undef)

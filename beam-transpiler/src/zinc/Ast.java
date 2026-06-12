@@ -55,7 +55,16 @@ final class Ast {
     }
   }
 
-  record MethodDecl(String retType, String name, List<Param> params, Block body) {}
+  record MethodDecl(String retType, String name, List<Param> params, Block body,
+      java.util.Set<String> mods) {
+    MethodDecl(String retType, String name, List<Param> params, Block body) {
+      this(retType, name, params, body, java.util.Set.of());
+    }
+
+    boolean isPrivate() {
+      return mods.contains("private");
+    }
+  }
 
   record Param(String type, String name) {}
 
@@ -73,14 +82,22 @@ final class Ast {
   }
 
   /** init is null for `int count;` — defaulted by type (0, 0.0, false, "", undefined). */
-  record FieldDecl(String type, String name, Expr init) {}
+  record FieldDecl(String type, String name, Expr init, java.util.Set<String> mods) {
+    FieldDecl(String type, String name, Expr init) {
+      this(type, name, init, java.util.Set.of());
+    }
+  }
 
   record Block(List<Stmt> stmts) {}
 
   sealed interface Stmt {}
 
   /** type is the declared type, or "var" to infer from init. */
-  record VarStmt(String type, String name, Expr init) implements Stmt {}
+  record VarStmt(String type, String name, Expr init, boolean isFinal) implements Stmt {
+    VarStmt(String type, String name, Expr init) {
+      this(type, name, init, false);
+    }
+  }
 
   record AssignStmt(String name, String op, Expr value) implements Stmt {}
 

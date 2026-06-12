@@ -90,7 +90,11 @@ class Parser {
     expect(TokKind.LBRACE, "'{'");
     var sigs = new ArrayList<MethodDecl>();
     while (!check(TokKind.RBRACE)) {
-      skipModifiers();
+      Set<String> mods = skipModifiers();
+      if (mods.contains("private") || mods.contains("static") || mods.contains("final")) {
+        throw new CompileError("interface " + name
+            + ": method signatures are implicitly public (no private/static/final)");
+      }
       String ret = parseType();
       String mName = expect(TokKind.IDENT, "method name").text();
       List<Param> params = parseParams();
@@ -126,13 +130,51 @@ class Parser {
     return new Import(path);
   }
 
-  /** Skips modifiers; returns the set seen (test-case selection needs 'public'). */
+  /** Collects modifiers. Decision #10: accepted syntax is enforced or rejected,
+   *  never silently decorative — every consumer validates what it allows. */
   private Set<String> skipModifiers() {
     var seen = new java.util.HashSet<String>();
     while (check(TokKind.IDENT) && MODIFIERS.contains(cur().text())) {
       seen.add(advance().text());
     }
+    if (seen.contains("protected")) {
+      throw new CompileError("'protected' has no meaning — zinc has no inheritance; "
+          + "use private or public");
+    }
+    if (seen.contains("public") && seen.contains("private")) {
+      throw new CompileError("a member cannot be both public and private");
+    }
     return seen;
+  }
+
+  private void checkMethodMods(Set<String> mods, String where, boolean staticRequired,
+      boolean privateOk) {
+    if (mods.contains("final")) {
+      throw new CompileError(where + ": 'final' on methods has no meaning — "
+          + "zinc has no inheritance");
+    }
+    if (staticRequired && !mods.contains("static")) {
+      throw new CompileError(where + ": utility-class methods are static — add 'static' "
+          + "(instance state lives in Actors and instance classes)");
+    }
+    if (!staticRequired && mods.contains("static")) {
+      throw new CompileError(where + ": 'static' does not belong here — "
+          + "these methods run against an instance");
+    }
+    if (!privateOk && mods.contains("private")) {
+      throw new CompileError(where + ": cannot be private — an Actor's methods are its "
+          + "protocol; private helpers belong in a utility class");
+    }
+  }
+
+  private void checkFieldMods(Set<String> mods, String where) {
+    if (mods.contains("static")) {
+      throw new CompileError(where + ": static fields are not supported (v1)");
+    }
+    if (mods.contains("public")) {
+      throw new CompileError(where + ": fields are encapsulated — no public fields; "
+          + "expose state through methods");
+    }
   }
 
   /** Base, generic or array type: int, List<String>, Map<String, Integer>, int[], var.
@@ -184,14 +226,14 @@ class Parser {
     if (marker == null) {
       classes.add(parseClassBody(name));
     } else if (marker.equals("Actor")) {
-      actors.add(parseActorBody(name));
+      actors.add(parseActorBody(name, "Actor"));
     } else if (marker.equals("Test")) {
       tests.add(parseTestBody(name));
     } else if (marker.equals("Application")) {
       if (application[0] != null) {
         throw new CompileError("more than one Application in this file");
       }
-      ActorDecl body = parseActorBody(name); // same body shape: fields + methods
+      ActorDecl body = parseActorBody(name, "Application"); // same body shape
       if (body.ctor() != null) {
         throw new CompileError("Application " + name + " cannot have a constructor");
       }
@@ -201,12 +243,16 @@ class Parser {
           throw new CompileError("Application " + name + " can only declare main(String[]):"
               + " it is the boundary, not a unit — methods live on Actors");
         }
+        if (!m.mods().contains("public")) {
+          throw new CompileError(name
+              + ".main: the entrypoint is 'public static void main(String[] args)'");
+        }
         main = m;
       }
       application[0] = new ApplicationDecl(name, body.fields(), main);
     } else {
       // user interface: an instance class — module + map term, ctor-set immutable fields
-      ActorDecl body = parseActorBody(name);
+      ActorDecl body = parseActorBody(name, "instance class");
       instanceClasses.add(
           new InstanceClassDecl(name, marker, body.fields(), body.ctor(), body.methods()));
     }
@@ -216,8 +262,10 @@ class Parser {
     expect(TokKind.LBRACE, "'{'");
     var methods = new ArrayList<MethodDecl>();
     while (!check(TokKind.RBRACE)) {
-      skipModifiers();
-      methods.add(parseMethod());
+      Set<String> mods = skipModifiers();
+      MethodDecl m = parseMethod(mods);
+      checkMethodMods(mods, name + "." + m.name(), true, true);
+      methods.add(m);
     }
     expect(TokKind.RBRACE, "'}'");
     return new ClassDecl(name, methods);
@@ -231,7 +279,11 @@ class Parser {
     var testNames = new ArrayList<String>();
     while (!check(TokKind.RBRACE)) {
       Set<String> mods = skipModifiers();
-      MethodDecl m = parseMethod();
+      MethodDecl m = parseMethod(mods);
+      if (mods.contains("static") || mods.contains("final")) {
+        throw new CompileError(name + "." + m.name()
+            + ": test methods follow the JUnit-3 shape — public void name(), no static/final");
+      }
       methods.add(m);
       if (mods.contains("public") && m.retType().equals("void") && m.params().isEmpty()) {
         testNames.add(m.name());
@@ -245,13 +297,13 @@ class Parser {
     return new TestDecl(name, methods, testNames);
   }
 
-  private MethodDecl parseMethod() {
+  private MethodDecl parseMethod(Set<String> mods) {
     String ret = parseType();
     String name = expect(TokKind.IDENT, "method name").text();
     if (!check(TokKind.LPAREN)) {
       throw new CompileError("static fields are not supported (v1), at line " + cur().line());
     }
-    return new MethodDecl(ret, name, parseParams(), parseBlock());
+    return new MethodDecl(ret, name, parseParams(), parseBlock(), mods);
   }
 
   private List<Param> parseParams() {
@@ -281,39 +333,51 @@ class Parser {
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
     while (!check(TokKind.RBRACE)) {
-      skipModifiers();
+      Set<String> mods = skipModifiers();
       String type = parseType();
       String fieldName = expect(TokKind.IDENT, "field name").text();
+      checkFieldMods(mods, name + "." + fieldName);
       expect(TokKind.SEMI, "';' (exception classes hold fields only, v1)");
-      fields.add(new FieldDecl(type, fieldName, null));
+      fields.add(new FieldDecl(type, fieldName, null, mods));
     }
     expect(TokKind.RBRACE, "'}'");
     return new ExceptionDecl(name, fields);
   }
 
-  private ActorDecl parseActorBody(String name) {
+  /** Shared body shape for Actor / Application / instance classes; `kind` picks the
+   *  modifier rules: Application methods (main) are static, the others never are;
+   *  private methods only make sense on instance classes (Actor methods = protocol). */
+  private ActorDecl parseActorBody(String name, String kind) {
+    boolean isApp = kind.equals("Application");
+    boolean isInstance = kind.equals("instance class");
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
     var methods = new ArrayList<MethodDecl>();
     MethodDecl ctor = null;
     while (!check(TokKind.RBRACE)) {
-      skipModifiers();
+      Set<String> mods = skipModifiers();
       String type = parseType();
       if (type.equals(name) && check(TokKind.LPAREN)) { // constructor
         if (ctor != null) throw new CompileError("Actor " + name + ": duplicate constructor");
-        ctor = new MethodDecl("", name, parseParams(), parseBlock());
+        if (mods.contains("static") || mods.contains("final") || mods.contains("private")) {
+          throw new CompileError(name + ": a constructor takes no modifiers (public is ok)");
+        }
+        ctor = new MethodDecl("", name, parseParams(), parseBlock(), mods);
         continue;
       }
       String memberName = expect(TokKind.IDENT, "member name").text();
       if (check(TokKind.LPAREN)) {
-        methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock()));
+        checkMethodMods(mods, name + "." + memberName, isApp, isInstance);
+        methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock(), mods));
       } else if (match(TokKind.ASSIGN)) {
+        checkFieldMods(mods, name + "." + memberName);
         Expr init = parseExpr();
         expect(TokKind.SEMI, "';'");
-        fields.add(new FieldDecl(type, memberName, init));
+        fields.add(new FieldDecl(type, memberName, init, mods));
       } else {
+        checkFieldMods(mods, name + "." + memberName);
         expect(TokKind.SEMI, "';'");
-        fields.add(new FieldDecl(type, memberName, null)); // defaulted by type
+        fields.add(new FieldDecl(type, memberName, null, mods)); // defaulted by type
       }
     }
     expect(TokKind.RBRACE, "'}'");
@@ -378,6 +442,15 @@ class Parser {
         }
         if (checkIdent("switch") && toks.get(pos + 1).kind() == TokKind.LPAREN) {
           return parseSwitch();
+        }
+        if (checkIdent("final")) { // final local: declaration that can't be reassigned
+          advance();
+          if (!looksLikeDecl()) {
+            throw new CompileError("'final' precedes a variable declaration, at line "
+                + cur().line());
+          }
+          VarStmt v = (VarStmt) parseLocalDecl();
+          return new VarStmt(v.type(), v.name(), v.init(), true);
         }
         if (looksLikeDecl()) return parseLocalDecl();
         Stmt s = parseSimpleStmt();

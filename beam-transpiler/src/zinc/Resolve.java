@@ -66,7 +66,7 @@ final class Resolve {
 
   private Ast.InstanceClassDecl instClass(Ast.InstanceClassDecl c) {
     List<FieldDecl> fields = c.fields().stream()
-        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()))).toList();
+        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()), f.mods())).toList();
     return new Ast.InstanceClassDecl(c.name(), c.iface(), fields,
         c.ctor() == null ? null : method(c.ctor()),
         c.methods().stream().map(this::method).toList());
@@ -75,7 +75,7 @@ final class Resolve {
   private ApplicationDecl app(ApplicationDecl a) {
     if (a == null) return null;
     List<FieldDecl> fields = a.fields().stream()
-        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()))).toList();
+        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()), f.mods())).toList();
     return new ApplicationDecl(a.name(), fields, a.main() == null ? null : method(a.main()));
   }
 
@@ -85,13 +85,13 @@ final class Resolve {
 
   private ActorDecl actor(ActorDecl a) {
     List<FieldDecl> fields = a.fields().stream()
-        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()))).toList();
+        .map(f -> new FieldDecl(f.type(), f.name(), expr(f.init()), f.mods())).toList();
     return new ActorDecl(a.name(), fields, a.ctor() == null ? null : method(a.ctor()),
         a.methods().stream().map(this::method).toList());
   }
 
   private MethodDecl method(MethodDecl m) {
-    return new MethodDecl(m.retType(), m.name(), m.params(), block(m.body()));
+    return new MethodDecl(m.retType(), m.name(), m.params(), block(m.body()), m.mods());
   }
 
   private Block block(Block b) {
@@ -100,7 +100,7 @@ final class Resolve {
 
   private Stmt stmt(Stmt s) {
     return switch (s) {
-      case VarStmt x -> new VarStmt(x.type(), x.name(), expr(x.init()));
+      case VarStmt x -> new VarStmt(x.type(), x.name(), expr(x.init()), x.isFinal());
       case AssignStmt x -> new AssignStmt(x.name(), x.op(), expr(x.value()));
       case FieldAssignStmt x ->
           new FieldAssignStmt(x.objVar(), x.field(), x.op(), expr(x.value()));

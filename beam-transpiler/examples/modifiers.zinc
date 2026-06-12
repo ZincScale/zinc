@@ -1,0 +1,20 @@
+// Modifiers are enforced, not decorative: private = same-class only (and not
+// exported from the Erlang module), final = construction-frozen. The ctor may
+// set a final field; methods may not.
+class Vault implements Actor {
+  final String key;
+  int reads = 0;
+  Vault(String k) { key = k; }
+  String get() { reads = reads + 1; return key; }
+}
+
+public class Main {
+  private static int twice(int x) { return x * 2; }
+
+  public static void main(String[] args) {
+    final int base = 10;
+    System.out.println(twice(base) + 1);   // 21
+    Vault v = new Vault("s3cret");
+    System.out.println(v.get());           // s3cret
+  }
+}

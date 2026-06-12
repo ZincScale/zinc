@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -42,6 +42,7 @@ declare -A want=(
   [switchenum]=$'cool\nmany'
   [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
   [close]=$'1\nclosed db'
+  [modifiers]=$'21\ns3cret'
 )
 # negative cases: each must FAIL transpile with the expected message fragment
 declare -A wanterr=(
@@ -57,6 +58,14 @@ declare -A wanterr=(
   [exc_field]="throw new Boom ('message'): cannot bind a int to String"
   [app_child_arg]="new Db arg 1 ('url'): cannot bind a int to String"
   [lambda_ret]="return: cannot bind a int to String"
+  [mod_protected]="'protected' has no meaning"
+  [mod_nonstatic]="Main.f: utility-class methods are static"
+  [mod_static_actor]="C.get: 'static' does not belong here"
+  [mod_private_actor]="C.get: cannot be private"
+  [mod_private_cross]="Util.secret is private"
+  [mod_final_local]="final variable 'x' cannot be reassigned"
+  [mod_final_field]="final field 'n' cannot be reassigned"
+  [mod_main_nonpublic]="public static void main"
 )
 
 fail=0

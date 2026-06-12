@@ -1,0 +1,6 @@
+class Util {
+  private static int secret() { return 7; }
+}
+public class Main {
+  public static void main(String[] args) { System.out.println(Util.secret()); }
+}
