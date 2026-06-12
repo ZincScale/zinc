@@ -445,6 +445,19 @@ Interleave as needed — all incremental on the existing codegen:
 - **surface `try`/`catch`** — user-facing error handling (throw/catch already proven)
 - **`switch`/`match`** — pattern matching
 - **tuples / multiple return**, optionally **lambdas / first-class functions**
+- **TODO (2026-06-12): finish known-vs-known checking.** The settled P4 doctrine
+  (known-vs-known mismatch = transpile error) is implemented at exactly ONE
+  position: typed local binds. Probes confirm all of these transpile today:
+  `int f() { return "hi"; }` (return vs declared return type), `f("hi")` for
+  `f(int x)` (call args — arity checked, types not, across all dispatch
+  families: class statics, actor methods, instance classes, interfaces, record
+  ctors), `int x = "hi"` as a field init, and `x = "hi"` reassignment of a
+  declared int. Fix = apply the existing checkBind at every declared-type
+  position; unknown still flows free (the FFI rule), runtime guards unchanged.
+  No new design needed.
+- **TODO: enforce modifiers** — surface that parses must mean something; today
+  public/private/protected/static/final are skipped (sole consumer: `public
+  void` zero-arg = test case). Semantics need decision #10 first.
 
 ## Phase 4: **SDK & toolchain — the one-stop shop**
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
@@ -524,6 +537,16 @@ made real, and it's pure BEAM strength:
    flat under zinc: `zinc.http` (client over httpc, server over cowboy), `zinc.net`
    (sockets over gen_tcp). `java.*` is reserved — declaring or importing it is a
    transpile error that names the zinc equivalent.
+10. **modifier semantics — OPEN (raised 2026-06-12, proposals not yet settled).**
+   Principle agreed: accepted syntax must be enforced or rejected, never silently
+   decorative. Proposed (pending user decision): `private` = callable only inside
+   the declaring class, honest lowering = not exported from the Erlang module; no
+   modifier = public (don't fake package-private); `protected` = transpile error
+   (no inheritance in zinc); `static` = required on plain-utility-class methods,
+   rejected on instance/Actor methods (consistency with the class-kind truth);
+   `final` = allowed where already true (fields), enforced on locals (no
+   reassign), rejected on classes/methods. Needs mods kept in the AST (parser
+   currently discards them).
 
 ## Start here next session
 **SPEC + STDLIB: IMPLEMENTED AND VERIFIED (2026-06-11).** The v1 spec is code: marker
