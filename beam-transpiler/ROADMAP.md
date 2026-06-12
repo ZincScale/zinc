@@ -547,8 +547,33 @@ green suite exit 0, red suite exit 1 + structured report. Noted: the
 crash-then-assert-restart example needs a STATIC child — dynamic children are
 temporary by design; restart assertions wait on the integration harness
 (boot-the-Application) or the opt-in restart modifier.
+**Shutdown story — settled (2026-06-12, designed with user).** Stop is outside-in:
+SIGTERM (systemd/docker stop) -> OTP signal server -> init:stop -> reverse-order
+tree drain, bounded by child-spec timeouts — WORKS TODAY, zero code. Liveness rule,
+stated precisely: a program exits when main returns, unless the Application declares
+static children (those serve until stopped); actors created in method bodies die
+with the process that created them (main included — main is just the entrypoint
+method, no special lifetime powers; the supervisor, not main, owns the durable tree,
+which is what makes restart possible: a restart needs a recipe held by someone who
+outlives the crash — fields donate theirs to the supervisor, methods consume theirs).
+Resource cleanup needs NO feature: handles/sockets/ports/ETS die with their owning
+process — kill-9-safe by construction; graceful shutdown is politeness, not
+correctness. The one residual need, designed: **`close()` — finally at process
+granularity** (AutoCloseable idiom). An Actor may declare `public void close()`;
+lowering sets trap_exit and runs it as terminate/2 on ORDERLY stop only (tree
+shutdown, owner's domain ending, test ending) — NEVER on the actor's own crash
+(crashed state is untrustworthy; the crash path's cleanup is the resource side:
+rollback, idempotency, supervision). Reverse declaration order + per-child timeout
+bounds come free from the existing supervisors; close() is best-effort by
+construction — anything that MUST happen belongs in a transaction, not a hook.
+This is also why statement-level finally/try-with-resources stayed deferred:
+zinc resources live in processes, not blocks. Implement alongside zinc.sql (its
+connection actors are the first real user). `System.exit` stays unbuilt until a
+dogfood (batch-job shape) earns it. Ctrl-C foreground = BEAM BREAK-menu wart,
+Phase 4 zc-run polish; PID-1 exec in release start script = Phase 5 detail.
 Remaining designed-but-unimplemented stdlib: **`zinc.sql`** (needs a Postgres to
-test against). Then Phase 4 (toolchain/installer) per the phases above.
+test against) + `close()` above. Then Phase 4 (toolchain/installer) per the phases
+above.
 ```
 cd beam-transpiler && ./e2e.sh && ./zc/test.sh && ./dogfood/webdemo/test.sh   # green baseline: 30/30 e2e + zc(run+test) + webdemo
 ```
