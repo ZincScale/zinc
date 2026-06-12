@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
 # zc shim: runs the single-file Java CLI with ZINC_HOME pointing at beam-transpiler.
+# Java resolution: ZINC_JAVA override > managed JRE (~/.zc/jre, installed by
+# `zc toolchain install`) > host java. End users never see Java.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec "${ZINC_JAVA:-java}" -Dzinc.home="$ROOT" "$ROOT/zc/Zc.java" "$@"
+JAVA="${ZINC_JAVA:-}"
+if [ -z "$JAVA" ] && [ -x "${ZC_HOME:-$HOME/.zc}/java/bin/java" ]; then
+  JAVA="${ZC_HOME:-$HOME/.zc}/java/bin/java"
+fi
+exec "${JAVA:-java}" -Dzinc.home="$ROOT" "$ROOT/zc/Zc.java" "$@"

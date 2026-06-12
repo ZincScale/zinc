@@ -486,6 +486,15 @@ Working CLI name: `zc` (final language name is open decision #6 — rename then)
     user-facing requirement (CI keeps it).
 - **4.3 Error source-maps** — map erlc/runtime errors back to `.zinc` spans (the transpiler
   tax; budget real time, it's what makes the toolchain feel native instead of leaky).
+  **Slice 1 DONE (2026-06-12):** statements carry source lines end-to-end; every
+  transpile error cites `<file>:<line>` (statement granularity; decl-level errors cite
+  the file), and Assert failures embed `File.zinc:N` in the expr text (P8 deferral
+  closed). Locked in by harness asserts. **Remaining:** runtime crash-frame mapping —
+  design: transpiler emits a per-module map (function/arity -> source file + method
+  line; statement-level later), `zc run`/`zc test` filter erl stderr and annotate
+  frames like `counter.erl:23` with `(Counter.zinc:12 incr)`. Honest-lines approach —
+  no -file/-line tricks that point at misleading nearby lines; generated .erl stays
+  the truth, zc adds the source citation beside it.
 
 ## Phase 5: **deploy — the anti-K8s story**
 A small team ships a self-healing service to a $10 VM with one command. This is the pitch

@@ -34,9 +34,13 @@ public class Zc {
       }
       case "build" -> build(projectDir(args));
       case "run" -> {
-        Path dir = projectDir(args);
-        build(dir);
-        run(dir);
+        if (args.length >= 2 && args[1].endsWith(".zinc")) {
+          runSingle(Path.of(args[1])); // script mode: no project, no zinc.toml
+        } else {
+          Path dir = projectDir(args);
+          build(dir);
+          run(dir);
+        }
       }
       case "test" -> {
         Path dir = projectDir(args);
@@ -262,6 +266,7 @@ public class Zc {
     if (resolveOtp(pin) != null) {
       System.out.println("zc: OTP " + resolveOtp(pin).getFileName() + " already installed");
       ensureRebar3(client);
+      ensureJre(client);
       return;
     }
     for (String flavor : OTP_FLAVORS) {
@@ -314,10 +319,44 @@ public class Zc {
       Files.writeString(dst.resolve(".zc-flavor"), flavor + "\n");
       System.out.println("zc: installed OTP " + best + " -> " + dst);
       ensureRebar3(client);
+      ensureJre(client);
       return;
     }
     die("zc: no runnable OTP build found for pin '" + pin + "' (flavors: "
         + String.join(", ", OTP_FLAVORS) + ")");
+  }
+
+  static final String JAVA_MAJOR = "25"; // pinned major; bump deliberately
+
+  /** End users never see Java: a pinned Temurin JDK lands next to the pinned OTP,
+   *  and bin/zc prefers it — after one toolchain install, zc needs no host Java.
+   *  (Full JDK, not JRE: zc runs via the java SOURCE launcher today; drops to a
+   *  JRE + compiled zc when the installer ships a jar — Phase 4.2.) */
+  static void ensureJre(HttpClient client) throws Exception {
+    Path dst = zcHome().resolve("java");
+    if (Files.isDirectory(dst.resolve("bin"))) return;
+    String os = System.getProperty("os.name").toLowerCase().contains("mac") ? "mac" : "linux";
+    String arch = System.getProperty("os.arch").contains("aarch64") ? "aarch64" : "x64";
+    String url = "https://api.adoptium.net/v3/binary/latest/" + JAVA_MAJOR
+        + "/ga/" + os + "/" + arch + "/jdk/hotspot/normal/eclipse?project=jdk";
+    System.out.println("zc: downloading JDK " + JAVA_MAJOR + " (" + os + "/" + arch + ") ...");
+    var resp = client.send(HttpRequest.newBuilder(URI.create(url)).build(),
+        HttpResponse.BodyHandlers.ofByteArray());
+    if (resp.statusCode() != 200) die("zc: fetch " + url + " -> HTTP " + resp.statusCode());
+    Path tmp = Files.createTempDirectory("zc-java");
+    Path tarball = tmp.resolve("java.tar.gz");
+    Files.write(tarball, resp.body());
+    exec(tmp, "tar", "xzf", tarball.toString());
+    Path root = tmp;
+    try (DirectoryStream<Path> ds = Files.newDirectoryStream(tmp)) {
+      for (Path p : ds) {
+        if (Files.isDirectory(p.resolve("bin"))) root = p; // jdk-25.x.y+z/
+      }
+    }
+    if (root == tmp) die("zc: unexpected JDK tarball layout");
+    Files.createDirectories(dst.getParent());
+    Files.move(root, dst);
+    System.out.println("zc: installed JDK -> " + dst);
   }
 
   /** rebar3 is one escript — managed next to the OTP it runs on. */
@@ -382,16 +421,17 @@ public class Zc {
     }
   }
 
-  /** Highest installed OTP matching the pin ("29" matches 29.0.1), or null. */
+  /** Highest installed OTP matching the pin ("29" matches 29.0.1); null pin = highest
+   *  of any version (script mode / pinless projects); null if nothing installed. */
   static Path resolveOtp(String pin) throws IOException {
     Path otp = zcHome().resolve("otp");
-    if (pin == null || !Files.isDirectory(otp)) return null;
+    if (!Files.isDirectory(otp)) return null;
     Path best = null;
     try (DirectoryStream<Path> ds = Files.newDirectoryStream(otp)) {
       for (Path d : ds) {
         String v = d.getFileName().toString();
         if (!Files.isDirectory(d.resolve("bin"))) continue;
-        if (!(v.equals(pin) || v.startsWith(pin + "."))) continue;
+        if (pin != null && !(v.equals(pin) || v.startsWith(pin + "."))) continue;
         if (best == null || cmpVersion(v, best.getFileName().toString()) > 0) best = d;
       }
     }
@@ -420,7 +460,9 @@ public class Zc {
     System.out.println("  ZINC_HOME  " + home);
     System.out.println("  ZC_HOME    " + zcHome());
     System.out.println("  java       " + System.getProperty("java.version") + " ("
-        + System.getProperty("java.home") + ")");
+        + System.getProperty("java.home") + ")"
+        + (Files.isDirectory(zcHome().resolve("java").resolve("bin")) ? "" : "  [host java;"
+            + " 'zc toolchain install' adds a managed JDK]"));
     toolchainList();
     Path here = Path.of(".");
     if (Files.exists(here.resolve("zinc.toml"))) {
@@ -468,9 +510,29 @@ public class Zc {
     exec(dir, rebarCmd("compile"));
   }
 
+  /** zc run file.zinc — transpile + erlc + run, one command, no project ceremony. */
+  static void runSingle(Path file) throws Exception {
+    if (!Files.exists(file)) die("zc: no such file: " + file);
+    useManagedOtp(Map.of()); // no pin: highest installed toolchain, else PATH
+    Path out = Files.createTempDirectory("zc-run");
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    exec(Path.of("."), java, home.resolve("src/zinc/Main.java").toString(),
+        file.toString(), out.toString());
+    String erlc = managedOtpBin != null ? managedOtpBin.resolve("erlc").toString() : "erlc";
+    var compile = new ArrayList<>(List.of(erlc, "-o", out.toString()));
+    try (DirectoryStream<Path> ds = Files.newDirectoryStream(out, "*.erl")) {
+      for (Path p : ds) compile.add(p.toString());
+    }
+    exec(out, compile.toArray(String[]::new));
+    String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
+    // +Bd: Ctrl-C terminates instead of the BEAM BREAK menu (dev-tool expectation)
+    exec(out, erl, "+Bd", "-noshell", "-pa", out.toString(), "-eval",
+        "main:run(), init:stop().");
+  }
+
   static void run(Path dir) throws Exception {
     String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
-    var cmd = new ArrayList<>(List.of(erl, "-noshell"));
+    var cmd = new ArrayList<>(List.of(erl, "+Bd", "-noshell"));
     for (String d : List.of("_build/default/lib", "_build/default/checkouts")) {
       Path base = dir.resolve(d);
       if (!Files.isDirectory(base)) continue;
