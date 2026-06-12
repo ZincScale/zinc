@@ -69,8 +69,8 @@ public class Main {
           if (!typeNames.add(n)) throw new CompileError("duplicate type name: " + n);
         }
         for (var c : p.classes()) {
-          var methods = new LinkedHashMap<String, String>();
-          for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
+          var methods = new LinkedHashMap<String, Ast.MethodDecl>();
+          for (var m : c.methods()) methods.put(m.name() + "/" + m.params().size(), m);
           String mod = fqMod(pkg, c.name());
           classes.put(c.name(), new ClassInfo(mod, methods));
           if (!modules.add(mod)) {
@@ -97,8 +97,8 @@ public class Main {
             throw new CompileError("test class " + t.name()
                 + " must live under test/ — test code never ships in releases");
           }
-          var methods = new LinkedHashMap<String, String>();
-          for (var m : t.methods()) methods.put(m.name() + "/" + m.params().size(), m.retType());
+          var methods = new LinkedHashMap<String, Ast.MethodDecl>();
+          for (var m : t.methods()) methods.put(m.name() + "/" + m.params().size(), m);
           String mod = fqMod(pkg, t.name());
           classes.put(t.name(), new ClassInfo(mod, methods));
           if (!modules.add(mod)) {

@@ -1,0 +1,4 @@
+public class Main implements Application {
+  Db db = new Db(8080, 4);
+  public static void main(String[] args) { System.out.println(1); }
+}

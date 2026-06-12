@@ -1,0 +1,6 @@
+class Boom extends Exception {
+  String message;
+}
+public class Main {
+  public static void main(String[] args) { throw new Boom(7); }
+}

@@ -1,0 +1,4 @@
+public class Main {
+  static void f() { return 1; }
+  public static void main(String[] args) { f(); }
+}

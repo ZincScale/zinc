@@ -43,7 +43,36 @@ declare -A want=(
   [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
   [close]=$'1\nclosed db'
 )
+# negative cases: each must FAIL transpile with the expected message fragment
+declare -A wanterr=(
+  [return_type]="return: cannot bind a String to int"
+  [return_void]="void method cannot return a value"
+  [arg_type]="f arg 1 ('x'): cannot bind a String to int"
+  [actor_arg]="C.bump arg 1 ('by'): cannot bind a String to int"
+  [field_init]="field n: cannot bind a String to int"
+  [reassign]="x: cannot bind a String to int"
+  [record_ctor]="new Point arg 1 ('x'): cannot bind a String to int"
+  [void_value]="cannot use a void method's result"
+  [spawn_arg]="new Counter arg 1 ('start'): cannot bind a String to int"
+  [exc_field]="throw new Boom ('message'): cannot bind a int to String"
+  [app_child_arg]="new Db arg 1 ('url'): cannot bind a int to String"
+  [lambda_ret]="return: cannot bind a int to String"
+)
+
 fail=0
+for ex in "${!wanterr[@]}"; do
+  dir="out/neg_$ex"
+  rm -rf "$dir" && mkdir -p "$dir"
+  if "$JAVA" src/zinc/Main.java "examples/neg/$ex.zinc" "$dir" >/dev/null 2>"$dir/err"; then
+    echo "FAIL  neg/$ex  ->  transpiled, expected error '${wanterr[$ex]}'"; fail=1; continue
+  fi
+  if grep -qF "${wanterr[$ex]}" "$dir/err"; then
+    echo "PASS  neg/$ex  ->  $(cat "$dir/err")"
+  else
+    echo "FAIL  neg/$ex  ->  got '$(cat "$dir/err")'  want '${wanterr[$ex]}'"; fail=1
+  fi
+done
+
 for ex in "${examples[@]}"; do
   dir="out/$ex"
   rm -rf "$dir" && mkdir -p "$dir"

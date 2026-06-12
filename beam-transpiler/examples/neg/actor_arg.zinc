@@ -1,0 +1,7 @@
+class C implements Actor {
+  int n = 0;
+  void bump(int by) { n = n + by; }
+}
+public class Main {
+  public static void main(String[] args) { C c = new C(); c.bump("hi"); }
+}
