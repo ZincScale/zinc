@@ -77,7 +77,7 @@ Steps (each guarded by the 10-example regression suite):
 
 **Done =** a supervised Counter written in plain imperative syntax compiles to
 gen_server+supervisor, runs on BEAM, and survives a crash by auto-restarting — verified in `e2e.sh`.
-**Status: shipped — `actor_counter` and `actor_selfheal` are green in the 13-case suite.**
+**Status: shipped — `actor_counter` and `actor_selfheal` green (now part of the 55-case e2e suite).**
 
 ## Phase 2: **Erlang FFI + modules/imports** — DONE
 - **FFI**: `import erlang.<module>;` binds that OTP module; `lists.sort(xs)` lowers to
@@ -642,7 +642,8 @@ made real, and it's pure BEAM strength:
    rejected on Actor methods (an Actor's methods are its protocol; helpers belong
    in a utility class); interface implementations must be public. No modifier =
    public (no fake package-private). `protected` = error (no inheritance).
-   `static` = required on utility-class methods, required+public on main,
+   `static` = required+public on a utility-class `main(String[])`; an Application's
+   entry is instead instance `void main()` (Java 25) or static `main(String[])`;
    rejected on Actor/instance/Test methods and all fields. `final` = enforced on
    locals (no reassign; arrays are values so element-assign counts), on actor
    fields = set at construction (ctor may assign), frozen across messages;
@@ -650,6 +651,23 @@ made real, and it's pure BEAM strength:
    (public void zero-arg = case). e2e: `modifiers` positive + 8 neg cases.
 
 ## Start here next session
+**CURRENT FRONTIER (2026-06-15).** The v1 language + stdlib are implemented and verified
+(milestone log below). Latest landed: the **legal-Java enforcement gate** (Phase 3 entry
+above) — the whole surface minus the `erlang.*` FFI basement compiles under `javac`;
+30/30 gated, e2e 55/55. **Agreed sequence from here (user, 2026-06-15):**
+1. **Finish Phase 4 — SDK & toolchain.** (a) `zc` CLI polish — the verbs exist in
+   `zc/Zc.java` (init/add/deps/build/run/test/toolchain/doctor); harden the dev-loop
+   ergonomics. (b) **Runtime crash-frame source maps** (Phase 4.3 remaining) — map erl
+   crash frames back to `Foo.zinc:N`; transpile-error file:line is already done (Slice 1).
+   This is the highest cognitive-load payoff: a crash should point at zinc, not generated
+   Erlang. (c) The **installer** (4.2) — `curl | sh` → `zc` + managed pinned OTP runtime,
+   Docker stops being user-facing.
+2. **Then finish the Phase 3 tail** — facade muscle gaps (List.sort/indexOf/addAll,
+   String.join/charAt/format, Map.entrySet/forEach, Math.pow/sqrt/…, Arrays.sort).
+3. **Then revisit** (Phase 5 deploy + Phase 6 docs/checker, re-prioritize then).
+
+--- milestone log (history) ---
+
 **SPEC + STDLIB: IMPLEMENTED AND VERIFIED (2026-06-11).** The v1 spec is code: marker
 interfaces + `new` spawns (P1), supervision-tree codegen (P2), Tag/final-records/FQ
 modules/exceptions (P3), interfaces + instance classes + generics + boundary guards
@@ -716,8 +734,8 @@ Phase 4 zc-run polish; PID-1 exec in release start script = Phase 5 detail.
   orderly stop). Facade: `db.query/exec(sql, params...)` (varargs; query -> rows
   as list of column-name maps, exec -> count), `db.transaction(tx -> {...})`
   (lambda param contextually typed Tx; return = COMMIT, throw/crash = ROLLBACK +
-  re-raise on the ladder; nesting = transpile error), `User.from(rows)` derived
-  row mapping reusing the '$jmap' JSON codec (match by column name,
+  re-raise on the ladder; nesting = transpile error), `Json.decodeAll(User.class, rows)`
+  derived row mapping reusing the '$jmap' JSON codec (match by column name,
   crash-on-missing, lenient extras), dynamic rows via unknown .get var-chaining
   with guarded typed binds. Db is an Application field (static child, supervisor
   type/infinity shutdown); `new Db` elsewhere = transpile error pointing at the
