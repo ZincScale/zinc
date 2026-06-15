@@ -1,0 +1,15 @@
+// Phase 3 tail facades: Math.* (sqrt/pow/floor/ceil/round), String.join, List.indexOf
+public class Main {
+  public static void main(String[] args) {
+    double s = Math.sqrt(144.0);
+    System.out.println(s);                 // 12.0
+    System.out.println(Math.round(s));     // 12
+    System.out.println(Math.pow(2, 5));    // 32.0
+    System.out.println(Math.floor(3.7));   // 3.0
+    System.out.println(Math.ceil(3.2));    // 4.0
+    var xs = List.of("a", "b", "c");
+    System.out.println(String.join("-", xs));  // a-b-c
+    System.out.println(xs.indexOf("b"));       // 1
+    System.out.println(xs.indexOf("z"));       // -1
+  }
+}

@@ -108,6 +108,11 @@ class CodeGen {
 
   private static final String IDX_HELPER =
       "'$idx'(B, P) -> case binary:match(B, P) of nomatch -> -1; {Pos, _} -> Pos end.";
+  private static final String LIDX_HELPER =
+      "'$lindexof'(L, X) -> '$lindexof'(L, X, 0).\n"
+      + "'$lindexof'([X | _], X, I) -> I;\n"
+      + "'$lindexof'([_ | T], X, I) -> '$lindexof'(T, X, I + 1);\n"
+      + "'$lindexof'([], _, _) -> -1.";
 
   /** catch (Exception e): zinc exceptions unwrap; native errors render a message. */
   private static final String EXNORM_HELPER =
@@ -170,6 +175,7 @@ class CodeGen {
   private boolean useSfx;
   private boolean useOk;
   private boolean useIdx;
+  private boolean useLidx;
   private boolean useExnorm;
   private boolean useCall;
   private boolean useChk;
@@ -185,6 +191,7 @@ class CodeGen {
     if (useSfx) out.add(SFX_HELPER);
     if (useOk) out.add(OK_HELPER);
     if (useIdx) out.add(IDX_HELPER);
+    if (useLidx) out.add(LIDX_HELPER);
     if (useExnorm) out.add(EXNORM_HELPER);
     if (useCall) out.add(CALL_HELPER);
     if (useChk) out.add(CHK_HELPER);
@@ -293,6 +300,7 @@ class CodeGen {
     useSfx = false;
     useOk = false;
     useIdx = false;
+    useLidx = false;
     useExnorm = false;
     useCall = false;
     useChk = false;
@@ -2630,9 +2638,16 @@ class CodeGen {
       }
       case "Math" -> {
         if (List.of("max", "min", "abs").contains(x.method())) {
-          return x.method() + "(" + genArgs(x.args(), env) + ")";
+          return x.method() + "(" + genArgs(x.args(), env) + ")"; // auto-imported BIFs
         }
-        throw new CompileError("unsupported: Math." + x.method());
+        if (List.of("sqrt", "pow", "floor", "ceil").contains(x.method())) {
+          return "math:" + x.method() + "(" + genArgs(x.args(), env) + ")";
+        }
+        if (x.method().equals("round")) { // Java Math.round(x) = floor(x + 0.5), returns long
+          return "floor((" + genExpr(x.args().get(0), env) + ") + 0.5)";
+        }
+        throw new CompileError("unsupported: Math." + x.method()
+            + " (max/min/abs/sqrt/pow/floor/ceil/round)");
       }
       case "Integer" -> {
         if (x.method().equals("parseInt")) {
@@ -2643,6 +2658,13 @@ class CodeGen {
         if (x.method().equals("valueOf")) {
           useFmt = true;
           return "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("join") && x.args().size() >= 2) {
+          // String.join(sep, list) or String.join(sep, a, b, ...) -> one binary
+          String sep = genExpr(x.args().get(0), env);
+          String list = x.args().size() == 2 ? genExpr(x.args().get(1), env)
+              : "[" + genArgs(x.args().subList(1, x.args().size()), env) + "]";
+          return "iolist_to_binary(lists:join(" + sep + ", " + list + "))";
         }
       }
       case "Arrays" -> {
@@ -2775,10 +2797,14 @@ class CodeGen {
         yield "length(" + r + ")";
       }
       case "contains" -> "lists:member(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "indexOf" -> {
+        useLidx = true;
+        yield "'$lindexof'(" + r + ", " + genExpr(x.args().get(0), env) + ")"; // -1 if absent
+      }
       case "isEmpty" -> "(" + r + " =:= [])";
       case "toArray" -> "array:from_list(" + r + ")";
-      case "add", "set", "remove", "clear" -> throw new CompileError(
-          "List is read-only — build with an ArrayList, then "
+      case "add", "set", "remove", "clear", "sort", "reverse", "addAll" ->
+          throw new CompileError("List is read-only — build with an ArrayList, then "
               + "List.copyOf(xs)");
       default -> throw new CompileError("unsupported: List." + x.method());
     };
@@ -2924,9 +2950,17 @@ class CodeGen {
           if (vr.name().equals("Router")) yield "Router";
           if (vr.name().equals("Response")) yield "Response";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
-          if (vr.name().equals("Math")) yield exprType(x.args().get(0));
+          if (vr.name().equals("Math")) {
+            yield switch (x.method()) {
+              case "sqrt", "pow", "floor", "ceil" -> "double";
+              case "round" -> "int";
+              default -> exprType(x.args().get(0)); // max/min/abs preserve the arg type
+            };
+          }
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
-          if (vr.name().equals("String")) yield x.method().equals("valueOf") ? "String" : null;
+          if (vr.name().equals("String")) {
+            yield List.of("valueOf", "join").contains(x.method()) ? "String" : null;
+          }
           if (vr.name().equals("Arrays")) {
             yield x.method().equals("asList") ? "List" : null;
           }
@@ -2967,7 +3001,7 @@ class CodeGen {
         tt = tt == null ? null : baseType(tt);
         if ("ArrayList".equals(tt) || "List".equals(tt)) {
           yield switch (x.method()) {
-            case "size" -> "int";
+            case "size", "indexOf" -> "int";
             case "contains", "isEmpty" -> "boolean";
             case "toArray" -> "Object[]";
             case "get" -> targs.size() == 1 ? targs.get(0) : null; // element type
