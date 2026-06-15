@@ -512,39 +512,38 @@ Interleave as needed — all incremental on the existing codegen:
   InterruptedException would need a throws clause). Principle: valid zinc is a subset
   of valid Java even for Erlang-shaped features — wrap, don't invent keywords.
 
-## Phase 4: **SDK & toolchain — the one-stop shop**
+## Phase 4: **SDK & toolchain — the one-stop shop** — LARGELY DONE (2026-06-15)
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:
 **install dev kit → dev kit installs runtime**. No Docker, no system Erlang, no rebar3.
 Working CLI name: `zc` (final language name is open decision #6 — rename then).
 
-- **4.1 The `zc` CLI** (first, still runnable via Docker while the installer doesn't exist):
-  - `zc run file.zinc` — transpile → erlc → run, one command, quiet unless it fails
-  - `zc build` — project build into `_build/` (.beam + start script)
-  - `zc new myapp` — scaffold (src/main.zinc, `zc.toml` with pinned toolchain+OTP versions)
-  - `zc doctor` — verify dev kit + runtime install, print versions, suggest fixes
-  - End users never see Java, same way they never see Erlang: the installer's managed-runtime
-    model (4.2) covers both — a pinned JRE lands in `~/.zc/` next to the pinned OTP build, and
-    `zc` is a thin launcher over them. Everything compiles **to BEAM**; internally `zc` drives
-    the standard Erlang toolchain (erlc, relx for Phase 5 releases) — users only ever see `zc`.
-- **4.2 The installer (one-stop shop)**:
-  - `curl -fsSL get.<lang>.dev | sh` (and a Windows installer later) → installs `zc` into
-    `~/.zc/bin`, adds to PATH, then first-run TUI: pick/confirm OTP version → downloads a
-    **pinned portable OTP build** into `~/.zc/otp/<ver>` (prebuilt per platform — the same
-    trick Elixir-burrito/Livebook use). Progress bars, resumable, checksummed.
-  - The runtime is **owned by the dev kit**: `zc toolchain list|install|use`, per-project pin
-    in `zc.toml`. Users NEVER apt-install erlang. This is the moment Docker stops being a
-    user-facing requirement (CI keeps it).
-- **4.3 Error source-maps** — map erlc/runtime errors back to `.zinc` spans (the transpiler
-  tax; budget real time, it's what makes the toolchain feel native instead of leaky).
-  **Slice 1 DONE (2026-06-12):** statements carry source lines end-to-end; every
-  transpile error cites `<file>:<line>` (statement granularity; decl-level errors cite
-  the file), and Assert failures embed `File.zinc:N` in the expr text (P8 deferral
-  closed). Locked in by harness asserts. **Remaining:** runtime crash-frame mapping —
-  design: transpiler emits a per-module map (function/arity -> source file + method
-  line; statement-level later), `zc run`/`zc test` filter erl stderr and annotate
-  frames like `counter.erl:23` with `(Counter.zinc:12 incr)`. Honest-lines approach —
-  no -file/-line tricks that point at misleading nearby lines; generated .erl stays
-  the truth, zc adds the source citation beside it.
+- **4.1 The `zc` CLI — DONE.** `zc run`/`build`/`new`/`init`/`test`/`add`/`deps`/`toolchain`/
+  `doctor` all implemented (`zc/Zc.java`); hex deps vendored via Java TLS; managed OTP+rebar3.
+  `zc run` is quiet-unless-fail (transpile/erlc plumbing silenced on success; managed-toolchain
+  libtinfo noise filtered) so it prints only the program's output. **Leftover polish:** project
+  `zc run` still shows rebar3's compile chatter (quiet it); a `--verbose` escape hatch.
+- **4.2 The installer — DONE (offline path verified; live release pending).** SETTLED
+  (user 2026-06-15): **GitHub-Releases tarball** distribution, **compiled jar + bootstrap
+  JRE** packaging. `package.sh` builds one self-contained `zc.jar` (CLI + transpiler,
+  Main-Class Zc) + a release tarball (`lib/zc.jar` + `lib/rebar_zinc` + `bin/zc` shim). zc
+  runs **dual-mode**: from the jar in a release (`java -cp zc.jar zinc.Main`) or the source
+  launcher in dev — `selfJar()` picks; the rebar_zinc plugin is jar-aware too. `install.sh`
+  is the rustup-style bootstrap: pulls `zc.tar.gz` from GitHub releases (or `ZC_DIST_TARBALL`
+  for offline/air-gapped), unpacks into `~/.zc`, fetches a managed Temurin JRE, wires PATH,
+  runs `zc toolchain install` for OTP — no system Java/Erlang/Docker. Verified locally on the
+  managed OTP: jar-mode `zc run` (single + project), `zc init`, `zc doctor`, offline install.
+  **Remaining (user-owned):** cut the first GitHub release (tag + upload `zc.tar.gz` +
+  `install.sh`) so the live `curl | sh` URL works — the download path is untestable until then.
+  Windows installer + progress bars/resume later.
+- **4.3 Error source-maps — DONE.** Slice 1 (2026-06-12): every transpile error cites
+  `<file>:<line>`; Assert failures embed `File.zinc:N`. **Runtime crash-frame mapping DONE
+  (2026-06-15):** the transpiler emits honest-lines source maps (a `%% @zinc-src <file>`
+  per module + a standalone `%@L<srcline>` marker per statement; `block()` skips commas
+  around markers, generated Erlang stays the truth — no -file/-line tricks). `zc run`
+  captures erl stderr and appends a "zinc trace" mapping each frame back to `file:line` via
+  the nearest marker, BEAM-internal frames dropped, frames deduped, error class decoded to
+  English. Works for plain and actor (handle_call) crashes. **Remaining:** annotate `zc test`
+  (EUnit) crash output the same way — it flows through rebar3 eunit, a separate format.
 
 ## Phase 5: **deploy — the anti-K8s story**
 A small team ships a self-healing service to a $10 VM with one command. This is the pitch
@@ -652,19 +651,18 @@ made real, and it's pure BEAM strength:
 
 ## Start here next session
 **CURRENT FRONTIER (2026-06-15).** The v1 language + stdlib are implemented and verified
-(milestone log below). Latest landed: the **legal-Java enforcement gate** (Phase 3 entry
-above) — the whole surface minus the `erlang.*` FFI basement compiles under `javac`;
-30/30 gated, e2e 55/55. **Agreed sequence from here (user, 2026-06-15):**
-1. **Finish Phase 4 — SDK & toolchain.** (a) `zc` CLI polish — the verbs exist in
-   `zc/Zc.java` (init/add/deps/build/run/test/toolchain/doctor); harden the dev-loop
-   ergonomics. (b) **Runtime crash-frame source maps** (Phase 4.3 remaining) — map erl
-   crash frames back to `Foo.zinc:N`; transpile-error file:line is already done (Slice 1).
-   This is the highest cognitive-load payoff: a crash should point at zinc, not generated
-   Erlang. (c) The **installer** (4.2) — `curl | sh` → `zc` + managed pinned OTP runtime,
-   Docker stops being user-facing.
-2. **Then finish the Phase 3 tail** — facade muscle gaps (List.sort/indexOf/addAll,
-   String.join/charAt/format, Map.entrySet/forEach, Math.pow/sqrt/…, Arrays.sort).
-3. **Then revisit** (Phase 5 deploy + Phase 6 docs/checker, re-prioritize then).
+(milestone log below). **Agreed sequence (user, 2026-06-15) — progress:**
+1. **Phase 4 — SDK & toolchain: DONE (2026-06-15).** (a) `zc` CLI polish — quiet `zc run`.
+   (b) Runtime crash-frame source maps — erl frames now map back to `Foo.zinc:N` (honest-
+   lines `@zinc-src`/`%@L` markers + zc stderr annotation). (c) Installer — jar packaging
+   (`package.sh`) + `install.sh` (GitHub-releases + managed JRE/OTP), dual-mode zc, verified
+   locally. Remaining: cut the first GitHub release so live `curl|sh` works (user-owned);
+   small polish (quiet rebar chatter, annotate `zc test`). See Phase 4 above.
+2. **NEXT: Phase 3 tail** — facade muscle gaps (List.sort/indexOf/addAll/reverse,
+   String.join/charAt/compareTo/format, Map.entrySet/forEach, Math.pow/sqrt/floor/ceil/round,
+   Arrays.sort/fill). Incremental, no design needed; add per gap + e2e case.
+3. **Then revisit** (Phase 5 deploy + Phase 6 docs/checker; the two-node distribution demo
+   is the highest-leverage proof point for the anti-K8s pitch — re-prioritize then).
 
 --- milestone log (history) ---
 
