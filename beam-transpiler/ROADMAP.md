@@ -460,17 +460,20 @@ Interleave as needed — all incremental on the existing codegen:
   (lists:nth O(n) each). These are THE two everyday Java idioms — accumulate-into-list
   and index-for — so today's lowerings violate the LOWERING_SPEC forbidden tier
   ("never back arrays with list-update") in spirit.
-  **SETTLED + IMPLEMENTED (user decision 2026-06-12): `ImmutableList` + `ArrayList`,
-  different purposes; `List` is NOT a zinc type** (user: no interface games, no dead
-  reserved words — `List` gets no special casing at all, it's an unknown identifier
-  like any other). `ImmutableList<T>` = receive/iterate (Erlang list; of/copyOf
-  factories; get/size/contains/isEmpty + for-each fast path; mutators = transpile
-  error). `ArrayList<T>` = build/index (array module: add appends at size O(log n),
+  **SETTLED + IMPLEMENTED (user decision 2026-06-12; renamed 2026-06-15): `List` +
+  `ArrayList`, different purposes.** Originally shipped as `ImmutableList` — but that
+  name is Guava (`com.google.common.collect`), not JDK, so a `.zinc` using it would
+  not compile under `javac` and broke the legal-Java rule. Renamed to `List` with
+  `List.of`/`List.copyOf` — both real JDK (9/10) — which keeps every `.zinc` file
+  legal Java. `List<T>` = receive/iterate (Erlang list; of/copyOf factories;
+  get/size/contains/isEmpty + for-each fast path; mutators = transpile error — stricter
+  than Java's mutable interface, so valid zinc stays a subset of valid Java).
+  `ArrayList<T>` = build/index (array module: add appends at size O(log n),
   get/set O(log n), size O(1); new ArrayList<>(xs) copies in,
-  ImmutableList.copyOf(xs) bridges out; remove deferred). e2e `arraylist` proves it:
+  List.copyOf(xs) bridges out; remove deferred). e2e `arraylist` proves it:
   500k appends + copyOf + iterate — the old ++ lowering would blow the suite timeout.
-  Maps were left as-is (Map/HashMap, no perf hole) — revisit naming consistency
-  (ImmutableMap?) only if it earns it.
+  Maps were left as-is (Map/HashMap, no perf hole); any future immutable-map naming
+  must stay legal JDK (NOT Guava's `ImmutableMap`) — `Map`/`Map.of` is the legal home.
   **Already right (audited, no action):** for-each = direct tail recursion (1.85–2×
   foldl, beam-lab); `s += ...` = amortized-O(1) binary append (StringBuilder is
   UNNECESSARY in zinc — document this; concat chains flatten to one construction);

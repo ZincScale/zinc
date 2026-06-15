@@ -1,5 +1,5 @@
 // ArrayList = build/index (array-module backed: add/get/set O(log n), size O(1));
-// ImmutableList = receive/iterate (Erlang list, for-each fast path); copyOf bridges.
+// List = receive/iterate (Erlang list, for-each fast path); copyOf bridges.
 // 500k appends: the old list-append lowering was O(n^2) and would blow the suite
 // timeout here; the array module does it in milliseconds.
 public class Main {
@@ -14,7 +14,7 @@ public class Main {
     System.out.println(xs.get(250000));   // 250000
     xs.set(0, 7);
     System.out.println(xs.get(0));        // 7
-    var snapshot = ImmutableList.copyOf(xs);
+    var snapshot = List.copyOf(xs);
     int sum = 0;
     for (var v : snapshot) {
       if (v > 499997) {

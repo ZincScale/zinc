@@ -31,7 +31,7 @@ public class Main {
       var modules = new java.util.HashSet<String>(List.of("zinc_root_sup", "zinc_dyn_sup"));
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Atom", "Tag", "Tuple", "Erlang",
-          "HashMap", "Map", "ArrayList", "ImmutableList", "Math", "Integer",
+          "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
           "Arrays", "Object",
           "String", "Exception", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",

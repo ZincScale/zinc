@@ -49,7 +49,7 @@ declare -A want=(
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line
 declare -A wantwarn=(
-  [warn_iget]="warn_iget.zinc:6: ImmutableList.get is O(n)"
+  [warn_iget]="warn_iget.zinc:6: List.get is O(n)"
 )
 # stderr contracts (substring match): streams are part of the language contract —
 # Log.*/crash reports land on stderr, println on stdout
@@ -79,7 +79,7 @@ declare -A wanterr=(
   [mod_final_local]="mod_final_local.zinc:4: final variable 'x' cannot be reassigned"
   [mod_final_field]="final field 'n' cannot be reassigned"
   [mod_main_nonpublic]="public static void main"
-  [immutable_add]="ImmutableList is read-only"
+  [immutable_add]="List is read-only"
 )
 
 fail=0

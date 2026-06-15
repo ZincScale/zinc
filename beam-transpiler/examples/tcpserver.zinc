@@ -34,7 +34,7 @@ class Acceptor implements Actor {
 
 public class Main {
   public static void main(String[] args) {
-    var opts = ImmutableList.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
+    var opts = List.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
         Tuple.of(Tag.active, false), Tuple.of(Tag.reuseaddr, true));
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
@@ -42,7 +42,7 @@ public class Main {
     acceptor.run(lsock);
 
     // --- client ---
-    var copts = ImmutableList.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
+    var copts = List.of(Tag.binary, Tuple.of(Tag.packet, Tag.line),
         Tuple.of(Tag.active, false));
     var cs = Erlang.ok(gen_tcp.connect("localhost".toCharArray(), port, copts));
 
