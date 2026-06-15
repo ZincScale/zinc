@@ -81,7 +81,13 @@ compiler_main(Cfg) ->
               "zinc: transpiler not found. Set {zinc, [{compiler_home, Dir}]} in "
               "rebar.config or the ZINC_HOME env var.", []);
         Home ->
-            filename:join([Home, "src", "zinc", "Main.java"])
+            %% jar install: ZINC_HOME is the lib dir holding zc.jar -> run the transpiler
+            %% off the classpath. dev checkout: fall back to the source launcher.
+            Jar = filename:join(Home, "zc.jar"),
+            case filelib:is_file(Jar) of
+                true  -> "-cp " ++ Jar ++ " zinc.Main";
+                false -> filename:join([Home, "src", "zinc", "Main.java"])
+            end
     end.
 
 env_or(Var, Default) ->

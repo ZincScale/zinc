@@ -3,3 +3,4 @@ out/
 .packages
 pubspec.lock
 *.jar
+dist/

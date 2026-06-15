@@ -23,6 +23,8 @@ public class Zc {
 
   public static void main(String[] args) throws Exception {
     String h = System.getProperty("zinc.home", System.getenv("ZINC_HOME"));
+    if (h == null) h = System.getProperty("ZINC_HOME_LIB"); // jar shim passes the lib dir
+    if (h == null && selfJar() != null) h = selfJar().getParent().toString();
     if (h == null) die("zc: ZINC_HOME not set (run via bin/zc)");
     home = Path.of(h).toAbsolutePath();
     if (args.length == 0) {
@@ -517,11 +519,12 @@ public class Zc {
     if (!Files.exists(file)) die("zc: no such file: " + file);
     useManagedOtp(Map.of()); // no pin: highest installed toolchain, else PATH
     Path out = Files.createTempDirectory("zc-run");
-    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
     // transpile + erlc are plumbing: quiet on success (no .erl-path spam, no toolchain
     // noise), full output only if they fail. `zc run` shows just the program's output.
-    execQuiet(Path.of("."), java, home.resolve("src/zinc/Main.java").toString(),
-        file.toString(), out.toString());
+    var transpile = new ArrayList<>(List.of(transpileCmd()));
+    transpile.add(file.toString());
+    transpile.add(out.toString());
+    execQuiet(Path.of("."), transpile.toArray(String[]::new));
     String erlc = managedOtpBin != null ? managedOtpBin.resolve("erlc").toString() : "erlc";
     var compile = new ArrayList<>(List.of(erlc, "-o", out.toString()));
     try (DirectoryStream<Path> ds = Files.newDirectoryStream(out, "*.erl")) {
@@ -555,9 +558,34 @@ public class Zc {
     runErl(dir, dir.resolve("src").resolve("zinc_gen"), cmd.toArray(String[]::new));
   }
 
+  /** The zc.jar we're running from, or null in dev (source-launcher) mode. */
+  static Path selfJar() {
+    try {
+      var loc = Zc.class.getProtectionDomain().getCodeSource().getLocation();
+      if (loc == null) return null;
+      Path p = Path.of(loc.toURI());
+      return p.toString().endsWith(".jar") ? p : null;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /** Transpiler launch prefix: from the jar in a release (`java -cp zc.jar zinc.Main`),
+   *  or the source launcher in dev (`java src/zinc/Main.java`). */
+  static String[] transpileCmd() {
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    Path jar = selfJar();
+    return jar != null
+        ? new String[] {java, "-cp", jar.toString(), "zinc.Main"}
+        : new String[] {java, home.resolve("src/zinc/Main.java").toString()};
+  }
+
   static void exec(Path dir, String... cmd) throws Exception {
     var pb = new ProcessBuilder(cmd).directory(dir.toFile()).inheritIO();
     pb.environment().put("ZINC_HOME", home.toString());
+    // the rebar_zinc plugin shells out to the transpiler; point it at the java we run on
+    pb.environment().put("ZINC_JAVA",
+        Path.of(System.getProperty("java.home"), "bin", "java").toString());
     if (managedOtpBin != null) {
       pb.environment().put("PATH",
           managedOtpBin + ":" + pb.environment().getOrDefault("PATH", ""));
