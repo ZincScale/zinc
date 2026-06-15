@@ -301,9 +301,27 @@ class CodeGen {
   }
 
   /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
+  /** Join statement lines with commas, but skip commas around standalone source-map
+   *  markers (`%@L<n>` comment lines) — they're not statements, so they get no comma. */
   private static String block(List<String> code, String pad) {
     if (code.isEmpty()) return pad + "ok";
-    return pad + String.join(",\n", code).replace("\n", "\n" + pad);
+    var sb = new StringBuilder();
+    for (int i = 0; i < code.size(); i++) {
+      sb.append(code.get(i));
+      if (!isMarker(code.get(i))) {
+        boolean moreStmts = false;
+        for (int j = i + 1; j < code.size(); j++) {
+          if (!isMarker(code.get(j))) { moreStmts = true; break; }
+        }
+        if (moreStmts) sb.append(",");
+      }
+      if (i < code.size() - 1) sb.append("\n");
+    }
+    return pad + sb.toString().replace("\n", "\n" + pad);
+  }
+
+  private static boolean isMarker(String line) {
+    return line.matches("%@L\\d+");
   }
 
 
@@ -800,6 +818,10 @@ class CodeGen {
       curClassName = program.application().name();
       out.put(curModule, genApplicationModule(program.application()));
     }
+    // source-map header: every module here came from this one .zinc file. Paired with
+    // the per-line `%@N` markers (genStmts), zc maps a crash frame back to file:line.
+    // Honest-lines: these are comments, the generated Erlang stays the truth.
+    out.replaceAll((mod, src) -> "%% @zinc-src " + srcFile + "\n" + src);
     return out;
   }
 
@@ -1415,7 +1437,15 @@ class CodeGen {
       boolean last = i == stmts.size() - 1;
       if (s.line() > 0) curLine = s.line();
       try {
+        int before = out.size();
         genStmt(s, out, env, topLevel, last, loopMut);
+        // source-map marker: a standalone `%@L<srcline>` comment right before the
+        // statement's generated code. zc maps a crash's generated line back by scanning
+        // up to the nearest marker. block() drops commas around markers; honest-lines
+        // (comments only) keep the generated Erlang the truth.
+        if (s.line() > 0 && out.size() > before) {
+          out.add(before, "%@L" + s.line());
+        }
       } catch (CompileError e) {
         throw at(e);
       }

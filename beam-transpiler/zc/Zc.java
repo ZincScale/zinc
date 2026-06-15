@@ -1,4 +1,6 @@
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -526,7 +528,7 @@ public class Zc {
     exec(out, compile.toArray(String[]::new));
     String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
     // +Bd: Ctrl-C terminates instead of the BEAM BREAK menu (dev-tool expectation)
-    exec(out, erl, "+Bd", "-noshell", "-pa", out.toString(), "-eval",
+    runErl(out, out, erl, "+Bd", "-noshell", "-pa", out.toString(), "-eval",
         "main:run(), init:stop().");
   }
 
@@ -547,7 +549,8 @@ public class Zc {
     }
     cmd.add("-eval");
     cmd.add("main:run(), init:stop().");
-    exec(dir, cmd.toArray(String[]::new));
+    // generated .erl (with @zinc-src + %@L markers) live under src/zinc_gen for crash mapping
+    runErl(dir, dir.resolve("src").resolve("zinc_gen"), cmd.toArray(String[]::new));
   }
 
   static void exec(Path dir, String... cmd) throws Exception {
@@ -559,6 +562,98 @@ public class Zc {
     }
     int code = pb.start().waitFor();
     if (code != 0) System.exit(code);
+  }
+
+  /** Run erl with stdout inherited (program output) but stderr captured-and-teed, so on a
+   *  crash we can append a zinc-flavored trace mapping erl frames back to .zinc:line.
+   *  srcDir = where the generated .erl (with @zinc-src + %@L markers) live. */
+  static void runErl(Path dir, Path srcDir, String... cmd) throws Exception {
+    var pb = new ProcessBuilder(cmd).directory(dir.toFile());
+    pb.environment().put("ZINC_HOME", home.toString());
+    pb.environment().put("ERL_CRASH_DUMP_SECONDS", "0"); // no erl_crash.dump litter
+    if (managedOtpBin != null) {
+      pb.environment().put("PATH",
+          managedOtpBin + ":" + pb.environment().getOrDefault("PATH", ""));
+    }
+    pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+    pb.redirectError(ProcessBuilder.Redirect.PIPE);
+    Process p = pb.start();
+    var captured = new StringBuilder();
+    try (var r = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+      String line;
+      while ((line = r.readLine()) != null) {
+        // managed-toolchain noise on some hosts; not the program's doing
+        if (line.contains("libtinfo.so") && line.contains("no version information")) continue;
+        System.err.println(line);
+        captured.append(line).append('\n');
+      }
+    }
+    int code = p.waitFor();
+    if (code != 0) {
+      String trace = annotateCrash(captured.toString(), srcDir);
+      if (trace != null) System.err.print(trace);
+      System.exit(code);
+    }
+  }
+
+  // erl stack frame: {Module, Fun, Arity, [{file,"x.erl"},{line,N}]}
+  static final Pattern FRAME = Pattern.compile(
+      "\\{('[^']+'|[a-zA-Z][\\w.]*)\\s*,\\s*([a-zA-Z_]\\w*)\\s*,\\s*(\\d+)\\s*,\\s*"
+          + "\\[\\{file,\"([^\"]+)\"\\},\\s*\\{line,(\\d+)\\}\\]\\}");
+  static final Pattern MARKER = Pattern.compile("%@L(\\d+)");
+
+  /** Turn the raw erl stacktrace into a zinc trace: each frame from a generated module
+   *  (one carrying `%% @zinc-src`) maps back to its .zinc file + the nearest `%@L` marker
+   *  at/above the crash line. BEAM-internal frames are dropped. null = nothing to add. */
+  static String annotateCrash(String stderr, Path srcDir) throws IOException {
+    var frames = new ArrayList<String>();
+    var seen = new HashSet<String>(); // a crash is reported several times; show each frame once
+    Matcher m = FRAME.matcher(stderr);
+    while (m.find()) {
+      String erlFile = m.group(4);
+      int erlLine = Integer.parseInt(m.group(5));
+      if (!seen.add(erlFile + ":" + erlLine + ":" + m.group(2))) continue;
+      Path erl = srcDir == null ? null : srcDir.resolve(Path.of(erlFile).getFileName());
+      if (erl == null || !Files.exists(erl)) continue;
+      List<String> lines = Files.readAllLines(erl);
+      String src = null;
+      for (String l : lines) {
+        if (l.startsWith("%% @zinc-src ")) { src = l.substring(12).trim(); break; }
+      }
+      if (src == null) continue; // a runtime/lib module, not user code
+      int srcLine = -1;
+      for (int i = Math.min(erlLine, lines.size()) - 1; i >= 0; i--) {
+        Matcher mk = MARKER.matcher(lines.get(i));
+        if (mk.find()) { srcLine = Integer.parseInt(mk.group(1)); break; }
+      }
+      String where = srcLine > 0 ? src + ":" + srcLine : src;
+      String fn = m.group(2).equals("user_main") ? "main" : m.group(2);
+      frames.add(String.format("    %-26s %s/%s   (%s:%d)",
+          where, fn, m.group(3), erlFile, erlLine));
+    }
+    if (frames.isEmpty()) return null;
+    var sb = new StringBuilder("\n  ── zinc trace (most recent call first) ──\n");
+    String reason = crashReason(stderr);
+    if (reason != null) sb.append("  ").append(reason).append('\n');
+    for (String f : frames) sb.append(f).append('\n');
+    return sb.toString();
+  }
+
+  /** Decode the common BEAM error classes into one plain-English line. */
+  static String crashReason(String s) {
+    String[][] table = {
+        {"zinc_badtype", "zinc_badtype — a value crossed a typed boundary with the wrong type"},
+        {"zinc_exc", "uncaught zinc exception"},
+        {"badarith", "badarith — bad arithmetic (e.g. divide by zero)"},
+        {"function_clause", "function_clause — no method clause matched the arguments"},
+        {"case_clause", "case_clause — no branch matched the value"},
+        {"badkey", "badkey — read a map/struct key that isn't there"},
+        {"badmatch", "badmatch — a value didn't match the expected shape"},
+        {"undef", "undef — called a function that doesn't exist (check an FFI module/arity)"},
+        {"badarg", "badarg — bad argument to a built-in operation"},
+    };
+    for (String[] r : table) if (s.contains(r[0])) return r[1];
+    return null;
   }
 
   // ---- zinc.toml (line-based TOML subset, like zinc-go's) ----
