@@ -84,7 +84,10 @@ public class Zc {
         }
       }
       case "doctor" -> doctor();
-      case "fmt" -> die("zc fmt: not implemented yet");
+      case "fmt" -> {
+        if (args.length < 2) die("usage: zc fmt <file.zinc | dir>");
+        fmt(Path.of(args[1]));
+      }
       case "version", "--version", "-v" -> System.out.println("zc 0.1.0 (zinc on BEAM)");
       default -> {
         usage();
@@ -782,6 +785,73 @@ public class Zc {
     System.out.println("added " + entry);
   }
 
+  // ---- fmt: a line-based reindenter (the lexer drops comments, so we format text, not
+  // tokens — preserves comments + strings, idempotent). 2-space indent by brace depth,
+  // trailing whitespace trimmed, blank runs collapsed to one, single trailing newline.
+
+  static void fmt(Path target) throws IOException {
+    if (Files.isDirectory(target)) {
+      try (var paths = Files.walk(target)) {
+        for (Path p : (Iterable<Path>) paths::iterator) {
+          if (p.toString().endsWith(".zinc")) fmtFile(p);
+        }
+      }
+    } else if (target.toString().endsWith(".zinc")) {
+      fmtFile(target);
+    } else {
+      die("zc fmt: not a .zinc file or directory: " + target);
+    }
+  }
+
+  static void fmtFile(Path p) throws IOException {
+    String src = Files.readString(p);
+    String out = reformat(src);
+    if (!out.equals(src)) {
+      Files.writeString(p, out);
+      System.out.println("formatted " + p);
+    }
+  }
+
+  static String reformat(String src) {
+    var out = new StringBuilder();
+    int depth = 0, pendingBlank = 0;
+    for (String raw : src.split("\n", -1)) {
+      String s = raw.strip();
+      if (s.isEmpty()) { pendingBlank = 1; continue; } // collapse blank runs, drop leading
+      if (out.length() > 0 && pendingBlank == 1) out.append('\n');
+      pendingBlank = 0;
+      char c0 = s.charAt(0);
+      boolean firstCloser = c0 == '}' || c0 == ')' || c0 == ']';
+      int indent = firstCloser ? Math.max(0, depth - 1) : depth;
+      out.append("  ".repeat(indent)).append(s).append('\n');
+      depth = Math.max(0, depth + braceDelta(s));
+    }
+    String r = out.toString();
+    return r.endsWith("\n") ? r : r + "\n";
+  }
+
+  /** Net open-minus-close of {}/()/[] on a line, skipping string literals and // comments. */
+  static int braceDelta(String s) {
+    int delta = 0;
+    boolean inStr = false;
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (inStr) {
+        if (c == '\\') i++;
+        else if (c == '"') inStr = false;
+      } else if (c == '"') {
+        inStr = true;
+      } else if (c == '/' && i + 1 < s.length() && s.charAt(i + 1) == '/') {
+        break;
+      } else if (c == '{' || c == '(' || c == '[') {
+        delta++;
+      } else if (c == '}' || c == ')' || c == ']') {
+        delta--;
+      }
+    }
+    return delta;
+  }
+
   static void die(String msg) {
     System.err.println(msg);
     System.exit(1);
@@ -802,7 +872,7 @@ public class Zc {
           zc toolchain install [ver]   install a managed OTP into ~/.zc/otp (rustup model)
           zc toolchain list            list managed toolchains
           zc doctor             check the install: versions, toolchains, resolution
-          zc fmt                (not implemented yet)
+          zc fmt <file|dir>     reindent .zinc (2-space, by brace depth)
           zc version            show version
         """);
   }
