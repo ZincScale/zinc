@@ -666,6 +666,20 @@ made real, and it's pure BEAM strength:
 3. **NEXT: revisit roadmap** (Phase 5 deploy + Phase 6 docs/checker; the two-node distribution
    demo is the highest-leverage proof point for the anti-K8s pitch — re-prioritize then).
 
+### Backlog (deferred, ready when earned)
+- **First public release — DEFERRED until ~halfway to a complete product** (user 2026-06-15:
+  premature now). Fully automated and documented: `release.sh <ver>` (build → pin install.sh
+  → tag `zc-v*` → GitHub release → upload) + `RELEASING.md` runbook. Monorepo gotchas baked
+  in: tag is `zc-v*` not `v*` (the bare `v*` namespace is zinc-go's and fires its CI), and
+  `make_latest=false` so it doesn't hijack the repo's "latest". Needs a GITHUB_TOKEN at run
+  time. **Until then, no public release and no CI** (deliberately — avoids Actions running
+  for nothing). Tier-0 audit verdict: foundation solid, install→dev→test→run loop complete
+  and tested; the open ends are deploy (Phase 5) and the "make it real" layer (release/CI/docs/
+  editor).
+- **`zc fmt`** — stubbed; implement when the surface settles.
+- **Casts `(int)`/`(double)`** — common Java idiom, missing; workaround is Math.round/floor/
+  trunc. Parser needs cast-vs-grouping disambiguation (limit to known primitive types).
+
 --- milestone log (history) ---
 
 **SPEC + STDLIB: IMPLEMENTED AND VERIFIED (2026-06-11).** The v1 spec is code: marker
