@@ -733,7 +733,19 @@ class Parser {
 
   Expr parseExpr() {
     if (lambdaAhead()) return parseLambda();
-    return parseOr();
+    return parseTernary();
+  }
+
+  /** cond ? then : else  — right-associative, lowest precedence above assignment. */
+  private Expr parseTernary() {
+    Expr cond = parseOr();
+    if (match(TokKind.QUESTION)) {
+      Expr then = parseTernary();
+      expect(TokKind.COLON, "':' (ternary)");
+      Expr els = parseTernary();
+      return new Ternary(cond, then, els);
+    }
+    return cond;
   }
 
   /** IDENT ->  |  ( [IDENT {, IDENT}] ) ->  */

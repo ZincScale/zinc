@@ -315,9 +315,9 @@ class CodeGen {
     jsonEmitted.clear();
   }
 
-  /** Indent a code list as a clause body: first line padded, inner newlines shifted. */
-  /** Join statement lines with commas, but skip commas around standalone source-map
-   *  markers (`%@L<n>` comment lines) — they're not statements, so they get no comma. */
+  /** Join statement lines as a clause body (first line padded, inner newlines shifted),
+   *  skipping commas around standalone source-map markers (`%@L<n>` comment lines) —
+   *  they're not statements, so they get no comma. */
   private static String block(List<String> code, String pad) {
     if (code.isEmpty()) return pad + "ok";
     var sb = new StringBuilder();
@@ -1138,6 +1138,8 @@ class CodeGen {
       case Index x -> exprSrc(x.obj()) + "[" + exprSrc(x.index()) + "]";
       case Binary x -> exprSrc(x.left()) + " " + x.op() + " " + exprSrc(x.right());
       case Unary x -> x.op() + exprSrc(x.operand());
+      case Ternary x -> exprSrc(x.cond()) + " ? " + exprSrc(x.thenExpr()) + " : "
+          + exprSrc(x.elseExpr());
       case Call x -> x.callee() + "(" + srcList(x.args()) + ")";
       case MethodCall x -> exprSrc(x.target()) + "." + x.method() + "(" + srcList(x.args()) + ")";
       case NewExpr x -> "new " + x.typeName() + "(" + srcList(x.args()) + ")";
@@ -2121,6 +2123,8 @@ class CodeGen {
         String inner = genExpr(x.operand(), env);
         yield x.op().equals("!") ? "(not " + inner + ")" : "(" + x.op() + inner + ")";
       }
+      case Ternary x -> "(case " + genExpr(x.cond(), env) + " of true -> "
+          + genExpr(x.thenExpr(), env) + "; false -> " + genExpr(x.elseExpr(), env) + " end)";
       case Binary x -> {
         if (x.op().equals("+") && (isStr(x.left()) || isStr(x.right()))) {
           yield "<<" + concatSegs(x.left(), env) + ", " + concatSegs(x.right(), env) + ">>";
@@ -2981,6 +2985,10 @@ class CodeGen {
         yield t != null && t.endsWith("[]") ? t.substring(0, t.length() - 2) : null;
       }
       case Unary x -> x.op().equals("!") ? "boolean" : exprType(x.operand());
+      case Ternary x -> {
+        String t = exprType(x.thenExpr()); // both branches share a type; fall back to else
+        yield t != null ? t : exprType(x.elseExpr());
+      }
       case Binary x -> {
         if (x.op().equals("+") && (isStr(x.left()) || isStr(x.right()))) yield "String";
         yield switch (x.op()) {
@@ -3366,6 +3374,11 @@ class CodeGen {
         exprRefs(x.index(), out);
       }
       case Unary x -> exprRefs(x.operand(), out);
+      case Ternary x -> {
+        exprRefs(x.cond(), out);
+        exprRefs(x.thenExpr(), out);
+        exprRefs(x.elseExpr(), out);
+      }
       case Binary x -> {
         exprRefs(x.left(), out);
         exprRefs(x.right(), out);

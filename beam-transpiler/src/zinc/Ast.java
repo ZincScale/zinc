@@ -227,6 +227,8 @@ final class Ast {
 
   record Unary(String op, Expr operand) implements Expr {}
 
+  record Ternary(Expr cond, Expr thenExpr, Expr elseExpr) implements Expr {}
+
   /** bare call -> static method of the enclosing class */
   record Call(String callee, List<Expr> args) implements Expr {}
 

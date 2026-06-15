@@ -45,6 +45,7 @@ final class Lexer {
       Map.entry(".", TokKind.DOT),
       Map.entry(":", TokKind.COLON),
       Map.entry(";", TokKind.SEMI),
+      Map.entry("?", TokKind.QUESTION),
       Map.entry("=", TokKind.ASSIGN),
       Map.entry("+", TokKind.PLUS),
       Map.entry("-", TokKind.MINUS),
