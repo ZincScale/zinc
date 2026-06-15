@@ -576,6 +576,36 @@ made real, and it's pure BEAM strength:
   hot code upgrades only if ever justified (systemd restart is fine for the target user).
 
 ## Phase 6: polish & bets
+- **Design north-star: minimize the dev's cognitive load so they spend it on logic, not
+  ceremony.** Every feature is judged by what it lets the dev *stop* thinking about —
+  familiar syntax (no new grammar), supervision (no hand-rolled recovery), walled-off
+  FFI (you always know which mode you're in), good errors and an opt-in static net (the
+  machine holds the boring, error-prone state). Tooling that offloads cognitive load
+  beats tooling that adds power. This frames the items below: the docs story and the
+  FFI static net are both cognitive-load offloading, not feature count. Let the tools
+  help.
+- **Documentation story — the dev-facing manual (BLOCKS adoption; do before any launch).**
+  One coherent narrative that teaches the WHOLE surface, not a feature dump: the
+  Java-as-syntax premise, the Actor/Application supervision model, the failure ladder,
+  collections (`List` vs `ArrayList`, when each), JSON via the `Json` facade, the
+  `zinc.http`/`zinc.sql` facades — AND the two escape hatches devs WILL hit: the
+  `import erlang.<module>` FFI basement (call OUT to any loaded OTP/hex module;
+  per-file opt-out of the legal-Java gate; unchecked → runtime `undef`) and the
+  `zinc.toml` / `zc add` hex-dependency flow (declare = fetch+build+start; call = same
+  FFI as stdlib). Show, don't list: a runnable example per feature, the generated
+  Erlang side-by-side where it illuminates (atoms, failure relay), and a "coming from
+  Java" page on what's deliberately different (unchecked exceptions, transactional
+  `try`, no threads, `Sys.sleep` not `Thread.sleep`). The e2e examples are the source
+  of truth — docs cite them so they can't drift. Form factor TBD (mdbook-style site vs
+  in-repo guide).
+- **Static net over the FFI basement (opt-in).** Inside zinc the surface is statically
+  checked (legal-Java gate + known-vs-known types); the `import erlang.X` boundary is
+  unchecked pass-through — "Python at the boundary." The BEAM already ships the tools to
+  close this without zinc reinventing them: wire `rebar3 xref` (calls to functions that
+  exist nowhere on the code path) and Dialyzer (success-typing: bad arity,
+  type-incompatible FFI calls) into `zc` as an opt-in check. Covers hex deps too, since
+  both analyzers see the whole loaded code path. Turns the basement from "find out at
+  runtime" into "checked if you ask."
 - **Optional checker / linter** on the AST (types as opt-in — the one thing worth stealing
   from Gleam: `Option` instead of null).
 - **Name the language** (open decision #6) — needed by the time the installer/domain exists.
