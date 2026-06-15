@@ -924,7 +924,10 @@ class CodeGen {
         + "        #{config => #{type => standard_error},\n"
         + "          filters => [{progress, {fun logger_filters:progress/2, stop}}]}),\n"
         + "    {ok, _} = zinc_root_sup:start_link(),\n";
-    pieces.add("main() ->\n" + boot + (app.main() != null ? "    user_main([])." : "    ok."));
+    // entry call: static main(String[]) -> user_main([]); instance void main() -> user_main()
+    String mainCall = app.main() == null ? "    ok."
+        : app.main().params().isEmpty() ? "    user_main()." : "    user_main([]).";
+    pieces.add("main() ->\n" + boot + mainCall);
     // liveness: static children alive -> serve until stopped; none -> exit after main
     pieces.add(!app.fields().isEmpty() ? "run() -> main(), timer:sleep(infinity)."
         : "run() -> main().");
@@ -959,7 +962,7 @@ class CodeGen {
       fTypes.put(f.name(), f.type());
     }
     if (app.main() != null) {
-      exports.add("user_main/1");
+      exports.add("user_main/" + app.main().params().size());
       pieces.add(genAppMain(app));
     }
     pieces.addAll(helpers);
@@ -1590,27 +1593,46 @@ class CodeGen {
     return v + " = " + rhs;
   }
 
-  /** throw new NotFound("x") -> erlang:error({zinc_exc, 'fq.tag', FieldsMap}). */
+  /** throw new NotFound("x") -> erlang:error({zinc_exc, 'fq.tag', #{message => "x"}}).
+   *  Args bind to the explicit ctor's params; its super(expr) supplies the message. */
   private String genThrow(Ast.ThrowStmt s, Map<String, String> env) {
     Ast.ExceptionDecl x = exceptions.get(s.exType());
     if (x == null) {
       throw new CompileError("throw new " + s.exType() + ": unknown exception class"
-          + " — declare it: class " + s.exType() + " extends Exception { ... }");
+          + " — declare it: class " + s.exType() + " extends RuntimeException { ... }");
     }
-    if (s.args().size() != x.fields().size()) {
-      throw new CompileError("throw new " + s.exType() + ": takes " + x.fields().size()
-          + " args (its fields, in order), got " + s.args().size());
+    MethodDecl ctor = x.ctor();
+    if (ctor == null) {
+      throw new CompileError("throw new " + s.exType()
+          + ": this exception is raised by the runtime, not user code");
+    }
+    if (s.args().size() != ctor.params().size()) {
+      throw new CompileError("throw new " + s.exType() + ": takes " + ctor.params().size()
+          + " args (its constructor params), got " + s.args().size());
+    }
+    var cenv = new HashMap<>(env);
+    for (int i = 0; i < ctor.params().size(); i++) {
+      Param p = ctor.params().get(i);
+      checkBind(p.type(), exprType(s.args().get(i)),
+          "throw new " + s.exType() + " ('" + p.name() + "')");
+      cenv.put(p.name(), genExpr(s.args().get(i), env));
     }
     String tag = atomLit(excTags.get(s.exType()));
-    var entries = new ArrayList<String>();
-    entries.add("'$class' => " + tag);
-    for (int i = 0; i < x.fields().size(); i++) {
-      FieldDecl f = x.fields().get(i);
-      checkBind(f.type(), exprType(s.args().get(i)),
-          "throw new " + s.exType() + " ('" + f.name() + "')");
-      entries.add(f.name() + " => " + genExpr(s.args().get(i), env));
+    String msg = ctorMessage(ctor, cenv);
+    return "erlang:error({zinc_exc, " + tag + ", #{'$class' => " + tag
+        + (msg == null ? "" : ", message => " + msg) + "}})";
+  }
+
+  /** Pull the message out of an exception ctor: the argument to its super(expr) call,
+   *  evaluated with the ctor params bound to the throw args. null = no super(). */
+  private String ctorMessage(MethodDecl ctor, Map<String, String> cenv) {
+    for (Stmt st : ctor.body().stmts()) {
+      if (st instanceof Ast.ExprStmt es && es.expr() instanceof Call c
+          && c.callee().equals("super") && c.args().size() == 1) {
+        return genExpr(c.args().get(0), cenv);
+      }
     }
-    return "erlang:error({zinc_exc, " + tag + ", #{" + String.join(", ", entries) + "}})";
+    return null;
   }
 
   /** Collection insert: guard the element when the type arg is known and the value isn't. */
@@ -1763,7 +1785,7 @@ class CodeGen {
         String tag = excTags.get(c.exType());
         if (tag == null) {
           throw new CompileError("catch (" + c.exType() + "): unknown exception class"
-              + " — declare it: class " + c.exType() + " extends Exception { ... }");
+              + " — declare it: class " + c.exType() + " extends RuntimeException { ... }");
         }
         List<String> kids = BUILTIN_EXC_CHILDREN.getOrDefault(c.exType(), List.of());
         if (kids.isEmpty()) {
@@ -2020,13 +2042,11 @@ class CodeGen {
       }
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !env.containsKey(vr.name())) {
-          // Tag.ok -> the atom ok; Color.RED -> 'RED' (enum values are atoms)
-          if (vr.name().equals("Tag")) {
-            yield atomLit(x.field());
-          }
-          if (vr.name().equals("Atom")) {
-            throw new CompileError("Atom.* was renamed: use Tag." + x.field()
-                + " (Tag.of(\"...\") for non-identifier shapes)");
+          // Color.RED -> 'RED' (enum values are atoms). Atoms are Tag.of("..."):
+          // the field form Tag.x isn't legal Java (Tag can't enumerate every atom).
+          if (vr.name().equals("Tag") || vr.name().equals("Atom")) {
+            throw new CompileError(vr.name() + "." + x.field()
+                + " is not valid: write atoms as Tag.of(\"" + x.field() + "\")");
           }
           EnumDecl ed = enums.get(vr.name());
           if (ed != null) {
@@ -2343,12 +2363,21 @@ class CodeGen {
         && r.components().stream().anyMatch(c -> c.name().equals(x.method()))) {
       return "maps:get(" + x.method() + ", " + genExpr(x.target(), env) + ")";
     }
-    if (r != null && x.method().equals("toJson") && x.args().isEmpty()) {
-      emitJsonTo(r);
-      return "'$tojson_" + r.name().toLowerCase() + "'(" + genExpr(x.target(), env) + ")";
-    }
     // dynamic var-chaining over foreign JSON (the FFI rule: unknown flows freely);
-    // the typed bind at the end of the chain is the guarded crossing
+    // .asInt()/.asText()/.asBool()/.asNum() is the guarded crossing back into a known type
+    if (tt == null && x.args().isEmpty()) {
+      String spec = switch (x.method()) {
+        case "asInt" -> "integer";
+        case "asText" -> "string";
+        case "asBool" -> "boolean";
+        case "asNum" -> "float";
+        default -> null;
+      };
+      if (spec != null) {
+        useChk = true;
+        return "'$chk'(" + genExpr(x.target(), env) + ", " + spec + ")";
+      }
+    }
     if (tt == null && x.method().equals("get") && x.args().size() == 1) {
       return "maps:get(" + genExpr(x.args().get(0), env) + ", "
           + genExpr(x.target(), env) + ")";
@@ -2369,6 +2398,22 @@ class CodeGen {
       case "String" -> "string";
       default -> "raw";
     };
+  }
+
+  /** User.class -> "User" (null if e isn't a class literal). The class literal is the
+   *  only place a bare type name appears as a value; it names the codec's target. */
+  private static String classLitName(Expr e) {
+    return e instanceof FieldAccess fa && fa.field().equals("class")
+        && fa.obj() instanceof VarRef vr ? vr.name() : null;
+  }
+
+  private RecordDecl classLitRecord(Expr e, String where) {
+    String n = classLitName(e);
+    RecordDecl r = n == null ? null : records.get(n);
+    if (r == null) {
+      throw new CompileError(where + " expects a record class literal, e.g. User.class");
+    }
+    return r;
   }
 
   private void emitJsonFrom(RecordDecl r) {
@@ -2415,28 +2460,14 @@ class CodeGen {
 
   /** Builtin namespaces, actor handles, class statics, FFI — all keyed by a bare name. */
   private String genNamespaceCall(String name, MethodCall x, Map<String, String> env) {
-    RecordDecl jr = records.get(name);
-    if (jr != null && x.method().equals("fromJson") && x.args().size() == 1) {
-      emitJsonFrom(jr);
-      return "'$fromjson_" + jr.name().toLowerCase() + "'(" + genExpr(x.args().get(0), env)
-          + ")";
-    }
-    // User.from(rows): rows are maps keyed by column name — same derived codec as
-    // fromJson ('$jmap'), matched by name, crash-on-missing, lenient on extras
-    if (jr != null && x.method().equals("from") && x.args().size() == 1) {
-      emitJsonFrom(jr);
-      String low = jr.name().toLowerCase();
-      if (jsonEmitted.add("rows_" + low)) {
-        helpers.add("'$fromrows_" + low + "'(Rows) -> ['$jmap_" + low
-            + "'(R) || R <- Rows].");
-      }
-      return "'$fromrows_" + low + "'(" + genExpr(x.args().get(0), env) + ")";
-    }
     switch (name) {
-      case "Thread" -> {
+      case "Sys" -> {
+        // zinc's sleep facade: unlike java.lang.Thread.sleep it throws no checked
+        // InterruptedException, so it stays legal Java without a throws clause.
         if (x.method().equals("sleep")) {
           return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
         }
+        throw new CompileError("unsupported: Sys." + x.method() + " (sleep)");
       }
       case "Log" -> {
         // println is the dumb stdout pipe; Log.* is the BEAM logger stream, where
@@ -2474,7 +2505,36 @@ class CodeGen {
         if (x.method().equals("parse") && x.args().size() == 1) {
           return "json:decode(" + genExpr(x.args().get(0), env) + ")";
         }
-        throw new CompileError("unsupported: Json." + x.method() + " (parse)");
+        // Json.encode(rec) -> derived codec from the record's static type
+        if (x.method().equals("encode") && x.args().size() == 1) {
+          RecordDecl r = records.get(baseType(exprType(x.args().get(0))));
+          if (r == null) {
+            throw new CompileError("Json.encode expects a record value");
+          }
+          emitJsonTo(r);
+          return "'$tojson_" + r.name().toLowerCase() + "'("
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        // Json.decode(User.class, s) / Json.decodeAll(User.class, rows): the class
+        // literal names the target record (rows are maps keyed by column name).
+        if (x.method().equals("decode") && x.args().size() == 2) {
+          RecordDecl r = classLitRecord(x.args().get(0), "Json.decode");
+          emitJsonFrom(r);
+          return "'$fromjson_" + r.name().toLowerCase() + "'("
+              + genExpr(x.args().get(1), env) + ")";
+        }
+        if (x.method().equals("decodeAll") && x.args().size() == 2) {
+          RecordDecl r = classLitRecord(x.args().get(0), "Json.decodeAll");
+          emitJsonFrom(r);
+          String low = r.name().toLowerCase();
+          if (jsonEmitted.add("rows_" + low)) {
+            helpers.add("'$fromrows_" + low + "'(Rows) -> ['$jmap_" + low
+                + "'(R) || R <- Rows].");
+          }
+          return "'$fromrows_" + low + "'(" + genExpr(x.args().get(1), env) + ")";
+        }
+        throw new CompileError("unsupported: Json." + x.method()
+            + " (parse/encode/decode/decodeAll)");
       }
       case "Assert" -> {
         useAssert = true;
@@ -2808,14 +2868,27 @@ class CodeGen {
         yield md == null ? null : md.retType();
       }
       case MethodCall x -> {
+        // .asInt()/.asText()/.asBool()/.asNum(): guarded crossing off a dynamic JSON value
+        String asx = switch (x.method()) {
+          case "asInt" -> "int";
+          case "asText" -> "String";
+          case "asBool" -> "boolean";
+          case "asNum" -> "double";
+          default -> null;
+        };
+        if (asx != null) yield asx;
         if (x.target() instanceof VarRef vr) {
           if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
           if (vr.name().equals("HttpClient")) yield "HttpClientBuilder";
-          if (records.containsKey(vr.name()) && x.method().equals("fromJson")) {
-            yield vr.name();
-          }
-          if (records.containsKey(vr.name()) && x.method().equals("from")) {
-            yield "List<" + vr.name() + ">";
+          if (vr.name().equals("Json")) {
+            String rec = classLitName(x.args().isEmpty() ? null : x.args().get(0));
+            yield switch (x.method()) {
+              case "encode" -> "String";
+              case "decode" -> rec != null && records.containsKey(rec) ? rec : null;
+              case "decodeAll" -> rec != null && records.containsKey(rec)
+                  ? "List<" + rec + ">" : null;
+              default -> null; // parse: dynamic
+            };
           }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
           if (vr.name().equals("Router")) yield "Router";
@@ -2926,7 +2999,6 @@ class CodeGen {
         }
         RecordDecl r = tt == null ? null : records.get(tt);
         if (r != null) {
-          if (x.method().equals("toJson")) yield "String";
           yield r.components().stream().filter(c -> c.name().equals(x.method()))
               .map(Param::type).findFirst().orElse(null);
         }

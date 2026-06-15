@@ -10,13 +10,13 @@ class Counter implements Actor {
 public class Main implements Application {
   Counter c = new Counter();        // root child: permanent, supervised, restarted
 
-  public static void main(String[] args) {
+  void main() {
     c.incr();
     c.incr();
     c.incr();
     System.out.println(c.get());  // 3   <- working actor
     c.boom();                     //     <- crashes the gen_server process
-    Thread.sleep(100);            //     <- the tree restarts it (same registered name)
+    Sys.sleep(100);               //     <- the tree restarts it (same registered name)
     System.out.println(c.get());  // 0   <- SAME handle serves again; state reset to init
     c.incr();
     System.out.println(c.get());  // 1   <- and it keeps working

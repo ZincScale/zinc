@@ -83,6 +83,12 @@ declare -A wanterr=(
 )
 
 fail=0
+
+# legal-Java gate (fast, host javac): the whole .zinc surface minus the erlang.* FFI
+# basement must compile under javac against the prelude jar. Run first -- fail before
+# the slow BEAM phase if any source stopped being valid Java.
+if ./legaljava.sh; then echo "PASS  legal-Java gate"; else echo "FAIL  legal-Java gate"; fail=1; fi
+
 for ex in "${!wanterr[@]}"; do
   dir="out/neg_$ex"
   rm -rf "$dir" && mkdir -p "$dir"

@@ -5,21 +5,21 @@
 // throw = ROLLBACK + relay). main() doubles as the test client.
 record User(String id, String name) {}
 
-class Boom extends Exception {
-  String message;
+class Boom extends RuntimeException {
+  Boom(String message) { super(message); }
 }
 
 public class Main implements Application {
   Db db = new Db("postgres://zinc:zinc@zincsql-pg:5432/zinc", 4);
 
-  public static void main(String[] args) {
+  void main() {
     db.exec("create table users (id text primary key, name text not null)");
     System.out.println(db.exec("insert into users values ($1, $2)", "7", "vin")); // 1
 
     var rows = db.query("select id, name from users where id = $1", "7");
-    List<User> us = User.from(rows);
+    List<User> us = Json.decodeAll(User.class, rows);
     System.out.println(us.get(0).name());   // vin   <- derived row mapping
-    String id = rows.get(0).get("id");      // dynamic row, guarded typed bind
+    String id = rows.get(0).get("id").asText();   // dynamic row, guarded typed bind
     System.out.println(id);                 // 7
 
     int added = db.transaction(tx -> {

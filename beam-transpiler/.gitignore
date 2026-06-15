@@ -2,3 +2,4 @@ out/
 .dart_tool/
 .packages
 pubspec.lock
+*.jar

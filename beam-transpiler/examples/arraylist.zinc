@@ -4,7 +4,7 @@
 // timeout here; the array module does it in milliseconds.
 public class Main {
   public static void main(String[] args) {
-    var xs = new ArrayList();
+    var xs = new ArrayList<Integer>();
     int i = 0;
     while (i < 500000) {
       xs.add(i);

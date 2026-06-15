@@ -14,7 +14,7 @@ class OneShot implements Actor {
 
 public class Main {
   public static void main(String[] args) {
-    var opts = List.of(Tag.binary, Tuple.of(Tag.active, false), Tuple.of(Tag.reuseaddr, true));
+    var opts = List.of(Tag.of("binary"), Tuple.of(Tag.of("active"), false), Tuple.of(Tag.of("reuseaddr"), true));
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
     var srv = new OneShot();

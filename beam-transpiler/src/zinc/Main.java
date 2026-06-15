@@ -30,10 +30,10 @@ public class Main {
       Ast.ApplicationDecl application = null;
       var modules = new java.util.HashSet<String>(List.of("zinc_root_sup", "zinc_dyn_sup"));
       var typeNames = new java.util.HashSet<String>();
-      var reserved = java.util.Set.of("System", "Thread", "Atom", "Tag", "Tuple", "Erlang",
-          "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
+      var reserved = java.util.Set.of("System", "Thread", "Sys", "Atom", "Tag", "Tuple",
+          "Erlang", "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
           "Arrays", "Object",
-          "String", "Exception", "Actor", "Application", "Log",
+          "String", "Exception", "RuntimeException", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json",
           "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",
@@ -43,7 +43,7 @@ public class Main {
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom
       for (String[] bx : CodeGen.BUILTIN_EXCEPTIONS) {
         exceptions.put(bx[0], new Ast.ExceptionDecl(bx[0],
-            List.of(new Ast.FieldDecl("String", "message", null))));
+            List.of(new Ast.FieldDecl("String", "message", null)), null));
         excTags.put(bx[0], bx[1]);
       }
       var interfaces = new LinkedHashMap<String, Ast.InterfaceDecl>();

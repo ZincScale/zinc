@@ -23,9 +23,12 @@ final class Ast {
   record InstanceClassDecl(String name, String iface, List<FieldDecl> fields,
       MethodDecl ctor, List<MethodDecl> methods) {}
 
-  /** class NotFound extends Exception { String message; } — the one sanctioned extends.
-   *  Final value; thrown as erlang:error({zinc_exc, 'fq.tag', FieldsMap}). */
-  record ExceptionDecl(String name, List<FieldDecl> fields) {}
+  /** class NotFound extends RuntimeException { NotFound(String m){super(m);} } — the one
+   *  sanctioned extends. Unchecked (failures auto-relay); thrown as
+   *  erlang:error({zinc_exc, 'fq.tag', #{message => ...}}). */
+  // ctor: the explicit user constructor (null for runtime-thrown builtins); its
+  // super(expr) call supplies the message. Drops the old auto-ctor-from-fields.
+  record ExceptionDecl(String name, List<FieldDecl> fields, MethodDecl ctor) {}
 
   /** class Main implements Application { Actor fields = root children; optional main. }
    *  The explicit root: lowers to the generated root supervisor's static children. */

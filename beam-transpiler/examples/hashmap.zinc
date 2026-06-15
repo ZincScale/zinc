@@ -1,7 +1,7 @@
 // HashMap -> Erlang map; put/remove are statements (SSA rebind), reads are pure
 public class Main {
   public static void main(String[] args) {
-    var m = new HashMap();
+    var m = new HashMap<String, Integer>();
     m.put("a", 1);
     m.put("b", 2);
     m.put("a", m.get("a") + 10);

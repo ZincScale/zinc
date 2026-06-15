@@ -28,13 +28,14 @@ file.zinc ──lex/parse──► AST ──codegen──► N .erl modules ─
   (`LOWERING_SPEC.md` is the codegen contract; throw/catch free; supervised self-heal ~16µs).
 - **`beam-transpiler/`** — working Java transpiler (lexer → sealed AST → parser → Erlang codegen;
   Java 22+ multi-file source launcher, so `java src/zinc/Main.java` needs no build tool).
-  `./e2e.sh` runs **13 example programs end-to-end on BEAM**.
+  `./e2e.sh` runs the **legal-Java gate then 55 cases end-to-end on BEAM**.
 - **Surface = legal Java (rewrite landed after Phase 1):** classes with static methods,
   typed params/locals (+`var`), classic/enhanced `for`, while, if/else-if, break/continue
   (classic-for continue runs the update), `++`/compound assigns, `int[]` + `.length`,
   records as structs (`new Point(1,2)`, `p.x()`; `p.x = v` mutation sugar is an extension),
   `String +` concat (type-aware → binary segments), int/int → `div`, `System.out.println`
-  (`~ts` for strings, `~p` otherwise), `Thread.sleep`. Declared types drive codegen
+  (`~ts` for strings, `~p` otherwise), `Sys.sleep` (zinc's non-throwing sleep facade;
+  `Thread.sleep`'s checked InterruptedException would break legal Java). Declared types drive codegen
   (void vs typed actor methods, div vs /, concat vs add).
 - **Phase 1.1 multi-module output** (`7e3ec4a`) — codegen emits named Erlang modules, driver
   writes `.erl` files to an outdir, `e2e.sh` compiles with `erlc` and runs `erl -noshell`.
@@ -281,24 +282,27 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
    crashed process exits with the same reason — not catchable in v1 (no retry against
    broken state); crash is transitive along a request. (4) Crashes hit domain policy
    (tree rules above). (5) Crash loops escalate to root -> VM exit nonzero -> systemd.
-   Exception surface: `class NotFound extends Exception` — the one sanctioned
-   `extends`; exception classes are final values, `message` by convention. All
-   unchecked, no `throws` clauses. `throw` -> `erlang:error({zinc_exc, 'pkg.notfound',
-   FieldsMap})`. Typed catch matches the tag, clauses in order; `catch (Exception e)`
+   Exception surface: `class NotFound extends RuntimeException` — the one sanctioned
+   `extends` (unchecked: zinc failures auto-relay, Erlang-style, so a checked
+   `extends Exception` would force `throws` clauses up every call chain). An explicit
+   constructor is required; its `super(message)` supplies the message (the old
+   auto-ctor-from-fields is gone). `throw` -> `erlang:error({zinc_exc, 'pkg.notfound',
+   #{message => ...}})`. Typed catch matches the tag, clauses in order; `catch (Exception e)`
    is the catch-all and also catches native BEAM errors (badarith ~
    ArithmeticException; `getMessage()` renders the reason). Exceptions in cast methods
    crash the process — no caller to relay to. Philosophy, stated once: catch only what
    you have a plan for (input/network/external failures); everything else crashes —
    process granularity + supervision IS the recovery story. Deferred: `finally`,
    try-with-resources, exception hierarchies beyond one level.
-   **Tags (atoms; closes GAP-10)**: `Tag.x` / `Tag.of("literal")` produce Erlang atoms
+   **Tags (atoms; closes GAP-10)**: `Tag.of("literal")` produces an Erlang atom
    — the FFI surface formerly `Atom.*`, renamed: a Tag labels protocol shapes (Erlang's
    own "tagged tuple" idiom); docs state "Tag = Erlang atom" once. `Tag.of("_")` ->
    `'_'`, resolved at transpile time; argument must be a compile-time string literal
    (atoms aren't GC'd — runtime minting is a leak; dynamic creation stays explicit via
-   FFI `list_to_atom`). Covers names unwritable as `Tag.x`: non-identifier shapes
-   (`_`, dots, uppercase) and Java-keyword names (`Tag.of("if")`). 255-char limit
-   checked; `Tag.ok` ≡ `Tag.of("ok")`. User code models its own constants as enums
+   FFI `list_to_atom`). The field form `Tag.ok` was DROPPED (legal-Java gate: a Tag
+   class can't enumerate the open atom set), so `Tag.of("ok")` is the one syntax; it
+   covers non-identifier shapes (`_`, dots, uppercase) and Java-keyword names
+   (`Tag.of("if")`). 255-char limit checked. User code models its own constants as enums
    (which lower to atoms); Tag is for foreign protocols only. Emitter rule, universal
    (Tag / enums / module names): emit an atom quoted whenever it isn't safely bare —
    non-lowercase-identifier shape OR Erlang reserved word (`Tag.end` -> `'end'`).
@@ -359,15 +363,17 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      websockets/streaming.
    **JSON v1 — designed (2026-06-11): typed codecs + dynamic access; no path DSL.**
    Backed by OTP 27's built-in `json` module — zero deps.
-   - The workhorse: the transpiler derives codecs on every record —
-     `User.fromJson(s)` (generated static: parse + shape-validate, typed
-     `{zinc_badtype...}` crash on mismatch) and `u.toJson()`. No class literals, no
-     reflection, no annotations: records are closed final values with statically
-     known fields, so derivation is pure codegen; nested records compose. Lenient
-     on extra fields, crash on missing; nullable/defaults story later.
+   - The workhorse: the transpiler derives codecs on every record, routed through
+     the `Json` facade (records can't carry `toJson`/`fromJson` in legal Java) —
+     `Json.decode(User.class, s)` (parse + shape-validate, typed `{zinc_badtype...}`
+     crash on mismatch), `Json.encode(u)`, and `Json.decodeAll(User.class, rows)`
+     for column-keyed DB rows. The class literal names the target record;
+     derivation is pure codegen (no reflection, no annotations); nested records
+     compose. Lenient on extra fields, crash on missing; nullable/defaults later.
    - The fallback, for foreign JSON: `Json.parse(s)` returns unknown-typed data
-     (maps/lists/scalars); `var` chaining flows freely (the FFI rule), and the
-     typed bind at the end is the guarded crossing — Python ergonomics with a
+     (maps/lists/scalars); `var` chaining flows freely (the FFI rule), and an
+     explicit `.asInt()`/`.asText()`/`.asBool()`/`.asNum()` is the guarded crossing
+     back into a known type — Python ergonomics with a
      checked boundary, ladder failure mode (no cast ceremony, no
      ClassCastException mysteries).
    - Deferred: path-string accessors (JsonPath/`at()`-style) — convenience over
@@ -487,6 +493,24 @@ Interleave as needed — all incremental on the existing codegen:
   (right output + dirty exit = FAIL), 120s timeout guards hangs, per-case stderr
   contracts (logging: Log warning on stderr; selfheal: supervisor child_terminated
   report). Principle: assert the OBSERVABLE CONTRACT, not a proxy for it.
+- **DONE (2026-06-15): legal-Java enforcement gate.** Every `.zinc` surface minus the
+  `erlang.*` FFI basement now compiles under `javac` against a prelude jar
+  (`zinc-prelude/zinc/*.java` — real Java stub types whose bodies throw
+  `UnsupportedOperationException`, package `zinc`). `legaljava.sh` copies each program
+  to `<PublicClass>.java` with prepended default imports (`java.util.*` + `zinc.*`,
+  Kotlin/Groovy-style), runs javac, asserts zero errors; wired as the fast first phase
+  of `e2e.sh`. **30/30 gated programs PASS, 6 FFI-exempt, e2e still 55/55.** Five
+  surface changes the gate forced (each a transpiler change + example rewrite):
+  (1) atoms are `Tag.of("x")` only — the field form `Tag.x` can't be legal Java;
+  (2) JSON moved off records onto the `Json` facade — `Json.encode`/`decode(T.class,_)`/
+  `decodeAll`, dynamic reads end in `.asInt()`/`.asText()`/`.asBool()`/`.asNum()`;
+  (3) exceptions `extends RuntimeException` (unchecked, no `throws` clauses) with a
+  required explicit ctor whose `super(message)` sets the message;
+  (4) Application entry is instance `void main()` (Java 25) so the supervision-tree
+  fields are legally reachable from the entrypoint; static `main(String[])` still
+  accepted; (5) `Sys.sleep` replaces `Thread.sleep` (the latter's checked
+  InterruptedException would need a throws clause). Principle: valid zinc is a subset
+  of valid Java even for Erlang-shaped features — wrap, don't invent keywords.
 
 ## Phase 4: **SDK & toolchain — the one-stop shop**
 One installer gets you everything; the dev kit manages the runtime. Rustup/flutter model:

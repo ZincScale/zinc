@@ -1,5 +1,5 @@
-class Boom extends Exception {
-  String message;
+class Boom extends RuntimeException {
+  Boom(String message) { super(message); }
 }
 public class Main {
   public static void main(String[] args) { throw new Boom(7); }

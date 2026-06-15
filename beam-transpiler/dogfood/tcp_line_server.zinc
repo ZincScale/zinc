@@ -41,10 +41,10 @@ class Acceptor implements Actor {
 public class Main {
   public static void main(String[] args) {
     var opts = new ArrayList();     // workaround GAP-2: no List.of(...) literal
-    opts.add(Tag.binary);
-    opts.add(Tuple.of(Tag.packet, Tag.line));
-    opts.add(Tuple.of(Tag.active, false));
-    opts.add(Tuple.of(Tag.reuseaddr, true));
+    opts.add(Tag.of("binary"));
+    opts.add(Tuple.of(Tag.of("packet"), Tag.of("line")));
+    opts.add(Tuple.of(Tag.of("active"), false));
+    opts.add(Tuple.of(Tag.of("reuseaddr"), true));
     var lsock = Erlang.ok(gen_tcp.listen(0, opts));
     int port = Erlang.ok(inet.port(lsock));
 
@@ -53,9 +53,9 @@ public class Main {
 
     // --- client side ---
     var copts = new ArrayList();
-    copts.add(Tag.binary);
-    copts.add(Tuple.of(Tag.packet, Tag.line));
-    copts.add(Tuple.of(Tag.active, false));
+    copts.add(Tag.of("binary"));
+    copts.add(Tuple.of(Tag.of("packet"), Tag.of("line")));
+    copts.add(Tuple.of(Tag.of("active"), false));
     // workaround GAP-3: gen_tcp wants hostname as charlist/atom/ip-tuple, String is a binary
     var cs = Erlang.ok(gen_tcp.connect(Tuple.of(127, 0, 0, 1), port, copts));
 

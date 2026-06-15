@@ -202,7 +202,7 @@ class Parser {
     return t.toString();
   }
 
-  /** class Name [implements Application|Actor|Test|<Interface> | extends Exception] { ... } */
+  /** class Name [implements Application|Actor|Test|<Interface> | extends RuntimeException] {..} */
   private void parseClassLike(List<ClassDecl> classes, List<ActorDecl> actors,
       ApplicationDecl[] application, List<ExceptionDecl> exceptions,
       List<InstanceClassDecl> instanceClasses, List<TestDecl> tests) {
@@ -211,9 +211,10 @@ class Parser {
     if (checkIdent("extends")) {
       advance();
       String parent = expect(TokKind.IDENT, "parent type").text();
-      if (!parent.equals("Exception")) {
+      if (!parent.equals("RuntimeException")) {
         throw new CompileError("class " + name + " extends " + parent
-            + ": 'extends Exception' is the one sanctioned extends (v1)");
+            + ": 'extends RuntimeException' is the one sanctioned extends (v1) — zinc"
+            + " failures auto-relay, so exceptions are unchecked");
       }
       exceptions.add(parseExceptionBody(name));
       return;
@@ -240,12 +241,17 @@ class Parser {
       MethodDecl main = null;
       for (MethodDecl m : body.methods()) {
         if (!m.name().equals("main")) {
-          throw new CompileError("Application " + name + " can only declare main(String[]):"
+          throw new CompileError("Application " + name + " can only declare main():"
               + " it is the boundary, not a unit — methods live on Actors");
         }
-        if (!m.mods().contains("public")) {
-          throw new CompileError(name
-              + ".main: the entrypoint is 'public static void main(String[] args)'");
+        // Java 25 instance `void main()` -- instance so the Application's fields are
+        // legally reachable from the entrypoint; static main(String[]) stays accepted.
+        boolean staticForm = m.mods().contains("static") && m.mods().contains("public")
+            && m.params().size() == 1;
+        boolean instanceForm = !m.mods().contains("static") && m.params().isEmpty();
+        if (!m.retType().equals("void") || (!staticForm && !instanceForm)) {
+          throw new CompileError(name + ".main: the entrypoint is 'void main()' (instance,"
+              + " Java 25) or 'public static void main(String[] args)'");
         }
         main = m;
       }
@@ -328,20 +334,32 @@ class Parser {
     return new RecordDecl(name, comps);
   }
 
-  /** Exception body: fields only — final values, positional construction at throw. */
+  /** Exception body: optional final fields plus a required explicit constructor whose
+   *  super(expr) sets the message -- e.g. NotFound(String message) { super(message); }.
+   *  (Legal Java: a bare `String message;` field gives javac no String constructor.) */
   private ExceptionDecl parseExceptionBody(String name) {
     expect(TokKind.LBRACE, "'{'");
     var fields = new ArrayList<FieldDecl>();
+    MethodDecl ctor = null;
     while (!check(TokKind.RBRACE)) {
       Set<String> mods = skipModifiers();
       String type = parseType();
+      if (type.equals(name) && check(TokKind.LPAREN)) { // constructor
+        if (ctor != null) throw new CompileError(name + ": duplicate constructor");
+        ctor = new MethodDecl("", name, parseParams(), parseBlock(), mods);
+        continue;
+      }
       String fieldName = expect(TokKind.IDENT, "field name").text();
       checkFieldMods(mods, name + "." + fieldName);
-      expect(TokKind.SEMI, "';' (exception classes hold fields only, v1)");
+      expect(TokKind.SEMI, "';'");
       fields.add(new FieldDecl(type, fieldName, null, mods));
     }
     expect(TokKind.RBRACE, "'}'");
-    return new ExceptionDecl(name, fields);
+    if (ctor == null) {
+      throw new CompileError("exception " + name + " needs an explicit constructor: "
+          + name + "(String message) { super(message); }");
+    }
+    return new ExceptionDecl(name, fields, ctor);
   }
 
   /** Shared body shape for Actor / Application / instance classes; `kind` picks the
@@ -367,7 +385,16 @@ class Parser {
       }
       String memberName = expect(TokKind.IDENT, "member name").text();
       if (check(TokKind.LPAREN)) {
-        checkMethodMods(mods, name + "." + memberName, isApp, isInstance);
+        // Application main is static(String[]) OR instance void main() -- its exact shape
+        // is validated in parseClassLike; here just ban final. Others never static.
+        if (isApp) {
+          if (mods.contains("final")) {
+            throw new CompileError(name + "." + memberName + ": 'final' on methods has no"
+                + " meaning — zinc has no inheritance");
+          }
+        } else {
+          checkMethodMods(mods, name + "." + memberName, false, isInstance);
+        }
         methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock(), mods));
       } else if (match(TokKind.ASSIGN)) {
         checkFieldMods(mods, name + "." + memberName);

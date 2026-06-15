@@ -1,7 +1,7 @@
 // failure ladder rung 1+2: expected failures are exceptions; a throw in a call
 // method relays to the caller (catchable) and the actor survives, state intact
-class NotFound extends Exception {
-  String message;
+class NotFound extends RuntimeException {
+  NotFound(String message) { super(message); }
 }
 
 class Store implements Actor {

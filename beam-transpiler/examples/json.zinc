@@ -5,21 +5,21 @@ record User(String name, int age, Address addr) {}
 
 public class Main {
   public static void main(String[] args) {
-    User u = User.fromJson("{\"name\":\"vin\",\"age\":40,\"addr\":{\"city\":\"sf\"},\"x\":1}");
+    User u = Json.decode(User.class, "{\"name\":\"vin\",\"age\":40,\"addr\":{\"city\":\"sf\"},\"x\":1}");
     System.out.println(u.name());          // vin   (extra field ignored: lenient)
     System.out.println(u.age() + 1);       // 41
     System.out.println(u.addr().city());   // sf    (nested record composes)
 
-    User v = User.fromJson(u.toJson());    // round-trip
+    User v = Json.decode(User.class, Json.encode(u));   // round-trip
     System.out.println(v.age());           // 40
 
     var doc = Json.parse("{\"k\":{\"n\":7}}");
     var inner = doc.get("k");              // unknown flows freely
-    int n = inner.get("n");                // guarded crossing
+    int n = inner.get("n").asInt();        // guarded crossing
     System.out.println(n);                 // 7
 
     try {
-      User bad = User.fromJson("{\"name\":\"x\"}");
+      User bad = Json.decode(User.class, "{\"name\":\"x\"}");
       System.out.println(bad.name());
     } catch (Exception e) {
       System.out.println("missing caught");  // age missing -> {zinc_badtype,{missing,..}}

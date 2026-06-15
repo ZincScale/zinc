@@ -6,11 +6,11 @@ interface Greeter {
 class English implements Greeter {
   String prefix;
   English(String p) { prefix = p; }
-  String greet(String name) { return prefix + name; }
+  public String greet(String name) { return prefix + name; }
 }
 
 class Terse implements Greeter {
-  String greet(String name) { return name + "!"; }
+  public String greet(String name) { return name + "!"; }
 }
 
 public class Main {
