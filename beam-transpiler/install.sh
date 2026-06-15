@@ -2,18 +2,20 @@
 # zc installer — the rustup model: one command lands the zc CLI + a managed runtime,
 # no system Java, no system Erlang, no Docker.
 #
-#   curl -fsSL https://github.com/ZincScale/zinc/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/ZincScale/zinc/releases/download/zc-v0.1.0/install.sh | sh
 #
 # Honors:
 #   ZC_HOME           install root (default ~/.zc)
-#   ZC_VERSION        release tag to pull (default: latest)
+#   ZC_VERSION        zc release tag to pull (default: zc-v0.1.0)
 #   ZC_DIST_TARBALL   use a local zc tarball instead of downloading (offline/air-gapped)
 #   ZC_SKIP_JRE=1     don't fetch the managed JRE (use host java)
 #   ZC_SKIP_OTP=1     don't fetch the OTP runtime now (do it later: zc toolchain install)
+#   ZC_SKIP_PATH=1    don't edit shell rc files; manage PATH yourself
 set -eu
 
 REPO="${ZC_REPO:-ZincScale/zinc}"
 ZC_HOME="${ZC_HOME:-$HOME/.zc}"
+ZC_VERSION="${ZC_VERSION:-zc-v0.1.0}"   # zc release tag (override to pin a version)
 JAVA_MAJOR=25
 
 say() { printf 'zc-install: %s\n' "$1"; }
@@ -47,11 +49,9 @@ if [ -n "${ZC_DIST_TARBALL:-}" ]; then
   say "using local tarball $ZC_DIST_TARBALL"
   cp "$ZC_DIST_TARBALL" "$TARBALL"
 else
-  if [ "${ZC_VERSION:-latest}" = latest ]; then
-    URL="https://github.com/$REPO/releases/latest/download/zc.tar.gz"
-  else
-    URL="https://github.com/$REPO/releases/download/$ZC_VERSION/zc.tar.gz"
-  fi
+  # Monorepo: zc releases are tagged `zc-vX.Y.Z` (the bare `v*` namespace is zinc-go's,
+  # so "latest release" can't be relied on). Fetch by the explicit zc tag.
+  URL="https://github.com/$REPO/releases/download/$ZC_VERSION/zc.tar.gz"
   say "downloading $URL"
   $DL "$TARBALL" "$URL" || die "download failed: $URL"
 fi
@@ -71,17 +71,21 @@ if [ -z "${ZC_SKIP_JRE:-}" ] && [ ! -x "$ZC_HOME/jre/bin/java" ]; then
   say "installed JRE -> $ZC_HOME/jre"
 fi
 
-# ---- 3. PATH ----
+# ---- 3. PATH (ZC_SKIP_PATH=1 to manage PATH yourself) ----
 case ":$PATH:" in
   *":$ZC_HOME/bin:"*) ;;
   *)
+    if [ -n "${ZC_SKIP_PATH:-}" ]; then
+      say "add to PATH yourself: export PATH=\"$ZC_HOME/bin:\$PATH\""
+    else
     for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
       [ -f "$rc" ] || continue
       grep -qs "$ZC_HOME/bin" "$rc" 2>/dev/null && continue
       printf '\n# zc\nexport PATH="%s/bin:$PATH"\n' "$ZC_HOME" >> "$rc"
       say "added $ZC_HOME/bin to PATH in $rc"
-    done
-    say "open a new shell, or: export PATH=\"$ZC_HOME/bin:\$PATH\""
+      done
+      say "open a new shell, or: export PATH=\"$ZC_HOME/bin:\$PATH\""
+    fi
     ;;
 esac
 
