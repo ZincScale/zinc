@@ -658,11 +658,13 @@ made real, and it's pure BEAM strength:
    (`package.sh`) + `install.sh` (GitHub-releases + managed JRE/OTP), dual-mode zc, verified
    locally. Remaining: cut the first GitHub release so live `curl|sh` works (user-owned);
    small polish (quiet rebar chatter, annotate `zc test`). See Phase 4 above.
-2. **NEXT: Phase 3 tail** — facade muscle gaps (List.sort/indexOf/addAll/reverse,
-   String.join/charAt/compareTo/format, Map.entrySet/forEach, Math.pow/sqrt/floor/ceil/round,
-   Arrays.sort/fill). Incremental, no design needed; add per gap + e2e case.
-3. **Then revisit** (Phase 5 deploy + Phase 6 docs/checker; the two-node distribution demo
-   is the highest-leverage proof point for the anti-K8s pitch — re-prioritize then).
+2. **Phase 3 tail — DONE (2026-06-15)** for the high-use Map/List/String surface: Math
+   sqrt/pow/floor/ceil/round, String join/charAt/compareTo/format, List indexOf/getFirst/
+   getLast, Map containsValue (e2e `mathstr`). **Deferred (need a design call):** non-mutating
+   sort on immutable List/Arrays (needs a Stream-style shape — Java's sort is void/mutating),
+   Map.forEach (2-arg lambda), Arrays.sort/fill. Add when earned.
+3. **NEXT: revisit roadmap** (Phase 5 deploy + Phase 6 docs/checker; the two-node distribution
+   demo is the highest-leverage proof point for the anti-K8s pitch — re-prioritize then).
 
 --- milestone log (history) ---
 

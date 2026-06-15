@@ -45,7 +45,7 @@ declare -A want=(
   [modifiers]=$'21\ns3cret'
   [arraylist]=$'500000\n250000\n7\n999997'
   [warn_iget]=$'8\n3'
-  [mathstr]=$'12.0\n12\n32.0\n3.0\n4.0\na-b-c\n1\n-1'
+  [mathstr]=$'12.0\n12\n32.0\n3.0\n4.0\na-b-c\n1\n-1\na\nc\ne\n-1\nx=7 (12.5%)\ntrue\nfalse'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line

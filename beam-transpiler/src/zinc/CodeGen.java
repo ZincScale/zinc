@@ -113,6 +113,10 @@ class CodeGen {
       + "'$lindexof'([X | _], X, I) -> I;\n"
       + "'$lindexof'([_ | T], X, I) -> '$lindexof'(T, X, I + 1);\n"
       + "'$lindexof'([], _, _) -> -1.";
+  private static final String STRCMP_HELPER =
+      "'$strcmp'(A, B) when A < B -> -1;\n"
+      + "'$strcmp'(A, B) when A > B -> 1;\n"
+      + "'$strcmp'(_, _) -> 0.";
 
   /** catch (Exception e): zinc exceptions unwrap; native errors render a message. */
   private static final String EXNORM_HELPER =
@@ -176,6 +180,7 @@ class CodeGen {
   private boolean useOk;
   private boolean useIdx;
   private boolean useLidx;
+  private boolean useStrcmp;
   private boolean useExnorm;
   private boolean useCall;
   private boolean useChk;
@@ -192,6 +197,7 @@ class CodeGen {
     if (useOk) out.add(OK_HELPER);
     if (useIdx) out.add(IDX_HELPER);
     if (useLidx) out.add(LIDX_HELPER);
+    if (useStrcmp) out.add(STRCMP_HELPER);
     if (useExnorm) out.add(EXNORM_HELPER);
     if (useCall) out.add(CALL_HELPER);
     if (useChk) out.add(CHK_HELPER);
@@ -301,6 +307,7 @@ class CodeGen {
     useOk = false;
     useIdx = false;
     useLidx = false;
+    useStrcmp = false;
     useExnorm = false;
     useCall = false;
     useChk = false;
@@ -2666,6 +2673,14 @@ class CodeGen {
               : "[" + genArgs(x.args().subList(1, x.args().size()), env) + "]";
           return "iolist_to_binary(lists:join(" + sep + ", " + list + "))";
         }
+        if (x.method().equals("format") && !x.args().isEmpty()) {
+          if (!(x.args().get(0) instanceof StrLit f)) {
+            throw new CompileError("String.format needs a compile-time format-string literal");
+          }
+          String erlFmt = translateFormat(f.text()); // %s/%d/%f/%.Nf/%x/%b/%n/%%
+          String fmtArgs = genArgs(x.args().subList(1, x.args().size()), env);
+          return "iolist_to_binary(io_lib:format(\"" + erlFmt + "\", [" + fmtArgs + "]))";
+        }
       }
       case "Arrays" -> {
         if (x.method().equals("asList")) {
@@ -2763,6 +2778,12 @@ class CodeGen {
         useIdx = true;
         yield "'$idx'(" + r + ", " + genExpr(x.args().get(0), env) + ")"; // byte offset
       }
+      case "charAt" -> // zinc strings are UTF-8: the i-th character as a 1-char string
+          "string:slice(" + r + ", " + genExpr(x.args().get(0), env) + ", 1)";
+      case "compareTo" -> {
+        useStrcmp = true;
+        yield "'$strcmp'(" + r + ", " + genExpr(x.args().get(0), env) + ")"; // -1 / 0 / 1
+      }
       case "replace" -> "iolist_to_binary(string:replace(" + r + ", "
           + genExpr(x.args().get(0), env) + ", " + genExpr(x.args().get(1), env) + ", all))";
       case "split" -> "array:from_list(string:split(" + r + ", "
@@ -2802,6 +2823,8 @@ class CodeGen {
         yield "'$lindexof'(" + r + ", " + genExpr(x.args().get(0), env) + ")"; // -1 if absent
       }
       case "isEmpty" -> "(" + r + " =:= [])";
+      case "getFirst" -> "hd(" + r + ")";
+      case "getLast" -> "lists:last(" + r + ")";
       case "toArray" -> "array:from_list(" + r + ")";
       case "add", "set", "remove", "clear", "sort", "reverse", "addAll" ->
           throw new CompileError("List is read-only — build with an ArrayList, then "
@@ -2815,6 +2838,8 @@ class CodeGen {
     String r = genExpr(x.target(), env);
     return switch (x.method()) {
       case "get" -> "array:get(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "getFirst" -> "array:get(0, " + r + ")";
+      case "getLast" -> "array:get(array:size(" + r + ") - 1, " + r + ")";
       case "size" -> "array:size(" + r + ")";
       case "isEmpty" -> "(array:size(" + r + ") =:= 0)";
       case "contains" -> "lists:member(" + genExpr(x.args().get(0), env)
@@ -2835,6 +2860,8 @@ class CodeGen {
       case "getOrDefault" -> "maps:get(" + genExpr(x.args().get(0), env) + ", " + r + ", "
           + genExpr(x.args().get(1), env) + ")";
       case "containsKey" -> "maps:is_key(" + genExpr(x.args().get(0), env) + ", " + r + ")";
+      case "containsValue" -> "lists:member(" + genExpr(x.args().get(0), env)
+          + ", maps:values(" + r + "))";
       case "size" -> "maps:size(" + r + ")";
       case "isEmpty" -> "(map_size(" + r + ") =:= 0)";
       case "keySet" -> "maps:keys(" + r + ")";
@@ -2853,6 +2880,52 @@ class CodeGen {
     if (e instanceof StrLit s) return "\"" + escErl(s.text()) + "\"/utf8";
     useFmt = true;
     return "('$fmt'(" + genExpr(e, env) + "))/binary";
+  }
+
+  /** Java printf format -> Erlang io_lib:format control string. Supports the common
+   *  specifiers; literal text is escaped for the Erlang string literal it lands in. */
+  private static String translateFormat(String f) {
+    var sb = new StringBuilder();
+    for (int i = 0; i < f.length(); i++) {
+      char c = f.charAt(i);
+      if (c == '~') { sb.append("~~"); continue; }   // erl directive char -> literal tilde
+      if (c != '%') { appendErlLit(sb, c); continue; }
+      if (++i >= f.length()) throw new CompileError("String.format: dangling % in format");
+      char d = f.charAt(i);
+      switch (d) {
+        case '%' -> sb.append('%');
+        case 'n' -> sb.append("~n");
+        case 's' -> sb.append("~ts");
+        case 'd' -> sb.append("~w");
+        case 'f' -> sb.append("~f");
+        case 'x' -> sb.append("~.16b");
+        case 'b' -> sb.append("~w");
+        case '.' -> {                                 // %.Nf precision
+          var num = new StringBuilder();
+          int j = i + 1;
+          while (j < f.length() && Character.isDigit(f.charAt(j))) num.append(f.charAt(j++));
+          if (num.length() == 0 || j >= f.length() || f.charAt(j) != 'f') {
+            throw new CompileError("String.format: only %.Nf precision is supported");
+          }
+          sb.append("~.").append(num).append('f');
+          i = j;
+        }
+        default -> throw new CompileError("String.format: unsupported specifier %" + d
+            + " (s/d/f/.Nf/x/b/n/%)");
+      }
+    }
+    return sb.toString();
+  }
+
+  private static void appendErlLit(StringBuilder sb, char c) {
+    switch (c) {
+      case '"' -> sb.append("\\\"");
+      case '\\' -> sb.append("\\\\");
+      case '\n' -> sb.append("\\n");
+      case '\t' -> sb.append("\\t");
+      case '\r' -> sb.append("\\r");
+      default -> sb.append(c);
+    }
   }
 
   private static String escErl(String s) {
@@ -2959,7 +3032,7 @@ class CodeGen {
           }
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
           if (vr.name().equals("String")) {
-            yield List.of("valueOf", "join").contains(x.method()) ? "String" : null;
+            yield List.of("valueOf", "join", "format").contains(x.method()) ? "String" : null;
           }
           if (vr.name().equals("Arrays")) {
             yield x.method().equals("asList") ? "List" : null;
@@ -2988,10 +3061,10 @@ class CodeGen {
         }
         if ("String".equals(tt)) {
           yield switch (x.method()) {
-            case "length", "indexOf" -> "int";
+            case "length", "indexOf", "compareTo" -> "int";
             case "isEmpty", "equals", "contains", "startsWith", "endsWith" -> "boolean";
             case "toUpperCase", "toLowerCase", "trim", "strip", "substring", "replace",
-                "repeat" -> "String";
+                "repeat", "charAt" -> "String";
             case "split" -> "String[]";
             case "toCharArray" -> "List";
             default -> null;
@@ -3004,14 +3077,14 @@ class CodeGen {
             case "size", "indexOf" -> "int";
             case "contains", "isEmpty" -> "boolean";
             case "toArray" -> "Object[]";
-            case "get" -> targs.size() == 1 ? targs.get(0) : null; // element type
+            case "get", "getFirst", "getLast" -> targs.size() == 1 ? targs.get(0) : null;
             default -> null;
           };
         }
         if ("HashMap".equals(tt) || "Map".equals(tt)) {
           yield switch (x.method()) {
             case "size" -> "int";
-            case "containsKey", "isEmpty" -> "boolean";
+            case "containsKey", "containsValue", "isEmpty" -> "boolean";
             default -> null;
           };
         }
