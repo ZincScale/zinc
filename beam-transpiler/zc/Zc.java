@@ -518,14 +518,16 @@ public class Zc {
     useManagedOtp(Map.of()); // no pin: highest installed toolchain, else PATH
     Path out = Files.createTempDirectory("zc-run");
     String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-    exec(Path.of("."), java, home.resolve("src/zinc/Main.java").toString(),
+    // transpile + erlc are plumbing: quiet on success (no .erl-path spam, no toolchain
+    // noise), full output only if they fail. `zc run` shows just the program's output.
+    execQuiet(Path.of("."), java, home.resolve("src/zinc/Main.java").toString(),
         file.toString(), out.toString());
     String erlc = managedOtpBin != null ? managedOtpBin.resolve("erlc").toString() : "erlc";
     var compile = new ArrayList<>(List.of(erlc, "-o", out.toString()));
     try (DirectoryStream<Path> ds = Files.newDirectoryStream(out, "*.erl")) {
       for (Path p : ds) compile.add(p.toString());
     }
-    exec(out, compile.toArray(String[]::new));
+    execQuiet(out, compile.toArray(String[]::new));
     String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
     // +Bd: Ctrl-C terminates instead of the BEAM BREAK menu (dev-tool expectation)
     runErl(out, out, erl, "+Bd", "-noshell", "-pa", out.toString(), "-eval",
