@@ -210,6 +210,7 @@ public class Main {
       if (supervised) {
         generated.put("zinc_dyn_sup", CodeGen.DYN_SUP_SOURCE);
         generated.put("zinc_root_sup", CodeGen.rootSupSource(resolvedApp, actors, actorMods));
+        generated.put("zinc_app", CodeGen.APP_SOURCE); // OTP app callback for `zc release`
       }
 
       Path outDir = Files.createDirectories(Path.of(args[1]));

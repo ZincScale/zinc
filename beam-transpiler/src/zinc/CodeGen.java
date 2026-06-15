@@ -664,6 +664,14 @@ class CodeGen {
       + "          [#{id => zinc_dyn, start => {zinc_dyn_sup, do_start, []},\n"
       + "             restart => temporary, shutdown => 5000, type => worker}]}}.\n";
 
+  /** OTP application callback: boots the supervision tree. Used by `zc release` (the .app
+   *  declares {mod, {zinc_app, []}}); inert under `zc run` (which boots via main:run/0). */
+  static final String APP_SOURCE = "-module(zinc_app).\n"
+      + "-behaviour(application).\n"
+      + "-export([start/2, stop/1]).\n\n"
+      + "start(_Type, _Args) -> zinc_root_sup:start_link().\n\n"
+      + "stop(_State) -> ok.\n";
+
   /** Root supervisor: zinc_dyn_sup + the Application's static children, decl order. */
   static String rootSupSource(Ast.ApplicationDecl app, Map<String, ActorDecl> actors,
       Map<String, String> actorMods) {
