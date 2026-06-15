@@ -548,8 +548,13 @@ Working CLI name: `zc` (final language name is open decision #6 — rename then)
 ## Phase 5: **deploy — the anti-K8s story**
 A small team ships a self-healing service to a $10 VM with one command. This is the pitch
 made real, and it's pure BEAM strength:
-- **`zc release`** — self-contained bundle: ERTS + compiled .beam + boot script in a tarball.
-  Target machine needs NOTHING installed (no Erlang, no container runtime).
+- **`zc release` — DONE (2026-06-15).** Self-contained bundle: ERTS + compiled .beam + boot
+  script in a tarball; target machine needs nothing installed. Transpiler emits a `zinc_app`
+  application callback (boots `zinc_root_sup`); `zc release` adds relx + `{mod,{zinc_app,[]}}`
+  and runs `rebar3 tar` → `_build/.../rel/<app>/<app>-<vsn>.tar.gz`. Verified: the release
+  boots the supervision tree + static children, stops clean. Requires an Application/Actor.
+  **Remaining in Phase 5:** `zc deploy user@host`, `--docker`/OCI, reproducible digests,
+  the compliance flow.
 - **`zc deploy user@host`** — scp the release, install a systemd unit (restart-on-boot;
   BEAM+supervisors handle everything above process level), health-check, flip a `current`
   symlink, roll back on failed health check. Deploy #2 is an upgrade.
@@ -676,7 +681,9 @@ made real, and it's pure BEAM strength:
   for nothing). Tier-0 audit verdict: foundation solid, install→dev→test→run loop complete
   and tested; the open ends are deploy (Phase 5) and the "make it real" layer (release/CI/docs/
   editor).
-- **`zc fmt`** — stubbed; implement when the surface settles.
+- **`zc fmt` — DONE (2026-06-15).** Line-based reindenter (2-space by brace depth);
+  formats text not tokens (lexer drops comments) so it preserves comments + strings, is
+  idempotent, no-op on clean files. Intra-line spacing normalization deferred.
 - **Casts `(int)`/`(double)`** — common Java idiom, missing; workaround is Math.round/floor/
   trunc. Parser needs cast-vs-grouping disambiguation (limit to known primitive types).
 
