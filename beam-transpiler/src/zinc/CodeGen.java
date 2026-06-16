@@ -1616,6 +1616,10 @@ class CodeGen {
             out.add(v + " = zinc_dyn_sup:spawn_child(" + atomLit(startMod) + ", self(), ["
                 + genArgs(sp.args(), env) + "])");
             varTypes.put(st.name(), a.name());
+          } else if (st.init() instanceof ListLit bl && st.type().equals("byte[]")) {
+            // byte[] is a binary, not the array module: {72, 0, -1} -> <<72, 0, 255>>
+            out.add(v + " = " + byteBinary(bl, env));
+            varTypes.put(st.name(), "byte[]");
           } else if (st.init() instanceof ListLit && st.type().endsWith("[]")) {
             out.add(v + " = array:from_list(" + genExpr(st.init(), env) + ")");
             varTypes.put(st.name(), st.type());
@@ -2962,6 +2966,14 @@ class CodeGen {
     var out = new ArrayList<String>();
     for (Expr a : args) out.add(genExpr(a, env));
     return String.join(", ", out);
+  }
+
+  /** byte[] literal -> Erlang binary. Each 8-bit segment takes the value mod 256, so a
+   *  Java signed byte like -1 becomes 0xFF (the legal-Java way to write a high byte). */
+  private String byteBinary(ListLit bl, Map<String, String> env) {
+    var segs = new ArrayList<String>();
+    for (Expr e : bl.elems()) segs.add("(" + genExpr(e, env) + ")");
+    return "<<" + String.join(", ", segs) + ">>";
   }
 
 

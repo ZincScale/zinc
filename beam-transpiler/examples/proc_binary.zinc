@@ -1,21 +1,18 @@
-// end-to-end binary processing: write bytes incl. NULs -> read as raw bytes -> write to a
-// second file -> verify exact byte size + round-trip. NULs are the discriminator: a
-// text/C-string impl would truncate at the first NUL (size 1, not 5), and byte size is
-// counted in bytes, not characters. (v1 gap: constructing arbitrary non-UTF-8 bytes, e.g.
-// 0xFF, needs a byte[] literal -- not yet a feature; NULs prove the byte-safe path.)
+// end-to-end binary processing with a real byte[] literal: bytes that are NOT valid text
+// -- a NUL (0x00) and 0xFF (written as -1, the legal-Java signed byte). Write -> read back
+// -> verify exact byte size AND byte-for-byte equality. A text/UTF impl would truncate at
+// the NUL or mangle 0xFF (invalid standalone UTF-8); only a byte-safe path round-trips it.
 public class Main {
   public static void main(String[] args) {
     String dir = "/tmp/zinc_proc_bin";
     Files.createDirectories(dir);
-    String src = dir + "/src.dat";
-    String dst = dir + "/dst.dat";
+    String path = dir + "/data.bin";
 
-    Files.writeString(src, "a\0b\0c");   // 5 raw bytes: a NUL b NUL c
-    byte[] raw = Files.readBytes(src);   // typed byte[], a binary at runtime
-    Files.writeBytes(dst, raw);
+    byte[] b = {72, 73, 0, -1, 65};   // H, I, NUL, 0xFF, A  -> 5 raw bytes
+    Files.writeBytes(path, b);
+    byte[] back = Files.readBytes(path);
 
-    System.out.println(Files.size(src));                    // 5  (NULs counted, not truncated)
-    System.out.println(Files.size(dst));                    // 5  (byte-exact round-trip)
-    System.out.println(Files.size(src) == Files.size(dst)); // true
+    System.out.println(Files.size(path));  // 5   (NUL + 0xFF counted, not truncated)
+    System.out.println(b == back);         // true (byte-for-byte round-trip)
   }
 }

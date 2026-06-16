@@ -52,7 +52,7 @@ declare -A want=(
   [filewrite]=$'5\ntrue\n6'
   [proc_json]=$'daily\n97\n100\n2\n30'
   [proc_csv]=$'rows=3 total=96'
-  [proc_binary]=$'5\n5\ntrue'
+  [proc_binary]=$'5\ntrue'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line
