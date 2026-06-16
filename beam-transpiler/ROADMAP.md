@@ -440,8 +440,14 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      ...}`; rebar3 eunit integration, reporting, and exit codes come free.
      Integration harness (boot the Application, hit it over HTTP) deferred —
      dogfood scripts cover it until something earns more.
-   **`zinc.io` v1 — designed (2026-06-16, the first hardening item; see reorder note
-   under "Start here next session").** Basic I/O — no useful work without it (config
+   **`zinc.io` v1 — designed + IMPLEMENTED (2026-06-16, the first hardening item; see
+   reorder note under "Start here next session").** Shipped in 3 e2e-verified slices:
+   slice 1 whole-file + getenv + `IOException` (`fileio`), slice 2 streaming reads
+   `forEachLine`/`foldLines`/`forEachChunk` (`filestream`), slice 3 scoped
+   `withWriter`/`withAppender` + `Writer` handle (`filewrite`). Generated `'zinc.io'`
+   module; default imports gained `java.util.function.*`. Cross-process `FileWriter`
+   Actor + `zinc.http` streaming responses (the ingress half) DEFERRED. Suite: 96 PASS,
+   legal-Java gate 35/35. Basic I/O — no useful work without it (config
    files, NiFi-scale data). Core principle (user): **streaming is explicit and
    first-class; copying large files through memory is a non-starter.** Namespace
    `zinc.io` (decision #9 — BEAM file I/O ≠ JVM blocking-IO semantics), javac-stubbed
