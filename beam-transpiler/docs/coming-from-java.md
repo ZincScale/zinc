@@ -52,7 +52,7 @@ actor.
   is the runtime's job, not yours.
 
 ### What's deferred (not in v1)
-`finally` / try-with-resources beyond the scoped `Reader`/`Writer`/`Channel` handles,
+`finally` / try-with-resources beyond the scoped `Reader`/`Writer`/`HttpStream` handles,
 exception hierarchies beyond one level, interface `default` methods, mutating sort, streams,
 regex facade, multi-node distribution. Reach for the `import erlang.*` FFI basement if you
 need something the stdlib doesn't cover yet.

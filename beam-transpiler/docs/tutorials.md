@@ -1,126 +1,162 @@
-# Tutorials
+# Tutorial: a self-healing JSON service
 
-Two real programs end to end. Both are distilled from tested examples — the HTTP service
-mirrors [`dogfood/webdemo`](../dogfood/webdemo), the pipeline mirrors
-[`examples/pipeline.zinc`](../examples/pipeline.zinc) and friends.
+We'll build a small HTTP service that stores and serves users as JSON — and watch it shrug
+off a crash without a line of recovery code. About 15 minutes. By the end you'll have used
+the three things that make zinc what it is: **supervised actors**, the **failure ladder**,
+and **derived JSON**.
+
+You need `zc` ([install](install.md)). Each step below is a real command with its real
+output.
 
 ---
 
-## 1. An HTTP + JSON service
+## Step 0 — scaffold and run
 
-A REST store: `POST /users/{id}` saves a user, `GET /users/{id}` returns it as JSON. The
-state lives in a supervised `Store` actor; the HTTP server is a child of the same app, so
-if the server crashes the supervisor restarts it and the store is untouched.
+```sh
+zc new userstore && cd userstore
+zc run
+```
+```
+Hello from userstore!
+```
+
+`zc new` made a `zinc.toml` and `src/Main.zinc` (a hello-world). The entry point is always
+the class named `Main`. Let's make it do something.
+
+## Step 1 — state that lives in a process
+
+Open `src/Main.zinc` and replace it with a store. We'll drive it from `main` first, no HTTP
+yet, just to see the shape:
 
 ```java
 record User(String id, String name) {}
 
 class Store implements Actor {
   HashMap<String, User> users = new HashMap<String, User>();
-  void put(String id, User u) { users.put(id, u); }   // cast (void)
-  User get(String id)         { return users.get(id); } // call (typed)
+  void put(String id, User u) { users.put(id, u); }   // void  -> async message (cast)
+  User get(String id)         { return users.get(id); } // typed -> sync request (call)
 }
 
 public class Main implements Application {
-  Store store = new Store();                            // supervised child #1
-  HttpServer server = new HttpServer(8080, Router.create()  // supervised child #2
+  Store store = new Store();          // a supervised child of the app
+  void main() {
+    store.put("7", new User("7", "vin"));
+    System.out.println(store.get("7").name());
+  }
+}
+```
+```sh
+zc run
+```
+```
+vin
+```
+
+What just happened, and why it matters:
+- `Store implements Actor` makes it a **process**, not an object. Its `HashMap` is private
+  state that **only the Store's own process can touch** — no locks, no `synchronized`, no
+  data races, because no one else has a reference to the map.
+- `store` is a *field* of the `Application`, so it's a **supervised child** — the runtime
+  starts it when the app boots and will restart it if it crashes.
+- The method shapes are the messaging contract: `put` returns `void` so calling it is a
+  fire-and-forget **cast**; `get` returns a value so it's a synchronous **call**. You write
+  ordinary Java; the return type decides the protocol.
+- Notice the methods have no `public` — an actor's methods *are* its public protocol, so
+  that's the default.
+
+## Step 2 — put it behind HTTP
+
+Now add an HTTP server as a *second* supervised child, with routes that close over the
+store. We need cowboy:
+
+```sh
+zc add cowboy@2.12.0
+```
+
+Replace `Main` (keep `User` and `Store`):
+
+```java
+public class Main implements Application {
+  Store store = new Store();
+  HttpServer server = new HttpServer(8080, Router.create()
       .post("/users/{id}", req -> {
-        User u = Json.decode(User.class, req.body());   // JSON -> record
+        User u = Json.decode(User.class, req.body());   // JSON body -> User record
         store.put(req.pathParam("id"), u);
         return Response.status(201);
       })
       .get("/users/{id}", req ->
-          Response.ok(Json.encode(store.get(req.pathParam("id"))))
+          Response.ok(Json.encode(store.get(req.pathParam("id"))))   // User -> JSON
                   .header("content-type", "application/json")));
 
   void main() {
-    // (a real service would just serve; here main doubles as a client to show it works)
-    var client = HttpClient.newBuilder().build();
-    var u = new User("7", "vin");
-    client.send(HttpRequest.newBuilder("http://127.0.0.1:8080/users/7")
-        .POST(Json.encode(u)).build());
-    var got = client.send(HttpRequest.newBuilder("http://127.0.0.1:8080/users/7")
-        .GET().build());
-    System.out.println(Json.decode(User.class, got.body()).name());   // vin
+    System.out.println("listening on :8080");
   }
 }
 ```
+```sh
+zc run
+```
+```
+listening on :8080
+```
 
-What you got for free: `Store` and `HttpServer` are declared as fields, so they're the
-app's supervision tree — born in order, restarted on crash, drained in reverse on SIGTERM.
-Handlers are plain lambdas closing over the store's handle. The JSON codecs are derived from
-the `User` record at compile time (no reflection, no annotations). `Router` lowers to
-cowboy's dispatch; `{id}` is a path param.
+`main` returns, but the program **keeps serving** — an `Application` with a live child
+(the `HttpServer`) runs until stopped. In another terminal:
 
-`zc add cowboy@2.12.0` to pull the dependency; `zc run` to start it.
+```sh
+curl -s -XPOST localhost:8080/users/7 -d '{"id":"7","name":"vin"}' -o /dev/null -w '%{http_code}\n'
+# 201
+curl -s localhost:8080/users/7
+# {"id":"7","name":"vin"}
+```
 
----
+The new pieces:
+- **`Router`** is a programmatic table (no annotations); `{id}` is a path parameter read via
+  `req.pathParam("id")`.
+- Handlers are **lambdas** that close over `store`'s handle — they send it messages.
+- **`Json.decode(User.class, …)` / `Json.encode(…)`** use codecs the transpiler *derives
+  from the `User` record at compile time* — no reflection, no annotations, no `toJson`
+  boilerplate.
 
-## 2. A bounded-memory file pipeline
+## Step 3 — crash it on purpose
 
-Count word lengths across a file that might be 8 KB or 50 GB — same code, constant memory.
-First the **single-process** version (scoped streaming, accumulate into locals):
+Here's the payoff. Add one more route that contains a bug, and a `GET` that proves the
+store survives:
 
 ```java
-public class Main {
-  public static void main(String[] args) {
-    int total = 0;
-    int lines = 0;
-    try (Reader r = Files.openReader("input.txt")) {
-      while (r.hasNextLine()) {
-        total += r.nextLine().length();   // one line resident at a time
-        lines++;
-      }
-    }
-    Files.writeString("summary.txt", "lines=" + lines + " chars=" + total);
-  }
-}
+      .get("/boom", req -> { int x = 1 / 0; return Response.ok("never"); })
 ```
 
-Now the **multi-process** version — a read stage, a real transform stage, and a write stage,
-each in its own process, running in parallel and paced by bounded channels so memory stays
-flat. The transform is just an actor that drains one channel and feeds the next:
+Restart (`Ctrl-C`, `zc run`) and hit the bug:
 
-```java
-class Upper implements Actor {
-  void run(Channel<String> in, Channel<String> out) {
-    while (in.hasNext()) {
-      out.put(in.take().toUpperCase());   // do the actual work here
-    }
-    out.close();                          // tell the next stage we're done
-  }
-}
-
-public class Main implements Application {
-  void main() {
-    String in = "input.txt", out = "output.txt";
-
-    Channel<String> a = new Channel<>(64);   // reader -> transform   (bounded)
-    Channel<String> b = new Channel<>(64);   // transform -> writer   (bounded)
-    new FileReader(in, a);                    // stage 1: file -> a
-    Upper up = new Upper();
-    up.run(a, b);                             // stage 2: a -> uppercase -> b (cast: own process)
-    FileWriter fw = new FileWriter(b, out);   // stage 3: b -> file
-    fw.join();                                // block until the pipeline drains
-  }
-}
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/boom
+# 500
+curl -s localhost:8080/users/7
+# {"id":"7","name":"vin"}      <- still there, service never went down
 ```
 
-`up.run(a, b)` is a `void` method, so the call is a cast — it runs the drain/transform loop
-in `up`'s *own* process, concurrently with the reader and writer. The whole thing
-([`examples/pipeline.zinc`](../examples/pipeline.zinc)) uppercases a file line-by-line; swap
-the body of the loop for parsing, filtering, JSON-mapping, whatever.
+That `1 / 0` is a genuine crash. But each request runs in **its own process**, so the bug
+takes down *only that request* (500 + a log line) — the server process and the store are
+untouched. That's the **failure ladder**: a bug crashes a process, the blast radius is one
+request, and supervision keeps everything above it alive. You wrote zero error-handling to
+get that.
 
-Want 20 workers sharing the load instead of one? Have 20 actors each drain the *same* input
-channel — items go to whoever's free (work-stealing), and `put` blocking gives you
-backpressure automatically. (Chain more stages the same way: each is an actor between two
-channels.)
+(If the *server itself* crashed, its supervisor would restart it — and because `store` is a
+sibling, not a child, of the server, the data would survive that too.)
 
-The point: at no instant is more than ~one item-per-stage resident — the reader can't
-outrun the slowest stage (the channels are bounded), and `FileReader`/`FileWriter` close
-their handles when done.
+## What you built
 
----
+A stateful, JSON, crash-isolating HTTP service — in ~30 lines, no functional code, no
+supervisor wiring, no locks, no Dockerfile. The supervision tree *is* your field
+declarations; the messaging contract *is* your method signatures; the JSON *is* your record
+shape.
 
-See **[the guide](guide.md)** for the full surface, or
-**[coming from Java](coming-from-java.md)** for the gotchas.
+## Next
+
+- `zc release` bundles this into a self-contained OTP release (ERTS + beam + boot script)
+  you can drop on a `$10` VM.
+- For bounded-memory data pipelines (the `Channel` + `FileReader`/`FileWriter` story), see
+  the streaming section of the **[guide](guide.md#7-io-and-streaming--bounded-memory-8-kb--5-gb)**
+  and the tested [`examples/pipeline.zinc`](../examples/pipeline.zinc).
+- The full surface: **[the guide](guide.md)**.

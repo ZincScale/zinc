@@ -33,6 +33,6 @@ exec "${JAVA:-java}" -DZINC_HOME_LIB="$LIB" -jar "$LIB/zc.jar" "$@"
 SHIM
 chmod +x "$STAGE/bin/zc"
 
-( cd "$DIST" && tar czf "zc-$VER.tar.gz" "zc-$VER" )
-echo "built $DIST/zc-$VER.tar.gz"
+( cd "$DIST" && tar czf "zc-$VER.tar.gz" "zc-$VER" && cp "zc-$VER.tar.gz" "zc.tar.gz" )
+echo "built $DIST/zc-$VER.tar.gz (also $DIST/zc.tar.gz — the release/offline name)"
 echo "  lib/zc.jar  lib/rebar_zinc/  bin/zc"

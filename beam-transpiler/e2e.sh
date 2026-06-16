@@ -97,6 +97,7 @@ declare -A wanterr=(
   [trywith_nonhandle]="try-with-resources supports scoped Reader/Writer"
   [mapforeach_arity]="Map.forEach takes a 2-arg lambda"
   [decodelist_nonrecord]="Json.decodeList expects a record class literal"
+  [new_pump]="spawn a pump with the static FileReader.pump"
 )
 
 fail=0

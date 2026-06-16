@@ -196,9 +196,10 @@ try (HttpStream s = client.openStream(req)) {
 
 **Cross-process pipeline (parallel + bounded):** a `Channel<T>` is a bounded backpressure
 buffer between actors (NiFi connection / `BlockingQueue`) — `put` blocks when full, the
-consumer pulls. `FileReader`/`FileWriter` are ready-made pump actors; a transform stage is
-just an actor that drains one channel and feeds the next, run via a cast so it loops in its
-own process:
+consumer pulls. `FileReader.pump` / `FileWriter.drain` are ready-made source/sink pumps
+(static spawn-and-go, like `Thread.startVirtualThread` — no `new` to discard); a transform
+stage is just an actor that drains one channel and feeds the next, kicked via a cast so it
+loops in its own process:
 ```java
 class Upper implements Actor {
   void run(Channel<String> in, Channel<String> out) {
@@ -209,10 +210,10 @@ class Upper implements Actor {
 // read -> transform -> write, three processes, paced by the bounded channels:
 Channel<String> a = new Channel<>(64);
 Channel<String> b = new Channel<>(64);
-new FileReader(in, a);                  // file -> a
-Upper up = new Upper();                 // a spawn must bind to a var (then use the handle)
+FileReader.pump(in, a);                 // file -> a   (spawns a background reader)
+Upper up = new Upper();                 // a spawn must bind to a var, then kick it
 up.run(a, b);                           // a -> uppercase -> b; cast, so it loops in up's process
-FileWriter fw = new FileWriter(b, out); // b -> file
+FileWriter fw = FileWriter.drain(b, out); // b -> file (handle to join on)
 fw.join();                              // wait for the pipeline to finish
 ```
 N workers can drain one `Channel` for automatic work-stealing + backpressure.
@@ -224,7 +225,8 @@ N workers can drain one `Channel` for automatic work-stealing + backpressure.
   `Json.decode(User.class, s)`, `Json.decodeList(User.class, arrayJson)` → `List<User>`;
   plus dynamic access (`Json.parse(s).get("k").asInt()`) for foreign JSON. (`json`, `proc_json`)
 - **`zinc.http`** — client (`HttpClient.newBuilder()...send(req)`) and a server: an
-  `HttpServer` Actor + a programmatic `Router` with `{id}` path params; handlers are lambdas.
+  `HttpServer` Actor + a programmatic `Router` with `{id}` path params; handlers are lambdas
+  (or a class `implements Handler`).
   (`http_client`)
 - **`zinc.sql`** — a `Db` connection pool (a supervision subtree); `db.query(sql, params...)`,
   lambda `db.transaction(tx -> {...})`; always prepared statements. (Postgres.)

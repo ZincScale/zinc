@@ -23,10 +23,10 @@ public class Main implements Application {
 
     Channel<String> a = new Channel<>(2);       // reader -> transform
     Channel<String> b = new Channel<>(2);       // transform -> writer
-    new FileReader(in, a);                       // stage 1: file -> a
+    FileReader.pump(in, a);                      // stage 1: file -> a (spawn-and-go, no `new`)
     Upper up = new Upper();
     up.run(a, b);                                // stage 2: a -> uppercase -> b (own process)
-    FileWriter fw = new FileWriter(b, out);      // stage 3: b -> file
+    FileWriter fw = FileWriter.drain(b, out);    // stage 3: b -> file (handle to join)
     fw.join();                                   // wait for the pipeline to finish
 
     System.out.println(Files.readLines(out).size());             // 5

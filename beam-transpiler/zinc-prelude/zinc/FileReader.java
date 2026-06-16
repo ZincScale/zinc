@@ -1,8 +1,10 @@
 package zinc;
 
-/** A pump Actor: reads a file line-by-line into a Channel (closing it at EOF), in its own
- *  process. Channel backpressure paces it, so it streams an arbitrarily large file in
- *  bounded memory. The source end of a multi-process pipeline (NiFi GetFile). Prelude stub. */
+/** A source pump: spawns a background process that reads a file line-by-line into a Channel
+ *  and closes it at EOF (NiFi GetFile). Static spawn-and-go -- like Thread.startVirtualThread,
+ *  no `new` to discard. Channel backpressure paces it, so it streams an arbitrarily large
+ *  file in bounded memory. Prelude stub. */
 public final class FileReader {
-  public FileReader(String path, Channel<String> out) { throw Tag.stub(); }
+  private FileReader() {}
+  public static void pump(String path, Channel<String> ch) { throw Tag.stub(); }
 }

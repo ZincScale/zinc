@@ -1,0 +1,6 @@
+public class Main {
+  public static void main(String[] args) {
+    Channel<String> ch = new Channel<>(2);
+    new FileReader("x.txt", ch);     // must be FileReader.pump(path, channel)
+  }
+}

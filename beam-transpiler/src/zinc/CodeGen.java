@@ -2430,20 +2430,18 @@ class CodeGen {
           throw new CompileError(
               "new List: use List.of(...) or List.copyOf(xs)");
         }
-        // builtin dynamically-spawnable Actors: Channel + the FileReader/FileWriter pumps
-        if (x.typeName().equals("Channel") || x.typeName().equals("FileReader")
-            || x.typeName().equals("FileWriter")) {
-          String mod = switch (x.typeName()) {
-            case "Channel" -> { usedChannel = true; yield "zinc.channel"; }
-            case "FileReader" -> {
-              usedFileReader = true; usedIo = true; usedChannel = true; yield "zinc.filereader";
-            }
-            default -> {
-              usedFileWriter = true; usedIo = true; usedChannel = true; yield "zinc.filewriter";
-            }
-          };
-          yield "zinc_dyn_sup:spawn_child('" + mod + "', self(), ["
+        // Channel<T>: a builtin dynamically-spawnable Actor (bound + used, so `new` is right).
+        // The FileReader/FileWriter pumps are NOT `new`'d (a discarded `new` is a smell) --
+        // they're spawned via the static FileReader.pump / FileWriter.drain (see genNamespaceCall).
+        if (x.typeName().equals("Channel")) {
+          usedChannel = true;
+          yield "zinc_dyn_sup:spawn_child('zinc.channel', self(), ["
               + genArgs(x.args(), env) + "])";
+        }
+        if (x.typeName().equals("FileReader") || x.typeName().equals("FileWriter")) {
+          throw new CompileError("spawn a pump with the static " + x.typeName()
+              + (x.typeName().equals("FileReader") ? ".pump(path, channel)" : ".drain(channel, path)")
+              + ", not `new` (a discarded `new` is a side-effecting smell)");
         }
         if (x.typeName().equals("Db") || x.typeName().equals("HttpServer")) {
           // long-lived resources live in the tree: ctor acquires, restart heals
@@ -3235,6 +3233,24 @@ class CodeGen {
         }
         throw new CompileError("unsupported: System." + x.method() + " (getenv)");
       }
+      // Static spawn methods for the pump Actors (no discarded `new`): FileReader.pump is
+      // fire-and-forget (void); FileWriter.drain returns a handle you join().
+      case "FileReader" -> {
+        if (x.method().equals("pump") && x.args().size() == 2) {
+          usedFileReader = true; usedIo = true; usedChannel = true;
+          return "zinc_dyn_sup:spawn_child('zinc.filereader', self(), ["
+              + genArgs(x.args(), env) + "])"; // (path, channel)
+        }
+        throw new CompileError("unsupported: FileReader." + x.method() + " (pump(path, channel))");
+      }
+      case "FileWriter" -> {
+        if (x.method().equals("drain") && x.args().size() == 2) {
+          usedFileWriter = true; usedIo = true; usedChannel = true;
+          return "zinc_dyn_sup:spawn_child('zinc.filewriter', self(), ["
+              + genArgs(x.args(), env) + "])"; // (channel, path)
+        }
+        throw new CompileError("unsupported: FileWriter." + x.method() + " (drain(channel, path))");
+      }
       default -> {}
     }
     if (!env.containsKey(name)) {
@@ -3599,6 +3615,10 @@ class CodeGen {
           if (vr.name().equals("System")) {
             yield x.method().equals("getenv") ? "String" : null;
           }
+          if (vr.name().equals("FileWriter")) {
+            yield x.method().equals("drain") ? "FileWriter" : null;   // handle to join()
+          }
+          if (vr.name().equals("FileReader")) yield null;             // pump: void
           if (vr.name().equals("String")) {
             yield List.of("valueOf", "join", "format").contains(x.method()) ? "String" : null;
           }
