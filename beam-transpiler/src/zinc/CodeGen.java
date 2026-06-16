@@ -197,6 +197,8 @@ class CodeGen {
   private boolean usedSql;
   private boolean usedIo;
   private boolean usedChannel;
+  private boolean usedFileReader;
+  private boolean usedFileWriter;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -322,6 +324,14 @@ class CodeGen {
 
   boolean usedChannel() {
     return usedChannel;
+  }
+
+  boolean usedFileReader() {
+    return usedFileReader;
+  }
+
+  boolean usedFileWriter() {
+    return usedFileWriter;
   }
 
   private void resetModuleState() {
@@ -913,6 +923,62 @@ class CodeGen {
       + "                eof -> erlang:error({zinc_channel_closed, Ch})\n"
       + "            end\n"
       + "    end.\n";
+
+  /** FileReader pump Actor: reads a file line-by-line into a Channel, closes it when done.
+   *  The pump runs in handle_continue (so `new` returns immediately); ch.put blocking IS
+   *  the backpressure. Built on the zinc.io scoped reader + zinc.channel. Dies when done. */
+  static final String FILEREADER_SOURCE = "-module('zinc.filereader').\n"
+      + "-behaviour(gen_server).\n"
+      + "-export([start_link/3, start_boot/2, init/1, handle_continue/2, handle_call/3,\n"
+      + "         handle_cast/2, handle_info/2]).\n\n"
+      + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n"
+      + "start_link(Name, Owner, Args) ->\n"
+      + "    gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).\n\n"
+      + "init([_Name, Owner, Path, Ch]) ->\n"
+      + "    case Owner of none -> ok; _ -> erlang:monitor(process, Owner) end,\n"
+      + "    {ok, #{path => Path, ch => Ch}, {continue, pump}}.\n\n"
+      + "handle_continue(pump, S = #{path := Path, ch := Ch}) ->\n"
+      + "    R = 'zinc.io':open_reader(Path),\n"
+      + "    try loop(R, Ch), 'zinc.channel':close(Ch) after 'zinc.io':close(R) end,\n"
+      + "    {stop, normal, S}.\n"
+      + "loop(R, Ch) ->\n"
+      + "    case 'zinc.io':r_has_next_line(R) of\n"
+      + "        true -> 'zinc.channel':send(Ch, 'zinc.io':r_next_line(R)), loop(R, Ch);\n"
+      + "        false -> ok\n"
+      + "    end.\n\n"
+      + "handle_call(_Msg, _From, S) -> {reply, ok, S}.\n"
+      + "handle_cast(_Msg, S) -> {noreply, S}.\n"
+      + "handle_info({'DOWN', _R, process, _P, _Reason}, S) -> {stop, normal, S};\n"
+      + "handle_info(_Msg, S) -> {noreply, S}.\n";
+
+  /** FileWriter pump Actor: drains a Channel into a file until the channel is closed. Stays
+   *  alive after draining so a caller can join() (a call that queues behind the pump and
+   *  returns when it's done). Built on zinc.channel + the zinc.io scoped writer. */
+  static final String FILEWRITER_SOURCE = "-module('zinc.filewriter').\n"
+      + "-behaviour(gen_server).\n"
+      + "-export([start_link/3, start_boot/2, init/1, handle_continue/2, handle_call/3,\n"
+      + "         handle_cast/2, handle_info/2]).\n\n"
+      + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n"
+      + "start_link(Name, Owner, Args) ->\n"
+      + "    gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).\n\n"
+      + "init([_Name, Owner, Ch, Path]) ->\n"
+      + "    case Owner of none -> ok; _ -> erlang:monitor(process, Owner) end,\n"
+      + "    {ok, #{ch => Ch, path => Path}, {continue, drain}}.\n\n"
+      + "handle_continue(drain, S = #{ch := Ch, path := Path}) ->\n"
+      + "    W = 'zinc.io':open_writer(Path),\n"
+      + "    try loop(Ch, W) after 'zinc.io':close(W) end,\n"
+      + "    {noreply, S#{done => true}}.\n"   // stay alive so join/0 can be answered
+      + "loop(Ch, W) ->\n"
+      + "    case 'zinc.channel':has_next(Ch) of\n"
+      + "        true -> 'zinc.io':w_writeln(W, 'zinc.channel':take(Ch)), loop(Ch, W);\n"
+      + "        false -> ok\n"
+      + "    end.\n\n"
+      + "%% join queues behind handle_continue (the drain), so it returns only when done\n"
+      + "handle_call(join, _From, S) -> {reply, ok, S};\n"
+      + "handle_call(_Msg, _From, S) -> {reply, ok, S}.\n"
+      + "handle_cast(_Msg, S) -> {noreply, S}.\n"
+      + "handle_info({'DOWN', _R, process, _P, _Reason}, S) -> {stop, normal, S};\n"
+      + "handle_info(_Msg, S) -> {noreply, S}.\n";
 
   /** Dynamic children: temporary (never restarted), die with their spawner (monitor). */
   static final String DYN_SUP_SOURCE = "-module(zinc_dyn_sup).\n"
@@ -2364,6 +2430,21 @@ class CodeGen {
           throw new CompileError(
               "new List: use List.of(...) or List.copyOf(xs)");
         }
+        // builtin dynamically-spawnable Actors: Channel + the FileReader/FileWriter pumps
+        if (x.typeName().equals("Channel") || x.typeName().equals("FileReader")
+            || x.typeName().equals("FileWriter")) {
+          String mod = switch (x.typeName()) {
+            case "Channel" -> { usedChannel = true; yield "zinc.channel"; }
+            case "FileReader" -> {
+              usedFileReader = true; usedIo = true; usedChannel = true; yield "zinc.filereader";
+            }
+            default -> {
+              usedFileWriter = true; usedIo = true; usedChannel = true; yield "zinc.filewriter";
+            }
+          };
+          yield "zinc_dyn_sup:spawn_child('" + mod + "', self(), ["
+              + genArgs(x.args(), env) + "])";
+        }
         if (x.typeName().equals("Db") || x.typeName().equals("HttpServer")) {
           // long-lived resources live in the tree: ctor acquires, restart heals
           throw new CompileError("v1: " + x.typeName()
@@ -2644,6 +2725,14 @@ class CodeGen {
         default -> throw new CompileError("unsupported: Channel." + x.method()
             + " (put/close/hasNext/take)");
       };
+    }
+    // FileWriter pump Actor: join() blocks until the drain finishes (queues behind it)
+    if ("FileWriter".equals(tt)) {
+      usedFileWriter = true;
+      if (x.method().equals("join")) {
+        return "gen_server:call(" + genExpr(x.target(), env) + ", join, infinity)";
+      }
+      throw new CompileError("unsupported: FileWriter." + x.method() + " (join)");
     }
     // Map.Entry (from entrySet()): a {K, V} tuple
     if (tt != null && "Entry".equals(baseType(tt))) {

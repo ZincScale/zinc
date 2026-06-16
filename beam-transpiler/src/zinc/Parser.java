@@ -588,6 +588,7 @@ class Parser {
   private boolean looksLikeDecl() {
     if (check(TokKind.KW_VAR)) return true;
     if (!check(TokKind.IDENT)) return false;
+    if (cur().text().equals("new")) return false; // `new T(...)` is an expr, not a decl
     int save = pos;
     advance();
     skipTypeArgs();

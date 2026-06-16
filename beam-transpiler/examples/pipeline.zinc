@@ -1,0 +1,23 @@
+// A multi-process streaming pipeline, bounded memory: FileReader (source) -> Channel ->
+// FileWriter (sink). Each pump runs in its own process; the channel's backpressure paces
+// them. fw.join() blocks until the whole pipeline has finished. This is the cross-actor
+// streaming arch piece end-to-end -- the file-copy shape of a NiFi flow.
+public class Main implements Application {
+  void main() {
+    String in = "/tmp/zinc_pipe_in.txt";
+    String out = "/tmp/zinc_pipe_out.txt";
+    String s = "";
+    for (int i = 1; i <= 5; i++) {
+      s += "line" + i + "\n";
+    }
+    Files.writeString(in, s);
+
+    Channel<String> ch = new Channel<>(2);     // bounded -> backpressure
+    new FileReader(in, ch);                     // in -> ch (background pump)
+    FileWriter fw = new FileWriter(ch, out);    // ch -> out (background pump)
+    fw.join();                                  // wait for the pipeline to finish
+
+    System.out.println(Files.readLines(out).size());             // 5
+    System.out.println(Files.readString(out).contains("line3")); // true
+  }
+}
