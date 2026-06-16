@@ -196,6 +196,7 @@ class CodeGen {
   private boolean usedServer;
   private boolean usedSql;
   private boolean usedIo;
+  private boolean usedChannel;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -317,6 +318,10 @@ class CodeGen {
 
   boolean usedIo() {
     return usedIo;
+  }
+
+  boolean usedChannel() {
+    return usedChannel;
   }
 
   private void resetModuleState() {
@@ -831,6 +836,83 @@ class CodeGen {
       + "reason(B) when is_binary(B) -> B;\n"
       + "reason(R) when is_atom(R) -> atom_to_list(R);\n"
       + "reason(R) -> io_lib:format(\"~p\", [R]).\n";
+
+  /** Channel<T>: a bounded backpressure buffer between Actors (NiFi connection /
+   *  BlockingQueue). A gen_server that PARKS a put when full and a pull when empty via
+   *  deferred replies -> decoupled (parallel) AND bounded memory. Consumer is Scanner-style
+   *  (has_next/take, no null) with a one-item lookahead in the caller's process dict.
+   *  send/2 etc. avoid the put/2 BIF name; pdict ops use erlang: explicitly. */
+  static final String CHANNEL_SOURCE = "-module('zinc.channel').\n"
+      + "-behaviour(gen_server).\n"
+      + "-export([start_link/3, start_boot/2, init/1, handle_call/3, handle_cast/2,\n"
+      + "         handle_info/2]).\n"
+      + "-export([send/2, close/1, has_next/1, take/1]).\n\n"
+      + "start_boot(Name, {M, F}) -> start_link(Name, none, M:F()).\n"
+      + "start_link(Name, Owner, Args) ->\n"
+      + "    gen_server:start_link({local, Name}, ?MODULE, [Name, Owner | Args], []).\n\n"
+      + "init([_Name, Owner, Cap]) ->\n"
+      + "    case Owner of none -> ok; _ -> erlang:monitor(process, Owner) end,\n"
+      + "    {ok, #{cap => Cap, q => queue:new(), n => 0,\n"
+      + "           waitp => queue:new(), waitt => queue:new(), closed => false}}.\n\n"
+      + "%% put: hand straight to a parked pull; else enqueue if room; else PARK (backpressure)\n"
+      + "handle_call({put, Item}, From, S) ->\n"
+      + "    #{waitt := WT, q := Q, n := N, cap := Cap, waitp := WP} = S,\n"
+      + "    case queue:out(WT) of\n"
+      + "        {{value, PF}, WT2} ->\n"
+      + "            gen_server:reply(PF, {item, Item}),\n"
+      + "            {reply, ok, S#{waitt := WT2}};\n"
+      + "        {empty, _} when N < Cap ->\n"
+      + "            {reply, ok, S#{q := queue:in(Item, Q), n := N + 1}};\n"
+      + "        {empty, _} ->\n"
+      + "            {noreply, S#{waitp := queue:in({From, Item}, WP)}}\n"
+      + "    end;\n"
+      + "%% pull: dequeue (admitting a parked put into the freed slot); else eof if closed; else PARK\n"
+      + "handle_call(pull, From, S) ->\n"
+      + "    #{q := Q, n := N, closed := C, waitt := WT} = S,\n"
+      + "    case queue:out(Q) of\n"
+      + "        {{value, Item}, Q2} ->\n"
+      + "            {reply, {item, Item}, admit(S#{q := Q2, n := N - 1})};\n"
+      + "        {empty, _} when C ->\n"
+      + "            {reply, eof, S};\n"
+      + "        {empty, _} ->\n"
+      + "            {noreply, S#{waitt := queue:in(From, WT)}}\n"
+      + "    end;\n"
+      + "handle_call(close, _From, S) ->\n"
+      + "    #{waitt := WT} = S,\n"
+      + "    lists:foreach(fun(F) -> gen_server:reply(F, eof) end, queue:to_list(WT)),\n"
+      + "    {reply, ok, S#{closed := true, waitt := queue:new()}}.\n\n"
+      + "admit(S) ->\n"
+      + "    #{q := Q, n := N, cap := Cap, waitp := WP} = S,\n"
+      + "    case queue:out(WP) of\n"
+      + "        {{value, {PF, Item}}, WP2} when N < Cap ->\n"
+      + "            gen_server:reply(PF, ok),\n"
+      + "            S#{q := queue:in(Item, Q), n := N + 1, waitp := WP2};\n"
+      + "        _ -> S\n"
+      + "    end.\n\n"
+      + "handle_cast(_Msg, S) -> {noreply, S}.\n"
+      + "handle_info({'DOWN', _R, process, _P, _Reason}, S) -> {stop, normal, S};\n"
+      + "handle_info(_Msg, S) -> {noreply, S}.\n\n"
+      + "send(Ch, Item) -> gen_server:call(Ch, {put, Item}, infinity).\n"
+      + "close(Ch) -> gen_server:call(Ch, close, infinity).\n"
+      + "has_next(Ch) ->\n"
+      + "    case get({zinc_ch, Ch}) of\n"
+      + "        {item, _} -> true;\n"
+      + "        eof -> false;\n"
+      + "        undefined ->\n"
+      + "            case gen_server:call(Ch, pull, infinity) of\n"
+      + "                {item, V} -> erlang:put({zinc_ch, Ch}, {item, V}), true;\n"
+      + "                eof -> erlang:put({zinc_ch, Ch}, eof), false\n"
+      + "            end\n"
+      + "    end.\n"
+      + "take(Ch) ->\n"
+      + "    case get({zinc_ch, Ch}) of\n"
+      + "        {item, V} -> erlang:erase({zinc_ch, Ch}), V;\n"
+      + "        _ ->\n"
+      + "            case gen_server:call(Ch, pull, infinity) of\n"
+      + "                {item, V} -> V;\n"
+      + "                eof -> erlang:error({zinc_channel_closed, Ch})\n"
+      + "            end\n"
+      + "    end.\n";
 
   /** Dynamic children: temporary (never restarted), die with their spawner (monitor). */
   static final String DYN_SUP_SOURCE = "-module(zinc_dyn_sup).\n"
@@ -1688,6 +1770,12 @@ class CodeGen {
             out.add(v + " = zinc_dyn_sup:spawn_child(" + atomLit(startMod) + ", self(), ["
                 + genArgs(sp.args(), env) + "])");
             varTypes.put(st.name(), a.name());
+          } else if (st.init() instanceof NewExpr nx && nx.typeName().equals("Channel")) {
+            // Channel<T> = a builtin dynamically-spawned Actor (bounded backpressure buffer)
+            usedChannel = true;
+            out.add(v + " = zinc_dyn_sup:spawn_child('zinc.channel', self(), ["
+                + genArgs(nx.args(), env) + "])");
+            varTypes.put(st.name(), st.type().equals("var") ? "Channel" : st.type());
           } else if (st.init() instanceof ListLit bl && st.type().equals("byte[]")) {
             // byte[] is a binary, not the array module: {72, 0, -1} -> <<72, 0, 255>>
             out.add(v + " = " + byteBinary(bl, env));
@@ -2542,6 +2630,19 @@ class CodeGen {
         case "close" -> "'zinc.io':close(" + r + ")";
         default -> throw new CompileError("unsupported: Reader." + x.method()
             + " (hasNextLine/nextLine/close)");
+      };
+    }
+    // Channel<T>: put/hasNext are BLOCKING calls (backpressure), not the void=>cast rule
+    if (tt != null && "Channel".equals(baseType(tt))) {
+      usedChannel = true;
+      String ch = genExpr(x.target(), env);
+      return switch (x.method()) {
+        case "put" -> "'zinc.channel':send(" + ch + ", " + genExpr(x.args().get(0), env) + ")";
+        case "close" -> "'zinc.channel':close(" + ch + ")";
+        case "hasNext" -> "'zinc.channel':has_next(" + ch + ")";
+        case "take" -> "'zinc.channel':take(" + ch + ")";
+        default -> throw new CompileError("unsupported: Channel." + x.method()
+            + " (put/close/hasNext/take)");
       };
     }
     // Map.Entry (from entrySet()): a {K, V} tuple
@@ -3473,6 +3574,13 @@ class CodeGen {
             case "getKey" -> targs.isEmpty() ? null : targs.get(0);
             case "getValue" -> targs.size() < 2 ? null : targs.get(1);
             default -> null;
+          };
+        }
+        if ("Channel".equals(tt)) {
+          yield switch (x.method()) {
+            case "hasNext" -> "boolean";
+            case "take" -> targs.isEmpty() ? null : targs.get(0);
+            default -> null; // put/close: void
           };
         }
         if ("Reader".equals(tt)) {

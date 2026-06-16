@@ -1,0 +1,28 @@
+// Channel<T>: bounded backpressure between Actors. The producer runs concurrently and
+// blocks on put when the channel is full (capacity 2); main drains it. All items flow in
+// FIFO order in bounded memory -- the building block for multi-process pipelines.
+class Producer implements Actor {
+  void run(Channel<String> ch) {
+    for (int i = 0; i < 5; i++) {
+      ch.put("x" + i);     // blocks when full -> paced by the consumer
+    }
+    ch.close();
+  }
+}
+
+public class Main implements Application {
+  void main() {
+    Channel<String> ch = new Channel<>(2);   // capacity 2 forces backpressure
+    Producer p = new Producer();
+    p.run(ch);                                // cast: runs concurrently with the drain below
+
+    int count = 0;
+    String all = "";
+    while (ch.hasNext()) {
+      all += ch.take();
+      count++;
+    }
+    System.out.println(count);   // 5
+    System.out.println(all);     // x0x1x2x3x4
+  }
+}
