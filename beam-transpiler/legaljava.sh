@@ -47,9 +47,9 @@ check() {
 }
 
 # single-file examples (each is its own program)
-for f in examples/*.zinc; do [ -f "$f" ] || continue; b=$(basename "$f" .zinc); d="$TMP/one/$b"; mkdir -p "$d"; cp "$f" "$d/"; check "$b" "$d"; done
+for f in examples/programs/*.zinc; do [ -f "$f" ] || continue; b=$(basename "$f" .zinc); d="$TMP/one/$b"; mkdir -p "$d"; cp "$f" "$d/"; check "$b" "$d"; done
 # multi-file programs
-check "multifile" examples/multifile
+check "multifile" examples/programs/multifile
 check "dogfood-webdemo" dogfood/webdemo/src
 check "dogfood-sqldemo" dogfood/sqldemo/src
 
