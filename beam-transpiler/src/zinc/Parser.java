@@ -199,7 +199,9 @@ class Parser {
       pos += 2;
       t.append("[]");
     }
-    return t.toString();
+    // `long` is a legal-Java alias for zinc's int (Erlang integers are arbitrary-precision,
+    // so there's no separate 64-bit type to model); the gate still sees `long` in source.
+    return t.toString().equals("long") ? "int" : t.toString();
   }
 
   /** class Name [implements Application|Actor|Test|<Interface> | extends RuntimeException] {..} */
@@ -851,6 +853,18 @@ class Parser {
   }
 
   private Expr parseUnary() {
+    // primitive cast: ( int | long | double ) operand  -- disambiguated from grouping by
+    // the type keyword between the parens (a user var can't be named int/long/double)
+    if (check(TokKind.LPAREN) && pos + 2 < toks.size()
+        && toks.get(pos + 1).kind() == TokKind.IDENT
+        && (toks.get(pos + 1).text().equals("int") || toks.get(pos + 1).text().equals("long")
+            || toks.get(pos + 1).text().equals("double"))
+        && toks.get(pos + 2).kind() == TokKind.RPAREN) {
+      advance();                       // (
+      String t = advance().text();     // int / long / double
+      advance();                       // )
+      return new Ast.Cast(t.equals("long") ? "int" : t, parseUnary());
+    }
     if (check(TokKind.MINUS)) {
       advance();
       return new Unary("-", parseUnary());

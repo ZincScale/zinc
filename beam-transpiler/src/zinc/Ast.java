@@ -232,6 +232,9 @@ final class Ast {
 
   record Unary(String op, Expr operand) implements Expr {}
 
+  /** Primitive cast (int)/(long)/(double); long is normalized to int at parse time. */
+  record Cast(String type, Expr operand) implements Expr {}
+
   record Ternary(Expr cond, Expr thenExpr, Expr elseExpr) implements Expr {}
 
   /** bare call -> static method of the enclosing class */

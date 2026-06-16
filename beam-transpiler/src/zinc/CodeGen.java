@@ -98,6 +98,11 @@ class CodeGen {
           + "'$fmt'(X) when is_integer(X) -> integer_to_binary(X);\n"
           + "'$fmt'(X) -> iolist_to_binary(io_lib:format(\"~p\", [X])).";
 
+  // Double/Float.parseDouble: Java accepts integer-looking strings ("30") as floats,
+  // but Erlang's binary_to_float needs a decimal point -- fall back to an integer parse.
+  private static final String PARSEFLOAT_HELPER =
+      "'$parsefloat'(B) -> try binary_to_float(B) catch _:_ -> float(binary_to_integer(B)) end.";
+
   private static final String SFX_HELPER =
       "'$sfx'(B, S) -> byte_size(S) =< byte_size(B) andalso\n"
           + "    binary:part(B, byte_size(B) - byte_size(S), byte_size(S)) =:= S.";
@@ -176,6 +181,7 @@ class CodeGen {
 
   // per-output-module usage flags: helpers are emitted only when referenced
   private boolean useFmt;
+  private boolean useParseFloat;
   private boolean useSfx;
   private boolean useOk;
   private boolean useIdx;
@@ -194,6 +200,7 @@ class CodeGen {
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
     if (useFmt) out.add(FMT_HELPER);
+    if (useParseFloat) out.add(PARSEFLOAT_HELPER);
     if (useSfx) out.add(SFX_HELPER);
     if (useOk) out.add(OK_HELPER);
     if (useIdx) out.add(IDX_HELPER);
@@ -1323,6 +1330,7 @@ class CodeGen {
       case Index x -> exprSrc(x.obj()) + "[" + exprSrc(x.index()) + "]";
       case Binary x -> exprSrc(x.left()) + " " + x.op() + " " + exprSrc(x.right());
       case Unary x -> x.op() + exprSrc(x.operand());
+      case Ast.Cast x -> "(" + x.type() + ") " + exprSrc(x.operand());
       case Ternary x -> exprSrc(x.cond()) + " ? " + exprSrc(x.thenExpr()) + " : "
           + exprSrc(x.elseExpr());
       case Call x -> x.callee() + "(" + srcList(x.args()) + ")";
@@ -2336,6 +2344,9 @@ class CodeGen {
         String inner = genExpr(x.operand(), env);
         yield x.op().equals("!") ? "(not " + inner + ")" : "(" + x.op() + inner + ")";
       }
+      case Ast.Cast x -> x.type().equals("double")     // (int)/(long) truncate toward zero
+          ? "float(" + genExpr(x.operand(), env) + ")"  // (double): int -> float
+          : "trunc(" + genExpr(x.operand(), env) + ")";
       case Ternary x -> "(case " + genExpr(x.cond(), env) + " of true -> "
           + genExpr(x.thenExpr(), env) + "; false -> " + genExpr(x.elseExpr(), env) + " end)";
       case Binary x -> {
@@ -2936,6 +2947,20 @@ class CodeGen {
           return "binary_to_integer(" + genExpr(x.args().get(0), env) + ")";
         }
       }
+      case "Long" -> {
+        if (x.method().equals("parseLong")) {
+          return "binary_to_integer(" + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: Long." + x.method() + " (parseLong)");
+      }
+      case "Double", "Float" -> {
+        if (x.method().equals("parseDouble") || x.method().equals("parseFloat")) {
+          useParseFloat = true;
+          return "'$parsefloat'(" + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: " + name + "." + x.method()
+            + " (parseDouble/parseFloat)");
+      }
       case "String" -> {
         if (x.method().equals("valueOf")) {
           useFmt = true;
@@ -3310,6 +3335,7 @@ class CodeGen {
         yield t != null && t.endsWith("[]") ? t.substring(0, t.length() - 2) : null;
       }
       case Unary x -> x.op().equals("!") ? "boolean" : exprType(x.operand());
+      case Ast.Cast x -> x.type().equals("double") ? "double" : "int";
       case Ternary x -> {
         String t = exprType(x.thenExpr()); // both branches share a type; fall back to else
         yield t != null ? t : exprType(x.elseExpr());
@@ -3364,6 +3390,10 @@ class CodeGen {
             };
           }
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
+          if (vr.name().equals("Long")) yield x.method().equals("parseLong") ? "int" : null;
+          if (vr.name().equals("Double") || vr.name().equals("Float")) {
+            yield List.of("parseDouble", "parseFloat").contains(x.method()) ? "double" : null;
+          }
           if (vr.name().equals("Files")) {
             yield switch (x.method()) {
               case "readString" -> "String";
@@ -3741,6 +3771,7 @@ class CodeGen {
         exprRefs(x.index(), out);
       }
       case Unary x -> exprRefs(x.operand(), out);
+      case Ast.Cast x -> exprRefs(x.operand(), out);
       case Ternary x -> {
         exprRefs(x.cond(), out);
         exprRefs(x.thenExpr(), out);

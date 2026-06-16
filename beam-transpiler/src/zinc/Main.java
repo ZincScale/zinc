@@ -32,7 +32,7 @@ public class Main {
       var typeNames = new java.util.HashSet<String>();
       var reserved = java.util.Set.of("System", "Thread", "Sys", "Atom", "Tag", "Tuple",
           "Erlang", "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
-          "Arrays", "Object",
+          "Long", "Double", "Float", "Arrays", "Object",
           "String", "Exception", "RuntimeException", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json",

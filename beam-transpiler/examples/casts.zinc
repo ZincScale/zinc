@@ -1,0 +1,21 @@
+// primitive casts (int)/(long)/(double) + the numeric parse family. Casts bind tighter
+// than arithmetic; (int)/(long) truncate toward zero; (double) widens int -> float.
+public class Main {
+  public static void main(String[] args) {
+    double d = 3.99;
+    System.out.println((int) d);          // 3   (truncate toward zero)
+    System.out.println((int) -3.99);      // -3
+    System.out.println((long) 5.5);       // 5
+    int n = 7;
+    System.out.println((double) n);       // 7.0
+    System.out.println((double) n / 2);   // 3.5  (cast binds tighter than /)
+
+    // parse family -- config parsing
+    long big = Long.parseLong("1000000000000");   // bignum, no overflow
+    System.out.println(big);                       // 1000000000000
+    System.out.println(Long.parseLong("42") + 1);  // 43
+    System.out.println(Double.parseDouble("3.5")); // 3.5
+    System.out.println(Double.parseDouble("30"));  // 30.0  (int-looking string -> float)
+    System.out.println(Float.parseFloat("2.5"));   // 2.5
+  }
+}

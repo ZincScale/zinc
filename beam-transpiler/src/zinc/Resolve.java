@@ -149,6 +149,7 @@ final class Resolve {
       case Index x -> new Index(expr(x.obj()), expr(x.index()));
       case Binary x -> new Binary(x.op(), expr(x.left()), expr(x.right()));
       case Unary x -> new Unary(x.op(), expr(x.operand()));
+      case Ast.Cast x -> new Ast.Cast(x.type(), expr(x.operand()));
       case Call x -> new Call(x.callee(), x.args().stream().map(this::expr).toList());
       case MethodCall x ->
           new MethodCall(expr(x.target()), x.method(), x.args().stream().map(this::expr).toList());
