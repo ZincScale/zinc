@@ -724,9 +724,21 @@ made real, and it's pure BEAM strength:
    streaming (`HttpStream`); `Map.entrySet`/`forEach`; casts `(int)/(long)/(double)` + `long`;
    `Long.parseLong`/`Double.parseDouble`/`Float.parseFloat`; broadened neg harness; **opt-in
    `zc check`** (xref + dialyzer over the FFI basement, off the hot path). **Deferred** (low
-   demand / earns-it-later): sort (hardly used), streams, regex, cross-process
-   `FileReader`/`FileWriter` Actor, HTTP request-body streaming, `HttpStream.statusCode()`.
-   **NEXT: Phase 6** (docs story; optional checker), then Phase 5 (two-node distribution demo).
+   demand / earns-it-later): sort (hardly used), streams, regex, HTTP request-body streaming,
+   `HttpStream.statusCode()`.
+   **CROSS-ACTOR STREAMING DONE (2026-06-16):** `Channel<T>` (bounded backpressure buffer,
+   first builtin dynamically-spawnable Actor; e2e `channel`) + `FileReader`/`FileWriter` pump
+   Actors (e2e `pipeline`); bare `new T(...)` statements now parse. Suite 114 pos + 27 neg,
+   gate 42/42, all pushed.
+   **DOCS DONE (2026-06-16):** `beam-transpiler/README.md` + `docs/{install,guide,tutorials,
+   coming-from-java}.md` — the whole surface, snippets cite tested examples. `zc new`→`zc run`
+   verified.
+   **NEXT (agreed sequencing, user 2026-06-16):** (1) cut the first GitHub release so live
+   `curl|sh` works (repo-owner, needs GITHUB_TOKEN); (2) **Phase 5 — distribution over nodes**
+   (the two-node demo, the anti-K8s proof point); (3) **"orchestration over processes"** — a
+   stdlib pool/executor abstraction (fixed / per-task / work-stealing strategies) built on
+   `new` + `Channel` + supervision, designed *distribution-aware* (deliberately AFTER
+   distribution so it's location-transparent, not reworked). See [[zinc-cross-actor-streaming]].
    Hardening scope was A + C only, bounded by the zinc-flow dogfood (NiFi-style engine in
    ZincScale/zinc-flow) so we filled gaps real code hits, not speculative features:
    - **A0 — basic I/O FIRST (user 2026-06-16: "can't do useful work without it"):** the
