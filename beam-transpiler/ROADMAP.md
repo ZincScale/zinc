@@ -716,10 +716,19 @@ made real, and it's pure BEAM strength:
    `Collections.sort(al)`/`al.sort(cmp)` on `ArrayList`; a returning `list.sorted()` isn't
    legal Java, streams are the deferred alternative); build when a port slice earns it.
    `Arrays.sort/fill` likewise deferred.
-3. **REORDERED (user, 2026-06-16): language hardening → Phase 6 → Phase 5.** Phase 5
-   (deploy/distribution) is deferred until the language is "rock solid." **Hardening = A + C
-   only**, bounded by the zinc-flow dogfood (NiFi-style engine in ZincScale/zinc-flow — a
-   target to aim at, no `.zinc` yet) so we fill gaps real code hits, not speculative features:
+3. **REORDERED (user, 2026-06-16): language hardening → Phase 6 → Phase 5. HARDENING DONE
+   (2026-06-16).** Phase 5 (deploy/distribution) was deferred until the language is "rock
+   solid"; A + C are now complete (suite 107 pos + 24 neg, gate 40/40). **Shipped:** zinc.io
+   v1 (whole-file + streaming `Reader`/`Writer` via try-with-resources) + format-processing
+   tests + an e2e depth audit & strengthening; `Json.decodeList`; `byte[]` literal; `zinc.http`
+   streaming (`HttpStream`); `Map.entrySet`/`forEach`; casts `(int)/(long)/(double)` + `long`;
+   `Long.parseLong`/`Double.parseDouble`/`Float.parseFloat`; broadened neg harness; **opt-in
+   `zc check`** (xref + dialyzer over the FFI basement, off the hot path). **Deferred** (low
+   demand / earns-it-later): sort (hardly used), streams, regex, cross-process
+   `FileReader`/`FileWriter` Actor, HTTP request-body streaming, `HttpStream.statusCode()`.
+   **NEXT: Phase 6** (docs story; optional checker), then Phase 5 (two-node distribution demo).
+   Hardening scope was A + C only, bounded by the zinc-flow dogfood (NiFi-style engine in
+   ZincScale/zinc-flow) so we filled gaps real code hits, not speculative features:
    - **A0 — basic I/O FIRST (user 2026-06-16: "can't do useful work without it"):** the
      `zinc.io` v1 facade designed above (streaming-first; small-file whole-reads bounded;
      `FileWriter` Actor; getenv). Outranks the mechanical gaps.
