@@ -1,0 +1,22 @@
+// end-to-end JSON processing: write a JSON object to disk -> read -> decode to a record ->
+// process -> encode -> write back -> re-read -> re-decode. Full round-trip through files.
+// (v1 gap noted: no clean JSON-array -> List<Record> decode; decodeAll is for DB rows.)
+record Report(String title, int count, int errors) {}
+
+public class Main {
+  public static void main(String[] args) {
+    String dir = "/tmp/zinc_proc_json";
+    Files.createDirectories(dir);
+    String path = dir + "/report.json";
+
+    Files.writeString(path, "{\"title\":\"daily\",\"count\":100,\"errors\":3}");
+    Report r = Json.decode(Report.class, Files.readString(path));
+    System.out.println(r.title());               // daily
+    System.out.println(r.count() - r.errors());  // 97
+
+    String out = dir + "/out.json";
+    Files.writeString(out, Json.encode(r));       // egress
+    Report r2 = Json.decode(Report.class, Files.readString(out));
+    System.out.println(r2.count());              // 100
+  }
+}

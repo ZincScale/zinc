@@ -1,0 +1,27 @@
+// end-to-end CSV processing: read a CSV file -> stream line by line -> split + parse ->
+// aggregate -> WRITE a summary file -> read it back -> output. Full ingest->egress flow.
+public class Main {
+  public static void main(String[] args) {
+    String dir = "/tmp/zinc_proc_csv";
+    Files.createDirectories(dir);
+    String path = dir + "/people.csv";
+    Files.writeString(path, "name,age\nvin,41\nbob,30\nsue,25\n");
+
+    int total = 0;
+    int rows = 0;
+    try (Reader r = Files.openReader(path)) {
+      if (r.hasNextLine()) {
+        r.nextLine();              // skip the header row
+      }
+      while (r.hasNextLine()) {
+        String[] cols = r.nextLine().split(",");
+        total += Integer.parseInt(cols[1]);
+        rows++;
+      }
+    }
+
+    String out = dir + "/summary.txt";
+    Files.writeString(out, "rows=" + rows + " total=" + total);
+    System.out.println(Files.readString(out));   // rows=3 total=96
+  }
+}
