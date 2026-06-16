@@ -123,7 +123,10 @@ final class Resolve {
       case BreakStmt x -> x;
       case ContinueStmt x -> x;
       case SeqStmt x -> new SeqStmt(x.stmts().stream().map(this::stmt).toList());
-      case TryStmt x -> new TryStmt(block(x.tryBlock()),
+      case TryStmt x -> new TryStmt(
+          x.resources().stream()
+              .map(r -> new Ast.Resource(r.type(), r.var(), expr(r.init()))).toList(),
+          block(x.tryBlock()),
           x.clauses().stream()
               .map(c -> new Ast.CatchClause(c.exType(), c.var(), block(c.body()))).toList(),
           x.line());

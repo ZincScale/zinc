@@ -1,6 +1,6 @@
-// zinc.io streaming reads -- the LARGE-file path: constant memory, in-process loop,
-// handle closed for you. foldLines accumulates (lambdas can't mutate captured locals),
-// forEachLine is for side effects. Neither slurps the whole file into memory.
+// zinc.io streaming read -- the LARGE-file path via try-with-resources. The Reader holds
+// a raw fd in this process, closed at block exit; the Scanner-style loop pulls one line at
+// a time, so memory is bounded (8KB or 5GB, same code). Accumulate into plain locals.
 public class Main {
   public static void main(String[] args) {
     String dir = "/tmp/zinc_stream";
@@ -14,15 +14,16 @@ public class Main {
     }
     Files.writeString(path, s);
 
-    // stream it: sum 1..1000 = 500500, then count lines -- never holding the file
-    int sum = Files.foldLines(path, 0, (acc, line) -> acc + Integer.parseInt(line));
+    // stream it: sum 1..1000 = 500500 and count lines -- never holding the whole file
+    int sum = 0;
+    int count = 0;
+    try (Reader r = Files.openReader(path)) {
+      while (r.hasNextLine()) {
+        sum += Integer.parseInt(r.nextLine());
+        count++;
+      }
+    }
     System.out.println(sum);
-    int count = Files.foldLines(path, 0, (acc, line) -> acc + 1);
     System.out.println(count);
-
-    // forEachLine: side-effecting consumer
-    String small = dir + "/small.txt";
-    Files.writeString(small, "one\ntwo\nthree\n");
-    Files.forEachLine(small, line -> System.out.println(line.toUpperCase()));
   }
 }

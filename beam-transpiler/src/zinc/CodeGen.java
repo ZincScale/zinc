@@ -661,43 +661,54 @@ class CodeGen {
       + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
       + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
       + "         mkdirs/1, delete/1, fsize/1, getenv/1,\n"
-      + "         for_each_line/2, fold_lines/3, for_each_chunk/3,\n"
-      + "         with_writer/2, with_appender/2, w_write/2, w_writeln/2]).\n\n"
-      + "%% --- streaming reads: open raw + read_ahead, loop IN-PROCESS (no per-line\n"
-      + "%% message cost), close in `after` (closes even if the consumer throws). The\n"
-      + "%% large-file path -- constant memory, never slurps the whole file. ---\n"
-      + "open_read(P) ->\n"
+      + "         open_reader/1, r_has_next_line/1, r_next_line/1,\n"
+      + "         open_writer/1, open_appender/1, w_write/2, w_writeln/2, close/1]).\n\n"
+      + "%% --- scoped streaming handles (try-with-resources): a raw fd held in THIS process,\n"
+      + "%% closed at block exit. Reads/writes happen in-process (synchronous) so a read->write\n"
+      + "%% loop is backpressured + bounded -- constant memory, never slurps the whole file. ---\n"
+      + "open_reader(P) ->\n"
       + "    case file:open(P, [read, raw, binary, {read_ahead, 65536}]) of\n"
-      + "        {ok, H} -> H;\n"
+      + "        {ok, H} -> {reader, H, P};\n"
       + "        {error, R} -> raise(R, P)\n"
       + "    end.\n"
-      + "for_each_line(P, F) ->\n"
-      + "    H = open_read(P),\n"
-      + "    try line_loop(H, F, P) after file:close(H) end.\n"
-      + "line_loop(H, F, P) ->\n"
-      + "    case file:read_line(H) of\n"
-      + "        {ok, Line} -> F(strip_eol(Line)), line_loop(H, F, P);\n"
-      + "        eof -> ok;\n"
+      + "%% Scanner-style: a one-line lookahead buffered in the process dict (the fd is\n"
+      + "%% process-bound, so this is safe within the handle's scope). No null at EOF.\n"
+      + "r_has_next_line({reader, H, P}) ->\n"
+      + "    case get({zinc_rd, H}) of\n"
+      + "        {line, _} -> true;\n"
+      + "        eof -> false;\n"
+      + "        undefined ->\n"
+      + "            case file:read_line(H) of\n"
+      + "                {ok, L} -> put({zinc_rd, H}, {line, L}), true;\n"
+      + "                eof -> put({zinc_rd, H}, eof), false;\n"
+      + "                {error, R} -> raise(R, P)\n"
+      + "            end\n"
+      + "    end.\n"
+      + "r_next_line({reader, H, P}) ->\n"
+      + "    case get({zinc_rd, H}) of\n"
+      + "        {line, L} -> erase({zinc_rd, H}), strip_eol(L);\n"
+      + "        eof -> raise(<<\"read past end of file\">>, P);\n"
+      + "        undefined ->\n"
+      + "            case file:read_line(H) of\n"
+      + "                {ok, L} -> strip_eol(L);\n"
+      + "                eof -> raise(<<\"read past end of file\">>, P);\n"
+      + "                {error, R} -> raise(R, P)\n"
+      + "            end\n"
+      + "    end.\n"
+      + "open_writer(P)   -> open_w(P, [write, raw, binary, {delayed_write, 262144, 2000}]).\n"
+      + "open_appender(P) -> open_w(P, [append, raw, binary, {delayed_write, 262144, 2000}]).\n"
+      + "open_w(P, Opts) ->\n"
+      + "    case file:open(P, Opts) of\n"
+      + "        {ok, H} -> {writer, H, P};\n"
       + "        {error, R} -> raise(R, P)\n"
       + "    end.\n"
-      + "fold_lines(P, Acc, F) ->\n"
-      + "    H = open_read(P),\n"
-      + "    try fold_loop(H, Acc, F, P) after file:close(H) end.\n"
-      + "fold_loop(H, Acc, F, P) ->\n"
-      + "    case file:read_line(H) of\n"
-      + "        {ok, Line} -> fold_loop(H, F(Acc, strip_eol(Line)), F, P);\n"
-      + "        eof -> Acc;\n"
-      + "        {error, R} -> raise(R, P)\n"
-      + "    end.\n"
-      + "for_each_chunk(P, Size, F) ->\n"
-      + "    H = open_read(P),\n"
-      + "    try chunk_loop(H, Size, F, P) after file:close(H) end.\n"
-      + "chunk_loop(H, Size, F, P) ->\n"
-      + "    case file:read(H, Size) of\n"
-      + "        {ok, Data} -> F(Data), chunk_loop(H, Size, F, P);\n"
-      + "        eof -> ok;\n"
-      + "        {error, R} -> raise(R, P)\n"
-      + "    end.\n"
+      + "w_write({writer, H, P}, S) ->\n"
+      + "    case file:write(H, S) of ok -> ok; {error, R} -> raise(R, P) end.\n"
+      + "w_writeln(W, S) -> w_write(W, [S, <<\"\\n\">>]).\n"
+      + "%% closed at try-with-resources block exit (or explicit close); tolerant of double\n"
+      + "%% close. A flush failure on a writer surfaces as IOException (durability).\n"
+      + "close({reader, H, _}) -> erase({zinc_rd, H}), catch file:close(H), ok;\n"
+      + "close({writer, H, P}) -> case file:close(H) of ok -> ok; {error, R} -> raise(R, P) end.\n"
       + "strip_eol(L) ->\n"
       + "    N = byte_size(L),\n"
       + "    case L of\n"
@@ -705,23 +716,6 @@ class CodeGen {
       + "        <<Body:(N-1)/binary, \"\\n\">> -> Body;\n"
       + "        _ -> L\n"
       + "    end.\n\n"
-      + "%% --- scoped writer (the db.transaction shape): open raw + delayed_write, hand a\n"
-      + "%% Writer handle {Fd,Path} to F, close in `after`. w_write does file:write IN the\n"
-      + "%% caller's process -> synchronous = backpressured + bounded; never a mailbox. ---\n"
-      + "with_writer(P, F) ->\n"
-      + "    do_with(P, [write, raw, binary, {delayed_write, 262144, 2000}], F).\n"
-      + "with_appender(P, F) ->\n"
-      + "    do_with(P, [append, raw, binary, {delayed_write, 262144, 2000}], F).\n"
-      + "do_with(P, Opts, F) ->\n"
-      + "    case file:open(P, Opts) of\n"
-      + "        {ok, H} ->\n"
-      + "            try F({H, P}), close_ok(H, P)\n"
-      + "            catch C:R:S -> file:close(H), erlang:raise(C, R, S) end;\n"
-      + "        {error, R} -> raise(R, P)\n"
-      + "    end.\n"
-      + "close_ok(H, P) -> case file:close(H) of ok -> ok; {error, R} -> raise(R, P) end.\n"
-      + "w_write({H, P}, S) -> case file:write(H, S) of ok -> ok; {error, R} -> raise(R, P) end.\n"
-      + "w_writeln(W, S) -> w_write(W, [S, <<\"\\n\">>]).\n\n"
       + "read_string(P) -> ok_or_raise(file:read_file(P), P).\n"
       + "read_bytes(P)  -> ok_or_raise(file:read_file(P), P).\n"
       + "read_lines(P)  ->\n"
@@ -763,6 +757,7 @@ class CodeGen {
       + "reason(enotdir) -> <<\"not a directory\">>;\n"
       + "reason(eexist)  -> <<\"already exists\">>;\n"
       + "reason(enospc)  -> <<\"no space left on device\">>;\n"
+      + "reason(B) when is_binary(B) -> B;\n"
       + "reason(R) when is_atom(R) -> atom_to_list(R);\n"
       + "reason(R) -> io_lib:format(\"~p\", [R]).\n";
 
@@ -1929,12 +1924,30 @@ class CodeGen {
    * control-flow signals ('$ret'/'$brk'/'$cont') are throw-class and pass through.
    */
   private String genTry(TryStmt s, Map<String, String> env, List<String> loopMut) {
+    // try-with-resources: bind each handle before the try, close it in `after` (reverse
+    // order). If an init raises, nothing is opened yet, so no close runs (Java semantics).
+    var preBinds = new ArrayList<String>();
+    var closes = new ArrayList<String>();
+    var bodyEnv = new HashMap<>(env);
+    for (Ast.Resource r : s.resources()) {
+      if (!r.type().equals("Reader") && !r.type().equals("Writer")) {
+        throw new CompileError("try-with-resources supports scoped Reader/Writer handles"
+            + " (v1), not " + r.type());
+      }
+      usedIo = true;
+      String rv = fresh(r.var());
+      preBinds.add(rv + " = " + genExpr(r.init(), bodyEnv));
+      bodyEnv.put(r.var(), rv);
+      varTypes.put(r.var(), r.type());
+      closes.add(0, "'zinc.io':close(" + rv + ")"); // closed in reverse declaration order
+    }
+
     var assigned = new LinkedHashSet<String>();
     collectAssigned(s.tryBlock(), assigned);
     for (Ast.CatchClause c : s.clauses()) collectAssigned(c.body(), assigned);
     var phi = assigned.stream().filter(env::containsKey).toList();
 
-    var tEnv = new HashMap<>(env);
+    var tEnv = new HashMap<>(bodyEnv);
     List<String> tCode = genStmts(s.tryBlock().stmts(), tEnv, false, loopMut);
     boolean tJump = endsInJump(s.tryBlock());
 
@@ -1977,10 +1990,15 @@ class CodeGen {
       arms.add(head + "\n" + block(armLines(cCode, cEnv, cJump, phi), "        "));
     }
 
-    String body = "try\n" + block(armLines(tCode, tEnv, tJump, phi), "        ") + "\n"
-        + "catch " + String.join(";\n", arms) + "\n"
-        + "end";
-    return bindPhi(phi, env, body);
+    String catchPart = arms.isEmpty() ? ""
+        : "\ncatch " + String.join(";\n", arms);
+    String afterPart = closes.isEmpty() ? ""
+        : "\nafter\n" + block(List.of(String.join(",\n", closes)), "        ");
+    String body = "try\n" + block(armLines(tCode, tEnv, tJump, phi), "        ")
+        + catchPart + afterPart + "\nend";
+    String core = bindPhi(phi, env, body);
+    if (preBinds.isEmpty()) return core;
+    return String.join(",\n", preBinds) + ",\n" + core;
   }
 
   /** Clause body for a phi-merging construct: arm code plus the phi tuple (unless it jumps). */
@@ -2421,7 +2439,8 @@ class CodeGen {
             + " (query/exec" + (isTx ? "" : "/transaction") + ")");
       }
     }
-    // scoped Files.withWriter handle: writes go straight to file:write IN this process
+    // scoped file handles (try-with-resources): reads/writes hit the fd IN this process,
+    // so a read->write loop is synchronous = backpressured + bounded (never a mailbox).
     if ("Writer".equals(tt)) {
       usedIo = true;
       String w = genExpr(x.target(), env);
@@ -2429,8 +2448,20 @@ class CodeGen {
       return switch (x.method()) {
         case "write" -> "'zinc.io':w_write(" + w + ", " + a0 + ")";
         case "writeLine" -> "'zinc.io':w_writeln(" + w + ", " + a0 + ")";
+        case "close" -> "'zinc.io':close(" + w + ")";
         default -> throw new CompileError("unsupported: Writer." + x.method()
-            + " (write/writeLine)");
+            + " (write/writeLine/close)");
+      };
+    }
+    if ("Reader".equals(tt)) {
+      usedIo = true;
+      String r = genExpr(x.target(), env);
+      return switch (x.method()) {
+        case "hasNextLine" -> "'zinc.io':r_has_next_line(" + r + ")";
+        case "nextLine" -> "'zinc.io':r_next_line(" + r + ")";
+        case "close" -> "'zinc.io':close(" + r + ")";
+        default -> throw new CompileError("unsupported: Reader." + x.method()
+            + " (hasNextLine/nextLine/close)");
       };
     }
     String recvH = null;
@@ -2860,34 +2891,6 @@ class CodeGen {
       }
       case "Files" -> {
         usedIo = true;
-        // streaming reads take a lambda whose params we type contextually (line=String,
-        // acc=the accumulator's type, chunk=byte[]) so facade calls inside it dispatch.
-        switch (x.method()) {
-          case "forEachLine" -> {
-            return "'zinc.io':for_each_line(" + genExpr(x.args().get(0), env) + ", "
-                + ioLambda(x, 1, List.of("String"), null, env) + ")";
-          }
-          case "foldLines" -> {
-            String accT = exprType(x.args().get(1));
-            return "'zinc.io':fold_lines(" + genExpr(x.args().get(0), env) + ", "
-                + genExpr(x.args().get(1), env) + ", "
-                + ioLambda(x, 2, java.util.Arrays.asList(accT, "String"), accT, env) + ")";
-          }
-          case "forEachChunk" -> {
-            return "'zinc.io':for_each_chunk(" + genExpr(x.args().get(0), env) + ", "
-                + genExpr(x.args().get(1), env) + ", "
-                + ioLambda(x, 2, List.of("byte[]"), null, env) + ")";
-          }
-          case "withWriter" -> {
-            return "'zinc.io':with_writer(" + genExpr(x.args().get(0), env) + ", "
-                + ioLambda(x, 1, List.of("Writer"), null, env) + ")";
-          }
-          case "withAppender" -> {
-            return "'zinc.io':with_appender(" + genExpr(x.args().get(0), env) + ", "
-                + ioLambda(x, 1, List.of("Writer"), null, env) + ")";
-          }
-          default -> {}
-        }
         String fn = switch (x.method()) {
           case "readString" -> "read_string";
           case "readBytes" -> "read_bytes";
@@ -2901,6 +2904,9 @@ class CodeGen {
           case "createDirectories" -> "mkdirs";
           case "delete" -> "delete";
           case "size" -> "fsize";
+          case "openReader" -> "open_reader";   // scoped streaming -- use in try-with-resources
+          case "openWriter" -> "open_writer";
+          case "openAppender" -> "open_appender";
           default -> throw new CompileError("unsupported: Files." + x.method());
         };
         return "'zinc.io':" + fn + "(" + genArgs(x.args(), env) + ")";
@@ -2947,18 +2953,6 @@ class CodeGen {
     return String.join(", ", out);
   }
 
-  /** A streaming-IO callback: the arg at idx must be a lambda of paramTypes.size()
-   *  params, generated with those param types (and optional return type) so facade
-   *  calls inside the lambda body dispatch by static type. */
-  private String ioLambda(MethodCall x, int idx, List<String> paramTypes, String retType,
-      Map<String, String> env) {
-    if (!(x.args().get(idx) instanceof LambdaExpr lx)
-        || lx.params().size() != paramTypes.size()) {
-      throw new CompileError("Files." + x.method() + " needs a " + paramTypes.size()
-          + "-arg lambda");
-    }
-    return genLambda(lx, env, paramTypes, retType);
-  }
 
   // ---- java.util / java.lang facade: users write Java, the compiler writes Erlang ----
 
@@ -3251,8 +3245,9 @@ class CodeGen {
               case "readLines", "list" -> "List<String>";
               case "exists", "isDirectory" -> "boolean";
               case "size" -> "int";
-              case "foldLines" -> exprType(x.args().get(1)); // accumulator's type
-              default -> null; // void: writes, mkdirs, delete, forEachLine, forEachChunk
+              case "openReader" -> "Reader";
+              case "openWriter", "openAppender" -> "Writer";
+              default -> null; // void: writes, mkdirs, delete
             };
           }
           if (vr.name().equals("System")) {
@@ -3315,6 +3310,14 @@ class CodeGen {
             default -> null;
           };
         }
+        if ("Reader".equals(tt)) {
+          yield switch (x.method()) {
+            case "hasNextLine" -> "boolean";
+            case "nextLine" -> "String";
+            default -> null; // close: void
+          };
+        }
+        if ("Writer".equals(tt)) yield null; // write/writeLine/close: void
         if ("HttpClientBuilder".equals(tt)) {
           yield x.method().equals("build") ? "HttpClient" : "HttpClientBuilder";
         }

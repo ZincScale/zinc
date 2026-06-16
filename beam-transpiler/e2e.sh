@@ -48,7 +48,7 @@ declare -A want=(
   [mathstr]=$'12.0\n12\n32.0\n3.0\n4.0\na-b-c\n1\n-1\na\nc\ne\n-1\nx=7 (12.5%)\ntrue\nfalse'
   [ternary]=$'big\n0\n7'
   [fileio]=$'2\ntrue\n20\n1\ntrue\ntrue\nno such file or directory: /tmp/zinc_fileio/missing.conf\nfalse'
-  [filestream]=$'500500\n1000\nONE\nTWO\nTHREE'
+  [filestream]=$'500500\n1000'
   [filewrite]=$'5\ntrue\n6'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must

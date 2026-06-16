@@ -450,7 +450,7 @@ class Parser {
       case ReturnStmt x -> new ReturnStmt(x.value(), ln);
       case ExprStmt x -> new ExprStmt(x.expr(), ln);
       case ThrowStmt x -> new ThrowStmt(x.exType(), x.args(), ln);
-      case TryStmt x -> new TryStmt(x.tryBlock(), x.clauses(), ln);
+      case TryStmt x -> new TryStmt(x.resources(), x.tryBlock(), x.clauses(), ln);
       // desugared classic for: stamp the parts that came from this source line
       case SeqStmt x -> new SeqStmt(x.stmts().stream()
           .map(st -> st.line() == 0 ? withLine(st, ln) : st).toList());
@@ -554,10 +554,18 @@ class Parser {
 
   private Stmt parseTry() {
     advance(); // 'try'
-    Block tryBlock = parseBlock();
-    if (!checkIdent("catch")) {
-      throw new CompileError("Parse error: expected 'catch' at line " + cur().line());
+    // try-with-resources: try (Type var = init) { ... }  -- the handle is auto-closed
+    var resources = new ArrayList<Ast.Resource>();
+    if (check(TokKind.LPAREN)) {
+      advance();
+      String type = parseType();
+      String var = expect(TokKind.IDENT, "resource variable name").text();
+      expect(TokKind.ASSIGN, "'=' (a try-with-resources resource needs an initializer)");
+      Expr init = parseExpr();
+      expect(TokKind.RPAREN, "')'");
+      resources.add(new Ast.Resource(type, var, init));
     }
+    Block tryBlock = parseBlock();
     var clauses = new ArrayList<CatchClause>();
     while (checkIdent("catch")) {
       advance();
@@ -567,7 +575,11 @@ class Parser {
       expect(TokKind.RPAREN, "')'");
       clauses.add(new CatchClause(exType, exVar, parseBlock()));
     }
-    return new TryStmt(tryBlock, clauses);
+    if (resources.isEmpty() && clauses.isEmpty()) {
+      throw new CompileError("Parse error: try needs a resource or a catch at line "
+          + cur().line());
+    }
+    return new TryStmt(resources, tryBlock, clauses);
   }
 
   /** IDENT ('[' ']')* IDENT, or 'var' IDENT — a local declaration. */

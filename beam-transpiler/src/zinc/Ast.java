@@ -184,13 +184,18 @@ final class Ast {
 
   /** try {..} catch (NotFound e) {..} catch (Exception e) {..} — clauses match in order;
    *  catch (Exception e) is the catch-all and also catches native BEAM errors. */
-  record TryStmt(Block tryBlock, List<CatchClause> clauses, int line) implements Stmt {
-    TryStmt(Block tryBlock, List<CatchClause> clauses) {
-      this(tryBlock, clauses, 0);
+  record TryStmt(List<Resource> resources, Block tryBlock, List<CatchClause> clauses, int line)
+      implements Stmt {
+    TryStmt(List<Resource> resources, Block tryBlock, List<CatchClause> clauses) {
+      this(resources, tryBlock, clauses, 0);
     }
   }
 
   record CatchClause(String exType, String var, Block body) {}
+
+  /** try-with-resources head: `try (Type var = init)` — the handle is closed on block
+   *  exit (success or throw). v1: scoped AutoCloseable handles only (Reader/Writer). */
+  record Resource(String type, String var, Expr init) {}
 
   /** throw new NotFound("msg") -> erlang:error({zinc_exc, 'fq.tag', FieldsMap}) */
   record ThrowStmt(String exType, List<Expr> args, int line) implements Stmt {

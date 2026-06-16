@@ -1,13 +1,13 @@
 package zinc;
 
 import java.util.List;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
 
-/** Basic file I/O over Erlang file/filelib. Streaming is explicit and first-class
- *  (forEachLine/foldLines/forEachChunk — slice 2); these whole-file ops read/write the
- *  ENTIRE file and are for SMALL files (config-sized). Large data must stream. Failure
- *  is a zinc.io.IOException (the value-or-throw idiom over Erlang's {ok,_}/{error,_}).
+/** Basic file I/O over Erlang file/filelib. Three lifetimes:
+ *   - whole-file (small files): readString/writeString/... slurp the entire file.
+ *   - scoped streaming (large files): openReader/openWriter return AutoCloseable handles
+ *     for try-with-resources -- in-process, backpressured, constant memory.
+ *   - long-lived/shared: a Writer/Reader Actor (deferred).
+ *  Failure is a zinc.io.IOException (value-or-throw over Erlang's {ok,_}/{error,_}).
  *  Prelude stub: bodies throw; the transpiler lowers calls to the 'zinc.io' module. */
 public final class Files {
   private Files() {}
@@ -29,15 +29,9 @@ public final class Files {
   // zinc int is an arbitrary-precision Erlang integer, so it holds any file size
   public static int size(String path) { throw Tag.stub(); }
 
-  // streaming reads -- the LARGE-file path. Constant memory, in-process loop, handle
-  // closed for you. Use these (not readString) for anything that can grow.
-  public static void forEachLine(String path, Consumer<String> action) { throw Tag.stub(); }
-  public static <T> T foldLines(String path, T acc, BiFunction<T, String, T> fn) { throw Tag.stub(); }
-  public static void forEachChunk(String path, int size, Consumer<byte[]> action) { throw Tag.stub(); }
-
-  // scoped streaming WRITE -- handle held open for the lambda, closed for you. Writes are
-  // in-process (synchronous) so a read->write loop is backpressured and bounded. Use this,
-  // not appendString-per-line, to stream large output without reopening the file each time.
-  public static void withWriter(String path, Consumer<Writer> action) { throw Tag.stub(); }
-  public static void withAppender(String path, Consumer<Writer> action) { throw Tag.stub(); }
+  // scoped streaming handles -- the LARGE-file path. Use in try-with-resources so the
+  // fd is closed at block exit: try (Reader r = Files.openReader(p)) { while ... }
+  public static Reader openReader(String path) { throw Tag.stub(); }
+  public static Writer openWriter(String path) { throw Tag.stub(); }
+  public static Writer openAppender(String path) { throw Tag.stub(); }
 }

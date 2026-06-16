@@ -441,11 +441,16 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      Integration harness (boot the Application, hit it over HTTP) deferred —
      dogfood scripts cover it until something earns more.
    **`zinc.io` v1 — designed + IMPLEMENTED (2026-06-16, the first hardening item; see
-   reorder note under "Start here next session").** Shipped in 3 e2e-verified slices:
-   slice 1 whole-file + getenv + `IOException` (`fileio`), slice 2 streaming reads
-   `forEachLine`/`foldLines`/`forEachChunk` (`filestream`), slice 3 scoped
-   `withWriter`/`withAppender` + `Writer` handle (`filewrite`). Generated `'zinc.io'`
-   module; default imports gained `java.util.function.*`. Cross-process `FileWriter`
+   reorder note under "Start here next session").** Shipped + e2e-verified: whole-file +
+   getenv + `IOException` (`fileio`); scoped streaming via **try-with-resources** + a
+   `Reader` (`Files.openReader`; Scanner-style `hasNextLine`/`nextLine`, no null) and
+   `Writer` (`openWriter`/`openAppender`; `write`/`writeLine`) — `filestream` (1000 lines),
+   `filewrite` (streaming uppercase copy + append). **No Erlang-idiom leak (user caught it):**
+   the first cut's `foldLines`/`forEach*`/`withWriter` lambda forms were removed — a fold is
+   not Java — in favor of an imperative loop over a scoped handle. **try-with-resources is now
+   a language feature** (scoped `AutoCloseable`; v1 = zinc.io `Reader`/`Writer` only; lowers to
+   `try..after 'zinc.io':close end`, body mutations thread out). Generated `'zinc.io'` module;
+   default imports gained `java.util.function.*`. Cross-process `FileReader`/`FileWriter`
    Actor + `zinc.http` streaming responses (the ingress half) DEFERRED. Suite: 96 PASS,
    legal-Java gate 35/35. Basic I/O — no useful work without it (config
    files, NiFi-scale data). Core principle (user): **streaming is explicit and
