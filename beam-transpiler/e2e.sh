@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite proc_json proc_csv proc_binary)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite proc_json proc_csv proc_binary httpstream)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -53,6 +53,7 @@ declare -A want=(
   [proc_json]=$'daily\n97\n100\n2\n30'
   [proc_csv]=$'rows=3 total=96'
   [proc_binary]=$'5\ntrue'
+  [httpstream]=$'HELLO-STREAM\n12'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line

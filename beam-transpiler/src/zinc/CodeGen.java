@@ -347,7 +347,8 @@ class CodeGen {
 
   /** zinc.http client over httpc — Java-shaped, sync send only (fan-out = worker Actors). */
   static final String HTTP_SOURCE = "-module('zinc.http').\n"
-      + "-export([send/2, add_header/3, with_body/3, header/2]).\n\n"
+      + "-export([send/2, add_header/3, with_body/3, header/2,\n"
+      + "         open_stream/2, s_has_next_chunk/1, s_next_chunk/1, s_header/2, s_close/1]).\n\n"
       + "add_header(R, K, V) -> maps:put(headers, maps:get(headers, R, []) ++ [{K, V}], R).\n\n"
       + "with_body(R, M, B) -> maps:put(method, M, maps:put(body, B, R)).\n\n"
       + "header(Resp, Name) ->\n"
@@ -385,6 +386,61 @@ class CodeGen {
       + "        none -> ok;\n"
       + "        {H, P} -> ok = httpc:set_options([{proxy, {{binary_to_list(H), P}, []}}]), ok\n"
       + "    end.\n\n"
+      + "%% --- streaming response: demand-driven ({self, once}) so a slow consumer can't\n"
+      + "%% flood the mailbox; chunks (refc binaries) arrive one at a time, pulled by\n"
+      + "%% stream_next. One-chunk lookahead in the process dict gives hasNextChunk (no null).\n"
+      + "open_stream(Client, Req) ->\n"
+      + "    {ok, _} = application:ensure_all_started(inets),\n"
+      + "    {ok, _} = application:ensure_all_started(ssl),\n"
+      + "    ok = set_proxy(Client),\n"
+      + "    Url = binary_to_list(maps:get(url, Req)),\n"
+      + "    Headers = [{binary_to_list(K), binary_to_list(V)}\n"
+      + "               || {K, V} <- maps:get(headers, Req, [])],\n"
+      + "    HttpOpts = [{connect_timeout, maps:get(connect_timeout, Client, 5000)},\n"
+      + "                {ssl, [{verify, verify_none}]}],\n"
+      + "    Method = maps:get(method, Req, get),\n"
+      + "    Request = case Method of\n"
+      + "        get -> {Url, Headers};\n"
+      + "        delete -> {Url, Headers};\n"
+      + "        _ -> {Url, Headers, \"application/octet-stream\", maps:get(body, Req, <<>>)}\n"
+      + "    end,\n"
+      + "    Opts = [{sync, false}, {stream, {self, once}}, {body_format, binary}],\n"
+      + "    {ok, Id} = httpc:request(Method, Request, HttpOpts, Opts),\n"
+      + "    receive\n"
+      + "        {http, {Id, stream_start, RH, Pid}} -> {httpstream, Id, Pid, hdrs(RH)};\n"
+      + "        {http, {Id, {error, R}}} -> raise('zinc.http.httpexception', R)\n"
+      + "    after maps:get(timeout, Req, 30000) ->\n"
+      + "        httpc:cancel_request(Id), raise('zinc.http.timeoutexception', timeout)\n"
+      + "    end.\n\n"
+      + "hdrs(RH) -> [{iolist_to_binary(string:lowercase(K)), iolist_to_binary(V)}\n"
+      + "             || {K, V} <- RH].\n\n"
+      + "s_has_next_chunk({httpstream, Id, Pid, _}) ->\n"
+      + "    case get({zinc_hs, Id}) of\n"
+      + "        {chunk, _} -> true;\n"
+      + "        eof -> false;\n"
+      + "        undefined ->\n"
+      + "            ok = httpc:stream_next(Pid),\n"
+      + "            receive\n"
+      + "                {http, {Id, stream, Part}} -> put({zinc_hs, Id}, {chunk, Part}), true;\n"
+      + "                {http, {Id, stream_end, _}} -> put({zinc_hs, Id}, eof), false;\n"
+      + "                {http, {Id, {error, R}}} -> raise('zinc.http.httpexception', R)\n"
+      + "            after 30000 -> raise('zinc.http.timeoutexception', timeout) end\n"
+      + "    end.\n\n"
+      + "s_next_chunk({httpstream, Id, _, _} = S) ->\n"
+      + "    case get({zinc_hs, Id}) of\n"
+      + "        {chunk, C} -> erase({zinc_hs, Id}), C;\n"
+      + "        _ ->\n"
+      + "            case s_has_next_chunk(S) of\n"
+      + "                true -> {chunk, C} = get({zinc_hs, Id}), erase({zinc_hs, Id}), C;\n"
+      + "                false -> raise('zinc.http.httpexception', <<\"read past end of stream\">>)\n"
+      + "            end\n"
+      + "    end.\n\n"
+      + "s_header({httpstream, _, _, H}, Name) ->\n"
+      + "    case lists:keyfind(string:lowercase(Name), 1, H) of\n"
+      + "        false -> <<>>;\n"
+      + "        {_, V} -> V\n"
+      + "    end.\n\n"
+      + "s_close({httpstream, Id, _, _}) -> erase({zinc_hs, Id}), httpc:cancel_request(Id), ok.\n\n"
       + "raise(Tag, R) ->\n"
       + "    erlang:error({zinc_exc, Tag, #{'$class' => Tag,\n"
       + "        message => iolist_to_binary(io_lib:format(\"~p\", [R]))}}).\n";
@@ -1934,16 +1990,17 @@ class CodeGen {
     var closes = new ArrayList<String>();
     var bodyEnv = new HashMap<>(env);
     for (Ast.Resource r : s.resources()) {
-      if (!r.type().equals("Reader") && !r.type().equals("Writer")) {
-        throw new CompileError("try-with-resources supports scoped Reader/Writer handles"
-            + " (v1), not " + r.type());
-      }
-      usedIo = true;
+      String closeFn = switch (r.type()) {
+        case "Reader", "Writer" -> { usedIo = true; yield "'zinc.io':close"; }
+        case "HttpStream" -> { usedHttp = true; yield "'zinc.http':s_close"; }
+        default -> throw new CompileError("try-with-resources supports scoped Reader/Writer"
+            + "/HttpStream handles (v1), not " + r.type());
+      };
       String rv = fresh(r.var());
       preBinds.add(rv + " = " + genExpr(r.init(), bodyEnv));
       bodyEnv.put(r.var(), rv);
       varTypes.put(r.var(), r.type());
-      closes.add(0, "'zinc.io':close(" + rv + ")"); // closed in reverse declaration order
+      closes.add(0, closeFn + "(" + rv + ")"); // closed in reverse declaration order
     }
 
     var assigned = new LinkedHashSet<String>();
@@ -2521,10 +2578,22 @@ class CodeGen {
               + genExpr(x.target(), env) + ")";
           default -> throw new CompileError("unsupported: Response." + x.method());
         };
-        case "HttpClient" -> x.method().equals("send")
-            ? "'zinc.http':send(" + genExpr(x.target(), env) + ", "
-                + genExpr(x.args().get(0), env) + ")"
-            : null;
+        case "HttpClient" -> switch (x.method()) {
+          case "send" -> "'zinc.http':send(" + genExpr(x.target(), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+          case "openStream" -> "'zinc.http':open_stream(" + genExpr(x.target(), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+          default -> null;
+        };
+        case "HttpStream" -> switch (x.method()) {
+          case "hasNextChunk" -> "'zinc.http':s_has_next_chunk(" + genExpr(x.target(), env) + ")";
+          case "nextChunk" -> "'zinc.http':s_next_chunk(" + genExpr(x.target(), env) + ")";
+          case "header" -> "'zinc.http':s_header(" + genExpr(x.target(), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+          case "close" -> "'zinc.http':s_close(" + genExpr(x.target(), env) + ")";
+          default -> throw new CompileError("unsupported: HttpStream." + x.method()
+              + " (hasNextChunk/nextChunk/header)");
+        };
         case "HttpResponse" -> switch (x.method()) {
           case "statusCode" -> "maps:get(status, " + genExpr(x.target(), env) + ")";
           case "body", "bodyBytes" -> "maps:get(body, " + genExpr(x.target(), env) + ")";
@@ -3347,7 +3416,17 @@ class CodeGen {
         if ("HttpRequestBuilder".equals(tt)) {
           yield x.method().equals("build") ? "HttpRequest" : "HttpRequestBuilder";
         }
-        if ("HttpClient".equals(tt)) yield x.method().equals("send") ? "HttpResponse" : null;
+        if ("HttpClient".equals(tt)) yield switch (x.method()) {
+          case "send" -> "HttpResponse";
+          case "openStream" -> "HttpStream";
+          default -> null;
+        };
+        if ("HttpStream".equals(tt)) yield switch (x.method()) {
+          case "hasNextChunk" -> "boolean";
+          case "nextChunk" -> "byte[]";
+          case "header" -> "String";
+          default -> null; // close: void
+        };
         if ("Router".equals(tt)) yield "Router";
         if ("Response".equals(tt)) yield "Response";
         if ("Request".equals(tt)) {

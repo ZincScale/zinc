@@ -37,7 +37,8 @@ public class Main {
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json",
           "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",
-          "Db", "Tx", "SqlException", "Files", "IOException", "Writer", "Reader");
+          "Db", "Tx", "SqlException", "Files", "IOException", "Writer", "Reader",
+          "HttpStream");
       var actorMods = new LinkedHashMap<String, String>(); // simple name -> FQ module
       var exceptions = new LinkedHashMap<String, Ast.ExceptionDecl>();
       var excTags = new LinkedHashMap<String, String>();   // simple name -> FQ tag atom

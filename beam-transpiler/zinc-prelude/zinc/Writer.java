@@ -7,6 +7,7 @@ package zinc;
 public final class Writer implements AutoCloseable {
   private Writer() {}
   public void write(String s) { throw Tag.stub(); }
+  public void write(byte[] b) { throw Tag.stub(); }   // raw bytes (e.g. an HttpStream chunk)
   public void writeLine(String s) { throw Tag.stub(); }
   @Override public void close() { throw Tag.stub(); }
 }
