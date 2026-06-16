@@ -2751,8 +2751,19 @@ class CodeGen {
           }
           return "'$fromrows_" + low + "'(" + genExpr(x.args().get(1), env) + ")";
         }
+        // decodeList(T.class, json) -> List<T>: parse a JSON ARRAY of objects into records
+        if (x.method().equals("decodeList") && x.args().size() == 2) {
+          RecordDecl r = classLitRecord(x.args().get(0), "Json.decodeList");
+          emitJsonFrom(r);
+          String low = r.name().toLowerCase();
+          if (jsonEmitted.add("jsonlist_" + low)) {
+            helpers.add("'$fromjsonlist_" + low + "'(B) -> ['$jmap_" + low
+                + "'(M) || M <- json:decode(B)].");
+          }
+          return "'$fromjsonlist_" + low + "'(" + genExpr(x.args().get(1), env) + ")";
+        }
         throw new CompileError("unsupported: Json." + x.method()
-            + " (parse/encode/decode/decodeAll)");
+            + " (parse/encode/decode/decodeAll/decodeList)");
       }
       case "Assert" -> {
         useAssert = true;
@@ -3221,7 +3232,7 @@ class CodeGen {
             yield switch (x.method()) {
               case "encode" -> "String";
               case "decode" -> rec != null && records.containsKey(rec) ? rec : null;
-              case "decodeAll" -> rec != null && records.containsKey(rec)
+              case "decodeAll", "decodeList" -> rec != null && records.containsKey(rec)
                   ? "List<" + rec + ">" : null;
               default -> null; // parse: dynamic
             };

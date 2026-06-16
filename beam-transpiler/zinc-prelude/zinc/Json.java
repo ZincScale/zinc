@@ -11,6 +11,7 @@ public final class Json {
   public static String encode(Object value) { throw Tag.stub(); }
   public static <T> T decode(Class<T> type, String json) { throw Tag.stub(); }
   public static <T> List<T> decodeAll(Class<T> type, List<Json> rows) { throw Tag.stub(); }
+  public static <T> List<T> decodeList(Class<T> type, String json) { throw Tag.stub(); }
 
   // dynamic value
   public static Json parse(String json) { throw Tag.stub(); }

@@ -50,7 +50,7 @@ declare -A want=(
   [fileio]=$'2\ntrue\n20\n1\ntrue\ntrue\nno such file or directory: /tmp/zinc_fileio/missing.conf\nfalse'
   [filestream]=$'500500\n1000'
   [filewrite]=$'5\ntrue\n6'
-  [proc_json]=$'daily\n97\n100'
+  [proc_json]=$'daily\n97\n100\n2\n30'
   [proc_csv]=$'rows=3 total=96'
   [proc_binary]=$'5\n5\ntrue'
 )
