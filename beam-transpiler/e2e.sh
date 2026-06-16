@@ -92,6 +92,9 @@ declare -A wanterr=(
   [mod_final_field]="final field 'n' cannot be reassigned"
   [mod_main_nonpublic]="public static void main"
   [immutable_add]="List is read-only"
+  [trywith_nonhandle]="try-with-resources supports scoped Reader/Writer"
+  [mapforeach_arity]="Map.forEach takes a 2-arg lambda"
+  [decodelist_nonrecord]="Json.decodeList expects a record class literal"
 )
 
 fail=0

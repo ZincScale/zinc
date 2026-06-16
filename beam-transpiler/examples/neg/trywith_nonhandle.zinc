@@ -1,0 +1,7 @@
+public class Main {
+  public static void main(String[] args) {
+    try (String s = "x") {           // only Reader/Writer/HttpStream are scoped handles
+      System.out.println(s);
+    }
+  }
+}

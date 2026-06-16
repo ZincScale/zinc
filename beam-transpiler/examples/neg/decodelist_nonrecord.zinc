@@ -1,0 +1,6 @@
+public class Main {
+  public static void main(String[] args) {
+    var xs = Json.decodeList(String.class, "[]");   // class literal must name a record
+    System.out.println(xs.size());
+  }
+}
