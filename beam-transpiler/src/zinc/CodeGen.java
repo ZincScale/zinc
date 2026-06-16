@@ -189,6 +189,7 @@ class CodeGen {
   private boolean usedHttp;
   private boolean usedServer;
   private boolean usedSql;
+  private boolean usedIo;
 
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
@@ -297,6 +298,10 @@ class CodeGen {
 
   boolean usedSql() {
     return usedSql;
+  }
+
+  boolean usedIo() {
+    return usedIo;
   }
 
   private void resetModuleState() {
@@ -644,9 +649,61 @@ class CodeGen {
       {"HttpException", "zinc.http.httpexception"},
       {"ConnectException", "zinc.http.connectexception"},
       {"TimeoutException", "zinc.http.timeoutexception"},
-      {"SqlException", "zinc.sql.sqlexception"}};
+      {"SqlException", "zinc.sql.sqlexception"},
+      {"IOException", "zinc.io.ioexception"}};
   static final Map<String, List<String>> BUILTIN_EXC_CHILDREN =
       Map.of("HttpException", List.of("ConnectException", "TimeoutException"));
+
+  /** zinc.io runtime: whole-file ops + getenv. The value-or-throw idiom over Erlang's
+   *  {ok,_}/{error,_} -- {error,Reason} becomes a catchable zinc.io.IOException. readString
+   *  reads the WHOLE file (small files); streaming primitives come in slice 2. */
+  static final String IO_SOURCE = "-module('zinc.io').\n"
+      + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
+      + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
+      + "         mkdirs/1, delete/1, fsize/1, getenv/1]).\n\n"
+      + "read_string(P) -> ok_or_raise(file:read_file(P), P).\n"
+      + "read_bytes(P)  -> ok_or_raise(file:read_file(P), P).\n"
+      + "read_lines(P)  ->\n"
+      + "    B = ok_or_raise(file:read_file(P), P),\n"
+      + "    drop_trailing_empty(binary:split(B, [<<\"\\r\\n\">>, <<\"\\n\">>], [global])).\n"
+      + "write_string(P, S)  -> unit_or_raise(file:write_file(P, S), P).\n"
+      + "append_string(P, S) -> unit_or_raise(file:write_file(P, S, [append]), P).\n"
+      + "write_bytes(P, B)   -> unit_or_raise(file:write_file(P, B), P).\n"
+      + "exists(P) -> filelib:is_file(P).\n"
+      + "is_dir(P) -> filelib:is_dir(P).\n"
+      + "list(P) ->\n"
+      + "    case file:list_dir(P) of\n"
+      + "        {ok, Names} -> [unicode:characters_to_binary(N) || N <- Names];\n"
+      + "        {error, R}  -> raise(R, P)\n"
+      + "    end.\n"
+      + "mkdirs(P) -> unit_or_raise(filelib:ensure_path(P), P).\n"
+      + "delete(P) ->\n"
+      + "    R = case filelib:is_dir(P) of true -> file:del_dir(P); false -> file:delete(P) end,\n"
+      + "    unit_or_raise(R, P).\n"
+      + "fsize(P) -> filelib:file_size(P).\n"
+      + "getenv(N) ->\n"
+      + "    case os:getenv(binary_to_list(N)) of\n"
+      + "        false -> <<>>;\n"
+      + "        V -> unicode:characters_to_binary(V)\n"
+      + "    end.\n\n"
+      + "ok_or_raise({ok, V}, _) -> V;\n"
+      + "ok_or_raise({error, R}, P) -> raise(R, P).\n"
+      + "unit_or_raise(ok, _) -> ok;\n"
+      + "unit_or_raise({error, R}, P) -> raise(R, P).\n"
+      + "drop_trailing_empty(L) ->\n"
+      + "    case lists:reverse(L) of [<<>> | T] -> lists:reverse(T); _ -> L end.\n\n"
+      + "raise(R, P) ->\n"
+      + "    Msg = iolist_to_binary([reason(R), <<\": \">>, P]),\n"
+      + "    erlang:error({zinc_exc, 'zinc.io.ioexception',\n"
+      + "        #{'$class' => 'zinc.io.ioexception', message => Msg}}).\n"
+      + "reason(enoent)  -> <<\"no such file or directory\">>;\n"
+      + "reason(eacces)  -> <<\"permission denied\">>;\n"
+      + "reason(eisdir)  -> <<\"is a directory\">>;\n"
+      + "reason(enotdir) -> <<\"not a directory\">>;\n"
+      + "reason(eexist)  -> <<\"already exists\">>;\n"
+      + "reason(enospc)  -> <<\"no space left on device\">>;\n"
+      + "reason(R) when is_atom(R) -> atom_to_list(R);\n"
+      + "reason(R) -> io_lib:format(\"~p\", [R]).\n";
 
   /** Dynamic children: temporary (never restarted), die with their spawner (monitor). */
   static final String DYN_SUP_SOURCE = "-module(zinc_dyn_sup).\n"
@@ -2728,6 +2785,32 @@ class CodeGen {
           return "#{" + String.join(", ", entries) + "}";
         }
       }
+      case "Files" -> {
+        usedIo = true;
+        String fn = switch (x.method()) {
+          case "readString" -> "read_string";
+          case "readBytes" -> "read_bytes";
+          case "readLines" -> "read_lines";
+          case "writeString" -> "write_string";
+          case "appendString" -> "append_string";
+          case "writeBytes" -> "write_bytes";
+          case "exists" -> "exists";
+          case "isDirectory" -> "is_dir";
+          case "list" -> "list";
+          case "createDirectories" -> "mkdirs";
+          case "delete" -> "delete";
+          case "size" -> "fsize";
+          default -> throw new CompileError("unsupported: Files." + x.method());
+        };
+        return "'zinc.io':" + fn + "(" + genArgs(x.args(), env) + ")";
+      }
+      case "System" -> {
+        if (x.method().equals("getenv") && x.args().size() == 1) {
+          usedIo = true; // unset var -> empty string (zinc has no null); v1
+          return "'zinc.io':getenv(" + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: System." + x.method() + " (getenv)");
+      }
       default -> {}
     }
     if (!env.containsKey(name)) {
@@ -3047,6 +3130,19 @@ class CodeGen {
             };
           }
           if (vr.name().equals("Integer")) yield x.method().equals("parseInt") ? "int" : null;
+          if (vr.name().equals("Files")) {
+            yield switch (x.method()) {
+              case "readString" -> "String";
+              case "readBytes" -> "byte[]";
+              case "readLines", "list" -> "List<String>";
+              case "exists", "isDirectory" -> "boolean";
+              case "size" -> "int";
+              default -> null; // void: writeString/appendString/writeBytes/mkdirs/delete
+            };
+          }
+          if (vr.name().equals("System")) {
+            yield x.method().equals("getenv") ? "String" : null;
+          }
           if (vr.name().equals("String")) {
             yield List.of("valueOf", "join", "format").contains(x.method()) ? "String" : null;
           }

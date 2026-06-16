@@ -440,6 +440,41 @@ Build order (architecture-first — dogfoods test what exists, they don't drive 
      ...}`; rebar3 eunit integration, reporting, and exit codes come free.
      Integration harness (boot the Application, hit it over HTTP) deferred —
      dogfood scripts cover it until something earns more.
+   **`zinc.io` v1 — designed (2026-06-16, the first hardening item; see reorder note
+   under "Start here next session").** Basic I/O — no useful work without it (config
+   files, NiFi-scale data). Core principle (user): **streaming is explicit and
+   first-class; copying large files through memory is a non-starter.** Namespace
+   `zinc.io` (decision #9 — BEAM file I/O ≠ JVM blocking-IO semantics), javac-stubbed
+   in the prelude like `zinc.http`; lowers to `file`/`filelib`/`os`.
+   - **Whole-file, SMALL files only (explicitly bounded, documented as such):**
+     `Files.readString/writeString/appendString`, `Files.readBytes/writeBytes`,
+     `Files.readLines`→`List<String>`. Slurp the whole file (`file:read_file`/
+     `write_file`) — convenience for config-sized files; large data uses streaming.
+   - **Streaming reads (the large-file path — constant memory, IN-PROCESS, no
+     per-line message cost):** lower to `file:open(P,[read,raw,binary,{read_ahead,N}])`
+     + in-process loop + **close in an `after`** (closes even if the consumer throws).
+     `raw` is load-bearing: without it every read round-trips the file-server process.
+     - `Files.forEachLine(path, line -> {...})` — side-effecting (push to an Actor / write out).
+     - `Files.foldLines(path, acc0, (acc,line) -> acc')` — accumulate (lowers to `foldl`;
+       needed because lambdas can't mutate captured locals — Erlang capture semantics).
+     - `Files.forEachChunk(path, size, bytes -> {...})` — binary/Avro case; chunks are
+       sub-binaries (zero-copy views into the read buffer).
+   - **Streaming writes — `FileWriter` resource Actor (close() idiom):** `new
+     FileWriter(path[, append])` opens raw in the ctor; `write`/`writeLine` as **cast**
+     (fire-and-forget) AND a sync `flush()` (call) for **backpressure** — a cast-only
+     writer's mailbox grows unbounded if the producer outpaces it (the `{active,true}`
+     failure mode). `file:close` via `terminate/2` on orderly stop (released with the
+     owning domain, kill-safe).
+   - **Env:** `System.getenv(name)` → `os:getenv`.
+   - **Failure (ladder rung 1):** `zinc.io.IOException extends RuntimeException` (like
+     `SqlException`); thrown on `{error,Reason}`; `getMessage()` renders `enoent`→"no
+     such file", `eacces`→"permission denied", etc.
+   - **BEAM memory model honored:** large values move as refc binaries / sub-binaries
+     (>64B passed by reference, never copied between processes); transient working set
+     lives in the streaming loop's own process and is reclaimed when it ends.
+   - **Deferred (named):** pull-based reader handle (per-line gen_server calls are a
+     perf anti-pattern — scoped fold/forEach replaces it), `zinc.net` raw sockets (HTTP
+     already covered), stdin/Console, process/exec, line streaming over the network.
 3. Implement; webdemo rewritten with zero `Tuple.of`/`Atom.*` in user code verifies it.
 Then `import elixir.*` FFI.
 
@@ -668,8 +703,26 @@ made real, and it's pure BEAM strength:
    getLast, Map containsValue (e2e `mathstr`). **Deferred (need a design call):** non-mutating
    sort on immutable List/Arrays (needs a Stream-style shape — Java's sort is void/mutating),
    Map.forEach (2-arg lambda), Arrays.sort/fill. Add when earned.
-3. **NEXT: revisit roadmap** (Phase 5 deploy + Phase 6 docs/checker; the two-node distribution
-   demo is the highest-leverage proof point for the anti-K8s pitch — re-prioritize then).
+3. **REORDERED (user, 2026-06-16): language hardening → Phase 6 → Phase 5.** Phase 5
+   (deploy/distribution) is deferred until the language is "rock solid." **Hardening = A + C
+   only**, bounded by the zinc-flow dogfood (NiFi-style engine in ZincScale/zinc-flow — a
+   target to aim at, no `.zinc` yet) so we fill gaps real code hits, not speculative features:
+   - **A0 — basic I/O FIRST (user 2026-06-16: "can't do useful work without it"):** the
+     `zinc.io` v1 facade designed above (streaming-first; small-file whole-reads bounded;
+     `FileWriter` Actor; getenv). Outranks the mechanical gaps.
+   - **A — close known surface gaps (tasks #1-4):** `Map.entrySet`/`forEach` (pervasive in
+     zinc-flow; only keySet/values today), numeric casts `(int)/(long)/(double)`,
+     `parseLong`/`parseDouble`, non-mutating sort + Comparator (List.sort throws today).
+   - **C — strengthen correctness net (tasks #5-6):** broaden `examples/neg/`; wire an
+     **opt-in** xref/Dialyzer static net over the FFI basement (NEVER on the default
+     `zc run`/`build` hot path — perf is a first-class transpilation constraint).
+   - **DEFERRED to FFI until a port slice earns them:** streams, regex, file I/O. `zinc.file`
+     is the most likely to be earned (zinc-flow's config/GetFile/plugin-dirs use `Files.*`).
+   - **Sealed-type dispatch → interface polymorphism** (no type-switch/`instanceof` surface).
+   - **NOT gaps (Actor-model by design — don't harden toward):** AtomicLong/volatile/
+     ConcurrentHashMap/synchronized/virtual-threads/ServiceLoader/reflection.
+   Then Phase 6 (docs + the static net), then Phase 5 (the two-node distribution demo is the
+   highest-leverage anti-K8s proof point).
 
 ### Backlog (deferred, ready when earned)
 - **First public release — DEFERRED until ~halfway to a complete product** (user 2026-06-15:
