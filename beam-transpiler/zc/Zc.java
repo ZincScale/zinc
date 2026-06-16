@@ -887,6 +887,7 @@ public class Zc {
           zc release [dir]      self-contained OTP release tarball (ERTS + beam + boot)
           zc test [dir]         run test/**/*.zinc test classes (EUnit underneath)
           zc clean [dir]        remove build output and generated .erl
+          zc check [dir]        opt-in static net: xref + dialyzer over the FFI basement
           zc add <name@ver>     add a hex dependency to zinc.toml
           zc deps [dir]         list dependencies
           zc toolchain install [ver]   install a managed OTP into ~/.zc/otp (rustup model)
