@@ -711,9 +711,11 @@ made real, and it's pure BEAM strength:
    small polish (quiet rebar chatter, annotate `zc test`). See Phase 4 above.
 2. **Phase 3 tail — DONE (2026-06-15)** for the high-use Map/List/String surface: Math
    sqrt/pow/floor/ceil/round, String join/charAt/compareTo/format, List indexOf/getFirst/
-   getLast, Map containsValue (e2e `mathstr`). **Deferred (need a design call):** non-mutating
-   sort on immutable List/Arrays (needs a Stream-style shape — Java's sort is void/mutating),
-   Map.forEach (2-arg lambda), Arrays.sort/fill. Add when earned.
+   getLast, Map containsValue (e2e `mathstr`). `Map.forEach`/`entrySet` DONE (e2e `mapiter`).
+   **Sort DEFERRED (user 2026-06-16: "hardly used")** — design resolved (mutating
+   `Collections.sort(al)`/`al.sort(cmp)` on `ArrayList`; a returning `list.sorted()` isn't
+   legal Java, streams are the deferred alternative); build when a port slice earns it.
+   `Arrays.sort/fill` likewise deferred.
 3. **REORDERED (user, 2026-06-16): language hardening → Phase 6 → Phase 5.** Phase 5
    (deploy/distribution) is deferred until the language is "rock solid." **Hardening = A + C
    only**, bounded by the zinc-flow dogfood (NiFi-style engine in ZincScale/zinc-flow — a
