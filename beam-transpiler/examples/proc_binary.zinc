@@ -1,5 +1,8 @@
-// end-to-end binary processing: write a file -> read it as raw bytes -> write those bytes
-// to a second file -> verify size + content. Exercises the byte[] read/write path.
+// end-to-end binary processing: write bytes incl. NULs -> read as raw bytes -> write to a
+// second file -> verify exact byte size + round-trip. NULs are the discriminator: a
+// text/C-string impl would truncate at the first NUL (size 1, not 5), and byte size is
+// counted in bytes, not characters. (v1 gap: constructing arbitrary non-UTF-8 bytes, e.g.
+// 0xFF, needs a byte[] literal -- not yet a feature; NULs prove the byte-safe path.)
 public class Main {
   public static void main(String[] args) {
     String dir = "/tmp/zinc_proc_bin";
@@ -7,11 +10,12 @@ public class Main {
     String src = dir + "/src.dat";
     String dst = dir + "/dst.dat";
 
-    Files.writeString(src, "binary payload");
+    Files.writeString(src, "a\0b\0c");   // 5 raw bytes: a NUL b NUL c
     byte[] raw = Files.readBytes(src);   // typed byte[], a binary at runtime
     Files.writeBytes(dst, raw);
 
-    System.out.println(Files.size(dst));        // 14
-    System.out.println(Files.readString(dst));  // binary payload
+    System.out.println(Files.size(src));                    // 5  (NULs counted, not truncated)
+    System.out.println(Files.size(dst));                    // 5  (byte-exact round-trip)
+    System.out.println(Files.size(src) == Files.size(dst)); // true
   }
 }

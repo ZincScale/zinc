@@ -1,10 +1,13 @@
-// ternary ?: — right-associative, both branches share a type
+// ternary ?: — right-associative, both branches share a type. Hit every arm incl. the
+// deep nested `a < 0 -> -1` branch (previously dark).
 public class Main {
   public static void main(String[] args) {
     int a = 5;
     System.out.println(a > 3 ? "big" : "small");      // big
-    System.out.println(a > 10 ? 1 : a < 0 ? -1 : 0);  // 0  (nested, right-assoc)
-    int max = a > 7 ? a : 7;                            // 7
+    System.out.println(a > 10 ? 1 : a < 0 ? -1 : 0);  // 0  (nested middle arm)
+    int b = -2;
+    System.out.println(b > 10 ? 1 : b < 0 ? -1 : 0);  // -1 (deep nested arm)
+    int max = a > 7 ? a : 7;                           // 7
     System.out.println(max);
   }
 }

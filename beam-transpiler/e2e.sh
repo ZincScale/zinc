@@ -17,13 +17,13 @@ declare -A want=(
   [structs]=185
   [arrays]=117
   [strings]=$'hi-BEAM-3\nline1\nline2\nsay "hi"'
-  [bools]=yes
-  [elseif]=2
-  [floats]=5.0
+  [bools]=$'true\nfalse\ntrue'
+  [elseif]=$'3\n2\n1'
+  [floats]=$'5.0\n3\n3.5\n2'
   [breakcont]=12
   [multifile]=$'[10]\n1'
   [actor_counter]=7
-  [actor_children]=7
+  [actor_children]=$'7\n0\n5'
   [exceptions]=$'8\nno such id\n1\nlocal'
   [interfaces]=$'hello zinc\nbeam!\nlambda fun'
   [guards]=$'badtype caught\n42'
@@ -39,20 +39,20 @@ declare -A want=(
   [javastrings]=$'12\nHELLO, BEAM!\nBEAM\n2\nyes\n7'
   [javacollections]=$'2\n5\n41\ntrue'
   [actor_args]=43
-  [switchenum]=$'cool\nmany'
+  [switchenum]=$'red\ncool\none\nmany'
   [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
   [close]=$'1\nclosed db'
   [modifiers]=$'21\ns3cret'
   [arraylist]=$'500000\n250000\n7\n999997'
   [warn_iget]=$'8\n3'
   [mathstr]=$'12.0\n12\n32.0\n3.0\n4.0\na-b-c\n1\n-1\na\nc\ne\n-1\nx=7 (12.5%)\ntrue\nfalse'
-  [ternary]=$'big\n0\n7'
+  [ternary]=$'big\n0\n-1\n7'
   [fileio]=$'2\ntrue\n20\n1\ntrue\ntrue\nno such file or directory: /tmp/zinc_fileio/missing.conf\nfalse'
   [filestream]=$'500500\n1000'
   [filewrite]=$'5\ntrue\n6'
   [proc_json]=$'daily\n97\n100'
   [proc_csv]=$'rows=3 total=96'
-  [proc_binary]=$'14\nbinary payload'
+  [proc_binary]=$'5\n5\ntrue'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line
@@ -64,6 +64,7 @@ declare -A wantwarn=(
 declare -A wantstderr=(
   [logging]="warning: about to be clean"
   [actor_selfheal]="child_terminated"
+  [actor_children]="child_terminated"
 )
 # negative cases: each must FAIL transpile with the expected message fragment
 declare -A wanterr=(

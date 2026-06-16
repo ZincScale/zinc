@@ -1,3 +1,4 @@
+// every rung of the if / else-if / else chain must be hit, not just the middle one.
 public class Main {
   static int grade(int n) {
     if (n > 10) {
@@ -10,6 +11,8 @@ public class Main {
   }
 
   public static void main(String[] args) {
-    System.out.println(grade(7));  // 2
+    System.out.println(grade(20));  // 3  (first rung)
+    System.out.println(grade(7));   // 2  (else-if rung)
+    System.out.println(grade(1));   // 1  (else rung)
   }
 }

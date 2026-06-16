@@ -1,11 +1,11 @@
+// booleans + &&/||/! with precedence -- assert both a TRUE and a FALSE result so a
+// bug that biases toward one value (or breaks precedence) can't pass.
 public class Main {
   public static void main(String[] args) {
     boolean a = true;
-    boolean b = !a;
-    if (a && !b || false) {
-      System.out.println("yes");
-    } else {
-      System.out.println("no");
-    }
+    boolean b = !a;                          // false
+    System.out.println(a && !b || false);    // true
+    System.out.println(b || (a && false));   // false  (&& binds tighter than ||)
+    System.out.println(!a == b);             // true   (false == false)
   }
 }

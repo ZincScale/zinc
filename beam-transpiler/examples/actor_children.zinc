@@ -1,22 +1,33 @@
-// composition is supervision: an Actor's Actor-typed fields are its children
-// (Owner lowers to a supervisor pair; inner's handle is deterministic: owner.inner)
+// composition is supervision: an Actor's Actor-typed fields are its children (Owner
+// lowers to a supervisor pair; inner's handle is deterministic: owner.inner). Asserts
+// the SUPERVISION, not just delegation: crash the NESTED child, the pair restarts it
+// with reset state, and the Owner + same handle keep serving. (Application-rooted so the
+// child is a permanent static child -- mirrors actor_selfheal one level deeper.)
 class Counter implements Actor {
   int count = 0;
   void add(int n) { count = count + n; }
   int get()       { return count; }
+  void boom()     { int z = 0; count = count / z; }  // crash the process (badarith)
 }
 
 class Owner implements Actor {
-  Counter inner = new Counter();
+  Counter inner = new Counter();    // nested child: supervised, permanent
   void bump(int n) { inner.add(n); }
   int total()      { return inner.get(); }
+  void crash()     { inner.boom(); }
 }
 
-public class Main {
-  public static void main(String[] args) {
-    var o = new Owner();
+public class Main implements Application {
+  Owner o = new Owner();            // root child of the Application
+
+  void main() {
     o.bump(4);
     o.bump(3);
-    System.out.println(o.total());  // 7
+    System.out.println(o.total());  // 7   (delegation works)
+    o.crash();                      //      crash the nested child
+    Sys.sleep(200);                 //      the pair restarts it
+    System.out.println(o.total());  // 0   (child restarted, state reset, same handle)
+    o.bump(5);
+    System.out.println(o.total());  // 5   (restarted child keeps serving)
   }
 }

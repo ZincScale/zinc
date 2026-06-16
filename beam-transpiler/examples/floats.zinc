@@ -1,7 +1,10 @@
+// int/int -> truncating `div`; anything with a double -> float `/`. Assert the int and
+// float results SEPARATELY so the difference is actually proven (no cancelling terms).
 public class Main {
   public static void main(String[] args) {
-    double d = 25.0 / 5.0;                // double division stays /
-    int half = 5 / 2;                     // int division -> div
-    System.out.println(d + half - half);  // 5.0
+    System.out.println(25.0 / 5.0);   // 5.0   (float division)
+    System.out.println(7 / 2);        // 3     (int division truncates)
+    System.out.println(7.0 / 2);      // 3.5   (mixed -> float)
+    System.out.println(5 / 2);        // 2     (int division)
   }
 }
