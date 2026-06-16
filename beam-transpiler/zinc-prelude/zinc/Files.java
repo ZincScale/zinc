@@ -1,6 +1,8 @@
 package zinc;
 
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
 /** Basic file I/O over Erlang file/filelib. Streaming is explicit and first-class
  *  (forEachLine/foldLines/forEachChunk — slice 2); these whole-file ops read/write the
@@ -26,4 +28,10 @@ public final class Files {
   public static void delete(String path) { throw Tag.stub(); }
   // zinc int is an arbitrary-precision Erlang integer, so it holds any file size
   public static int size(String path) { throw Tag.stub(); }
+
+  // streaming reads -- the LARGE-file path. Constant memory, in-process loop, handle
+  // closed for you. Use these (not readString) for anything that can grow.
+  public static void forEachLine(String path, Consumer<String> action) { throw Tag.stub(); }
+  public static <T> T foldLines(String path, T acc, BiFunction<T, String, T> fn) { throw Tag.stub(); }
+  public static void forEachChunk(String path, int size, Consumer<byte[]> action) { throw Tag.stub(); }
 }

@@ -7,7 +7,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 JBIN="$HOME/.local/java/current/bin"; [ -x "$JBIN/javac" ] || JBIN="$(dirname "$(command -v javac)")"
 JAR="zinc-prelude/zinc-prelude.jar"
-PRE=$'import java.util.*;\nimport zinc.*;\n'
+PRE=$'import java.util.*;\nimport java.util.function.*;\nimport zinc.*;\n'
 TMP="out/legaljava"; rm -rf "$TMP"; mkdir -p "$TMP"
 
 pass=0; fail=0; exempt=0; failed=()

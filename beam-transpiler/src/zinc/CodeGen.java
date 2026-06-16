@@ -660,7 +660,50 @@ class CodeGen {
   static final String IO_SOURCE = "-module('zinc.io').\n"
       + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
       + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
-      + "         mkdirs/1, delete/1, fsize/1, getenv/1]).\n\n"
+      + "         mkdirs/1, delete/1, fsize/1, getenv/1,\n"
+      + "         for_each_line/2, fold_lines/3, for_each_chunk/3]).\n\n"
+      + "%% --- streaming reads: open raw + read_ahead, loop IN-PROCESS (no per-line\n"
+      + "%% message cost), close in `after` (closes even if the consumer throws). The\n"
+      + "%% large-file path -- constant memory, never slurps the whole file. ---\n"
+      + "open_read(P) ->\n"
+      + "    case file:open(P, [read, raw, binary, {read_ahead, 65536}]) of\n"
+      + "        {ok, H} -> H;\n"
+      + "        {error, R} -> raise(R, P)\n"
+      + "    end.\n"
+      + "for_each_line(P, F) ->\n"
+      + "    H = open_read(P),\n"
+      + "    try line_loop(H, F, P) after file:close(H) end.\n"
+      + "line_loop(H, F, P) ->\n"
+      + "    case file:read_line(H) of\n"
+      + "        {ok, Line} -> F(strip_eol(Line)), line_loop(H, F, P);\n"
+      + "        eof -> ok;\n"
+      + "        {error, R} -> raise(R, P)\n"
+      + "    end.\n"
+      + "fold_lines(P, Acc, F) ->\n"
+      + "    H = open_read(P),\n"
+      + "    try fold_loop(H, Acc, F, P) after file:close(H) end.\n"
+      + "fold_loop(H, Acc, F, P) ->\n"
+      + "    case file:read_line(H) of\n"
+      + "        {ok, Line} -> fold_loop(H, F(Acc, strip_eol(Line)), F, P);\n"
+      + "        eof -> Acc;\n"
+      + "        {error, R} -> raise(R, P)\n"
+      + "    end.\n"
+      + "for_each_chunk(P, Size, F) ->\n"
+      + "    H = open_read(P),\n"
+      + "    try chunk_loop(H, Size, F, P) after file:close(H) end.\n"
+      + "chunk_loop(H, Size, F, P) ->\n"
+      + "    case file:read(H, Size) of\n"
+      + "        {ok, Data} -> F(Data), chunk_loop(H, Size, F, P);\n"
+      + "        eof -> ok;\n"
+      + "        {error, R} -> raise(R, P)\n"
+      + "    end.\n"
+      + "strip_eol(L) ->\n"
+      + "    N = byte_size(L),\n"
+      + "    case L of\n"
+      + "        <<Body:(N-2)/binary, \"\\r\\n\">> -> Body;\n"
+      + "        <<Body:(N-1)/binary, \"\\n\">> -> Body;\n"
+      + "        _ -> L\n"
+      + "    end.\n\n"
       + "read_string(P) -> ok_or_raise(file:read_file(P), P).\n"
       + "read_bytes(P)  -> ok_or_raise(file:read_file(P), P).\n"
       + "read_lines(P)  ->\n"
@@ -2787,6 +2830,26 @@ class CodeGen {
       }
       case "Files" -> {
         usedIo = true;
+        // streaming reads take a lambda whose params we type contextually (line=String,
+        // acc=the accumulator's type, chunk=byte[]) so facade calls inside it dispatch.
+        switch (x.method()) {
+          case "forEachLine" -> {
+            return "'zinc.io':for_each_line(" + genExpr(x.args().get(0), env) + ", "
+                + ioLambda(x, 1, List.of("String"), null, env) + ")";
+          }
+          case "foldLines" -> {
+            String accT = exprType(x.args().get(1));
+            return "'zinc.io':fold_lines(" + genExpr(x.args().get(0), env) + ", "
+                + genExpr(x.args().get(1), env) + ", "
+                + ioLambda(x, 2, java.util.Arrays.asList(accT, "String"), accT, env) + ")";
+          }
+          case "forEachChunk" -> {
+            return "'zinc.io':for_each_chunk(" + genExpr(x.args().get(0), env) + ", "
+                + genExpr(x.args().get(1), env) + ", "
+                + ioLambda(x, 2, List.of("byte[]"), null, env) + ")";
+          }
+          default -> {}
+        }
         String fn = switch (x.method()) {
           case "readString" -> "read_string";
           case "readBytes" -> "read_bytes";
@@ -2844,6 +2907,19 @@ class CodeGen {
     var out = new ArrayList<String>();
     for (Expr a : args) out.add(genExpr(a, env));
     return String.join(", ", out);
+  }
+
+  /** A streaming-IO callback: the arg at idx must be a lambda of paramTypes.size()
+   *  params, generated with those param types (and optional return type) so facade
+   *  calls inside the lambda body dispatch by static type. */
+  private String ioLambda(MethodCall x, int idx, List<String> paramTypes, String retType,
+      Map<String, String> env) {
+    if (!(x.args().get(idx) instanceof LambdaExpr lx)
+        || lx.params().size() != paramTypes.size()) {
+      throw new CompileError("Files." + x.method() + " needs a " + paramTypes.size()
+          + "-arg lambda");
+    }
+    return genLambda(lx, env, paramTypes, retType);
   }
 
   // ---- java.util / java.lang facade: users write Java, the compiler writes Erlang ----
@@ -3137,7 +3213,8 @@ class CodeGen {
               case "readLines", "list" -> "List<String>";
               case "exists", "isDirectory" -> "boolean";
               case "size" -> "int";
-              default -> null; // void: writeString/appendString/writeBytes/mkdirs/delete
+              case "foldLines" -> exprType(x.args().get(1)); // accumulator's type
+              default -> null; // void: writes, mkdirs, delete, forEachLine, forEachChunk
             };
           }
           if (vr.name().equals("System")) {
