@@ -67,6 +67,25 @@ public class Zc {
         ensureGenerated(dir, cfg);
         exec(dir, rebarCmd("clean"));
       }
+      // OPT-IN static net over the FFI basement (never on the build/run hot path):
+      // xref catches calls to functions that exist nowhere; dialyzer adds success typing
+      // (bad arity, type-incompatible FFI). Covers hex deps too, since both see the whole
+      // loaded code path. --xref skips the (slow, PLT-building) dialyzer pass.
+      case "check" -> {
+        Path dir = projectDir(args);
+        var cfg = loadToml(dir);
+        useManagedOtp(cfg);
+        ensureGenerated(dir, cfg);
+        vendorDeps(dir, cfg);
+        exec(dir, rebarCmd("compile"));
+        System.out.println("zc: xref — calls to functions that exist nowhere ...");
+        exec(dir, rebarCmd("xref"));
+        if (!java.util.Arrays.asList(args).contains("--xref")) {
+          System.out.println("zc: dialyzer — success typing (first run builds a PLT, "
+              + "then cached) ...");
+          exec(dir, rebarCmd("dialyzer"));
+        }
+      }
       case "deps" -> {
         var cfg = loadToml(projectDir(args));
         cfg.getOrDefault("deps", Map.of()).forEach((k, v) -> System.out.println(k + " " + v));
@@ -173,6 +192,7 @@ public class Zc {
                           {post, [{clean, {zinc, clean}}]}]}.
         {src_dirs, [{"src", [{recursive, true}]}]}.
         {profiles, [{test, [{extra_src_dirs, [{"test", [{recursive, true}]}]}]}]}.
+        {xref_checks, [undefined_function_calls, deprecated_function_calls]}.
         {deps, [%s]}.
         %s""".formatted(String.join(", ", depList), relx));
     String mod = forRelease ? "    {mod, {zinc_app, []}},\n" : "";
