@@ -4,7 +4,7 @@
 // piece end-to-end -- a NiFi flow with a real processor in the middle.
 class Upper implements Actor {
   // pull each line from `incoming`, uppercase it, push to `outgoing`
-  void run(Channel<String> incoming, Channel<String> outgoing) {
+  public void run(Channel<String> incoming, Channel<String> outgoing) {
     while (incoming.hasNext()) {
       outgoing.put(incoming.take().toUpperCase());   // the middle stage does real work
     }

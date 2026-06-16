@@ -3,13 +3,13 @@
 class Counter implements Actor {
   int count;
   Counter(int start) { count = start; }
-  void incr()        { count = count + 1; }
-  int kick() {                  // sync call that queues two self-casts behind itself
+  public void incr()        { count = count + 1; }
+  public int kick() {           // sync call that queues two self-casts behind itself
     this.incr();
     this.incr();
     return 0;
   }
-  int get()          { return count; }
+  public int get()          { return count; }
 }
 
 public class Main {

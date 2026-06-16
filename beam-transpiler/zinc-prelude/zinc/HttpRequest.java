@@ -10,6 +10,7 @@ public final class HttpRequest {
     public Builder GET()              { throw Tag.stub(); }
     public Builder POST(String body)  { throw Tag.stub(); }
     public Builder header(String k, String v) { throw Tag.stub(); }
+    public Builder timeout(int millis) { throw Tag.stub(); }
     public HttpRequest build()        { throw Tag.stub(); }
   }
 }

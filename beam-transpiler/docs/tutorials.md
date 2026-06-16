@@ -33,8 +33,8 @@ record User(String id, String name) {}
 
 class Store implements Actor {
   HashMap<String, User> users = new HashMap<String, User>();
-  void put(String id, User u) { users.put(id, u); }   // void  -> async message (cast)
-  User get(String id)         { return users.get(id); } // typed -> sync request (call)
+  public void put(String id, User u) { users.put(id, u); }   // void  -> async message (cast)
+  public User get(String id)         { return users.get(id); } // typed -> sync request (call)
 }
 
 public class Main implements Application {
@@ -61,8 +61,8 @@ What just happened, and why it matters:
 - The method shapes are the messaging contract: `put` returns `void` so calling it is a
   fire-and-forget **cast**; `get` returns a value so it's a synchronous **call**. You write
   ordinary Java; the return type decides the protocol.
-- Notice the methods have no `public` — an actor's methods *are* its public protocol, so
-  that's the default.
+- The methods are `public` — that's an actor's message protocol. (A `private` method, by
+  contrast, is an in-process helper: a plain local function, not a message handler.)
 
 ## Step 2 — put it behind HTTP
 

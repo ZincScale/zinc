@@ -5,7 +5,7 @@ import erlang.inet;
 import erlang.erlang;
 
 class Conn implements Actor {
-  void serve(Object sock) {
+  public void serve(Object sock) {
     while (true) {
       try {
         String line = Erlang.ok(gen_tcp.recv(sock, 0));
@@ -18,7 +18,7 @@ class Conn implements Actor {
 }
 
 class Acceptor implements Actor {
-  void run(Object lsock) {
+  public void run(Object lsock) {
     while (true) {
       try {
         var sock = Erlang.ok(gen_tcp.accept(lsock));

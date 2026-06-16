@@ -147,8 +147,7 @@ class Parser {
     return seen;
   }
 
-  private void checkMethodMods(Set<String> mods, String where, boolean staticRequired,
-      boolean privateOk) {
+  private void checkMethodMods(Set<String> mods, String where, boolean staticRequired) {
     if (mods.contains("final")) {
       throw new CompileError(where + ": 'final' on methods has no meaning — "
           + "zinc has no inheritance");
@@ -160,10 +159,6 @@ class Parser {
     if (!staticRequired && mods.contains("static")) {
       throw new CompileError(where + ": 'static' does not belong here — "
           + "these methods run against an instance");
-    }
-    if (!privateOk && mods.contains("private")) {
-      throw new CompileError(where + ": cannot be private — an Actor's methods are its "
-          + "protocol; private helpers belong in a utility class");
     }
   }
 
@@ -272,7 +267,7 @@ class Parser {
     while (!check(TokKind.RBRACE)) {
       Set<String> mods = skipModifiers();
       MethodDecl m = parseMethod(mods);
-      checkMethodMods(mods, name + "." + m.name(), true, true);
+      checkMethodMods(mods, name + "." + m.name(), true);
       methods.add(m);
     }
     expect(TokKind.RBRACE, "'}'");
@@ -394,8 +389,15 @@ class Parser {
             throw new CompileError(name + "." + memberName + ": 'final' on methods has no"
                 + " meaning — zinc has no inheritance");
           }
-        } else {
-          checkMethodMods(mods, name + "." + memberName, false, isInstance);
+        } else if (isInstance) {
+          checkMethodMods(mods, name + "." + memberName, false);
+        } else { // Actor: visibility is mandatory and load-bearing (public = protocol,
+                 // private = in-process helper), so it reads like Java -- no bare methods
+          checkMethodMods(mods, name + "." + memberName, false);
+          if (!mods.contains("public") && !mods.contains("private")) {
+            throw new CompileError(name + "." + memberName + ": an Actor method must be"
+                + " declared public (its message protocol) or private (an in-process helper)");
+          }
         }
         methods.add(new MethodDecl(type, memberName, parseParams(), parseBlock(), mods));
       } else if (match(TokKind.ASSIGN)) {

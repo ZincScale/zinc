@@ -42,6 +42,7 @@ class CodeGen {
   private int curLine;       // line of the statement being lowered; 0 = unknown
   private final Set<String> finalVars = new LinkedHashSet<>(); // per method body
   private boolean inActor = false;
+  private ActorDecl curActor; // the actor being lowered (private-helper call resolution)
   private Map<String, String> varTypes = new HashMap<>();       // var -> type, per method
   private int ctr = 0;
   private List<String> helpers = new ArrayList<>();
@@ -1149,8 +1150,10 @@ class CodeGen {
       curModule = actorMods.get(a.name());
       curClassName = null;
       inActor = true;
+      curActor = a;
       out.put(curModule, genActorModule(a));
       inActor = false;
+      curActor = null;
       if (hasActorChildren(a, allActors)) {
         out.put(curModule + "_sup", genPairSup(a));
       }
@@ -1532,7 +1535,7 @@ class CodeGen {
   static MethodDecl closeHook(ActorDecl a) {
     for (MethodDecl m : a.methods()) {
       if (!m.name().equals("close")) continue;
-      if (!m.retType().equals("void") || !m.params().isEmpty()) {
+      if (!m.retType().equals("void") || !m.params().isEmpty() || m.isPrivate()) {
         throw new CompileError("actor " + a.name()
             + ".close: the shutdown hook is 'public void close()' (no params)");
       }
@@ -1547,6 +1550,7 @@ class CodeGen {
     for (FieldDecl f : a.fields()) {
       if (!f.mods().contains("final")) continue;
       for (MethodDecl m : a.methods()) {
+        if (m.isPrivate()) continue; // helpers are pure: no field access to reassign
         var assigned = new LinkedHashSet<String>();
         collectAssigned(m.body(), assigned);
         if (assigned.contains(f.name())) {
@@ -1557,8 +1561,15 @@ class CodeGen {
     }
     var casts = new ArrayList<String>();
     var calls = new ArrayList<String>();
+    var privates = new ArrayList<String>();
     for (MethodDecl m : a.methods()) {
       if (m == close) continue;
+      if (m.isPrivate()) {
+        // an in-process helper: a pure local function (not exported, not a message
+        // handler, no state map) -- called directly from this actor's own methods
+        privates.add(genFn(m));
+        continue;
+      }
       if (m.retType().equals("void")) {
         if (hasReturn(m.body())) {
           throw new CompileError("actor " + a.name() + "." + m.name()
@@ -1599,6 +1610,7 @@ class CodeGen {
             : "handle_info({'EXIT', _Pid, Reason}, State) -> {stop, Reason, State};\n"
               + "handle_info(Msg, _State) -> erlang:error({unknown_info, Msg})."));
     if (close != null) pieces.add(genCloseTerminate(a, close));
+    pieces.addAll(privates);
     pieces.addAll(helpers);
     pieces.addAll(usedHelpers());
     return "-module(" + atomLit(curModule) + ").\n"
@@ -2525,6 +2537,18 @@ class CodeGen {
       }
       case Call x -> {
         if (inActor) {
+          MethodDecl pm = curActor == null ? null : curActor.methods().stream()
+              .filter(h -> h.name().equals(x.callee()) && h.params().size() == x.args().size())
+              .findFirst().orElse(null);
+          if (pm != null && pm.isPrivate()) { // bare call to an in-process helper -> local fn
+            checkArgs(curActor.name() + "." + x.callee(), pm.params(), x.args());
+            yield fnName(x.callee()) + "(" + genArgs(x.args(), env) + ")";
+          }
+          if (pm != null) {
+            throw new CompileError("inside an actor, '" + x.callee() + "' is a public protocol"
+                + " method — invoke it on a handle, not as a bare self-call (only private"
+                + " helpers are called directly)");
+          }
           throw new CompileError("inside an actor, call static methods as Class.method(...)");
         }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
@@ -2644,6 +2668,14 @@ class CodeGen {
           .filter(h -> h.name().equals(x.method()) && h.params().size() == arity)
           .findFirst().orElseThrow(() -> new CompileError("actor " + actor.name()
               + " has no method " + x.method() + "/" + arity));
+      if (m.isPrivate()) { // in-process helper: a local fn call on self, never on a handle
+        if (!(x.target() instanceof VarRef vr && vr.name().equals("this"))) {
+          throw new CompileError("actor " + actor.name() + "." + x.method() + " is a private"
+              + " helper — callable only within the actor, not on a handle");
+        }
+        checkArgs(actor.name() + "." + x.method(), m.params(), x.args());
+        return fnName(x.method()) + "(" + genArgs(x.args(), env) + ")";
+      }
       checkArgs(actor.name() + "." + x.method(), m.params(), x.args());
       String msg = x.args().isEmpty() ? "{" + x.method() + "}"
           : "{" + x.method() + ", " + genArgs(x.args(), env) + "}";

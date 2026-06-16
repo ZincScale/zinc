@@ -35,9 +35,9 @@ fixture='
 cat > src/Counter.zinc <<EOF
 class Counter implements Actor {
   int count = 0;
-  void incr()         { count = count + 1; }
-  int get()           { return count; }
-  int divideBy(int n) { return count / n; }
+  public void incr()         { count = count + 1; }
+  public int get()           { return count; }
+  public int divideBy(int n) { return count / n; }
 }
 EOF
 cat > test/CounterTest.zinc <<EOF

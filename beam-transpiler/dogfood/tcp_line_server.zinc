@@ -6,7 +6,7 @@ import erlang.erlang;
 import erlang.io_lib;
 
 class Conn implements Actor {
-  void serve(Object sock) {
+  public void serve(Object sock) {
     // workaround GAP-4: lexer has no escape sequences, "\n" is backslash-n
     String nl = erlang.list_to_binary(io_lib.nl());
     boolean open = true;            // workaround GAP-1: break-inside-catch escapes loops
@@ -23,7 +23,7 @@ class Conn implements Actor {
 }
 
 class Acceptor implements Actor {
-  void run(Object lsock) {
+  public void run(Object lsock) {
     boolean up = true;
     while (up) {
       try {

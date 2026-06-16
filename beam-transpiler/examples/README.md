@@ -60,10 +60,11 @@ expected output in `../e2e.sh`.
 |------|-------|
 | [`logging`](programs/logging.zinc) | `Log.*` (logger stream) vs `System.out.println` (clean stdout) |
 | [`json`](programs/json.zinc) | derived record codecs + dynamic access (`proc_json` adds `decodeList`) |
-| [`http_client`](programs/http_client.zinc) | the `zinc.http` client (and the exception ladder) |
+| [`http_client`](programs/http_client.zinc) | the `zinc.http` client builders + the exception ladder (refused connection) |
 
-(The HTTP *server* + `Router` + JSON is the [tutorial](../docs/tutorials.md) and
-[`../dogfood/webdemo`](../dogfood/webdemo).)
+(The HTTP *server* + `Router` + JSON — and the client streaming a response body into a file
+in bounded memory (`openStream`) — is the [tutorial](../docs/tutorials.md) and
+[`../dogfood/webdemo`](../dogfood/webdemo): it needs cowboy, which the e2e set has no deps for.)
 
 ## 6. Files & streaming, bounded memory ([guide §7](../docs/guide.md))
 | file | shows |
@@ -72,7 +73,6 @@ expected output in `../e2e.sh`.
 | [`filestream`](programs/filestream.zinc) | scoped streaming read (try-with-resources `Reader`, constant memory) |
 | [`filewrite`](programs/filewrite.zinc) | scoped streaming write (`Writer`) |
 | [`proc_csv`](programs/proc_csv.zinc) / [`proc_json`](programs/proc_json.zinc) / [`proc_binary`](programs/proc_binary.zinc) | end-to-end format processing |
-| [`httpstream`](programs/httpstream.zinc) | streaming an HTTP response body in bounded memory |
 
 ## 7. Concurrency: channels & pipelines ([guide §7](../docs/guide.md))
 | file | shows |

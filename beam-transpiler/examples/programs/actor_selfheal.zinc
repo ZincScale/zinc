@@ -2,9 +2,9 @@
 // tree restarts it, and the SAME handle keeps serving. Zero supervision code here.
 class Counter implements Actor {
   int count = 0;
-  void incr() { count = count + 1; }
-  int get()   { return count; }
-  void boom() { int x = 1 / 0; }   // real crash inside the actor (badarith)
+  public void incr() { count = count + 1; }
+  public int get()   { return count; }
+  public void boom() { int x = 1 / 0; }   // real crash inside the actor (badarith)
 }
 
 public class Main implements Application {

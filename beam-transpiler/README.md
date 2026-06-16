@@ -8,9 +8,9 @@ supervisor, or a Dockerfile.
 // A counter that survives its own crashes. No supervision code — the runtime builds it.
 class Counter implements Actor {
   int count = 0;
-  void incr() { count = count + 1; }   // void  => async message (cast)
-  int get()   { return count; }        // typed => sync request (call)
-  void boom() { int x = 1 / 0; }       // a real crash
+  public void incr() { count = count + 1; }   // void  => async message (cast)
+  public int get()   { return count; }        // typed => sync request (call)
+  public void boom() { int x = 1 / 0; }       // a real crash
 }
 
 public class Main implements Application {

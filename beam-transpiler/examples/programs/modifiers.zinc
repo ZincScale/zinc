@@ -1,11 +1,13 @@
-// Modifiers are enforced, not decorative: private = same-class only (and not
-// exported from the Erlang module), final = construction-frozen. The ctor may
-// set a final field; methods may not.
+// Modifiers are enforced, not decorative: an Actor method is public (its message
+// protocol) or private (an in-process helper -- a plain local function, NOT a message
+// handler, so it takes what it needs as args). final = construction-frozen; the ctor
+// may set a final field, methods may not.
 class Vault implements Actor {
   final String key;
   int reads = 0;
   Vault(String k) { key = k; }
-  String get() { reads = reads + 1; return key; }
+  public String get() { reads = reads + 1; return tag(key, reads); }  // public protocol
+  private String tag(String k, int n) { return k + "#" + n; }         // in-process helper
 }
 
 public class Main {

@@ -127,9 +127,10 @@ This is the differentiator. Two marker interfaces, both prelude (no import):
 - **`implements Actor`** — a supervised, stateful process. Fields are state; methods are the
   protocol. **`void` method ⇒ async cast; typed method ⇒ sync call** (the Java return type
   *is* the messaging contract). The instance reference is a handle that survives restarts.
-  Methods take **no visibility modifier** — an Actor's methods *are* its public protocol, so
-  `public` is the default (and `private` is rejected on them). That's why the snippets below
-  write `void put(...)` / `User get(...)` with no `public`.
+  Every method is declared **`public`** (its message protocol) or **`private`** (an
+  in-process helper — a plain local function, *not* a message handler, called only from
+  within the actor; being pure, it takes what it needs as arguments rather than reading
+  fields). Bare methods are rejected, so the surface reads like Java.
 - **`implements Application`** — the one root per runnable project: an OTP application whose
   **`Actor`-typed fields are its supervised children**, born in declaration order. Hosts
   `main`, receives SIGTERM, owns the exit code.
@@ -142,8 +143,8 @@ supervision — an Actor's Actor-fields are its children; failure flows down, ne
 ```java
 class Counter implements Actor {
   int count = 0;
-  void incr() { count = count + 1; }   // cast
-  int get()   { return count; }        // call
+  public void incr() { count = count + 1; }   // cast
+  public int get()   { return count; }        // call
 }
 
 public class Main implements Application {
@@ -202,7 +203,7 @@ stage is just an actor that drains one channel and feeds the next, kicked via a 
 loops in its own process:
 ```java
 class Upper implements Actor {                       // a transform stage
-  void run(Channel<String> incoming, Channel<String> outgoing) {
+  public void run(Channel<String> incoming, Channel<String> outgoing) {
     while (incoming.hasNext()) outgoing.put(incoming.take().toUpperCase());
     outgoing.close();
   }
@@ -217,7 +218,8 @@ FileWriter fw = FileWriter.drain(upperLines, outputFile);  // upperLines -> file
 fw.join();                                           // wait for the pipeline to finish
 ```
 N workers can drain one `Channel` for automatic work-stealing + backpressure.
-(`fileio`, `filestream`, `filewrite`, `httpstream`, `channel`, `pipeline`)
+(`fileio`, `filestream`, `filewrite`, `channel`, `pipeline`; HTTP-body streaming via
+`openStream` is in `dogfood/webdemo`)
 
 ## 8. Standard library
 
@@ -227,7 +229,8 @@ N workers can drain one `Channel` for automatic work-stealing + backpressure.
 - **`zinc.http`** — client (`HttpClient.newBuilder()...send(req)`) and a server: an
   `HttpServer` Actor + a programmatic `Router` with `{id}` path params; handlers are lambdas
   (or a class `implements Handler`).
-  (`http_client`)
+  (`http_client` for the client + ladder; `dogfood/webdemo` for the server, Router, and
+  `openStream` response streaming)
 - **`zinc.sql`** — a `Db` connection pool (a supervision subtree); `db.query(sql, params...)`,
   lambda `db.transaction(tx -> {...})`; always prepared statements. (Postgres.)
 - **`Log`** — `Log.info/warn/error(msg)` → BEAM logger (where crash reports land);

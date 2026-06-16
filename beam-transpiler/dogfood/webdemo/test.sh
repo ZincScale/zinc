@@ -13,9 +13,9 @@ got=$(docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$ROOT":/work -v "$JAVA_DIR":/java -v "$REBAR3":/usr/local/bin/rebar3 \
   -e PATH="/java/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
   -w /work/dogfood/webdemo erlang:slim \
-  sh -c 'timeout 120 /work/bin/zc run; true' | tail -3)
+  sh -c 'timeout 120 /work/bin/zc run; true' | tail -5)
 
-want=$(printf '201\nvin\nhello from zinc')
+want=$(printf '201\nvin\nhello from zinc\n100\ntrue')
 
 if [ "$got" = "$want" ]; then
   echo "PASS  webdemo"

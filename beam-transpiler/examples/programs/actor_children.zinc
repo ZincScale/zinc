@@ -5,16 +5,16 @@
 // child is a permanent static child -- mirrors actor_selfheal one level deeper.)
 class Counter implements Actor {
   int count = 0;
-  void add(int n) { count = count + n; }
-  int get()       { return count; }
-  void boom()     { int z = 0; count = count / z; }  // crash the process (badarith)
+  public void add(int n) { count = count + n; }
+  public int get()       { return count; }
+  public void boom()     { int z = 0; count = count / z; }  // crash the process (badarith)
 }
 
 class Owner implements Actor {
   Counter inner = new Counter();    // nested child: supervised, permanent
-  void bump(int n) { inner.add(n); }
-  int total()      { return inner.get(); }
-  void crash()     { inner.boom(); }
+  public void bump(int n) { inner.add(n); }
+  public int total()      { return inner.get(); }
+  public void crash()     { inner.boom(); }
 }
 
 public class Main implements Application {

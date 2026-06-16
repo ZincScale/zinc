@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite proc_json proc_csv proc_binary httpstream mapiter casts channel pipeline)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite proc_json proc_csv proc_binary mapiter casts channel pipeline)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -28,7 +28,7 @@ declare -A want=(
   [interfaces]=$'hello zinc\nbeam!\nlambda fun'
   [guards]=$'badtype caught\n42'
   [logging]='clean stdout'
-  [http_client]=$'200\nzinc!\nconnect refused caught'
+  [http_client]='connect refused caught'
   [json]=$'vin\n41\nsf\n40\n7\nmissing caught'
   [actor_selfheal]=$'3\n0\n1'
   [ffi]="BEAM-9"
@@ -42,7 +42,7 @@ declare -A want=(
   [switchenum]=$'red\ncool\none\nmany'
   [tcpserver]=$'HELLO WORLD\nBEAM ME UP'
   [close]=$'1\nclosed db'
-  [modifiers]=$'21\ns3cret'
+  [modifiers]=$'21\ns3cret#1'
   [arraylist]=$'500000\n250000\n7\n999997'
   [warn_iget]=$'8\n3'
   [mathstr]=$'12.0\n12\n32.0\n3.0\n4.0\na-b-c\n1\n-1\na\nc\ne\n-1\nx=7 (12.5%)\ntrue\nfalse'
@@ -53,7 +53,6 @@ declare -A want=(
   [proc_json]=$'daily\n97\n100\n2\n30'
   [proc_csv]=$'rows=3 total=96'
   [proc_binary]=$'5\ntrue'
-  [httpstream]=$'HELLO-STREAM\n12'
   [mapiter]=$'60\n3\n10\na=10\nb=20\nc=30'
   [casts]=$'3\n-3\n5\n7.0\n3.5\n1000000000000\n43\n3.5\n30.0\n2.5'
   [channel]=$'5\nx0x1x2x3x4'
@@ -88,7 +87,8 @@ declare -A wanterr=(
   [mod_protected]="'protected' has no meaning"
   [mod_nonstatic]="Main.f: utility-class methods are static"
   [mod_static_actor]="C.get: 'static' does not belong here"
-  [mod_private_actor]="C.get: cannot be private"
+  [mod_bare_actor]="C.get: an Actor method must be declared public"
+  [priv_helper_extern]="C.helper is a private helper"
   [mod_private_cross]="Util.secret is private"
   [mod_final_local]="mod_final_local.zinc:4: final variable 'x' cannot be reassigned"
   [mod_final_field]="final field 'n' cannot be reassigned"

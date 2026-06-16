@@ -1,7 +1,7 @@
 class Counter implements Actor {
   int n;
   Counter(int start) { n = start; }
-  int get() { return n; }
+  public int get() { return n; }
 }
 public class Main {
   public static void main(String[] args) { Counter c = new Counter("hi"); System.out.println(c.get()); }

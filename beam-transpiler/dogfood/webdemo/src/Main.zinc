@@ -5,18 +5,31 @@ record User(String id, String name) {}
 
 class Store implements Actor {
   HashMap<String, User> users = new HashMap<String, User>();
-  void put(String id, User u) { users.put(id, u); }
-  User get(String id)         { return users.get(id); }
+  public void put(String id, User u) { users.put(id, u); }
+  public User get(String id)         { return users.get(id); }
 }
 
 class HelloHandler implements Handler {
   public Response handle(Request req) { return Response.ok("hello from zinc\n"); }
 }
 
+// serves a multi-line body the client downloads with openStream -- the bounded-memory
+// HTTP->file streaming path (chunk by chunk, never the whole body in memory at once).
+class StreamHandler implements Handler {
+  public Response handle(Request req) {
+    String body = "";
+    for (int i = 1; i <= 100; i++) {
+      body += "line" + i + "\n";
+    }
+    return Response.ok(body);
+  }
+}
+
 public class Main implements Application {
   Store store = new Store();
   HttpServer server = new HttpServer(8080, Router.create()
       .get("/hello", new HelloHandler())
+      .get("/stream", new StreamHandler())
       .post("/users/{id}", req -> {
         User u = Json.decode(User.class, req.body());
         store.put(req.pathParam("id"), u);
@@ -39,5 +52,18 @@ public class Main implements Application {
 
     var hello = client.send(HttpRequest.newBuilder(base + "/hello").GET().build());
     System.out.print(hello.body());                       // hello from zinc
+
+    // stream a 100-line body straight to a file, one chunk at a time -- bounded memory
+    String out = "/tmp/zinc_webdemo_stream.out";
+    var req = HttpRequest.newBuilder(base + "/stream").GET().build();
+    try (HttpStream s = client.openStream(req)) {
+      try (Writer w = Files.openWriter(out)) {
+        while (s.hasNextChunk()) {
+          w.write(s.nextChunk());                          // byte[] chunk -> file
+        }
+      }
+    }
+    System.out.println(Files.readLines(out).size());          // 100
+    System.out.println(Files.readString(out).contains("line50")); // true
   }
 }
