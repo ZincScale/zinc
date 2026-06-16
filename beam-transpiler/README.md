@@ -54,6 +54,7 @@ deployment story is a self-contained release on a `$10` VM, not a cluster.
 - **[Guide](docs/guide.md)** — the whole language, one coherent narrative.
 - **[Tutorials](docs/tutorials.md)** — build a real HTTP+JSON service and a streaming pipeline.
 - **[Coming from Java](docs/coming-from-java.md)** — what's deliberately different.
+- **[Examples](examples/README.md)** — ~45 tested programs as a reading path, easiest first.
 
 ## What's real today
 
