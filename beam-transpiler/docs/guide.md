@@ -201,20 +201,20 @@ consumer pulls. `FileReader.pump` / `FileWriter.drain` are ready-made source/sin
 stage is just an actor that drains one channel and feeds the next, kicked via a cast so it
 loops in its own process:
 ```java
-class Upper implements Actor {
-  void run(Channel<String> in, Channel<String> out) {
-    while (in.hasNext()) out.put(in.take().toUpperCase());   // the real work
-    out.close();
+class Upper implements Actor {                       // a transform stage
+  void run(Channel<String> incoming, Channel<String> outgoing) {
+    while (incoming.hasNext()) outgoing.put(incoming.take().toUpperCase());
+    outgoing.close();
   }
 }
 // read -> transform -> write, three processes, paced by the bounded channels:
-Channel<String> a = new Channel<>(64);
-Channel<String> b = new Channel<>(64);
-FileReader.pump(in, a);                 // file -> a   (spawns a background reader)
-Upper up = new Upper();                 // a spawn must bind to a var, then kick it
-up.run(a, b);                           // a -> uppercase -> b; cast, so it loops in up's process
-FileWriter fw = FileWriter.drain(b, out); // b -> file (handle to join on)
-fw.join();                              // wait for the pipeline to finish
+Channel<String> rawLines = new Channel<>(64);        // reader -> transform
+Channel<String> upperLines = new Channel<>(64);      // transform -> writer
+FileReader.pump(inputFile, rawLines);                // file -> rawLines (spawns a background reader)
+Upper up = new Upper();                              // a spawn must bind to a var, then kick it
+up.run(rawLines, upperLines);                        // cast, so it loops in up's own process
+FileWriter fw = FileWriter.drain(upperLines, outputFile);  // upperLines -> file (handle to join on)
+fw.join();                                           // wait for the pipeline to finish
 ```
 N workers can drain one `Channel` for automatic work-stealing + backpressure.
 (`fileio`, `filestream`, `filewrite`, `httpstream`, `channel`, `pipeline`)
