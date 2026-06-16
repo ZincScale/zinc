@@ -237,7 +237,15 @@ class CodeGen {
     int i = t.indexOf('<');
     if (i < 0 || !t.endsWith(">")) return List.of();
     var out = new ArrayList<String>();
-    for (String a : t.substring(i + 1, t.length() - 1).split(",")) out.add(a.trim());
+    String inner = t.substring(i + 1, t.length() - 1);
+    int depth = 0, start = 0;          // split on TOP-LEVEL commas only (nested generics)
+    for (int j = 0; j < inner.length(); j++) {
+      char c = inner.charAt(j);
+      if (c == '<') depth++;
+      else if (c == '>') depth--;
+      else if (c == ',' && depth == 0) { out.add(inner.substring(start, j).trim()); start = j + 1; }
+    }
+    out.add(inner.substring(start).trim());
     return out;
   }
 
@@ -2525,6 +2533,16 @@ class CodeGen {
             + " (hasNextLine/nextLine/close)");
       };
     }
+    // Map.Entry (from entrySet()): a {K, V} tuple
+    if (tt != null && "Entry".equals(baseType(tt))) {
+      String e = genExpr(x.target(), env);
+      return switch (x.method()) {
+        case "getKey" -> "element(1, " + e + ")";
+        case "getValue" -> "element(2, " + e + ")";
+        default -> throw new CompileError("unsupported: Map.Entry." + x.method()
+            + " (getKey/getValue)");
+      };
+    }
     String recvH = null;
     if (tt != null) {
       recvH = switch (tt) {
@@ -3148,6 +3166,12 @@ class CodeGen {
     };
   }
 
+  /** [K, V] from a Map&lt;K,V&gt;/HashMap&lt;K,V&gt; type, or [null, null] for a raw map. */
+  private List<String> entryTypes(String mapType) {
+    List<String> ts = mapType == null ? List.of() : typeArgs(mapType);
+    return ts.size() == 2 ? ts : java.util.Arrays.asList(null, null);
+  }
+
   private String genMapMethod(MethodCall x, Map<String, String> env) {
     String r = genExpr(x.target(), env);
     return switch (x.method()) {
@@ -3161,6 +3185,16 @@ class CodeGen {
       case "isEmpty" -> "(map_size(" + r + ") =:= 0)";
       case "keySet" -> "maps:keys(" + r + ")";
       case "values" -> "maps:values(" + r + ")";
+      case "entrySet" -> "maps:to_list(" + r + ")"; // list of {K,V} -> for-each + e.getKey()
+      case "forEach" -> {
+        // forEach((k, v) -> {...}): side-effects (a lambda can't mutate captured locals;
+        // for accumulation use `for (var e : m.entrySet())` instead)
+        if (!(x.args().get(0) instanceof LambdaExpr lx) || lx.params().size() != 2) {
+          throw new CompileError("Map.forEach takes a 2-arg lambda: m.forEach((k, v) -> {...})");
+        }
+        yield "maps:foreach(" + genLambda(lx, env, entryTypes(exprType(x.target())))
+            + ", " + r + ")";
+      }
       case "put", "remove" -> throw new CompileError(
           "Map." + x.method() + " mutates: use it as a statement");
       default -> throw new CompileError("unsupported: Map." + x.method());
@@ -3399,6 +3433,15 @@ class CodeGen {
           yield switch (x.method()) {
             case "size" -> "int";
             case "containsKey", "containsValue", "isEmpty" -> "boolean";
+            case "entrySet" -> targs.size() == 2
+                ? "List<Entry<" + targs.get(0) + "," + targs.get(1) + ">>" : "List<Entry>";
+            default -> null; // forEach: void
+          };
+        }
+        if ("Entry".equals(tt)) {
+          yield switch (x.method()) {
+            case "getKey" -> targs.isEmpty() ? null : targs.get(0);
+            case "getValue" -> targs.size() < 2 ? null : targs.get(1);
             default -> null;
           };
         }
