@@ -34,4 +34,10 @@ public final class Files {
   public static void forEachLine(String path, Consumer<String> action) { throw Tag.stub(); }
   public static <T> T foldLines(String path, T acc, BiFunction<T, String, T> fn) { throw Tag.stub(); }
   public static void forEachChunk(String path, int size, Consumer<byte[]> action) { throw Tag.stub(); }
+
+  // scoped streaming WRITE -- handle held open for the lambda, closed for you. Writes are
+  // in-process (synchronous) so a read->write loop is backpressured and bounded. Use this,
+  // not appendString-per-line, to stream large output without reopening the file each time.
+  public static void withWriter(String path, Consumer<Writer> action) { throw Tag.stub(); }
+  public static void withAppender(String path, Consumer<Writer> action) { throw Tag.stub(); }
 }

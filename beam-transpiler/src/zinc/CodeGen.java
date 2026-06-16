@@ -661,7 +661,8 @@ class CodeGen {
       + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
       + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
       + "         mkdirs/1, delete/1, fsize/1, getenv/1,\n"
-      + "         for_each_line/2, fold_lines/3, for_each_chunk/3]).\n\n"
+      + "         for_each_line/2, fold_lines/3, for_each_chunk/3,\n"
+      + "         with_writer/2, with_appender/2, w_write/2, w_writeln/2]).\n\n"
       + "%% --- streaming reads: open raw + read_ahead, loop IN-PROCESS (no per-line\n"
       + "%% message cost), close in `after` (closes even if the consumer throws). The\n"
       + "%% large-file path -- constant memory, never slurps the whole file. ---\n"
@@ -704,6 +705,23 @@ class CodeGen {
       + "        <<Body:(N-1)/binary, \"\\n\">> -> Body;\n"
       + "        _ -> L\n"
       + "    end.\n\n"
+      + "%% --- scoped writer (the db.transaction shape): open raw + delayed_write, hand a\n"
+      + "%% Writer handle {Fd,Path} to F, close in `after`. w_write does file:write IN the\n"
+      + "%% caller's process -> synchronous = backpressured + bounded; never a mailbox. ---\n"
+      + "with_writer(P, F) ->\n"
+      + "    do_with(P, [write, raw, binary, {delayed_write, 262144, 2000}], F).\n"
+      + "with_appender(P, F) ->\n"
+      + "    do_with(P, [append, raw, binary, {delayed_write, 262144, 2000}], F).\n"
+      + "do_with(P, Opts, F) ->\n"
+      + "    case file:open(P, Opts) of\n"
+      + "        {ok, H} ->\n"
+      + "            try F({H, P}), close_ok(H, P)\n"
+      + "            catch C:R:S -> file:close(H), erlang:raise(C, R, S) end;\n"
+      + "        {error, R} -> raise(R, P)\n"
+      + "    end.\n"
+      + "close_ok(H, P) -> case file:close(H) of ok -> ok; {error, R} -> raise(R, P) end.\n"
+      + "w_write({H, P}, S) -> case file:write(H, S) of ok -> ok; {error, R} -> raise(R, P) end.\n"
+      + "w_writeln(W, S) -> w_write(W, [S, <<\"\\n\">>]).\n\n"
       + "read_string(P) -> ok_or_raise(file:read_file(P), P).\n"
       + "read_bytes(P)  -> ok_or_raise(file:read_file(P), P).\n"
       + "read_lines(P)  ->\n"
@@ -2403,6 +2421,18 @@ class CodeGen {
             + " (query/exec" + (isTx ? "" : "/transaction") + ")");
       }
     }
+    // scoped Files.withWriter handle: writes go straight to file:write IN this process
+    if ("Writer".equals(tt)) {
+      usedIo = true;
+      String w = genExpr(x.target(), env);
+      String a0 = x.args().isEmpty() ? null : genExpr(x.args().get(0), env);
+      return switch (x.method()) {
+        case "write" -> "'zinc.io':w_write(" + w + ", " + a0 + ")";
+        case "writeLine" -> "'zinc.io':w_writeln(" + w + ", " + a0 + ")";
+        default -> throw new CompileError("unsupported: Writer." + x.method()
+            + " (write/writeLine)");
+      };
+    }
     String recvH = null;
     if (tt != null) {
       recvH = switch (tt) {
@@ -2847,6 +2877,14 @@ class CodeGen {
             return "'zinc.io':for_each_chunk(" + genExpr(x.args().get(0), env) + ", "
                 + genExpr(x.args().get(1), env) + ", "
                 + ioLambda(x, 2, List.of("byte[]"), null, env) + ")";
+          }
+          case "withWriter" -> {
+            return "'zinc.io':with_writer(" + genExpr(x.args().get(0), env) + ", "
+                + ioLambda(x, 1, List.of("Writer"), null, env) + ")";
+          }
+          case "withAppender" -> {
+            return "'zinc.io':with_appender(" + genExpr(x.args().get(0), env) + ", "
+                + ioLambda(x, 1, List.of("Writer"), null, env) + ")";
           }
           default -> {}
         }

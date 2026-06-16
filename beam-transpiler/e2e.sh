@@ -9,7 +9,7 @@ command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
 
-examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream)
+examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite)
 declare -A want=(
   [sum_evens]=20
   [first_over]=7
@@ -49,6 +49,7 @@ declare -A want=(
   [ternary]=$'big\n0\n7'
   [fileio]=$'2\ntrue\n20\n1\ntrue\ntrue\nno such file or directory: /tmp/zinc_fileio/missing.conf\nfalse'
   [filestream]=$'500500\n1000\nONE\nTWO\nTHREE'
+  [filewrite]=$'5\ntrue\n6'
 )
 # transpile-warning contracts (substring against transpile stderr): warnings must
 # fire where promised — and carry file:line

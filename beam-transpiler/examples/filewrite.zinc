@@ -1,0 +1,27 @@
+// zinc.io scoped writer -- the streaming WRITE path. read line -> uppercase -> write,
+// all in ONE process with the output handle held open: synchronous, so it's
+// backpressured and bounded. Never materializes the whole file (8KB or 5GB, same code).
+public class Main {
+  public static void main(String[] args) {
+    String dir = "/tmp/zinc_write";
+    Files.createDirectories(dir);
+    String in = dir + "/in.txt";
+    String out = dir + "/out.txt";
+
+    String s = "";
+    for (int i = 1; i <= 5; i++) {
+      s += "line" + i + "\n";
+    }
+    Files.writeString(in, s);
+
+    // streaming transform: the inner read loop drives the write directly, in-process
+    Files.withWriter(out, w -> Files.forEachLine(in, line -> w.writeLine(line.toUpperCase())));
+
+    System.out.println(Files.readLines(out).size());            // 5
+    System.out.println(Files.readString(out).contains("LINE3")); // true
+
+    // append mode: same scoped handle, opened for append
+    Files.withAppender(out, w -> w.writeLine("EXTRA"));
+    System.out.println(Files.readLines(out).size());            // 6
+  }
+}
