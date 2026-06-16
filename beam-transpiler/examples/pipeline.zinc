@@ -1,7 +1,16 @@
-// A multi-process streaming pipeline, bounded memory: FileReader (source) -> Channel ->
-// FileWriter (sink). Each pump runs in its own process; the channel's backpressure paces
-// them. fw.join() blocks until the whole pipeline has finished. This is the cross-actor
-// streaming arch piece end-to-end -- the file-copy shape of a NiFi flow.
+// A 3-stage multi-process pipeline, bounded memory: FileReader (source) -> Upper
+// (transform) -> FileWriter (sink). Each stage runs in its own process; the bounded
+// channels between them provide backpressure. This is the cross-actor streaming arch
+// piece end-to-end -- a NiFi flow with a real processor in the middle.
+class Upper implements Actor {
+  void run(Channel<String> in, Channel<String> out) {
+    while (in.hasNext()) {
+      out.put(in.take().toUpperCase());   // the middle stage does real work
+    }
+    out.close();                          // signal end-of-stream downstream
+  }
+}
+
 public class Main implements Application {
   void main() {
     String in = "/tmp/zinc_pipe_in.txt";
@@ -12,12 +21,15 @@ public class Main implements Application {
     }
     Files.writeString(in, s);
 
-    Channel<String> ch = new Channel<>(2);     // bounded -> backpressure
-    new FileReader(in, ch);                     // in -> ch (background pump)
-    FileWriter fw = new FileWriter(ch, out);    // ch -> out (background pump)
-    fw.join();                                  // wait for the pipeline to finish
+    Channel<String> a = new Channel<>(2);       // reader -> transform
+    Channel<String> b = new Channel<>(2);       // transform -> writer
+    new FileReader(in, a);                       // stage 1: file -> a
+    Upper up = new Upper();
+    up.run(a, b);                                // stage 2: a -> uppercase -> b (own process)
+    FileWriter fw = new FileWriter(b, out);      // stage 3: b -> file
+    fw.join();                                   // wait for the pipeline to finish
 
     System.out.println(Files.readLines(out).size());             // 5
-    System.out.println(Files.readString(out).contains("line3")); // true
+    System.out.println(Files.readString(out).contains("LINE3")); // true (uppercased)
   }
 }

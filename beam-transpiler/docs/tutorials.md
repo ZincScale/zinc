@@ -77,30 +77,48 @@ public class Main {
 }
 ```
 
-Now the **multi-process** version — a read stage, your transform, and a write stage running
-in parallel, paced by a bounded channel so memory stays flat:
+Now the **multi-process** version — a read stage, a real transform stage, and a write stage,
+each in its own process, running in parallel and paced by bounded channels so memory stays
+flat. The transform is just an actor that drains one channel and feeds the next:
 
 ```java
+class Upper implements Actor {
+  void run(Channel<String> in, Channel<String> out) {
+    while (in.hasNext()) {
+      out.put(in.take().toUpperCase());   // do the actual work here
+    }
+    out.close();                          // tell the next stage we're done
+  }
+}
+
 public class Main implements Application {
   void main() {
     String in = "input.txt", out = "output.txt";
 
-    Channel<String> ch = new Channel<>(64);    // bounded -> backpressure
-    new FileReader(in, ch);                     // stage 1: file -> channel (own process)
-    FileWriter fw = new FileWriter(ch, out);    // stage 3: channel -> file (own process)
-    fw.join();                                  // block until the pipeline drains
+    Channel<String> a = new Channel<>(64);   // reader -> transform   (bounded)
+    Channel<String> b = new Channel<>(64);   // transform -> writer   (bounded)
+    new FileReader(in, a);                    // stage 1: file -> a
+    Upper up = new Upper();
+    up.run(a, b);                             // stage 2: a -> uppercase -> b (cast: own process)
+    FileWriter fw = new FileWriter(b, out);   // stage 3: b -> file
+    fw.join();                                // block until the pipeline drains
   }
 }
 ```
 
-To transform between the ends, drop an actor in the middle that drains one channel and feeds
-another (`while (in.hasNext()) out.put(transform(in.take()));`). Want 20 workers sharing the
-load? Have 20 actors each drain the *same* channel — items go to whoever's free
-(work-stealing), and `put` blocking gives you backpressure automatically.
+`up.run(a, b)` is a `void` method, so the call is a cast — it runs the drain/transform loop
+in `up`'s *own* process, concurrently with the reader and writer. The whole thing
+([`examples/pipeline.zinc`](../examples/pipeline.zinc)) uppercases a file line-by-line; swap
+the body of the loop for parsing, filtering, JSON-mapping, whatever.
 
-The point: at no instant is more than ~one chunk-per-stage resident. The reader can't outrun
-the writer (the channel is bounded), and `FileReader`/`FileWriter` close their handles when
-done.
+Want 20 workers sharing the load instead of one? Have 20 actors each drain the *same* input
+channel — items go to whoever's free (work-stealing), and `put` blocking gives you
+backpressure automatically. (Chain more stages the same way: each is an actor between two
+channels.)
+
+The point: at no instant is more than ~one item-per-stage resident — the reader can't
+outrun the slowest stage (the channels are bounded), and `FileReader`/`FileWriter` close
+their handles when done.
 
 ---
 

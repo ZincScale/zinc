@@ -127,6 +127,9 @@ This is the differentiator. Two marker interfaces, both prelude (no import):
 - **`implements Actor`** — a supervised, stateful process. Fields are state; methods are the
   protocol. **`void` method ⇒ async cast; typed method ⇒ sync call** (the Java return type
   *is* the messaging contract). The instance reference is a handle that survives restarts.
+  Methods take **no visibility modifier** — an Actor's methods *are* its public protocol, so
+  `public` is the default (and `private` is rejected on them). That's why the snippets below
+  write `void put(...)` / `User get(...)` with no `public`.
 - **`implements Application`** — the one root per runnable project: an OTP application whose
   **`Actor`-typed fields are its supervised children**, born in declaration order. Hosts
   `main`, receives SIGTERM, owns the exit code.
@@ -193,11 +196,23 @@ try (HttpStream s = client.openStream(req)) {
 
 **Cross-process pipeline (parallel + bounded):** a `Channel<T>` is a bounded backpressure
 buffer between actors (NiFi connection / `BlockingQueue`) — `put` blocks when full, the
-consumer pulls. `FileReader`/`FileWriter` are ready-made pump actors:
+consumer pulls. `FileReader`/`FileWriter` are ready-made pump actors; a transform stage is
+just an actor that drains one channel and feeds the next, run via a cast so it loops in its
+own process:
 ```java
-Channel<String> ch = new Channel<>(64);
-new FileReader(in, ch);                 // pumps in -> ch (its own process)
-FileWriter fw = new FileWriter(ch, out); // drains ch -> out (its own process)
+class Upper implements Actor {
+  void run(Channel<String> in, Channel<String> out) {
+    while (in.hasNext()) out.put(in.take().toUpperCase());   // the real work
+    out.close();
+  }
+}
+// read -> transform -> write, three processes, paced by the bounded channels:
+Channel<String> a = new Channel<>(64);
+Channel<String> b = new Channel<>(64);
+new FileReader(in, a);                  // file -> a
+Upper up = new Upper();                 // a spawn must bind to a var (then use the handle)
+up.run(a, b);                           // a -> uppercase -> b; cast, so it loops in up's process
+FileWriter fw = new FileWriter(b, out); // b -> file
 fw.join();                              // wait for the pipeline to finish
 ```
 N workers can drain one `Channel` for automatic work-stealing + backpressure.
