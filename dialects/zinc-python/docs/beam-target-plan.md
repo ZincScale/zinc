@@ -5,24 +5,30 @@ Status: BUILT (2026-06-17) — all decisions below implemented and green on BEAM
 (~900 lines) emitting the existing Ast; `CodeGen`/`Resolve` untouched. Commits
 db78933..604d6f1.
 
-Working end-to-end on BEAM (e2e-py 15/15): entry/`def main`, locals + control flow
-(`while`, `for-in-range`, `if/else if`), functions with return-type inference + sibling
-calls, actors (`class C(Actor)`, cast/call from return type), constructors (`def init`),
-supervision root (`class Main(Application)`) with crash/restart, protocols
-(`interface` + `class X(Greeter)` + SAM `->` lambdas), FFI (`from erlang import m`),
+Working end-to-end on BEAM (e2e-py: 17 positive + 9 negative): entry/`def main`, locals +
+control flow (`while`, `for-in-range`, `if/else if`), functions with return-type inference +
+sibling calls, actors (`class C(Actor)`, cast/call from return type), constructors
+(`def init`), supervision root (`class Main(Application)`) with crash/restart, protocols
+(`interface` + `class X(Greeter)` + SAM `->`/`lambda` lambdas), FFI (`from erlang import m`),
 Channel (bounded backpressure), typed locals (`x: T = e`), f-strings (`"{expr}"`),
 try/except + raise + user exceptions (`class E(Exception) {}`, actor failure-relay),
 records (`record Point(x: int, y: int)`, Pythonic `p.x`), enums (`Color.RED`),
-match/case (`match x { case L {} case _ {} }`).
+match/case, list literals (`[a, b, c]`), Python `lambda` keyword, multi-file projects
+(file -> eponymous class, `from util import mathutil` -> `Mathutil.fn(...)`).
 
-NOTE: `CodeGen`/`Resolve` remained UNTOUCHED for the entire build — even records/enums/
-match, which we expected to need a CodeGen edit, worked because `FieldAccess` already
-lowers to `maps:get` / enum atom. The whole language is a frontend
-(`PyLexer`+`PyParser`+`PyInfer`).
+Errors carry `<file>:<line>` (PyParser stamps statement lines); 9 negative tests assert
+type mismatches (local/return/reassign/arg), parse errors, and structural errors.
 
-NOT yet built: Python `lambda` keyword (only `->`), Python list/dict literals,
-whole-program param inference, multi-file `.zn` projects, standalone LSP/type-checker
-(inference lives in the transpiler).
+Tooling: `zc new --py <name>` scaffolds a `.zn` project; the rebar_zinc compile provider
+globs `**/*.{zinc,zn}`, so `zc build`/`run`/`release` and the installer all work for
+braces-Python (the transpile step is the only surface-specific part).
+
+NOTE: `CodeGen`/`Resolve` remained UNTOUCHED for the entire build — records/enums/match,
+list literals, everything. The whole language is a frontend (`PyLexer`+`PyParser`+`PyInfer`).
+
+NOT yet built (deferred): dict literals (`{k: v}`), whole-program param inference (untyped
+params are dynamic, default int arithmetic — annotate for String/double), standalone
+LSP/type-checker (inference lives in the transpiler).
 
 ---
 
