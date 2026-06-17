@@ -5,16 +5,18 @@ Status: BUILT (2026-06-17) — all decisions below implemented and green on BEAM
 (~900 lines) emitting the existing Ast; `CodeGen`/`Resolve` untouched. Commits
 db78933..604d6f1.
 
-Working end-to-end on BEAM: entry/`def main`, locals + control flow (`while`,
-`for-in-range`, `if/else if`), functions with return-type inference + sibling calls,
-actors (`class C(Actor)`, cast/call from return type), constructors (`def init`),
+Working end-to-end on BEAM (e2e-py 13/13): entry/`def main`, locals + control flow
+(`while`, `for-in-range`, `if/else if`), functions with return-type inference + sibling
+calls, actors (`class C(Actor)`, cast/call from return type), constructors (`def init`),
 supervision root (`class Main(Application)`) with crash/restart, protocols
 (`interface` + `class X(Greeter)` + SAM `->` lambdas), FFI (`from erlang import m`),
-Channel (bounded backpressure), typed locals (`x: T = e`).
+Channel (bounded backpressure), typed locals (`x: T = e`), f-strings (`"{expr}"`),
+try/except + raise + user exceptions (`class E(Exception) {}`, actor failure-relay).
 
-NOT yet built: f-strings (`"{x}"` interpolation — use `"x" + i`), records/enums/switch,
-try/except, Python `lambda` keyword (only `->`), whole-program param inference,
-multi-file `.zn` projects, standalone LSP/type-checker (inference lives in the transpiler).
+NOT yet built: records/enums/switch (records need a CodeGen touch for Pythonic `p.x`
+access, since today's accessor is `p.x()`), Python `lambda` keyword (only `->`),
+Python list/dict literals, whole-program param inference, multi-file `.zn` projects,
+standalone LSP/type-checker (inference lives in the transpiler).
 
 ---
 
