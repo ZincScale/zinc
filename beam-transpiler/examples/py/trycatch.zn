@@ -1,0 +1,22 @@
+# transactional try: a throw reverts outer vars to their try-entry values
+def main() {
+    x = 0
+    try {
+        x = 1 / 0
+    } except Exception as e {
+        x = 7
+    }
+    print(x)
+    n = 0
+    while true {
+        try {
+            n = n + 1
+            if n > 2 {
+                boom = 1 / 0
+            }
+        } except Exception as e {
+            break
+        }
+    }
+    print(n)
+}

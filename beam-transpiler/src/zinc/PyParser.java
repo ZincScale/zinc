@@ -23,6 +23,7 @@ final class PyParser {
   private ApplicationDecl application;            // the one `class Main(Application)`, if any
   private final List<InterfaceDecl> interfaces = new ArrayList<>();
   private final List<InstanceClassDecl> instanceClasses = new ArrayList<>();
+  private final List<ExceptionDecl> exceptions = new ArrayList<>();
 
   PyParser(List<Token> toks) {
     this.toks = toks;
@@ -98,7 +99,7 @@ final class PyParser {
       classes.add(new ClassDecl("Main", topDefs));
     }
     var program = new Program(imports, classes, List.of(), actors, List.of(), application,
-        List.of(), interfaces, instanceClasses, List.of());
+        exceptions, interfaces, instanceClasses, List.of());
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
@@ -160,7 +161,9 @@ final class PyParser {
       }
       expect(TokKind.RPAREN, "')'");
     }
-    if ("Actor".equals(base)) {
+    if ("Exception".equals(base) || "RuntimeException".equals(base)) {
+      parseExceptionClass(name);
+    } else if ("Actor".equals(base)) {
       Members m = parseMembers(name);
       actors.add(new ActorDecl(name, m.fields(), m.ctor(), m.methods()));
     } else if ("Application".equals(base)) {
@@ -173,6 +176,22 @@ final class PyParser {
       Members m = parseMembers(name);
       instanceClasses.add(new InstanceClassDecl(name, base, m.fields(), m.ctor(), m.methods()));
     }
+  }
+
+  /** `class NotFound(Exception) {}` — a message-carrying exception. v1: empty body; the
+   *  `NotFound(String message) { super(message); }` ctor is synthesized. */
+  private void parseExceptionClass(String name) {
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    if (!check(TokKind.RBRACE)) {
+      throw new CompileError("user exceptions are message-only (v1): write `class " + name
+          + "(Exception) {}` and raise it with a message");
+    }
+    expect(TokKind.RBRACE, "'}'");
+    var ctor = new MethodDecl("", name, List.of(new Param("String", "message")),
+        new Block(List.of(new ExprStmt(new Call("super", List.of(new VarRef("message")))))),
+        Set.of("public"));
+    exceptions.add(new ExceptionDecl(name, List.of(), ctor));
   }
 
   /** `class Main(Application) { child = Actor()...  def main(self) {..} }` — fields are the
@@ -354,6 +373,8 @@ final class PyParser {
     if (check(TokKind.KW_IF)) return parseIf();
     if (check(TokKind.KW_WHILE)) return parseWhile();
     if (check(TokKind.KW_FOR)) return parseFor();
+    if (checkIdent("try")) return parseTry();
+    if (checkIdent("raise")) return parseRaise();
     // typed local declaration: `name: Type = expr`
     if (check(TokKind.IDENT) && toks.get(pos + 1).kind() == TokKind.COLON) {
       String name = advance().text();
@@ -420,6 +441,39 @@ final class PyParser {
           new WhileStmt(new Binary("<", new VarRef(name), hi), new Block(stmts))));
     }
     return new ForEachStmt("var", name, iter, body);
+  }
+
+  /** `try { } except TYPE [as VAR] { } ...` — clauses match in order; transactional. */
+  private Stmt parseTry() {
+    expect(TokKind.IDENT, "'try'"); // 'try'
+    Block tryBlock = parseBlock();
+    var clauses = new ArrayList<Ast.CatchClause>();
+    while (checkIdent("except")) {
+      advance(); // 'except'
+      String exType = expect(TokKind.IDENT, "exception type").text();
+      String var = "_e";
+      if (checkIdent("as")) {
+        advance();
+        var = expect(TokKind.IDENT, "exception variable").text();
+      }
+      clauses.add(new Ast.CatchClause(exType, var, parseBlock()));
+    }
+    if (clauses.isEmpty()) {
+      throw new CompileError("Parse error: try needs at least one `except` at line "
+          + cur().line());
+    }
+    return new TryStmt(List.of(), tryBlock, clauses);
+  }
+
+  /** `raise SomeError("msg")` -> throw. */
+  private Stmt parseRaise() {
+    expect(TokKind.IDENT, "'raise'"); // 'raise'
+    Expr e = parseExpr();
+    if (e instanceof NewExpr nx) {
+      return new Ast.ThrowStmt(nx.typeName(), nx.args());
+    }
+    throw new CompileError("Parse error: `raise` expects `raise SomeError(...)` at line "
+        + cur().line());
   }
 
   /** Replace `continue` belonging to THIS loop with `update; continue` (descends ifs). */
