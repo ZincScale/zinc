@@ -1,0 +1,26 @@
+# Channel: bounded backpressure between actors. Producer blocks on put when full (cap 2);
+# main drains it. FIFO in bounded memory -- the cross-actor streaming primitive.
+class Producer(Actor) {
+    def run(self, ch: Channel) {
+        for i in range(0, 5) {
+            ch.put("x" + i)
+        }
+        ch.close()
+    }
+}
+
+class Main(Application) {
+    def main(self) {
+        ch = Channel(2)
+        p = Producer()
+        p.run(ch)
+        count = 0
+        all = ""
+        while ch.hasNext() {
+            all = all + ch.take()
+            count = count + 1
+        }
+        print(count)
+        print(all)
+    }
+}

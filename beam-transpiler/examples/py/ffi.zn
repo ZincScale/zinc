@@ -1,0 +1,7 @@
+# FFI escape hatch: `from erlang import <module>` binds an OTP module; calls pass through
+from erlang import string
+
+def main() {
+    up: String = string.uppercase("beam")
+    print(up)
+}

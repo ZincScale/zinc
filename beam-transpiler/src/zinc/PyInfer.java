@@ -24,7 +24,7 @@ final class PyInfer {
   private PyInfer() {}
 
   static Program infer(Program p) {
-    if (p.classes().isEmpty() && p.actors().isEmpty()) return p;
+    if (p.classes().isEmpty() && p.actors().isEmpty() && p.instanceClasses().isEmpty()) return p;
     var inf = new PyInfer();
     for (ClassDecl c : p.classes()) {
       for (MethodDecl m : c.methods()) {
@@ -33,6 +33,7 @@ final class PyInfer {
     }
     List<ClassDecl> classes = p.classes();
     List<ActorDecl> actors = p.actors();
+    List<InstanceClassDecl> instanceClasses = p.instanceClasses();
     for (int pass = 0; pass < 3; pass++) { // fixpoint for forward references
       boolean changed = false;
       var nextClasses = new ArrayList<ClassDecl>();
@@ -72,6 +73,25 @@ final class PyInfer {
         nextActors.add(new ActorDecl(a.name(), a.fields(), a.ctor(), methods));
       }
       actors = nextActors;
+      var nextInst = new ArrayList<InstanceClassDecl>();
+      for (InstanceClassDecl c : instanceClasses) {
+        var fieldTypes = new HashMap<String, String>();
+        for (FieldDecl f : c.fields()) {
+          fieldTypes.put(f.name(), f.type());
+        }
+        var methods = new ArrayList<MethodDecl>();
+        for (MethodDecl m : c.methods()) {
+          if (m.retType().equals("infer")) {
+            String t = inf.inferMethod(m, fieldTypes);
+            if (!t.equals("infer")) changed = true;
+            methods.add(new MethodDecl(t, m.name(), m.params(), m.body(), m.mods()));
+          } else {
+            methods.add(m);
+          }
+        }
+        nextInst.add(new InstanceClassDecl(c.name(), c.iface(), c.fields(), c.ctor(), methods));
+      }
+      instanceClasses = nextInst;
       if (!changed) break;
     }
     for (ClassDecl c : classes) {
@@ -80,8 +100,11 @@ final class PyInfer {
     for (ActorDecl a : actors) {
       requireResolved(a.name(), a.methods());
     }
+    for (InstanceClassDecl c : instanceClasses) {
+      requireResolved(c.name(), c.methods());
+    }
     return new Program(p.imports(), classes, p.records(), actors, p.enums(),
-        p.application(), p.exceptions(), p.interfaces(), p.instanceClasses(), p.tests());
+        p.application(), p.exceptions(), p.interfaces(), instanceClasses, p.tests());
   }
 
   private static void requireResolved(String owner, List<MethodDecl> methods) {

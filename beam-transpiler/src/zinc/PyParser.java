@@ -21,6 +21,8 @@ final class PyParser {
   private int pos = 0;
   private Set<String> declared = new HashSet<>(); // locals seen in the current method
   private ApplicationDecl application;            // the one `class Main(Application)`, if any
+  private final List<InterfaceDecl> interfaces = new ArrayList<>();
+  private final List<InstanceClassDecl> instanceClasses = new ArrayList<>();
 
   PyParser(List<Token> toks) {
     this.toks = toks;
@@ -68,6 +70,7 @@ final class PyParser {
 
   Program parseProgram() {
     skipSemis();
+    var imports = new ArrayList<Import>();
     var topDefs = new ArrayList<MethodDecl>(); // become static methods of class Main
     var actors = new ArrayList<ActorDecl>();
     while (!check(TokKind.EOF)) {
@@ -75,8 +78,13 @@ final class PyParser {
         topDefs.add(parseDef(true));
       } else if (checkIdent("class")) {
         parseClass(actors);
+      } else if (check(TokKind.KW_IMPORT) || checkIdent("from")) {
+        parseImports(imports);
+      } else if (checkIdent("interface")) {
+        parseInterface();
       } else {
-        throw new CompileError("Parse error: expected `def` or `class` at line " + cur().line());
+        throw new CompileError("Parse error: expected `def`, `class`, `interface` or `import`"
+            + " at line " + cur().line());
       }
       skipSemis();
     }
@@ -89,9 +97,53 @@ final class PyParser {
     } else if (!topDefs.isEmpty()) {
       classes.add(new ClassDecl("Main", topDefs));
     }
-    var program = new Program(List.of(), classes, List.of(), actors, List.of(), application,
-        List.of(), List.of(), List.of(), List.of());
+    var program = new Program(imports, classes, List.of(), actors, List.of(), application,
+        List.of(), interfaces, instanceClasses, List.of());
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
+  }
+
+  /** `interface Name { def m(self, ...) -> T  ... }` — signatures only, no bodies. */
+  private void parseInterface() {
+    expect(TokKind.IDENT, "'interface'"); // 'interface'
+    String name = expect(TokKind.IDENT, "interface name").text();
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var sigs = new ArrayList<MethodDecl>();
+    while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
+      expect(TokKind.IDENT, "'def'"); // 'def'
+      String mName = expect(TokKind.IDENT, "method name").text();
+      List<Param> ps = stripSelf(parseParams());
+      String ret = match(TokKind.ARROW) ? parseType() : "void";
+      sigs.add(new MethodDecl(ret, mName, ps, null, Set.of("public")));
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    interfaces.add(new InterfaceDecl(name, sigs));
+  }
+
+  /** `import a.b.c`  or  `from a.b import x, y` -> one Import per leaf (erlang.* = FFI). */
+  private void parseImports(List<Import> imports) {
+    if (match(TokKind.KW_IMPORT)) {
+      var path = new ArrayList<String>();
+      path.add(expect(TokKind.IDENT, "module name").text());
+      while (match(TokKind.DOT)) {
+        path.add(expect(TokKind.IDENT, "module name").text());
+      }
+      imports.add(new Import(path));
+      return;
+    }
+    expect(TokKind.IDENT, "'from'"); // 'from'
+    var base = new ArrayList<String>();
+    base.add(expect(TokKind.IDENT, "module name").text());
+    while (match(TokKind.DOT)) {
+      base.add(expect(TokKind.IDENT, "module name").text());
+    }
+    expect(TokKind.KW_IMPORT, "'import'");
+    do {
+      var path = new ArrayList<>(base);
+      path.add(expect(TokKind.IDENT, "imported name").text());
+      imports.add(new Import(path));
+    } while (match(TokKind.COMMA));
   }
 
   /** `class NAME ( BASE ) { ... }`. v1: `(Actor)` or `(Application)`. */
@@ -109,15 +161,17 @@ final class PyParser {
       expect(TokKind.RPAREN, "')'");
     }
     if ("Actor".equals(base)) {
-      actors.add(parseActorBody(name));
+      Members m = parseMembers(name);
+      actors.add(new ActorDecl(name, m.fields(), m.ctor(), m.methods()));
     } else if ("Application".equals(base)) {
       if (application != null) {
         throw new CompileError("more than one Application");
       }
       application = parseApplicationBody(name);
     } else {
-      throw new CompileError("class " + name
-          + ": only `(Actor)` or `(Application)` is supported (v1) at line " + cur().line());
+      // no base, or an interface name -> an instance class (module + map value).
+      Members m = parseMembers(name);
+      instanceClasses.add(new InstanceClassDecl(name, base, m.fields(), m.ctor(), m.methods()));
     }
   }
 
@@ -154,9 +208,12 @@ final class PyParser {
     return new ApplicationDecl(name, fields, main);
   }
 
-  /** Actor body: fields (`name [: T] [= init]`) and methods (`def m(self, ...) [-> T]`).
-   *  `def init` becomes the constructor; `self.field` reads/writes are bare field refs. */
-  private ActorDecl parseActorBody(String name) {
+  private record Members(List<FieldDecl> fields, MethodDecl ctor, List<MethodDecl> methods) {}
+
+  /** Class body: fields (`name [: T] [= init]`) and methods (`def m(self, ...) [-> T]`).
+   *  `def init` becomes the constructor; `self.field` reads/writes are bare field refs.
+   *  Shared by Actor and instance-class declarations. */
+  private Members parseMembers(String name) {
     expect(TokKind.LBRACE, "'{'");
     skipSemis();
     var fields = new ArrayList<FieldDecl>();
@@ -186,7 +243,7 @@ final class PyParser {
       skipSemis();
     }
     expect(TokKind.RBRACE, "'}'");
-    return new ActorDecl(name, fields, ctor, methods);
+    return new Members(fields, ctor, methods);
   }
 
   private List<Param> stripSelf(List<Param> params) {
@@ -297,6 +354,16 @@ final class PyParser {
     if (check(TokKind.KW_IF)) return parseIf();
     if (check(TokKind.KW_WHILE)) return parseWhile();
     if (check(TokKind.KW_FOR)) return parseFor();
+    // typed local declaration: `name: Type = expr`
+    if (check(TokKind.IDENT) && toks.get(pos + 1).kind() == TokKind.COLON) {
+      String name = advance().text();
+      advance(); // ':'
+      String type = parseType();
+      expect(TokKind.ASSIGN, "'=' (an annotated local needs an initializer)");
+      Expr init = parseExpr();
+      declared.add(name);
+      return new VarStmt(type, name, init);
+    }
     if (check(TokKind.KW_BREAK)) {
       advance();
       return new BreakStmt();

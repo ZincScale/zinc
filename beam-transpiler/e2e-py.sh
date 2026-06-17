@@ -8,7 +8,7 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 ERL="docker run --rm --user $(id -u):$(id -g)"
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -17,6 +17,9 @@ declare -A want=(
   [counter]=7
   [counter_init]=42
   [supervised]=$'7\n0\n5'
+  [ffi]=BEAM
+  [channel]=$'5\nx0x1x2x3x4'
+  [protocols]=$'hello zinc\nbeam!\nlambda fun'
 )
 
 fail=0
