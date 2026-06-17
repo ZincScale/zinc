@@ -1,0 +1,3 @@
+def banner(s: String) -> String {
+    return "[" + s + "]"
+}

@@ -8,7 +8,7 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 ERL="docker run --rm --user $(id -u):$(id -g)"
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -25,13 +25,16 @@ declare -A want=(
   [exceptions]=$'8\nno such id\n1\nlocal'
   [records]=$'185\ngreen'
   [match]=$'red\ncool\none\nmany'
+  [multifile]=$'[10]\n1'
 )
 
 fail=0
 for ex in "${examples[@]}"; do
   dir="out/py_$ex"
   rm -rf "$dir" && mkdir -p "$dir"
-  if ! "$JAVA" src/zinc/Main.java "examples/py/$ex.zn" "$dir" >/dev/null 2>"$dir/transpile.err"; then
+  src="examples/py/$ex.zn"
+  [ -d "examples/py/$ex" ] && src="examples/py/$ex"   # directory = multi-file project
+  if ! "$JAVA" src/zinc/Main.java "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
   got=$($ERL -v "$PWD/$dir:/app" -w /app erlang:slim sh -c \

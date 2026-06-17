@@ -18,6 +18,7 @@ import zinc.Ast.*;
  */
 final class PyParser {
   private final List<Token> toks;
+  private final String fileClass;                 // eponymous class for top-level defs
   private int pos = 0;
   private Set<String> declared = new HashSet<>(); // locals seen in the current method
   private ApplicationDecl application;            // the one `class Main(Application)`, if any
@@ -28,7 +29,12 @@ final class PyParser {
   private final List<EnumDecl> enums = new ArrayList<>();
 
   PyParser(List<Token> toks) {
+    this(toks, "Main");
+  }
+
+  PyParser(List<Token> toks, String fileClass) {
     this.toks = toks;
+    this.fileClass = fileClass;
   }
 
   private Token cur() {
@@ -102,7 +108,10 @@ final class PyParser {
             + "live on Actors (the Application is the boundary)");
       }
     } else if (!topDefs.isEmpty()) {
-      classes.add(new ClassDecl("Main", topDefs));
+      // a file with `def main` is the entry (class Main -> module main); otherwise the
+      // file's top-level defs live on a class named after the file (Fmt.banner(...)).
+      boolean hasMain = topDefs.stream().anyMatch(m -> m.name().equals("main"));
+      classes.add(new ClassDecl(hasMain ? "Main" : fileClass, topDefs));
     }
     var program = new Program(imports, classes, records, actors, enums, application,
         exceptions, interfaces, instanceClasses, List.of());
@@ -163,7 +172,9 @@ final class PyParser {
     interfaces.add(new InterfaceDecl(name, sigs));
   }
 
-  /** `import a.b.c`  or  `from a.b import x, y` -> one Import per leaf (erlang.* = FFI). */
+  /** `import util.mathutil`  or  `from util import mathutil` -> Import([util, Mathutil]):
+   *  a sibling module is a class, so the leaf is capitalized to the class name. FFI imports
+   *  (`from erlang import gen_tcp`) keep the lowercase OTP module name. */
   private void parseImports(List<Import> imports) {
     if (match(TokKind.KW_IMPORT)) {
       var path = new ArrayList<String>();
@@ -171,7 +182,7 @@ final class PyParser {
       while (match(TokKind.DOT)) {
         path.add(expect(TokKind.IDENT, "module name").text());
       }
-      imports.add(new Import(path));
+      imports.add(new Import(classify(path)));
       return;
     }
     expect(TokKind.IDENT, "'from'"); // 'from'
@@ -184,8 +195,19 @@ final class PyParser {
     do {
       var path = new ArrayList<>(base);
       path.add(expect(TokKind.IDENT, "imported name").text());
-      imports.add(new Import(path));
+      imports.add(new Import(classify(path)));
     } while (match(TokKind.COMMA));
+  }
+
+  /** Capitalize the leaf (= class name) unless this is an erlang.* FFI import. */
+  private List<String> classify(List<String> path) {
+    if (path.isEmpty() || path.get(0).equals("erlang")) return path;
+    int last = path.size() - 1;
+    String leaf = path.get(last);
+    if (!leaf.isEmpty() && Character.isLowerCase(leaf.charAt(0))) {
+      path.set(last, Character.toUpperCase(leaf.charAt(0)) + leaf.substring(1));
+    }
+    return path;
   }
 
   /** `class NAME ( BASE ) { ... }`. v1: `(Actor)` or `(Application)`. */

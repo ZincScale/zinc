@@ -265,16 +265,17 @@ public class Main {
     }
     var srcFiles = new ArrayList<Path>();
     try (var walk = Files.walk(in)) {
-      walk.filter(p -> p.toString().endsWith(".zinc")).sorted().forEach(srcFiles::add);
+      walk.filter(p -> p.toString().endsWith(".zinc") || p.toString().endsWith(".zn"))
+          .sorted().forEach(srcFiles::add);
     }
     if (srcFiles.isEmpty()) {
       if (test) return programs;
-      throw new CompileError("no .zinc files under " + in);
+      throw new CompileError("no .zinc/.zn files under " + in);
     }
     for (Path p : srcFiles) {
       Program prog = parse(p);
       Path rel = in.relativize(p);
-      checkFileName(rel, prog);
+      if (!p.toString().endsWith(".zn")) checkFileName(rel, prog); // .zn is convention-light
       String pkg = rel.getParent() == null ? ""
           : rel.getParent().toString().replace('/', '.').toLowerCase();
       programs.add(new Src(prog, pkg, test, rel.toString()));
@@ -302,7 +303,11 @@ public class Main {
     String src = Files.readString(file);
     try {
       if (file.toString().endsWith(".zn")) { // braces-Python surface
-        return new PyParser(PyLexer.lex(src)).parseProgram();
+        String stem = file.getFileName().toString();
+        stem = stem.substring(0, stem.length() - ".zn".length());
+        String cls = stem.isEmpty() ? "Main"
+            : Character.toUpperCase(stem.charAt(0)) + stem.substring(1);
+        return new PyParser(PyLexer.lex(src), cls).parseProgram();
       }
       return new Parser(Lexer.lex(src)).parseProgram();
     } catch (CompileError e) {
