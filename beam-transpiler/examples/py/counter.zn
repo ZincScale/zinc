@@ -1,0 +1,21 @@
+# actor -> gen_server: void method = async cast, typed method = sync call
+class Counter(Actor) {
+    count = 0
+    def incr(self) {
+        self.count = self.count + 1
+    }
+    def add(self, n: int) {
+        self.count = self.count + n
+    }
+    def get(self) -> int {
+        return self.count
+    }
+}
+
+def main() {
+    c = Counter()
+    c.incr()
+    c.incr()
+    c.add(5)
+    print(c.get())
+}

@@ -68,12 +68,14 @@ final class PyParser {
   Program parseProgram() {
     skipSemis();
     var topDefs = new ArrayList<MethodDecl>(); // become static methods of class Main
+    var actors = new ArrayList<ActorDecl>();
     while (!check(TokKind.EOF)) {
       if (checkIdent("def")) {
         topDefs.add(parseDef(true));
+      } else if (checkIdent("class")) {
+        parseClass(actors);
       } else {
-        throw new CompileError("Parse error: only top-level `def`s are supported (v1) at line "
-            + cur().line());
+        throw new CompileError("Parse error: expected `def` or `class` at line " + cur().line());
       }
       skipSemis();
     }
@@ -81,14 +83,91 @@ final class PyParser {
     if (!topDefs.isEmpty()) {
       classes.add(new ClassDecl("Main", topDefs));
     }
-    var program = new Program(List.of(), classes, List.of(), List.of(), List.of(), null,
+    var program = new Program(List.of(), classes, List.of(), actors, List.of(), null,
         List.of(), List.of(), List.of(), List.of());
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
-  /** `def NAME ( params ) [-> TYPE] { block }`. Top-level defs are public static; `main`
-   *  with no params gets the synthetic `String[] args` so it matches the Java entry path. */
-  private MethodDecl parseDef(boolean topLevel) {
+  /** `class NAME ( BASE ) { fields + methods }`. v1: only `(Actor)`. */
+  private void parseClass(List<ActorDecl> actors) {
+    expect(TokKind.IDENT, "'class'"); // 'class'
+    String name = expect(TokKind.IDENT, "class name").text();
+    String base = null;
+    if (match(TokKind.LPAREN)) {
+      if (!check(TokKind.RPAREN)) {
+        base = expect(TokKind.IDENT, "base class").text();
+        while (match(TokKind.COMMA)) {
+          expect(TokKind.IDENT, "base class");
+        }
+      }
+      expect(TokKind.RPAREN, "')'");
+    }
+    if ("Actor".equals(base)) {
+      actors.add(parseActorBody(name));
+    } else {
+      throw new CompileError("class " + name
+          + ": only `(Actor)` is supported (v1) at line " + cur().line());
+    }
+  }
+
+  /** Actor body: fields (`name [: T] [= init]`) and methods (`def m(self, ...) [-> T]`).
+   *  `def init` becomes the constructor; `self.field` reads/writes are bare field refs. */
+  private ActorDecl parseActorBody(String name) {
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var fields = new ArrayList<FieldDecl>();
+    var methods = new ArrayList<MethodDecl>();
+    MethodDecl ctor = null;
+    while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
+      if (checkIdent("def")) {
+        RawDef d = parseDefRaw();
+        List<Param> ps = stripSelf(d.params());
+        if (d.name().equals("init")) {
+          ctor = new MethodDecl("", name, ps, d.body(), Set.of("public"));
+        } else {
+          methods.add(new MethodDecl(d.ret(), d.name(), ps, d.body(), Set.of("public")));
+        }
+      } else {
+        String fname = expect(TokKind.IDENT, "field name").text();
+        String ftype = "var";
+        if (match(TokKind.COLON)) {
+          ftype = parseType();
+        }
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        if (ftype.equals("var") && init != null) {
+          ftype = literalType(init);
+        }
+        fields.add(new FieldDecl(ftype, fname, init));
+      }
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ActorDecl(name, fields, ctor, methods);
+  }
+
+  private List<Param> stripSelf(List<Param> params) {
+    if (!params.isEmpty() && params.get(0).name().equals("self")) {
+      return params.subList(1, params.size());
+    }
+    return params;
+  }
+
+  /** Concrete type of a literal initializer; `var` if it can't be read off directly. */
+  private String literalType(Expr e) {
+    return switch (e) {
+      case IntLit x -> "int";
+      case FloatLit x -> "double";
+      case BoolLit x -> "boolean";
+      case StrLit x -> "String";
+      case NewExpr x -> x.typeName();
+      default -> "var";
+    };
+  }
+
+  private record RawDef(String name, List<Param> params, String ret, Block body) {}
+
+  /** `def NAME ( params ) [-> TYPE] { block }`. */
+  private RawDef parseDefRaw() {
     expect(TokKind.IDENT, "'def'"); // 'def'
     String name = expect(TokKind.IDENT, "function name").text();
     List<Param> params = parseParams();
@@ -100,12 +179,20 @@ final class PyParser {
     for (Param p : params) {
       declared.add(p.name());
     }
+    declared.add("self");
     Block body = parseBlock();
-    if (topLevel && name.equals("main") && params.isEmpty()) {
+    return new RawDef(name, params, ret, body);
+  }
+
+  /** Top-level def -> public static method of class Main; `main` gets synthetic args. */
+  private MethodDecl parseDef(boolean topLevel) {
+    RawDef d = parseDefRaw();
+    List<Param> params = d.params();
+    if (topLevel && d.name().equals("main") && params.isEmpty()) {
       params = List.of(new Param("String[]", "args")); // -> main/1, the hardwired entry
     }
     var mods = topLevel ? Set.of("public", "static") : Set.of("public");
-    return new MethodDecl(ret, name, params, body, mods);
+    return new MethodDecl(d.ret(), d.name(), params, d.body(), mods);
   }
 
   /** `( [NAME [: TYPE] {, NAME [: TYPE]}] )`. Untyped params infer as `var`. */
@@ -394,15 +481,19 @@ final class PyParser {
 
   private Expr parsePostfix() {
     Expr e = parsePrimary();
+    // `self.x` collapses to the actor's bare member: self.field -> field (VarRef),
+    // self.method(..) -> this.method(..) -- matching the legal-Java actor surface.
+    boolean self = e instanceof VarRef v && v.name().equals("self");
     while (true) {
       if (match(TokKind.DOT)) {
         String name = expect(TokKind.IDENT, "member name").text();
         if (match(TokKind.LPAREN)) {
           var args = parseArgs();
-          e = new MethodCall(e, name, args);
+          e = new MethodCall(self ? new VarRef("this") : e, name, args);
         } else {
-          e = new FieldAccess(e, name);
+          e = self ? new VarRef(name) : new FieldAccess(e, name);
         }
+        self = false;
       } else if (match(TokKind.LBRACKET)) {
         Expr idx = parseExpr();
         expect(TokKind.RBRACKET, "']'");
@@ -410,6 +501,9 @@ final class PyParser {
       } else {
         break;
       }
+    }
+    if (e instanceof VarRef v && v.name().equals("self")) {
+      return new VarRef("this"); // bare `self`
     }
     return e;
   }
@@ -448,6 +542,11 @@ final class PyParser {
         var args = parseArgs();
         if (name.equals("print")) { // desugar to the node CodeGen already lowers
           return new MethodCall(new FieldAccess(new VarRef("System"), "out"), "println", args);
+        }
+        // CapWords callee is construction (Python convention); Resolve turns an Actor
+        // construction into a spawn. lowercase is a plain function call.
+        if (Character.isUpperCase(name.charAt(0))) {
+          return new NewExpr(name, args);
         }
         return new Call(name, args);
       }

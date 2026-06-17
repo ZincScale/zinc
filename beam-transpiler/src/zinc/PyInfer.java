@@ -24,7 +24,7 @@ final class PyInfer {
   private PyInfer() {}
 
   static Program infer(Program p) {
-    if (p.classes().isEmpty()) return p;
+    if (p.classes().isEmpty() && p.actors().isEmpty()) return p;
     var inf = new PyInfer();
     for (ClassDecl c : p.classes()) {
       for (MethodDecl m : c.methods()) {
@@ -32,14 +32,15 @@ final class PyInfer {
       }
     }
     List<ClassDecl> classes = p.classes();
+    List<ActorDecl> actors = p.actors();
     for (int pass = 0; pass < 3; pass++) { // fixpoint for forward references
       boolean changed = false;
-      var next = new ArrayList<ClassDecl>();
+      var nextClasses = new ArrayList<ClassDecl>();
       for (ClassDecl c : classes) {
         var methods = new ArrayList<MethodDecl>();
         for (MethodDecl m : c.methods()) {
           if (m.retType().equals("infer")) {
-            String t = inf.inferMethod(m);
+            String t = inf.inferMethod(m, Map.of());
             if (!t.equals("infer")) {
               changed = true;
               inf.sigs.put(m.name() + "/" + m.params().size(), t);
@@ -49,27 +50,53 @@ final class PyInfer {
             methods.add(m);
           }
         }
-        next.add(new ClassDecl(c.name(), methods));
+        nextClasses.add(new ClassDecl(c.name(), methods));
       }
-      classes = next;
+      classes = nextClasses;
+      var nextActors = new ArrayList<ActorDecl>();
+      for (ActorDecl a : actors) {
+        var fieldTypes = new HashMap<String, String>();
+        for (FieldDecl f : a.fields()) {
+          fieldTypes.put(f.name(), f.type());
+        }
+        var methods = new ArrayList<MethodDecl>();
+        for (MethodDecl m : a.methods()) {
+          if (m.retType().equals("infer")) {
+            String t = inf.inferMethod(m, fieldTypes);
+            if (!t.equals("infer")) changed = true;
+            methods.add(new MethodDecl(t, m.name(), m.params(), m.body(), m.mods()));
+          } else {
+            methods.add(m);
+          }
+        }
+        nextActors.add(new ActorDecl(a.name(), a.fields(), a.ctor(), methods));
+      }
+      actors = nextActors;
       if (!changed) break;
     }
     for (ClassDecl c : classes) {
-      for (MethodDecl m : c.methods()) {
-        if (m.retType().equals("infer")) {
-          throw new CompileError(c.name() + "." + m.name()
-              + ": cannot infer return type — annotate it with '-> T'");
-        }
+      requireResolved(c.name(), c.methods());
+    }
+    for (ActorDecl a : actors) {
+      requireResolved(a.name(), a.methods());
+    }
+    return new Program(p.imports(), classes, p.records(), actors, p.enums(),
+        p.application(), p.exceptions(), p.interfaces(), p.instanceClasses(), p.tests());
+  }
+
+  private static void requireResolved(String owner, List<MethodDecl> methods) {
+    for (MethodDecl m : methods) {
+      if (m.retType().equals("infer")) {
+        throw new CompileError(owner + "." + m.name()
+            + ": cannot infer return type — annotate it with '-> T'");
       }
     }
-    return new Program(p.imports(), classes, p.records(), p.actors(), p.enums(),
-        p.application(), p.exceptions(), p.interfaces(), p.instanceClasses(), p.tests());
   }
 
   /** "void" if the body returns no value; the returned expression's type otherwise;
    *  "infer" (unresolved) if a value is returned but cannot be typed yet. */
-  private String inferMethod(MethodDecl m) {
-    env = new HashMap<>();
+  private String inferMethod(MethodDecl m, Map<String, String> fieldTypes) {
+    env = new HashMap<>(fieldTypes);
     for (Param param : m.params()) {
       env.put(param.name(), param.type());
     }

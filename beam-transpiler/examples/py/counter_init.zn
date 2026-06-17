@@ -1,0 +1,20 @@
+# constructor: spawn args; restart re-runs the same init
+class Counter(Actor) {
+    count = 0
+    def init(self, start: int) {
+        self.count = start
+    }
+    def incr(self) {
+        self.count = self.count + 1
+    }
+    def get(self) -> int {
+        return self.count
+    }
+}
+
+def main() {
+    c = Counter(40)
+    c.incr()
+    c.incr()
+    print(c.get())
+}
