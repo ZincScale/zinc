@@ -1,6 +1,24 @@
 # Surface mapping: braces-Python → BEAM
 
-Status: DESIGN — decisions locked, not started.
+Status: BUILT (2026-06-17) — all decisions below implemented and green on BEAM via
+`beam-transpiler/e2e-py.sh` (10/10). Frontend: `PyLexer` + `PyParser` + `PyInfer`
+(~900 lines) emitting the existing Ast; `CodeGen`/`Resolve` untouched. Commits
+db78933..604d6f1.
+
+Working end-to-end on BEAM: entry/`def main`, locals + control flow (`while`,
+`for-in-range`, `if/else if`), functions with return-type inference + sibling calls,
+actors (`class C(Actor)`, cast/call from return type), constructors (`def init`),
+supervision root (`class Main(Application)`) with crash/restart, protocols
+(`interface` + `class X(Greeter)` + SAM `->` lambdas), FFI (`from erlang import m`),
+Channel (bounded backpressure), typed locals (`x: T = e`).
+
+NOT yet built: f-strings (`"{x}"` interpolation — use `"x" + i`), records/enums/switch,
+try/except, Python `lambda` keyword (only `->`), whole-program param inference,
+multi-file `.zn` projects, standalone LSP/type-checker (inference lives in the transpiler).
+
+---
+
+## Original design (locked, now implemented)
 
 ## Thesis
 

@@ -619,6 +619,54 @@ final class PyParser {
     return e;
   }
 
+  /** Implicit f-string: `"a {expr} b"` -> "a " + (expr) + " b". `{{`/`}}` are literal
+   *  braces. Each hole is sub-parsed as a braces-Python expression. A string with no
+   *  `{expr}` hole is returned verbatim (no brace unescaping). */
+  private Expr fstring(String text) {
+    int n = text.length();
+    var parts = new ArrayList<Expr>();
+    var lit = new StringBuilder();
+    boolean any = false;
+    int i = 0;
+    while (i < n) {
+      char c = text.charAt(i);
+      if (c == '{') {
+        if (i + 1 < n && text.charAt(i + 1) == '{') {
+          lit.append('{');
+          i += 2;
+          continue;
+        }
+        int depth = 1;
+        int j = i + 1;
+        while (j < n && depth > 0) {
+          char d = text.charAt(j);
+          if (d == '{') depth++;
+          else if (d == '}' && --depth == 0) break;
+          j++;
+        }
+        if (depth != 0) throw new CompileError("unterminated `{` in string: " + text);
+        parts.add(new StrLit(lit.toString()));
+        lit.setLength(0);
+        parts.add(new PyParser(PyLexer.lex(text.substring(i + 1, j))).parseExpr());
+        any = true;
+        i = j + 1;
+      } else if (c == '}' && i + 1 < n && text.charAt(i + 1) == '}') {
+        lit.append('}');
+        i += 2;
+      } else {
+        lit.append(c);
+        i++;
+      }
+    }
+    if (!any) return new StrLit(text);
+    parts.add(new StrLit(lit.toString()));
+    Expr acc = parts.get(0); // a StrLit -> the whole fold has String-concat semantics
+    for (int k = 1; k < parts.size(); k++) {
+      acc = new Binary("+", acc, parts.get(k));
+    }
+    return acc;
+  }
+
   private List<Expr> parseArgs() {
     var args = new ArrayList<Expr>();
     if (!check(TokKind.RPAREN)) {
@@ -641,7 +689,7 @@ final class PyParser {
       advance();
       return new BoolLit(false);
     }
-    if (check(TokKind.STR_LIT)) return new StrLit(advance().text());
+    if (check(TokKind.STR_LIT)) return fstring(advance().text());
     if (match(TokKind.LPAREN)) {
       Expr e = parseExpr();
       expect(TokKind.RPAREN, "')'");
