@@ -1,0 +1,15 @@
+# records are immutable map values; p.x reads a component (Pythonic attribute access)
+record Point(x: int, y: int)
+
+enum Color { RED, GREEN, BLUE }
+
+def main() {
+    p = Point(170, 4)
+    p = Point(p.x + 10, p.y)
+    p = Point(p.x + 5, p.y)
+    print(p.x)
+    c = Color.GREEN
+    if c == Color.GREEN {
+        print("green")
+    }
+}

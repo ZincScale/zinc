@@ -24,6 +24,8 @@ final class PyParser {
   private final List<InterfaceDecl> interfaces = new ArrayList<>();
   private final List<InstanceClassDecl> instanceClasses = new ArrayList<>();
   private final List<ExceptionDecl> exceptions = new ArrayList<>();
+  private final List<RecordDecl> records = new ArrayList<>();
+  private final List<EnumDecl> enums = new ArrayList<>();
 
   PyParser(List<Token> toks) {
     this.toks = toks;
@@ -83,9 +85,13 @@ final class PyParser {
         parseImports(imports);
       } else if (checkIdent("interface")) {
         parseInterface();
+      } else if (checkIdent("record")) {
+        parseRecord();
+      } else if (checkIdent("enum")) {
+        parseEnum();
       } else {
-        throw new CompileError("Parse error: expected `def`, `class`, `interface` or `import`"
-            + " at line " + cur().line());
+        throw new CompileError("Parse error: expected `def`, `class`, `interface`, `record`,"
+            + " `enum` or `import` at line " + cur().line());
       }
       skipSemis();
     }
@@ -98,9 +104,43 @@ final class PyParser {
     } else if (!topDefs.isEmpty()) {
       classes.add(new ClassDecl("Main", topDefs));
     }
-    var program = new Program(imports, classes, List.of(), actors, List.of(), application,
+    var program = new Program(imports, classes, records, actors, enums, application,
         exceptions, interfaces, instanceClasses, List.of());
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
+  }
+
+  /** `record Point(x: int, y: int)` -> immutable map value; `p.x` reads a component. */
+  private void parseRecord() {
+    expect(TokKind.IDENT, "'record'"); // 'record'
+    String name = expect(TokKind.IDENT, "record name").text();
+    var comps = new ArrayList<Param>();
+    expect(TokKind.LPAREN, "'('");
+    if (!check(TokKind.RPAREN)) {
+      do {
+        String cname = expect(TokKind.IDENT, "component name").text();
+        expect(TokKind.COLON, "':' (record components are typed: name: T)");
+        comps.add(new Param(parseType(), cname));
+      } while (match(TokKind.COMMA));
+    }
+    expect(TokKind.RPAREN, "')'");
+    records.add(new RecordDecl(name, comps));
+  }
+
+  /** `enum Color { RED, GREEN }` -> values lower to atoms; `Color.RED` reads one. */
+  private void parseEnum() {
+    expect(TokKind.IDENT, "'enum'"); // 'enum'
+    String name = expect(TokKind.IDENT, "enum name").text();
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var values = new ArrayList<String>();
+    values.add(expect(TokKind.IDENT, "enum value").text());
+    while (match(TokKind.COMMA)) {
+      skipSemis();
+      values.add(expect(TokKind.IDENT, "enum value").text());
+    }
+    skipSemis();
+    expect(TokKind.RBRACE, "'}'");
+    enums.add(new EnumDecl(name, values));
   }
 
   /** `interface Name { def m(self, ...) -> T  ... }` — signatures only, no bodies. */
@@ -375,6 +415,7 @@ final class PyParser {
     if (check(TokKind.KW_FOR)) return parseFor();
     if (checkIdent("try")) return parseTry();
     if (checkIdent("raise")) return parseRaise();
+    if (checkIdent("match") && matchAhead()) return parseMatch();
     // typed local declaration: `name: Type = expr`
     if (check(TokKind.IDENT) && toks.get(pos + 1).kind() == TokKind.COLON) {
       String name = advance().text();
@@ -463,6 +504,45 @@ final class PyParser {
           + cur().line());
     }
     return new TryStmt(List.of(), tryBlock, clauses);
+  }
+
+  /** `match` is a soft keyword: only a statement head when not used as a variable/call. */
+  private boolean matchAhead() {
+    return switch (toks.get(pos + 1).kind()) {
+      case ASSIGN, COLON, PLUS_EQ, MINUS_EQ, STAR_EQ, DOT, LPAREN, SEMI -> false;
+      default -> true;
+    };
+  }
+
+  /** `match SUBJECT { case L[, L] { } ... case _ { } }` -> arrow-switch; `case _` = default. */
+  private Stmt parseMatch() {
+    expect(TokKind.IDENT, "'match'"); // 'match'
+    Expr subject = parseExpr();
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var cases = new ArrayList<SwitchCase>();
+    Block defaultBlock = null;
+    while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
+      if (!checkIdent("case")) {
+        throw new CompileError("Parse error: expected `case` at line " + cur().line());
+      }
+      advance(); // 'case'
+      if (check(TokKind.IDENT) && cur().text().equals("_")) {
+        advance();
+        if (defaultBlock != null) throw new CompileError("duplicate `case _`");
+        defaultBlock = parseBlock();
+      } else {
+        var labels = new ArrayList<Expr>();
+        labels.add(parseOr()); // not parseExpr: labels are constants, not lambdas
+        while (match(TokKind.COMMA)) {
+          labels.add(parseOr());
+        }
+        cases.add(new SwitchCase(labels, parseBlock()));
+      }
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new SwitchStmt(subject, cases, defaultBlock);
   }
 
   /** `raise SomeError("msg")` -> throw. */
