@@ -33,8 +33,14 @@ public class Zc {
     }
     switch (args[0]) {
       case "init", "new" -> {
-        if (args.length < 2) die("usage: zc init <name>");
-        init(args[1]);
+        boolean py = false;
+        String name = null;
+        for (int i = 1; i < args.length; i++) {
+          if (args[i].equals("--py")) py = true;
+          else if (!args[i].startsWith("-")) name = args[i];
+        }
+        if (name == null) die("usage: zc init [--py] <name>");
+        init(name, py);
       }
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
@@ -126,6 +132,11 @@ public class Zc {
   // ---- init ----
 
   static void init(String name) throws IOException {
+    init(name, false);
+  }
+
+  /** `--py` scaffolds a braces-Python (.zn) project; otherwise legal-Java (.zinc). */
+  static void init(String name, boolean py) throws IOException {
     Path dir = Path.of(name);
     if (Files.exists(dir)) die("zc: directory '" + name + "' already exists");
     Files.createDirectories(dir.resolve("src"));
@@ -141,7 +152,12 @@ public class Zc {
         [deps]
         # hex packages, e.g.:  cowboy = "2.12.0"
         """.formatted(base));
-    Files.writeString(dir.resolve("src/Main.zinc"), """
+    String entry = py ? "src/main.zn" : "src/Main.zinc";
+    Files.writeString(dir.resolve(entry), py ? """
+        def main() {
+            print("Hello from %s!")
+        }
+        """.formatted(base) : """
         public class Main {
           public static void main(String[] args) {
             System.out.println("Hello from %s!");
@@ -152,7 +168,7 @@ public class Zc {
         "_build/\n_checkouts/\nsrc/zinc_gen/\ntest/zinc_gen/\nrebar.config\nsrc/*.app.src\n");
     ensureGenerated(dir, loadToml(dir));
     System.out.println("created " + name + "/");
-    System.out.println("  zinc.toml  src/Main.zinc");
+    System.out.println("  zinc.toml  " + entry);
     System.out.println("next: cd " + name + " && zc run");
   }
 

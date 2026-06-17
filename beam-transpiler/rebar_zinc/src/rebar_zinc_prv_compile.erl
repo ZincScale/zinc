@@ -37,8 +37,8 @@ compile_app(App, Cfg) ->
     Dir = rebar_app_info:dir(App),
     SrcDir = filename:join(Dir, "src"),
     TestDir = filename:join(Dir, "test"),
-    Srcs = filelib:wildcard("**/*.zinc", SrcDir),
-    Tests = filelib:wildcard("**/*.zinc", TestDir),
+    Srcs = filelib:wildcard("**/*.{zinc,zn}", SrcDir),
+    Tests = filelib:wildcard("**/*.{zinc,zn}", TestDir),
     case Srcs of
         [] ->
             ok;
