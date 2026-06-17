@@ -299,8 +299,12 @@ public class Main {
   }
 
   private static Program parse(Path file) throws IOException {
+    String src = Files.readString(file);
     try {
-      return new Parser(Lexer.lex(Files.readString(file))).parseProgram();
+      if (file.toString().endsWith(".zn")) { // braces-Python surface
+        return new PyParser(PyLexer.lex(src)).parseProgram();
+      }
+      return new Parser(Lexer.lex(src)).parseProgram();
     } catch (CompileError e) {
       throw new CompileError(file.getFileName() + ": " + e.getMessage());
     }
