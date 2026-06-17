@@ -5,18 +5,24 @@ Status: BUILT (2026-06-17) — all decisions below implemented and green on BEAM
 (~900 lines) emitting the existing Ast; `CodeGen`/`Resolve` untouched. Commits
 db78933..604d6f1.
 
-Working end-to-end on BEAM (e2e-py 13/13): entry/`def main`, locals + control flow
+Working end-to-end on BEAM (e2e-py 15/15): entry/`def main`, locals + control flow
 (`while`, `for-in-range`, `if/else if`), functions with return-type inference + sibling
 calls, actors (`class C(Actor)`, cast/call from return type), constructors (`def init`),
 supervision root (`class Main(Application)`) with crash/restart, protocols
 (`interface` + `class X(Greeter)` + SAM `->` lambdas), FFI (`from erlang import m`),
 Channel (bounded backpressure), typed locals (`x: T = e`), f-strings (`"{expr}"`),
-try/except + raise + user exceptions (`class E(Exception) {}`, actor failure-relay).
+try/except + raise + user exceptions (`class E(Exception) {}`, actor failure-relay),
+records (`record Point(x: int, y: int)`, Pythonic `p.x`), enums (`Color.RED`),
+match/case (`match x { case L {} case _ {} }`).
 
-NOT yet built: records/enums/switch (records need a CodeGen touch for Pythonic `p.x`
-access, since today's accessor is `p.x()`), Python `lambda` keyword (only `->`),
-Python list/dict literals, whole-program param inference, multi-file `.zn` projects,
-standalone LSP/type-checker (inference lives in the transpiler).
+NOTE: `CodeGen`/`Resolve` remained UNTOUCHED for the entire build — even records/enums/
+match, which we expected to need a CodeGen edit, worked because `FieldAccess` already
+lowers to `maps:get` / enum atom. The whole language is a frontend
+(`PyLexer`+`PyParser`+`PyInfer`).
+
+NOT yet built: Python `lambda` keyword (only `->`), Python list/dict literals,
+whole-program param inference, multi-file `.zn` projects, standalone LSP/type-checker
+(inference lives in the transpiler).
 
 ---
 
