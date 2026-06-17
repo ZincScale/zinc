@@ -81,8 +81,9 @@ final class PyParser {
     if (!topDefs.isEmpty()) {
       classes.add(new ClassDecl("Main", topDefs));
     }
-    return new Program(List.of(), classes, List.of(), List.of(), List.of(), null,
+    var program = new Program(List.of(), classes, List.of(), List.of(), List.of(), null,
         List.of(), List.of(), List.of(), List.of());
+    return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
   /** `def NAME ( params ) [-> TYPE] { block }`. Top-level defs are public static; `main`
@@ -91,7 +92,7 @@ final class PyParser {
     expect(TokKind.IDENT, "'def'"); // 'def'
     String name = expect(TokKind.IDENT, "function name").text();
     List<Param> params = parseParams();
-    String ret = "void";
+    String ret = "infer"; // sentinel: PyInfer resolves from the body (void if no value-return)
     if (match(TokKind.ARROW)) {
       ret = parseType();
     }
