@@ -1,0 +1,4 @@
+class Main(Application) {
+    def helper(self) { return 1 }
+    def main(self) { print(1) }
+}

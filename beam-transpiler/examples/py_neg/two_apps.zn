@@ -1,0 +1,2 @@
+class A(Application) { def main(self) {} }
+class B(Application) { def main(self) {} }

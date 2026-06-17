@@ -155,6 +155,7 @@ final class PyParser {
       String mName = expect(TokKind.IDENT, "method name").text();
       List<Param> ps = stripSelf(parseParams());
       String ret = match(TokKind.ARROW) ? parseType() : "void";
+      if (ret.equals("None")) ret = "void";
       sigs.add(new MethodDecl(ret, mName, ps, null, Set.of("public")));
       skipSemis();
     }
@@ -334,6 +335,7 @@ final class PyParser {
     String ret = "infer"; // sentinel: PyInfer resolves from the body (void if no value-return)
     if (match(TokKind.ARROW)) {
       ret = parseType();
+      if (ret.equals("None")) ret = "void"; // `-> None` is an explicit cast/void
     }
     declared = new HashSet<>();
     for (Param p : params) {
@@ -408,7 +410,34 @@ final class PyParser {
     return new Block(stmts);
   }
 
+  /** Stamps each statement with its source line so type/runtime errors cite file:line. */
   private Stmt parseStatement() {
+    int ln = cur().line();
+    return withLine(parseStatement0(), ln);
+  }
+
+  private static Stmt withLine(Stmt s, int ln) {
+    return switch (s) {
+      case VarStmt x -> new VarStmt(x.type(), x.name(), x.init(), x.isFinal(), ln);
+      case AssignStmt x -> new AssignStmt(x.name(), x.op(), x.value(), ln);
+      case FieldAssignStmt x -> new FieldAssignStmt(x.objVar(), x.field(), x.op(), x.value(), ln);
+      case IndexAssignStmt x -> new IndexAssignStmt(x.arrVar(), x.index(), x.op(), x.value(), ln);
+      case SwitchStmt x -> new SwitchStmt(x.subject(), x.cases(), x.defaultBlock(), ln);
+      case IfStmt x -> new IfStmt(x.cond(), x.thenBlock(), x.elseBlock(), ln);
+      case ForEachStmt x -> new ForEachStmt(x.varType(), x.varName(), x.iterable(), x.body(), ln);
+      case WhileStmt x -> new WhileStmt(x.cond(), x.body(), ln);
+      case ReturnStmt x -> new ReturnStmt(x.value(), ln);
+      case ExprStmt x -> new ExprStmt(x.expr(), ln);
+      case Ast.ThrowStmt x -> new Ast.ThrowStmt(x.exType(), x.args(), ln);
+      case TryStmt x -> new TryStmt(x.resources(), x.tryBlock(), x.clauses(), ln);
+      case SeqStmt x -> new SeqStmt(x.stmts().stream()
+          .map(st -> st.line() == 0 ? withLine(st, ln) : st).toList());
+      case BreakStmt x -> x;
+      case ContinueStmt x -> x;
+    };
+  }
+
+  private Stmt parseStatement0() {
     if (check(TokKind.KW_RETURN)) return parseReturn();
     if (check(TokKind.KW_IF)) return parseIf();
     if (check(TokKind.KW_WHILE)) return parseWhile();

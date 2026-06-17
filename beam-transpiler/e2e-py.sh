@@ -42,4 +42,30 @@ for ex in "${examples[@]}"; do
     echo "FAIL  $ex  ->  got '$got'  want '${want[$ex]}'"; fail=1
   fi
 done
+
+# negative cases: each MUST fail transpile with the expected message fragment (errors
+# carry <file>:<line> where they originate -- the source-map contract).
+declare -A wanterr=(
+  [type_local]='type_local.zn:2: x: cannot bind a String to int'
+  [return_void]='return_void.zn:2: return: void method cannot return a value'
+  [return_type]='return_type.zn:2: return: cannot bind a String to int'
+  [reassign]='reassign.zn:3: x: cannot bind a String to int'
+  [arg_type]="arg_type.zn:3: add arg 2 ('b'): cannot bind a String to int"
+  [parse_brace]="parse_brace.zn: Parse error: expected '}' but got EOF"
+  [app_method]='Application Main can only declare main()'
+  [two_apps]='more than one Application'
+  [infer_cycle]="cannot infer return type — annotate it with '-> T'"
+)
+for ex in "${!wanterr[@]}"; do
+  dir="out/pyneg_$ex"
+  rm -rf "$dir" && mkdir -p "$dir"
+  if "$JAVA" src/zinc/Main.java "examples/py_neg/$ex.zn" "$dir" >/dev/null 2>"$dir/err"; then
+    echo "FAIL  neg/$ex  ->  transpiled, expected error '${wanterr[$ex]}'"; fail=1; continue
+  fi
+  if grep -qF "${wanterr[$ex]}" "$dir/err"; then
+    echo "PASS  neg/$ex  ->  $(head -1 "$dir/err")"
+  else
+    echo "FAIL  neg/$ex  ->  got '$(head -1 "$dir/err")'  want '${wanterr[$ex]}'"; fail=1
+  fi
+done
 exit $fail

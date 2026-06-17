@@ -1,0 +1,4 @@
+def f() -> int {
+    return "x"
+}
+def main() { print(f()) }
