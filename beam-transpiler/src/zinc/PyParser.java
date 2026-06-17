@@ -659,8 +659,23 @@ final class PyParser {
   // ---- expressions (identical grammar to the legal-Java surface) ----
 
   Expr parseExpr() {
+    if (checkIdent("lambda")) return parsePyLambda();
     if (lambdaAhead()) return parseLambda();
     return parseTernary();
+  }
+
+  /** Python lambda: `lambda a, b: expr` (also `lambda: expr`). */
+  private Expr parsePyLambda() {
+    expect(TokKind.IDENT, "'lambda'"); // 'lambda'
+    var params = new ArrayList<String>();
+    if (!check(TokKind.COLON)) {
+      do {
+        params.add(expect(TokKind.IDENT, "lambda parameter").text());
+      } while (match(TokKind.COMMA));
+    }
+    expect(TokKind.COLON, "':' (lambda body)");
+    Expr body = parseExpr();
+    return new LambdaExpr(params, new Block(List.of(new ReturnStmt(body))));
   }
 
   private Expr parseTernary() {
@@ -879,6 +894,16 @@ final class PyParser {
       Expr e = parseExpr();
       expect(TokKind.RPAREN, "')'");
       return e;
+    }
+    if (match(TokKind.LBRACKET)) { // Python list literal: [a, b, c]
+      var elems = new ArrayList<Expr>();
+      if (!check(TokKind.RBRACKET)) {
+        do {
+          elems.add(parseExpr());
+        } while (match(TokKind.COMMA));
+      }
+      expect(TokKind.RBRACKET, "']'");
+      return new ListLit(elems);
     }
     if (check(TokKind.IDENT)) {
       String name = advance().text();

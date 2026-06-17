@@ -8,7 +8,7 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 ERL="docker run --rm --user $(id -u):$(id -g)"
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -26,6 +26,7 @@ declare -A want=(
   [records]=$'185\ngreen'
   [match]=$'red\ncool\none\nmany'
   [multifile]=$'[10]\n1'
+  [collections]=$'40\n3\n21'
 )
 
 fail=0
