@@ -1,0 +1,30 @@
+# supervised root: Application fields are permanent children. Crash the nested child,
+# the pair restarts it with reset state, the same handle keeps serving.
+class Counter(Actor) {
+    count = 0
+    def add(self, n: int) { self.count = self.count + n }
+    def get(self) -> int  { return self.count }
+    def boom(self)        { z = 0
+                            self.count = self.count / z }
+}
+
+class Owner(Actor) {
+    inner = Counter()
+    def bump(self, n: int) { self.inner.add(n) }
+    def total(self) -> int { return self.inner.get() }
+    def crash(self)        { self.inner.boom() }
+}
+
+class Main(Application) {
+    o = Owner()
+    def main(self) {
+        self.o.bump(4)
+        self.o.bump(3)
+        print(self.o.total())
+        self.o.crash()
+        Sys.sleep(200)
+        print(self.o.total())
+        self.o.bump(5)
+        print(self.o.total())
+    }
+}

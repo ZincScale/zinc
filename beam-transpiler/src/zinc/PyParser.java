@@ -20,6 +20,7 @@ final class PyParser {
   private final List<Token> toks;
   private int pos = 0;
   private Set<String> declared = new HashSet<>(); // locals seen in the current method
+  private ApplicationDecl application;            // the one `class Main(Application)`, if any
 
   PyParser(List<Token> toks) {
     this.toks = toks;
@@ -80,15 +81,20 @@ final class PyParser {
       skipSemis();
     }
     var classes = new ArrayList<ClassDecl>();
-    if (!topDefs.isEmpty()) {
+    if (application != null) {
+      if (!topDefs.isEmpty()) {
+        throw new CompileError("an Application program has no top-level `def`s — helpers "
+            + "live on Actors (the Application is the boundary)");
+      }
+    } else if (!topDefs.isEmpty()) {
       classes.add(new ClassDecl("Main", topDefs));
     }
-    var program = new Program(List.of(), classes, List.of(), actors, List.of(), null,
+    var program = new Program(List.of(), classes, List.of(), actors, List.of(), application,
         List.of(), List.of(), List.of(), List.of());
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
-  /** `class NAME ( BASE ) { fields + methods }`. v1: only `(Actor)`. */
+  /** `class NAME ( BASE ) { ... }`. v1: `(Actor)` or `(Application)`. */
   private void parseClass(List<ActorDecl> actors) {
     expect(TokKind.IDENT, "'class'"); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
@@ -104,10 +110,48 @@ final class PyParser {
     }
     if ("Actor".equals(base)) {
       actors.add(parseActorBody(name));
+    } else if ("Application".equals(base)) {
+      if (application != null) {
+        throw new CompileError("more than one Application");
+      }
+      application = parseApplicationBody(name);
     } else {
       throw new CompileError("class " + name
-          + ": only `(Actor)` is supported (v1) at line " + cur().line());
+          + ": only `(Actor)` or `(Application)` is supported (v1) at line " + cur().line());
     }
+  }
+
+  /** `class Main(Application) { child = Actor()...  def main(self) {..} }` — fields are the
+   *  root supervisor's permanent children; main is the entry. */
+  private ApplicationDecl parseApplicationBody(String name) {
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var fields = new ArrayList<FieldDecl>();
+    MethodDecl main = null;
+    while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
+      if (checkIdent("def")) {
+        RawDef d = parseDefRaw();
+        if (!d.name().equals("main")) {
+          throw new CompileError("Application " + name + " can only declare main(): it is the "
+              + "boundary, not a unit — methods live on Actors");
+        }
+        main = new MethodDecl("void", "main", stripSelf(d.params()), d.body(), Set.of("public"));
+      } else {
+        String fname = expect(TokKind.IDENT, "child field name").text();
+        String ftype = "var";
+        if (match(TokKind.COLON)) {
+          ftype = parseType();
+        }
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        if (ftype.equals("var") && init != null) {
+          ftype = literalType(init);
+        }
+        fields.add(new FieldDecl(ftype, fname, init));
+      }
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new ApplicationDecl(name, fields, main);
   }
 
   /** Actor body: fields (`name [: T] [= init]`) and methods (`def m(self, ...) [-> T]`).
