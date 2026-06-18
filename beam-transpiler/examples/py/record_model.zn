@@ -1,0 +1,48 @@
+# Runtime schema/record model — the Avro-style GenericRecord "currency" zinc-flow passes
+# between processors. Pure zinc: enum + records + Map<String,Object> + dynamic crossings;
+# no new language feature needed. fromJson is the dynamic-JSON -> typed-record bridge that
+# every Convert*ToRecord processor is built on.
+enum FieldType { INT, STRING, DOUBLE, BOOL }
+
+record Field(name: String, ftype: FieldType)
+record Schema(name: String, fields: List<Field>)
+record Row(schema: Schema, values: Map<String, Object>)
+
+def newRow(s: Schema) -> Row {
+    return Row(s, {})
+}
+
+def withField(r: Row, name: String, value: Object) -> Row {
+    vals = r.values
+    vals[name] = value
+    return Row(r.schema, vals)
+}
+
+def fromJson(s: Schema, json: String) -> Row {
+    doc = Json.parse(json)
+    r = newRow(s)
+    for f in s.fields {
+        match f.ftype {
+            case INT    { i: int = doc.get(f.name).asInt()
+                          r = withField(r, f.name, i) }
+            case STRING { t: String = doc.get(f.name).asText()
+                          r = withField(r, f.name, t) }
+            case DOUBLE { d: double = doc.get(f.name).asNum()
+                          r = withField(r, f.name, d) }
+            case BOOL   { b: boolean = doc.get(f.name).asBool()
+                          r = withField(r, f.name, b) }
+        }
+    }
+    return r
+}
+
+def main() {
+    s = Schema("user", [Field("id", FieldType.INT), Field("name", FieldType.STRING)])
+    r = fromJson(s, "{\"id\":7,\"name\":\"vin\"}")
+    print(r.schema.name)
+    id: int = r.values.get("id")
+    print(id + 1)
+    nm: String = r.values.get("name")
+    print(nm)
+    print(len(r.schema.fields))
+}
