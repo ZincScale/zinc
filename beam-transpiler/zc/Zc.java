@@ -45,7 +45,7 @@ public class Zc {
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
       case "run" -> {
-        if (args.length >= 2 && args[1].endsWith(".zinc")) {
+        if (args.length >= 2 && (args[1].endsWith(".zinc") || args[1].endsWith(".zn"))) {
           runSingle(Path.of(args[1])); // script mode: no project, no zinc.toml
         } else {
           Path dir = projectDir(args);
@@ -110,7 +110,7 @@ public class Zc {
       }
       case "doctor" -> doctor();
       case "fmt" -> {
-        if (args.length < 2) die("usage: zc fmt <file.zinc | dir>");
+        if (args.length < 2) die("usage: zc fmt <file.zinc|.zn | dir>");
         fmt(Path.of(args[1]));
       }
       case "version", "--version", "-v" -> System.out.println("zc 0.1.0 (zinc on BEAM)");
@@ -599,9 +599,10 @@ public class Zc {
     if (!Files.isDirectory(src)) return false;
     try (var paths = Files.walk(src)) {
       for (Path p : (Iterable<Path>) paths::iterator) {
-        if (!p.toString().endsWith(".zinc")) continue;
+        if (!p.toString().endsWith(".zinc") && !p.toString().endsWith(".zn")) continue;
         String s = Files.readString(p);
-        if (s.contains("implements Application") || s.contains("implements Actor")) return true;
+        if (s.contains("implements Application") || s.contains("implements Actor")
+            || s.contains("(Application)") || s.contains("(Actor)")) return true;
       }
     }
     return false;
@@ -825,17 +826,21 @@ public class Zc {
   // tokens — preserves comments + strings, idempotent). 2-space indent by brace depth,
   // trailing whitespace trimmed, blank runs collapsed to one, single trailing newline.
 
+  static boolean isSource(Path p) {
+    return p.toString().endsWith(".zinc") || p.toString().endsWith(".zn");
+  }
+
   static void fmt(Path target) throws IOException {
     if (Files.isDirectory(target)) {
       try (var paths = Files.walk(target)) {
         for (Path p : (Iterable<Path>) paths::iterator) {
-          if (p.toString().endsWith(".zinc")) fmtFile(p);
+          if (isSource(p)) fmtFile(p);
         }
       }
-    } else if (target.toString().endsWith(".zinc")) {
+    } else if (isSource(target)) {
       fmtFile(target);
     } else {
-      die("zc fmt: not a .zinc file or directory: " + target);
+      die("zc fmt: not a .zinc/.zn file or directory: " + target);
     }
   }
 
@@ -897,11 +902,12 @@ public class Zc {
     System.out.println("""
         usage: zc <command> [args]
 
-          zc init <name>        create a new project (zinc.toml, src/Main.zinc)
-          zc build [dir]        transpile .zinc + compile (rebar3 under the hood)
-          zc run [dir]          build, then run main()
+          zc init [--py] <name> create a new project (--py = braces-Python src/main.zn,
+                                else legal-Java src/Main.zinc)
+          zc build [dir]        transpile .zinc/.zn + compile (rebar3 under the hood)
+          zc run [dir|file]     build + run main(); a .zinc/.zn file runs in script mode
           zc release [dir]      self-contained OTP release tarball (ERTS + beam + boot)
-          zc test [dir]         run test/**/*.zinc test classes (EUnit underneath)
+          zc test [dir]         run the test suite (EUnit underneath)
           zc clean [dir]        remove build output and generated .erl
           zc check [dir]        opt-in static net: xref + dialyzer over the FFI basement
           zc add <name@ver>     add a hex dependency to zinc.toml
@@ -909,7 +915,7 @@ public class Zc {
           zc toolchain install [ver]   install a managed OTP into ~/.zc/otp (rustup model)
           zc toolchain list            list managed toolchains
           zc doctor             check the install: versions, toolchains, resolution
-          zc fmt <file|dir>     reindent .zinc (2-space, by brace depth)
+          zc fmt <file|dir>     reindent .zinc/.zn (2-space, by brace depth)
           zc version            show version
         """);
   }
