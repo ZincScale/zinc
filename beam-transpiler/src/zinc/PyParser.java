@@ -343,9 +343,36 @@ final class PyParser {
       case BoolLit x -> "boolean";
       case StrLit x -> "String";
       case NewExpr x -> x.typeName();
-      case MapLit x -> "HashMap";
+      case MapLit x -> mapLitType(x);
+      case ListLit x -> listLitType(x);
       default -> "var";
     };
+  }
+
+  /** List literal type: List&lt;T&gt; when elements are homogeneous literals; bare List otherwise. */
+  private String listLitType(ListLit x) {
+    if (x.elems().isEmpty()) return "List";
+    String e = literalType(x.elems().get(0));
+    if (e.equals("var")) return "List";
+    for (int i = 1; i < x.elems().size(); i++) {
+      if (!e.equals(literalType(x.elems().get(i)))) return "List";
+    }
+    return "List<" + e + ">";
+  }
+
+  /** Dict literal type: HashMap&lt;K,V&gt; when keys and values are each homogeneous literals;
+   *  bare HashMap otherwise (heterogeneous -> dynamic values). Mirrors CodeGen.mapLitType. */
+  private String mapLitType(MapLit x) {
+    if (x.keys().isEmpty()) return "HashMap";
+    String k = literalType(x.keys().get(0)), v = literalType(x.values().get(0));
+    if (k.equals("var") || v.equals("var")) return "HashMap";
+    for (int i = 1; i < x.keys().size(); i++) {
+      if (!k.equals(literalType(x.keys().get(i)))
+          || !v.equals(literalType(x.values().get(i)))) {
+        return "HashMap";
+      }
+    }
+    return "HashMap<" + k + "," + v + ">";
   }
 
   private record RawDef(String name, List<Param> params, String ret, Block body) {}

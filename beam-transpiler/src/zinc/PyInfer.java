@@ -171,7 +171,26 @@ final class PyInfer {
       case StrLit x -> "String";
       case VarRef x -> env.get(x.name());
       case NewExpr x -> x.typeName();
-      case Ast.MapLit x -> "HashMap";
+      case Ast.ListLit x -> {
+        if (x.elems().isEmpty()) yield "List";
+        String et = typeOf(x.elems().get(0));
+        if (et == null) yield "List";
+        for (int i = 1; i < x.elems().size(); i++) {
+          if (!et.equals(typeOf(x.elems().get(i)))) yield "List";
+        }
+        yield "List<" + et + ">";
+      }
+      case Ast.MapLit x -> {
+        if (x.keys().isEmpty()) yield "HashMap";
+        String k = typeOf(x.keys().get(0)), v = typeOf(x.values().get(0));
+        if (k == null || v == null) yield "HashMap";
+        for (int i = 1; i < x.keys().size(); i++) {
+          if (!k.equals(typeOf(x.keys().get(i))) || !v.equals(typeOf(x.values().get(i)))) {
+            yield "HashMap";
+          }
+        }
+        yield "HashMap<" + k + "," + v + ">";
+      }
       case Ast.Cast x -> x.type().equals("double") ? "double" : "int";
       case Unary x -> x.op().equals("!") ? "boolean" : typeOf(x.operand());
       case Ternary x -> {

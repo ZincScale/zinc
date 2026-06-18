@@ -260,6 +260,54 @@ class CodeGen {
     return out;
   }
 
+  /** A dict literal's type: HashMap&lt;K,V&gt; when keys agree AND values agree (homogeneous);
+   *  bare HashMap otherwise (heterogeneous -> dynamic values, guarded crossings on use). */
+  private String mapLitType(MapLit x) {
+    if (x.keys().isEmpty()) return "HashMap";
+    String k = exprType(x.keys().get(0)), v = exprType(x.values().get(0));
+    if (k == null || v == null) return "HashMap";
+    for (int i = 1; i < x.keys().size(); i++) {
+      if (!k.equals(exprType(x.keys().get(i))) || !v.equals(exprType(x.values().get(i)))) {
+        return "HashMap";
+      }
+    }
+    return "HashMap<" + k + "," + v + ">";
+  }
+
+  /** A list literal's type: List&lt;T&gt; when elements agree (homogeneous); bare List otherwise. */
+  private String listLitType(ListLit x) {
+    if (x.elems().isEmpty()) return "List";
+    String e = exprType(x.elems().get(0));
+    if (e == null) return "List";
+    for (int i = 1; i < x.elems().size(); i++) {
+      if (!e.equals(exprType(x.elems().get(i)))) return "List";
+    }
+    return "List<" + e + ">";
+  }
+
+  /** True if the current class defines a method of this name/arity (don't shadow user code). */
+  private boolean userDefines(String name, int arity) {
+    ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
+    return ci != null && ci.methods().containsKey(name + "/" + arity);
+  }
+
+  /** len(x): the one length spelling, dispatched on x's static type. */
+  private String genLen(Expr arg, Map<String, String> env) {
+    String t = exprType(arg);
+    String b = t == null ? null : baseType(t);
+    String g = genExpr(arg, env);
+    if ("String".equals(t)) return "string:length(" + g + ")";
+    if (t != null && t.endsWith("[]")) return "array:size(" + g + ")";
+    if ("ArrayList".equals(b)) return "array:size(" + g + ")";
+    if ("HashMap".equals(b) || "Map".equals(b)) return "maps:size(" + g + ")";
+    if ("List".equals(b)) {
+      warnLinear("len() on a List is O(n) (walks the list)", "use an ArrayList for O(1) size");
+      return "length(" + g + ")";
+    }
+    throw new CompileError("len() expects a string, list, map, or array — got "
+        + (t == null ? "an untyped value" : t));
+  }
+
   /** Runtime boundary guard spec for a declared type; null = not guardable (flows free). */
   private String typeSpec(String t) {
     String b = baseType(t);
@@ -1941,22 +1989,28 @@ class CodeGen {
                 + "' cannot be assigned (zinc arrays are values — final freezes them)");
           }
           String t = varTypes.get(st.arrVar());
-          if (t == null || !t.endsWith("[]")) {
-            throw new CompileError("index assignment needs an array-typed variable, '"
+          String tb = t == null ? null : baseType(t);
+          String cur = envGet(env, st.arrVar());
+          boolean isMap = "HashMap".equals(tb) || "Map".equals(tb);
+          if (t == null || (!t.endsWith("[]") && !isMap)) {
+            throw new CompileError("index assignment needs an array- or map-typed variable, '"
                 + st.arrVar() + "' is " + (t == null ? "untyped" : t));
           }
-          String cur = envGet(env, st.arrVar());
-          String iv = fresh("i");
+          String iv = fresh(isMap ? "k" : "i");
           out.add(iv + " = " + genExpr(st.index(), env));
+          String acc = isMap ? "maps:get(" + iv + ", " + cur + ")"
+                             : "array:get(" + iv + ", " + cur + ")";
+          List<String> targs = isMap ? typeArgs(t) : List.of();
           String rhs = switch (st.op()) {
-            case "=" -> genExpr(st.value(), env);
-            case "+=" -> "array:get(" + iv + ", " + cur + ") + " + genExpr(st.value(), env);
-            case "-=" -> "array:get(" + iv + ", " + cur + ") - " + genExpr(st.value(), env);
-            case "*=" -> "array:get(" + iv + ", " + cur + ") * " + genExpr(st.value(), env);
+            case "=" -> isMap ? guarded(st.value(), targs, 1, env) : genExpr(st.value(), env);
+            case "+=" -> acc + " + " + genExpr(st.value(), env);
+            case "-=" -> acc + " - " + genExpr(st.value(), env);
+            case "*=" -> acc + " * " + genExpr(st.value(), env);
             default -> throw new CompileError("bad assign op " + st.op());
           };
           String v = fresh(st.arrVar());
-          out.add(v + " = array:set(" + iv + ", " + rhs + ", " + cur + ")");
+          out.add(v + " = " + (isMap ? "maps:put(" + iv + ", " + rhs + ", " + cur + ")"
+                                     : "array:set(" + iv + ", " + rhs + ", " + cur + ")"));
           env.put(st.arrVar(), v);
         }
         case SwitchStmt st -> out.add(genSwitch(st, env, loopMut));
@@ -2520,9 +2574,14 @@ class CodeGen {
       }
       case Index x -> {
         String t = exprType(x.obj());
-        yield t != null && t.endsWith("[]")
-            ? "array:get(" + genExpr(x.index(), env) + ", " + genExpr(x.obj(), env) + ")"
-            : "lists:nth((" + genExpr(x.index(), env) + ") + 1, " + genExpr(x.obj(), env) + ")";
+        String b = t == null ? null : baseType(t);
+        if (t != null && t.endsWith("[]")) {
+          yield "array:get(" + genExpr(x.index(), env) + ", " + genExpr(x.obj(), env) + ")";
+        }
+        if ("HashMap".equals(b) || "Map".equals(b)) {       // d["k"] -> maps:get
+          yield "maps:get(" + genExpr(x.index(), env) + ", " + genExpr(x.obj(), env) + ")";
+        }
+        yield "lists:nth((" + genExpr(x.index(), env) + ") + 1, " + genExpr(x.obj(), env) + ")";
       }
       case ArrayNewExpr x -> "array:new(" + genExpr(x.size(), env) + ", {default, "
           + defaultFor(x.elemType()) + "})";
@@ -2543,6 +2602,9 @@ class CodeGen {
             + genExpr(x.right(), env) + ")";
       }
       case Call x -> {
+        if (x.callee().equals("len") && x.args().size() == 1 && !userDefines("len", 1)) {
+          yield genLen(x.args().get(0), env);
+        }
         if (inActor) {
           MethodDecl pm = curActor == null ? null : curActor.methods().stream()
               .filter(h -> h.name().equals(x.callee()) && h.params().size() == x.args().size())
@@ -3564,8 +3626,8 @@ class CodeGen {
       case BoolLit x -> "boolean";
       case StrLit x -> "String";
       case VarRef x -> varTypes.get(x.name());
-      case ListLit x -> null;
-      case MapLit x -> "HashMap";
+      case ListLit x -> listLitType(x);
+      case MapLit x -> mapLitType(x);
       case NewExpr x -> x.typeName();
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
@@ -3588,7 +3650,18 @@ class CodeGen {
       case LambdaExpr x -> "Function";
       case Index x -> {
         String t = exprType(x.obj());
-        yield t != null && t.endsWith("[]") ? t.substring(0, t.length() - 2) : null;
+        if (t == null) yield null;
+        if (t.endsWith("[]")) yield t.substring(0, t.length() - 2);
+        String b = baseType(t);                              // d["k"] is V (null = dynamic)
+        if ("HashMap".equals(b) || "Map".equals(b)) {
+          var ta = typeArgs(t);
+          yield ta.size() == 2 ? ta.get(1) : null;
+        }
+        if ("List".equals(b) || "ArrayList".equals(b)) {     // xs[i] is the element type
+          var ta = typeArgs(t);
+          yield ta.size() == 1 ? ta.get(0) : null;
+        }
+        yield null;
       }
       case Unary x -> x.op().equals("!") ? "boolean" : exprType(x.operand());
       case Ast.Cast x -> x.type().equals("double") ? "double" : "int";
@@ -3606,6 +3679,9 @@ class CodeGen {
         };
       }
       case Call x -> {
+        if (x.callee().equals("len") && x.args().size() == 1 && !userDefines("len", 1)) {
+          yield "int";
+        }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
         MethodDecl md = ci == null ? null
             : ci.methods().get(x.callee() + "/" + x.args().size());
