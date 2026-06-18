@@ -8,7 +8,7 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 ERL="docker run --rm --user $(id -u):$(id -g)"
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client filestream)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -40,6 +40,7 @@ declare -A want=(
   [json]=$'vin\n41\nsf\n40\n7\nmissing caught'
   [fileio]=$'2\ntrue\n20\n1\ntrue\nno such file or directory: /tmp/zinc_fileio_py/missing.conf\nfalse'
   [http_client]='connect refused caught'
+  [filestream]=$'5\ntrue'
 )
 
 fail=0

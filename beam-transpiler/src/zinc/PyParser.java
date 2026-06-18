@@ -474,6 +474,7 @@ final class PyParser {
     if (check(TokKind.KW_WHILE)) return parseWhile();
     if (check(TokKind.KW_FOR)) return parseFor();
     if (checkIdent("try")) return parseTry();
+    if (checkIdent("with")) return parseWith();
     if (checkIdent("raise")) return parseRaise();
     if (checkIdent("match") && matchAhead()) return parseMatch();
     // typed local declaration: `name: Type = expr`
@@ -603,6 +604,35 @@ final class PyParser {
     }
     expect(TokKind.RBRACE, "'}'");
     return new SwitchStmt(subject, cases, defaultBlock);
+  }
+
+  /** `with Files.openReader(p) as r { body }` -> scoped resource (auto-closed at block
+   *  exit), i.e. a try-with-resources. The handle type is read off the opener method. */
+  private Stmt parseWith() {
+    expect(TokKind.IDENT, "'with'"); // 'with'
+    Expr init = parseExpr();
+    if (!checkIdent("as")) {
+      throw new CompileError("Parse error: `with` needs `as <name>` at line " + cur().line());
+    }
+    advance(); // 'as'
+    String var = expect(TokKind.IDENT, "resource variable").text();
+    declared.add(var);
+    String type = resourceType(init);
+    Block body = parseBlock();
+    return new TryStmt(List.of(new Ast.Resource(type, var, init)), body, List.of());
+  }
+
+  private String resourceType(Expr init) {
+    if (init instanceof MethodCall mc) {
+      switch (mc.method()) {
+        case "openReader": return "Reader";
+        case "openWriter":
+        case "openAppender": return "Writer";
+        default: break;
+      }
+    }
+    throw new CompileError("`with` resource must be Files.openReader / openWriter / "
+        + "openAppender (v1) at line " + cur().line());
   }
 
   /** `raise SomeError("msg")` -> throw. */
