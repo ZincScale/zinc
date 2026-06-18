@@ -104,7 +104,7 @@ final class PyInfer {
       requireResolved(c.name(), c.methods());
     }
     return new Program(p.imports(), classes, p.records(), actors, p.enums(),
-        p.application(), p.exceptions(), p.interfaces(), instanceClasses, p.tests());
+        p.application(), p.exceptions(), p.interfaces(), instanceClasses, p.tests(), p.sealeds());
   }
 
   private static void requireResolved(String owner, List<MethodDecl> methods) {

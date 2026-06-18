@@ -26,6 +26,7 @@ final class PyParser {
   private final List<InstanceClassDecl> instanceClasses = new ArrayList<>();
   private final List<ExceptionDecl> exceptions = new ArrayList<>();
   private final List<RecordDecl> records = new ArrayList<>();
+  private final List<SealedDecl> sealeds = new ArrayList<>();
   private final List<EnumDecl> enums = new ArrayList<>();
 
   PyParser(List<Token> toks) {
@@ -95,6 +96,8 @@ final class PyParser {
         parseRecord();
       } else if (checkIdent("enum")) {
         parseEnum();
+      } else if (checkIdent("sealed")) {
+        parseSealed();
       } else {
         throw new CompileError("Parse error: expected `def`, `class`, `interface`, `record`,"
             + " `enum` or `import` at line " + cur().line());
@@ -114,7 +117,7 @@ final class PyParser {
       classes.add(new ClassDecl(hasMain ? "Main" : fileClass, topDefs));
     }
     var program = new Program(imports, classes, records, actors, enums, application,
-        exceptions, interfaces, instanceClasses, List.of());
+        exceptions, interfaces, instanceClasses, List.of(), sealeds);
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
@@ -133,6 +136,33 @@ final class PyParser {
     }
     expect(TokKind.RPAREN, "')'");
     records.add(new RecordDecl(name, comps));
+  }
+
+  /** `sealed T { V1(f: A)  V2(g: B, h: C) }` -> algebraic union; each variant is a
+   *  record-shaped constructor that lowers to a tagged tuple; matched by variant pattern. */
+  private void parseSealed() {
+    expect(TokKind.IDENT, "'sealed'");
+    String name = expect(TokKind.IDENT, "sealed type name").text();
+    expect(TokKind.LBRACE, "'{'");
+    skipSemis();
+    var variants = new ArrayList<RecordDecl>();
+    while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
+      String vname = expect(TokKind.IDENT, "variant name").text();
+      var comps = new ArrayList<Param>();
+      expect(TokKind.LPAREN, "'('");
+      if (!check(TokKind.RPAREN)) {
+        do {
+          String cname = expect(TokKind.IDENT, "field name").text();
+          expect(TokKind.COLON, "':' (variant fields are typed: name: T)");
+          comps.add(new Param(parseType(), cname));
+        } while (match(TokKind.COMMA));
+      }
+      expect(TokKind.RPAREN, "')'");
+      variants.add(new RecordDecl(vname, comps));
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    sealeds.add(new SealedDecl(name, variants));
   }
 
   /** `enum Color { RED, GREEN }` -> values lower to atoms; `Color.RED` reads one. */

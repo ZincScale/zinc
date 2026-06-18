@@ -1,0 +1,11 @@
+# a match on a sealed type must cover every variant (or `case _`)
+sealed R { A(x: int)  B(y: int)  C(z: int) }
+def f(r: R) -> int {
+    out = 0
+    match r {
+        case A(x) { out = x }
+        case B(y) { out = y }
+    }
+    return out
+}
+def main() { print(f(A(1))) }

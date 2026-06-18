@@ -8,7 +8,19 @@ final class Ast {
   record Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
       List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application,
       List<ExceptionDecl> exceptions, List<InterfaceDecl> interfaces,
-      List<InstanceClassDecl> instanceClasses, List<TestDecl> tests) {}
+      List<InstanceClassDecl> instanceClasses, List<TestDecl> tests, List<SealedDecl> sealeds) {
+    Program(List<Import> imports, List<ClassDecl> classes, List<RecordDecl> records,
+        List<ActorDecl> actors, List<EnumDecl> enums, ApplicationDecl application,
+        List<ExceptionDecl> exceptions, List<InterfaceDecl> interfaces,
+        List<InstanceClassDecl> instanceClasses, List<TestDecl> tests) {
+      this(imports, classes, records, actors, enums, application, exceptions, interfaces,
+          instanceClasses, tests, List.of());
+    }
+  }
+
+  /** sealed ProcessorResult { Single(ff: FlowFile)  Failure(reason: String, ff: FlowFile) }
+   *  — an algebraic union; variants are record-shaped, construct + match as tagged tuples. */
+  record SealedDecl(String name, List<RecordDecl> variants) {}
 
   /** class CalcTest implements Test { public void addsUp() {...} } — every public void
    *  zero-arg method is a test case (JUnit 3 / EUnit convention), the rest helpers.

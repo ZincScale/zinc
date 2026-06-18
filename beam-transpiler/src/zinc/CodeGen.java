@@ -44,6 +44,9 @@ class CodeGen {
   private boolean inActor = false;
   private ActorDecl curActor; // the actor being lowered (private-helper call resolution)
   private Map<String, String> varTypes = new HashMap<>();       // var -> type, per method
+  private final Map<String, RecordDecl> variants = new HashMap<>();      // variant -> shape
+  private final Map<String, String> variantSealed = new HashMap<>();     // variant -> sealed type
+  private final Map<String, List<String>> sealedVariants = new HashMap<>(); // sealed -> variants
   private int ctr = 0;
   private List<String> helpers = new ArrayList<>();
 
@@ -53,7 +56,7 @@ class CodeGen {
       Map<String, String> actorMods, Map<String, Ast.ExceptionDecl> exceptions,
       Map<String, String> excTags, Map<String, Ast.InterfaceDecl> interfaces,
       Map<String, Ast.InstanceClassDecl> instClasses, Map<String, String> instMods,
-      boolean projectHasActors) {
+      Map<String, Ast.SealedDecl> sealedTypes, boolean projectHasActors) {
     this.srcFile = srcFile;
     this.program = program;
     this.classes = classes;
@@ -67,6 +70,15 @@ class CodeGen {
     this.instClasses = instClasses;
     this.instMods = instMods;
     this.projectHasActors = projectHasActors;
+    for (var sd : sealedTypes.values()) {
+      var vnames = new ArrayList<String>();
+      for (RecordDecl v : sd.variants()) {
+        variants.put(v.name(), v);
+        variantSealed.put(v.name(), sd.name());
+        vnames.add(v.name());
+      }
+      sealedVariants.put(sd.name(), vnames);
+    }
     for (Import im : program.imports()) {
       // import erlang.<module>; -> FFI binding to that Erlang module, calls pass through
       if (im.path().size() == 2 && im.path().get(0).equals("erlang")) {
@@ -1927,8 +1939,8 @@ class CodeGen {
             } else {
               out.add(v + " = " + genExpr(st.init(), env));
             }
-            varTypes.put(st.name(),
-                st.type().equals("var") ? exprType(st.init()) : st.type());
+            varTypes.put(st.name(), st.type().equals("var") ? exprType(st.init())
+                : variantSealed.getOrDefault(st.type(), st.type()));
           }
           env.put(st.name(), v);
         }
@@ -2172,6 +2184,9 @@ class CodeGen {
 
   /** Arrow switch -> case with one clause per label; assigned vars phi-merge across arms. */
   private String genSwitch(SwitchStmt s, Map<String, String> env, List<String> loopMut) {
+    boolean isVariant = s.cases().stream().anyMatch(c -> c.labels().size() == 1
+        && c.labels().get(0) instanceof NewExpr ne && variants.containsKey(ne.typeName()));
+    if (isVariant) return genVariantMatch(s, env, loopMut);
     String subj = genExpr(s.subject(), env);
     String subjType = exprType(s.subject());
     var assigned = new LinkedHashSet<String>();
@@ -2199,6 +2214,67 @@ class CodeGen {
     }
     clauses.add("    _ ->\n" + defArm);
 
+    String body = "case " + subj + " of\n" + String.join(";\n", clauses) + "\nend";
+    return bindPhi(phi, env, body);
+  }
+
+  /** Sealed-union match: each case is a variant pattern `V(a, b)` -> Erlang tuple pattern
+   *  `{'V', A, B}` with the fields bound; exhaustive over the sealed type (or `case _`). */
+  private String genVariantMatch(SwitchStmt s, Map<String, String> env, List<String> loopMut) {
+    String subj = genExpr(s.subject(), env);
+    String st0 = exprType(s.subject());
+    String sealedType = st0 == null ? null : variantSealed.getOrDefault(st0, st0);
+    var assigned = new LinkedHashSet<String>();
+    for (SwitchCase c : s.cases()) collectAssigned(c.body(), assigned);
+    if (s.defaultBlock() != null) collectAssigned(s.defaultBlock(), assigned);
+    var phi = assigned.stream().filter(env::containsKey).toList();
+
+    var covered = new LinkedHashSet<String>();
+    var clauses = new ArrayList<String>();
+    for (SwitchCase c : s.cases()) {
+      if (c.labels().size() != 1 || !(c.labels().get(0) instanceof NewExpr pat)) {
+        throw new CompileError("a sealed match case is one variant pattern, e.g. case V(a)");
+      }
+      RecordDecl vd = variants.get(pat.typeName());
+      if (vd == null) throw new CompileError("unknown variant in match: " + pat.typeName());
+      if (pat.args().size() != vd.components().size()) {
+        throw new CompileError(pat.typeName() + " pattern: expected " + vd.components().size()
+            + " fields, got " + pat.args().size());
+      }
+      covered.add(pat.typeName());
+      var armEnv = new HashMap<>(env);
+      var saved = new HashMap<String, String>();
+      var binds = new ArrayList<String>();
+      binds.add("'" + pat.typeName() + "'");
+      for (int i = 0; i < pat.args().size(); i++) {
+        if (!(pat.args().get(i) instanceof VarRef bv)) {
+          throw new CompileError(pat.typeName() + " pattern fields must be names (v1)");
+        }
+        if (bv.name().equals("_")) { binds.add("_"); continue; }
+        String fr = fresh(bv.name());
+        armEnv.put(bv.name(), fr);
+        saved.put(bv.name(), varTypes.get(bv.name()));
+        varTypes.put(bv.name(), vd.components().get(i).type());
+        binds.add(fr);
+      }
+      List<String> code = genStmts(c.body().stmts(), armEnv, false, loopMut);
+      String arm = block(armLines(code, armEnv, endsInJump(c.body()), phi), "        ");
+      saved.forEach((k, v) -> { if (v == null) varTypes.remove(k); else varTypes.put(k, v); });
+      clauses.add("    {" + String.join(", ", binds) + "} ->\n" + arm);
+    }
+    if (s.defaultBlock() != null) {
+      var defEnv = new HashMap<>(env);
+      List<String> code = genStmts(s.defaultBlock().stmts(), defEnv, false, loopMut);
+      clauses.add("    _ ->\n"
+          + block(armLines(code, defEnv, endsInJump(s.defaultBlock()), phi), "        "));
+    } else if (sealedType != null && sealedVariants.containsKey(sealedType)) {
+      var missing = new ArrayList<String>();
+      for (String v : sealedVariants.get(sealedType)) if (!covered.contains(v)) missing.add(v);
+      if (!missing.isEmpty()) {
+        throw new CompileError("non-exhaustive match on " + sealedType + ": missing "
+            + String.join(", ", missing) + " (add those cases or `case _`)");
+      }
+    }
     String body = "case " + subj + " of\n" + String.join(";\n", clauses) + "\nend";
     return bindPhi(phi, env, body);
   }
@@ -2493,6 +2569,20 @@ class CodeGen {
         yield "#{" + String.join(", ", entries) + "}";
       }
       case NewExpr x -> {
+        RecordDecl variant = variants.get(x.typeName());
+        if (variant != null) {              // sealed variant -> tagged tuple {'Variant', F1, ..}
+          if (x.args().size() != variant.components().size()) {
+            throw new CompileError(x.typeName() + ": expected " + variant.components().size()
+                + " fields, got " + x.args().size());
+          }
+          var parts = new ArrayList<String>();
+          parts.add("'" + x.typeName() + "'");
+          var ct = variant.components();
+          for (int i = 0; i < x.args().size(); i++) {
+            parts.add(guarded(x.args().get(i), List.of(ct.get(i).type()), 0, env));
+          }
+          yield "{" + String.join(", ", parts) + "}";
+        }
         if (x.typeName().equals("HashMap")) {
           if (!x.args().isEmpty()) throw new CompileError("new HashMap takes no args (v1)");
           yield "#{}";
@@ -3671,7 +3761,7 @@ class CodeGen {
       case VarRef x -> varTypes.get(x.name());
       case ListLit x -> listLitType(x);
       case MapLit x -> mapLitType(x);
-      case NewExpr x -> x.typeName();
+      case NewExpr x -> variantSealed.getOrDefault(x.typeName(), x.typeName());
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
           if (vr.name().equals("Tag")) yield "Tag";

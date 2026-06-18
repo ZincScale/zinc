@@ -25,6 +25,7 @@ public class Main {
       // project-wide registries; type names and module names must be unique
       var classes = new LinkedHashMap<String, ClassInfo>();
       var records = new LinkedHashMap<String, Ast.RecordDecl>();
+      var sealedTypes = new LinkedHashMap<String, Ast.SealedDecl>();
       var enums = new LinkedHashMap<String, Ast.EnumDecl>();
       var actors = new LinkedHashMap<String, Ast.ActorDecl>();
       Ast.ApplicationDecl application = null;
@@ -59,6 +60,10 @@ public class Main {
         var names = new ArrayList<String>();
         p.classes().forEach(c -> names.add(c.name()));
         p.records().forEach(r -> names.add(r.name()));
+        p.sealeds().forEach(sd -> {
+          names.add(sd.name());
+          sd.variants().forEach(v -> names.add(v.name()));
+        });
         p.actors().forEach(a -> names.add(a.name()));
         p.enums().forEach(e2 -> names.add(e2.name()));
         if (p.application() != null) names.add(p.application().name());
@@ -80,6 +85,7 @@ public class Main {
           }
         }
         p.records().forEach(r -> records.put(r.name(), r));
+        p.sealeds().forEach(sd -> sealedTypes.put(sd.name(), sd));
         p.enums().forEach(e2 -> enums.put(e2.name(), e2));
         for (var x : p.exceptions()) {
           exceptions.put(x.name(), x);
@@ -190,7 +196,7 @@ public class Main {
         Program resolved = Resolve.spawns(src.prog(), actors.keySet());
         if (resolved.application() != null) resolvedApp = resolved.application();
         var cg = new CodeGen(src.file(), resolved, classes, records, enums, actors, actorMods,
-            exceptions, excTags, interfaces, instClasses, instMods, supervised);
+            exceptions, excTags, interfaces, instClasses, instMods, sealedTypes, supervised);
         try {
           (src.test() ? generatedTest : generated).putAll(cg.generateAll());
         } catch (CompileError e) {
