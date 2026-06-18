@@ -3190,6 +3190,38 @@ class CodeGen {
         }
         throw new CompileError("unsupported: Sys." + x.method() + " (sleep)");
       }
+      case "Time" -> {
+        return switch (x.method()) {
+          case "now" -> "erlang:system_time(millisecond)";    // epoch millis
+          case "seconds" -> "erlang:system_time(second)";     // epoch seconds
+          case "nanos" -> "erlang:system_time(nanosecond)";   // epoch nanos
+          case "monotonic" -> "erlang:monotonic_time(millisecond)";  // for durations
+          default -> throw new CompileError("unsupported: Time." + x.method()
+              + " (now/seconds/nanos/monotonic)");
+        };
+      }
+      case "Base64" -> {
+        return switch (x.method()) {
+          case "encode" -> "base64:encode(" + genExpr(x.args().get(0), env) + ")"; // bytes->String
+          case "decode" -> "base64:decode(" + genExpr(x.args().get(0), env) + ")"; // String->bytes
+          default -> throw new CompileError("unsupported: Base64." + x.method() + " (encode/decode)");
+        };
+      }
+      case "Hex" -> {
+        return switch (x.method()) {
+          case "encode" -> "binary:encode_hex(" + genExpr(x.args().get(0), env) + ")";
+          case "decode" -> "binary:decode_hex(" + genExpr(x.args().get(0), env) + ")";
+          default -> throw new CompileError("unsupported: Hex." + x.method() + " (encode/decode)");
+        };
+      }
+      case "Gzip" -> {
+        return switch (x.method()) {
+          case "compress" -> "zlib:gzip(" + genExpr(x.args().get(0), env) + ")";
+          case "decompress" -> "zlib:gunzip(" + genExpr(x.args().get(0), env) + ")";
+          default -> throw new CompileError("unsupported: Gzip." + x.method()
+              + " (compress/decompress)");
+        };
+      }
       case "Log" -> {
         // println is the dumb stdout pipe; Log.* is the BEAM logger stream, where
         // supervisor crash reports already land. Module metadata injected statically.
@@ -3857,6 +3889,11 @@ class CodeGen {
           if (vr.name().equals("Router")) yield "Router";
           if (vr.name().equals("Response")) yield "Response";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
+          if (vr.name().equals("Time")) yield "int";
+          if (vr.name().equals("Base64") || vr.name().equals("Hex")) {
+            yield x.method().equals("encode") ? "String" : "byte[]";
+          }
+          if (vr.name().equals("Gzip")) yield "byte[]";
           if (vr.name().equals("Math")) {
             yield switch (x.method()) {
               case "sqrt", "pow", "floor", "ceil" -> "double";
