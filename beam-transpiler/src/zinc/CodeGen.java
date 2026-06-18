@@ -426,8 +426,14 @@ class CodeGen {
 
   /** zinc.http client over httpc — Java-shaped, sync send only (fan-out = worker Actors). */
   static final String HTTP_SOURCE = "-module('zinc.http').\n"
-      + "-export([send/2, add_header/3, with_body/3, header/2,\n"
+      + "-compile({no_auto_import, [get/1, put/2]}).  %% get/put are the one-shot facade here\n"
+      + "-export([send/2, get/1, post/2, put/2, delete/1, add_header/3, with_body/3, header/2,\n"
       + "         open_stream/2, s_has_next_chunk/1, s_next_chunk/1, s_header/2, s_close/1]).\n\n"
+      + "%% one-shot facade: default client + send (http.get(url) etc. in braces-Python).\n"
+      + "get(Url)     -> send(#{}, #{url => Url, method => get}).\n"
+      + "delete(Url)  -> send(#{}, #{url => Url, method => delete}).\n"
+      + "post(Url, B) -> send(#{}, #{url => Url, method => post, body => B}).\n"
+      + "put(Url, B)  -> send(#{}, #{url => Url, method => put, body => B}).\n\n"
       + "add_header(R, K, V) -> maps:put(headers, maps:get(headers, R, []) ++ [{K, V}], R).\n\n"
       + "with_body(R, M, B) -> maps:put(method, M, maps:put(body, B, R)).\n\n"
       + "header(Resp, Name) ->\n"
@@ -494,23 +500,23 @@ class CodeGen {
       + "hdrs(RH) -> [{iolist_to_binary(string:lowercase(K)), iolist_to_binary(V)}\n"
       + "             || {K, V} <- RH].\n\n"
       + "s_has_next_chunk({httpstream, Id, Pid, _}) ->\n"
-      + "    case get({zinc_hs, Id}) of\n"
+      + "    case erlang:get({zinc_hs, Id}) of\n"
       + "        {chunk, _} -> true;\n"
       + "        eof -> false;\n"
       + "        undefined ->\n"
       + "            ok = httpc:stream_next(Pid),\n"
       + "            receive\n"
-      + "                {http, {Id, stream, Part}} -> put({zinc_hs, Id}, {chunk, Part}), true;\n"
-      + "                {http, {Id, stream_end, _}} -> put({zinc_hs, Id}, eof), false;\n"
+      + "                {http, {Id, stream, Part}} -> erlang:put({zinc_hs, Id}, {chunk, Part}), true;\n"
+      + "                {http, {Id, stream_end, _}} -> erlang:put({zinc_hs, Id}, eof), false;\n"
       + "                {http, {Id, {error, R}}} -> raise('zinc.http.httpexception', R)\n"
       + "            after 30000 -> raise('zinc.http.timeoutexception', timeout) end\n"
       + "    end.\n\n"
       + "s_next_chunk({httpstream, Id, _, _} = S) ->\n"
-      + "    case get({zinc_hs, Id}) of\n"
+      + "    case erlang:get({zinc_hs, Id}) of\n"
       + "        {chunk, C} -> erase({zinc_hs, Id}), C;\n"
       + "        _ ->\n"
       + "            case s_has_next_chunk(S) of\n"
-      + "                true -> {chunk, C} = get({zinc_hs, Id}), erase({zinc_hs, Id}), C;\n"
+      + "                true -> {chunk, C} = erlang:get({zinc_hs, Id}), erase({zinc_hs, Id}), C;\n"
       + "                false -> raise('zinc.http.httpexception', <<\"read past end of stream\">>)\n"
       + "            end\n"
       + "    end.\n\n"
@@ -3200,6 +3206,27 @@ class CodeGen {
         }
         throw new CompileError("unsupported: HttpClient." + x.method());
       }
+      case "http" -> {
+        // one-shot client facade: http.get(url) etc. -> default client + send (the
+        // HttpClient/HttpRequest builders stay for headers/timeouts/proxy). A local
+        // variable named `http` wins, so this never hijacks user code.
+        if (!env.containsKey("http")) {
+          usedHttp = true;
+          String url = x.args().isEmpty() ? null : genExpr(x.args().get(0), env);
+          switch (x.method()) {
+            case "get" -> { return "'zinc.http':get(" + url + ")"; }
+            case "delete" -> { return "'zinc.http':delete(" + url + ")"; }
+            case "post" -> {
+              return "'zinc.http':post(" + url + ", " + genExpr(x.args().get(1), env) + ")";
+            }
+            case "put" -> {
+              return "'zinc.http':put(" + url + ", " + genExpr(x.args().get(1), env) + ")";
+            }
+            default -> throw new CompileError("unsupported: http." + x.method()
+                + " (get/post/put/delete)");
+          }
+        }
+      }
       case "HttpRequest" -> {
         if (x.method().equals("newBuilder") && x.args().size() == 1) {
           usedHttp = true;
@@ -3733,6 +3760,10 @@ class CodeGen {
             };
           }
           if (vr.name().equals("HttpRequest")) yield "HttpRequestBuilder";
+          if (vr.name().equals("http") && !varTypes.containsKey("http")) {
+            yield List.of("get", "post", "put", "delete").contains(x.method())
+                ? "HttpResponse" : null;
+          }
           if (vr.name().equals("Router")) yield "Router";
           if (vr.name().equals("Response")) yield "Response";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;

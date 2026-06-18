@@ -1,0 +1,10 @@
+# http.get one-shot facade: default client + send, same failure ladder as the builder
+# (a refused connection is a catchable HttpException). The builder stays for headers/timeouts.
+def main() {
+    try {
+        http.get("http://127.0.0.1:1/none")
+        print("no exception?!")
+    } except HttpException as e {
+        print("facade refused caught")
+    }
+}
