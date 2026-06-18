@@ -4,3 +4,4 @@ out/
 pubspec.lock
 *.jar
 dist/
+erl_crash.dump
