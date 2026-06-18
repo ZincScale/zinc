@@ -8,7 +8,7 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 ERL="docker run --rm --user $(id -u):$(id -g)"
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -27,6 +27,7 @@ declare -A want=(
   [match]=$'red\ncool\none\nmany'
   [multifile]=$'[10]\n1'
   [collections]=$'40\n3\n21'
+  [dict]=$'13\nlocalhost'
 )
 
 fail=0
@@ -59,6 +60,7 @@ declare -A wanterr=(
   [app_method]='Application Main can only declare main()'
   [two_apps]='more than one Application'
   [infer_cycle]="cannot infer return type — annotate it with '-> T'"
+  [untyped_param]="parameter 'a' needs a type"
 )
 for ex in "${!wanterr[@]}"; do
   dir="out/pyneg_$ex"

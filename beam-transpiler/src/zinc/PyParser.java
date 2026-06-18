@@ -343,6 +343,7 @@ final class PyParser {
       case BoolLit x -> "boolean";
       case StrLit x -> "String";
       case NewExpr x -> x.typeName();
+      case MapLit x -> "HashMap";
       default -> "var";
     };
   }
@@ -379,16 +380,24 @@ final class PyParser {
     return new MethodDecl(d.ret(), d.name(), params, d.body(), mods);
   }
 
-  /** `( [NAME [: TYPE] {, NAME [: TYPE]}] )`. Untyped params infer as `var`. */
+  /** `( [NAME : TYPE {, NAME : TYPE}] )`. Params must be typed (the language is statically
+   *  typed: a value is typed by annotation or by first assignment, and a param has no first
+   *  assignment to infer from) — except the receiver `self`, which is stripped. */
   private List<Param> parseParams() {
     expect(TokKind.LPAREN, "'('");
     var params = new ArrayList<Param>();
     if (!check(TokKind.RPAREN)) {
       do {
         String pname = expect(TokKind.IDENT, "parameter name").text();
-        String ptype = "var";
+        String ptype;
         if (match(TokKind.COLON)) {
           ptype = parseType();
+        } else if (pname.equals("self")) {
+          ptype = "var"; // the receiver; removed by stripSelf
+        } else {
+          throw new CompileError("parameter '" + pname + "' needs a type — write '" + pname
+              + ": T' (params are typed; only locals infer from assignment) at line "
+              + cur().line());
         }
         params.add(new Param(ptype, pname));
       } while (match(TokKind.COMMA));
@@ -904,6 +913,21 @@ final class PyParser {
       }
       expect(TokKind.RBRACKET, "']'");
       return new ListLit(elems);
+    }
+    if (match(TokKind.LBRACE)) { // dict literal: {k: v, ...} (only ever in expr position)
+      var keys = new ArrayList<Expr>();
+      var values = new ArrayList<Expr>();
+      skipSemis();
+      while (!check(TokKind.RBRACE)) {
+        keys.add(parseExpr());
+        expect(TokKind.COLON, "':' (dict entries are key: value)");
+        values.add(parseExpr());
+        skipSemis();
+        if (!match(TokKind.COMMA)) break;
+        skipSemis();
+      }
+      expect(TokKind.RBRACE, "'}'");
+      return new MapLit(keys, values);
     }
     if (check(TokKind.IDENT)) {
       String name = advance().text();

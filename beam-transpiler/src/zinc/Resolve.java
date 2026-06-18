@@ -144,6 +144,8 @@ final class Resolve {
             : new NewExpr(x.typeName(), args);
       }
       case ListLit x -> new ListLit(x.elems().stream().map(this::expr).toList());
+      case Ast.MapLit x -> new Ast.MapLit(x.keys().stream().map(this::expr).toList(),
+          x.values().stream().map(this::expr).toList());
       case ArrayNewExpr x -> new ArrayNewExpr(x.elemType(), expr(x.size()));
       case FieldAccess x -> new FieldAccess(expr(x.obj()), x.field());
       case Index x -> new Index(expr(x.obj()), expr(x.index()));

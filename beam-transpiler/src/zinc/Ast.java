@@ -219,6 +219,9 @@ final class Ast {
   /** array initializer {1, 2, 3} */
   record ListLit(List<Expr> elems) implements Expr {}
 
+  /** dict literal {k1: v1, k2: v2} -> Erlang map #{K1 => V1, ...}; keys/values parallel. */
+  record MapLit(List<Expr> keys, List<Expr> values) implements Expr {}
+
   record NewExpr(String typeName, List<Expr> args) implements Expr {}
 
   /** new int[n] -> array:new(N, {default, <type default>}) */

@@ -2425,6 +2425,13 @@ class CodeGen {
         for (Expr el : x.elems()) elems.add(genExpr(el, env));
         yield "[" + String.join(", ", elems) + "]";
       }
+      case MapLit x -> {
+        var entries = new ArrayList<String>();
+        for (int i = 0; i < x.keys().size(); i++) {
+          entries.add(genExpr(x.keys().get(i), env) + " => " + genExpr(x.values().get(i), env));
+        }
+        yield "#{" + String.join(", ", entries) + "}";
+      }
       case NewExpr x -> {
         if (x.typeName().equals("HashMap")) {
           if (!x.args().isEmpty()) throw new CompileError("new HashMap takes no args (v1)");
@@ -3558,6 +3565,7 @@ class CodeGen {
       case StrLit x -> "String";
       case VarRef x -> varTypes.get(x.name());
       case ListLit x -> null;
+      case MapLit x -> "HashMap";
       case NewExpr x -> x.typeName();
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
@@ -4010,6 +4018,10 @@ class CodeGen {
       case VarRef x -> out.add(x.name());
       case ListLit x -> {
         for (Expr el : x.elems()) exprRefs(el, out);
+      }
+      case MapLit x -> {
+        for (Expr k : x.keys()) exprRefs(k, out);
+        for (Expr v : x.values()) exprRefs(v, out);
       }
       case NewExpr x -> {
         for (Expr a : x.args()) exprRefs(a, out);

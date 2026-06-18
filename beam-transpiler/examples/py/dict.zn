@@ -1,0 +1,13 @@
+# dict literals -> Erlang maps; .get/.put/.size like HashMap, multi-line ok.
+# a dynamic .get is typed on retrieval (host: String) to print as text.
+def main() {
+    scores = {"a": 1, "b": 2}
+    scores.put("a", scores.get("a") + 10)
+    print(scores.get("a") + scores.size())
+    config = {
+        "host": "localhost",
+        "port": 8080
+    }
+    host: String = config.get("host")
+    print(host)
+}

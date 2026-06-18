@@ -171,6 +171,7 @@ final class PyInfer {
       case StrLit x -> "String";
       case VarRef x -> env.get(x.name());
       case NewExpr x -> x.typeName();
+      case Ast.MapLit x -> "HashMap";
       case Ast.Cast x -> x.type().equals("double") ? "double" : "int";
       case Unary x -> x.op().equals("!") ? "boolean" : typeOf(x.operand());
       case Ternary x -> {
