@@ -1,5 +1,9 @@
 # Language transforms
 
+> **⚠️ Stale — describes the dropped `.zn`→Python target.** The active surface is braces-Python →
+> BEAM (see [`beam-transpiler/docs/getting-started.md`](../../../beam-transpiler/docs/getting-started.md)).
+> Kept for history.
+
 `zinc-python` does four mechanical transforms. Everything else — every keyword, every standard-library function, every semantic — is plain Python.
 
 ## 1. Braces → indentation

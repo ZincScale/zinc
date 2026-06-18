@@ -1,5 +1,11 @@
 # Getting Started
 
+> **⚠️ Stale — the `.zn`→Python target was dropped.** The active surface is **braces-Python →
+> BEAM**: see [`beam-transpiler/docs/getting-started.md`](../../../beam-transpiler/docs/getting-started.md)
+> and the design doc [`beam-target-plan.md`](beam-target-plan.md). The `dialects/zinc-python`
+> *frontend* is reused by the BEAM transpiler; this page describes the old Python-output
+> toolchain and is kept for history only.
+
 `zinc-python` is a thin transpiler from `.zn` (braces Python) to standard Python 3.14t. It does four mechanical transforms — braces → indentation, method-name dunders, implicit `self`, auto f-strings — and leaves everything else untouched. The output is plain Python you can read, edit, and ship without lock-in.
 
 ## Install
