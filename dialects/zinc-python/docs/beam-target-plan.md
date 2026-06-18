@@ -140,3 +140,120 @@ is replaced by the checker + LSP.
   port against.
 - Type checker scope: start with return-type checking (required by #2); decide
   how far gradual typing goes for params/locals as a follow-up.
+
+---
+
+# Stdlib veneer (spec — 2026-06-18)
+
+## Why
+The `.zn` grammar is already Python-familiar, but the **library idioms still read
+like Java** — `HttpClient.newBuilder()`, `Json.decode(User.class, …)`,
+`e.getMessage()`, `map.get/.put/.size()`, `xs.length` vs `dict.size()`. A day-one
+Python/JS/PHP/Ruby dev hits that wall even though the syntax welcomes them. This
+veneer adds Pythonic spellings as **additive aliases** over the existing BEAM
+lowering — nothing is removed, the legal-Java surface keeps compiling. It is the
+first deliberate CodeGen touch since the braces-Python build, so **every item must
+keep `legaljava.sh` + `e2e.sh` green** (run both after each). Each change is sugar
+over machinery that already exists: no new semantics, no Resolve changes. The
+frontend is untouched — everything lands in CodeGen + one PyInfer return-type line.
+
+Verified scoping facts: `m["k"] = v` already parses to `IndexAssignStmt`
+(PyParser.java:455); dict literals are already typed `HashMap` (PyInfer.java:174,
+PyParser.java:346); the `'zinc.http'` runtime module that `send` calls already
+exists.
+
+## Items
+
+### 1. Subscript indexing for dicts — `d["k"]` / `d["k"] = v`
+The most visible inconsistency (lists subscript, dicts don't).
+- **Read** — `genExpr` `case Index` (CodeGen.java:2521): add a `Map`/`HashMap`
+  base-type branch → `maps:get(Key, M)`, ordered `T[]`→`array:get`,
+  `Map`→`maps:get`, else `lists:nth`.
+- **Write** — `IndexAssignStmt` lowering (CodeGen.java:1938), today array-only:
+  add a `Map`/`HashMap` branch → `maps:put(Key, Val, M)` with the SSA rebind that
+  genMutator's `put` uses (1982); type-guard the value via existing `guarded(...)`.
+- Compat: Java surface never indexes maps with `[]`; `.get/.put` stay working.
+
+### 2. Global `len(x)` — one spelling for length
+- Builtin in `genExpr` `case Call` (CodeGen.java:2545), dispatched on
+  `exprType(arg)`: `String`→`string:length`, `List`→`length` (**keeps the O(n)
+  cost warning, per the 2026-06-12 honest-cost policy**), `ArrayList`/`T[]`→
+  `array:size`, `Map`/`HashMap`→`maps:size`; else a clear compile error.
+- Return type `int` — add `len` to the inference switch near CodeGen.java:3575.
+- Guard: only a builtin when no user function named `len` is in scope (don't
+  hijack the Java surface).
+
+### 3. `str(x)` and `e.message`
+- **`str(x)`** — builtin Call, **general over any value**: already-`String`
+  passthrough; everything else (int/float/bool/binary/exception) via one prelude
+  helper `'$str'/1`. Return type `String`.
+- **`e.message`** — `FieldAccess` `.message` on an exception-typed value reuses
+  the `getMessage` lowering (CodeGen.java:2897–2900 / 3802). Dispatched on the
+  exception type, so a record with a real `message` field is unaffected.
+
+### 4. Drop `.class` in `Json.decode` — accept the bare record name
+- `classLitRecord` (CodeGen.java:2957): if `classLitName` returns null, also
+  accept a bare `VarRef` naming a known record. `Json.decode(User, s)` works;
+  `User.class` still works. Flows to `decodeAll` and other `classLitRecord` callers.
+
+### 5. `http.get(url)` facade — keep the builder for power users
+- `http` namespace in `genNamespaceCall`: `http.get(url)`, `http.post(url, body)`,
+  `http.put`, `http.delete` → convenience entries `'zinc.http':get/1`, `post/2`,
+  etc. that build the default client + request and call existing `send` (same
+  `HttpException` ladder). Return type = `send`'s response type.
+- Only item needing a non-CodeGen edit: add those 4 functions to the `'zinc.http'`
+  runtime `.erl`. The Java-style builder stays.
+
+## Consistency / docs / tests
+- Document `len()` and subscript as the **canonical** spellings; keep
+  `.size()/.length/.get/.put` working for compat.
+- e2e-py coverage: extend `dict`, `collections`, `json`, `exceptions`,
+  `http_client` (or one new `veneer.zn`) to exercise `d["k"]`, `d["k"]=v`,
+  `len()`, `str(e)`/`e.message`, `Json.decode(User, …)`, `http.get`; add to
+  `examples=(…)` + `want` in `e2e-py.sh`.
+
+## Order (by leverage)
+1. Subscript + `len()` — kills the most visible inconsistency
+2. `.class` drop — smallest change
+3. `str()` / `.message`
+4. `http.get` facade — only item touching a prelude `.erl`
+
+## Type safety — the veneer must not reopen dynamic footguns
+The point of the surface is Python ergonomics **with** static teeth, so production
+doesn't collapse the way interpreted languages allow. The existing posture is
+**typed-by-default, dynamic-quarantined**: params must be typed (`parameter 'a'
+needs a type`), return types checked, `String`↔`int` binding errors, exhaustive
+match — and the *only* dynamic values are explicit crossings (JSON fields, raw map
+gets) that pass a **guarded runtime check** (`guarded(...)` / `'$jchk'`,
+CodeGen.java:1871, 2049), so a wrong dynamic value fails **loud at the boundary**,
+not silently 10 frames later. The veneer keeps that contract:
+
+- **`len(x)` / `str(x)`** — total and type-directed; no new dynamic surface.
+- **`Json.decode(User, …)` / `http.get`** — return concretely-typed values.
+- **Dict subscript is the one risk.** Rule:
+  - **Homogeneous literal** (`{"a":1, "b":2}`) → inferred `HashMap<K,V>`; `d["k"]`
+    is concretely typed, so `d["k"] + "s"` is a **compile error**. (Strictly more
+    safety than today, where `MapLit` infers bare `HashMap`.)
+  - **Heterogeneous literal** (`{"host":"localhost", "port":8080}`) → inferred
+    `Map<String, dynamic>`; `d["k"]` is **dynamic** and behaves like `.get()`
+    today: it cannot be used directly in a typed op — it must first cross into a
+    concrete type via an annotation (`port: int = config["port"]`), which inserts
+    the guarded runtime check. So `config["port"] + 1` without the crossing is a
+    compile error; the crossing makes it safe and fails loud if the value isn't
+    really an `int`. This matches the existing `json.zn` pattern
+    (`host: String = config.get("host")`).
+  - Implementation: PyInfer `MapLit` (PyInfer.java:174) returns the join of value
+    types — `HashMap<K,V>` when all values agree, `Map<String, dynamic>` otherwise.
+    Subscript read (CodeGen.java:2521) routes dynamic-valued maps through the same
+    guarded-crossing path `.get()` already uses.
+
+### Deliberately not doing — Optional/None safety
+**Decision (2026-06-18): no Optional/None construct.** "Keep it safe, but no
+safer." Compile-time null-safety adds unwrap/`?`/Optional ceremony that slows
+day-one programming — the exact fluff this surface exists to avoid. And the BEAM
+target already gives the safety net for free: a nil/badmatch **crashes the process
+loud and immediately** (fail-fast, never a silent wrong value), and supervision
+restarts it. That's the null-safety story — runtime loud-crash + supervision, not
+type-level ceremony. The bar is: catch the footguns that corrupt data silently
+(type confusion across boundaries, mixed-dict misuse), not the ones the runtime
+already makes loud.
