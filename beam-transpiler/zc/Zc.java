@@ -45,16 +45,21 @@ public class Zc {
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
       case "run" -> {
-        boolean scriptFile = args.length >= 2
-            && (args[1].endsWith(".zinc") || args[1].endsWith(".zn"));
-        boolean scriptDir = args.length >= 2 && Files.isDirectory(Path.of(args[1]))
-            && !Files.exists(Path.of(args[1]).resolve("zinc.toml")); // a folder of .zn, no project
+        // --once: run the entry and exit even for an Application (main + init:stop), instead
+        // of staying alive as a service. The CI/test/smoke shape -- no hang on a server.
+        boolean once = args.length >= 2 && args[1].equals("--once");
+        int pi = once ? 2 : 1;
+        String path = args.length > pi ? args[pi] : ".";
+        boolean scriptFile = path.endsWith(".zinc") || path.endsWith(".zn");
+        boolean scriptDir = Files.isDirectory(Path.of(path))
+            && !Files.exists(Path.of(path).resolve("zinc.toml")); // a folder of .zn, no project
         if (scriptFile || scriptDir) {
-          runSingle(Path.of(args[1])); // script mode: no project, no zinc.toml
+          runSingle(Path.of(path), once); // script mode: no project, no zinc.toml
         } else {
-          Path dir = projectDir(args);
+          Path dir = Files.exists(Path.of(path).resolve("zinc.toml")) ? Path.of(path)
+              : projectDir(args);
           build(dir);
-          run(dir);
+          if (once) runOnce(dir); else run(dir);
         }
       }
       case "test" -> {
@@ -612,8 +617,9 @@ public class Zc {
     return false;
   }
 
-  /** zc run file.zinc — transpile + erlc + run, one command, no project ceremony. */
-  static void runSingle(Path file) throws Exception {
+  /** zc run file.zinc — transpile + erlc + run, one command, no project ceremony.
+   *  once=true runs the entry and exits (main + init:stop) even for an Application. */
+  static void runSingle(Path file, boolean once) throws Exception {
     if (!Files.exists(file)) die("zc: no such file: " + file);
     useManagedOtp(Map.of()); // no pin: highest installed toolchain, else PATH
     Path out = Files.createTempDirectory("zc-run");
@@ -632,10 +638,18 @@ public class Zc {
     String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
     // +Bd: Ctrl-C terminates instead of the BEAM BREAK menu (dev-tool expectation)
     runErl(out, out, erl, "+Bd", "-noshell", "-pa", out.toString(), "-eval",
-        "main:run(), init:stop().");
+        (once ? "main:main()" : "main:run()") + ", init:stop().");
+  }
+
+  static void runOnce(Path dir) throws Exception {
+    run(dir, true);
   }
 
   static void run(Path dir) throws Exception {
+    run(dir, false);
+  }
+
+  static void run(Path dir, boolean once) throws Exception {
     String erl = managedOtpBin != null ? managedOtpBin.resolve("erl").toString() : "erl";
     var cmd = new ArrayList<>(List.of(erl, "+Bd", "-noshell"));
     for (String d : List.of("_build/default/lib", "_build/default/checkouts")) {
@@ -651,7 +665,7 @@ public class Zc {
       }
     }
     cmd.add("-eval");
-    cmd.add("main:run(), init:stop().");
+    cmd.add((once ? "main:main()" : "main:run()") + ", init:stop().");
     // generated .erl (with @zinc-src + %@L markers) live under src/zinc_gen for crash mapping
     runErl(dir, dir.resolve("src").resolve("zinc_gen"), cmd.toArray(String[]::new));
   }
