@@ -103,6 +103,50 @@ for ex in "${runnable[@]}"; do
   fi
 done
 
+# SQL e2e: real Postgres + epgsql, in its OWN networked container (the batch above has no
+# DB). The Db pool connects in its constructors at boot, so pg must be up first. Skips
+# cleanly if no postgres image is available (Docker Hub is rate-limited; we prefer the
+# unauthenticated public ECR mirror). epgsql lives under src/{,commands,datatypes}.
+SQL_NET=zinc_sql_net; SQL_PG=zincsql-pg; EPG="$PWD/dogfood/sqldemo/_checkouts/epgsql"
+sql_cleanup() { docker rm -f "$SQL_PG" >/dev/null 2>&1; docker network rm "$SQL_NET" >/dev/null 2>&1; }
+if [ ! -d "$EPG/src" ]; then
+  echo "SKIP  sql (no epgsql checkout)"
+else
+  sql_cleanup; docker network create "$SQL_NET" >/dev/null 2>&1
+  pgok=
+  for img in public.ecr.aws/docker/library/postgres:16-alpine postgres:16-alpine; do
+    if docker run -d --name "$SQL_PG" --network "$SQL_NET" \
+         -e POSTGRES_USER=zinc -e POSTGRES_PASSWORD=zinc -e POSTGRES_DB=zinc \
+         "$img" >/dev/null 2>&1; then pgok=1; break; fi
+    docker rm -f "$SQL_PG" >/dev/null 2>&1
+  done
+  if [ -z "$pgok" ]; then
+    echo "SKIP  sql (no postgres image available)"; sql_cleanup
+  else
+    for i in $(seq 1 40); do
+      docker exec "$SQL_PG" pg_isready -U zinc >/dev/null 2>&1 && break; sleep 1
+    done
+    sleep 1
+    dir=out/py_sql; rm -rf "$dir" && mkdir -p "$dir"
+    if ! "${ZC[@]}" examples/py/sql.zn "$dir" >/dev/null 2>"$dir/transpile.err"; then
+      echo "FAIL  sql (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1
+    else
+      got=$(docker run --rm --user "$(id -u):$(id -g)" --network "$SQL_NET" \
+        -v "$PWD/$dir:/app" -v "$EPG:/epg" -w /app erlang:slim sh -c \
+        'erlc -I /epg/include -o /tmp $(find /epg/src -name "*.erl") >/dev/null 2>&1
+         erlc -pa /tmp -o . *.erl 2>cc.err && \
+           erl -noshell -pa . -pa /tmp -eval "main:main(), init:stop()." 2>run.err')
+      sqlwant=$'1\nvin\n7\n1\n2\nrolled back 2\nsql error caught'
+      if [ "$got" = "$sqlwant" ]; then
+        echo "PASS  sql  ->  $(printf '%s' "$got" | tr '\n' '|')"
+      else
+        echo "FAIL  sql  ->  got '$got'"; sed 's/^/    /' "$dir/run.err"; fail=1
+      fi
+    fi
+    sql_cleanup
+  fi
+fi
+
 # negative cases: each MUST fail transpile with the expected message fragment (errors
 # carry <file>:<line> where they originate -- the source-map contract). Host-only, fast.
 declare -A wanterr=(
