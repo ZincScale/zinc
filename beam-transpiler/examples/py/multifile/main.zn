@@ -2,7 +2,7 @@ from util import mathutil
 
 def main() {
     s = Mathutil.sum_to(4)
-    print(Fmt.banner("{s}"))
+    print(Fmt.banner(f"{s}"))
     t = Tick()
     t.inc()
     print(t.get())

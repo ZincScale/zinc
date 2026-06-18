@@ -3572,7 +3572,17 @@ class CodeGen {
           if (vr.name().equals("Tag")) yield "Tag";
           if (enums.containsKey(vr.name())) yield vr.name();
         }
-        yield x.field().equals("length") ? "int" : null;
+        if (x.field().equals("length")) yield "int";
+        // record component access (p.x): carry the declared component type, so a String
+        // field prints/binds as a String rather than a dynamic value.
+        String objType = exprType(x.obj());
+        String ot = objType == null ? null : baseType(objType);
+        if (ot != null && records.containsKey(ot)) {
+          for (Param c : records.get(ot).components()) {
+            if (c.name().equals(x.field())) yield c.type();
+          }
+        }
+        yield null;
       }
       case ArrayNewExpr x -> x.elemType() + "[]";
       case LambdaExpr x -> "Function";

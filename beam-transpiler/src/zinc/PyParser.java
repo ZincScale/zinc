@@ -898,7 +898,8 @@ final class PyParser {
       advance();
       return new BoolLit(false);
     }
-    if (check(TokKind.STR_LIT)) return fstring(advance().text());
+    if (check(TokKind.STR_LIT)) return new StrLit(advance().text()); // literal braces
+    if (check(TokKind.FSTR_LIT)) return fstring(advance().text());    // f"..." interpolates
     if (match(TokKind.LPAREN)) {
       Expr e = parseExpr();
       expect(TokKind.RPAREN, "')'");

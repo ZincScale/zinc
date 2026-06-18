@@ -1,0 +1,11 @@
+# zinc.http HttpClient builders + the failure ladder (a refused connection is catchable)
+def main() {
+    client = HttpClient.newBuilder().connectTimeout(2000).build()
+    req = HttpRequest.newBuilder("http://127.0.0.1:1/none").header("accept", "text/plain").GET().timeout(2000).build()
+    try {
+        client.send(req)
+        print("no exception?!")
+    } except HttpException as e {
+        print("connect refused caught")
+    }
+}

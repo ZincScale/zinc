@@ -2,13 +2,13 @@
 class Counter(Actor) {
     count = 0
     def add(self, n: int) { self.count = self.count + n }
-    def show(self) -> String { return "Counter(count={self.count})" }
+    def show(self) -> String { return f"Counter(count={self.count})" }
 }
 
 def main() {
     name = "zinc"
     n = 7
-    print("hello {name}, n={n}, sum={n + 1}")
+    print(f"hello {name}, n={n}, sum={n + 1}")
     c = Counter()
     c.add(41)
     print(c.show())

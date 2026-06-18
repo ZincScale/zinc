@@ -1,0 +1,22 @@
+# zinc.io whole-file ops: read/write/append, dir ops, getenv, value-or-throw IOException
+def main() {
+    dir = "/tmp/zinc_fileio_py"
+    Files.createDirectories(dir)
+    cfg = dir + "/app.conf"
+    Files.writeString(cfg, "name=zinc\n")
+    Files.appendString(cfg, "port=8080\n")
+    lines = Files.readLines(cfg)
+    print(lines.size())
+    content: String = Files.readString(cfg)
+    print(content.contains("port=8080"))
+    print(Files.size(cfg))
+    print(Files.list(dir).size())
+    print(Files.isDirectory(dir))
+    try {
+        Files.readString(dir + "/missing.conf")
+    } except Exception as e {
+        print(e.getMessage())
+    }
+    Files.delete(cfg)
+    print(Files.exists(cfg))
+}

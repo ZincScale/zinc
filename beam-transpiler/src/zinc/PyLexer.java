@@ -70,7 +70,7 @@ final class PyLexer {
 
   // A newline after one of these kinds ends a statement -> insert SEMI.
   private static final Set<TokKind> STMT_END = Set.of(
-      TokKind.IDENT, TokKind.INT_LIT, TokKind.FLOAT_LIT, TokKind.STR_LIT,
+      TokKind.IDENT, TokKind.INT_LIT, TokKind.FLOAT_LIT, TokKind.STR_LIT, TokKind.FSTR_LIT,
       TokKind.KW_TRUE, TokKind.KW_FALSE, TokKind.KW_RETURN, TokKind.KW_BREAK,
       TokKind.KW_CONTINUE, TokKind.RPAREN, TokKind.RBRACKET);
 
@@ -102,6 +102,13 @@ final class PyLexer {
         }
         continue;
       }
+      // f"..." is an interpolated string; a plain "..." has literal braces. Consume the
+      // 'f' here and fall into the string lexer, which tags the token FSTR_LIT.
+      boolean fstr = c == 'f' && i + 1 < n && src.charAt(i + 1) == '"';
+      if (fstr) {
+        i++;
+        c = '"';
+      }
       if (c == '"') {
         var buf = new StringBuilder();
         i++;
@@ -130,7 +137,7 @@ final class PyLexer {
           i++;
         }
         if (i >= n) throw new CompileError("unterminated string at line " + line);
-        toks.add(new Token(TokKind.STR_LIT, buf.toString(), line));
+        toks.add(new Token(fstr ? TokKind.FSTR_LIT : TokKind.STR_LIT, buf.toString(), line));
         i++; // closing quote
         continue;
       }
