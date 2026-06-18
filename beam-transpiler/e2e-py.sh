@@ -41,7 +41,7 @@ declare -A want=(
   [fileio]=$'2\ntrue\n20\n1\ntrue\nno such file or directory: /tmp/zinc_fileio_py/missing.conf\nfalse'
   [http_client]='connect refused caught'
   [filestream]=$'5\ntrue'
-  [veneer]=$'13\n3\n5\nlocalhost'
+  [veneer]=$'13\n3\n5\nlocalhost\n42!'
 )
 
 fail=0

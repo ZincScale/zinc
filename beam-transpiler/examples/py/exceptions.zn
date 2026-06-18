@@ -19,12 +19,12 @@ def main() {
     try {
         s.find(99)
     } except NotFound as e {
-        print(e.getMessage())
+        print(e.message)
     }
     print(s.hits())
     try {
         raise NotFound("local")
     } except Exception as e {
-        print(e.getMessage())
+        print(e.message)
     }
 }

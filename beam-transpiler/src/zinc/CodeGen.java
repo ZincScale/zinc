@@ -2570,6 +2570,11 @@ class CodeGen {
               ? "array:size(" + genExpr(x.obj(), env) + ")"
               : "length(" + genExpr(x.obj(), env) + ")";
         }
+        String ot = exprType(x.obj());                       // e.message -> e.getMessage()
+        if (x.field().equals("message")
+            && ot != null && (exceptions.containsKey(ot) || ot.equals("Exception"))) {
+          yield "maps:get(message, " + genExpr(x.obj(), env) + ", <<>>)";
+        }
         yield "maps:get(" + x.field() + ", " + genExpr(x.obj(), env) + ")";
       }
       case Index x -> {
@@ -2604,6 +2609,10 @@ class CodeGen {
       case Call x -> {
         if (x.callee().equals("len") && x.args().size() == 1 && !userDefines("len", 1)) {
           yield genLen(x.args().get(0), env);
+        }
+        if (x.callee().equals("str") && x.args().size() == 1 && !userDefines("str", 1)) {
+          useFmt = true;                                    // any value -> String (binary)
+          yield "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
         }
         if (inActor) {
           MethodDecl pm = curActor == null ? null : curActor.methods().stream()
@@ -3016,13 +3025,20 @@ class CodeGen {
         && fa.obj() instanceof VarRef vr ? vr.name() : null;
   }
 
+  /** The record named by a class-literal arg: `User.class` (Java) or bare `User` (Pythonic).
+   *  Returns the name only if it resolves to a known record; null otherwise. */
+  private String classLitRecordName(Expr e) {
+    String n = classLitName(e);                                  // User.class
+    if (n == null && e instanceof VarRef vr) n = vr.name();      // bare User
+    return n != null && records.containsKey(n) ? n : null;
+  }
+
   private RecordDecl classLitRecord(Expr e, String where) {
-    String n = classLitName(e);
-    RecordDecl r = n == null ? null : records.get(n);
-    if (r == null) {
-      throw new CompileError(where + " expects a record class literal, e.g. User.class");
+    String n = classLitRecordName(e);
+    if (n == null) {
+      throw new CompileError(where + " expects a record type, e.g. User (or User.class)");
     }
-    return r;
+    return records.get(n);
   }
 
   private void emitJsonFrom(RecordDecl r) {
@@ -3639,6 +3655,10 @@ class CodeGen {
         // field prints/binds as a String rather than a dynamic value.
         String objType = exprType(x.obj());
         String ot = objType == null ? null : baseType(objType);
+        if (x.field().equals("message") && ot != null
+            && (exceptions.containsKey(ot) || ot.equals("Exception"))) {
+          yield "String";                                   // e.message -> getMessage()
+        }
         if (ot != null && records.containsKey(ot)) {
           for (Param c : records.get(ot).components()) {
             if (c.name().equals(x.field())) yield c.type();
@@ -3682,6 +3702,9 @@ class CodeGen {
         if (x.callee().equals("len") && x.args().size() == 1 && !userDefines("len", 1)) {
           yield "int";
         }
+        if (x.callee().equals("str") && x.args().size() == 1 && !userDefines("str", 1)) {
+          yield "String";
+        }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
         MethodDecl md = ci == null ? null
             : ci.methods().get(x.callee() + "/" + x.args().size());
@@ -3701,12 +3724,11 @@ class CodeGen {
           if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
           if (vr.name().equals("HttpClient")) yield "HttpClientBuilder";
           if (vr.name().equals("Json")) {
-            String rec = classLitName(x.args().isEmpty() ? null : x.args().get(0));
+            String rec = x.args().isEmpty() ? null : classLitRecordName(x.args().get(0));
             yield switch (x.method()) {
               case "encode" -> "String";
-              case "decode" -> rec != null && records.containsKey(rec) ? rec : null;
-              case "decodeAll", "decodeList" -> rec != null && records.containsKey(rec)
-                  ? "List<" + rec + ">" : null;
+              case "decode" -> rec;
+              case "decodeAll", "decodeList" -> rec != null ? "List<" + rec + ">" : null;
               default -> null; // parse: dynamic
             };
           }

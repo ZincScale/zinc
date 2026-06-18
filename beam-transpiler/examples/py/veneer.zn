@@ -12,4 +12,6 @@ def main() {
     cfg = {"host": "localhost", "port": 8080}   # mixed values -> dynamic
     host: String = cfg["host"]                  # crossing makes it a String
     print(host)
+
+    print(str(42) + "!")                  # str(): any value -> String
 }
