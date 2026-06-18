@@ -334,7 +334,6 @@ public class Zc {
       ensureJre(client);
       return;
     }
-    String resolved = null;   // full version, kept for the el-RPM fallback below
     for (String flavor : OTP_FLAVORS) {
       String base = "https://builds.hex.pm/builds/otp/" + flavor + "/";
       var builds = client.send(HttpRequest.newBuilder(URI.create(base + "builds.txt")).build(),
@@ -353,7 +352,6 @@ public class Zc {
         }
       }
       if (best == null) continue;
-      resolved = best;
       System.out.println("zc: downloading OTP " + best + " (" + flavor + ") ...");
       var tgz = client.send(
           HttpRequest.newBuilder(URI.create(base + "OTP-" + best + ".tar.gz")).build(),
@@ -393,12 +391,12 @@ public class Zc {
     // NIF can need OpenSSL symbols (e.g. SM4) that RHEL strips, so it fails to load. RabbitMQ
     // ships el<N> RPMs built against the host's OpenSSL — crypto loads. Gated by sanityOtp.
     String elMajor = elMajor();
-    if (resolved != null && elMajor != null && commandExists("rpm2cpio")
-        && commandExists("cpio")) {
+    String elVer = elMajor == null ? null : resolveElVersion(client, pin); // RabbitMQ's own tags
+    if (elVer != null && commandExists("rpm2cpio") && commandExists("cpio")) {
       String arch = System.getProperty("os.arch").contains("aarch64") ? "aarch64" : "x86_64";
-      String url = "https://github.com/rabbitmq/erlang-rpm/releases/download/v" + resolved
-          + "/erlang-" + resolved + "-1.el" + elMajor + "." + arch + ".rpm";
-      System.out.println("zc: downloading OTP " + resolved + " (rabbitmq el" + elMajor + ") ...");
+      String url = "https://github.com/rabbitmq/erlang-rpm/releases/download/v" + elVer
+          + "/erlang-" + elVer + "-1.el" + elMajor + "." + arch + ".rpm";
+      System.out.println("zc: downloading OTP " + elVer + " (rabbitmq el" + elMajor + ") ...");
       var rpm = client.send(HttpRequest.newBuilder(URI.create(url)).build(),
           HttpResponse.BodyHandlers.ofByteArray());
       if (rpm.statusCode() == 200) {
@@ -410,11 +408,11 @@ public class Zc {
         exec(tmp, "sh", "-c", "rpm2cpio '" + rpmf + "' | cpio -idm --quiet");
         Path root = tmp.resolve("usr/lib64/erlang"); // RPM payload root (relocatable erl)
         if (Files.isDirectory(root) && sanityOtp(root)) {
-          Path dst = otpDir.resolve(resolved);
+          Path dst = otpDir.resolve(elVer);
           Files.move(root, dst);
-          if (!sanityOtp(dst)) die("zc: OTP " + resolved + " failed sanity after move");
+          if (!sanityOtp(dst)) die("zc: OTP " + elVer + " failed sanity after move");
           Files.writeString(dst.resolve(".zc-flavor"), "rabbitmq-el" + elMajor + "\n");
-          System.out.println("zc: installed OTP " + resolved + " -> " + dst);
+          System.out.println("zc: installed OTP " + elVer + " -> " + dst);
           ensureRebar3(client);
           ensureJre(client);
           return;
@@ -435,6 +433,28 @@ public class Zc {
       if (!rpmFamily) return null;
       var m = java.util.regex.Pattern.compile("VERSION_ID=\"?(\\d+)").matcher(os);
       return m.find() ? m.group(1) : null;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /** Highest RabbitMQ erlang-rpm tag matching the pin, read from its own git refs (smart-HTTP
+   *  info/refs — no GitHub API rate limit, no git binary). Pin "29" -> "29.0.2". Decoupled
+   *  from builds.hex.pm so a version skew between the two can't 404 the el RPM. null if none. */
+  static String resolveElVersion(HttpClient client, String pin) {
+    try {
+      var refs = client.send(HttpRequest.newBuilder(URI.create(
+          "https://github.com/rabbitmq/erlang-rpm.git/info/refs?service=git-upload-pack"))
+          .build(), HttpResponse.BodyHandlers.ofString());
+      if (refs.statusCode() != 200) return null;
+      var m = java.util.regex.Pattern.compile("refs/tags/v([0-9][0-9.]*[0-9])").matcher(refs.body());
+      String best = null;
+      while (m.find()) {
+        String v = m.group(1);
+        if (!(v.equals(pin) || v.startsWith(pin + "."))) continue;
+        if (best == null || cmpVersion(v, best) > 0) best = v;
+      }
+      return best;
     } catch (Exception e) {
       return null;
     }
