@@ -1,5 +1,9 @@
 # Examples — a reading path
 
+> **Writing braces-Python (`.zn`)?** The current surface's examples live in
+> [`py/`](py/) (run by `../e2e-py.sh`). This page is the **legal-Java** (`.zinc`) reading
+> path — same BEAM backend, Java syntax — kept green by `../e2e.sh`.
+
 These are the programs the test suite runs (`../e2e.sh`): each is transpiled, compiled with
 `erlc`, run on a real BEAM, and its output asserted — so every one is known-good, runnable
 zinc. New here? Read them roughly top to bottom; each section builds on the last. Pair them
