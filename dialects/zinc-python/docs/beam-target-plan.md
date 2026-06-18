@@ -145,6 +145,15 @@ is replaced by the checker + LSP.
 
 # Stdlib veneer (spec — 2026-06-18)
 
+**STATUS: ALL 5 ITEMS DONE (2026-06-18).** Commits: 721a8c3 (subscript + `len()`),
+a2d1c6d (`.class` drop + `str()` + `e.message`), 270686d (`http.get` facade). Both
+suites green (braces-Python e2e + legal-Java e2e + javac gate). As-built deltas from
+the spec below: `str()` reuses the existing general `$fmt` helper (not a new `$str`);
+item 1 also gave homogeneous **list** literals a `List<T>` type (not just dicts); and a
+follow-on (3c079ed) made PyParser **keep generic type args** so `Channel<String>`/
+`List<int>`/`Map<String,int>` annotations work. Coverage lives in `examples/py/veneer.zn`
+plus `json.zn`/`exceptions.zn`/`http_facade.zn`.
+
 ## Why
 The `.zn` grammar is already Python-familiar, but the **library idioms still read
 like Java** — `HttpClient.newBuilder()`, `Json.decode(User.class, …)`,
@@ -164,7 +173,7 @@ exists.
 
 ## Items
 
-### 1. Subscript indexing for dicts — `d["k"]` / `d["k"] = v`
+### 1. Subscript indexing for dicts — `d["k"]` / `d["k"] = v` ✅ DONE
 The most visible inconsistency (lists subscript, dicts don't).
 - **Read** — `genExpr` `case Index` (CodeGen.java:2521): add a `Map`/`HashMap`
   base-type branch → `maps:get(Key, M)`, ordered `T[]`→`array:get`,
@@ -174,7 +183,7 @@ The most visible inconsistency (lists subscript, dicts don't).
   genMutator's `put` uses (1982); type-guard the value via existing `guarded(...)`.
 - Compat: Java surface never indexes maps with `[]`; `.get/.put` stay working.
 
-### 2. Global `len(x)` — one spelling for length
+### 2. Global `len(x)` — one spelling for length ✅ DONE
 - Builtin in `genExpr` `case Call` (CodeGen.java:2545), dispatched on
   `exprType(arg)`: `String`→`string:length`, `List`→`length` (**keeps the O(n)
   cost warning, per the 2026-06-12 honest-cost policy**), `ArrayList`/`T[]`→
@@ -183,7 +192,7 @@ The most visible inconsistency (lists subscript, dicts don't).
 - Guard: only a builtin when no user function named `len` is in scope (don't
   hijack the Java surface).
 
-### 3. `str(x)` and `e.message`
+### 3. `str(x)` and `e.message` ✅ DONE
 - **`str(x)`** — builtin Call, **general over any value**: already-`String`
   passthrough; everything else (int/float/bool/binary/exception) via one prelude
   helper `'$str'/1`. Return type `String`.
@@ -191,12 +200,12 @@ The most visible inconsistency (lists subscript, dicts don't).
   the `getMessage` lowering (CodeGen.java:2897–2900 / 3802). Dispatched on the
   exception type, so a record with a real `message` field is unaffected.
 
-### 4. Drop `.class` in `Json.decode` — accept the bare record name
+### 4. Drop `.class` in `Json.decode` — accept the bare record name ✅ DONE
 - `classLitRecord` (CodeGen.java:2957): if `classLitName` returns null, also
   accept a bare `VarRef` naming a known record. `Json.decode(User, s)` works;
   `User.class` still works. Flows to `decodeAll` and other `classLitRecord` callers.
 
-### 5. `http.get(url)` facade — keep the builder for power users
+### 5. `http.get(url)` facade — keep the builder for power users ✅ DONE
 - `http` namespace in `genNamespaceCall`: `http.get(url)`, `http.post(url, body)`,
   `http.put`, `http.delete` → convenience entries `'zinc.http':get/1`, `post/2`,
   etc. that build the default client + request and call existing `send` (same
