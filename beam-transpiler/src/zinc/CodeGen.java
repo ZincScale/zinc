@@ -111,6 +111,14 @@ class CodeGen {
           + "'$fmt'(X) when is_integer(X) -> integer_to_binary(X);\n"
           + "'$fmt'(X) -> iolist_to_binary(io_lib:format(\"~p\", [X])).";
 
+  private static final String UUID_HELPER =
+      "'$uuid4'() ->\n"
+          + "    <<A:32, B:16, C:16, D:16, E:48>> = crypto:strong_rand_bytes(16),\n"
+          + "    C2 = (C band 16#0fff) bor 16#4000,   %% version 4\n"
+          + "    D2 = (D band 16#3fff) bor 16#8000,   %% variant 10\n"
+          + "    iolist_to_binary(io_lib:format("
+          + "\"~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b\", [A, B, C2, D2, E])).";
+
   // Double/Float.parseDouble: Java accepts integer-looking strings ("30") as floats,
   // but Erlang's binary_to_float needs a decimal point -- fall back to an integer parse.
   private static final String PARSEFLOAT_HELPER =
@@ -194,6 +202,7 @@ class CodeGen {
 
   // per-output-module usage flags: helpers are emitted only when referenced
   private boolean useFmt;
+  private boolean useUuid;
   private boolean useParseFloat;
   private boolean useSfx;
   private boolean useOk;
@@ -216,6 +225,7 @@ class CodeGen {
   private List<String> usedHelpers() {
     var out = new ArrayList<String>();
     if (useFmt) out.add(FMT_HELPER);
+    if (useUuid) out.add(UUID_HELPER);
     if (useParseFloat) out.add(PARSEFLOAT_HELPER);
     if (useSfx) out.add(SFX_HELPER);
     if (useOk) out.add(OK_HELPER);
@@ -399,6 +409,7 @@ class CodeGen {
     helpers = new ArrayList<>();
     dispHelpers.clear();
     useFmt = false;
+    useUuid = false;
     useSfx = false;
     useOk = false;
     useIdx = false;
@@ -3222,6 +3233,30 @@ class CodeGen {
               + " (compress/decompress)");
         };
       }
+      case "Crypto" -> {       // hashes/HMAC -> byte[]; pair with Hex/Base64 for tokens
+        return switch (x.method()) {
+          case "sha256" -> "crypto:hash(sha256, " + genExpr(x.args().get(0), env) + ")";
+          case "sha1" -> "crypto:hash(sha, " + genExpr(x.args().get(0), env) + ")";
+          case "md5" -> "crypto:hash(md5, " + genExpr(x.args().get(0), env) + ")";
+          case "hmacSha256" -> "crypto:mac(hmac, sha256, " + genExpr(x.args().get(0), env)
+              + ", " + genExpr(x.args().get(1), env) + ")";
+          default -> throw new CompileError("unsupported: Crypto." + x.method()
+              + " (sha256/sha1/md5/hmacSha256)");
+        };
+      }
+      case "Random" -> {
+        return switch (x.method()) {
+          case "int" -> "(rand:uniform(" + genExpr(x.args().get(0), env) + ") - 1)"; // 0..n-1
+          case "float" -> "rand:uniform()";                                          // 0.0..1.0
+          case "bytes" -> "crypto:strong_rand_bytes(" + genExpr(x.args().get(0), env) + ")";
+          default -> throw new CompileError("unsupported: Random." + x.method()
+              + " (int/float/bytes)");
+        };
+      }
+      case "Uuid" -> {
+        if (x.method().equals("v4")) { useUuid = true; return "'$uuid4'()"; }
+        throw new CompileError("unsupported: Uuid." + x.method() + " (v4)");
+      }
       case "Log" -> {
         // println is the dumb stdout pipe; Log.* is the BEAM logger stream, where
         // supervisor crash reports already land. Module metadata injected statically.
@@ -3894,6 +3929,16 @@ class CodeGen {
             yield x.method().equals("encode") ? "String" : "byte[]";
           }
           if (vr.name().equals("Gzip")) yield "byte[]";
+          if (vr.name().equals("Crypto")) yield "byte[]";
+          if (vr.name().equals("Random")) {
+            yield switch (x.method()) {
+              case "int" -> "int";
+              case "float" -> "double";
+              case "bytes" -> "byte[]";
+              default -> null;
+            };
+          }
+          if (vr.name().equals("Uuid")) yield "String";
           if (vr.name().equals("Math")) {
             yield switch (x.method()) {
               case "sqrt", "pow", "floor", "ceil" -> "double";
