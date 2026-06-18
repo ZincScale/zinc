@@ -261,7 +261,7 @@ public class Zc {
       exec(tmp, "tar", "xf", tar.toString());
       Files.createDirectories(dst);
       exec(dst, "tar", "xzf", tmp.resolve("contents.tar.gz").toString());
-      System.out.println("zc: vendored " + name + " " + vsn + " (hex)");
+      System.err.println("zc: vendored " + name + " " + vsn + " (hex)");
       requirements(tmp.resolve("metadata.config")).forEach(queue::putIfAbsent);
     }
   }
@@ -635,7 +635,7 @@ public class Zc {
     useManagedOtp(cfg);
     ensureGenerated(dir, cfg);
     vendorDeps(dir, cfg);
-    exec(dir, rebarCmd("compile"));
+    execErr(dir, rebarCmd("compile")); // build progress on stderr; stdout stays the program's
   }
 
   /** zc release — a self-contained OTP release (ERTS + .beam + boot script) via relx,
@@ -753,6 +753,24 @@ public class Zc {
     return jar != null
         ? new String[] {java, "-cp", jar.toString(), "zinc.Main"}
         : new String[] {java, home.resolve("src/zinc/Main.java").toString()};
+  }
+
+  /** Like exec, but the child's stdout goes to stderr — for build/progress output so a
+   *  `zc run` of a project keeps stdout to the program alone. */
+  static void execErr(Path dir, String... cmd) throws Exception {
+    var pb = new ProcessBuilder(cmd).directory(dir.toFile());
+    pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+    pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new java.io.File("/dev/stderr")));
+    pb.environment().put("ZINC_HOME", home.toString());
+    pb.environment().put("ZINC_JAVA",
+        Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    if (managedOtpBin != null) {
+      pb.environment().put("PATH",
+          managedOtpBin + ":" + pb.environment().getOrDefault("PATH", ""));
+    }
+    int code = pb.start().waitFor();
+    if (code != 0) System.exit(code);
   }
 
   static void exec(Path dir, String... cmd) throws Exception {

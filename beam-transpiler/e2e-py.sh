@@ -79,7 +79,11 @@ done
 # `zc` against a Postgres sidecar on localhost. Skips cleanly if no pg image.
 EPG="$PWD/dogfood/sqldemo/_checkouts/epgsql"; SQL_PG=zincsql-pg
 sql_cleanup() { docker rm -f "$SQL_PG" >/dev/null 2>&1; }
-if [ ! -d "$EPG/src" ] || ! command -v docker >/dev/null 2>&1; then
+# heavy: builds the epgsql driver via rebar + a pg sidecar each run. Opt-in (ZC_E2E_SQL=1)
+# so the default suite stays fast; still goes fully through `zc` when enabled.
+if [ -z "${ZC_E2E_SQL:-}" ]; then
+  echo "SKIP  sql (set ZC_E2E_SQL=1 — heavy: builds epgsql + pg, runs through zc)"
+elif [ ! -d "$EPG/src" ] || ! command -v docker >/dev/null 2>&1; then
   echo "SKIP  sql (no epgsql checkout or docker)"
 else
   sql_cleanup; pgok=
