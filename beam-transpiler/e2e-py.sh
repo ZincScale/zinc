@@ -4,9 +4,16 @@
 # frontend differs (Main dispatches .zn to PyLexer/PyParser).
 set -uo pipefail
 cd "$(dirname "$0")"
+mkdir -p out
 JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
-ERL="docker run --rm --user $(id -u):$(id -g)"
+ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
+# compile the transpiler ONCE, then run it as a precompiled class per example
+# (java source-launch recompiled all of src/ in-memory on every invocation -- ~4x slower).
+JAVAC="${JAVA%java}javac"; command -v "$JAVAC" >/dev/null || JAVAC=javac
+CLASSES="out/.classes_py"; rm -rf "$CLASSES" && mkdir -p "$CLASSES"  # own dir: safe alongside e2e.sh
+if ! "$JAVAC" -d "$CLASSES" src/zinc/*.java; then echo "FAIL  transpiler compile"; exit 1; fi
+ZC=("$JAVA" -cp "$CLASSES" zinc.Main)
 
 examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream veneer)
 declare -A want=(
@@ -46,25 +53,57 @@ declare -A want=(
 )
 
 fail=0
+
+# phase 1: transpile everything on the host (no docker)
+runnable=()
 for ex in "${examples[@]}"; do
   dir="out/py_$ex"
   rm -rf "$dir" && mkdir -p "$dir"
   src="examples/py/$ex.zn"
   [ -d "examples/py/$ex" ] && src="examples/py/$ex"   # directory = multi-file project
-  if ! "$JAVA" src/zinc/Main.java "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
+  if ! "${ZC[@]}" "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
-  got=$($ERL -v "$PWD/$dir:/app" -w /app erlang:slim sh -c \
-    'erlc -o . *.erl 2>cc.err && erl -noshell -pa . -eval "main:main(), init:stop()." 2>run.err' 2>/dev/null)
-  if [ "$got" = "${want[$ex]}" ]; then
+  runnable+=("$ex")
+done
+
+# phase 2: ONE container compiles + runs every case (was one container spin per case)
+rm -f out/.codes_py
+{
+  echo 'set -u'
+  for ex in "${runnable[@]}"; do
+    cat <<EOS
+if erlc -o out/py_$ex out/py_$ex/*.erl 2> out/py_$ex/compile.err; then
+  timeout 120 erl -noshell -pa out/py_$ex -eval "main:main(), init:stop()." \
+    > out/py_$ex/run.out 2> out/py_$ex/run.err
+  echo "$ex:\$?" >> out/.codes_py
+else
+  echo "$ex:erlc" >> out/.codes_py
+fi
+EOS
+  done
+} > out/.runner_py.sh
+$ERL sh out/.runner_py.sh
+
+# phase 3: assert each case from the artifacts
+for ex in "${runnable[@]}"; do
+  dir="out/py_$ex"
+  code=$(grep "^$ex:" out/.codes_py | head -1 | cut -d: -f2)
+  if [ "$code" = "erlc" ]; then
+    echo "FAIL  $ex (erlc)"; sed 's/^/    /' "$dir/compile.err"; fail=1; continue
+  fi
+  got=$(cat "$dir/run.out")
+  if [ "${code:-1}" -ne 0 ]; then
+    echo "FAIL  $ex  ->  exit $code (want 0)"; sed 's/^/    /' "$dir/run.err"; fail=1
+  elif [ "$got" = "${want[$ex]}" ]; then
     echo "PASS  $ex  ->  $got"
   else
-    echo "FAIL  $ex  ->  got '$got'  want '${want[$ex]}'"; fail=1
+    echo "FAIL  $ex  ->  got '$got'  want '${want[$ex]}'"; sed 's/^/    /' "$dir/run.err"; fail=1
   fi
 done
 
 # negative cases: each MUST fail transpile with the expected message fragment (errors
-# carry <file>:<line> where they originate -- the source-map contract).
+# carry <file>:<line> where they originate -- the source-map contract). Host-only, fast.
 declare -A wanterr=(
   [type_local]='type_local.zn:2: x: cannot bind a String to int'
   [return_void]='return_void.zn:2: return: void method cannot return a value'
@@ -80,7 +119,7 @@ declare -A wanterr=(
 for ex in "${!wanterr[@]}"; do
   dir="out/pyneg_$ex"
   rm -rf "$dir" && mkdir -p "$dir"
-  if "$JAVA" src/zinc/Main.java "examples/py_neg/$ex.zn" "$dir" >/dev/null 2>"$dir/err"; then
+  if "${ZC[@]}" "examples/py_neg/$ex.zn" "$dir" >/dev/null 2>"$dir/err"; then
     echo "FAIL  neg/$ex  ->  transpiled, expected error '${wanterr[$ex]}'"; fail=1; continue
   fi
   if grep -qF "${wanterr[$ex]}" "$dir/err"; then

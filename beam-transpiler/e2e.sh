@@ -8,6 +8,12 @@ JAVA="${JAVA_BIN:-$HOME/.local/java/current/bin/java}"
 command -v "$JAVA" >/dev/null || JAVA=java
 # --user keeps files written into the mount owned by the host user.
 ERL="docker run --rm --user $(id -u):$(id -g) -v $PWD:/app -w /app erlang:slim"
+# compile the transpiler ONCE, then run it as a precompiled class per example
+# (java source-launch recompiled all of src/ in-memory on every invocation -- ~4x slower).
+JAVAC="${JAVA%java}javac"; command -v "$JAVAC" >/dev/null || JAVAC=javac
+CLASSES="out/.classes"; rm -rf "$CLASSES" && mkdir -p "$CLASSES"
+if ! "$JAVAC" -d "$CLASSES" src/zinc/*.java; then echo "FAIL  transpiler compile"; exit 1; fi
+ZC=("$JAVA" -cp "$CLASSES" zinc.Main)
 
 examples=(sum_evens first_over countdown structs arrays strings bools elseif floats breakcont multifile actor_counter actor_selfheal actor_children exceptions interfaces guards logging http_client json ffi atoms_tuples lambdas hashmap trycatch javastrings javacollections actor_args switchenum tcpserver close modifiers arraylist warn_iget mathstr ternary fileio filestream filewrite proc_json proc_csv proc_binary mapiter casts channel pipeline)
 declare -A want=(
@@ -110,7 +116,7 @@ if ./legaljava.sh; then echo "PASS  legal-Java gate"; else echo "FAIL  legal-Jav
 for ex in "${!wanterr[@]}"; do
   dir="out/neg_$ex"
   rm -rf "$dir" && mkdir -p "$dir"
-  if "$JAVA" src/zinc/Main.java "examples/neg/$ex.zinc" "$dir" >/dev/null 2>"$dir/err"; then
+  if "${ZC[@]}" "examples/neg/$ex.zinc" "$dir" >/dev/null 2>"$dir/err"; then
     echo "FAIL  neg/$ex  ->  transpiled, expected error '${wanterr[$ex]}'"; fail=1; continue
   fi
   if grep -qF "${wanterr[$ex]}" "$dir/err"; then
@@ -127,7 +133,7 @@ for ex in "${examples[@]}"; do
   rm -rf "$dir" && mkdir -p "$dir"
   src="examples/programs/$ex.zinc"
   [ -d "examples/programs/$ex" ] && src="examples/programs/$ex"   # project mode: a dir of .zinc
-  if ! "$JAVA" src/zinc/Main.java "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
+  if ! "${ZC[@]}" "$src" "$dir" >/dev/null 2>"$dir/transpile.err"; then
     echo "FAIL  $ex (transpile)"; sed 's/^/    /' "$dir/transpile.err"; fail=1; continue
   fi
   runnable+=("$ex")
