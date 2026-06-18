@@ -334,6 +334,7 @@ public class Zc {
       ensureJre(client);
       return;
     }
+    String resolved = null;   // full version, kept for the el-RPM fallback below
     for (String flavor : OTP_FLAVORS) {
       String base = "https://builds.hex.pm/builds/otp/" + flavor + "/";
       var builds = client.send(HttpRequest.newBuilder(URI.create(base + "builds.txt")).build(),
@@ -352,6 +353,7 @@ public class Zc {
         }
       }
       if (best == null) continue;
+      resolved = best;
       System.out.println("zc: downloading OTP " + best + " (" + flavor + ") ...");
       var tgz = client.send(
           HttpRequest.newBuilder(URI.create(base + "OTP-" + best + ".tar.gz")).build(),
@@ -387,8 +389,65 @@ public class Zc {
       ensureJre(client);
       return;
     }
-    die("zc: no runnable OTP build found for pin '" + pin + "' (flavors: "
-        + String.join(", ", OTP_FLAVORS) + ")");
+    // RHEL/Fedora fallback: the builds.hex.pm tarballs are Debian-built and their crypto
+    // NIF can need OpenSSL symbols (e.g. SM4) that RHEL strips, so it fails to load. RabbitMQ
+    // ships el<N> RPMs built against the host's OpenSSL — crypto loads. Gated by sanityOtp.
+    String elMajor = elMajor();
+    if (resolved != null && elMajor != null && commandExists("rpm2cpio")
+        && commandExists("cpio")) {
+      String arch = System.getProperty("os.arch").contains("aarch64") ? "aarch64" : "x86_64";
+      String url = "https://github.com/rabbitmq/erlang-rpm/releases/download/v" + resolved
+          + "/erlang-" + resolved + "-1.el" + elMajor + "." + arch + ".rpm";
+      System.out.println("zc: downloading OTP " + resolved + " (rabbitmq el" + elMajor + ") ...");
+      var rpm = client.send(HttpRequest.newBuilder(URI.create(url)).build(),
+          HttpResponse.BodyHandlers.ofByteArray());
+      if (rpm.statusCode() == 200) {
+        Path otpDir = zcHome().resolve("otp");
+        Files.createDirectories(otpDir);
+        Path tmp = Files.createTempDirectory(otpDir, "zc-otp-el"); // same fs -> move is atomic
+        Path rpmf = tmp.resolve("otp.rpm");
+        Files.write(rpmf, rpm.body());
+        exec(tmp, "sh", "-c", "rpm2cpio '" + rpmf + "' | cpio -idm --quiet");
+        Path root = tmp.resolve("usr/lib64/erlang"); // RPM payload root (relocatable erl)
+        if (Files.isDirectory(root) && sanityOtp(root)) {
+          Path dst = otpDir.resolve(resolved);
+          Files.move(root, dst);
+          if (!sanityOtp(dst)) die("zc: OTP " + resolved + " failed sanity after move");
+          Files.writeString(dst.resolve(".zc-flavor"), "rabbitmq-el" + elMajor + "\n");
+          System.out.println("zc: installed OTP " + resolved + " -> " + dst);
+          ensureRebar3(client);
+          ensureJre(client);
+          return;
+        }
+      }
+    }
+    die("zc: no runnable OTP build found for pin '" + pin + "' (tried hexpm "
+        + String.join(", ", OTP_FLAVORS) + (elMajor != null ? " + rabbitmq el" + elMajor : "")
+        + ")");
+  }
+
+  /** RHEL/Fedora major version if this is an rpm-family host, else null (drives the el RPM). */
+  static String elMajor() {
+    try {
+      String os = Files.readString(Path.of("/etc/os-release"));
+      boolean rpmFamily = os.matches("(?s).*\\bID=\"?(rhel|centos|rocky|almalinux|fedora|ol)\"?.*")
+          || (os.contains("ID_LIKE=") && (os.contains("rhel") || os.contains("fedora")));
+      if (!rpmFamily) return null;
+      var m = java.util.regex.Pattern.compile("VERSION_ID=\"?(\\d+)").matcher(os);
+      return m.find() ? m.group(1) : null;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  static boolean commandExists(String cmd) {
+    try {
+      return new ProcessBuilder("sh", "-c", "command -v " + cmd)
+          .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+          .redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0;
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   static final String JAVA_MAJOR = "25"; // pinned major; bump deliberately
@@ -459,8 +518,12 @@ public class Zc {
 
   static boolean sanityOtp(Path root) {
     try {
+      // a REAL crypto op, not application:ensure_all_started(crypto): the latter can return
+      // ok even when the NIF's on_load failed, so it let a build whose crypto.so needs
+      // symbols this host's OpenSSL lacks (e.g. SM4 on RHEL) pass. crypto:hash forces the
+      // NIF to load and actually run.
       var pb = new ProcessBuilder(root.resolve("bin/erl").toString(), "-noshell", "-eval",
-          "{ok,_}=application:ensure_all_started(crypto),io:format(\"ok\"),init:stop().");
+          "true=is_binary(crypto:hash(sha256,<<\"zc\">>)),io:format(\"ok\"),init:stop().");
       pb.redirectErrorStream(false);
       Process p = pb.start();
       String out = new String(p.getInputStream().readAllBytes());
