@@ -15,7 +15,7 @@ CLASSES="out/.classes_py"; rm -rf "$CLASSES" && mkdir -p "$CLASSES"  # own dir: 
 if ! "$JAVAC" -d "$CLASSES" src/zinc/*.java; then echo "FAIL  transpiler compile"; exit 1; fi
 ZC=("$JAVA" -cp "$CLASSES" zinc.Main)
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream veneer)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream pipeline veneer)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -49,6 +49,7 @@ declare -A want=(
   [http_client]='connect refused caught'
   [http_facade]='facade refused caught'
   [filestream]=$'5\ntrue'
+  [pipeline]=$'5\ntrue'
   [veneer]=$'13\n3\n5\nlocalhost\n42!'
 )
 

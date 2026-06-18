@@ -433,17 +433,24 @@ final class PyParser {
     return params;
   }
 
-  /** A type name, with erased generics and trailing []. */
+  /** A type name with its generic args and trailing []. Generics are KEPT (e.g.
+   *  Channel<String>, List<int>, Map<String,int>) -- CodeGen reads them via typeArgs to
+   *  type take()/get()/[] and to drive guarded crossings, matching the literal inference
+   *  that already produces HashMap<K,V>/List<T>. */
   private String parseType() {
     StringBuilder t = new StringBuilder(expect(TokKind.IDENT, "type name").text());
-    if (check(TokKind.LT)) { // erased generics
+    if (check(TokKind.LT)) {
+      t.append('<');
       advance();
       int depth = 1;
       while (depth > 0) {
-        if (check(TokKind.LT)) depth++;
-        else if (check(TokKind.GT)) depth--;
-        if (depth > 0) advance();
-        else advance();
+        switch (cur().kind()) {
+          case LT -> { depth++; t.append('<'); }
+          case GT -> { depth--; t.append('>'); }
+          case COMMA -> t.append(',');
+          default -> t.append(cur().text());
+        }
+        advance();
       }
     }
     while (check(TokKind.LBRACKET) && toks.get(pos + 1).kind() == TokKind.RBRACKET) {

@@ -1,0 +1,35 @@
+# 3-stage multi-process pipeline, bounded memory: FileReader (source) -> Upper (transform)
+# -> FileWriter (sink). Each stage runs in its own process; the bounded channels between
+# them give backpressure. The cross-actor streaming arch, end-to-end on braces-Python.
+class Upper(Actor) {
+    # pull each line from `incoming`, uppercase it, push to `outgoing`
+    def run(self, incoming: Channel<String>, outgoing: Channel<String>) {
+        while incoming.hasNext() {
+            outgoing.put(incoming.take().toUpperCase())   # the middle stage does real work
+        }
+        outgoing.close()                                  # signal end-of-stream downstream
+    }
+}
+
+class Main(Application) {
+    def main(self) {
+        inputFile = "/tmp/zinc_pipe_in_py.txt"
+        outputFile = "/tmp/zinc_pipe_out_py.txt"
+        s = ""
+        for i in range(1, 6) {
+            s = s + "line" + i + "\n"
+        }
+        Files.writeString(inputFile, s)
+
+        rawLines = Channel(2)                  # reader -> transform
+        upperLines = Channel(2)                # transform -> writer
+        FileReader.pump(inputFile, rawLines)   # stage 1: file -> rawLines (spawn-and-go)
+        up = Upper()
+        up.run(rawLines, upperLines)           # stage 2: uppercase, in up's own process
+        fw = FileWriter.drain(upperLines, outputFile)   # stage 3: upperLines -> file
+        fw.join()                              # wait for the pipeline to finish
+
+        print(Files.readLines(outputFile).size())            # 5
+        print(Files.readString(outputFile).contains("LINE3")) # true (uppercased)
+    }
+}
