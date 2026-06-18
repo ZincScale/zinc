@@ -1,0 +1,10 @@
+# break and continue inside a for-in-range loop
+def main() {
+    total = 0
+    for i in range(0, 10) {
+        if i == 5 { break }
+        if i % 2 == 1 { continue }
+        total = total + i
+    }
+    print(total)
+}

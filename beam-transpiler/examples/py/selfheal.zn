@@ -1,0 +1,18 @@
+# a supervised worker crashes and is restarted with reset state
+class Worker(Actor) {
+    n = 0
+    def add(self, k: int) { self.n = self.n + k }
+    def get(self) -> int { return self.n }
+    def boom(self) { z = 0
+                     self.n = self.n / z }
+}
+class Main(Application) {
+    w = Worker()
+    def main(self) {
+        self.w.add(5)
+        print(self.w.get())
+        self.w.boom()
+        Sys.sleep(150)
+        print(self.w.get())
+    }
+}

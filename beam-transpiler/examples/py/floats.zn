@@ -1,0 +1,9 @@
+# double arithmetic; int/int is integer division, float/float is real division
+def main() {
+    x = 7.0
+    y = 2.0
+    print(x / y)
+    print(x + 1)
+    print(10 / 3)
+    print(10.0 / 4.0)
+}
