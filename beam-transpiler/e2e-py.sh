@@ -14,8 +14,9 @@ if ! "$JBIN/javac" -d "$D/classes" $(find src/zinc -name '*.java') zc/Zc.java; t
 fi
 printf 'Main-Class: Zc\n' > "$D/manifest.txt"
 "$JBIN/jar" cfm "$D/zc.jar" "$D/manifest.txt" -C "$D/classes" .
+cp -r rebar_zinc "$D/rebar_zinc"   # rebar transpile plugin lives next to the jar (ZINC_HOME_LIB)
 # every case goes through this; timeout is a safety net so no run can hang the suite
-zc() { timeout 90 "$JBIN/java" -DZINC_HOME_LIB="$PWD/$D" -jar "$D/zc.jar" "$@"; }
+zc() { timeout 180 "$JBIN/java" -DZINC_HOME_LIB="$D" -jar "$D/zc.jar" "$@"; }
 
 examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream pipeline veneer sealed encoding record_model webauth)
 declare -A want=(
@@ -75,15 +76,12 @@ for ex in "${examples[@]}"; do
   fi
 done
 
-# SQL: a real zc project (epgsql vendored via _checkouts, no network) built + run through
-# `zc` against a Postgres sidecar on localhost. Skips cleanly if no pg image.
+# SQL: a real zc PROJECT built + run through `zc` against a Postgres sidecar — the full
+# rebar path (epgsql vendored in _checkouts, HEX_OFFLINE so no hex/firewall), all through the
+# tooling. The project's _build is kept across runs so epgsql compiles once, not every time.
 EPG="$PWD/dogfood/sqldemo/_checkouts/epgsql"; SQL_PG=zincsql-pg
 sql_cleanup() { docker rm -f "$SQL_PG" >/dev/null 2>&1; }
-# heavy: builds the epgsql driver via rebar + a pg sidecar each run. Opt-in (ZC_E2E_SQL=1)
-# so the default suite stays fast; still goes fully through `zc` when enabled.
-if [ -z "${ZC_E2E_SQL:-}" ]; then
-  echo "SKIP  sql (set ZC_E2E_SQL=1 — heavy: builds epgsql + pg, runs through zc)"
-elif [ ! -d "$EPG/src" ] || ! command -v docker >/dev/null 2>&1; then
+if [ ! -d "$EPG/src" ] || ! command -v docker >/dev/null 2>&1; then
   echo "SKIP  sql (no epgsql checkout or docker)"
 else
   sql_cleanup; pgok=
@@ -98,17 +96,15 @@ else
   else
     for i in $(seq 1 40); do docker exec "$SQL_PG" pg_isready -U zinc >/dev/null 2>&1 && break; sleep 1; done
     sleep 1
-    proj="$D/sqlproj"; rm -rf "$proj"; mkdir -p "$proj/src" "$proj/_checkouts"
-    ln -s "$EPG" "$proj/_checkouts/epgsql"
+    proj="$PWD/dist/sqlproj"; mkdir -p "$proj/src" "$proj/_checkouts"  # persistent: keep _build
+    [ -e "$proj/_checkouts/epgsql" ] || ln -s "$EPG" "$proj/_checkouts/epgsql"
     printf '[project]\nname = "sqldemo"\nversion = "0.1.0"\n\n[otp]\nversion = "29"\n\n[deps]\nepgsql = "4.7.1"\n' > "$proj/zinc.toml"
     sed 's#zincsql-pg:5432#localhost:5432#' examples/py/sql.zn > "$proj/src/main.zn"
-    ( cd "$proj" && zc run --once . ) >"$D/sql.out" 2>"$D/sql.err"
+    ( cd "$proj" && HEX_OFFLINE=1 zc run --once . ) >"$D/sql.out" 2>"$D/sql.err"
     got=$(cat "$D/sql.out")
     sqlwant=$'1\nvin\n7\n1\n2\nrolled back 2\nsql error caught'
     if [ "$got" = "$sqlwant" ]; then
       echo "PASS  sql  ->  $(printf '%s' "$got" | tr '\n' '|')"
-    elif grep -qs "Unable to load crypto" "$D/sql.out" "$D/sql.err"; then
-      echo "SKIP  sql  (managed OTP crypto NIF unavailable — rebar3 + pg auth need it)"
     else
       echo "FAIL  sql  ->  got '$got'"; sed 's/^/    /' "$D/sql.err"; fail=1
     fi
