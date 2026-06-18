@@ -45,7 +45,11 @@ public class Zc {
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
       case "run" -> {
-        if (args.length >= 2 && (args[1].endsWith(".zinc") || args[1].endsWith(".zn"))) {
+        boolean scriptFile = args.length >= 2
+            && (args[1].endsWith(".zinc") || args[1].endsWith(".zn"));
+        boolean scriptDir = args.length >= 2 && Files.isDirectory(Path.of(args[1]))
+            && !Files.exists(Path.of(args[1]).resolve("zinc.toml")); // a folder of .zn, no project
+        if (scriptFile || scriptDir) {
           runSingle(Path.of(args[1])); // script mode: no project, no zinc.toml
         } else {
           Path dir = projectDir(args);
