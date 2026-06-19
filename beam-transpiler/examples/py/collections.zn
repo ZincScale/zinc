@@ -1,6 +1,6 @@
 # Python list literals + lambda keyword; SAM lambda satisfies a 1-method interface
 interface Op {
-    def apply(self, n: int) -> int
+    def apply(n: int) -> int
 }
 
 def main() {

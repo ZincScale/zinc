@@ -1,17 +1,17 @@
 # nominal protocols: `class X(Greeter)` implements the interface; dynamic dispatch at the
 # call site; a SAM lambda also satisfies a one-method interface.
 interface Greeter {
-    def greet(self, name: String) -> String
+    def greet(name: String) -> String
 }
 
 class English(Greeter) {
     prefix: String = ""
-    def init(self, p: String) { self.prefix = p }
-    def greet(self, name: String) -> String { return self.prefix + name }
+    def init(p: String) { prefix = p }
+    def greet(name: String) -> String { return prefix + name }
 }
 
 class Terse(Greeter) {
-    def greet(self, name: String) -> String { return name + "!" }
+    def greet(name: String) -> String { return name + "!" }
 }
 
 def main() {

@@ -9,7 +9,8 @@ conflict, zinc chooses safe. Here's what to know.
 Blocks use `{ }`, not indentation. **Params must be typed** (`def add(a: int, b: int) -> int`);
 locals infer from assignment (`n = 7`). Return types are checked, and for an `Actor` the
 return type *is* the messaging contract (§ below). f-strings are **explicit** — write
-`f"hi {name}"`, not `"hi {name}"`. `self` is written out, like Python. Chains use `else if`,
+`f"hi {name}"`, not `"hi {name}"`. **`self` is implicit** — write `def incr()` and bare
+`count`, not Python's `def incr(self)`/`self.count` (explicit `self.` still works). Chains use `else if`,
 not `elif`.
 
 ### Concurrency is actors, not asyncio or threads
@@ -60,7 +61,7 @@ compile time. What you can't express statically, you reach for the FFI for (belo
 
 ### Small differences
 - `Sys.sleep(ms)` instead of `time.sleep` (and it takes milliseconds).
-- A service uses `class Main(Application)` with `def main(self)`; a script/tool is just a
+- A service uses `class Main(Application)` with `def main()`; a script/tool is just a
   top-level `def main()`.
 - Your own constants are `enum`s (which lower to BEAM atoms); a raw atom is `Tag.of("x")`.
 - `int` is arbitrary-precision (BEAM bignums) — no overflow.

@@ -3,14 +3,14 @@ class NotFound(Exception) {}
 
 class Store(Actor) {
     hits = 0
-    def find(self, id: int) -> int {
-        self.hits = self.hits + 1
+    def find(id: int) -> int {
+        hits = hits + 1
         if id > 10 {
             raise NotFound("no such id")
         }
         return id * 2
     }
-    def hits(self) -> int { return self.hits }
+    def hits() -> int { return hits }
 }
 
 def main() {

@@ -1,8 +1,8 @@
 # implicit f-strings: any string with {expr} interpolates
 class Counter(Actor) {
     count = 0
-    def add(self, n: int) { self.count = self.count + n }
-    def show(self) -> String { return f"Counter(count={self.count})" }
+    def add(n: int) { count = count + n }
+    def show() -> String { return f"Counter(count={count})" }
 }
 
 def main() {

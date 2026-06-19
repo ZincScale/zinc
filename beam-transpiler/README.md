@@ -8,24 +8,24 @@ functional code, a supervisor, or a Dockerfile.
 # A counter that survives its own crashes. No supervision code — the runtime builds it.
 class Counter(Actor) {
     count = 0
-    def incr(self)       { self.count = self.count + 1 }   # no return => async message (cast)
-    def get(self) -> int { return self.count }             # typed     => sync request (call)
-    def boom(self)       { z = 0
-                           self.count = self.count / z }    # a real crash
+    def incr()       { count = count + 1 }   # no return => async message (cast)
+    def get() -> int { return count }             # typed     => sync request (call)
+    def boom()       { z = 0
+                           count = count / z }    # a real crash
 }
 
 class Main(Application) {
     c = Counter()                  # a supervised child of the app
-    def main(self) {
-        self.c.incr()
-        self.c.incr()
-        self.c.incr()
-        print(self.c.get())        # 3
-        self.c.boom()              # the process crashes...
+    def main() {
+        c.incr()
+        c.incr()
+        c.incr()
+        print(c.get())        # 3
+        c.boom()              # the process crashes...
         Sys.sleep(100)             # ...the supervisor restarts it...
-        print(self.c.get())        # 0  — same handle, fresh state
-        self.c.incr()
-        print(self.c.get())        # 1  — and it keeps serving
+        print(c.get())        # 0  — same handle, fresh state
+        c.incr()
+        print(c.get())        # 1  — and it keeps serving
     }
 }
 ```

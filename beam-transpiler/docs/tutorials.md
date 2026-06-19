@@ -33,15 +33,15 @@ record User(id: String, name: String)
 
 class Store(Actor) {
     users: Map<String, User> = {}
-    def put(self, id: String, u: User) { self.users[id] = u }    # no return -> async (cast)
-    def get(self, id: String) -> User  { return self.users.get(id) }  # typed -> sync (call)
+    def put(id: String, u: User) { users[id] = u }    # no return -> async (cast)
+    def get(id: String) -> User  { return users.get(id) }  # typed -> sync (call)
 }
 
 class Main(Application) {
     store = Store()                     # a supervised child of the app
-    def main(self) {
-        self.store.put("7", User("7", "vin"))
-        print(self.store.get("7").name)
+    def main() {
+        store.put("7", User("7", "vin"))
+        print(store.get("7").name)
     }
 }
 ```
@@ -79,13 +79,13 @@ class Main(Application) {
     server = HttpServer(8080, Router.create()
         .post("/users/{id}", req -> {
             u: User = Json.decode(User, req.body())        # JSON body -> User record
-            self.store.put(req.pathParam("id"), u)
+            store.put(req.pathParam("id"), u)
             return Response.status(201)
         })
         .get("/users/{id}", req ->
-            Response.ok(Json.encode(self.store.get(req.pathParam("id"))))   # User -> JSON
+            Response.ok(Json.encode(store.get(req.pathParam("id"))))   # User -> JSON
                     .header("content-type", "application/json")))
-    def main(self) {
+    def main() {
         print("listening on :8080")
     }
 }
@@ -110,7 +110,7 @@ curl -s localhost:8080/users/7
 The new pieces:
 - **`Router`** is a programmatic table (no annotations); `{id}` is a path parameter read via
   `req.pathParam("id")`.
-- Handlers are **lambdas** that close over `self.store`'s handle — they send it messages.
+- Handlers are **lambdas** that close over `store`'s handle — they send it messages.
 - **`Json.decode(User, …)` / `Json.encode(…)`** use codecs the transpiler *derives from the
   `User` record at compile time* — no reflection, no annotations, no `to_json` boilerplate.
   The bare record name `User` is the Pythonic spelling (`User.class` also works).

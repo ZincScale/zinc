@@ -3,7 +3,7 @@
 # them give backpressure. The cross-actor streaming arch, end-to-end on braces-Python.
 class Upper(Actor) {
     # pull each line from `incoming`, uppercase it, push to `outgoing`
-    def run(self, incoming: Channel<String>, outgoing: Channel<String>) {
+    def run(incoming: Channel<String>, outgoing: Channel<String>) {
         while incoming.hasNext() {
             outgoing.put(incoming.take().toUpperCase())   # the middle stage does real work
         }
@@ -12,7 +12,7 @@ class Upper(Actor) {
 }
 
 class Main(Application) {
-    def main(self) {
+    def main() {
         inputFile = "/tmp/zinc_pipe_in_py.txt"
         outputFile = "/tmp/zinc_pipe_out_py.txt"
         s = ""

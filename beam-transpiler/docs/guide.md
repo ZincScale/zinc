@@ -14,7 +14,7 @@ in parentheses are real, tested examples under [`examples/py/`](../examples/py).
 ## 1. Programs, files, modules
 
 - A top-level **`def main()`** is the entry point of a script or tool — zero ceremony.
-- A long-running service uses an **`Application`** with an instance `def main(self)` (see §6).
+- A long-running service uses an **`Application`** with an instance `def main()` (see §6).
 - Each file is a module, referenced by its **lowercase file name** (Pythonic):
   `from util import mathutil` imports `util/mathutil.zn`, then you call `mathutil.fn(...)`.
   Same-directory modules need no import. (Classes/actors/records stay CapWords.)
@@ -125,12 +125,11 @@ you let it crash and be restarted.
 
 This is the differentiator. Two base classes, both prelude (no import):
 
-- **`(Actor)`** — a supervised, stateful process. Fields are state; methods are the protocol,
-  accessed via `self`. **No return type ⇒ async cast; typed `-> T` ⇒ sync call** (the return
-  type *is* the messaging contract). The instance reference is a handle that survives
-  restarts. A method with no `self`-prefixed name is `public` (its message protocol); mark
-  in-process helpers `_private`-style by keeping them out of the call surface — a private
-  helper is a plain local function, not a message handler.
+- **`(Actor)`** — a supervised, stateful process. Fields are state, accessed directly (`self`
+  is implicit — no `self` param, no `self.` prefix); methods are the protocol. **No return
+  type ⇒ async cast; typed `-> T` ⇒ sync call** (the return type *is* the messaging contract).
+  The instance reference is a handle that survives restarts. Public methods are the message
+  protocol; a `private` method is an in-process helper (a plain local function), not a handler.
 - **`(Application)`** — the one root per runnable service: an OTP application whose
   **Actor-typed fields are its supervised children**, born in declaration order. Hosts
   `main`, receives SIGTERM, owns the exit code.
@@ -143,15 +142,15 @@ an Actor's Actor-fields are its children; failure flows down, never up.
 ```python
 class Counter(Actor) {
     count = 0
-    def incr(self)       { self.count = self.count + 1 }   # cast
-    def get(self) -> int { return self.count }             # call
+    def incr()       { count = count + 1 }   # cast
+    def get() -> int { return count }             # call
 }
 
 class Main(Application) {
     c = Counter()                  # a permanent, supervised child
-    def main(self) {
-        self.c.incr()
-        print(self.c.get())        # 1
+    def main() {
+        c.incr()
+        print(c.get())        # 1
     }
 }
 ```
@@ -160,7 +159,7 @@ Crash it and the supervisor restarts it with the same handle — see the
 [README hook](../README.md) and `selfheal`, `supervised`, `counter`.
 
 A program exits when `main` returns **and** no actors are alive; a service with static
-children runs until stopped. An Actor may declare `def close(self)` — run as `terminate` on
+children runs until stopped. An Actor may declare `def close()` — run as `terminate` on
 *orderly* stop only (resource cleanup).
 
 ## 7. I/O and streaming — bounded memory, 8 KB → 5 GB
@@ -194,7 +193,7 @@ buffer between actors — `put` blocks when full, the consumer pulls. `FileReade
 an actor that drains one channel and feeds the next:
 ```python
 class Upper(Actor) {                                       # a transform stage
-    def run(self, incoming: Channel<String>, outgoing: Channel<String>) {
+    def run(incoming: Channel<String>, outgoing: Channel<String>) {
         while incoming.hasNext() {
             outgoing.put(incoming.take().toUpperCase())
         }
