@@ -14,7 +14,7 @@ Channel (bounded backpressure), typed locals (`x: T = e`), f-strings (`"{expr}"`
 try/except + raise + user exceptions (`class E(Exception) {}`, actor failure-relay),
 records (`record Point(x: int, y: int)`, Pythonic `p.x`), enums (`Color.RED`),
 match/case, list literals (`[a, b, c]`), Python `lambda` keyword, multi-file projects
-(file -> eponymous class, `from util import mathutil` -> `Mathutil.fn(...)`).
+(file -> module by lowercase name, `from util import mathutil` -> `mathutil.fn(...)`).
 
 Errors carry `<file>:<line>` (PyParser stamps statement lines); 9 negative tests assert
 type mismatches (local/return/reassign/arg), parse errors, and structural errors.

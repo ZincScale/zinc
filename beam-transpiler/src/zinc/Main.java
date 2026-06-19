@@ -311,8 +311,9 @@ public class Main {
       if (file.toString().endsWith(".zn")) { // braces-Python surface
         String stem = file.getFileName().toString();
         stem = stem.substring(0, stem.length() - ".zn".length());
-        String cls = stem.isEmpty() ? "Main"
-            : Character.toUpperCase(stem.charAt(0)) + stem.substring(1);
+        // a file with top-level defs is a MODULE, referenced by its lowercase file name
+        // (Pythonic: `mathutil.sum_to(...)`), not a capitalized Java-style class.
+        String cls = stem.isEmpty() ? "Main" : stem;
         return new PyParser(PyLexer.lex(src), cls).parseProgram();
       }
       return new Parser(Lexer.lex(src)).parseProgram();

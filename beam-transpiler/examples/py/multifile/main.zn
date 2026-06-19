@@ -1,9 +1,9 @@
 from util import mathutil
 
 def main() {
-    s = Mathutil.sum_to(4)
-    print(Fmt.banner(f"{s}"))
-    t = Tick()
+    s = mathutil.sum_to(4)         # module ref = lowercase file name (Pythonic)
+    print(fmt.banner(f"{s}"))      # same-dir module, no import needed
+    t = Tick()                     # a class is still CapWords
     t.inc()
     print(t.get())
 }

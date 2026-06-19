@@ -15,8 +15,9 @@ in parentheses are real, tested examples under [`examples/py/`](../examples/py).
 
 - A top-level **`def main()`** is the entry point of a script or tool — zero ceremony.
 - A long-running service uses an **`Application`** with an instance `def main(self)` (see §6).
-- Each file becomes a module; top-level `def`s live on a class named after the file.
-  `from util import mathutil` imports `util/mathutil.zn` and you call `Mathutil.fn(...)`.
+- Each file is a module, referenced by its **lowercase file name** (Pythonic):
+  `from util import mathutil` imports `util/mathutil.zn`, then you call `mathutil.fn(...)`.
+  Same-directory modules need no import. (Classes/actors/records stay CapWords.)
 
 ```python
 def main() {

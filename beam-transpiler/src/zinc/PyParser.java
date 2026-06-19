@@ -202,9 +202,9 @@ final class PyParser {
     interfaces.add(new InterfaceDecl(name, sigs));
   }
 
-  /** `import util.mathutil`  or  `from util import mathutil` -> Import([util, Mathutil]):
-   *  a sibling module is a class, so the leaf is capitalized to the class name. FFI imports
-   *  (`from erlang import gen_tcp`) keep the lowercase OTP module name. */
+  /** `import util.mathutil`  or  `from util import mathutil` -> Import([util, mathutil]):
+   *  a sibling module is referenced by its lowercase file name (Pythonic), same as the
+   *  Erlang module it lowers to. FFI imports (`from erlang import gen_tcp`) are the same shape. */
   private void parseImports(List<Import> imports) {
     if (match(TokKind.KW_IMPORT)) {
       var path = new ArrayList<String>();
@@ -229,14 +229,9 @@ final class PyParser {
     } while (match(TokKind.COMMA));
   }
 
-  /** Capitalize the leaf (= class name) unless this is an erlang.* FFI import. */
+  /** Module names stay as written (lowercase file name) — both for sibling modules and
+   *  erlang.* FFI imports; the leaf is the Erlang module it lowers to. */
   private List<String> classify(List<String> path) {
-    if (path.isEmpty() || path.get(0).equals("erlang")) return path;
-    int last = path.size() - 1;
-    String leaf = path.get(last);
-    if (!leaf.isEmpty() && Character.isLowerCase(leaf.charAt(0))) {
-      path.set(last, Character.toUpperCase(leaf.charAt(0)) + leaf.substring(1));
-    }
     return path;
   }
 
