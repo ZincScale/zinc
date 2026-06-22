@@ -58,7 +58,7 @@ declare -A want=(
   [encoding]=$'aGk=\ntrue\n4142\ntrue\ntrue'
   [record_model]=$'user\n8\nvin\n2'
   [webauth]=$'true\n64\n64\n36\n0\ntrue'
-  [resources]=$'a.txt\ntxt\n2\ntrue'
+  [resources]=$'a.txt\ntxt\n3\ntrue\ntrue\ntrue'
 )
 
 fail=0

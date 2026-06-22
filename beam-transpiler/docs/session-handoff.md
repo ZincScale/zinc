@@ -20,6 +20,9 @@ architecture area, then implement one planned slice at a time with acceptance te
   - `Files.baseName`
   - `Files.extension`
   - deterministic sorted `Files.list`
+  - `Files.dirName`
+  - recursive sorted `Files.walk`
+  - `Files.modifiedTime`
   - scoped resource reference handling for `TryStmt`
 - Added `zinc-prelude/zinc/Config.java`.
 - Added `examples/py/resources.zn` and wired it into `e2e-py.sh`.
@@ -37,8 +40,9 @@ cd beam-transpiler
 `flowdemo` currently proves:
 
 - JSON config decode into a typed record.
-- Directory discovery via sorted `Files.list`.
-- Path construction and basename/extension helpers.
+- Directory discovery via sorted `Files.list` and recursive `Files.walk`.
+- Path construction and basename/dirname/extension helpers.
+- Input filtering by extension and file modified-time metadata.
 - Streaming input with nested scoped readers/writers.
 - Success/failure routing.
 - HTTP `/health` and `/status` checks.
@@ -46,11 +50,10 @@ cd beam-transpiler
 
 ## Remaining work
 
-Before moving on, review and commit the current uncommitted slice if it looks right.
+Before moving on, review and commit the current uncommitted path-discovery slice if it looks right.
 
 Next implementation should come from `docs/solidification-plan.md`, likely one of:
 
-- Path/file discovery completeness: `dirname`, filtering, glob/walk, metadata.
 - Scheduling/liveness: wall-clock time, monotonic elapsed time, timers, uptime/last-run
   metrics.
 - Process orchestration: bounded worker pool, fan-out/fan-in, deterministic drain and

@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 mkdir -p dist
 got=$(../../bin/zc run --once . 2>dist/run.err)
-want=$'processed=4\nsuccess=3\nfailed=1\nlast_error=negative score\nrestart=ok\nsuccess_file=true\nfailure_file=true\nhealth=ok\nstatus_has_processed=true'
+want=$'processed=5\nsuccess=4\nfailed=1\nlast_error=negative score\nrestart=ok\nmetadata=true:true\nsuccess_file=true\nfailure_file=true\nhealth=ok\nstatus_has_processed=true'
 
 if [ "$got" != "$want" ]; then
   echo "FAIL  flowdemo"

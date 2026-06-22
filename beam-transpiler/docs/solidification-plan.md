@@ -359,7 +359,7 @@ These came from building the first `dogfood/flowdemo` skeleton with existing fea
 | --- | --- | --- |
 | Actor call methods require one final return | `Worker.process` could not return from branches inside `try`; transpiler rejected it with the existing v1 rule | Not a compiler change now. Keep examples in final-return style; revisit only if real code becomes awkward. |
 | Nested scoped writers exposed local/resource friction | `with Files.openAppender(successPath)` inside loops originally failed because resource initializers were missing from free-variable analysis | Closed in resource slice: resource initializer refs now participate in loop capture; `resources.zn` and `flowdemo` use nested scoped writers. |
-| File discovery was too raw | `Files.list(inputDir)` had no stable order or path helpers | Partially closed: `Files.list` is sorted; added `Files.join/baseName/extension`. Walk/glob deferred. |
+| File discovery was too raw | `Files.list(inputDir)` had no stable order, path helpers, recursive discovery, or metadata | Mostly closed: `Files.list` is sorted; added `Files.join/baseName/dirName/extension`, recursive sorted `Files.walk`, and `Files.modifiedTime`. Glob-specific matching and richer metadata remain deferred. |
 | Service-mode test is self-contained but not external | `flowdemo` validates HTTP via in-app `HttpClient`, not a separate long-running harness | Good enough for Phase 1. Add external harness only for release/deploy smoke. |
 | Service tests need port allocation | First HTTP slice failed on fixed port 8081 with `eaddrinuse` | Use a high fixed port for now. Design a test-port allocation strategy before adding more service dogfoods. |
 
@@ -372,7 +372,10 @@ API:
 - `Files.list(dir)` returns names in stable sorted order.
 - `Files.join(a, b)` joins one path segment without duplicate slash handling surprises.
 - `Files.baseName(path)` returns the final path segment.
+- `Files.dirName(path)` returns the parent path.
 - `Files.extension(path)` returns the suffix after the final dot in the base name, or empty string.
+- `Files.walk(dir)` returns sorted full paths for files under `dir`, recursively.
+- `Files.modifiedTime(path)` returns a Unix-seconds timestamp for ingest freshness checks.
 - `Config.decode(RecordType, path)` reads a small JSON config file and decodes it through the existing derived record codec.
 
 Lowering/runtime model:

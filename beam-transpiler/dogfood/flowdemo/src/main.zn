@@ -70,9 +70,14 @@ class Flow(Actor) {
         Files.writeString(cfg.successPath, "")
         Files.writeString(cfg.failurePath, "")
 
-        for fileName in Files.list(cfg.inputDir) {
-            path = Files.join(cfg.inputDir, fileName)
-            with Files.openReader(path) as r {
+        newest = 0
+        parentSeen = false
+        for path in Files.walk(cfg.inputDir) {
+            if Files.extension(path).equals("jsonl") {
+                mt = Files.modifiedTime(path)
+                if mt > newest { newest = mt }
+                if Files.dirName(path).contains("nested") { parentSeen = true }
+                with Files.openReader(path) as r {
                 with Files.openAppender(cfg.successPath) as okWriter {
                     with Files.openAppender(cfg.failurePath) as badWriter {
                         while r.hasNextLine() {
@@ -92,6 +97,7 @@ class Flow(Actor) {
                         }
                     }
                 }
+                }
             }
         }
 
@@ -103,7 +109,7 @@ class Flow(Actor) {
             case Success(ff) { restart = "restart=ok" }
             case Failed(reason, raw) { restart = "restart=bad" }
         }
-        return metrics.summary() + "\n" + restart
+        return metrics.summary() + "\n" + restart + "\nmetadata=" + (newest > 0) + ":" + parentSeen
     }
 }
 
@@ -116,17 +122,22 @@ class Main(Application) {
     def main() {
         root = "/tmp/zinc_flowdemo"
         inputDir = Files.join(root, "in")
+        nestedDir = Files.join(inputDir, "nested")
         successPath = Files.join(root, "success.txt")
         failurePath = Files.join(root, "failure.txt")
         configPath = Files.join(root, "config.json")
 
-        Files.createDirectories(inputDir + "/")
+        Files.createDirectories(nestedDir + "/")
         Files.writeString(Files.join(inputDir, "a.jsonl"),
             "{\"name\":\"alpha\",\"score\":1}\n" +
             "{\"name\":\"beta\",\"score\":2}\n")
         Files.writeString(Files.join(inputDir, "b.jsonl"),
             "{\"name\":\"bad\",\"score\":-1}\n" +
             "{\"name\":\"gamma\",\"score\":3}\n")
+        Files.writeString(Files.join(nestedDir, "c.jsonl"),
+            "{\"name\":\"delta\",\"score\":4}\n")
+        Files.writeString(Files.join(inputDir, "ignore.tmp"),
+            "{\"name\":\"skip\",\"score\":100}\n")
         Files.writeString(configPath,
             "{\"inputDir\":\"" + inputDir + "\"," +
             "\"successPath\":\"" + successPath + "\"," +
@@ -140,6 +151,6 @@ class Main(Application) {
         health = client.send(HttpRequest.newBuilder("http://127.0.0.1:18081/health").GET().build())
         print("health=" + health.body())
         status = client.send(HttpRequest.newBuilder("http://127.0.0.1:18081/status").GET().build())
-        print("status_has_processed=" + status.body().contains("processed=4"))
+        print("status_has_processed=" + status.body().contains("processed=5"))
     }
 }

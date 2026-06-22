@@ -26,11 +26,14 @@ public final class Files {
   public static List<String> list(String dir) { throw Tag.stub(); }
   public static String join(String a, String b) { throw Tag.stub(); }
   public static String baseName(String path) { throw Tag.stub(); }
+  public static String dirName(String path) { throw Tag.stub(); }
   public static String extension(String path) { throw Tag.stub(); }
+  public static List<String> walk(String dir) { throw Tag.stub(); }
   public static void createDirectories(String path) { throw Tag.stub(); }
   public static void delete(String path) { throw Tag.stub(); }
   // zinc int is an arbitrary-precision Erlang integer, so it holds any file size
   public static int size(String path) { throw Tag.stub(); }
+  public static int modifiedTime(String path) { throw Tag.stub(); }
 
   // scoped streaming handles -- the LARGE-file path. Use in try-with-resources so the
   // fd is closed at block exit: try (Reader r = Files.openReader(p)) { while ... }

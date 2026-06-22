@@ -823,8 +823,8 @@ class CodeGen {
    *  reads the WHOLE file (small files); streaming primitives come in slice 2. */
   static final String IO_SOURCE = "-module('zinc.io').\n"
       + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
-      + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
-      + "         join/2, base_name/1, extension/1,\n"
+      + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1, walk/1,\n"
+      + "         join/2, base_name/1, dir_name/1, extension/1, modified_time/1,\n"
       + "         mkdirs/1, delete/1, fsize/1, getenv/1,\n"
       + "         open_reader/1, r_has_next_line/1, r_next_line/1,\n"
       + "         open_writer/1, open_appender/1, w_write/2, w_writeln/2, close/1]).\n\n"
@@ -902,9 +902,21 @@ class CodeGen {
       + "        _ -> case binary:last(A) of $/ -> <<A/binary, B/binary>>; _ -> <<A/binary, \"/\", B/binary>> end\n"
       + "    end.\n"
       + "base_name(P) -> filename:basename(P).\n"
+      + "dir_name(P) -> filename:dirname(P).\n"
       + "extension(P) ->\n"
       + "    E = filename:extension(P),\n"
       + "    case E of <<\".\", Rest/binary>> -> Rest; _ -> <<>> end.\n"
+      + "walk(P) ->\n"
+      + "    case filelib:is_dir(P) of\n"
+      + "        true -> lists:sort(filelib:fold_files(binary_to_list(P), \".*\", true,\n"
+      + "            fun(F, Acc) -> [unicode:characters_to_binary(F) | Acc] end, []));\n"
+      + "        false -> raise(enotdir, P)\n"
+      + "    end.\n"
+      + "modified_time(P) ->\n"
+      + "    case filelib:last_modified(P) of\n"
+      + "        0 -> raise(enoent, P);\n"
+      + "        DT -> calendar:datetime_to_gregorian_seconds(DT) - 62167219200\n"
+      + "    end.\n"
       + "mkdirs(P) -> unit_or_raise(filelib:ensure_path(P), P).\n"
       + "delete(P) ->\n"
       + "    R = case filelib:is_dir(P) of true -> file:del_dir(P); false -> file:delete(P) end,\n"
@@ -3539,7 +3551,10 @@ class CodeGen {
           case "list" -> "list";
           case "join" -> "join";
           case "baseName" -> "base_name";
+          case "dirName" -> "dir_name";
           case "extension" -> "extension";
+          case "walk" -> "walk";
+          case "modifiedTime" -> "modified_time";
           case "createDirectories" -> "mkdirs";
           case "delete" -> "delete";
           case "size" -> "fsize";
@@ -3984,7 +3999,9 @@ class CodeGen {
               case "readBytes" -> "byte[]";
               case "readLines", "list" -> "List<String>";
               case "exists", "isDirectory" -> "boolean";
-              case "join", "baseName", "extension" -> "String";
+              case "join", "baseName", "dirName", "extension" -> "String";
+              case "walk" -> "List<String>";
+              case "modifiedTime" -> "int";
               case "size" -> "int";
               case "openReader" -> "Reader";
               case "openWriter", "openAppender" -> "Writer";
