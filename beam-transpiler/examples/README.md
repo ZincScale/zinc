@@ -1,97 +1,60 @@
-# Examples — a reading path
+# Examples
 
-> **Writing braces-Python (`.zn`)?** The current surface's examples live in
-> [`py/`](py/) (run by `../e2e-py.sh`). This page is the **legal-Java** (`.zinc`) reading
-> path — same BEAM backend, Java syntax — kept green by `../e2e.sh`.
+The primary examples are `.zn` programs in [`py/`](py/). They are run by
+[`../e2e-py.sh`](../e2e-py.sh): each file is transpiled, compiled, executed on a real BEAM,
+and checked against expected output.
 
-These are the programs the test suite runs (`../e2e.sh`): each is transpiled, compiled with
-`erlc`, run on a real BEAM, and its output asserted — so every one is known-good, runnable
-zinc. New here? Read them roughly top to bottom; each section builds on the last. Pair them
-with **[the guide](../docs/guide.md)** (section links below). The programs live in
-[`programs/`](programs); the click-throughs below open each file.
+Run the whole suite:
 
-Run any of them by copying the file into a `zc new` project's `src/Main.zinc`, or read the
-expected output in `../e2e.sh`.
+```sh
+cd beam-transpiler
+./e2e-py.sh
+```
 
-## 1. Language basics ([guide §1–2, §4](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`sum_evens`](programs/sum_evens.zinc) | a `for` loop, mutation, `%`, an accumulator |
-| [`countdown`](programs/countdown.zinc) | a `while` loop with threaded mutable state |
-| [`first_over`](programs/first_over.zinc) | early `return` out of a for-each loop |
-| [`bools`](programs/bools.zinc) | `&&` / `\|\|` / `!` and precedence (true *and* false results) |
-| [`elseif`](programs/elseif.zinc) | `if` / `else if` / `else` — every branch |
-| [`breakcont`](programs/breakcont.zinc) | `break` and `continue` (continue still runs the for-update) |
-| [`floats`](programs/floats.zinc) | int vs float division (`/` → `div` vs float) |
-| [`casts`](programs/casts.zinc) | `(int)`/`(long)`/`(double)` casts + `Long.parseLong`/`Double.parseDouble` |
-| [`ternary`](programs/ternary.zinc) | the `?:` operator, nested |
-| [`strings`](programs/strings.zinc) / [`javastrings`](programs/javastrings.zinc) | string literals, escapes, and the `String` facade |
+Run one example directly:
 
-## 2. Values & collections ([guide §2–3](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`structs`](programs/structs.zinc) | `record`s (immutable, `p.x()`) |
-| [`switchenum`](programs/switchenum.zinc) | `enum`s + arrow `switch` |
-| [`arrays`](programs/arrays.zinc) | `int[]` fixed-size arrays + index assignment |
-| [`arraylist`](programs/arraylist.zinc) | `ArrayList<T>` (build/index; the O(n²)-regression guard) |
-| [`hashmap`](programs/hashmap.zinc) / [`javacollections`](programs/javacollections.zinc) | `Map`/`HashMap` and the java.util facade |
-| [`mapiter`](programs/mapiter.zinc) | walking a map: `entrySet()` for-each + `forEach` |
-| [`lambdas`](programs/lambdas.zinc) | lambdas / higher-order functions |
-| [`interfaces`](programs/interfaces.zinc) | interfaces + instance classes (dynamic `'$class'` dispatch) + SAM lambdas |
-| [`mathstr`](programs/mathstr.zinc) | `Math.*`, `String.join/format`, `List`/`Map` facade methods |
-| [`warn_iget`](programs/warn_iget.zinc) | the O(n)-cost warning on `List.get`/`size` (with file:line) |
-| [`atoms_tuples`](programs/atoms_tuples.zinc) | `Tag.of` atoms, `Tuple`, `Erlang.ok` (the value-or-throw idiom) |
-| [`modifiers`](programs/modifiers.zinc) | `private`/`final`/`static` — enforced, not decorative |
+```sh
+zc run examples/py/hello.zn
+zc run examples/py/resources.zn
+```
 
-## 3. Errors & the failure ladder ([guide §4–5](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`trycatch`](programs/trycatch.zinc) | `try`/`catch` — including the *transactional* revert |
-| [`exceptions`](programs/exceptions.zinc) | typed exceptions, the catch-all, relay from an actor |
-| [`guards`](programs/guards.zinc) | runtime type guards at the unknown→known boundary |
+## Recommended Reading Path
 
-## 4. Actors & supervision — the differentiator ([guide §6](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`actor_counter`](programs/actor_counter.zinc) | a basic actor: `void` ⇒ cast, typed ⇒ call |
-| [`actor_args`](programs/actor_args.zinc) | constructor args + passing handles |
-| [`actor_children`](programs/actor_children.zinc) | composition = supervision (a nested child crashes & restarts) |
-| [`actor_selfheal`](programs/actor_selfheal.zinc) | **the headline:** crash → supervisor restart → same handle, fresh state |
-| [`close`](programs/close.zinc) | `public void close()` runs on orderly stop only |
+| Topic | Examples |
+|-------|----------|
+| First programs | [`hello.zn`](py/hello.zn), [`functions.zn`](py/functions.zn), [`countdown.zn`](py/countdown.zn), [`fizzbuzz.zn`](py/fizzbuzz.zn) |
+| Control flow | [`bools.zn`](py/bools.zn), [`ternary.zn`](py/ternary.zn), [`breakcont.zn`](py/breakcont.zn), [`match.zn`](py/match.zn) |
+| Types and values | [`records.zn`](py/records.zn), [`record_model.zn`](py/record_model.zn), [`sealed.zn`](py/sealed.zn), [`protocols.zn`](py/protocols.zn) |
+| Collections | [`collections.zn`](py/collections.zn), [`dict.zn`](py/dict.zn), [`multifile/`](py/multifile) |
+| Errors | [`trycatch.zn`](py/trycatch.zn), [`exceptions.zn`](py/exceptions.zn) |
+| Actors and supervision | [`counter.zn`](py/counter.zn), [`counter_init.zn`](py/counter_init.zn), [`supervised.zn`](py/supervised.zn), [`selfheal.zn`](py/selfheal.zn) |
+| Files and resources | [`fileio.zn`](py/fileio.zn), [`filestream.zn`](py/filestream.zn), [`resources.zn`](py/resources.zn) |
+| Channels and pipelines | [`channel.zn`](py/channel.zn), [`pipeline.zn`](py/pipeline.zn) |
+| JSON and HTTP | [`json.zn`](py/json.zn), [`http_client.zn`](py/http_client.zn), [`http_facade.zn`](py/http_facade.zn) |
+| SQL | [`sql.zn`](py/sql.zn) |
+| Encoding and auth utilities | [`encoding.zn`](py/encoding.zn), [`webauth.zn`](py/webauth.zn) |
+| FFI | [`ffi.zn`](py/ffi.zn) |
 
-## 5. Standard library ([guide §8](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`logging`](programs/logging.zinc) | `Log.*` (logger stream) vs `System.out.println` (clean stdout) |
-| [`json`](programs/json.zinc) | derived record codecs + dynamic access (`proc_json` adds `decodeList`) |
-| [`http_client`](programs/http_client.zinc) | the `zinc.http` client builders + the exception ladder (refused connection) |
+## Application Example
 
-(The HTTP *server* + `Router` + JSON — and the client streaming a response body into a file
-in bounded memory (`openStream`) — is the [tutorial](../docs/tutorials.md) and
-[`../dogfood/webdemo`](../dogfood/webdemo): it needs cowboy, which the e2e set has no deps for.)
+The canonical app-level example is not under `examples/py`; it lives in
+[`../dogfood/flowdemo`](../dogfood/flowdemo). It uses typed config, recursive file discovery,
+streaming readers/writers, actor workers, result routing, HTTP status routes, and restart
+checks.
 
-## 6. Files & streaming, bounded memory ([guide §7](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`fileio`](programs/fileio.zinc) | whole-file read/write, dir ops, `getenv`, `IOException` (small files) |
-| [`filestream`](programs/filestream.zinc) | scoped streaming read (try-with-resources `Reader`, constant memory) |
-| [`filewrite`](programs/filewrite.zinc) | scoped streaming write (`Writer`) |
-| [`proc_csv`](programs/proc_csv.zinc) / [`proc_json`](programs/proc_json.zinc) / [`proc_binary`](programs/proc_binary.zinc) | end-to-end format processing |
+```sh
+cd beam-transpiler
+./dogfood/flowdemo/test.sh
+```
 
-## 7. Concurrency: channels & pipelines ([guide §7](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`channel`](programs/channel.zinc) | `Channel<T>` — bounded backpressure between actors |
-| [`pipeline`](programs/pipeline.zinc) | a 3-stage multi-process pipeline (`FileReader.pump` → transform → `FileWriter.drain`) |
+## Negative Examples
 
-## 8. FFI & projects ([guide §1, §9](../docs/guide.md))
-| file | shows |
-|------|-------|
-| [`ffi`](programs/ffi.zinc) | `import erlang.*` — the unchecked basement |
-| [`tcpserver`](programs/tcpserver.zinc) | a TCP line server over the `gen_tcp` FFI (acceptor + per-connection actors) |
-| [`multifile/`](programs/multifile) | a multi-file project: classes = modules, dirs = packages |
+[`py_neg/`](py_neg) contains `.zn` programs that must fail to compile. These pin down type
+errors, invalid application shapes, non-exhaustive matches, reassignment rules, and inference
+cycles. Expected errors are asserted in `../e2e-py.sh`.
 
-## Negative examples
-[`neg/`](neg) holds programs that **must fail to transpile** — they pin down what the
-language *rejects* (type mismatches, modifier misuse, `new` on a pump, ...). Their expected
-error messages are in `../e2e.sh` (`wanterr`).
+## Legacy Legal-Java Examples
+
+[`programs/`](programs) and [`neg/`](neg) are the older legal-Java `.zinc` surface. They use
+the same BEAM backend and remain tested by `../e2e.sh`, but new users should start with
+`.zn` examples above.

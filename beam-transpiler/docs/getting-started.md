@@ -1,70 +1,58 @@
-# Getting started — braces-Python on the BEAM
+# Getting Started
 
-Write Python-shaped code with braces and types. Get an Erlang/OTP service that supervises
-itself, heals on crash, and streams in bounded memory — without writing a supervisor, a
-`gen_server`, or a Dockerfile.
+This guide takes you from a first `.zn` script to a supervised BEAM application. The current
+surface is braces-Python: Python-shaped code, braces for blocks, and static types at module
+boundaries.
 
-```python
-def main() {
-    print("Hello from braces-Python on BEAM!")
-}
-```
+## Install Or Use The Checkout
 
-```
-$ zc run hello.zn
-Hello from braces-Python on BEAM!
-```
-
-That's the whole pitch: the ergonomics of Python (fast, to the point, no ceremony), the
-reliability of the BEAM (multicore + supervision for free), and a real type checker so
-production doesn't collapse the way interpreted languages let it.
-
-`.zn` is the braces-Python surface. It transpiles to Erlang and runs on the BEAM.
-
----
-
-## Install
-
-One command lands the `zc` CLI plus a managed JRE and OTP runtime under `~/.zc` — no system
-Java, no system Erlang, no Docker (the rustup model):
+Release install, once a `zc-v*` release is available:
 
 ```sh
 curl -fsSL https://github.com/ZincScale/zinc/releases/download/zc-v0.1.0/install.sh | sh
+zc doctor
 ```
 
-Check it:
+From this repository, no packaging step is needed:
 
 ```sh
-zc doctor      # versions, toolchains, resolution
+cd beam-transpiler
+export PATH="$PWD/bin:$PATH"
+zc doctor
 ```
 
-If you manage your own OTP, `ZC_SKIP_OTP=1` skips the bundled runtime; install one later with
-`zc toolchain install`.
+If no managed OTP is installed yet, run:
 
----
+```sh
+zc toolchain install 29
+```
 
-## Hello world (script mode)
+## Run A Script
 
-A single `.zn` file with a top-level `def main()` is a runnable script — no project needed:
+Create `hello.zn`:
 
 ```python
-# hello.zn
 def main() {
-    name = "world"
+    name = "BEAM"
     print(f"Hello, {name}!")
 }
 ```
 
+Run it directly:
+
 ```sh
-zc run hello.zn      # Hello, world!
+zc run hello.zn
 ```
 
-f-strings are explicit (`f"..."`), like Python. Top-level `def main()` is the entry point —
-zero `public static void` ceremony.
+Expected output:
 
----
+```text
+Hello, BEAM!
+```
 
-## A real project
+A top-level `def main()` is enough for script mode. No project file is required.
+
+## Create A Project
 
 ```sh
 zc new --py myapp
@@ -72,174 +60,110 @@ cd myapp
 zc run
 ```
 
-`zc new --py` scaffolds a braces-Python project:
+The scaffold contains:
 
-```
+```text
 myapp/
-  zinc.toml        # [project] name/version, [otp] version, [deps] hex packages
-  src/main.zn      # def main() { ... }  — the entry point
+  zinc.toml
+  src/main.zn
 ```
 
-Day-to-day commands:
+Common commands:
 
 ```sh
-zc run             # build + run main()
-zc build           # transpile + compile (rebar3 under the hood)
-zc test            # run test/**/*.zn
-zc add cowboy@2.12.0   # add a hex dependency to zinc.toml
-zc fmt src         # reindent by brace depth
-zc release         # self-contained OTP release tarball (ERTS + beam + boot)
+zc run                 # build and run
+zc run --once .        # run once even if the project is an Application
+zc build               # transpile and compile
+zc test                # run test/**/*.zn
+zc check --xref        # xref only over generated BEAM/FFI code
+zc check               # xref + dialyzer
+zc fmt src             # brace-depth formatter
+zc release             # self-contained OTP release tarball
+zc add cowboy@2.12.0   # add a Hex dependency
 ```
 
----
+## Actors And Supervision
 
-## The killer feature: actors + supervision, from your types
-
-A class that extends `Actor` becomes a supervised `gen_server`. Its method return types
-decide the messaging: **a typed return (`-> T`) is a synchronous call; no return type is an
-async cast.** A class that extends `Application` is an OTP app whose supervision tree is read
-straight off its fields.
+An `Actor` is a BEAM process. Its fields are private process state. A no-return method is an
+async cast; a typed return method is a sync call. An `Application` owns supervised children
+through its actor fields.
 
 ```python
 class Counter(Actor) {
     count = 0
-    def incr()       { count = count + 1 }   # no return  => async (cast)
-    def get() -> int { return count }             # typed      => sync (call)
-    def boom()       { z = 0
-                           count = count / z }    # a real crash
+
+    def incr() { count = count + 1 }
+    def get() -> int { return count }
+    def crash() { x = 1 / 0 }
 }
 
 class Main(Application) {
-    c = Counter()                  # a supervised child of the app
+    counter = Counter()
+
     def main() {
-        c.incr()
-        c.incr()
-        c.incr()
-        print(c.get())        # 3
-        c.boom()              # the process crashes...
-        Sys.sleep(100)             # ...the supervisor restarts it...
-        print(c.get())        # 0  — same handle, fresh state
-        c.incr()
-        print(c.get())        # 1  — and it keeps serving
+        counter.incr()
+        counter.incr()
+        print(counter.get())
+        counter.crash()
+        Sys.sleep(100)
+        print(counter.get())
     }
 }
 ```
 
-You wrote no supervision code. The runtime built the `gen_server`, the supervisor, and the
-restart strategy from `class C(Actor)` and the `Counter c` field.
+Run with `zc run --once .`. The second print is `0`: the actor crashed and restarted with a
+fresh state, while the handle stayed valid.
 
----
+## Config, Files, And Streaming
 
-## A tour of the surface
-
-Everything below is real `.zn` that runs today (it's in `examples/py/`).
-
-**Records, enums, match** — Pythonic attribute access (`p.x`), exhaustive `match`:
+Typical apps need typed config and file discovery. Zinc keeps that path small and explicit:
 
 ```python
-record Point(x: int, y: int)
-enum Color { RED, GREEN, BLUE }
+record AppConfig(inputDir: String, output: String)
 
-def describe(c: Color) -> String {
-    out = "cool"
-    match c {                       # bare labels; `case a, b` and `case _` too
-        case RED { out = "warm" }
-    }
-    return out
-}
-```
+class Main(Application) {
+    def main() {
+        cfg: AppConfig = Config.decode(AppConfig, "config.json")
+        Files.writeString(cfg.output, "")
 
-**Collections** — dict/list literals, subscript, and one length spelling `len()`:
-
-```python
-scores = {"a": 1, "b": 2}            # inferred HashMap<String,int>
-scores["a"] = scores["a"] + 10       # subscript read + write, type-checked
-print(scores["a"] + len(scores))     # 13
-
-xs = [10, 20, 30]
-print(len(xs))                       # 3   (works on strings, lists, maps)
-```
-
-Homogeneous literals are statically typed, so `scores["a"] + "s"` is a **compile error** —
-the safety net interpreted languages don't give you. Mixed literals stay dynamic and require
-a typed crossing (`host: String = cfg["host"]`).
-
-**Errors** — `try/except`, `raise`, user exceptions, `str(e)` / `e.message`:
-
-```python
-class NotFound(Exception) {}
-
-def lookup(id: int) -> int {
-    if id > 10 { raise NotFound("no such id") }
-    return id * 2
-}
-
-def main() {
-    try { lookup(99) }
-    except NotFound as e { print(e.message) }    # no such id
-    print(str(42) + "!")                          # 42!  — str() on any value
-}
-```
-
-**JSON** — derived record codecs, bare record name (no `.class`):
-
-```python
-record User(name: String, age: int)
-
-u: User = Json.decode(User, "{\"name\":\"vin\",\"age\":40}")
-print(u.name)                        # vin
-```
-
-**HTTP** — a one-shot facade (the builder stays for headers/timeouts):
-
-```python
-try {
-    http.get("https://example.com")
-} except HttpException as e {
-    print("request failed")
-}
-```
-
-**Streaming pipeline** — bounded-memory dataflow across processes via `Channel<T>` and the
-file pumps. Each stage runs in its own process; the bounded channels give backpressure:
-
-```python
-class Upper(Actor) {
-    def run(incoming: Channel<String>, outgoing: Channel<String>) {
-        while incoming.hasNext() {
-            outgoing.put(incoming.take().toUpperCase())
+        for path in Files.walk(cfg.inputDir) {
+            if Files.extension(path).equals("jsonl") {
+                with Files.openReader(path) as r {
+                    with Files.openAppender(cfg.output) as w {
+                        while r.hasNextLine() {
+                            w.writeLine(Files.baseName(path) + ":" + r.nextLine())
+                        }
+                    }
+                }
+            }
         }
-        outgoing.close()
     }
 }
-# FileReader.pump(in, ch1) -> Upper.run(ch1, ch2) -> FileWriter.drain(ch2, out)
 ```
 
-**SQL** — a connection pool that's an `Application` child; transactions ride the failure
-ladder (return = COMMIT, `raise` = ROLLBACK):
+Useful file APIs:
 
-```python
-db = Db("postgres://user:pw@host:5432/db", 4)
-db.exec("insert into users values ($1, $2)", "7", "vin")
-rows = db.query("select id, name from users where id = $1", "7")
-us: List<User> = Json.decodeAll(User, rows)
+- `Files.join(a, b)`, `Files.baseName(path)`, `Files.dirName(path)`, `Files.extension(path)`
+- `Files.list(dir)` for sorted names directly under a directory
+- `Files.walk(dir)` for sorted recursive full paths
+- `Files.modifiedTime(path)` and `Files.size(path)` for ingest checks
+- `Files.openReader/openWriter/openAppender` for scoped, bounded-memory streaming
+
+## Run The Canonical Dogfood App
+
+`dogfood/flowdemo` is the current acceptance app. It proves the pieces compose:
+
+```sh
+cd beam-transpiler
+./dogfood/flowdemo/test.sh
 ```
 
----
-
-## What you get for free
-
-- **Supervision & self-healing** — crashes are isolated and restarted; you write business
-  logic, not OTP boilerplate.
-- **Multicore** — actors are real BEAM processes, scheduled across all cores.
-- **Bounded memory** — `Channel<T>` + the file pumps stream gigabytes without OOM.
-- **Static safety** — typed params, checked returns, typed collections; dynamic values are
-  quarantined behind guarded crossings that fail loud at the boundary, not silently 10 frames
-  later. (There is no `Optional`/`None` ceremony — a nil deref crashes loud and the supervisor
-  restarts; that's the null story.)
+It exercises typed config, recursive file discovery, extension filtering, streaming readers
+and writers, success/failure routing, HTTP `/health` and `/status`, and worker restart
+evidence.
 
 ## Next
 
-- `examples/py/` — every feature above as a runnable, tested `.zn` file.
-- `dialects/zinc-python/docs/beam-target-plan.md` — the design doc (how each Python construct
-  maps to a BEAM concept).
+- Read the full [guide](guide.md).
+- Browse the tested [examples](../examples/README.md).
+- Build the HTTP service in [tutorials](tutorials.md).

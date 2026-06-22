@@ -1,86 +1,100 @@
-# zinc — Python on the BEAM
+# zinc on BEAM
 
-Write Python-shaped code with braces and types. Get an Erlang/OTP service that supervises
-itself, heals on crash, and streams gigabytes in bounded memory — without writing a line of
-functional code, a supervisor, or a Dockerfile.
+Write Python-shaped `.zn` code with braces and types. Compile it to Erlang/OTP and run it
+with supervision, process isolation, backpressure, and release tooling built in.
 
 ```python
-# A counter that survives its own crashes. No supervision code — the runtime builds it.
 class Counter(Actor) {
     count = 0
-    def incr()       { count = count + 1 }   # no return => async message (cast)
-    def get() -> int { return count }             # typed     => sync request (call)
-    def boom()       { z = 0
-                           count = count / z }    # a real crash
+
+    def incr() { count = count + 1 }       # no return type -> async cast
+    def get() -> int { return count }      # typed return -> sync call
+    def crash() { x = 1 / 0 }              # a real process crash
 }
 
 class Main(Application) {
-    c = Counter()                  # a supervised child of the app
+    counter = Counter()                    # supervised child
+
     def main() {
-        c.incr()
-        c.incr()
-        c.incr()
-        print(c.get())        # 3
-        c.boom()              # the process crashes...
-        Sys.sleep(100)             # ...the supervisor restarts it...
-        print(c.get())        # 0  — same handle, fresh state
-        c.incr()
-        print(c.get())        # 1  — and it keeps serving
+        counter.incr()
+        print(counter.get())               # 1
+        counter.crash()
+        Sys.sleep(100)
+        print(counter.get())               # 0, restarted with fresh state
     }
 }
 ```
 
-```
-$ zc run
-3
-0
-1
+```sh
+zc run --once .
 ```
 
-That's the whole thesis: a class `(Actor)` becomes a supervised `gen_server`; a class
-`(Application)` becomes an OTP application with a supervision tree read straight from your
-fields. Method return types pick the messaging — a typed `-> T` is a sync call, no return is
-an async cast. You get BEAM-grade reliability (supervision, self-healing, distribution) with
-Python muscle memory and a real type checker so production doesn't collapse the way
-interpreted languages let it.
+The core idea is small: `class X(Actor)` lowers to a supervised BEAM process, and
+`class Main(Application)` lowers to an OTP application. Fields define the supervision tree.
+Method signatures define the protocol.
 
-`.zn` is the braces-Python surface. It transpiles to Erlang and runs on the BEAM.
+## Current Surface
 
-## Why
+The primary surface is `.zn`: braces-Python syntax, explicit types where they matter, and
+Python-style modules. It supports:
 
-Small teams reach for microservices + Kubernetes to get reliability, scaling, and
-isolation — and pay an enormous ops tax for it. The BEAM gives most of that *in the
-runtime*. zinc is the on-ramp: familiar syntax, no functional-language friction, and the
-deployment story is a self-contained release on a `$10` VM, not a cluster.
+- top-level scripts with `def main()` and service projects with `class Main(Application)`
+- actors, supervision, dynamic children, typed calls, async casts, and restart-stable handles
+- records, enums, sealed unions, interfaces, lambdas, lists, dicts, and checked returns
+- `try` / `except`, `raise`, f-strings, `match`, `for`, `while`, `break`, and `continue`
+- JSON record codecs, dynamic JSON access, config decode, files/path helpers, scoped streaming
+- `Channel<T>` pipelines, HTTP client/server, Postgres access, logging, encoding, crypto, UUIDs
+- `from erlang import ...` FFI for raw OTP or Hex modules
+- `zc new --py`, `zc run`, `zc build`, `zc test`, `zc check`, `zc release`, and managed OTP
 
-## Start here
+The legacy legal-Java `.zinc` frontend remains tested by `./e2e.sh`, but new docs and new
+application work should use `.zn`.
 
-- **[Getting started](docs/getting-started.md)** — install → hello → a real project →
-  actors+supervision → a tour of the surface. The fastest path in.
-- **[Examples](examples/py/)** — every feature as a tested, runnable `.zn` program.
-- **[Design doc](../dialects/zinc-python/docs/beam-target-plan.md)** — how each Python
-  construct maps to a BEAM concept (and the stdlib veneer + type-safety decisions).
+## Quick Start From This Checkout
 
-## What's real today
+```sh
+cd beam-transpiler
+export PATH="$PWD/bin:$PATH"
+zc run examples/py/hello.zn
+./e2e-py.sh
+```
 
-Actors + Applications with supervision; the failure ladder (typed exceptions → relay →
-crash → restart); records, enums, interfaces, generics, `match`/`case`; dict/list literals
-with subscript and `len()`, f-strings, `str()`, `e.message`; **bounded-memory streaming** —
-scoped file/HTTP readers & writers (`with`) and a `Channel`-based multi-process pipeline;
-`Json` (derived record codecs, `Json.decode(User, …)`), `zinc.http` (client incl. the
-`http.get` facade + server over cowboy), `zinc.sql` (Postgres); the `from erlang import …`
-FFI escape hatch. The `zc` CLI scaffolds (`zc new --py`), vendors hex deps, builds, runs,
-tests, and cuts a self-contained OTP release.
+Create a project:
 
-**Type safety, "safe but no safer":** typed params, checked returns, statically-typed
-homogeneous collections; dynamic values (foreign JSON, mixed maps) are quarantined behind
-guarded crossings that fail loud at the boundary. No `Optional`/`None` ceremony — a nil
-deref crashes loud and the supervisor restarts it.
+```sh
+zc new --py flowtoy
+cd flowtoy
+zc run
+```
 
-The compiler is a single-pass Java transpiler (`src/zinc/`, frontend `PyLexer`/`PyParser`/
-`PyInfer`); `./e2e-py.sh` runs the whole `.zn` suite (transpile → `erlc` → run on a real
-BEAM → assert output, including a Postgres-backed SQL test). The docs cite those examples,
-so they can't drift. (`./e2e.sh` keeps the original legal-Java surface green — same backend,
-Java syntax.)
+For a realistic acceptance app, run the dogfood flow engine:
 
-Roadmap and design history: [ROADMAP.md](ROADMAP.md). Language name: TBD.
+```sh
+cd beam-transpiler
+./dogfood/flowdemo/test.sh
+```
+
+`flowdemo` loads typed JSON config, recursively discovers input files, filters by extension,
+streams records, routes success/failure output, exposes HTTP health/status routes, and proves
+worker restart behavior through a black-box test.
+
+## Documentation
+
+- [Install](docs/install.md) - release install, offline install, and contributor setup.
+- [Getting started](docs/getting-started.md) - first script, first project, and flowdemo tour.
+- [Guide](docs/guide.md) - language, actors, I/O, standard library, and CLI.
+- [Tutorials](docs/tutorials.md) - build a small HTTP service and inspect the flowdemo app.
+- [Examples](examples/README.md) - tested `.zn` examples by topic.
+- [Solidification plan](docs/solidification-plan.md) - current dogfood-driven engineering plan.
+
+## Development Checks
+
+```sh
+cd beam-transpiler
+./e2e-py.sh                    # primary .zn suite
+./dogfood/flowdemo/test.sh     # canonical app acceptance target
+./e2e.sh                       # legacy .zinc compatibility suite
+```
+
+The compiler is implemented in Java under `src/zinc/`. The CLI lives in `zc/Zc.java`, and the
+prelude API stubs are in `zinc-prelude/zinc/`.

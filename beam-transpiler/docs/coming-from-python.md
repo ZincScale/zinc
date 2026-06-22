@@ -59,6 +59,9 @@ No monkeypatching, no `__getattr__`, no `eval`, no adding attributes at runtime,
 typing across unrelated types. Interfaces are nominal (`class X(Greeter)`) and checked at
 compile time. What you can't express statically, you reach for the FFI for (below).
 
+### Files and config are explicit
+Python code often mixes path strings, dynamic dict config, and open file handles casually. Zinc keeps these boundaries explicit: `Config.decode(RecordType, path)` turns JSON config into a typed record; `Files.list` and `Files.walk` return sorted discovery results; `Files.join`, `baseName`, `dirName`, and `extension` cover the common path operations; scoped `with Files.openReader/openWriter/openAppender` closes handles automatically and keeps large files streaming.
+
 ### Small differences
 - `Sys.sleep(ms)` instead of `time.sleep` (and it takes milliseconds).
 - A service uses `class Main(Application)` with `def main()`; a script/tool is just a

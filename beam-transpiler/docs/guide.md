@@ -1,23 +1,12 @@
-# The zinc guide
+# Zinc Guide
 
-zinc is **braces-Python that compiles to Erlang/OTP.** You write Python-shaped code — with
-braces instead of significant whitespace, and types — and the transpiler emits readable
-Erlang that runs on the BEAM. The deal, stated once: *Python ergonomics, typed, with the
-BEAM's reliability built in.* Where the BEAM offers something Python can't (supervised
-processes), you opt in with a **base class** (`class C(Actor)`) — never a new keyword.
+Zinc on BEAM compiles `.zn` braces-Python to Erlang/OTP. You write Python-shaped code with
+explicit types where they matter; the compiler emits BEAM modules and the `zc` CLI builds and
+runs them with rebar3.
 
-This guide is the whole surface, in order. Each piece has a runnable snippet; the file names
-in parentheses are real, tested examples under [`examples/py/`](../examples/py).
+## Programs And Modules
 
----
-
-## 1. Programs, files, modules
-
-- A top-level **`def main()`** is the entry point of a script or tool — zero ceremony.
-- A long-running service uses an **`Application`** with an instance `def main()` (see §6).
-- Each file is a module, referenced by its **lowercase file name** (Pythonic):
-  `from util import mathutil` imports `util/mathutil.zn`, then you call `mathutil.fn(...)`.
-  Same-directory modules need no import. (Classes/actors/records stay CapWords.)
+A script can be one file with a top-level `def main()`:
 
 ```python
 def main() {
@@ -25,237 +14,249 @@ def main() {
 }
 ```
 
-## 2. Values and types
-
-Primitives: `int` (arbitrary-precision — no overflow), `double`, `boolean`, `String` (a
-UTF-8 binary). Locals infer their type from assignment; params must be typed. f-strings are
-explicit (`f"..."`), like Python.
+A service uses one `class Main(Application)`:
 
 ```python
-d = 7.0 / 2          # 3.5  (float division)
-n = 7 / 2            # 3    (int division truncates)
-name = "beam"
-print(f"hi {name}, n={n}")    # hi beam, n=3
-```
-
-**Records** are immutable structs — fields set at construction, read with Pythonic attribute
-access, never reassigned (mutable state lives in actors, §6):
-
-```python
-record Point(x: int, y: int)
-
-p = Point(1, 2)
-print(p.x + p.y)     # 3
-```
-
-**Enums** are atoms; **instance classes** (`class X(SomeInterface)`) are immutable value
-objects with methods; **interfaces** (`interface`) are nominally checked and dispatch
-dynamically; **lambdas** (`n -> n * 3` or `lambda n: n * 3`) satisfy single-method
-interfaces. (`records`, `protocols`, `collections`, `match`)
-
-## 3. Collections — Pythonic, with honest costs
-
-Dict and list literals; subscript indexing; `len()` is the one length spelling.
-
-```python
-scores = {"a": 1, "b": 2}        # inferred HashMap<String,int>
-scores["a"] = scores["a"] + 10   # subscript read + write, type-checked
-print(scores["a"] + len(scores)) # 13
-
-xs = [10, 20, 30]
-print(xs[0] + len(xs))           # 13   (len works on strings, lists, maps, arrays)
-```
-
-Homogeneous literals are statically typed, so `scores["a"] + "s"` is a **compile error**.
-Mixed-value dicts stay dynamic and need a typed crossing (`host: String = cfg["host"]`).
-Under the hood zinc splits Java's `List` by *purpose*, because the lowering costs differ:
-
-| type | use it to | backed by | costs |
-|------|-----------|-----------|-------|
-| `List<T>` | receive / iterate | Erlang list | `get`/`size` are O(n) (warned); for-each is fast |
-| `ArrayList<T>` | build / index | Erlang `array` | `add`/`get`/`set` O(log n), `size` O(1) |
-| `Map`/`HashMap` | key-value | Erlang map | O(log n) |
-
-`d["k"]`/`d.get(k)`/`len(d)` all work; `byte[]` is a binary, `int[]` is the array module.
-(`collections`, `dict`, `multifile`)
-
-## 4. Control flow and errors
-
-Classic `if` / `else if` / `else`, `for i in range(a, b)`, `for x in xs`, `while`,
-`break`/`continue`, `match`/`case` (constants, bare enum labels, `case a, b`, `case _`), and
-the ternary (`big if n > 5 else small`).
-
-**`try`/`except` is transactional**: a caught `try` reverts the outer-variable mutations it
-made before the raise (the BEAM can't observe partial bindings — when ergonomics and
-safe-on-BEAM semantics conflict, zinc chooses safe). Exceptions are **unchecked**:
-
-```python
-class NotFound(Exception) {}
-
-def main() {
-    try {
-        raise NotFound("no such id")
-    } except NotFound as e {
-        print(e.message)              # no such id   (str(e) also works)
-    } except Exception as e {
-        print("catch-all (also catches native BEAM errors)")
+class Main(Application) {
+    def main() {
+        print("started")
     }
 }
 ```
 
-(`trycatch`, `exceptions`, `match`, `ternary`)
+Files are modules. Lowercase file names are the module names. Same-directory modules can be
+referenced directly; nested modules use imports such as `from util import mathutil`.
 
-## 5. The failure ladder
+## Values And Types
 
-One model for everything that can go wrong:
-
-1. **Expected failures are exceptions** — unwind to a typed `except`. Catch only what you have
-   a plan for (bad input, network, external systems).
-2. **A raise in an Actor call relays to the caller** (catchable there); the actor survives,
-   state intact via the transactional `try`.
-3. **Bugs crash the process** — a caller mid-call exits with the same reason (not catchable;
-   no retry against broken state).
-4. **Crashes hit supervision** — the tree restarts the domain (§6).
-5. **Crash loops escalate** to the root, then the VM exits non-zero → systemd's problem.
-
-Process granularity + supervision *is* the recovery story. You rarely write error handling;
-you let it crash and be restarted.
-
-## 6. Actors and Applications — the supervision model
-
-This is the differentiator. Two base classes, both prelude (no import):
-
-- **`(Actor)`** — a supervised, stateful process. Fields are state, accessed directly (`self`
-  is implicit — no `self` param, no `self.` prefix); methods are the protocol. **No return
-  type ⇒ async cast; typed `-> T` ⇒ sync call** (the return type *is* the messaging contract).
-  The instance reference is a handle that survives restarts. Public methods are the message
-  protocol; a `private` method is an in-process helper (a plain local function), not a handler.
-- **`(Application)`** — the one root per runnable service: an OTP application whose
-  **Actor-typed fields are its supervised children**, born in declaration order. Hosts
-  `main`, receives SIGTERM, owns the exit code.
-
-**Construction spawns.** `Counter()` runs the constructor *inside* a freshly spawned process
-and returns the handle. A field = a **static child** (permanent, restarted). One in a method
-body = a **dynamic child** (temporary, dies with its owner). Composition *is* supervision —
-an Actor's Actor-fields are its children; failure flows down, never up.
+Primitive types are `int`, `double`, `boolean`, `String`, and `byte[]`. Locals infer from
+assignment. Parameters must be typed. Return types are checked.
 
 ```python
-class Counter(Actor) {
-    count = 0
-    def incr()       { count = count + 1 }   # cast
-    def get() -> int { return count }             # call
+def add(a: int, b: int) -> int {
+    return a + b
+}
+
+def main() {
+    name = "zinc"
+    print(f"hello {name}")
+}
+```
+
+Records are immutable values:
+
+```python
+record User(id: String, name: String)
+
+u = User("7", "vin")
+print(u.name)
+```
+
+Enums, sealed unions, nominal interfaces, instance classes, and lambdas are supported. See
+`examples/py/records.zn`, `match.zn`, `sealed.zn`, and `protocols.zn`.
+
+## Collections
+
+List and dict literals are typed when homogeneous:
+
+```python
+scores = {"a": 1, "b": 2}
+scores["a"] = scores["a"] + 10
+print(scores["a"] + len(scores))
+
+xs = [10, 20, 30]
+print(xs[0] + len(xs))
+```
+
+`List<T>` is the receive/iterate type. `ArrayList<T>` is the build/index type. `Map<K,V>` and
+`HashMap<K,V>` lower to Erlang maps. Mixed dynamic values are allowed at foreign boundaries,
+but typed crossings are checked.
+
+## Control Flow And Errors
+
+Supported flow: `if` / `else if` / `else`, `while`, `for x in xs`, `for i in range(a, b)`,
+`break`, `continue`, ternary expressions, and exhaustive `match`.
+
+```python
+match color {
+    case RED { print("warm") }
+    case GREEN, BLUE { print("cool") }
+}
+```
+
+Errors use unchecked exceptions:
+
+```python
+class BadInput(Exception) {}
+
+try {
+    raise BadInput("nope")
+} except BadInput as e {
+    print(e.message)
+} except Exception as e {
+    print("fallback")
+}
+```
+
+Inside a caught `try`, outer-variable mutation is transactional: partial bindings from the
+failed path are not leaked.
+
+## Actors And Applications
+
+`Actor` is the main BEAM abstraction.
+
+- Actor fields are process state.
+- Public methods are the message protocol.
+- A method with no return type is an async cast.
+- A method with `-> T` is a sync call.
+- Actor handles remain valid across restarts.
+- Actor fields on an `Application` are supervised children.
+
+```python
+class Store(Actor) {
+    users: Map<String, String> = {}
+
+    def put(id: String, name: String) { users[id] = name }
+    def get(id: String) -> String { return users.get(id) }
 }
 
 class Main(Application) {
-    c = Counter()                  # a permanent, supervised child
+    store = Store()
+
     def main() {
-        c.incr()
-        print(c.get())        # 1
+        store.put("7", "vin")
+        print(store.get("7"))
     }
 }
 ```
 
-Crash it and the supervisor restarts it with the same handle — see the
-[README hook](../README.md) and `selfheal`, `supervised`, `counter`.
+An actor can have `private` helpers in the legal-Java surface. In current `.zn` examples,
+prefer simple public actor protocol methods or top-level helper functions until private
+Python-shaped helpers are promoted in the frontend.
 
-A program exits when `main` returns **and** no actors are alive; a service with static
-children runs until stopped. An Actor may declare `def close()` — run as `terminate` on
-*orderly* stop only (resource cleanup).
+## Files, Config, And Streaming
 
-## 7. I/O and streaming — bounded memory, 8 KB → 5 GB
+Small whole-file APIs:
 
-The rule: **streaming is explicit; copying large files through memory is a non-starter.**
-Three lifetimes:
-
-**Whole-file (small):** one self-contained call, no handle.
 ```python
-cfg = Files.readString("app.conf")
-Files.writeString("out.txt", cfg)
+text = Files.readString("in.txt")
+Files.writeString("out.txt", text)
 ```
 
-**Scoped streaming (large, one pass):** a `Reader`/`Writer` held for a `with`-block — raw +
-read-ahead, in-process, closed at block exit. Constant memory regardless of file size.
+Path and discovery APIs:
+
+```python
+root = "/tmp/app"
+input = Files.join(root, "in")
+for path in Files.walk(input) {
+    if Files.extension(path).equals("jsonl") {
+        print(Files.dirName(path) + ":" + Files.baseName(path))
+        print(Files.modifiedTime(path))
+    }
+}
+```
+
+`Files.list(dir)` returns sorted direct child names. `Files.walk(dir)` returns sorted
+recursive full paths. `Files.size(path)` returns file size.
+
+Typed config decode reads JSON into a record through the existing JSON codec:
+
+```python
+record AppConfig(inputDir: String, output: String)
+cfg: AppConfig = Config.decode(AppConfig, "config.json")
+```
+
+Scoped streaming keeps memory bounded:
+
 ```python
 with Files.openReader(src) as r {
     with Files.openWriter(dst) as w {
         while r.hasNextLine() {
-            w.writeLine(r.nextLine().toUpperCase())   # one line resident at a time
+            w.writeLine(r.nextLine().toUpperCase())
         }
     }
 }
 ```
-`HttpStream` works identically for an HTTP body (demand-driven, so the producer can't flood
-you): `with client.openStream(req) as s { ... }`.
 
-**Cross-process pipeline (parallel + bounded):** a `Channel<T>` is a bounded backpressure
-buffer between actors — `put` blocks when full, the consumer pulls. `FileReader.pump` /
-`FileWriter.drain` are ready-made source/sink pumps (spawn-and-go); a transform stage is just
-an actor that drains one channel and feeds the next:
+For cross-process pipelines, use `Channel<T>`, `FileReader.pump`, and `FileWriter.drain`.
+See `examples/py/pipeline.zn`.
+
+## JSON, HTTP, SQL, And Other Stdlib Pieces
+
+JSON:
+
 ```python
-class Upper(Actor) {                                       # a transform stage
-    def run(incoming: Channel<String>, outgoing: Channel<String>) {
-        while incoming.hasNext() {
-            outgoing.put(incoming.take().toUpperCase())
-        }
-        outgoing.close()
+record User(id: String, name: String)
+u: User = Json.decode(User, "{\"id\":\"7\",\"name\":\"vin\"}")
+print(Json.encode(u))
+```
+
+Dynamic JSON access is available through `Json.parse(s).get("key").asText/asInt/...`.
+
+HTTP client:
+
+```python
+client = HttpClient.newBuilder().connectTimeout(2000).build()
+resp = client.send(HttpRequest.newBuilder("http://127.0.0.1:8080/health").GET().build())
+print(resp.body())
+```
+
+HTTP server:
+
+```python
+class Main(Application) {
+    server = HttpServer(8080, Router.create()
+        .get("/health", req -> Response.ok("ok")))
+
+    def main() {
+        print("listening")
     }
 }
-# read -> transform -> write, three processes, paced by the bounded channels:
-rawLines = Channel(64)                       # reader -> transform
-upperLines = Channel(64)                     # transform -> writer
-FileReader.pump(inputFile, rawLines)         # file -> rawLines (spawns a background reader)
-up = Upper()
-up.run(rawLines, upperLines)                 # cast, so it loops in up's own process
-fw = FileWriter.drain(upperLines, outputFile)   # upperLines -> file (handle to join on)
-fw.join()                                    # wait for the pipeline to finish
 ```
-N workers can drain one `Channel` for automatic work-stealing + backpressure.
-(`fileio`, `filestream`, `channel`, `pipeline`)
 
-## 8. Standard library
+SQL is exposed through `Db`, `query`, `exec`, and transaction lambdas. See
+`examples/py/sql.zn`.
 
-- **`Json`** — derived record codecs (no reflection): `Json.encode(rec)`,
-  `Json.decode(User, s)` (bare record name; `User.class` also works),
-  `Json.decodeList(User, arrayJson)` → `List<User>`; plus dynamic access
-  (`Json.parse(s).get("k").asInt()`) for foreign JSON. (`json`)
-- **`zinc.http`** — a client: the `HttpClient.newBuilder()...send(req)` builder for full
-  control, or the one-shot facade `http.get(url)` / `http.post(url, body)` / `put` / `delete`.
-  Plus a server: an `HttpServer` Actor + a programmatic `Router` with `{id}` path params;
-  handlers are lambdas. (`http_client`, `http_facade`; server in `dogfood/webdemo`)
-- **`zinc.sql`** — a `Db` connection pool (a supervision subtree, an Application child);
-  `db.query(sql, params...)`, `db.exec(...)`, lambda `db.transaction(tx -> {...})` (return =
-  COMMIT, `raise` = ROLLBACK); always prepared statements. (Postgres; `sql`)
-- **`Log`** — `Log.info/warn/error(msg)` → BEAM logger (where crash reports land);
-  `print` stays clean stdout.
+Other covered APIs include `Log`, `Base64`, `Hex`, `Gzip`, `Crypto`, `Random`, and `Uuid`.
+See `examples/py/encoding.zn` and `webauth.zn`.
 
-## 9. The FFI escape hatch and dependencies
+## FFI And Dependencies
 
-Day-to-day code is pure braces-Python. When you need a raw OTP/hex module, open the hatch:
+Use raw Erlang modules through the FFI escape hatch:
 
 ```python
-from erlang import lists        # binds the OTP `lists` module
+from erlang import lists
 
-sorted = lists.sort(xs)         # lowers to lists:sort(Xs); passthrough, unchecked
+sorted = lists.sort(xs)
 ```
 
-Add hex packages with `zc add cowboy@2.12.0`; declaring a dep fetches + builds it, and you
-call it through the same FFI. The basement is unchecked by default, but **`zc check`** runs
-xref + dialyzer over it (and your deps) on demand — calls to functions that exist nowhere,
-bad arity, type-incompatible FFI. (`ffi`)
+Add Hex packages with:
 
-## 10. Generics and the type net
+```sh
+zc add cowboy@2.12.0
+```
 
-Generic annotations are **kept** — `Channel<String>`, `List<int>`, `Map<String,int>` carry
-their element type, so `take()`/`get()`/`d["k"]` are typed. They're erased at lowering (the
-BEAM has no reified types) but **gradually checked** at transpile time: known-vs-known
-mismatch is an error, dynamic values (foreign JSON, mixed maps) flow freely until a guarded
-crossing checks them at the boundary. Params must be typed; returns are checked.
+`zc check --xref` validates undefined FFI calls. `zc check` also runs dialyzer.
 
-**"Safe but no safer":** the net catches what corrupts data *silently* (type confusion across
-boundaries, mixed-dict misuse). There is **no `Optional`/`None` ceremony** — a nil deref
-crashes loud and the supervisor restarts it; that's the null story. (`veneer`)
+## CLI Reference
 
----
+```sh
+zc new --py <name>          create a .zn project
+zc run [file|dir]           build and run
+zc run --once [dir]         run Application main and stop, useful for tests
+zc build [dir]              transpile and compile
+zc test [dir]               run test/**/*.zn
+zc fmt <file|dir>           reindent by brace depth
+zc add <name@version>       add a Hex dependency
+zc check [--xref] [dir]     xref, optionally dialyzer
+zc release [dir]            self-contained OTP release tarball
+zc toolchain install [ver]  install managed OTP
+zc doctor                   inspect install/toolchain resolution
+```
 
-Next: the **[Tutorials](tutorials.md)** build a real service; **[Coming from
-Python](coming-from-python.md)** lists what's deliberately different.
+## What To Read Next
+
+- [Getting started](getting-started.md) for the first project path.
+- [Tutorials](tutorials.md) for an HTTP service and flowdemo tour.
+- [Examples](../examples/README.md) for tested `.zn` snippets by topic.
+- [Solidification plan](solidification-plan.md) for current engineering priorities.
