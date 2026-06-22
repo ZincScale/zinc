@@ -18,7 +18,7 @@ cp -r rebar_zinc "$D/rebar_zinc"   # rebar transpile plugin lives next to the ja
 # every case goes through this; timeout is a safety net so no run can hang the suite
 zc() { timeout 180 "$JBIN/java" -DZINC_HOME_LIB="$D" -jar "$D/zc.jar" "$@"; }
 
-examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream pipeline veneer sealed encoding record_model webauth)
+examples=(hello countdown functions fizzbuzz counter counter_init supervised ffi channel protocols fstring trycatch exceptions records match multifile collections dict bools floats ternary strings breakcont math selfheal nested recursion json fileio http_client http_facade filestream pipeline veneer sealed encoding record_model webauth resources)
 declare -A want=(
   [hello]='Hello from braces-Python on BEAM!'
   [countdown]=15
@@ -58,6 +58,7 @@ declare -A want=(
   [encoding]=$'aGk=\ntrue\n4142\ntrue\ntrue'
   [record_model]=$'user\n8\nvin\n2'
   [webauth]=$'true\n64\n64\n36\n0\ntrue'
+  [resources]=$'a.txt\ntxt\n2\ntrue'
 )
 
 fail=0

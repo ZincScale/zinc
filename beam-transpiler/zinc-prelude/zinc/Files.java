@@ -24,6 +24,9 @@ public final class Files {
   public static boolean exists(String path) { throw Tag.stub(); }
   public static boolean isDirectory(String path) { throw Tag.stub(); }
   public static List<String> list(String dir) { throw Tag.stub(); }
+  public static String join(String a, String b) { throw Tag.stub(); }
+  public static String baseName(String path) { throw Tag.stub(); }
+  public static String extension(String path) { throw Tag.stub(); }
   public static void createDirectories(String path) { throw Tag.stub(); }
   public static void delete(String path) { throw Tag.stub(); }
   // zinc int is an arbitrary-precision Erlang integer, so it holds any file size

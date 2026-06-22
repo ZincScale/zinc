@@ -1,0 +1,9 @@
+[project]
+name = "flowdemo"
+version = "0.1.0"
+
+[otp]
+version = "29"
+
+[deps]
+cowboy = "2.12.0"

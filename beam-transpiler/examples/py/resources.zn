@@ -1,0 +1,35 @@
+record AppConfig(inputDir: String, output: String)
+
+def main() {
+    root = "/tmp/zinc_resources_py"
+    input = Files.join(root, "in")
+    out = Files.join(root, "out.txt")
+    cfgPath = Files.join(root, "config.json")
+
+    Files.createDirectories(input + "/")
+    Files.writeString(Files.join(input, "b.txt"), "bee\n")
+    Files.writeString(Files.join(input, "a.txt"), "aye\n")
+    Files.writeString(cfgPath, "{\"inputDir\":\"" + input + "\",\"output\":\"" + out + "\"}")
+
+    cfg: AppConfig = Config.decode(AppConfig, cfgPath)
+    Files.writeString(cfg.output, "")
+    first = ""
+    count = 0
+    for name in Files.list(cfg.inputDir) {
+        if count == 0 { first = name }
+        src = Files.join(cfg.inputDir, name)
+        with Files.openReader(src) as r {
+            with Files.openAppender(cfg.output) as w {
+                while r.hasNextLine() {
+                    w.writeLine(Files.baseName(src) + ":" + r.nextLine())
+                }
+            }
+        }
+        count = count + 1
+    }
+
+    print(first)
+    print(Files.extension(first))
+    print(count)
+    print(Files.readString(cfg.output).contains("a.txt:aye"))
+}

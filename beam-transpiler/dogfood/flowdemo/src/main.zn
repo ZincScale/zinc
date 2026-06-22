@@ -1,0 +1,145 @@
+# Canonical flow dogfood, Phase 1: current features only.
+
+enum FieldType { INT, STRING }
+
+record Field(name: String, ftype: FieldType, required: boolean)
+record Schema(name: String, fields: List<Field>)
+record FlowFile(path: String, name: String, score: int)
+record FlowConfig(inputDir: String, successPath: String, failurePath: String)
+
+sealed ProcResult {
+    Success(ff: FlowFile)
+    Failed(reason: String, raw: String)
+}
+
+class Metrics(Actor) {
+    processed = 0
+    success = 0
+    failed = 0
+    lastError = ""
+
+    def seen() { processed = processed + 1 }
+    def ok() { success = success + 1 }
+    def bad(reason: String) {
+        failed = failed + 1
+        lastError = reason
+    }
+    def summary() -> String {
+        return "processed=" + processed + "\n" +
+               "success=" + success + "\n" +
+               "failed=" + failed + "\n" +
+               "last_error=" + lastError
+    }
+}
+
+class Worker(Actor) {
+    def process(path: String, line: String) -> ProcResult {
+        out: ProcResult = Failed("unset", line)
+        try {
+            doc = Json.parse(line)
+            name: String = doc.get("name").asText()
+            score: int = doc.get("score").asInt()
+            if score < 0 {
+                out = Failed("negative score", line)
+            } else {
+                out = Success(FlowFile(path, name.toUpperCase(), score + 1))
+            }
+        } except Exception as e {
+            out = Failed(e.message, line)
+        }
+        return out
+    }
+
+    def crash() {
+        z = 0
+        x = 1 / z
+    }
+}
+
+class Flow(Actor) {
+    metrics = Metrics()
+    worker = Worker()
+
+    def status() -> String {
+        return metrics.summary()
+    }
+
+    def runOnce(configPath: String) -> String {
+        cfg: FlowConfig = Config.decode(FlowConfig, configPath)
+
+        Files.writeString(cfg.successPath, "")
+        Files.writeString(cfg.failurePath, "")
+
+        for fileName in Files.list(cfg.inputDir) {
+            path = Files.join(cfg.inputDir, fileName)
+            with Files.openReader(path) as r {
+                with Files.openAppender(cfg.successPath) as okWriter {
+                    with Files.openAppender(cfg.failurePath) as badWriter {
+                        while r.hasNextLine() {
+                            line = r.nextLine()
+                            metrics.seen()
+                            result = worker.process(path, line)
+                            match result {
+                                case Success(ff) {
+                                    metrics.ok()
+                                    okWriter.writeLine(ff.name + "," + ff.score)
+                                }
+                                case Failed(reason, raw) {
+                                    metrics.bad(reason)
+                                    badWriter.writeLine(reason + ":" + raw)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        worker.crash()
+        Sys.sleep(150)
+        recovered = worker.process("probe", "{\"name\":\"after\",\"score\":1}")
+        restart = "restart=bad"
+        match recovered {
+            case Success(ff) { restart = "restart=ok" }
+            case Failed(reason, raw) { restart = "restart=bad" }
+        }
+        return metrics.summary() + "\n" + restart
+    }
+}
+
+class Main(Application) {
+    flow = Flow()
+    server = HttpServer(18081, Router.create()
+        .get("/health", req -> Response.ok("ok"))
+        .get("/status", req -> Response.ok(flow.status())))
+
+    def main() {
+        root = "/tmp/zinc_flowdemo"
+        inputDir = Files.join(root, "in")
+        successPath = Files.join(root, "success.txt")
+        failurePath = Files.join(root, "failure.txt")
+        configPath = Files.join(root, "config.json")
+
+        Files.createDirectories(inputDir + "/")
+        Files.writeString(Files.join(inputDir, "a.jsonl"),
+            "{\"name\":\"alpha\",\"score\":1}\n" +
+            "{\"name\":\"beta\",\"score\":2}\n")
+        Files.writeString(Files.join(inputDir, "b.jsonl"),
+            "{\"name\":\"bad\",\"score\":-1}\n" +
+            "{\"name\":\"gamma\",\"score\":3}\n")
+        Files.writeString(configPath,
+            "{\"inputDir\":\"" + inputDir + "\"," +
+            "\"successPath\":\"" + successPath + "\"," +
+            "\"failurePath\":\"" + failurePath + "\"}")
+
+        print(flow.runOnce(configPath))
+        print("success_file=" + Files.readString(successPath).contains("ALPHA,2"))
+        print("failure_file=" + Files.readString(failurePath).contains("negative score"))
+
+        client = HttpClient.newBuilder().connectTimeout(2000).build()
+        health = client.send(HttpRequest.newBuilder("http://127.0.0.1:18081/health").GET().build())
+        print("health=" + health.body())
+        status = client.send(HttpRequest.newBuilder("http://127.0.0.1:18081/status").GET().build())
+        print("status_has_processed=" + status.body().contains("processed=4"))
+    }
+}

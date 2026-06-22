@@ -36,7 +36,7 @@ public class Main {
           "Long", "Double", "Float", "Arrays", "Object",
           "String", "Exception", "RuntimeException", "Actor", "Application", "Log",
           "HttpClient", "HttpRequest", "HttpResponse",
-          "HttpException", "ConnectException", "TimeoutException", "Json",
+          "HttpException", "ConnectException", "TimeoutException", "Json", "Config",
           "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",
           "Db", "Tx", "SqlException", "Files", "IOException", "Writer", "Reader",
           "HttpStream", "Channel", "FileReader", "FileWriter");

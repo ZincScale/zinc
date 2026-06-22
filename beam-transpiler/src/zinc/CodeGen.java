@@ -824,6 +824,7 @@ class CodeGen {
   static final String IO_SOURCE = "-module('zinc.io').\n"
       + "-export([read_string/1, read_bytes/1, read_lines/1, write_string/2,\n"
       + "         append_string/2, write_bytes/2, exists/1, is_dir/1, list/1,\n"
+      + "         join/2, base_name/1, extension/1,\n"
       + "         mkdirs/1, delete/1, fsize/1, getenv/1,\n"
       + "         open_reader/1, r_has_next_line/1, r_next_line/1,\n"
       + "         open_writer/1, open_appender/1, w_write/2, w_writeln/2, close/1]).\n\n"
@@ -892,9 +893,18 @@ class CodeGen {
       + "is_dir(P) -> filelib:is_dir(P).\n"
       + "list(P) ->\n"
       + "    case file:list_dir(P) of\n"
-      + "        {ok, Names} -> [unicode:characters_to_binary(N) || N <- Names];\n"
+      + "        {ok, Names} -> lists:sort([unicode:characters_to_binary(N) || N <- Names]);\n"
       + "        {error, R}  -> raise(R, P)\n"
       + "    end.\n"
+      + "join(A, B) ->\n"
+      + "    case A of\n"
+      + "        <<>> -> B;\n"
+      + "        _ -> case binary:last(A) of $/ -> <<A/binary, B/binary>>; _ -> <<A/binary, \"/\", B/binary>> end\n"
+      + "    end.\n"
+      + "base_name(P) -> filename:basename(P).\n"
+      + "extension(P) ->\n"
+      + "    E = filename:extension(P),\n"
+      + "    case E of <<\".\", Rest/binary>> -> Rest; _ -> <<>> end.\n"
       + "mkdirs(P) -> unit_or_raise(filelib:ensure_path(P), P).\n"
       + "delete(P) ->\n"
       + "    R = case filelib:is_dir(P) of true -> file:del_dir(P); false -> file:delete(P) end,\n"
@@ -3289,6 +3299,16 @@ class CodeGen {
         }
         throw new CompileError("unsupported: Response." + x.method() + " (ok/status)");
       }
+      case "Config" -> {
+        if (x.method().equals("decode") && x.args().size() == 2) {
+          RecordDecl r = classLitRecord(x.args().get(0), "Config.decode");
+          emitJsonFrom(r);
+          usedIo = true;
+          return "'$fromjson_" + r.name().toLowerCase() + "'('zinc.io':read_string("
+              + genExpr(x.args().get(1), env) + "))";
+        }
+        throw new CompileError("unsupported: Config." + x.method() + " (decode)");
+      }
       case "Json" -> {
         if (x.method().equals("parse") && x.args().size() == 1) {
           return "json:decode(" + genExpr(x.args().get(0), env) + ")";
@@ -3517,6 +3537,9 @@ class CodeGen {
           case "exists" -> "exists";
           case "isDirectory" -> "is_dir";
           case "list" -> "list";
+          case "join" -> "join";
+          case "baseName" -> "base_name";
+          case "extension" -> "extension";
           case "createDirectories" -> "mkdirs";
           case "delete" -> "delete";
           case "size" -> "fsize";
@@ -3907,6 +3930,10 @@ class CodeGen {
         if (x.target() instanceof VarRef vr) {
           if (vr.name().equals("Tag")) yield x.method().equals("of") ? "Tag" : null;
           if (vr.name().equals("HttpClient")) yield "HttpClientBuilder";
+          if (vr.name().equals("Config")) {
+            String rec = x.args().isEmpty() ? null : classLitRecordName(x.args().get(0));
+            yield x.method().equals("decode") ? rec : null;
+          }
           if (vr.name().equals("Json")) {
             String rec = x.args().isEmpty() ? null : classLitRecordName(x.args().get(0));
             yield switch (x.method()) {
@@ -3957,6 +3984,7 @@ class CodeGen {
               case "readBytes" -> "byte[]";
               case "readLines", "list" -> "List<String>";
               case "exists", "isDirectory" -> "boolean";
+              case "join", "baseName", "extension" -> "String";
               case "size" -> "int";
               case "openReader" -> "Reader";
               case "openWriter", "openAppender" -> "Writer";
@@ -4311,6 +4339,7 @@ class CodeGen {
           for (Expr a : st.args()) exprRefs(a, out);
         }
         case TryStmt st -> {
+          for (Ast.Resource r : st.resources()) exprRefs(r.init(), out);
           blockRefs(st.tryBlock(), out);
           for (Ast.CatchClause c : st.clauses()) blockRefs(c.body(), out);
         }

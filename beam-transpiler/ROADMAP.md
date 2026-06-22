@@ -701,6 +701,12 @@ made real, and it's pure BEAM strength:
    (public void zero-arg = case). e2e: `modifiers` positive + 8 neg cases.
 
 ## Start here next session
+**ACTIVE PLANNING GATE (2026-06-19):** before adding more isolated features, use
+`docs/solidification-plan.md`. The next work is design-first: build a canonical
+zinc-flow-style dogfood target, record gaps by architecture area, and only then implement
+one planned slice at a time with acceptance tests. This supersedes quick patching from the
+older historical backlog below.
+
 **CURRENT FRONTIER (2026-06-15).** The v1 language + stdlib are implemented and verified
 (milestone log below). **Agreed sequence (user, 2026-06-15) — progress:**
 1. **Phase 4 — SDK & toolchain: DONE (2026-06-15).** (a) `zc` CLI polish — quiet `zc run`.
