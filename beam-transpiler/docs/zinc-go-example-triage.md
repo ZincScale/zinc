@@ -44,8 +44,8 @@ runtime-specific examples out of `e2e-zinc.sh` until there is an explicit BEAM d
   Zinc-Go's explicit trailing `error` return model as-is.
 - Nullability examples may be adapted once `null` / `T?` syntax is deliberately added. Do
   not require strict null-safety analysis for the first BEAM implementation.
-- Generic examples should be adapted as erased type metadata. Collections are the first
-  supported case; generic functions/data records need their own implementation slice.
+- Generic examples should be adapted as erased type metadata. Collections, generic records,
+  and generic functions are supported without monomorphizing runtime code.
 - Function-type examples using Zinc-Go `Fn<...>` should be rewritten as single-method
   interfaces. BEAM Zinc's canonical function type is a SAM-style interface backed by an
   Erlang fun.
