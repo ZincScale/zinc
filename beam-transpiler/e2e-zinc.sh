@@ -37,8 +37,8 @@ declare -A want=(
   [go_string_aliases]=$'  HELLO, ZINC!  \n  hello, zinc!  \n[Hello, Zinc!  ]\n[  Hello, Zinc!]'
   [nulls_tuples]=$'found: vin\nmissing: null\nfound length: 3\nmissing length: null\nfound upper: VIN\nmissing upper: null\npair: 3:beam\nuser: 7:vin\ntyped user: 7:vin\nbundle: 4:beam'
   [beam_helpers]=$'range sum: 6\nclosed sum: 6\nlist slice sum: 90\nbytes slice: BC\nbytes length: 4\nbyte at 2: 67'
-  [generic_records]=$'zinc\n10\nbeam:vm'
-  [generic_functions]=$'zinc\n8\nvm'
+  [generic_records]=$'zinc\n10\nbeam:vm\n8'
+  [generic_functions]=$'zinc\n8\nvm\n12'
   [functions]=$'7\n42'
   [fizzbuzz]=$'1\n2\nFizz\n4\nBuzz'
   [counter]=7
@@ -83,6 +83,7 @@ declare -A wanterr=(
   [byte_index_assign]='byte_index_assign.zn:3: byte[] is binary data and cannot be assigned by index'
   [generic_record_value]="generic_record_value.zn:4: new Pair<String,int> arg 2 ('second'): cannot bind a String to int"
   [generic_function_arg]="generic_function_arg.zn:6: identity arg 1 ('value'): cannot bind a String to int"
+  [generic_function_list_arg]="generic_function_list_arg.zn:6: first arg 1 ('values'): cannot bind a String to int"
 )
 
 fail=0

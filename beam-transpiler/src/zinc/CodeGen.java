@@ -250,6 +250,14 @@ class CodeGen {
       throw new CompileError(where + ": cannot use a void method's result as a value");
     }
     if (declared.equals("double") && got.equals("int")) return; // widening
+    List<String> dargs = typeArgs(declared), gargs = typeArgs(got);
+    if (baseType(declared).equals(baseType(got)) && !dargs.isEmpty()
+        && dargs.size() == gargs.size()) {
+      for (int i = 0; i < dargs.size(); i++) {
+        checkBind(dargs.get(i), gargs.get(i), where);
+      }
+      return;
+    }
     Ast.InstanceClassDecl ic = instClasses.get(got);
     if (ic != null && ic.iface().equals(declared)) return;      // one-hop subtyping
     boolean dn = isNominal(declared) || isPrim(declared);
@@ -363,11 +371,7 @@ class CodeGen {
   }
 
   private String substType(String t, RecordDecl r, List<String> args) {
-    if (t == null || args.isEmpty() || r.typeParams().isEmpty()) return t;
-    for (int i = 0; i < r.typeParams().size() && i < args.size(); i++) {
-      if (t.equals(r.typeParams().get(i))) return args.get(i);
-    }
-    return t;
+    return substType(t, r.typeParams(), args);
   }
 
   private List<Param> substParams(RecordDecl r, List<String> args) {
@@ -380,9 +384,35 @@ class CodeGen {
   }
 
   private String substType(String t, MethodDecl m, List<String> args) {
-    if (t == null || args.isEmpty() || m.typeParams().isEmpty()) return t;
-    for (int i = 0; i < m.typeParams().size() && i < args.size(); i++) {
-      if (t.equals(m.typeParams().get(i))) return args.get(i);
+    return substType(t, m.typeParams(), args);
+  }
+
+  private String substType(String t, List<String> params, List<String> args) {
+    if (t == null || args.isEmpty() || params.isEmpty()) return t;
+    for (int i = 0; i < params.size() && i < args.size(); i++) {
+      if (t.equals(params.get(i))) return args.get(i);
+    }
+    if (t.endsWith("[]")) {
+      return substType(t.substring(0, t.length() - 2), params, args) + "[]";
+    }
+    if (t.startsWith("(") && t.endsWith(")")) {
+      var elems = new ArrayList<String>();
+      for (String x : tupleElems(t)) {
+        String sx = substType(x, params, args);
+        if (sx == null) return null;
+        elems.add(sx);
+      }
+      return "(" + String.join(",", elems) + ")";
+    }
+    List<String> ta = typeArgs(t);
+    if (!ta.isEmpty()) {
+      var elems = new ArrayList<String>();
+      for (String x : ta) {
+        String sx = substType(x, params, args);
+        if (sx == null) return null;
+        elems.add(sx);
+      }
+      return baseType(t) + "<" + String.join(",", elems) + ">";
     }
     return t;
   }
@@ -393,11 +423,31 @@ class CodeGen {
     var inferred = new ArrayList<String>();
     for (int i = 0; i < m.typeParams().size(); i++) inferred.add(null);
     for (int i = 0; i < m.params().size() && i < x.args().size(); i++) {
-      String pt = m.params().get(i).type();
-      int k = m.typeParams().indexOf(pt);
-      if (k >= 0) inferred.set(k, exprType(x.args().get(i)));
+      inferMethodTypeArg(m.params().get(i).type(), exprType(x.args().get(i)),
+          m.typeParams(), inferred);
     }
     return inferred;
+  }
+
+  private void inferMethodTypeArg(String pattern, String actual, List<String> params,
+      List<String> out) {
+    if (pattern == null || actual == null) return;
+    int k = params.indexOf(pattern);
+    if (k >= 0) {
+      out.set(k, actual);
+      return;
+    }
+    if (pattern.endsWith("[]") && actual.endsWith("[]")) {
+      inferMethodTypeArg(pattern.substring(0, pattern.length() - 2),
+          actual.substring(0, actual.length() - 2), params, out);
+      return;
+    }
+    if (baseType(pattern).equals(baseType(actual))) {
+      List<String> pa = typeArgs(pattern), aa = typeArgs(actual);
+      for (int i = 0; i < pa.size() && i < aa.size(); i++) {
+        inferMethodTypeArg(pa.get(i), aa.get(i), params, out);
+      }
+    }
   }
 
   private List<Param> substParams(MethodDecl m, List<String> args) {

@@ -9,10 +9,15 @@ T choose<T>(boolean first, T a, T b) {
     return b
 }
 
+T first<T>(List<T> values) {
+    return values[0]
+}
+
 void main() {
     String name = identity<String>("zinc")
     int count = identity<int>(7)
     print(name)
     print(count + 1)
     print(choose<String>(false, "beam", "vm"))
+    print(first<int>(List<int>[11, 12, 13]) + 1)
 }

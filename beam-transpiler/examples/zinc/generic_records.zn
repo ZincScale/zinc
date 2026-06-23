@@ -1,4 +1,5 @@
 record Pair<A, B>(A first, B second)
+record Box<T>(List<T> items)
 
 Pair<String, int> score() {
     return Pair<String, int>("zinc", 9)
@@ -11,4 +12,7 @@ void main() {
 
     var inferred = Pair<String, String>("beam", "vm")
     print(inferred.first + ":" + inferred.second)
+
+    Box<int> boxed = Box<int>(List<int>[3, 5, 8])
+    print(boxed.items[2])
 }

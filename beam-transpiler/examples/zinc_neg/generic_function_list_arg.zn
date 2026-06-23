@@ -1,0 +1,8 @@
+T first<T>(List<T> values) {
+    return values[0]
+}
+
+void main() {
+    int n = first<int>(List<String>["bad"])
+    print(n)
+}
