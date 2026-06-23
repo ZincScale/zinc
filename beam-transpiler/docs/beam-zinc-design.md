@@ -92,7 +92,7 @@ metadata used for indexing, iteration, assignment, and guard checks.
 Implementation direction:
 
 - Keep collection generics as the first-class generic use case.
-- Generic data records are supported as erased type metadata.
+- Generic data records and functions are supported as erased type metadata.
 - Avoid implementing bounded generics or typeclass-style constraints until there is a real
   BEAM use case.
 

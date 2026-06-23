@@ -157,8 +157,12 @@ final class PyParser {
     }
     int i = skipTypeAhead(pos);
     if (toks.get(i).kind() == TokKind.QUESTION) i++;
-    return toks.get(i).kind() == TokKind.IDENT
-        && toks.get(i + 1).kind() == TokKind.LPAREN;
+    if (toks.get(i).kind() != TokKind.IDENT) return false;
+    i++;
+    if (toks.get(i).kind() == TokKind.LT) {
+      i = genericHeadEnd(i - 1);
+    }
+    return toks.get(i).kind() == TokKind.LPAREN;
   }
 
   private boolean looksLikeTupleZincDef() {
@@ -528,7 +532,8 @@ final class PyParser {
     return "HashMap<" + k + "," + v + ">";
   }
 
-  private record RawDef(String name, List<Param> params, String ret, Block body) {}
+  private record RawDef(String name, List<String> typeParams, List<Param> params, String ret,
+      Block body) {}
 
   /** `def NAME(params) [-> TYPE] { block }` or `TYPE NAME(params) { block }`. */
   private RawDef parseDefRaw() {
@@ -541,6 +546,7 @@ final class PyParser {
       if (ret.equals("None")) ret = "void";
       name = expect(TokKind.IDENT, "function name").text();
     }
+    List<String> typeParams = parseTypeParamNames();
     List<Param> params = parseParams();
     if (ret.equals("infer") && match(TokKind.ARROW)) {
       ret = parseType();
@@ -557,7 +563,7 @@ final class PyParser {
     } else {
       body = parseBlock();
     }
-    return new RawDef(name, params, ret, body);
+    return new RawDef(name, typeParams, params, ret, body);
   }
 
   /** Top-level def -> public static method of class Main; `main` gets synthetic args. */
@@ -568,7 +574,7 @@ final class PyParser {
       params = List.of(new Param("String[]", "args")); // -> main/1, the hardwired entry
     }
     var mods = topLevel ? Set.of("public", "static") : Set.of("public");
-    return new MethodDecl(d.ret(), d.name(), params, d.body(), mods);
+    return new MethodDecl(d.ret(), d.name(), d.typeParams(), params, d.body(), mods);
   }
 
   /** `( [NAME : TYPE {, NAME : TYPE}] )`. Params must be typed (the language is statically
@@ -1487,7 +1493,10 @@ final class PyParser {
           return parseMapLiteral(collectionType);
         }
         if (match(TokKind.LPAREN)) {
-          return new NewExpr(collectionType, parseArgs());
+          if (Character.isUpperCase(baseTypeName(collectionType).charAt(0))) {
+            return new NewExpr(collectionType, parseArgs());
+          }
+          return new Call(collectionType, parseArgs());
         }
         throw new CompileError("Parse error: expected typed literal or constructor after "
             + collectionType + " at line " + cur().line());

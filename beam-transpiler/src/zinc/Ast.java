@@ -70,10 +70,20 @@ final class Ast {
     }
   }
 
-  record MethodDecl(String retType, String name, List<Param> params, Block body,
-      java.util.Set<String> mods) {
+  record MethodDecl(String retType, String name, List<String> typeParams, List<Param> params,
+      Block body, java.util.Set<String> mods) {
+    MethodDecl(String retType, String name, List<String> typeParams, List<Param> params,
+        Block body) {
+      this(retType, name, typeParams, params, body, java.util.Set.of());
+    }
+
     MethodDecl(String retType, String name, List<Param> params, Block body) {
-      this(retType, name, params, body, java.util.Set.of());
+      this(retType, name, List.of(), params, body, java.util.Set.of());
+    }
+
+    MethodDecl(String retType, String name, List<Param> params, Block body,
+        java.util.Set<String> mods) {
+      this(retType, name, List.of(), params, body, mods);
     }
 
     boolean isPrivate() {

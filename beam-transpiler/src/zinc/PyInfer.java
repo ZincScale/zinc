@@ -46,7 +46,8 @@ final class PyInfer {
               changed = true;
               inf.sigs.put(m.name() + "/" + m.params().size(), t);
             }
-            methods.add(new MethodDecl(t, m.name(), m.params(), m.body(), m.mods()));
+            methods.add(new MethodDecl(t, m.name(), m.typeParams(), m.params(), m.body(),
+                m.mods()));
           } else {
             methods.add(m);
           }
@@ -65,7 +66,8 @@ final class PyInfer {
           if (m.retType().equals("infer")) {
             String t = inf.inferMethod(m, fieldTypes);
             if (!t.equals("infer")) changed = true;
-            methods.add(new MethodDecl(t, m.name(), m.params(), m.body(), m.mods()));
+            methods.add(new MethodDecl(t, m.name(), m.typeParams(), m.params(), m.body(),
+                m.mods()));
           } else {
             methods.add(m);
           }
@@ -84,7 +86,8 @@ final class PyInfer {
           if (m.retType().equals("infer")) {
             String t = inf.inferMethod(m, fieldTypes);
             if (!t.equals("infer")) changed = true;
-            methods.add(new MethodDecl(t, m.name(), m.params(), m.body(), m.mods()));
+            methods.add(new MethodDecl(t, m.name(), m.typeParams(), m.params(), m.body(),
+                m.mods()));
           } else {
             methods.add(m);
           }
@@ -229,11 +232,16 @@ final class PyInfer {
         };
       }
       case Call x -> {
-        String t = sigs.get(x.callee() + "/" + x.args().size());
+        String t = sigs.get(baseType(x.callee()) + "/" + x.args().size());
         yield t == null || t.equals("infer") ? null : t;
       }
       default -> null;
     };
+  }
+
+  private static String baseType(String t) {
+    int i = t.indexOf('<');
+    return i < 0 ? t : t.substring(0, i);
   }
 
   private static List<String> tupleElems(String t) {

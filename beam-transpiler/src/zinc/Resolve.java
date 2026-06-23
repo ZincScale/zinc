@@ -93,7 +93,8 @@ final class Resolve {
   }
 
   private MethodDecl method(MethodDecl m) {
-    return new MethodDecl(m.retType(), m.name(), m.params(), block(m.body()), m.mods());
+    return new MethodDecl(m.retType(), m.name(), m.typeParams(), m.params(), block(m.body()),
+        m.mods());
   }
 
   private Block block(Block b) {

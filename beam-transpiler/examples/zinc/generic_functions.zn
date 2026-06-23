@@ -1,0 +1,18 @@
+T identity<T>(T value) {
+    return value
+}
+
+T choose<T>(boolean first, T a, T b) {
+    if first {
+        return a
+    }
+    return b
+}
+
+void main() {
+    String name = identity<String>("zinc")
+    int count = identity<int>(7)
+    print(name)
+    print(count + 1)
+    print(choose<String>(false, "beam", "vm"))
+}

@@ -379,6 +379,36 @@ class CodeGen {
     return out;
   }
 
+  private String substType(String t, MethodDecl m, List<String> args) {
+    if (t == null || args.isEmpty() || m.typeParams().isEmpty()) return t;
+    for (int i = 0; i < m.typeParams().size() && i < args.size(); i++) {
+      if (t.equals(m.typeParams().get(i))) return args.get(i);
+    }
+    return t;
+  }
+
+  private List<String> methodTypeArgs(MethodDecl m, Call x) {
+    var explicit = typeArgs(x.callee());
+    if (!explicit.isEmpty()) return explicit;
+    var inferred = new ArrayList<String>();
+    for (int i = 0; i < m.typeParams().size(); i++) inferred.add(null);
+    for (int i = 0; i < m.params().size() && i < x.args().size(); i++) {
+      String pt = m.params().get(i).type();
+      int k = m.typeParams().indexOf(pt);
+      if (k >= 0) inferred.set(k, exprType(x.args().get(i)));
+    }
+    return inferred;
+  }
+
+  private List<Param> substParams(MethodDecl m, List<String> args) {
+    if (args.isEmpty()) return m.params();
+    var out = new ArrayList<Param>();
+    for (Param p : m.params()) {
+      out.add(new Param(substType(p.type(), m, args), p.name()));
+    }
+    return out;
+  }
+
   /** Known-vs-known per argument; unknown args flow free (the FFI rule). */
   private void checkArgs(String where, List<Param> params, List<Expr> args) {
     for (int i = 0; i < params.size() && i < args.size(); i++) {
@@ -2886,12 +2916,13 @@ class CodeGen {
           throw new CompileError("inside an actor, call static methods as Class.method(...)");
         }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
+        String callee = baseType(x.callee());
         MethodDecl md = ci == null ? null
-            : ci.methods().get(x.callee() + "/" + x.args().size());
-        if (md != null) checkArgs(x.callee(), md.params(), x.args());
+            : ci.methods().get(callee + "/" + x.args().size());
+        if (md != null) checkArgs(callee, substParams(md, methodTypeArgs(md, x)), x.args());
         var args = new ArrayList<String>();
         for (Expr a : x.args()) args.add(genExpr(a, env));
-        yield fnName(x.callee()) + "(" + String.join(", ", args) + ")";
+        yield fnName(callee) + "(" + String.join(", ", args) + ")";
       }
       case MethodCall x -> genMethodCall(x, env);
       case SafeMethodCall x -> genSafeMethodCall(x, env);
@@ -4135,9 +4166,10 @@ class CodeGen {
           yield x.callee().equals("double") || x.callee().equals("float") ? "double" : "int";
         }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
+        String callee = baseType(x.callee());
         MethodDecl md = ci == null ? null
-            : ci.methods().get(x.callee() + "/" + x.args().size());
-        yield md == null ? null : md.retType();
+            : ci.methods().get(callee + "/" + x.args().size());
+        yield md == null ? null : substType(md.retType(), md, methodTypeArgs(md, x));
       }
       case MethodCall x -> {
         // .asInt()/.asText()/.asBool()/.asNum(): guarded crossing off a dynamic JSON value

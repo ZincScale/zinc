@@ -1,0 +1,8 @@
+T identity<T>(T value) {
+    return value
+}
+
+void main() {
+    int n = identity<int>("bad")
+    print(n)
+}
