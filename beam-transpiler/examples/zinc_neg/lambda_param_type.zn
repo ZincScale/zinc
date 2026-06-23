@@ -1,0 +1,8 @@
+interface Predicate {
+    boolean test(int value)
+}
+
+void main() {
+    Predicate p = (String n) -> true
+    print(p.test(1))
+}

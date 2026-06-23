@@ -176,8 +176,8 @@ var head = Lists.slice(xs, 0, 3)
 Type behavior:
 
 - `String.substring(start, end)` returns `String` and already lowers to `string:slice`.
-- `Bytes.slice(bytes, start, length)` should return `byte[]`.
-- `Lists.slice(xs, start, length)` should return `List<T>` and may warn for O(n).
+- `Bytes.slice(bytes, start, length)` returns `byte[]`.
+- `Lists.slice(xs, start, length)` returns `List<T>` and warns for O(n).
 - Array slicing should be a library operation if needed, not bracket syntax.
 
 Implementation direction:
@@ -233,8 +233,8 @@ for lambdas. It also avoids the custom `Fn<(A), R>` syntax from Zinc-Go.
 Implementation direction:
 
 - Keep the existing SAM-interface lambda lowering as the primary path.
-- Add typed lambda parameters only if they improve inference for unambiguous cases; the
-  preferred style is to let the target interface type the lambda.
+- Typed lambda parameters are supported for unambiguous parenthesized lambdas, but the
+  preferred style is still to let the target interface type the lambda.
 - Do not port `Fn<...>` examples directly. Rewrite them as named interfaces or existing
   domain interfaces.
 

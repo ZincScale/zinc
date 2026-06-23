@@ -1141,7 +1141,12 @@ final class PyParser {
     int i = pos + 1;
     if (toks.get(i).kind() == TokKind.RPAREN) return toks.get(i + 1).kind() == TokKind.ARROW;
     while (toks.get(i).kind() == TokKind.IDENT) {
-      i++;
+      int typedEnd = skipTypeAhead(i);
+      if (toks.get(typedEnd).kind() == TokKind.IDENT) {
+        i = typedEnd + 1;
+      } else {
+        i++;
+      }
       if (toks.get(i).kind() == TokKind.COMMA) {
         i++;
         continue;
@@ -1153,21 +1158,33 @@ final class PyParser {
 
   private Expr parseLambda() {
     var params = new ArrayList<String>();
+    var paramTypes = new ArrayList<String>();
     if (check(TokKind.IDENT)) {
       params.add(advance().text());
     } else {
       expect(TokKind.LPAREN, "'('");
       if (!check(TokKind.RPAREN)) {
         do {
-          params.add(expect(TokKind.IDENT, "lambda parameter").text());
+          if (toks.get(pos + 1).kind() == TokKind.IDENT
+              || toks.get(pos + 1).kind() == TokKind.LT
+              || toks.get(pos + 1).kind() == TokKind.LBRACKET
+              || toks.get(pos + 1).kind() == TokKind.QUESTION) {
+            paramTypes.add(parseType());
+            params.add(expect(TokKind.IDENT, "lambda parameter").text());
+          } else {
+            params.add(expect(TokKind.IDENT, "lambda parameter").text());
+          }
         } while (match(TokKind.COMMA));
       }
       expect(TokKind.RPAREN, "')'");
     }
+    if (!paramTypes.isEmpty() && paramTypes.size() != params.size()) {
+      throw new CompileError("typed lambda parameters must all declare a type");
+    }
     expect(TokKind.ARROW, "'->'");
     Block body = check(TokKind.LBRACE) ? parseBlock()
         : new Block(List.of(new ExprStmt(parseExpr())));
-    return new LambdaExpr(params, body);
+    return new LambdaExpr(params, paramTypes, body);
   }
 
   private Expr parseOr() {

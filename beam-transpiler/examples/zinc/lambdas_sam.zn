@@ -29,4 +29,7 @@ void main() {
         return false
     }
     print(blocky.test(12))
+
+    Predicate typed = (int n) -> n == 5
+    print(typed.test(5))
 }

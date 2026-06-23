@@ -167,7 +167,7 @@ final class Resolve {
           new SafeMethodCall(expr(x.target()), x.method(),
               x.args().stream().map(this::expr).toList());
       case SpawnExpr x -> new SpawnExpr(x.actorName(), x.args().stream().map(this::expr).toList());
-      case LambdaExpr x -> new LambdaExpr(x.params(), block(x.body()));
+      case LambdaExpr x -> new LambdaExpr(x.params(), x.paramTypes(), block(x.body()));
       default -> e; // literals, VarRef
     };
   }

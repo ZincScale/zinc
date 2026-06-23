@@ -3016,8 +3016,15 @@ class CodeGen {
       Ast.InterfaceDecl iface = interfaces.get(ifaceName);
       if (iface != null && iface.sigs().size() == 1
           && iface.sigs().get(0).params().size() == lx.params().size()) {
+        var samTypes = iface.sigs().get(0).params().stream().map(Param::type).toList();
+        if (!lx.paramTypes().isEmpty()) {
+          for (int i = 0; i < lx.paramTypes().size(); i++) {
+            checkBind(lx.paramTypes().get(i), samTypes.get(i),
+                "lambda parameter '" + lx.params().get(i) + "'");
+          }
+        }
         return genLambda(lx, env,
-            iface.sigs().get(0).params().stream().map(Param::type).toList(),
+            samTypes,
             iface.sigs().get(0).retType());
       }
     }
@@ -3032,6 +3039,7 @@ class CodeGen {
    *  paramTypes/retType (from a SAM context) type the body; null = unknown (FFI rule). */
   private String genLambda(LambdaExpr x, Map<String, String> env, List<String> paramTypes,
       String retType) {
+    if (paramTypes == null && !x.paramTypes().isEmpty()) paramTypes = x.paramTypes();
     var bad = new LinkedHashSet<String>();
     collectAssigned(x.body(), bad);
     for (String b : bad) {

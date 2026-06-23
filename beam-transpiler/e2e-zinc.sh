@@ -50,7 +50,7 @@ declare -A want=(
   [exceptions]=$'8\nno such id\n1\nlocal'
   [match]=$'red\ncool\none\nmany'
   [protocols]=$'hello zinc\nbeam!\nlambda fun'
-  [lambdas_sam]=$'true\nn=7\ntrue'
+  [lambdas_sam]=$'true\nn=7\ntrue\ntrue'
   [json]=$'vin\n41\nsf\n40\n7\nmissing caught'
   [sealed]=$'ok d\nroute big\nfail negative'
   [resources]=$'a.txt\ntxt\n3\ntrue\ntrue\ntrue'
@@ -84,6 +84,7 @@ declare -A wanterr=(
   [generic_record_value]="generic_record_value.zn:4: new Pair<String,int> arg 2 ('second'): cannot bind a String to int"
   [generic_function_arg]="generic_function_arg.zn:6: identity arg 1 ('value'): cannot bind a String to int"
   [generic_function_list_arg]="generic_function_list_arg.zn:6: first arg 1 ('values'): cannot bind a String to int"
+  [lambda_param_type]="lambda_param_type.zn:6: lambda parameter 'n': cannot bind a int to String"
 )
 
 fail=0

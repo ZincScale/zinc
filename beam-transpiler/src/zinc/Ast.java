@@ -301,6 +301,10 @@ final class Ast {
 
   record SpawnExpr(String actorName, List<Expr> args) implements Expr {}
 
-  /** x -> e  |  (a, b) -> { ... }  -> Erlang fun; captures must be effectively final. */
-  record LambdaExpr(List<String> params, Block body) implements Expr {}
+  /** x -> e  |  (int x) -> e  |  (a, b) -> { ... }  -> Erlang fun. */
+  record LambdaExpr(List<String> params, List<String> paramTypes, Block body) implements Expr {
+    LambdaExpr(List<String> params, Block body) {
+      this(params, List.of(), body);
+    }
+  }
 }
