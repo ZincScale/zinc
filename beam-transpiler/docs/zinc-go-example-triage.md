@@ -42,15 +42,14 @@ runtime-specific examples out of `e2e-zinc.sh` until there is an explicit BEAM d
   goroutines/select unless a BEAM-native equivalent is designed.
 - Failure examples should use `try`/`catch`, actor crashes, and supervision. Do not port
   Zinc-Go's explicit trailing `error` return model as-is.
-- Nullability examples may be adapted once `null` / `T?` syntax is deliberately added. Do
-  not require strict null-safety analysis for the first BEAM implementation.
+- Nullability examples may use `null`, `T?`, and `?.` where they map cleanly to BEAM Zinc.
 - Generic examples should be adapted as erased type metadata. Collections, generic records,
   and generic functions are supported without monomorphizing runtime code.
 - Function-type examples using Zinc-Go `Fn<...>` should be rewritten as single-method
   interfaces. BEAM Zinc's canonical function type is a SAM-style interface backed by an
   Erlang fun.
-- Resource cleanup should prefer existing `with Files.open... as ...` until a canonical
-  BEAM `using` form is specified.
+- Resource cleanup should use existing `with Files.open... as ...`; do not port a separate
+  Go-style cleanup spelling.
 - `byte[]` is BEAM binary data in existing APIs. `bytes[i]` reads an int byte, and direct
   index assignment is not supported. Do not treat `byte[n]` as an ordinary array until a
   binary builder story is specified.
@@ -61,7 +60,6 @@ runtime-specific examples out of `e2e-zinc.sh` until there is an explicit BEAM d
 - Pointer/FFI examples such as address-of, Go pointer inference, struct tags, and Go package
   interop.
 - Goroutine/select/timeout examples with Go runtime assumptions.
-- Safe-navigation examples until `?.` has an explicit null-lowering design and e2e coverage.
-- Slice-range examples such as `xs[0..3]`; canonical BEAM Zinc should use named sequence,
-  list, string, and binary helpers unless bracket slicing is deliberately designed later.
+- Slice-range examples such as `xs[0..3]`; canonical BEAM Zinc uses named sequence, list,
+  string, and binary helpers instead.
 - Data-class or generic examples that rely on Go-specific value/pointer receiver behavior.

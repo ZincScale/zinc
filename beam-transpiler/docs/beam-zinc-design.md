@@ -42,16 +42,15 @@ Implementation direction:
 - Keep `Exception`, `throw`, `try`, and `catch` as the main failure syntax.
 - Keep `error_*`, `(T, error)`, and `catch { return err }` Zinc-Go examples out of
   `e2e-zinc.sh`.
-- If typed result values are needed later, design them as ordinary sealed records such as
-  `Ok(T)` / `Err(String)`, not as a second error channel built into every call.
+- Do not add a built-in typed result channel. When code wants explicit success/failure
+  values instead of exceptions, use ordinary sealed records in user/domain code.
 
 ## 2. Nullability
 
-Decision: nullability is acceptable at this stage; strict null checking is not required now.
+Decision: nullability is acceptable at this stage.
 
 - `null` may exist as a value for interoperability and simple optional flows.
 - `T?` is accepted as surface type syntax, normalizing to `T` plus nullable metadata.
-- The compiler should not attempt a full strict null-safety analysis in the near term.
 - Runtime failures from bad null use are acceptable initially.
 
 Implementation direction:
@@ -159,7 +158,7 @@ operations:
 - `string:slice/2` and `string:slice/3` for strings.
 - `binary:part/3` for binaries.
 
-Canonical Zinc should expose those through named library/method operations, not `xs[a..b]`.
+Canonical Zinc exposes those through named library/method operations, not `xs[a..b]`.
 
 Candidate syntax:
 
@@ -178,7 +177,7 @@ Type behavior:
 - `String.substring(start, end)` returns `String` and already lowers to `string:slice`.
 - `Bytes.slice(bytes, start, length)` returns `byte[]`.
 - `Lists.slice(xs, start, length)` returns `List<T>` and warns for O(n).
-- Array slicing should be a library operation if needed, not bracket syntax.
+- Array slicing should use a named helper if needed, not bracket syntax.
 
 Implementation direction:
 
@@ -187,7 +186,7 @@ Implementation direction:
   helper facades over BEAM list and binary primitives.
 - Keep existing `range(a, b)` and `a..b` accepted as compatibility syntax for now, but do
   not promote them as the canonical BEAM spelling.
-- Do not add `Slice` / `xs[a..b]` unless a later design explicitly chooses bracket slicing.
+- Do not add `Slice` / `xs[a..b]`; the named helpers are the canonical BEAM spelling.
 - Make list slicing costs explicit in warnings.
 
 ## 6. Function Types And Lambdas
@@ -257,6 +256,8 @@ Design direction:
 - Prefer records for values and actors for mutable state.
 - If data methods are needed, prefer explicit nominal instance classes or module functions
   before adding broad class inheritance.
+- Resource cleanup uses the existing `with Files.open... as ...` spelling. Do not add a
+  second `using` spelling unless a broader resource model needs it.
 
 Examples to avoid as direct ports:
 
