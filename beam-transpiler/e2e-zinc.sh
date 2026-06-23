@@ -15,7 +15,7 @@ printf 'Main-Class: Zc\n' > "$D/manifest.txt"
 cp -r rebar_zinc "$D/rebar_zinc"
 zc() { timeout 180 "$JBIN/java" -DZINC_HOME_LIB="$D" -jar "$D/zc.jar" "$@"; }
 
-examples=(hello go_hello top_level go_control go_enums go_assert go_int_literals go_bitwise go_shift go_precedence go_type_casts go_arrays go_sized_arrays go_bool_alias go_numeric_aliases go_interp_escape go_typed_collections go_string_aliases nulls_tuples beam_helpers functions fizzbuzz counter supervised records collections strings trycatch exceptions match protocols lambdas_sam json sealed resources channel multifile fileio filestream pipeline http_client http_facade encoding webauth record_model veneer bools floats)
+examples=(hello go_hello top_level go_control go_enums go_assert go_int_literals go_bitwise go_shift go_precedence go_type_casts go_arrays go_sized_arrays go_bool_alias go_numeric_aliases go_interp_escape go_typed_collections go_string_aliases nulls_tuples beam_helpers generic_records functions fizzbuzz counter supervised records collections strings trycatch exceptions match protocols lambdas_sam json sealed resources channel multifile fileio filestream pipeline http_client http_facade encoding webauth record_model veneer bools floats)
 declare -A want=(
   [hello]='Hello from Zinc on BEAM!'
   [go_hello]=$'Hello, World!\nHello, Zinc!\nThe answer is 42'
@@ -37,6 +37,7 @@ declare -A want=(
   [go_string_aliases]=$'  HELLO, ZINC!  \n  hello, zinc!  \n[Hello, Zinc!  ]\n[  Hello, Zinc!]'
   [nulls_tuples]=$'found: vin\nmissing: null\nfound length: 3\nmissing length: null\nfound upper: VIN\nmissing upper: null\npair: 3:beam\nuser: 7:vin\ntyped user: 7:vin\nbundle: 4:beam'
   [beam_helpers]=$'range sum: 6\nclosed sum: 6\nlist slice sum: 90\nbytes slice: BC\nbytes length: 4\nbyte at 2: 67'
+  [generic_records]=$'zinc\n10\nbeam:vm'
   [functions]=$'7\n42'
   [fizzbuzz]=$'1\n2\nFizz\n4\nBuzz'
   [counter]=7
@@ -79,6 +80,7 @@ declare -A wanterr=(
   [lambda_return_type]='lambda_return_type.zn:6: lambda result: cannot bind a int to String'
   [tuple_destructure_type]='tuple_destructure_type.zn:6: id: cannot bind a int to String'
   [byte_index_assign]='byte_index_assign.zn:3: byte[] is binary data and cannot be assigned by index'
+  [generic_record_value]="generic_record_value.zn:4: new Pair<String,int> arg 2 ('second'): cannot bind a String to int"
 )
 
 fail=0

@@ -1,0 +1,14 @@
+record Pair<A, B>(A first, B second)
+
+Pair<String, int> score() {
+    return Pair<String, int>("zinc", 9)
+}
+
+void main() {
+    Pair<String, int> p = score()
+    print(p.first)
+    print(p.second + 1)
+
+    var inferred = Pair<String, String>("beam", "vm")
+    print(inferred.first + ":" + inferred.second)
+}

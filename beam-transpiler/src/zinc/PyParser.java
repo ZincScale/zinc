@@ -155,7 +155,7 @@ final class PyParser {
         || head.equals("import") || head.equals("def")) {
       return false;
     }
-    int i = pos + 1;
+    int i = skipTypeAhead(pos);
     if (toks.get(i).kind() == TokKind.QUESTION) i++;
     return toks.get(i).kind() == TokKind.IDENT
         && toks.get(i + 1).kind() == TokKind.LPAREN;
@@ -187,10 +187,11 @@ final class PyParser {
     return new Param(type, name);
   }
 
-  /** `record Point(x: int, y: int)` or `record Point(int x, int y)` -> immutable map value. */
+  /** `record Point(x: int, y: int)` or `record Pair<A, B>(A a, B b)` -> immutable map. */
   private void parseRecord() {
     expect(TokKind.IDENT, "'record'"); // 'record'
     String name = expect(TokKind.IDENT, "record name").text();
+    List<String> typeParams = parseTypeParamNames();
     var comps = new ArrayList<Param>();
     expect(TokKind.LPAREN, "'('");
     if (!check(TokKind.RPAREN)) {
@@ -199,7 +200,17 @@ final class PyParser {
       } while (match(TokKind.COMMA));
     }
     expect(TokKind.RPAREN, "')'");
-    records.add(new RecordDecl(name, comps));
+    records.add(new RecordDecl(name, typeParams, comps));
+  }
+
+  private List<String> parseTypeParamNames() {
+    if (!match(TokKind.LT)) return List.of();
+    var names = new ArrayList<String>();
+    do {
+      names.add(expect(TokKind.IDENT, "type parameter").text());
+    } while (match(TokKind.COMMA));
+    expect(TokKind.GT, "'>'");
+    return names;
   }
 
   /** `sealed T { V1(f: A)  V2(String g, C h) }` -> algebraic union; each variant is a
@@ -1460,7 +1471,7 @@ final class PyParser {
       return new MapLit(keys, values);
     }
     if (check(TokKind.IDENT)) {
-      if ((checkIdent("List") || checkIdent("Map")) && toks.get(pos + 1).kind() == TokKind.LT) {
+      if (genericExprAhead()) {
         String collectionType = parseGenericHeadType();
         if (baseTypeName(collectionType).equals("List") && match(TokKind.LBRACKET)) {
           var elems = new ArrayList<Expr>();
@@ -1475,7 +1486,10 @@ final class PyParser {
         if (baseTypeName(collectionType).equals("Map") && match(TokKind.LBRACE)) {
           return parseMapLiteral(collectionType);
         }
-        throw new CompileError("Parse error: expected typed collection literal after "
+        if (match(TokKind.LPAREN)) {
+          return new NewExpr(collectionType, parseArgs());
+        }
+        throw new CompileError("Parse error: expected typed literal or constructor after "
             + collectionType + " at line " + cur().line());
       }
       String name = advance().text();
@@ -1522,6 +1536,25 @@ final class PyParser {
   private String baseTypeName(String t) {
     int i = t.indexOf('<');
     return i < 0 ? t : t.substring(0, i);
+  }
+
+  private boolean genericExprAhead() {
+    if (!check(TokKind.IDENT) || toks.get(pos + 1).kind() != TokKind.LT) return false;
+    int i = genericHeadEnd(pos);
+    return toks.get(i).kind() == TokKind.LPAREN
+        || toks.get(i).kind() == TokKind.LBRACKET
+        || toks.get(i).kind() == TokKind.LBRACE;
+  }
+
+  private int genericHeadEnd(int i) {
+    i += 2; // ident '<'
+    int depth = 1;
+    while (depth > 0 && toks.get(i).kind() != TokKind.EOF) {
+      if (toks.get(i).kind() == TokKind.LT) depth++;
+      else if (toks.get(i).kind() == TokKind.GT) depth--;
+      i++;
+    }
+    return i;
   }
 
   private boolean isSizedArrayElementType(String name) {

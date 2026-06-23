@@ -357,8 +357,26 @@ class CodeGen {
   }
 
   private boolean isNominal(String t) {
-    return records.containsKey(t) || instClasses.containsKey(t) || interfaces.containsKey(t)
-        || allActors.containsKey(t) || exceptions.containsKey(t) || enums.containsKey(t);
+    String b = baseType(t);
+    return records.containsKey(b) || instClasses.containsKey(b) || interfaces.containsKey(b)
+        || allActors.containsKey(b) || exceptions.containsKey(b) || enums.containsKey(b);
+  }
+
+  private String substType(String t, RecordDecl r, List<String> args) {
+    if (t == null || args.isEmpty() || r.typeParams().isEmpty()) return t;
+    for (int i = 0; i < r.typeParams().size() && i < args.size(); i++) {
+      if (t.equals(r.typeParams().get(i))) return args.get(i);
+    }
+    return t;
+  }
+
+  private List<Param> substParams(RecordDecl r, List<String> args) {
+    if (args.isEmpty()) return r.components();
+    var out = new ArrayList<Param>();
+    for (Param p : r.components()) {
+      out.add(new Param(substType(p.type(), r, args), p.name()));
+    }
+    return out;
   }
 
   /** Known-vs-known per argument; unknown args flow free (the FFI rule). */
@@ -2693,25 +2711,26 @@ class CodeGen {
         yield "#{" + String.join(", ", entries) + "}";
       }
       case NewExpr x -> {
-        RecordDecl variant = variants.get(x.typeName());
+        String xt = baseType(x.typeName());
+        RecordDecl variant = variants.get(xt);
         if (variant != null) {              // sealed variant -> tagged tuple {'Variant', F1, ..}
           if (x.args().size() != variant.components().size()) {
             throw new CompileError(x.typeName() + ": expected " + variant.components().size()
                 + " fields, got " + x.args().size());
           }
           var parts = new ArrayList<String>();
-          parts.add("'" + x.typeName() + "'");
+          parts.add("'" + xt + "'");
           var ct = variant.components();
           for (int i = 0; i < x.args().size(); i++) {
             parts.add(guarded(x.args().get(i), List.of(ct.get(i).type()), 0, env));
           }
           yield "{" + String.join(", ", parts) + "}";
         }
-        if (x.typeName().equals("HashMap")) {
+        if (xt.equals("HashMap")) {
           if (!x.args().isEmpty()) throw new CompileError("new HashMap takes no args (v1)");
           yield "#{}";
         }
-        if (x.typeName().equals("ArrayList")) {
+        if (xt.equals("ArrayList")) {
           // array-module backed: get/set/add O(log n), size O(1) (a list was O(n)/O(n^2))
           if (x.args().isEmpty()) yield "array:new()";
           if (x.args().size() == 1) { // copy-in bridge: new ArrayList<>(immutableList)
@@ -2719,30 +2738,30 @@ class CodeGen {
           }
           throw new CompileError("new ArrayList takes no args, or one list to copy");
         }
-        if (x.typeName().equals("List")) {
+        if (xt.equals("List")) {
           throw new CompileError(
               "new List: use List.of(...) or List.copyOf(xs)");
         }
         // Channel<T>: a builtin dynamically-spawnable Actor (bound + used, so `new` is right).
         // The FileReader/FileWriter pumps are NOT `new`'d (a discarded `new` is a smell) --
         // they're spawned via the static FileReader.pump / FileWriter.drain (see genNamespaceCall).
-        if (x.typeName().equals("Channel")) {
+        if (xt.equals("Channel")) {
           usedChannel = true;
           yield "zinc_dyn_sup:spawn_child('zinc.channel', self(), ["
               + genArgs(x.args(), env) + "])";
         }
-        if (x.typeName().equals("FileReader") || x.typeName().equals("FileWriter")) {
+        if (xt.equals("FileReader") || xt.equals("FileWriter")) {
           throw new CompileError("spawn a pump with the static " + x.typeName()
-              + (x.typeName().equals("FileReader") ? ".pump(path, channel)" : ".drain(channel, path)")
+              + (xt.equals("FileReader") ? ".pump(path, channel)" : ".drain(channel, path)")
               + ", not `new` (a discarded `new` is a side-effecting smell)");
         }
-        if (x.typeName().equals("Db") || x.typeName().equals("HttpServer")) {
+        if (xt.equals("Db") || xt.equals("HttpServer")) {
           // long-lived resources live in the tree: ctor acquires, restart heals
           throw new CompileError("v1: " + x.typeName()
               + " is a static child — declare it as an Application field: "
               + x.typeName() + " x = new " + x.typeName() + "(...)");
         }
-        Ast.InstanceClassDecl ic = instClasses.get(x.typeName());
+        Ast.InstanceClassDecl ic = instClasses.get(xt);
         if (ic != null) {
           int want = ic.ctor() == null ? 0 : ic.ctor().params().size();
           if (x.args().size() != want) {
@@ -2752,17 +2771,17 @@ class CodeGen {
           if (ic.ctor() != null) {
             checkArgs("new " + x.typeName(), ic.ctor().params(), x.args());
           }
-          yield atomLit(instMods.get(x.typeName())) + ":new(" + genArgs(x.args(), env) + ")";
+          yield atomLit(instMods.get(xt)) + ":new(" + genArgs(x.args(), env) + ")";
         }
-        RecordDecl r = records.get(x.typeName());
+        RecordDecl r = records.get(xt);
         if (r == null) throw new CompileError("unknown record type: " + x.typeName());
         if (r.components().size() != x.args().size()) {
           throw new CompileError("new " + x.typeName() + ": expected "
               + r.components().size() + " args, got " + x.args().size());
         }
-        checkArgs("new " + x.typeName(), r.components(), x.args());
+        checkArgs("new " + x.typeName(), substParams(r, typeArgs(x.typeName())), x.args());
         var entries = new ArrayList<String>();
-        entries.add("'$class' => " + atomLit(x.typeName().toLowerCase()));
+        entries.add("'$class' => " + atomLit(xt.toLowerCase()));
         for (int i = 0; i < x.args().size(); i++) {
           entries.add(r.components().get(i).name() + " => " + genExpr(x.args().get(i), env));
         }
@@ -4045,7 +4064,7 @@ class CodeGen {
       }
       case ListLit x -> listLitType(x);
       case MapLit x -> mapLitType(x);
-      case NewExpr x -> variantSealed.getOrDefault(x.typeName(), x.typeName());
+      case NewExpr x -> variantSealed.getOrDefault(baseType(x.typeName()), x.typeName());
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !varTypes.containsKey(vr.name())) {
           if (vr.name().equals("Tag")) yield "Tag";
@@ -4061,8 +4080,10 @@ class CodeGen {
           yield "String";                                   // e.message -> getMessage()
         }
         if (ot != null && records.containsKey(ot)) {
-          for (Param c : records.get(ot).components()) {
-            if (c.name().equals(x.field())) yield c.type();
+          RecordDecl r = records.get(ot);
+          List<String> args = objType == null ? List.of() : typeArgs(objType);
+          for (Param c : r.components()) {
+            if (c.name().equals(x.field())) yield substType(c.type(), r, args);
           }
         }
         yield null;

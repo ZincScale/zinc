@@ -1,0 +1,6 @@
+record Pair<A, B>(A first, B second)
+
+void main() {
+    Pair<String, int> p = Pair<String, int>("zinc", "bad")
+    print(p.second)
+}

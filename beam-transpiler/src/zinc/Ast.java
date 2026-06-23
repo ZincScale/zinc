@@ -83,8 +83,12 @@ final class Ast {
 
   record Param(String type, String name) {}
 
-  /** record Point(int x, int y) {} -> map; accessors p.x() -> maps:get */
-  record RecordDecl(String name, List<Param> components) {}
+  /** record Point(int x, int y) {} -> map; typeParams are erased metadata. */
+  record RecordDecl(String name, List<String> typeParams, List<Param> components) {
+    RecordDecl(String name, List<Param> components) {
+      this(name, List.of(), components);
+    }
+  }
 
   /** actor -> gen_server module; void method = async cast, typed method = sync call.
    *  ctor (method named like the actor, null if absent) receives spawn args; the child
