@@ -13,7 +13,7 @@ This lands the `zc` CLI in `~/.zc`, fetches a managed JRE and a pinned OTP, and 
 `PATH`. Then:
 
 ```sh
-zc new --py hello && cd hello
+zc new hello && cd hello
 zc run            # -> Hello from hello!
 ```
 
@@ -55,7 +55,7 @@ no build step (Java 22+ source launcher):
 cd beam-transpiler
 export PATH="$PWD/bin:$PATH"          # the bin/zc shim
 zc toolchain install                 # one-time: pull a managed OTP into ~/.zc/otp
-zc new --py hello && cd hello && zc run
+zc new hello && cd hello && zc run
 ```
 
 `bin/zc` prefers, in order: `ZINC_JAVA` → a managed JDK in `~/.zc/java` → host `java`.
@@ -69,7 +69,9 @@ zc doctor       # versions, managed toolchains, and how the [otp] pin resolves
 ## The commands
 
 ```
-zc new --py <name>    create a braces-Python project (zinc.toml, src/main.zn)
+zc new <name>         create a canonical Zinc project (zinc.toml, src/main.zn)
+zc new --py <name>    create a legacy Python-shaped .zn project
+zc new --java <name>  create a legacy legal-Java .zinc project
 zc run [dir]          build, then run main()
 zc build [dir]        transpile + compile (no run)
 zc test [dir]         run the test suite (EUnit underneath)

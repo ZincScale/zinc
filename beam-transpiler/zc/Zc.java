@@ -33,14 +33,16 @@ public class Zc {
     }
     switch (args[0]) {
       case "init", "new" -> {
-        boolean py = false;
+        boolean javaSurface = false;
+        boolean legacyPy = false;
         String name = null;
         for (int i = 1; i < args.length; i++) {
-          if (args[i].equals("--py")) py = true;
+          if (args[i].equals("--java")) javaSurface = true;
+          else if (args[i].equals("--py")) legacyPy = true; // accepted for old scripts
           else if (!args[i].startsWith("-")) name = args[i];
         }
-        if (name == null) die("usage: zc init [--py] <name>");
-        init(name, py);
+        if (name == null) die("usage: zc init [--java|--py] <name>");
+        init(name, javaSurface, legacyPy);
       }
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
@@ -141,11 +143,12 @@ public class Zc {
   // ---- init ----
 
   static void init(String name) throws IOException {
-    init(name, false);
+    init(name, false, false);
   }
 
-  /** `--py` scaffolds a braces-Python (.zn) project; otherwise legal-Java (.zinc). */
-  static void init(String name, boolean py) throws IOException {
+  /** Default scaffolds canonical Zinc (.zn); `--py` keeps the legacy Python-shaped sample,
+   *  and `--java` keeps the original legal-Java frontend sample. */
+  static void init(String name, boolean javaSurface, boolean legacyPy) throws IOException {
     Path dir = Path.of(name);
     if (Files.exists(dir)) die("zc: directory '" + name + "' already exists");
     Files.createDirectories(dir.resolve("src"));
@@ -161,16 +164,20 @@ public class Zc {
         [deps]
         # hex packages, e.g.:  cowboy = "2.12.0"
         """.formatted(base));
-    String entry = py ? "src/main.zn" : "src/Main.zinc";
-    Files.writeString(dir.resolve(entry), py ? """
-        def main() {
-            print("Hello from %s!")
-        }
-        """.formatted(base) : """
+    String entry = javaSurface ? "src/Main.zinc" : "src/main.zn";
+    Files.writeString(dir.resolve(entry), javaSurface ? """
         public class Main {
           public static void main(String[] args) {
             System.out.println("Hello from %s!");
           }
+        }
+        """.formatted(base) : legacyPy ? """
+        def main() {
+            print("Hello from %s!")
+        }
+        """.formatted(base) : """
+        void main() {
+            print("Hello from %s!")
         }
         """.formatted(base));
     Files.writeString(dir.resolve(".gitignore"),
@@ -1021,8 +1028,9 @@ public class Zc {
     System.out.println("""
         usage: zc <command> [args]
 
-          zc init [--py] <name> create a new project (--py = braces-Python src/main.zn,
-                                else legal-Java src/Main.zinc)
+          zc init [--java|--py] <name>
+                                create a new project (default = canonical src/main.zn,
+                                --py = legacy Python-shaped .zn, --java = legal-Java .zinc)
           zc build [dir]        transpile .zinc/.zn + compile (rebar3 under the hood)
           zc run [dir|file]     build + run main(); a .zinc/.zn file runs in script mode
           zc release [dir]      self-contained OTP release tarball (ERTS + beam + boot)

@@ -1,0 +1,22 @@
+int sum(int[] numbers) {
+    int total = 0
+    for (n in numbers) {
+        total = total + n
+    }
+    return total
+}
+
+void main() {
+    int[] nums = [10, 20, 30, 40, 50]
+    print("first: ${nums[0]}")
+    print("length: ${nums.length}")
+    print("sum: ${sum(nums)}")
+
+    String[] names = ["Alice", "Bob", "Charlie"]
+    for (name in names) {
+        print("Hello, ${name}!")
+    }
+
+    int[] empty = []
+    print("empty length: ${empty.length}")
+}

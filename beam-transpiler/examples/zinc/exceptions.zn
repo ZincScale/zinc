@@ -1,0 +1,33 @@
+class NotFound : Exception {}
+
+class Store : Actor {
+    int hits = 0
+
+    int find(int id) {
+        hits = hits + 1
+        if id > 10 {
+            throw NotFound("no such id")
+        }
+        return id * 2
+    }
+
+    int hitCount() {
+        return hits
+    }
+}
+
+void main() {
+    var s = Store()
+    print(s.find(4))
+    try {
+        s.find(99)
+    } catch NotFound e {
+        print(e.message)
+    }
+    print(s.hitCount())
+    try {
+        throw NotFound("local")
+    } catch Exception e {
+        print(e.message)
+    }
+}

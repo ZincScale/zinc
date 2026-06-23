@@ -142,6 +142,13 @@ final class PyInfer {
           String t = v.type().equals("var") ? typeOf(v.init()) : v.type();
           if (t != null) env.put(v.name(), t);
         }
+        case Ast.DestructureStmt v -> {
+          List<String> ts = tupleElems(typeOf(v.init()));
+          for (int i = 0; i < v.names().size(); i++) {
+            if (!v.types().isEmpty()) env.put(v.names().get(i), v.types().get(i));
+            else if (i < ts.size()) env.put(v.names().get(i), ts.get(i));
+          }
+        }
         case ReturnStmt r -> {
           if (r.value() != null) rets.add(r.value());
         }
@@ -168,10 +175,12 @@ final class PyInfer {
       case IntLit x -> "int";
       case FloatLit x -> "double";
       case BoolLit x -> "boolean";
+      case NullLit x -> null;
       case StrLit x -> "String";
       case VarRef x -> env.get(x.name());
       case NewExpr x -> x.typeName();
       case Ast.ListLit x -> {
+        if (x.explicitType() != null) yield x.explicitType();
         if (x.elems().isEmpty()) yield "List";
         String et = typeOf(x.elems().get(0));
         if (et == null) yield "List";
@@ -181,6 +190,7 @@ final class PyInfer {
         yield "List<" + et + ">";
       }
       case Ast.MapLit x -> {
+        if (x.explicitType() != null) yield x.explicitType();
         if (x.keys().isEmpty()) yield "HashMap";
         String k = typeOf(x.keys().get(0)), v = typeOf(x.values().get(0));
         if (k == null || v == null) yield "HashMap";
@@ -192,6 +202,15 @@ final class PyInfer {
         yield "HashMap<" + k + "," + v + ">";
       }
       case Ast.Cast x -> x.type().equals("double") ? "double" : "int";
+      case Ast.TupleLit x -> {
+        var types = new java.util.ArrayList<String>();
+        for (Expr el : x.elems()) {
+          String t = typeOf(el);
+          if (t == null) yield null;
+          types.add(t);
+        }
+        yield "(" + String.join(",", types) + ")";
+      }
       case Unary x -> x.op().equals("!") ? "boolean" : typeOf(x.operand());
       case Ternary x -> {
         String t = typeOf(x.thenExpr());
@@ -215,5 +234,25 @@ final class PyInfer {
       }
       default -> null;
     };
+  }
+
+  private static List<String> tupleElems(String t) {
+    if (t == null || !t.startsWith("(") || !t.endsWith(")")) return List.of();
+    var out = new java.util.ArrayList<String>();
+    String inner = t.substring(1, t.length() - 1);
+    int depthAngle = 0, depthTuple = 0, start = 0;
+    for (int i = 0; i < inner.length(); i++) {
+      char c = inner.charAt(i);
+      if (c == '<') depthAngle++;
+      else if (c == '>') depthAngle--;
+      else if (c == '(') depthTuple++;
+      else if (c == ')') depthTuple--;
+      else if (c == ',' && depthAngle == 0 && depthTuple == 0) {
+        out.add(inner.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+    out.add(inner.substring(start).trim());
+    return out;
   }
 }

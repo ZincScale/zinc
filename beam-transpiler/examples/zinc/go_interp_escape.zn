@@ -1,0 +1,14 @@
+void main() {
+    var m = {"greeting": "hello", "name": "zinc"}
+    print("greeting: ${m[\"greeting\"]}")
+    print("name: ${m[\"name\"]}")
+
+    var scores = {"alice": 95, "bob": 87}
+    print("alice=${scores[\"alice\"]} bob=${scores[\"bob\"]}")
+
+    var config = {"server.port": "8080", "server.host": "localhost"}
+    var port = config["server.port"]
+    var host = config["server.host"]
+    print("server: ${host}:${port}")
+    print("direct port: ${config[\"server.port\"]}")
+}

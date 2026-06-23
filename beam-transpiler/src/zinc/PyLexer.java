@@ -8,7 +8,7 @@ import java.util.Set;
 /**
  * Lexer for the braces-Python surface (.zn). Same token stream shape as {@link Lexer}
  * so {@link PyParser} can reuse the legal-Java parser's machinery, with three surface
- * differences: '#' line comments (not '//'), Python keyword spellings, and newline ->
+ * differences: '#' or '//' line comments, Python keyword spellings, and newline ->
  * SEMI "automatic semicolon insertion" so statements terminate at line ends instead of
  * an explicit ';'. Newlines inside (...) / [...] are suppressed (implicit line joining).
  */
@@ -65,6 +65,9 @@ final class PyLexer {
       Map.entry("/", TokKind.SLASH),
       Map.entry("%", TokKind.PERCENT),
       Map.entry("!", TokKind.BANG),
+      Map.entry("&", TokKind.AMP),
+      Map.entry("|", TokKind.PIPE),
+      Map.entry("^", TokKind.CARET),
       Map.entry("<", TokKind.LT),
       Map.entry(">", TokKind.GT));
 
@@ -97,6 +100,12 @@ final class PyLexer {
         continue;
       }
       if (c == '#') { // line comment
+        while (i < n && src.charAt(i) != '\n') {
+          i++;
+        }
+        continue;
+      }
+      if (c == '/' && i + 1 < n && src.charAt(i + 1) == '/') {
         while (i < n && src.charAt(i) != '\n') {
           i++;
         }
@@ -152,6 +161,17 @@ final class PyLexer {
       }
       if (isDigit(c)) {
         int s = i;
+        if (c == '0' && i + 1 < n
+            && (src.charAt(i + 1) == 'x' || src.charAt(i + 1) == 'X'
+                || src.charAt(i + 1) == 'b' || src.charAt(i + 1) == 'B'
+                || src.charAt(i + 1) == 'o' || src.charAt(i + 1) == 'O')) {
+          i += 2;
+          while (i < n && isRadixDigit(src.charAt(i))) {
+            i++;
+          }
+          toks.add(new Token(TokKind.INT_LIT, src.substring(s, i), line));
+          continue;
+        }
         while (i < n && isDigit(src.charAt(i))) {
           i++;
         }
@@ -166,8 +186,18 @@ final class PyLexer {
         }
         continue;
       }
+      if (i + 2 < n && src.startsWith("..=", i)) {
+        toks.add(new Token(TokKind.DOTDOTEQ, "..=", line));
+        i += 3;
+        continue;
+      }
       if (i + 1 < n) {
         String two = src.substring(i, i + 2);
+        if (two.equals("..")) {
+          toks.add(new Token(TokKind.DOTDOT, two, line));
+          i += 2;
+          continue;
+        }
         TokKind k2 = TWO.get(two);
         if (k2 != null) {
           toks.add(new Token(k2, two, line));
@@ -199,6 +229,10 @@ final class PyLexer {
 
   private static boolean isDigit(char c) {
     return c >= '0' && c <= '9';
+  }
+
+  private static boolean isRadixDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
   }
 
   private static boolean isAlpha(char c) {

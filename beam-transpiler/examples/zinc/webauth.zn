@@ -1,0 +1,15 @@
+String hashPw(String pw, String salt) {
+    return Hex.encode(Crypto.sha256(salt + pw))
+}
+
+void main() {
+    var h1 = hashPw("hunter2", "s4lt")
+    var h2 = hashPw("hunter2", "s4lt")
+    print(h1 == h2)
+    print(len(h1))
+    String sig = Hex.encode(Crypto.hmacSha256("key", "session=7"))
+    print(len(sig))
+    print(len(Uuid.v4()))
+    print(Random.int(1))
+    print(len(Base64.encode(Random.bytes(16))) > 0)
+}

@@ -7,9 +7,10 @@ import java.util.Set;
 import zinc.Ast.*;
 
 /**
- * Parser for the braces-Python surface (.zn). Emits the SAME {@link Ast} the legal-Java
- * {@link Parser} produces, so Resolve + CodeGen run unchanged. The expression grammar is
- * identical (C-style operators); only declarations/statements differ:
+ * Parser for the .zn surface. It accepts the original braces-Python shape plus the
+ * canonical Zinc aliases being promoted for BEAM. Both emit the SAME {@link Ast} the
+ * legal-Java {@link Parser} produces, so Resolve + CodeGen run unchanged. The expression
+ * grammar is identical (C-style operators); only declarations/statements differ:
  *   - top-level `def`s (incl. main + helpers) -> a synthetic `class Main { static ... }`
  *     (mirrors the Java surface's `public class Main { public static void main(...) }`)
  *   - `if`/`while`/`for` take no parens; `for x in EXPR` is Python-style
@@ -54,6 +55,14 @@ final class PyParser {
     return check(TokKind.IDENT) && cur().text().equals(text);
   }
 
+  private boolean matchIdent(String text) {
+    if (checkIdent(text)) {
+      pos++;
+      return true;
+    }
+    return false;
+  }
+
   private boolean match(TokKind k) {
     if (check(k)) {
       pos++;
@@ -76,18 +85,28 @@ final class PyParser {
     }
   }
 
+  private void skipPub() {
+    matchIdent("pub");
+  }
+
   // ---- declarations ----
 
   Program parseProgram() {
     skipSemis();
     var imports = new ArrayList<Import>();
     var topDefs = new ArrayList<MethodDecl>(); // become static methods of class Main
+    var topStmts = new ArrayList<Stmt>();       // become Main.main for script-style files
     var actors = new ArrayList<ActorDecl>();
+    var topDeclared = new HashSet<String>();
+    declared = topDeclared;
     while (!check(TokKind.EOF)) {
-      if (checkIdent("def")) {
+      skipPub();
+      if (checkIdent("def") || looksLikeZincDef() || looksLikeTupleZincDef()) {
         topDefs.add(parseDef(true));
+        declared = topDeclared;
       } else if (checkIdent("class")) {
         parseClass(actors);
+        declared = topDeclared;
       } else if (check(TokKind.KW_IMPORT) || checkIdent("from")) {
         parseImports(imports);
       } else if (checkIdent("interface")) {
@@ -99,20 +118,27 @@ final class PyParser {
       } else if (checkIdent("sealed")) {
         parseSealed();
       } else {
-        throw new CompileError("Parse error: expected `def`, `class`, `interface`, `record`,"
-            + " `enum` or `import` at line " + cur().line());
+        topStmts.add(parseStatement());
+        topDeclared = new HashSet<>(declared);
       }
       skipSemis();
     }
     var classes = new ArrayList<ClassDecl>();
     if (application != null) {
-      if (!topDefs.isEmpty()) {
-        throw new CompileError("an Application program has no top-level `def`s — helpers "
+      if (!topDefs.isEmpty() || !topStmts.isEmpty()) {
+        throw new CompileError("an Application program has no top-level code — helpers "
             + "live on Actors (the Application is the boundary)");
       }
-    } else if (!topDefs.isEmpty()) {
-      // a file with `def main` is the entry (class Main -> module main); otherwise the
-      // file's top-level defs live on a class named after the file (Fmt.banner(...)).
+    } else if (!topDefs.isEmpty() || !topStmts.isEmpty()) {
+      if (!topStmts.isEmpty() && topDefs.stream().anyMatch(m -> m.name().equals("main"))) {
+        throw new CompileError("a file cannot mix top-level statements with main()");
+      }
+      if (!topStmts.isEmpty()) {
+        topDefs.add(new MethodDecl("void", "main", List.of(new Param("String[]", "args")),
+            new Block(topStmts), Set.of("public", "static")));
+      }
+      // a file with main or top-level statements is the entry; otherwise top-level defs
+      // live on a class named after the file (Fmt.banner(...)).
       boolean hasMain = topDefs.stream().anyMatch(m -> m.name().equals("main"));
       classes.add(new ClassDecl(hasMain ? "Main" : fileClass, topDefs));
     }
@@ -121,7 +147,47 @@ final class PyParser {
     return PyInfer.infer(program); // resolve `infer` return types from method bodies
   }
 
-  /** `record Point(x: int, y: int)` -> immutable map value; `p.x` reads a component. */
+  private boolean looksLikeZincDef() {
+    if (!check(TokKind.IDENT)) return false;
+    String head = cur().text();
+    if (head.equals("class") || head.equals("interface") || head.equals("record")
+        || head.equals("enum") || head.equals("sealed") || head.equals("from")
+        || head.equals("import") || head.equals("def")) {
+      return false;
+    }
+    int i = pos + 1;
+    if (toks.get(i).kind() == TokKind.QUESTION) i++;
+    return toks.get(i).kind() == TokKind.IDENT
+        && toks.get(i + 1).kind() == TokKind.LPAREN;
+  }
+
+  private boolean looksLikeTupleZincDef() {
+    if (!check(TokKind.LPAREN)) return false;
+    int i = pos + 1;
+    int depth = 1;
+    boolean comma = false;
+    while (depth > 0 && toks.get(i).kind() != TokKind.EOF) {
+      if (toks.get(i).kind() == TokKind.LPAREN) depth++;
+      else if (toks.get(i).kind() == TokKind.RPAREN) depth--;
+      else if (depth == 1 && toks.get(i).kind() == TokKind.COMMA) comma = true;
+      i++;
+    }
+    return comma && toks.get(i).kind() == TokKind.IDENT
+        && toks.get(i + 1).kind() == TokKind.LPAREN;
+  }
+
+  private Param parseNamedType(String what) {
+    if (toks.get(pos + 1).kind() == TokKind.COLON) {
+      String name = expect(TokKind.IDENT, what + " name").text();
+      advance(); // ':'
+      return new Param(parseType(), name);
+    }
+    String type = parseType();
+    String name = expect(TokKind.IDENT, what + " name").text();
+    return new Param(type, name);
+  }
+
+  /** `record Point(x: int, y: int)` or `record Point(int x, int y)` -> immutable map value. */
   private void parseRecord() {
     expect(TokKind.IDENT, "'record'"); // 'record'
     String name = expect(TokKind.IDENT, "record name").text();
@@ -129,16 +195,14 @@ final class PyParser {
     expect(TokKind.LPAREN, "'('");
     if (!check(TokKind.RPAREN)) {
       do {
-        String cname = expect(TokKind.IDENT, "component name").text();
-        expect(TokKind.COLON, "':' (record components are typed: name: T)");
-        comps.add(new Param(parseType(), cname));
+        comps.add(parseNamedType("component"));
       } while (match(TokKind.COMMA));
     }
     expect(TokKind.RPAREN, "')'");
     records.add(new RecordDecl(name, comps));
   }
 
-  /** `sealed T { V1(f: A)  V2(g: B, h: C) }` -> algebraic union; each variant is a
+  /** `sealed T { V1(f: A)  V2(String g, C h) }` -> algebraic union; each variant is a
    *  record-shaped constructor that lowers to a tagged tuple; matched by variant pattern. */
   private void parseSealed() {
     expect(TokKind.IDENT, "'sealed'");
@@ -152,9 +216,7 @@ final class PyParser {
       expect(TokKind.LPAREN, "'('");
       if (!check(TokKind.RPAREN)) {
         do {
-          String cname = expect(TokKind.IDENT, "field name").text();
-          expect(TokKind.COLON, "':' (variant fields are typed: name: T)");
-          comps.add(new Param(parseType(), cname));
+          comps.add(parseNamedType("variant field"));
         } while (match(TokKind.COMMA));
       }
       expect(TokKind.RPAREN, "')'");
@@ -182,7 +244,7 @@ final class PyParser {
     enums.add(new EnumDecl(name, values));
   }
 
-  /** `interface Name { def m(self, ...) -> T  ... }` — signatures only, no bodies. */
+  /** `interface Name { def m(self, ...) -> T ... }` or `Ret m(...)` — signatures only. */
   private void parseInterface() {
     expect(TokKind.IDENT, "'interface'"); // 'interface'
     String name = expect(TokKind.IDENT, "interface name").text();
@@ -190,11 +252,20 @@ final class PyParser {
     skipSemis();
     var sigs = new ArrayList<MethodDecl>();
     while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
-      expect(TokKind.IDENT, "'def'"); // 'def'
-      String mName = expect(TokKind.IDENT, "method name").text();
+      String ret = "void";
+      String mName;
+      if (matchIdent("def")) {
+        mName = expect(TokKind.IDENT, "method name").text();
+      } else {
+        ret = parseType();
+        if (ret.equals("None")) ret = "void";
+        mName = expect(TokKind.IDENT, "method name").text();
+      }
       List<Param> ps = stripSelf(parseParams());
-      String ret = match(TokKind.ARROW) ? parseType() : "void";
-      if (ret.equals("None")) ret = "void";
+      if (ret.equals("void") && match(TokKind.ARROW)) {
+        ret = parseType();
+        if (ret.equals("None")) ret = "void";
+      }
       sigs.add(new MethodDecl(ret, mName, ps, null, Set.of("public")));
       skipSemis();
     }
@@ -235,12 +306,14 @@ final class PyParser {
     return path;
   }
 
-  /** `class NAME ( BASE ) { ... }`. v1: `(Actor)` or `(Application)`. */
+  /** `class NAME (BASE) { ... }` or `class NAME : BASE { ... }`. */
   private void parseClass(List<ActorDecl> actors) {
     expect(TokKind.IDENT, "'class'"); // 'class'
     String name = expect(TokKind.IDENT, "class name").text();
     String base = null;
-    if (match(TokKind.LPAREN)) {
+    if (match(TokKind.COLON)) {
+      base = expect(TokKind.IDENT, "base class").text();
+    } else if (match(TokKind.LPAREN)) {
       if (!check(TokKind.RPAREN)) {
         base = expect(TokKind.IDENT, "base class").text();
         while (match(TokKind.COMMA)) {
@@ -290,13 +363,24 @@ final class PyParser {
     var fields = new ArrayList<FieldDecl>();
     MethodDecl main = null;
     while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
-      if (checkIdent("def")) {
+      skipPub();
+      if (checkIdent("def") || looksLikeZincDef() || looksLikeTupleZincDef()) {
         RawDef d = parseDefRaw();
         if (!d.name().equals("main")) {
           throw new CompileError("Application " + name + " can only declare main(): it is the "
               + "boundary, not a unit — methods live on Actors");
         }
         main = new MethodDecl("void", "main", stripSelf(d.params()), d.body(), Set.of("public"));
+      } else if (checkIdent("var") && toks.get(pos + 1).kind() == TokKind.IDENT) {
+        advance();
+        String fname = expect(TokKind.IDENT, "child field name").text();
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        fields.add(new FieldDecl(init == null ? "var" : literalType(init), fname, init));
+      } else if (looksLikeTypeFirstField()) {
+        String ftype = parseType();
+        String fname = expect(TokKind.IDENT, "child field name").text();
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        fields.add(new FieldDecl(ftype, fname, init));
       } else {
         String fname = expect(TokKind.IDENT, "child field name").text();
         String ftype = "var";
@@ -327,7 +411,8 @@ final class PyParser {
     var methods = new ArrayList<MethodDecl>();
     MethodDecl ctor = null;
     while (!check(TokKind.RBRACE) && !check(TokKind.EOF)) {
-      if (checkIdent("def")) {
+      skipPub();
+      if (checkIdent("def") || looksLikeZincDef() || looksLikeTupleZincDef()) {
         RawDef d = parseDefRaw();
         List<Param> ps = stripSelf(d.params());
         if (d.name().equals("init")) {
@@ -335,6 +420,16 @@ final class PyParser {
         } else {
           methods.add(new MethodDecl(d.ret(), d.name(), ps, d.body(), Set.of("public")));
         }
+      } else if (checkIdent("var") && toks.get(pos + 1).kind() == TokKind.IDENT) {
+        advance();
+        String fname = expect(TokKind.IDENT, "field name").text();
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        fields.add(new FieldDecl(init == null ? "var" : literalType(init), fname, init));
+      } else if (looksLikeTypeFirstField()) {
+        String ftype = parseType();
+        String fname = expect(TokKind.IDENT, "field name").text();
+        Expr init = match(TokKind.ASSIGN) ? parseExpr() : null;
+        fields.add(new FieldDecl(ftype, fname, init));
       } else {
         String fname = expect(TokKind.IDENT, "field name").text();
         String ftype = "var";
@@ -353,6 +448,14 @@ final class PyParser {
     return new Members(fields, ctor, methods);
   }
 
+  private boolean looksLikeTypeFirstField() {
+    return check(TokKind.IDENT)
+        && (toks.get(pos + 1).kind() == TokKind.IDENT
+            || toks.get(pos + 1).kind() == TokKind.QUESTION
+            || toks.get(pos + 1).kind() == TokKind.LT
+            || toks.get(pos + 1).kind() == TokKind.LBRACKET);
+  }
+
   private List<Param> stripSelf(List<Param> params) {
     if (!params.isEmpty() && params.get(0).name().equals("self")) {
       return params.subList(1, params.size());
@@ -366,16 +469,29 @@ final class PyParser {
       case IntLit x -> "int";
       case FloatLit x -> "double";
       case BoolLit x -> "boolean";
+      case NullLit x -> "var";
       case StrLit x -> "String";
       case NewExpr x -> x.typeName();
       case MapLit x -> mapLitType(x);
       case ListLit x -> listLitType(x);
+      case TupleLit x -> tupleLitType(x);
       default -> "var";
     };
   }
 
+  private String tupleLitType(TupleLit x) {
+    var types = new ArrayList<String>();
+    for (Expr e : x.elems()) {
+      String t = literalType(e);
+      if (t.equals("var")) return "var";
+      types.add(t);
+    }
+    return "(" + String.join(",", types) + ")";
+  }
+
   /** List literal type: List&lt;T&gt; when elements are homogeneous literals; bare List otherwise. */
   private String listLitType(ListLit x) {
+    if (x.explicitType() != null) return x.explicitType();
     if (x.elems().isEmpty()) return "List";
     String e = literalType(x.elems().get(0));
     if (e.equals("var")) return "List";
@@ -388,6 +504,7 @@ final class PyParser {
   /** Dict literal type: HashMap&lt;K,V&gt; when keys and values are each homogeneous literals;
    *  bare HashMap otherwise (heterogeneous -> dynamic values). Mirrors CodeGen.mapLitType. */
   private String mapLitType(MapLit x) {
+    if (x.explicitType() != null) return x.explicitType();
     if (x.keys().isEmpty()) return "HashMap";
     String k = literalType(x.keys().get(0)), v = literalType(x.values().get(0));
     if (k.equals("var") || v.equals("var")) return "HashMap";
@@ -402,13 +519,19 @@ final class PyParser {
 
   private record RawDef(String name, List<Param> params, String ret, Block body) {}
 
-  /** `def NAME ( params ) [-> TYPE] { block }`. */
+  /** `def NAME(params) [-> TYPE] { block }` or `TYPE NAME(params) { block }`. */
   private RawDef parseDefRaw() {
-    expect(TokKind.IDENT, "'def'"); // 'def'
-    String name = expect(TokKind.IDENT, "function name").text();
-    List<Param> params = parseParams();
     String ret = "infer"; // sentinel: PyInfer resolves from the body (void if no value-return)
-    if (match(TokKind.ARROW)) {
+    String name;
+    if (matchIdent("def")) {
+      name = expect(TokKind.IDENT, "function name").text();
+    } else {
+      ret = parseType();
+      if (ret.equals("None")) ret = "void";
+      name = expect(TokKind.IDENT, "function name").text();
+    }
+    List<Param> params = parseParams();
+    if (ret.equals("infer") && match(TokKind.ARROW)) {
       ret = parseType();
       if (ret.equals("None")) ret = "void"; // `-> None` is an explicit cast/void
     }
@@ -417,7 +540,12 @@ final class PyParser {
       declared.add(p.name());
     }
     declared.add("self");
-    Block body = parseBlock();
+    Block body;
+    if (match(TokKind.ASSIGN)) {
+      body = new Block(List.of(new ReturnStmt(parseExpr())));
+    } else {
+      body = parseBlock();
+    }
     return new RawDef(name, params, ret, body);
   }
 
@@ -440,15 +568,24 @@ final class PyParser {
     var params = new ArrayList<Param>();
     if (!check(TokKind.RPAREN)) {
       do {
-        String pname = expect(TokKind.IDENT, "parameter name").text();
+        String pname;
         String ptype;
-        if (match(TokKind.COLON)) {
+        if (toks.get(pos + 1).kind() == TokKind.COLON) {
+          pname = expect(TokKind.IDENT, "parameter name").text();
+          advance(); // ':'
           ptype = parseType();
-        } else if (pname.equals("self")) {
+        } else if (checkIdent("self")) {
+          pname = advance().text();
           ptype = "var"; // the receiver; removed by stripSelf
+        } else if (toks.get(pos + 1).kind() != TokKind.COMMA
+            && toks.get(pos + 1).kind() != TokKind.RPAREN) {
+          ptype = parseType();
+          pname = expect(TokKind.IDENT, "parameter name").text();
         } else {
+          pname = expect(TokKind.IDENT, "parameter name").text();
           throw new CompileError("parameter '" + pname + "' needs a type — write '" + pname
-              + ": T' (params are typed; only locals infer from assignment) at line "
+              + ": T' or 'T " + pname
+              + "' (params are typed; only locals infer from assignment) at line "
               + cur().line());
         }
         params.add(new Param(ptype, pname));
@@ -463,7 +600,16 @@ final class PyParser {
    *  type take()/get()/[] and to drive guarded crossings, matching the literal inference
    *  that already produces HashMap<K,V>/List<T>. */
   private String parseType() {
-    StringBuilder t = new StringBuilder(expect(TokKind.IDENT, "type name").text());
+    if (match(TokKind.LPAREN)) {
+      var elems = new ArrayList<String>();
+      elems.add(parseType());
+      expect(TokKind.COMMA, "',' (tuple types need at least two elements)");
+      elems.add(parseType());
+      while (match(TokKind.COMMA)) elems.add(parseType());
+      expect(TokKind.RPAREN, "')'");
+      return "(" + String.join(",", elems) + ")";
+    }
+    StringBuilder t = new StringBuilder(normalizeTypeName(expect(TokKind.IDENT, "type name").text()));
     if (check(TokKind.LT)) {
       t.append('<');
       advance();
@@ -473,6 +619,7 @@ final class PyParser {
           case LT -> { depth++; t.append('<'); }
           case GT -> { depth--; t.append('>'); }
           case COMMA -> t.append(',');
+          case IDENT -> t.append(normalizeTypeName(cur().text()));
           default -> t.append(cur().text());
         }
         advance();
@@ -483,7 +630,37 @@ final class PyParser {
       advance();
       t.append("[]");
     }
+    if (match(TokKind.QUESTION)) {
+      // Nullable is accepted as metadata-only syntax for now; strict analysis is deferred.
+    }
     return t.toString();
+  }
+
+  private String parseGenericHeadType() {
+    StringBuilder t = new StringBuilder(normalizeTypeName(expect(TokKind.IDENT, "type name").text()));
+    expect(TokKind.LT, "'<'");
+    t.append('<');
+    int depth = 1;
+    while (depth > 0) {
+      switch (cur().kind()) {
+        case LT -> { depth++; t.append('<'); }
+        case GT -> { depth--; t.append('>'); }
+        case COMMA -> t.append(',');
+        case IDENT -> t.append(normalizeTypeName(cur().text()));
+        default -> t.append(cur().text());
+      }
+      advance();
+    }
+    return t.toString();
+  }
+
+  private String normalizeTypeName(String name) {
+    return switch (name) {
+      case "bool" -> "boolean";
+      case "long", "Int", "Long" -> "int";
+      case "float", "Float", "Double" -> "double";
+      default -> name;
+    };
   }
 
   // ---- statements ----
@@ -509,6 +686,7 @@ final class PyParser {
   private static Stmt withLine(Stmt s, int ln) {
     return switch (s) {
       case VarStmt x -> new VarStmt(x.type(), x.name(), x.init(), x.isFinal(), ln);
+      case DestructureStmt x -> new DestructureStmt(x.types(), x.names(), x.init(), ln);
       case AssignStmt x -> new AssignStmt(x.name(), x.op(), x.value(), ln);
       case FieldAssignStmt x -> new FieldAssignStmt(x.objVar(), x.field(), x.op(), x.value(), ln);
       case IndexAssignStmt x -> new IndexAssignStmt(x.arrVar(), x.index(), x.op(), x.value(), ln);
@@ -534,8 +712,41 @@ final class PyParser {
     if (check(TokKind.KW_FOR)) return parseFor();
     if (checkIdent("try")) return parseTry();
     if (checkIdent("with")) return parseWith();
-    if (checkIdent("raise")) return parseRaise();
+    if (checkIdent("throw") || checkIdent("raise")) return parseThrow();
+    if (checkIdent("assert")) return parseAssert();
     if (checkIdent("match") && matchAhead()) return parseMatch();
+    if (checkIdent("var") && toks.get(pos + 1).kind() == TokKind.LPAREN) {
+      advance();
+      var names = parseDestructureNames();
+      expect(TokKind.ASSIGN, "'=' (destructuring needs an initializer)");
+      Expr init = parseExpr();
+      declared.addAll(names);
+      return new DestructureStmt(names, init);
+    }
+    if (looksLikeTypedDestructure()) {
+      var binding = parseTypedDestructure();
+      expect(TokKind.ASSIGN, "'=' (destructuring needs an initializer)");
+      Expr init = parseExpr();
+      declared.addAll(binding.names());
+      return new DestructureStmt(binding.types(), binding.names(), init);
+    }
+    if (checkIdent("var") && toks.get(pos + 1).kind() == TokKind.IDENT) {
+      advance();
+      String name = expect(TokKind.IDENT, "local name").text();
+      expect(TokKind.ASSIGN, "'=' (var locals need an initializer)");
+      Expr init = parseExpr();
+      declared.add(name);
+      return new VarStmt("var", name, init);
+    }
+    // Zinc-style typed local declaration: `Type name = expr`
+    if (looksLikeTypeFirstLocal()) {
+      String type = parseType();
+      String name = expect(TokKind.IDENT, "local name").text();
+      expect(TokKind.ASSIGN, "'=' (a typed local needs an initializer)");
+      Expr init = parseExpr();
+      declared.add(name);
+      return new VarStmt(type, name, init);
+    }
     // typed local declaration: `name: Type = expr`
     if (check(TokKind.IDENT) && toks.get(pos + 1).kind() == TokKind.COLON) {
       String name = advance().text();
@@ -557,10 +768,106 @@ final class PyParser {
     return parseSimpleStmt();
   }
 
+  private List<String> parseDestructureNames() {
+    expect(TokKind.LPAREN, "'('");
+    var names = new ArrayList<String>();
+    names.add(expect(TokKind.IDENT, "destructure variable").text());
+    expect(TokKind.COMMA, "',' (destructuring needs at least two variables)");
+    names.add(expect(TokKind.IDENT, "destructure variable").text());
+    while (match(TokKind.COMMA)) {
+      names.add(expect(TokKind.IDENT, "destructure variable").text());
+    }
+    expect(TokKind.RPAREN, "')'");
+    return names;
+  }
+
+  private record DestructureBinding(List<String> types, List<String> names) {}
+
+  private DestructureBinding parseTypedDestructure() {
+    expect(TokKind.LPAREN, "'('");
+    var types = new ArrayList<String>();
+    var names = new ArrayList<String>();
+    do {
+      types.add(parseType());
+      names.add(expect(TokKind.IDENT, "destructure variable").text());
+    } while (match(TokKind.COMMA));
+    expect(TokKind.RPAREN, "')'");
+    if (names.size() < 2) {
+      throw new CompileError("typed destructuring needs at least two variables");
+    }
+    return new DestructureBinding(types, names);
+  }
+
+  private boolean looksLikeTypedDestructure() {
+    if (!check(TokKind.LPAREN)) return false;
+    int i = pos + 1;
+    if (toks.get(i).kind() != TokKind.IDENT) return false;
+    i = skipTypeAhead(i);
+    if (toks.get(i).kind() != TokKind.IDENT) return false;
+    i++;
+    if (toks.get(i).kind() != TokKind.COMMA) return false;
+    while (toks.get(i).kind() == TokKind.COMMA) {
+      i++;
+      if (toks.get(i).kind() != TokKind.IDENT) return false;
+      i = skipTypeAhead(i);
+      if (toks.get(i).kind() != TokKind.IDENT) return false;
+      i++;
+    }
+    return toks.get(i).kind() == TokKind.RPAREN
+        && toks.get(i + 1).kind() == TokKind.ASSIGN;
+  }
+
+  private int skipTypeAhead(int i) {
+    i++;
+    if (toks.get(i).kind() == TokKind.LT) {
+      int depth = 1;
+      i++;
+      while (depth > 0 && toks.get(i).kind() != TokKind.EOF) {
+        if (toks.get(i).kind() == TokKind.LT) depth++;
+        else if (toks.get(i).kind() == TokKind.GT) depth--;
+        i++;
+      }
+    }
+    while (toks.get(i).kind() == TokKind.LBRACKET
+        && toks.get(i + 1).kind() == TokKind.RBRACKET) {
+      i += 2;
+    }
+    if (toks.get(i).kind() == TokKind.QUESTION) i++;
+    return i;
+  }
+
+  private boolean looksLikeTypeFirstLocal() {
+    if (!check(TokKind.IDENT)) return false;
+    int i = pos + 1;
+    if (toks.get(i).kind() == TokKind.LBRACKET && toks.get(i + 1).kind() == TokKind.RBRACKET) {
+      i += 2;
+    } else if (toks.get(i).kind() == TokKind.LT) {
+      int depth = 1;
+      i++;
+      while (depth > 0 && toks.get(i).kind() != TokKind.EOF) {
+        if (toks.get(i).kind() == TokKind.LT) depth++;
+        else if (toks.get(i).kind() == TokKind.GT) depth--;
+        i++;
+      }
+    }
+    if (toks.get(i).kind() == TokKind.QUESTION) i++;
+    return toks.get(i).kind() == TokKind.IDENT
+        && toks.get(i + 1).kind() == TokKind.ASSIGN;
+  }
+
   private Stmt parseReturn() {
     expect(TokKind.KW_RETURN, "'return'");
     if (check(TokKind.SEMI) || check(TokKind.RBRACE)) return new ReturnStmt(null);
     return new ReturnStmt(parseExpr());
+  }
+
+  private Stmt parseAssert() {
+    expect(TokKind.IDENT, "'assert'");
+    Expr cond = parseExpr();
+    if (match(TokKind.COMMA)) {
+      parseExpr(); // message accepted for Zinc syntax; backend reports expression source.
+    }
+    return new ExprStmt(new MethodCall(new VarRef("Assert"), "isTrue", List.of(cond)));
   }
 
   private Stmt parseIf() {
@@ -583,6 +890,7 @@ final class PyParser {
   /** `for NAME in EXPR { body }`. range(a,b)/range(b) desugar to a counting while. */
   private Stmt parseFor() {
     expect(TokKind.KW_FOR, "'for'");
+    boolean parened = match(TokKind.LPAREN);
     String name = expect(TokKind.IDENT, "loop variable").text();
     if (!checkIdent("in")) {
       throw new CompileError("Parse error: expected 'in' in for-loop at line " + cur().line());
@@ -590,10 +898,28 @@ final class PyParser {
     advance(); // 'in'
     declared.add(name);
     Expr iter = parseExpr();
+    boolean rangeSyntax = false;
+    boolean inclusive = false;
+    Expr lo = null;
+    Expr hi = null;
+    if (check(TokKind.DOTDOT) || check(TokKind.DOTDOTEQ)) {
+      rangeSyntax = true;
+      inclusive = match(TokKind.DOTDOTEQ);
+      if (!inclusive) expect(TokKind.DOTDOT, "'..'");
+      lo = iter;
+      hi = parseExpr();
+    }
+    if (parened) expect(TokKind.RPAREN, "')'");
     Block body = parseBlock();
-    if (iter instanceof Call c && c.callee().equals("range")) {
-      Expr lo = c.args().size() == 1 ? new IntLit(0) : c.args().get(0);
-      Expr hi = c.args().size() == 1 ? c.args().get(0) : c.args().get(1);
+    boolean rangeCall = iter instanceof Call rc && rc.callee().equals("range");
+    if (rangeSyntax || rangeCall) {
+      if (!rangeSyntax) {
+        var c = (Call) iter;
+        lo = c.args().size() == 1 ? new IntLit(0) : c.args().get(0);
+        hi = c.args().size() == 1 ? c.args().get(0) : c.args().get(1);
+      } else if (inclusive) {
+        hi = new Binary("+", hi, new IntLit(1));
+      }
       Stmt init = new VarStmt("var", name, lo);
       Stmt update = new AssignStmt(name, "+=", new IntLit(1));
       var stmts = new ArrayList<>(rewriteContinue(body, update).stmts());
@@ -604,23 +930,27 @@ final class PyParser {
     return new ForEachStmt("var", name, iter, body);
   }
 
-  /** `try { } except TYPE [as VAR] { } ...` — clauses match in order; transactional. */
+  /** `try { } catch TYPE [VAR] { } ...` — clauses match in order; transactional.
+   *  Legacy `except TYPE [as VAR]` remains accepted for compatibility. */
   private Stmt parseTry() {
     expect(TokKind.IDENT, "'try'"); // 'try'
     Block tryBlock = parseBlock();
     var clauses = new ArrayList<Ast.CatchClause>();
-    while (checkIdent("except")) {
-      advance(); // 'except'
+    while (checkIdent("catch") || checkIdent("except")) {
+      boolean legacyExcept = checkIdent("except");
+      advance(); // 'catch' / 'except'
       String exType = expect(TokKind.IDENT, "exception type").text();
       String var = "_e";
-      if (checkIdent("as")) {
+      if (legacyExcept && checkIdent("as")) {
         advance();
         var = expect(TokKind.IDENT, "exception variable").text();
+      } else if (check(TokKind.IDENT) && !checkIdent("catch") && !checkIdent("except")) {
+        var = advance().text();
       }
       clauses.add(new Ast.CatchClause(exType, var, parseBlock()));
     }
     if (clauses.isEmpty()) {
-      throw new CompileError("Parse error: try needs at least one `except` at line "
+      throw new CompileError("Parse error: try needs at least one `catch` at line "
           + cur().line());
     }
     return new TryStmt(List.of(), tryBlock, clauses);
@@ -629,7 +959,7 @@ final class PyParser {
   /** `match` is a soft keyword: only a statement head when not used as a variable/call. */
   private boolean matchAhead() {
     return switch (toks.get(pos + 1).kind()) {
-      case ASSIGN, COLON, PLUS_EQ, MINUS_EQ, STAR_EQ, DOT, LPAREN, SEMI -> false;
+      case ASSIGN, COLON, PLUS_EQ, MINUS_EQ, STAR_EQ, DOT, SEMI -> false;
       default -> true;
     };
   }
@@ -694,14 +1024,15 @@ final class PyParser {
         + "openAppender (v1) at line " + cur().line());
   }
 
-  /** `raise SomeError("msg")` -> throw. */
-  private Stmt parseRaise() {
-    expect(TokKind.IDENT, "'raise'"); // 'raise'
+  /** `throw SomeError("msg")` -> throw. Legacy `raise SomeError("msg")` is accepted. */
+  private Stmt parseThrow() {
+    String kw = expect(TokKind.IDENT, "'throw'").text(); // 'throw' / 'raise'
     Expr e = parseExpr();
     if (e instanceof NewExpr nx) {
       return new Ast.ThrowStmt(nx.typeName(), nx.args());
     }
-    throw new CompileError("Parse error: `raise` expects `raise SomeError(...)` at line "
+    throw new CompileError("Parse error: `" + kw + "` expects `" + kw
+        + " SomeError(...)` at line "
         + cur().line());
   }
 
@@ -818,7 +1149,7 @@ final class PyParser {
     }
     expect(TokKind.ARROW, "'->'");
     Block body = check(TokKind.LBRACE) ? parseBlock()
-        : new Block(List.of(new ReturnStmt(parseExpr())));
+        : new Block(List.of(new ExprStmt(parseExpr())));
     return new LambdaExpr(params, body);
   }
 
@@ -832,10 +1163,37 @@ final class PyParser {
   }
 
   private Expr parseAnd() {
-    Expr left = parseEquality();
+    Expr left = parseBitOr();
     while (check(TokKind.AMP_AMP)) {
       advance();
-      left = new Binary("&&", left, parseEquality());
+      left = new Binary("&&", left, parseBitOr());
+    }
+    return left;
+  }
+
+  private Expr parseBitOr() {
+    Expr left = parseBitXor();
+    while (check(TokKind.PIPE)) {
+      advance();
+      left = new Binary("|", left, parseBitXor());
+    }
+    return left;
+  }
+
+  private Expr parseBitXor() {
+    Expr left = parseBitAnd();
+    while (check(TokKind.CARET)) {
+      advance();
+      left = new Binary("^", left, parseBitAnd());
+    }
+    return left;
+  }
+
+  private Expr parseBitAnd() {
+    Expr left = parseEquality();
+    while (check(TokKind.AMP)) {
+      advance();
+      left = new Binary("&", left, parseEquality());
     }
     return left;
   }
@@ -850,12 +1208,33 @@ final class PyParser {
   }
 
   private Expr parseRelational() {
-    Expr left = parseAdditive();
+    Expr left = parseShift();
     while (check(TokKind.LT) || check(TokKind.GT) || check(TokKind.LE) || check(TokKind.GE)) {
       String op = advance().text();
+      left = new Binary(op, left, parseShift());
+    }
+    return left;
+  }
+
+  private Expr parseShift() {
+    Expr left = parseAdditive();
+    while (isShiftAhead()) {
+      String op = shiftOp();
       left = new Binary(op, left, parseAdditive());
     }
     return left;
+  }
+
+  private boolean isShiftAhead() {
+    return (check(TokKind.LT) && toks.get(pos + 1).kind() == TokKind.LT)
+        || (check(TokKind.GT) && toks.get(pos + 1).kind() == TokKind.GT);
+  }
+
+  private String shiftOp() {
+    String op = check(TokKind.LT) ? "<<" : ">>";
+    advance();
+    advance();
+    return op;
   }
 
   private Expr parseAdditive() {
@@ -901,6 +1280,16 @@ final class PyParser {
           e = new MethodCall(self ? new VarRef("this") : e, name, args);
         } else {
           e = self ? new VarRef(name) : new FieldAccess(e, name);
+        }
+        self = false;
+      } else if (check(TokKind.QUESTION) && toks.get(pos + 1).kind() == TokKind.DOT) {
+        advance(); // '?'
+        advance(); // '.'
+        String name = expect(TokKind.IDENT, "member name").text();
+        if (match(TokKind.LPAREN)) {
+          e = new SafeMethodCall(self ? new VarRef("this") : e, name, parseArgs());
+        } else {
+          e = self ? new VarRef(name) : new SafeFieldAccess(e, name);
         }
         self = false;
       } else if (match(TokKind.LBRACKET)) {
@@ -965,6 +1354,45 @@ final class PyParser {
     return acc;
   }
 
+  /** Canonical Zinc interpolation: `"a ${expr} b"`. Plain strings without `${...}` stay
+   *  literal, so legacy examples with ordinary braces are unaffected. */
+  private Expr zincString(String text) {
+    int n = text.length();
+    var parts = new ArrayList<Expr>();
+    var lit = new StringBuilder();
+    boolean any = false;
+    int i = 0;
+    while (i < n) {
+      char c = text.charAt(i);
+      if (c == '$' && i + 1 < n && text.charAt(i + 1) == '{') {
+        int depth = 1;
+        int j = i + 2;
+        while (j < n && depth > 0) {
+          char d = text.charAt(j);
+          if (d == '{') depth++;
+          else if (d == '}' && --depth == 0) break;
+          j++;
+        }
+        if (depth != 0) throw new CompileError("unterminated `${` in string: " + text);
+        parts.add(new StrLit(lit.toString()));
+        lit.setLength(0);
+        parts.add(new PyParser(PyLexer.lex(text.substring(i + 2, j))).parseExpr());
+        any = true;
+        i = j + 1;
+      } else {
+        lit.append(c);
+        i++;
+      }
+    }
+    if (!any) return new StrLit(text);
+    parts.add(new StrLit(lit.toString()));
+    Expr acc = parts.get(0);
+    for (int k = 1; k < parts.size(); k++) {
+      acc = new Binary("+", acc, parts.get(k));
+    }
+    return acc;
+  }
+
   private List<Expr> parseArgs() {
     var args = new ArrayList<Expr>();
     if (!check(TokKind.RPAREN)) {
@@ -977,7 +1405,7 @@ final class PyParser {
   }
 
   private Expr parsePrimary() {
-    if (check(TokKind.INT_LIT)) return new IntLit(Long.parseLong(advance().text()));
+    if (check(TokKind.INT_LIT)) return new IntLit(parseIntLit(advance().text()));
     if (check(TokKind.FLOAT_LIT)) return new FloatLit(Double.parseDouble(advance().text()));
     if (check(TokKind.KW_TRUE)) {
       advance();
@@ -987,10 +1415,22 @@ final class PyParser {
       advance();
       return new BoolLit(false);
     }
-    if (check(TokKind.STR_LIT)) return new StrLit(advance().text()); // literal braces
+    if (checkIdent("null")) {
+      advance();
+      return new NullLit();
+    }
+    if (check(TokKind.STR_LIT)) return zincString(advance().text());
     if (check(TokKind.FSTR_LIT)) return fstring(advance().text());    // f"..." interpolates
     if (match(TokKind.LPAREN)) {
       Expr e = parseExpr();
+      if (match(TokKind.COMMA)) {
+        var elems = new ArrayList<Expr>();
+        elems.add(e);
+        elems.add(parseExpr());
+        while (match(TokKind.COMMA)) elems.add(parseExpr());
+        expect(TokKind.RPAREN, "')'");
+        return new TupleLit(elems);
+      }
       expect(TokKind.RPAREN, "')'");
       return e;
     }
@@ -1020,7 +1460,31 @@ final class PyParser {
       return new MapLit(keys, values);
     }
     if (check(TokKind.IDENT)) {
+      if ((checkIdent("List") || checkIdent("Map")) && toks.get(pos + 1).kind() == TokKind.LT) {
+        String collectionType = parseGenericHeadType();
+        if (baseTypeName(collectionType).equals("List") && match(TokKind.LBRACKET)) {
+          var elems = new ArrayList<Expr>();
+          if (!check(TokKind.RBRACKET)) {
+            do {
+              elems.add(parseExpr());
+            } while (match(TokKind.COMMA));
+          }
+          expect(TokKind.RBRACKET, "']'");
+          return new ListLit(elems, collectionType);
+        }
+        if (baseTypeName(collectionType).equals("Map") && match(TokKind.LBRACE)) {
+          return parseMapLiteral(collectionType);
+        }
+        throw new CompileError("Parse error: expected typed collection literal after "
+            + collectionType + " at line " + cur().line());
+      }
       String name = advance().text();
+      String typeName = normalizeTypeName(name);
+      if (isSizedArrayElementType(typeName) && match(TokKind.LBRACKET)) {
+        Expr size = parseExpr();
+        expect(TokKind.RBRACKET, "']'");
+        return new ArrayNewExpr(typeName, size);
+      }
       if (match(TokKind.LPAREN)) {
         var args = parseArgs();
         if (name.equals("print")) { // desugar to the node CodeGen already lowers
@@ -1037,5 +1501,44 @@ final class PyParser {
     }
     throw new CompileError("Parse error: unexpected " + cur().kind() + " \"" + cur().text()
         + "\" at line " + cur().line());
+  }
+
+  private MapLit parseMapLiteral(String explicitType) {
+    var keys = new ArrayList<Expr>();
+    var values = new ArrayList<Expr>();
+    skipSemis();
+    while (!check(TokKind.RBRACE)) {
+      keys.add(parseExpr());
+      expect(TokKind.COLON, "':' (dict entries are key: value)");
+      values.add(parseExpr());
+      skipSemis();
+      if (!match(TokKind.COMMA)) break;
+      skipSemis();
+    }
+    expect(TokKind.RBRACE, "'}'");
+    return new MapLit(keys, values, explicitType);
+  }
+
+  private String baseTypeName(String t) {
+    int i = t.indexOf('<');
+    return i < 0 ? t : t.substring(0, i);
+  }
+
+  private boolean isSizedArrayElementType(String name) {
+    return name.equals("int") || name.equals("double") || name.equals("boolean")
+        || name.equals("String");
+  }
+
+  private long parseIntLit(String text) {
+    if (text.startsWith("0x") || text.startsWith("0X")) {
+      return Long.parseLong(text.substring(2), 16);
+    }
+    if (text.startsWith("0b") || text.startsWith("0B")) {
+      return Long.parseLong(text.substring(2), 2);
+    }
+    if (text.startsWith("0o") || text.startsWith("0O")) {
+      return Long.parseLong(text.substring(2), 8);
+    }
+    return Long.parseLong(text);
   }
 }

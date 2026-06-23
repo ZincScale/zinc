@@ -1,0 +1,44 @@
+enum FieldType { INT, STRING, DOUBLE, BOOL }
+
+record Field(String name, FieldType ftype)
+record Schema(String name, List<Field> fields)
+record Row(Schema schema, Map<String, Object> values)
+
+Row newRow(Schema s) {
+    return Row(s, {})
+}
+
+Row withField(Row r, String name, Object value) {
+    var vals = r.values
+    vals[name] = value
+    return Row(r.schema, vals)
+}
+
+Row fromJson(Schema s, String json) {
+    var doc = Json.parse(json)
+    var r = newRow(s)
+    for f in s.fields {
+        match f.ftype {
+            case INT    { int i = doc.get(f.name).asInt()
+                          r = withField(r, f.name, i) }
+            case STRING { String t = doc.get(f.name).asText()
+                          r = withField(r, f.name, t) }
+            case DOUBLE { double d = doc.get(f.name).asNum()
+                          r = withField(r, f.name, d) }
+            case BOOL   { boolean b = doc.get(f.name).asBool()
+                          r = withField(r, f.name, b) }
+        }
+    }
+    return r
+}
+
+void main() {
+    var s = Schema("user", [Field("id", FieldType.INT), Field("name", FieldType.STRING)])
+    var r = fromJson(s, "{\"id\":7,\"name\":\"vin\"}")
+    print(r.schema.name)
+    int id = r.values.get("id")
+    print(id + 1)
+    String nm = r.values.get("name")
+    print(nm)
+    print(len(r.schema.fields))
+}

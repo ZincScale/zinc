@@ -1,0 +1,23 @@
+long widen(Int x) {
+    return x + 1
+}
+
+Float ratio(float x, Double y) {
+    return x / y
+}
+
+void main() {
+    Int a = 41
+    long b = widen(a)
+    float c = ratio(7.0, 2.0)
+    Double d = c + 0.5
+
+    Long[] nums = [a, b]
+    Float[] vals = [c, d]
+
+    print("b: ${b}")
+    print("c: ${c}")
+    print("d: ${d}")
+    print("nums length: ${nums.length}")
+    print("vals second: ${vals[1]}")
+}

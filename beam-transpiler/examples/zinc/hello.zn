@@ -1,0 +1,4 @@
+// Canonical Zinc-on-BEAM syntax.
+void main() {
+    print("Hello from Zinc on BEAM!")
+}

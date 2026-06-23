@@ -1,0 +1,7 @@
+String bad() {
+    return 7
+}
+
+void main() {
+    print(bad())
+}

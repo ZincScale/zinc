@@ -66,6 +66,8 @@ Then create a GitHub release on tag `zc-v<ver>` (web UI or `gh release create`),
 
 ## Pre-release checklist
 
+- [ ] `./e2e-zinc.sh` green (canonical Zinc-on-BEAM)
+- [ ] `./e2e-py.sh` green (legacy Python-shaped .zn compatibility)
 - [ ] `./e2e.sh` green (legal-Java gate + cases)
 - [ ] `zc/test.sh` green
 - [ ] version bumped where it's reported (`zc version`, `zinc.toml` templates)

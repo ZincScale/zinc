@@ -1,24 +1,25 @@
 # Zinc Guide
 
-Zinc on BEAM compiles `.zn` braces-Python to Erlang/OTP. You write Python-shaped code with
-explicit types where they matter; the compiler emits BEAM modules and the `zc` CLI builds and
-runs them with rebar3.
+Zinc on BEAM compiles `.zn` code to Erlang/OTP. The canonical surface is type-first Zinc
+syntax with BEAM-native actors and applications; the older Python-shaped `.zn` form remains
+accepted for compatibility. The compiler emits BEAM modules and the `zc` CLI builds and runs
+them with rebar3.
 
 ## Programs And Modules
 
-A script can be one file with a top-level `def main()`:
+A script can be one file with a top-level `void main()`:
 
-```python
-def main() {
+```zinc
+void main() {
     print("hello")
 }
 ```
 
-A service uses one `class Main(Application)`:
+A service uses one `class Main : Application`:
 
-```python
-class Main(Application) {
-    def main() {
+```zinc
+class Main : Application {
+    void main() {
         print("started")
     }
 }
@@ -32,20 +33,20 @@ referenced directly; nested modules use imports such as `from util import mathut
 Primitive types are `int`, `double`, `boolean`, `String`, and `byte[]`. Locals infer from
 assignment. Parameters must be typed. Return types are checked.
 
-```python
-def add(a: int, b: int) -> int {
+```zinc
+int add(int a, int b) {
     return a + b
 }
 
-def main() {
+void main() {
     name = "zinc"
-    print(f"hello {name}")
+    print("hello " + name)
 }
 ```
 
 Records are immutable values:
 
-```python
+```zinc
 record User(id: String, name: String)
 
 u = User("7", "vin")
@@ -59,7 +60,7 @@ Enums, sealed unions, nominal interfaces, instance classes, and lambdas are supp
 
 List and dict literals are typed when homogeneous:
 
-```python
+```zinc
 scores = {"a": 1, "b": 2}
 scores["a"] = scores["a"] + 10
 print(scores["a"] + len(scores))
@@ -77,7 +78,7 @@ but typed crossings are checked.
 Supported flow: `if` / `else if` / `else`, `while`, `for x in xs`, `for i in range(a, b)`,
 `break`, `continue`, ternary expressions, and exhaustive `match`.
 
-```python
+```zinc
 match color {
     case RED { print("warm") }
     case GREEN, BLUE { print("cool") }
@@ -86,14 +87,14 @@ match color {
 
 Errors use unchecked exceptions:
 
-```python
+```zinc
 class BadInput(Exception) {}
 
 try {
-    raise BadInput("nope")
-} except BadInput as e {
+    throw BadInput("nope")
+} catch BadInput e {
     print(e.message)
-} except Exception as e {
+} catch Exception e {
     print("fallback")
 }
 ```
@@ -112,40 +113,40 @@ failed path are not leaked.
 - Actor handles remain valid across restarts.
 - Actor fields on an `Application` are supervised children.
 
-```python
-class Store(Actor) {
-    users: Map<String, String> = {}
+```zinc
+class Store : Actor {
+    Map<String, String> users = {}
 
-    def put(id: String, name: String) { users[id] = name }
-    def get(id: String) -> String { return users.get(id) }
+    void put(String id, String name) { users[id] = name }
+    String get(String id) { return users.get(id) }
 }
 
-class Main(Application) {
-    store = Store()
+class Main : Application {
+    Store store = Store()
 
-    def main() {
+    void main() {
         store.put("7", "vin")
         print(store.get("7"))
     }
 }
 ```
 
-An actor can have `private` helpers in the legal-Java surface. In current `.zn` examples,
-prefer simple public actor protocol methods or top-level helper functions until private
-Python-shaped helpers are promoted in the frontend.
+Actor protocol methods are public in the current BEAM frontend. Prefer simple public actor
+methods or top-level helper functions until private helpers are promoted in the canonical
+`.zn` surface.
 
 ## Files, Config, And Streaming
 
 Small whole-file APIs:
 
-```python
+```zinc
 text = Files.readString("in.txt")
 Files.writeString("out.txt", text)
 ```
 
 Path and discovery APIs:
 
-```python
+```zinc
 root = "/tmp/app"
 input = Files.join(root, "in")
 for path in Files.walk(input) {
@@ -161,14 +162,14 @@ recursive full paths. `Files.size(path)` returns file size.
 
 Typed config decode reads JSON into a record through the existing JSON codec:
 
-```python
+```zinc
 record AppConfig(inputDir: String, output: String)
 cfg: AppConfig = Config.decode(AppConfig, "config.json")
 ```
 
 Scoped streaming keeps memory bounded:
 
-```python
+```zinc
 with Files.openReader(src) as r {
     with Files.openWriter(dst) as w {
         while r.hasNextLine() {
@@ -185,7 +186,7 @@ See `examples/py/pipeline.zn`.
 
 JSON:
 
-```python
+```zinc
 record User(id: String, name: String)
 u: User = Json.decode(User, "{\"id\":\"7\",\"name\":\"vin\"}")
 print(Json.encode(u))
@@ -195,7 +196,7 @@ Dynamic JSON access is available through `Json.parse(s).get("key").asText/asInt/
 
 HTTP client:
 
-```python
+```zinc
 client = HttpClient.newBuilder().connectTimeout(2000).build()
 resp = client.send(HttpRequest.newBuilder("http://127.0.0.1:8080/health").GET().build())
 print(resp.body())
@@ -203,12 +204,12 @@ print(resp.body())
 
 HTTP server:
 
-```python
-class Main(Application) {
-    server = HttpServer(8080, Router.create()
+```zinc
+class Main : Application {
+    HttpServer server = HttpServer(8080, Router.create()
         .get("/health", req -> Response.ok("ok")))
 
-    def main() {
+    void main() {
         print("listening")
     }
 }
@@ -224,7 +225,7 @@ See `examples/py/encoding.zn` and `webauth.zn`.
 
 Use raw Erlang modules through the FFI escape hatch:
 
-```python
+```zinc
 from erlang import lists
 
 sorted = lists.sort(xs)
@@ -241,7 +242,9 @@ zc add cowboy@2.12.0
 ## CLI Reference
 
 ```sh
-zc new --py <name>          create a .zn project
+zc new <name>               create a canonical .zn project
+zc new --py <name>          create a legacy Python-shaped .zn project
+zc new --java <name>        create a legacy legal-Java .zinc project
 zc run [file|dir]           build and run
 zc run --once [dir]         run Application main and stop, useful for tests
 zc build [dir]              transpile and compile

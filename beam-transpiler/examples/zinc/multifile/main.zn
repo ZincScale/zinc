@@ -1,0 +1,9 @@
+from util import mathutil
+
+void main() {
+    var s = mathutil.sum_to(4)
+    print(fmt.banner("${s}"))
+    var t = Tick()
+    t.inc()
+    print(t.get())
+}

@@ -1,0 +1,10 @@
+void main() {
+    var client = HttpClient.newBuilder().connectTimeout(2000).build()
+    var req = HttpRequest.newBuilder("http://127.0.0.1:1/none").header("accept", "text/plain").GET().timeout(2000).build()
+    try {
+        client.send(req)
+        print("no exception?!")
+    } catch HttpException e {
+        print("connect refused caught")
+    }
+}

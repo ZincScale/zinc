@@ -1,0 +1,8 @@
+void main() {
+    var x = 7.0
+    var y = 2.0
+    print(x / y)
+    print(x + 1)
+    print(10 / 3)
+    print(10.0 / 4.0)
+}

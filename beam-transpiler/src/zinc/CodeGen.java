@@ -109,6 +109,7 @@ class CodeGen {
   private static final String FMT_HELPER =
       "'$fmt'(X) when is_binary(X) -> X;\n"
           + "'$fmt'(X) when is_integer(X) -> integer_to_binary(X);\n"
+          + "'$fmt'(X) when is_atom(X) -> atom_to_binary(X, utf8);\n"
           + "'$fmt'(X) -> iolist_to_binary(io_lib:format(\"~p\", [X])).";
 
   private static final String UUID_HELPER =
@@ -285,6 +286,7 @@ class CodeGen {
   /** A dict literal's type: HashMap&lt;K,V&gt; when keys agree AND values agree (homogeneous);
    *  bare HashMap otherwise (heterogeneous -> dynamic values, guarded crossings on use). */
   private String mapLitType(MapLit x) {
+    if (x.explicitType() != null) return x.explicitType();
     if (x.keys().isEmpty()) return "HashMap";
     String k = exprType(x.keys().get(0)), v = exprType(x.values().get(0));
     if (k == null || v == null) return "HashMap";
@@ -298,6 +300,7 @@ class CodeGen {
 
   /** A list literal's type: List&lt;T&gt; when elements agree (homogeneous); bare List otherwise. */
   private String listLitType(ListLit x) {
+    if (x.explicitType() != null) return x.explicitType();
     if (x.elems().isEmpty()) return "List";
     String e = exprType(x.elems().get(0));
     if (e == null) return "List";
@@ -1574,9 +1577,11 @@ class CodeGen {
       case IntLit x -> String.valueOf(x.value());
       case FloatLit x -> String.valueOf(x.value());
       case BoolLit x -> String.valueOf(x.value());
+      case NullLit x -> "null";
       case StrLit x -> "\"" + x.text() + "\"";
       case VarRef x -> x.name();
       case FieldAccess x -> exprSrc(x.obj()) + "." + x.field();
+      case SafeFieldAccess x -> exprSrc(x.obj()) + "?." + x.field();
       case Index x -> exprSrc(x.obj()) + "[" + exprSrc(x.index()) + "]";
       case Binary x -> exprSrc(x.left()) + " " + x.op() + " " + exprSrc(x.right());
       case Unary x -> x.op() + exprSrc(x.operand());
@@ -1585,8 +1590,11 @@ class CodeGen {
           + exprSrc(x.elseExpr());
       case Call x -> x.callee() + "(" + srcList(x.args()) + ")";
       case MethodCall x -> exprSrc(x.target()) + "." + x.method() + "(" + srcList(x.args()) + ")";
+      case SafeMethodCall x ->
+          exprSrc(x.target()) + "?." + x.method() + "(" + srcList(x.args()) + ")";
       case NewExpr x -> "new " + x.typeName() + "(" + srcList(x.args()) + ")";
       case SpawnExpr x -> "new " + x.actorName() + "(" + srcList(x.args()) + ")";
+      case TupleLit x -> "(" + srcList(x.elems()) + ")";
       case LambdaExpr x -> {
         List<Stmt> ss = x.body().stmts();
         String body = ss.size() == 1 ? switch (ss.get(0)) {
@@ -1602,6 +1610,36 @@ class CodeGen {
 
   private static String srcList(List<Expr> es) {
     return String.join(", ", es.stream().map(CodeGen::exprSrc).toList());
+  }
+
+  private String tupleLitType(TupleLit x) {
+    var types = new ArrayList<String>();
+    for (Expr e : x.elems()) {
+      String t = exprType(e);
+      if (t == null) return null;
+      types.add(t);
+    }
+    return "(" + String.join(",", types) + ")";
+  }
+
+  private List<String> tupleElems(String t) {
+    if (t == null || !t.startsWith("(") || !t.endsWith(")")) return List.of();
+    var out = new ArrayList<String>();
+    String inner = t.substring(1, t.length() - 1);
+    int depthAngle = 0, depthTuple = 0, start = 0;
+    for (int i = 0; i < inner.length(); i++) {
+      char c = inner.charAt(i);
+      if (c == '<') depthAngle++;
+      else if (c == '>') depthAngle--;
+      else if (c == '(') depthTuple++;
+      else if (c == ')') depthTuple--;
+      else if (c == ',' && depthAngle == 0 && depthTuple == 0) {
+        out.add(inner.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+    out.add(inner.substring(start).trim());
+    return out;
   }
 
   private String genFn(MethodDecl m) {
@@ -1977,6 +2015,35 @@ class CodeGen {
           }
           env.put(st.name(), v);
         }
+        case DestructureStmt st -> {
+          String tuple = fresh("tuple");
+          out.add(tuple + " = " + genExpr(st.init(), env));
+          List<String> elems = tupleElems(exprType(st.init()));
+          if (!elems.isEmpty() && elems.size() != st.names().size()) {
+            throw new CompileError("tuple destructuring: expected " + st.names().size()
+                + " values, got " + elems.size());
+          }
+          for (int j = 0; j < st.names().size(); j++) {
+            String name = st.names().get(j);
+            String v = fresh(name);
+            String elem = "element(" + (j + 1) + ", " + tuple + ")";
+            if (!st.types().isEmpty()) {
+              String declared = st.types().get(j);
+              String got = elems.isEmpty() ? null : elems.get(j);
+              if (got == null && typeSpec(declared) != null) {
+                useChk = true;
+                elem = "'$chk'(" + elem + ", " + typeSpec(declared) + ")";
+              } else {
+                checkBind(declared, got, name);
+              }
+            }
+            out.add(v + " = " + elem);
+            env.put(name, v);
+            varTypes.put(name, st.types().isEmpty()
+                ? (elems.isEmpty() ? null : elems.get(j))
+                : st.types().get(j));
+          }
+        }
         case AssignStmt st -> {
           if (finalVars.contains(st.name())) {
             throw new CompileError("final variable '" + st.name() + "' cannot be reassigned");
@@ -2043,6 +2110,10 @@ class CodeGen {
           String tb = t == null ? null : baseType(t);
           String cur = envGet(env, st.arrVar());
           boolean isMap = "HashMap".equals(tb) || "Map".equals(tb);
+          if ("byte[]".equals(t)) {
+            throw new CompileError("byte[] is binary data and cannot be assigned by index; "
+                + "build a new binary with Bytes helpers");
+          }
           if (t == null || (!t.endsWith("[]") && !isMap)) {
             throw new CompileError("index assignment needs an array- or map-typed variable, '"
                 + st.arrVar() + "' is " + (t == null ? "untyped" : t));
@@ -2587,17 +2658,37 @@ class CodeGen {
       case IntLit x -> String.valueOf(x.value());
       case FloatLit x -> String.valueOf(x.value());
       case BoolLit x -> x.value() ? "true" : "false";
+      case NullLit x -> "null";
       case StrLit x -> "<<\"" + escErl(x.text()) + "\"/utf8>>";
-      case VarRef x -> envGet(env, x.name());
+      case VarRef x -> {
+        if (!env.containsKey(x.name())) {
+          String enumType = enumTypeForValue(x.name());
+          if (enumType != null) yield "'" + x.name() + "'";
+        }
+        yield envGet(env, x.name());
+      }
       case ListLit x -> {
         var elems = new ArrayList<String>();
-        for (Expr el : x.elems()) elems.add(genExpr(el, env));
+        var ts = x.explicitType() == null ? List.<String>of() : typeArgs(x.explicitType());
+        for (Expr el : x.elems()) {
+          if (ts.size() == 1) checkBind(ts.get(0), exprType(el), "list literal");
+          elems.add(ts.size() == 1 ? guarded(el, ts, 0, env) : genExpr(el, env));
+        }
         yield "[" + String.join(", ", elems) + "]";
       }
       case MapLit x -> {
         var entries = new ArrayList<String>();
+        var ts = x.explicitType() == null ? List.<String>of() : typeArgs(x.explicitType());
         for (int i = 0; i < x.keys().size(); i++) {
-          entries.add(genExpr(x.keys().get(i), env) + " => " + genExpr(x.values().get(i), env));
+          if (ts.size() == 2) {
+            checkBind(ts.get(0), exprType(x.keys().get(i)), "map literal key");
+            checkBind(ts.get(1), exprType(x.values().get(i)), "map literal value");
+          }
+          String k = ts.size() == 2 ? guarded(x.keys().get(i), ts, 0, env)
+              : genExpr(x.keys().get(i), env);
+          String v = ts.size() == 2 ? guarded(x.values().get(i), ts, 1, env)
+              : genExpr(x.values().get(i), env);
+          entries.add(k + " => " + v);
         }
         yield "#{" + String.join(", ", entries) + "}";
       }
@@ -2695,9 +2786,11 @@ class CodeGen {
         }
         if (x.field().equals("length")) {
           String t = exprType(x.obj());
-          yield t != null && t.endsWith("[]")
-              ? "array:size(" + genExpr(x.obj(), env) + ")"
-              : "length(" + genExpr(x.obj(), env) + ")";
+          yield "byte[]".equals(t) ? "byte_size(" + genExpr(x.obj(), env) + ")"
+              : "String".equals(t) ? "string:length(" + genExpr(x.obj(), env) + ")"
+              : t != null && t.endsWith("[]")
+                  ? "array:size(" + genExpr(x.obj(), env) + ")"
+                  : "length(" + genExpr(x.obj(), env) + ")";
         }
         String ot = exprType(x.obj());                       // e.message -> e.getMessage()
         if (x.field().equals("message")
@@ -2706,9 +2799,13 @@ class CodeGen {
         }
         yield "maps:get(" + x.field() + ", " + genExpr(x.obj(), env) + ")";
       }
+      case SafeFieldAccess x -> genSafeFieldAccess(x, env);
       case Index x -> {
         String t = exprType(x.obj());
         String b = t == null ? null : baseType(t);
+        if ("byte[]".equals(t)) {
+          yield "binary:at(" + genExpr(x.obj(), env) + ", " + genExpr(x.index(), env) + ")";
+        }
         if (t != null && t.endsWith("[]")) {
           yield "array:get(" + genExpr(x.index(), env) + ", " + genExpr(x.obj(), env) + ")";
         }
@@ -2719,6 +2816,11 @@ class CodeGen {
       }
       case ArrayNewExpr x -> "array:new(" + genExpr(x.size(), env) + ", {default, "
           + defaultFor(x.elemType()) + "})";
+      case TupleLit x -> {
+        var elems = new ArrayList<String>();
+        for (Expr el : x.elems()) elems.add(genExpr(el, env));
+        yield tupleOf(elems);
+      }
       case Unary x -> {
         String inner = genExpr(x.operand(), env);
         yield x.op().equals("!") ? "(not " + inner + ")" : "(" + x.op() + inner + ")";
@@ -2742,6 +2844,12 @@ class CodeGen {
         if (x.callee().equals("str") && x.args().size() == 1 && !userDefines("str", 1)) {
           useFmt = true;                                    // any value -> String (binary)
           yield "'$fmt'(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (isNumericCastCall(x)) {
+          String arg = genExpr(x.args().get(0), env);
+          yield x.callee().equals("double") || x.callee().equals("float")
+              ? "float(" + arg + ")"
+              : "trunc(" + arg + ")";
         }
         if (inActor) {
           MethodDecl pm = curActor == null ? null : curActor.methods().stream()
@@ -2767,11 +2875,38 @@ class CodeGen {
         yield fnName(x.callee()) + "(" + String.join(", ", args) + ")";
       }
       case MethodCall x -> genMethodCall(x, env);
+      case SafeMethodCall x -> genSafeMethodCall(x, env);
       case SpawnExpr x ->
           throw new CompileError("an Actor must be bound directly: var x = new "
               + x.actorName() + "(...)  (v1)");
       case LambdaExpr x -> genLambda(x, env, null);
     };
+  }
+
+  private String genSafeFieldAccess(SafeFieldAccess x, Map<String, String> env) {
+    String recv = fresh("safe");
+    var lenv = new HashMap<>(env);
+    lenv.put(recv, recv);
+    String oldType = varTypes.get(recv);
+    String recvType = exprType(x.obj());
+    if (recvType == null) varTypes.remove(recv); else varTypes.put(recv, recvType);
+    String body = genExpr(new FieldAccess(new VarRef(recv), x.field()), lenv);
+    if (oldType == null) varTypes.remove(recv); else varTypes.put(recv, oldType);
+    return "(fun(" + recv + ") -> case " + recv + " of null -> null; _ -> "
+        + body + " end end)(" + genExpr(x.obj(), env) + ")";
+  }
+
+  private String genSafeMethodCall(SafeMethodCall x, Map<String, String> env) {
+    String recv = fresh("safe");
+    var lenv = new HashMap<>(env);
+    lenv.put(recv, recv);
+    String oldType = varTypes.get(recv);
+    String recvType = exprType(x.target());
+    if (recvType == null) varTypes.remove(recv); else varTypes.put(recv, recvType);
+    String body = genMethodCall(new MethodCall(new VarRef(recv), x.method(), x.args()), lenv);
+    if (oldType == null) varTypes.remove(recv); else varTypes.put(recv, oldType);
+    return "(fun(" + recv + ") -> case " + recv + " of null -> null; _ -> "
+        + body + " end end)(" + genExpr(x.target(), env) + ")";
   }
 
   /** Lambda in a SAM-interface position: params take the interface method's types,
@@ -3223,6 +3358,39 @@ class CodeGen {
         }
         throw new CompileError("unsupported: Sys." + x.method() + " (sleep)");
       }
+      case "Seq" -> {
+        if (x.method().equals("range") && x.args().size() == 2) {
+          String start = genExpr(x.args().get(0), env);
+          String end = genExpr(x.args().get(1), env);
+          return "(case " + end + " =< " + start + " of true -> []; false -> lists:seq("
+              + start + ", (" + end + ") - 1) end)";
+        }
+        if (x.method().equals("rangeClosed") && x.args().size() == 2) {
+          String start = genExpr(x.args().get(0), env);
+          String end = genExpr(x.args().get(1), env);
+          return "(case " + end + " < " + start + " of true -> []; false -> lists:seq("
+              + start + ", " + end + ") end)";
+        }
+        throw new CompileError("unsupported: Seq." + x.method() + " (range/rangeClosed)");
+      }
+      case "Lists" -> {
+        if (x.method().equals("slice") && x.args().size() == 3) {
+          String list = genExpr(x.args().get(0), env);
+          String start = genExpr(x.args().get(1), env);
+          String len = genExpr(x.args().get(2), env);
+          warnLinear("Lists.slice is O(n) on a linked List",
+              "use ArrayList or byte[] for indexed slicing when costs matter");
+          return "lists:sublist(lists:nthtail(" + start + ", " + list + "), " + len + ")";
+        }
+        throw new CompileError("unsupported: Lists." + x.method() + " (slice)");
+      }
+      case "Bytes" -> {
+        if (x.method().equals("slice") && x.args().size() == 3) {
+          return "binary:part(" + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.args().get(1), env) + ", " + genExpr(x.args().get(2), env) + ")";
+        }
+        throw new CompileError("unsupported: Bytes." + x.method() + " (slice)");
+      }
       case "Time" -> {
         return switch (x.method()) {
           case "now" -> "erlang:system_time(millisecond)";    // epoch millis
@@ -3642,9 +3810,11 @@ class CodeGen {
       case "length" -> "string:length(" + r + ")";
       case "isEmpty" -> "(" + r + " =:= <<>>)";
       case "equals" -> "(" + r + " =:= " + genExpr(x.args().get(0), env) + ")";
-      case "toUpperCase" -> "string:uppercase(" + r + ")";
-      case "toLowerCase" -> "string:lowercase(" + r + ")";
+      case "toUpperCase", "upper" -> "string:uppercase(" + r + ")";
+      case "toLowerCase", "lower" -> "string:lowercase(" + r + ")";
       case "trim", "strip" -> "string:trim(" + r + ")";
+      case "trimStart" -> "string:trim(" + r + ", leading)";
+      case "trimEnd" -> "string:trim(" + r + ", trailing)";
       case "substring" -> x.args().size() == 1
           ? "string:slice(" + r + ", " + genExpr(x.args().get(0), env) + ")"
           : "string:slice(" + r + ", " + genExpr(x.args().get(0), env) + ", ("
@@ -3753,7 +3923,7 @@ class CodeGen {
           + ", maps:values(" + r + "))";
       case "size" -> "maps:size(" + r + ")";
       case "isEmpty" -> "(map_size(" + r + ") =:= 0)";
-      case "keySet" -> "maps:keys(" + r + ")";
+      case "keySet", "keys" -> "maps:keys(" + r + ")";
       case "values" -> "maps:values(" + r + ")";
       case "entrySet" -> "maps:to_list(" + r + ")"; // list of {K,V} -> for-each + e.getKey()
       case "forEach" -> {
@@ -3839,6 +4009,11 @@ class CodeGen {
       case "+", "-", "*" -> op;
       case "/" -> "int".equals(exprType(l)) && "int".equals(exprType(r)) ? "div" : "/";
       case "%" -> "rem";
+      case "&" -> "band";
+      case "|" -> "bor";
+      case "^" -> "bxor";
+      case "<<" -> "bsl";
+      case ">>" -> "bsr";
       case "&&" -> "andalso";
       case "||" -> "orelse";
       case "==" -> "=:=";
@@ -3862,8 +4037,12 @@ class CodeGen {
       case IntLit x -> "int";
       case FloatLit x -> "double";
       case BoolLit x -> "boolean";
+      case NullLit x -> null;
       case StrLit x -> "String";
-      case VarRef x -> varTypes.get(x.name());
+      case VarRef x -> {
+        String t = varTypes.get(x.name());
+        yield t != null ? t : enumTypeForValue(x.name());
+      }
       case ListLit x -> listLitType(x);
       case MapLit x -> mapLitType(x);
       case NewExpr x -> variantSealed.getOrDefault(x.typeName(), x.typeName());
@@ -3888,11 +4067,14 @@ class CodeGen {
         }
         yield null;
       }
+      case SafeFieldAccess x -> exprType(new FieldAccess(x.obj(), x.field()));
       case ArrayNewExpr x -> x.elemType() + "[]";
+      case TupleLit x -> tupleLitType(x);
       case LambdaExpr x -> "Function";
       case Index x -> {
         String t = exprType(x.obj());
         if (t == null) yield null;
+        if ("byte[]".equals(t)) yield "int";
         if (t.endsWith("[]")) yield t.substring(0, t.length() - 2);
         String b = baseType(t);                              // d["k"] is V (null = dynamic)
         if ("HashMap".equals(b) || "Map".equals(b)) {
@@ -3917,6 +4099,7 @@ class CodeGen {
           case "+", "-", "*", "/", "%" ->
               "double".equals(exprType(x.left())) || "double".equals(exprType(x.right()))
                   ? "double" : "int";
+          case "&", "|", "^", "<<", ">>" -> "int";
           default -> "boolean";
         };
       }
@@ -3926,6 +4109,9 @@ class CodeGen {
         }
         if (x.callee().equals("str") && x.args().size() == 1 && !userDefines("str", 1)) {
           yield "String";
+        }
+        if (isNumericCastCall(x)) {
+          yield x.callee().equals("double") || x.callee().equals("float") ? "double" : "int";
         }
         ClassInfo ci = curClassName == null ? null : classes.get(curClassName);
         MethodDecl md = ci == null ? null
@@ -3966,6 +4152,12 @@ class CodeGen {
           if (vr.name().equals("Router")) yield "Router";
           if (vr.name().equals("Response")) yield "Response";
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
+          if (vr.name().equals("Seq")) yield "List<int>";
+          if (vr.name().equals("Lists")) {
+            yield x.method().equals("slice") && !x.args().isEmpty()
+                ? exprType(x.args().get(0)) : null;
+          }
+          if (vr.name().equals("Bytes")) yield x.method().equals("slice") ? "byte[]" : null;
           if (vr.name().equals("Time")) yield "int";
           if (vr.name().equals("Base64") || vr.name().equals("Hex")) {
             yield x.method().equals("encode") ? "String" : "byte[]";
@@ -4048,7 +4240,7 @@ class CodeGen {
             case "length", "indexOf", "compareTo" -> "int";
             case "isEmpty", "equals", "contains", "startsWith", "endsWith" -> "boolean";
             case "toUpperCase", "toLowerCase", "trim", "strip", "substring", "replace",
-                "repeat", "charAt" -> "String";
+                "repeat", "charAt", "upper", "lower", "trimStart", "trimEnd" -> "String";
             case "split" -> "String[]";
             case "toCharArray" -> "List";
             default -> null;
@@ -4069,6 +4261,8 @@ class CodeGen {
           yield switch (x.method()) {
             case "size" -> "int";
             case "containsKey", "containsValue", "isEmpty" -> "boolean";
+            case "keys", "keySet" -> targs.size() == 2 ? "List<" + targs.get(0) + ">" : "List";
+            case "values" -> targs.size() == 2 ? "List<" + targs.get(1) + ">" : "List";
             case "entrySet" -> targs.size() == 2
                 ? "List<Entry<" + targs.get(0) + "," + targs.get(1) + ">>" : "List<Entry>";
             default -> null; // forEach: void
@@ -4159,8 +4353,27 @@ class CodeGen {
         }
         yield null;
       }
+      case SafeMethodCall x -> exprType(new MethodCall(x.target(), x.method(), x.args()));
       case SpawnExpr x -> x.actorName();
     };
+  }
+
+  private String enumTypeForValue(String value) {
+    String found = null;
+    for (EnumDecl e : enums.values()) {
+      if (!e.values().contains(value)) continue;
+      if (found != null && !found.equals(e.name())) {
+        throw new CompileError("ambiguous enum value " + value
+            + " — qualify it as " + found + "." + value + " or " + e.name() + "." + value);
+      }
+      found = e.name();
+    }
+    return found;
+  }
+
+  private boolean isNumericCastCall(Call x) {
+    return x.args().size() == 1 && !userDefines(x.callee(), 1)
+        && List.of("int", "long", "float", "double").contains(x.callee());
   }
 
   // ---- analysis ----
@@ -4316,6 +4529,7 @@ class CodeGen {
     for (Stmt s : b.stmts()) {
       switch (s) {
         case VarStmt st -> exprRefs(st.init(), out);
+        case DestructureStmt st -> exprRefs(st.init(), out);
         case AssignStmt st -> {
           if (!st.op().equals("=")) out.add(st.name());
           exprRefs(st.value(), out);
@@ -4371,6 +4585,7 @@ class CodeGen {
       case IntLit x -> {}
       case FloatLit x -> {}
       case BoolLit x -> {}
+      case NullLit x -> {}
       case StrLit x -> {}
       case VarRef x -> out.add(x.name());
       case ListLit x -> {
@@ -4384,6 +4599,7 @@ class CodeGen {
         for (Expr a : x.args()) exprRefs(a, out);
       }
       case FieldAccess x -> exprRefs(x.obj(), out);
+      case SafeFieldAccess x -> exprRefs(x.obj(), out);
       case Index x -> {
         exprRefs(x.obj(), out);
         exprRefs(x.index(), out);
@@ -4407,7 +4623,14 @@ class CodeGen {
         exprRefs(x.target(), out);
         for (Expr a : x.args()) exprRefs(a, out);
       }
+      case SafeMethodCall x -> {
+        exprRefs(x.target(), out);
+        for (Expr a : x.args()) exprRefs(a, out);
+      }
       case ArrayNewExpr x -> exprRefs(x.size(), out);
+      case TupleLit x -> {
+        for (Expr el : x.elems()) exprRefs(el, out);
+      }
       case SpawnExpr x -> {
         for (Expr a : x.args()) exprRefs(a, out);
       }

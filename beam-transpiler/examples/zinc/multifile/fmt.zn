@@ -1,0 +1,3 @@
+String banner(String s) {
+    return "[" + s + "]"
+}

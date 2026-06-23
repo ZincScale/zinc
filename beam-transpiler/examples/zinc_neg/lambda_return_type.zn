@@ -1,0 +1,8 @@
+interface Formatter {
+    String apply(int value)
+}
+
+void main() {
+    Formatter f = n -> n + 1
+    print(f.apply(7))
+}

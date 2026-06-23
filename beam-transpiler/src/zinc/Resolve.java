@@ -28,6 +28,8 @@ import zinc.Ast.MethodDecl;
 import zinc.Ast.NewExpr;
 import zinc.Ast.Program;
 import zinc.Ast.ReturnStmt;
+import zinc.Ast.SafeFieldAccess;
+import zinc.Ast.SafeMethodCall;
 import zinc.Ast.SeqStmt;
 import zinc.Ast.SpawnExpr;
 import zinc.Ast.Stmt;
@@ -101,6 +103,8 @@ final class Resolve {
   private Stmt stmt(Stmt s) {
     return switch (s) {
       case VarStmt x -> new VarStmt(x.type(), x.name(), expr(x.init()), x.isFinal(), x.line());
+      case Ast.DestructureStmt x ->
+          new Ast.DestructureStmt(x.types(), x.names(), expr(x.init()), x.line());
       case AssignStmt x -> new AssignStmt(x.name(), x.op(), expr(x.value()), x.line());
       case FieldAssignStmt x ->
           new FieldAssignStmt(x.objVar(), x.field(), x.op(), expr(x.value()), x.line());
@@ -143,11 +147,14 @@ final class Resolve {
         yield actorNames.contains(x.typeName()) ? new SpawnExpr(x.typeName(), args)
             : new NewExpr(x.typeName(), args);
       }
-      case ListLit x -> new ListLit(x.elems().stream().map(this::expr).toList());
+      case ListLit x -> new ListLit(x.elems().stream().map(this::expr).toList(),
+          x.explicitType());
       case Ast.MapLit x -> new Ast.MapLit(x.keys().stream().map(this::expr).toList(),
-          x.values().stream().map(this::expr).toList());
+          x.values().stream().map(this::expr).toList(), x.explicitType());
       case ArrayNewExpr x -> new ArrayNewExpr(x.elemType(), expr(x.size()));
+      case Ast.TupleLit x -> new Ast.TupleLit(x.elems().stream().map(this::expr).toList());
       case FieldAccess x -> new FieldAccess(expr(x.obj()), x.field());
+      case SafeFieldAccess x -> new SafeFieldAccess(expr(x.obj()), x.field());
       case Index x -> new Index(expr(x.obj()), expr(x.index()));
       case Binary x -> new Binary(x.op(), expr(x.left()), expr(x.right()));
       case Unary x -> new Unary(x.op(), expr(x.operand()));
@@ -155,6 +162,9 @@ final class Resolve {
       case Call x -> new Call(x.callee(), x.args().stream().map(this::expr).toList());
       case MethodCall x ->
           new MethodCall(expr(x.target()), x.method(), x.args().stream().map(this::expr).toList());
+      case SafeMethodCall x ->
+          new SafeMethodCall(expr(x.target()), x.method(),
+              x.args().stream().map(this::expr).toList());
       case SpawnExpr x -> new SpawnExpr(x.actorName(), x.args().stream().map(this::expr).toList());
       case LambdaExpr x -> new LambdaExpr(x.params(), block(x.body()));
       default -> e; // literals, VarRef

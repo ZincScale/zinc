@@ -1,0 +1,22 @@
+void main() {
+    var nums = int[5]
+    print("int len: ${len(nums)}")
+    print("int[0]: ${nums[0]}")
+    nums[2] = 42
+    nums[4] = 99
+    print("int[2]: ${nums[2]}")
+    print("int[4]: ${nums[4]}")
+
+    var names = String[3]
+    print("string len: ${len(names)}")
+    names[0] = "zinc"
+    names[1] = "flow"
+    print("names[0]: ${names[0]}")
+    print("names[1]: ${names[1]}")
+
+    var flags = bool[4]
+    print("bool len: ${len(flags)}")
+    flags[0] = true
+    print("flags[0]: ${flags[0]}")
+    print("flags[1]: ${flags[1]}")
+}

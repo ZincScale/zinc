@@ -1,0 +1,32 @@
+interface Predicate {
+    boolean test(int value)
+}
+
+interface Formatter {
+    String apply(int value)
+}
+
+boolean any(List<int> values, Predicate pred) {
+    for v in values {
+        if pred.test(v) {
+            return true
+        }
+    }
+    return false
+}
+
+void main() {
+    Predicate positive = n -> n > 0
+    print(any(List<int>[-2, 0, 3], positive))
+
+    Formatter fmt = n -> "n=" + n
+    print(fmt.apply(7))
+
+    Predicate blocky = n -> {
+        if n > 10 {
+            return true
+        }
+        return false
+    }
+    print(blocky.test(12))
+}

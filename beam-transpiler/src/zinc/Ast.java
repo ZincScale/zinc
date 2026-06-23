@@ -125,6 +125,17 @@ final class Ast {
     }
   }
 
+  record DestructureStmt(List<String> types, List<String> names, Expr init, int line)
+      implements Stmt {
+    DestructureStmt(List<String> types, List<String> names, Expr init) {
+      this(types, names, init, 0);
+    }
+
+    DestructureStmt(List<String> names, Expr init) {
+      this(List.of(), names, init, 0);
+    }
+  }
+
   record AssignStmt(String name, String op, Expr value, int line) implements Stmt {
     AssignStmt(String name, String op, Expr value) {
       this(name, op, value, 0);
@@ -224,22 +235,36 @@ final class Ast {
 
   record BoolLit(boolean value) implements Expr {}
 
+  record NullLit() implements Expr {}
+
   record StrLit(String text) implements Expr {}
 
   record VarRef(String name) implements Expr {}
 
-  /** array initializer {1, 2, 3} */
-  record ListLit(List<Expr> elems) implements Expr {}
+  /** array/list initializer; explicitType carries `List<T>[...]` when present. */
+  record ListLit(List<Expr> elems, String explicitType) implements Expr {
+    ListLit(List<Expr> elems) {
+      this(elems, null);
+    }
+  }
 
   /** dict literal {k1: v1, k2: v2} -> Erlang map #{K1 => V1, ...}; keys/values parallel. */
-  record MapLit(List<Expr> keys, List<Expr> values) implements Expr {}
+  record MapLit(List<Expr> keys, List<Expr> values, String explicitType) implements Expr {
+    MapLit(List<Expr> keys, List<Expr> values) {
+      this(keys, values, null);
+    }
+  }
 
   record NewExpr(String typeName, List<Expr> args) implements Expr {}
 
   /** new int[n] -> array:new(N, {default, <type default>}) */
   record ArrayNewExpr(String elemType, Expr size) implements Expr {}
 
+  record TupleLit(List<Expr> elems) implements Expr {}
+
   record FieldAccess(Expr obj, String field) implements Expr {}
+
+  record SafeFieldAccess(Expr obj, String field) implements Expr {}
 
   record Index(Expr obj, Expr index) implements Expr {}
 
@@ -257,6 +282,8 @@ final class Ast {
 
   /** x.f(args): System.out.println / Thread.sleep / Class.staticMethod / record accessor / actor handle */
   record MethodCall(Expr target, String method, List<Expr> args) implements Expr {}
+
+  record SafeMethodCall(Expr target, String method, List<Expr> args) implements Expr {}
 
   record SpawnExpr(String actorName, List<Expr> args) implements Expr {}
 

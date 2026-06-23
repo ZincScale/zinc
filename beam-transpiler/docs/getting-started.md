@@ -1,8 +1,8 @@
 # Getting Started
 
-This guide takes you from a first `.zn` script to a supervised BEAM application. The current
-surface is braces-Python: Python-shaped code, braces for blocks, and static types at module
-boundaries.
+This guide takes you from a first `.zn` script to a supervised BEAM application. The
+canonical surface is Zinc syntax with type-first declarations, braces for blocks, and
+BEAM-native actors.
 
 ## Install Or Use The Checkout
 
@@ -31,10 +31,10 @@ zc toolchain install 29
 
 Create `hello.zn`:
 
-```python
-def main() {
-    name = "BEAM"
-    print(f"Hello, {name}!")
+```zinc
+void main() {
+    var name = "BEAM"
+    print("Hello, " + name + "!")
 }
 ```
 
@@ -50,12 +50,12 @@ Expected output:
 Hello, BEAM!
 ```
 
-A top-level `def main()` is enough for script mode. No project file is required.
+A top-level `void main()` is enough for script mode. No project file is required.
 
 ## Create A Project
 
 ```sh
-zc new --py myapp
+zc new myapp
 cd myapp
 zc run
 ```
@@ -88,19 +88,19 @@ An `Actor` is a BEAM process. Its fields are private process state. A no-return 
 async cast; a typed return method is a sync call. An `Application` owns supervised children
 through its actor fields.
 
-```python
-class Counter(Actor) {
-    count = 0
+```zinc
+class Counter : Actor {
+    int count = 0
 
-    def incr() { count = count + 1 }
-    def get() -> int { return count }
-    def crash() { x = 1 / 0 }
+    void incr() { count = count + 1 }
+    int get() { return count }
+    void crash() { int x = 1 / 0 }
 }
 
-class Main(Application) {
-    counter = Counter()
+class Main : Application {
+    Counter counter = Counter()
 
-    def main() {
+    void main() {
         counter.incr()
         counter.incr()
         print(counter.get())
@@ -118,12 +118,12 @@ fresh state, while the handle stayed valid.
 
 Typical apps need typed config and file discovery. Zinc keeps that path small and explicit:
 
-```python
+```zinc
 record AppConfig(inputDir: String, output: String)
 
-class Main(Application) {
-    def main() {
-        cfg: AppConfig = Config.decode(AppConfig, "config.json")
+class Main : Application {
+    void main() {
+        AppConfig cfg = Config.decode(AppConfig, "config.json")
         Files.writeString(cfg.output, "")
 
         for path in Files.walk(cfg.inputDir) {

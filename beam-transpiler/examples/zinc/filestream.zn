@@ -1,0 +1,21 @@
+void main() {
+    var dir = "/tmp/zinc_stream"
+    Files.createDirectories(dir)
+    var src = dir + "/in.txt"
+    var dst = dir + "/out.txt"
+    var s = ""
+    for i in range(1, 6) {
+        s = s + "line" + i + "\n"
+    }
+    Files.writeString(src, s)
+    with Files.openReader(src) as r {
+        with Files.openWriter(dst) as w {
+            while r.hasNextLine() {
+                w.writeLine(r.nextLine().toUpperCase())
+            }
+        }
+    }
+    print(Files.readLines(dst).size())
+    String out = Files.readString(dst)
+    print(out.contains("LINE3"))
+}

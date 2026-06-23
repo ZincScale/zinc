@@ -441,6 +441,7 @@ class Parser {
   private static Stmt withLine(Stmt s, int ln) {
     return switch (s) {
       case VarStmt x -> new VarStmt(x.type(), x.name(), x.init(), x.isFinal(), ln);
+      case DestructureStmt x -> new DestructureStmt(x.types(), x.names(), x.init(), ln);
       case AssignStmt x -> new AssignStmt(x.name(), x.op(), x.value(), ln);
       case FieldAssignStmt x -> new FieldAssignStmt(x.objVar(), x.field(), x.op(),
           x.value(), ln);
@@ -797,7 +798,7 @@ class Parser {
     }
     expect(TokKind.ARROW, "'->'");
     Block body = check(TokKind.LBRACE) ? parseBlock()
-        : new Block(List.of(new ReturnStmt(parseExpr())));
+        : new Block(List.of(new ExprStmt(parseExpr())));
     return new LambdaExpr(params, body);
   }
 
@@ -895,6 +896,22 @@ class Parser {
           e = new MethodCall(e, name, args);
         } else {
           e = new FieldAccess(e, name);
+        }
+      } else if (check(TokKind.QUESTION) && toks.get(pos + 1).kind() == TokKind.DOT) {
+        advance(); // '?'
+        advance(); // '.'
+        String name = expect(TokKind.IDENT, "member name").text();
+        if (match(TokKind.LPAREN)) {
+          var args = new ArrayList<Expr>();
+          if (!check(TokKind.RPAREN)) {
+            do {
+              args.add(parseExpr());
+            } while (match(TokKind.COMMA));
+          }
+          expect(TokKind.RPAREN, "')'");
+          e = new SafeMethodCall(e, name, args);
+        } else {
+          e = new SafeFieldAccess(e, name);
         }
       } else if (match(TokKind.LBRACKET)) {
         Expr idx = parseExpr();

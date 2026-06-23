@@ -1,0 +1,34 @@
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+void main() {
+    var c = Red
+    print("color: ${c}")
+
+    var d = North
+    print("direction: ${d}")
+
+    match (c) {
+        case Red {
+            print("red!")
+        }
+        case Green {
+            print("green!")
+        }
+        case _ {
+            print("other")
+        }
+    }
+
+    print("Enums OK")
+}

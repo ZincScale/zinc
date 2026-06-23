@@ -1,0 +1,10 @@
+void main() {
+    var name = "BEAM"
+    print("hello ${name}, n=${3 + 4}")
+
+    var s = "Hello, BEAM!"
+    print(s.length())
+    print(s.toUpperCase())
+    print(s.substring(7, 11))
+    print(s.contains("BEAM"))
+}

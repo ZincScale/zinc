@@ -1,0 +1,7 @@
+void main() {
+    var s = "  Hello, Zinc!  "
+    print(s.upper())
+    print(s.lower())
+    print("[${s.trimStart()}]")
+    print("[${s.trimEnd()}]")
+}

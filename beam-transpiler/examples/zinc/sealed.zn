@@ -1,0 +1,33 @@
+record Doc(String name, int size)
+
+sealed Result {
+    Ok(Doc doc)
+    Routed(String route, Doc doc)
+    Failed(String reason)
+}
+
+Result classify(int n) {
+    if n < 0 {
+        return Failed("negative")
+    }
+    if n > 100 {
+        return Routed("big", Doc("d", n))
+    }
+    return Ok(Doc("d", n))
+}
+
+String handle(Result r) {
+    var out = "?"
+    match r {
+        case Ok(doc)            { out = "ok " + doc.name }
+        case Routed(route, doc) { out = "route " + route }
+        case Failed(reason)     { out = "fail " + reason }
+    }
+    return out
+}
+
+void main() {
+    print(handle(classify(5)))
+    print(handle(classify(200)))
+    print(handle(classify(-1)))
+}

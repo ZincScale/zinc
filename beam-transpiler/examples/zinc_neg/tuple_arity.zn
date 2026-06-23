@@ -1,0 +1,8 @@
+(int, String) user() {
+    return (7, "vin")
+}
+
+void main() {
+    var (id, name, extra) = user()
+    print(id)
+}

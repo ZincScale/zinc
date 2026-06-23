@@ -1,0 +1,7 @@
+int bad(a) {
+    return a
+}
+
+void main() {
+    print(bad(1))
+}
