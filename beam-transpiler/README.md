@@ -94,5 +94,8 @@ cd beam-transpiler
 ./package-test.sh              # release artifact smoke
 ```
 
+The same four checks run in the `beam-zinc` GitHub Actions workflow for changes under
+`beam-transpiler/`.
+
 The compiler is implemented in Java under `src/zinc/`. The CLI lives in `zc/Zc.java`, and the
 prelude API stubs are in `zinc-prelude/zinc/`.
