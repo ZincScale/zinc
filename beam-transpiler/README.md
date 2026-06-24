@@ -82,6 +82,7 @@ the normal project build path through `zinc.toml`.
 - [Tutorials](docs/tutorials.md) - build a small HTTP service and inspect project examples.
 - [Examples](examples/README.md) - tested `.zn` examples by topic.
 - [Roadmap](ROADMAP.md) - current engineering plan and release path.
+- [Changelog](CHANGELOG.md) - release notes.
 
 ## Development Checks
 

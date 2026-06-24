@@ -69,7 +69,7 @@ Then create a GitHub release on tag `zc-v<ver>` (web UI or `gh release create`),
 - [ ] `./e2e-zinc.sh` green (canonical Zinc-on-BEAM)
 - [ ] `./zc/test.sh` green
 - [ ] `./rebar_zinc/test.sh` green
-- [ ] `./package-test.sh` green
-- [ ] version bumped where it's reported (`zc version`, `zinc.toml` templates)
+- [ ] `./package-test.sh` green, including offline install from `dist/zc.tar.gz`
+- [ ] version checked where it's reported (`zc version`, `zinc.toml` templates, `install.sh`)
 - [ ] CHANGELOG / release notes drafted
 - [ ] decide: is this the release where we add CI? (until then, releases are manual on purpose)

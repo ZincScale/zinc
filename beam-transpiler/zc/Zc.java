@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 
 /** zc — the zinc meta-builder for BEAM (patterned on compilers/zinc-go cmd/zinc). */
 public class Zc {
+  static final String VERSION = "0.1.0";
   static Path home; // beam-transpiler root (transpiler + rebar_zinc plugin live here)
 
   public static void main(String[] args) throws Exception {
@@ -124,7 +125,7 @@ public class Zc {
         if (args.length < 2) die("usage: zc fmt <file.zn | dir>");
         fmt(Path.of(args[1]));
       }
-      case "version", "--version", "-v" -> System.out.println("zc 0.1.0 (zinc on BEAM)");
+      case "version", "--version", "-v" -> System.out.println(versionString());
       default -> {
         usage();
         System.exit(1);
@@ -595,7 +596,7 @@ public class Zc {
   }
 
   static void doctor() throws Exception {
-    System.out.println("zc 0.1.0");
+    System.out.println("zc " + VERSION);
     System.out.println("  ZINC_HOME  " + home);
     System.out.println("  ZC_HOME    " + zcHome());
     System.out.println("  java       " + System.getProperty("java.version") + " ("
@@ -1023,6 +1024,10 @@ public class Zc {
   static void die(String msg) {
     System.err.println(msg);
     System.exit(1);
+  }
+
+  static String versionString() {
+    return "zc " + VERSION + " (zinc on BEAM)";
   }
 
   static void usage() {

@@ -25,4 +25,15 @@ if [ "$got" != "zc 0.1.0 (zinc on BEAM)" ]; then
   exit 1
 fi
 
+install_home="$TMP/home"
+ZC_HOME="$install_home" ZC_DIST_TARBALL="$TARBALL" ZC_SKIP_JRE=1 ZC_SKIP_OTP=1 \
+  ZC_SKIP_PATH=1 sh install.sh >"$TMP/install.out"
+got="$("$install_home/bin/zc" version)"
+if [ "$got" != "zc 0.1.0 (zinc on BEAM)" ]; then
+  printf "FAIL  offline install zc version -> got '%s'\n" "$got" >&2
+  cat "$TMP/install.out" >&2
+  exit 1
+fi
+
 echo "PASS  package  ->  $TARBALL"
+echo "PASS  offline-install"
