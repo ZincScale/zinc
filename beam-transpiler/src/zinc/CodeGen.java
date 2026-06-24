@@ -3490,7 +3490,39 @@ class CodeGen {
               "use ArrayList or byte[] for indexed slicing when costs matter");
           return "lists:sublist(lists:nthtail(" + start + ", " + list + "), " + len + ")";
         }
-        throw new CompileError("unsupported: Lists." + x.method() + " (slice)");
+        if (x.method().equals("size") && x.args().size() == 1) {
+          warnLinear("Lists.size is O(n) (walks the list)", "use ArrayList for O(1) size");
+          return "length(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("isEmpty") && x.args().size() == 1) {
+          return "(" + genExpr(x.args().get(0), env) + " =:= [])";
+        }
+        if (x.method().equals("get") && x.args().size() == 2) {
+          warnLinear("Lists.get is O(n)", "use ArrayList for repeated indexed access");
+          return "lists:nth((" + genExpr(x.args().get(1), env) + ") + 1, "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("first") && x.args().size() == 1) {
+          return "hd(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("last") && x.args().size() == 1) {
+          warnLinear("Lists.last is O(n) on a linked List", "use ArrayList for repeated tail access");
+          return "lists:last(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("prepend") && x.args().size() == 2) {
+          List<String> targs = typeArgs(exprType(x.args().get(1)));
+          return "[" + (targs.size() == 1 ? guarded(x.args().get(0), targs, 0, env)
+              : genExpr(x.args().get(0), env)) + " | " + genExpr(x.args().get(1), env) + "]";
+        }
+        if (x.method().equals("reverse") && x.args().size() == 1) {
+          return "lists:reverse(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("concat") && x.args().size() == 2) {
+          warnLinear("Lists.concat copies the left list", "build with prepend+reverse or ArrayList in hot paths");
+          return genExpr(x.args().get(0), env) + " ++ " + genExpr(x.args().get(1), env);
+        }
+        throw new CompileError("unsupported: Lists." + x.method()
+            + " (slice/size/isEmpty/get/first/last/prepend/reverse/concat)");
       }
       case "Bytes" -> {
         if (x.method().equals("slice") && x.args().size() == 3) {
@@ -3783,7 +3815,28 @@ class CodeGen {
         if (x.method().equals("asList")) {
           return "array:to_list(" + genExpr(x.args().get(0), env) + ")";
         }
-        throw new CompileError("unsupported: Arrays." + x.method());
+        if (x.method().equals("toList") && x.args().size() == 1) {
+          return "array:to_list(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("fromList") && x.args().size() == 1) {
+          return "array:from_list(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("size") && x.args().size() == 1) {
+          return "array:size(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("get") && x.args().size() == 2) {
+          return "array:get(" + genExpr(x.args().get(1), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("set") && x.args().size() == 3) {
+          String elemType = arrayElementType(exprType(x.args().get(0)));
+          String value = elemType == null ? genExpr(x.args().get(2), env)
+              : guarded(x.args().get(2), List.of(elemType), 0, env);
+          return "array:set(" + genExpr(x.args().get(1), env) + ", "
+              + value + ", " + genExpr(x.args().get(0), env) + ")";
+        }
+        throw new CompileError("unsupported: Arrays." + x.method()
+            + " (asList/toList/fromList/size/get/set)");
       }
       case "List" -> {
         if (x.method().equals("of") && !env.containsKey("List")) {
@@ -3812,6 +3865,53 @@ class CodeGen {
           }
           return "#{" + String.join(", ", entries) + "}";
         }
+      }
+      case "Maps" -> {
+        if (x.method().equals("get") && x.args().size() == 2) {
+          return "maps:get(" + genExpr(x.args().get(1), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("getOrDefault") && x.args().size() == 3) {
+          return "maps:get(" + genExpr(x.args().get(1), env) + ", "
+              + genExpr(x.args().get(0), env) + ", " + genExpr(x.args().get(2), env) + ")";
+        }
+        if (x.method().equals("put") && x.args().size() == 3) {
+          List<String> targs = typeArgs(exprType(x.args().get(0)));
+          String key = targs.size() == 2 ? guarded(x.args().get(1), targs, 0, env)
+              : genExpr(x.args().get(1), env);
+          String value = targs.size() == 2 ? guarded(x.args().get(2), targs, 1, env)
+              : genExpr(x.args().get(2), env);
+          return "maps:put(" + key + ", " + value + ", " + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("remove") && x.args().size() == 2) {
+          return "maps:remove(" + genExpr(x.args().get(1), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("containsKey") && x.args().size() == 2) {
+          return "maps:is_key(" + genExpr(x.args().get(1), env) + ", "
+              + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("size") && x.args().size() == 1) {
+          return "maps:size(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("isEmpty") && x.args().size() == 1) {
+          return "(map_size(" + genExpr(x.args().get(0), env) + ") =:= 0)";
+        }
+        if (x.method().equals("keys") && x.args().size() == 1) {
+          return "maps:keys(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("values") && x.args().size() == 1) {
+          return "maps:values(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("entries") && x.args().size() == 1) {
+          return "maps:to_list(" + genExpr(x.args().get(0), env) + ")";
+        }
+        if (x.method().equals("merge") && x.args().size() == 2) {
+          return "maps:merge(" + genExpr(x.args().get(0), env) + ", "
+              + genExpr(x.args().get(1), env) + ")";
+        }
+        throw new CompileError("unsupported: Maps." + x.method()
+            + " (get/getOrDefault/put/remove/containsKey/size/isEmpty/keys/values/entries/merge)");
       }
       case "Files" -> {
         usedIo = true;
@@ -4018,6 +4118,17 @@ class CodeGen {
   private List<String> entryTypes(String mapType) {
     List<String> ts = mapType == null ? List.of() : typeArgs(mapType);
     return ts.size() == 2 ? ts : java.util.Arrays.asList(null, null);
+  }
+
+  /** Element type from T[]/ArrayList<T>, or null when unknown. */
+  private String arrayElementType(String t) {
+    if (t == null) return null;
+    if (t.endsWith("[]")) return t.substring(0, t.length() - 2);
+    if ("ArrayList".equals(baseType(t))) {
+      List<String> ts = typeArgs(t);
+      return ts.size() == 1 ? ts.get(0) : null;
+    }
+    return null;
   }
 
   private String genMapMethod(MethodCall x, Map<String, String> env) {
@@ -4265,8 +4376,24 @@ class CodeGen {
           if (vr.name().equals("Tuple")) yield x.method().equals("of") ? "Tuple" : null;
           if (vr.name().equals("Seq")) yield "List<int>";
           if (vr.name().equals("Lists")) {
-            yield x.method().equals("slice") && !x.args().isEmpty()
-                ? exprType(x.args().get(0)) : null;
+            if (List.of("slice", "prepend", "reverse", "concat").contains(x.method())
+                && !x.args().isEmpty()) {
+              yield x.method().equals("prepend") && x.args().size() > 1
+                  ? exprType(x.args().get(1)) : exprType(x.args().get(0));
+            }
+            if (List.of("size", "get", "first", "last").contains(x.method())) {
+              yield switch (x.method()) {
+                case "size" -> "int";
+                case "get", "first", "last" -> {
+                  String lt = x.args().isEmpty() ? null : exprType(x.args().get(0));
+                  List<String> ts = lt == null ? List.of() : typeArgs(lt);
+                  yield ts.size() == 1 ? ts.get(0) : null;
+                }
+                default -> null;
+              };
+            }
+            if (x.method().equals("isEmpty")) yield "boolean";
+            yield null;
           }
           if (vr.name().equals("Bytes")) yield x.method().equals("slice") ? "byte[]" : null;
           if (vr.name().equals("Time")) yield "int";
@@ -4322,13 +4449,46 @@ class CodeGen {
             yield List.of("valueOf", "join", "format").contains(x.method()) ? "String" : null;
           }
           if (vr.name().equals("Arrays")) {
-            yield x.method().equals("asList") ? "List" : null;
+            if (List.of("asList", "toList").contains(x.method())) {
+              String at = x.args().isEmpty() ? null : exprType(x.args().get(0));
+              String elem = arrayElementType(at);
+              yield elem == null ? "List" : "List<" + elem + ">";
+            }
+            if (x.method().equals("fromList")) {
+              String lt = x.args().isEmpty() ? null : exprType(x.args().get(0));
+              List<String> ts = lt == null ? List.of() : typeArgs(lt);
+              yield ts.size() == 1 ? "ArrayList<" + ts.get(0) + ">" : "ArrayList";
+            }
+            if (x.method().equals("size")) yield "int";
+            if (x.method().equals("get")) {
+              String at = x.args().isEmpty() ? null : exprType(x.args().get(0));
+              yield arrayElementType(at);
+            }
+            if (x.method().equals("set")) {
+              yield x.args().isEmpty() ? null : exprType(x.args().get(0));
+            }
+            yield null;
           }
           if (vr.name().equals("List") && !varTypes.containsKey("List")) {
             yield List.of("of", "copyOf").contains(x.method()) ? "List" : null;
           }
           if (vr.name().equals("Map") && !varTypes.containsKey("Map")) {
             yield x.method().equals("of") ? "Map" : null;
+          }
+          if (vr.name().equals("Maps")) {
+            String mt = x.args().isEmpty() ? null : exprType(x.args().get(0));
+            List<String> ts = mt == null ? List.of() : typeArgs(mt);
+            yield switch (x.method()) {
+              case "size" -> "int";
+              case "containsKey", "isEmpty" -> "boolean";
+              case "keys" -> ts.size() == 2 ? "List<" + ts.get(0) + ">" : "List";
+              case "values" -> ts.size() == 2 ? "List<" + ts.get(1) + ">" : "List";
+              case "entries" -> ts.size() == 2
+                  ? "List<Entry<" + ts.get(0) + "," + ts.get(1) + ">>" : "List<Entry>";
+              case "get", "getOrDefault" -> ts.size() == 2 ? ts.get(1) : null;
+              case "put", "remove", "merge" -> mt;
+              default -> null;
+            };
           }
           if (!varTypes.containsKey(vr.name())) {
             ClassInfo ci = classes.get(vr.name());

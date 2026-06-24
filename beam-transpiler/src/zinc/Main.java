@@ -35,7 +35,7 @@ public class Main {
           "Erlang", "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
           "Long", "Double", "Float", "Arrays", "Object",
           "String", "Exception", "RuntimeException", "Actor", "Application", "Log",
-          "Seq", "Lists", "Bytes", "Time", "Base64", "Hex", "Gzip", "Crypto", "Random", "Uuid",
+          "Seq", "Lists", "Maps", "Bytes", "Time", "Base64", "Hex", "Gzip", "Crypto", "Random", "Uuid",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json", "Config",
           "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",

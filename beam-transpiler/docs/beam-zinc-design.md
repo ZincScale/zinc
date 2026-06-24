@@ -170,13 +170,23 @@ for i in Seq.range(0, 3) {
 var mid = s.substring(1, 4)
 var part = Bytes.slice(data, 1, 3)
 var head = Lists.slice(xs, 0, 3)
+var indexed = Arrays.fromList(xs)
+var next = Maps.put(scores, "alice", 42)
 ```
 
 Type behavior:
 
 - `String.substring(start, end)` returns `String` and already lowers to `string:slice`.
 - `Bytes.slice(bytes, start, length)` returns `byte[]`.
-- `Lists.slice(xs, start, length)` returns `List<T>` and warns for O(n).
+- `Lists.slice(xs, start, length)`, `Lists.get(xs, i)`, `Lists.size(xs)`, and
+  `Lists.last(xs)` return the expected `List<T>`/`T`/`int` shapes and warn for O(n).
+- `Lists.prepend(value, xs)` and `Lists.reverse(xs)` are the preferred linked-list build
+  helpers when accumulating in hot paths.
+- `Arrays.fromList(xs)`, `Arrays.toList(a)`, `Arrays.get(a, i)`, `Arrays.set(a, i, v)`,
+  and `Arrays.size(a)` expose the BEAM `array` module directly.
+- `Maps.get`, `Maps.getOrDefault`, `Maps.put`, `Maps.remove`, `Maps.merge`, `Maps.keys`,
+  `Maps.values`, and `Maps.entries` are expression helpers over Erlang maps. Mutating
+  helpers return a new map value.
 - Array slicing should use a named helper if needed, not bracket syntax.
 
 Implementation direction:
@@ -184,6 +194,9 @@ Implementation direction:
 - Prefer `Seq.range` / `Seq.rangeClosed` over `a..b`.
 - `Lists.slice(xs, start, length)` and `Bytes.slice(bytes, start, length)` are supported
   helper facades over BEAM list and binary primitives.
+- Prefer the `Lists`, `Arrays`, and `Maps` helper facades over ad hoc lowering patterns in
+  performance-sensitive code. They make linked-list O(n) operations visible and keep
+  immutable map/array updates expression-shaped.
 - Keep existing `range(a, b)` and `a..b` accepted as compatibility syntax for now, but do
   not promote them as the canonical BEAM spelling.
 - Do not add `Slice` / `xs[a..b]`; the named helpers are the canonical BEAM spelling.

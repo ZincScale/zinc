@@ -72,6 +72,21 @@ print(xs[0] + len(xs))
 `HashMap<K,V>` lower to Erlang maps. Mixed dynamic values are allowed at foreign boundaries,
 but typed crossings are checked.
 
+For BEAM-hot collection code, prefer the helper facades:
+
+```zinc
+xs = Lists.prepend(item, xs)
+xs = Lists.reverse(xs)
+arr = Arrays.fromList(xs)
+arr = Arrays.set(arr, 0, item)
+scores = Maps.put(scores, "alice", 42)
+value = Maps.getOrDefault(scores, "missing", 0)
+```
+
+`Lists.get`, `Lists.size`, `Lists.slice`, and `Lists.last` warn because linked-list access is
+linear on BEAM. `Arrays.*` maps to the Erlang `array` module. `Maps.*` returns new map values
+for updates, so rebind the result when you want to keep it.
+
 ## Control Flow And Errors
 
 Supported flow: `if` / `else if` / `else`, `while`, `for x in xs`, `for i in range(a, b)`,

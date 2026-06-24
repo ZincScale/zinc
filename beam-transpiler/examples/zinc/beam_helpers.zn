@@ -24,4 +24,26 @@ void main() {
     print("bytes slice: ${part}")
     print("bytes length: ${data.length}")
     print("byte at 2: ${data[2]}")
+
+    var built = List<int>[]
+    built = Lists.prepend(3, built)
+    built = Lists.prepend(2, built)
+    built = Lists.prepend(1, built)
+    var builtSum = 0
+    for (n in built) {
+        builtSum = builtSum + n
+    }
+    print("built sum: ${builtSum}")
+
+    var scores = Map<String, int>{"a": 1, "b": 2}
+    var moreScores = Maps.put(scores, "c", 3)
+    var merged = Maps.merge(moreScores, Map<String, int>{"b": 20})
+    print("map size: ${Maps.size(merged)}")
+    print("map b: ${Maps.get(merged, \"b\")}")
+    print("map fallback: ${Maps.getOrDefault(merged, \"missing\", 9)}")
+
+    var indexed = Arrays.fromList(built)
+    indexed = Arrays.set(indexed, 1, 9)
+    print("array mid: ${Arrays.get(indexed, 1)}")
+    print("array size: ${Arrays.size(indexed)}")
 }
