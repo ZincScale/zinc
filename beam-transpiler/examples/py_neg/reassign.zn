@@ -1,5 +1,0 @@
-def main() {
-    x = 3
-    x = "str"
-    print(x)
-}

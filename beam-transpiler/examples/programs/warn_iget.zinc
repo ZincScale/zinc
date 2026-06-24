@@ -1,9 +1,0 @@
-// O(n)-on-List policy: get/size compile and run fine, but warn with
-// file:line and the cheap alternative (e2e asserts the warning text).
-public class Main {
-  public static void main(String[] args) {
-    var xs = List.of(7, 8, 9);
-    System.out.println(xs.get(1));   // 8   <- warns: O(n), use ArrayList to index
-    System.out.println(xs.size());   // 3   <- warns: O(n), ArrayList.size is O(1)
-  }
-}

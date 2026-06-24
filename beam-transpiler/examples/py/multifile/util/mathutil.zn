@@ -1,7 +1,0 @@
-def sum_to(n: int) -> int {
-    acc = 0
-    for i in range(0, n + 1) {
-        acc = acc + i
-    }
-    return acc
-}

@@ -1,4 +1,4 @@
-%% Provider `zinc compile`: src/**/*.zinc -> src/zinc_gen/*.erl via the zinc transpiler.
+%% Provider `zinc compile`: src/**/*.zn -> src/zinc_gen/*.erl via the zinc transpiler.
 %% Wire it before erlc with:
 %%   {provider_hooks, [{pre, [{compile, {zinc, compile}}]}]}.
 -module(rebar_zinc_prv_compile).
@@ -14,8 +14,8 @@ init(State) ->
         {deps, []},
         {example, "rebar3 zinc compile"},
         {opts, []},
-        {short_desc, "Transpile zinc .zinc (Java-syntax) sources to Erlang"},
-        {desc, "Finds src/**/*.zinc in each project app and emits .erl into src/zinc_gen/. "
+        {short_desc, "Transpile Zinc .zn sources to Erlang"},
+        {desc, "Finds src/**/*.zn in each project app and emits .erl into src/zinc_gen/. "
                "Transpiler location: {zinc, [{compiler_home, Dir}]} in rebar.config, or "
                "the ZINC_HOME env var; java binary via {java, Path} or ZINC_JAVA."}
     ]),
@@ -37,8 +37,8 @@ compile_app(App, Cfg) ->
     Dir = rebar_app_info:dir(App),
     SrcDir = filename:join(Dir, "src"),
     TestDir = filename:join(Dir, "test"),
-    Srcs = filelib:wildcard("**/*.{zinc,zn}", SrcDir),
-    Tests = filelib:wildcard("**/*.{zinc,zn}", TestDir),
+    Srcs = filelib:wildcard("**/*.zn", SrcDir),
+    Tests = filelib:wildcard("**/*.zn", TestDir),
     case Srcs of
         [] ->
             ok;
@@ -47,7 +47,7 @@ compile_app(App, Cfg) ->
             TestOut = filename:join(TestDir, "zinc_gen"),
             clean_generated(OutDir),
             clean_generated(TestOut),
-            %% test/**/*.zinc rides along: one transpiler run sees the whole project
+            %% test/**/*.zn rides along: one transpiler run sees the whole project
             %% (tests reference src types); test output never lands under src/
             TestArgs = case Tests of
                            [] -> "";

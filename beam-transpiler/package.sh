@@ -17,8 +17,11 @@ rm -rf "$DIST/classes" "$STAGE"; mkdir -p "$DIST/classes" "$STAGE/lib" "$STAGE/b
 echo "Main-Class: Zc" > "$DIST/manifest.txt"
 "$JBIN/jar" cfm "$STAGE/lib/zc.jar" "$DIST/manifest.txt" -C "$DIST/classes" .
 
-# rebar_zinc plugin rides along (project builds shell out to the transpiler via the jar)
-cp -r rebar_zinc "$STAGE/lib/rebar_zinc"
+# rebar_zinc plugin rides along (project builds shell out to the transpiler via the jar).
+# Stage only runtime plugin files; tests and generated fixtures do not belong in releases.
+mkdir -p "$STAGE/lib/rebar_zinc/src"
+cp rebar_zinc/rebar.config "$STAGE/lib/rebar_zinc/"
+cp rebar_zinc/src/* "$STAGE/lib/rebar_zinc/src/"
 
 # bin/zc shim: prefer the managed JRE, run the jar; ZINC_HOME = lib (so the rebar plugin
 # finds zc.jar for project builds)

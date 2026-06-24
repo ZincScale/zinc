@@ -1,7 +1,0 @@
-public class Main {
-  public static void main(String[] args) {
-    var xs = List.of(1, 2);
-    xs.add(3);
-    System.out.println(xs.size());
-  }
-}

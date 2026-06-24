@@ -1,9 +1,0 @@
-[project]
-name = "sqldemo"
-version = "0.1.0"
-
-[otp]
-version = "29"
-
-[deps]
-epgsql = "4.7.1"

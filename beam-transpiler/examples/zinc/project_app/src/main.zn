@@ -1,0 +1,20 @@
+class Counter : Actor {
+    int count = 0
+
+    void add(int n) {
+        count = count + n
+    }
+
+    int get() {
+        return count
+    }
+}
+
+class Main : Application {
+    Counter counter = Counter()
+
+    void main() {
+        counter.add(8)
+        print(counter.get())
+    }
+}

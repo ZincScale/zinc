@@ -1,9 +1,0 @@
-interface Greeter {
-  String greet(String name);
-}
-public class Main {
-  public static void main(String[] args) {
-    Greeter g = name -> 42;
-    System.out.println(g.greet("x"));
-  }
-}

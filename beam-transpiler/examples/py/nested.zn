@@ -1,9 +1,0 @@
-# composition: list of dicts, dict of lists
-def main() {
-    rows = [{"x": 1}, {"x": 2}]
-    first = rows[0]
-    print(first.get("x"))
-    grid = {"row": [1, 2, 3]}
-    r = grid.get("row")
-    print(r[2])
-}

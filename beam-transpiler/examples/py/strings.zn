@@ -1,8 +1,0 @@
-# JDK string methods carry over: length/toUpperCase/substring/contains
-def main() {
-    s = "Hello, BEAM!"
-    print(s.length())
-    print(s.toUpperCase())
-    print(s.substring(7, 11))
-    print(s.contains("BEAM"))
-}

@@ -1,5 +1,0 @@
-class Tick(Actor) {
-    n = 0
-    def inc() { n = n + 1 }
-    def get() -> int { return n }
-}

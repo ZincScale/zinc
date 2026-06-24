@@ -1,0 +1,7 @@
+_build/
+_checkouts/
+src/zinc_gen/
+test/zinc_gen/
+rebar.config
+src/*.app.src
+rebar.lock

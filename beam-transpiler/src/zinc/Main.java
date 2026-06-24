@@ -14,7 +14,7 @@ import zinc.CodeGen.ClassInfo;
 public class Main {
   public static void main(String[] args) throws IOException {
     if (args.length != 2 && args.length != 4) {
-      System.err.println("usage: Main <File.zinc | project-dir> <outdir> [<testdir> <testoutdir>]");
+      System.err.println("usage: Main <File.zn | project-dir> <outdir> [<testdir> <testoutdir>]");
       System.exit(2);
     }
     try {
@@ -35,6 +35,7 @@ public class Main {
           "Erlang", "HashMap", "Map", "ArrayList", "List", "Math", "Integer",
           "Long", "Double", "Float", "Arrays", "Object",
           "String", "Exception", "RuntimeException", "Actor", "Application", "Log",
+          "Seq", "Lists", "Bytes", "Time", "Base64", "Hex", "Gzip", "Crypto", "Random", "Uuid",
           "HttpClient", "HttpRequest", "HttpResponse",
           "HttpException", "ConnectException", "TimeoutException", "Json", "Config",
           "Router", "Response", "Request", "HttpServer", "Handler", "Test", "Assert",
@@ -172,11 +173,10 @@ public class Main {
         Ast.MethodDecl entryMain = entry == null ? null : entry.methods().get("main/1");
         if (entryMain == null) {
           throw new CompileError(
-              "project needs a class Main with main(String[] args), or an Application");
+              "project needs a top-level main(), class Main, or an Application");
         }
         if (!entryMain.mods().contains("public")) {
-          throw new CompileError(
-              "Main.main: the entrypoint is 'public static void main(String[] args)'");
+          throw new CompileError("Main.main: the entrypoint must be public");
         }
       }
 
@@ -271,17 +271,16 @@ public class Main {
     }
     var srcFiles = new ArrayList<Path>();
     try (var walk = Files.walk(in)) {
-      walk.filter(p -> p.toString().endsWith(".zinc") || p.toString().endsWith(".zn"))
+      walk.filter(p -> p.toString().endsWith(".zn"))
           .sorted().forEach(srcFiles::add);
     }
     if (srcFiles.isEmpty()) {
       if (test) return programs;
-      throw new CompileError("no .zinc/.zn files under " + in);
+      throw new CompileError("no .zn files under " + in);
     }
     for (Path p : srcFiles) {
       Program prog = parse(p);
       Path rel = in.relativize(p);
-      if (!p.toString().endsWith(".zn")) checkFileName(rel, prog); // .zn is convention-light
       String pkg = rel.getParent() == null ? ""
           : rel.getParent().toString().replace('/', '.').toLowerCase();
       programs.add(new Src(prog, pkg, test, rel.toString()));
@@ -289,34 +288,17 @@ public class Main {
     return programs;
   }
 
-  /** Java convention: File.zinc declares its eponymous public type. */
-  private static void checkFileName(Path rel, Program prog) {
-    String stem = rel.getFileName().toString();
-    stem = stem.substring(0, stem.length() - ".zinc".length());
-    var names = new ArrayList<String>();
-    prog.classes().forEach(c -> names.add(c.name()));
-    prog.records().forEach(r -> names.add(r.name()));
-    prog.actors().forEach(a -> names.add(a.name()));
-    prog.enums().forEach(e -> names.add(e.name()));
-    prog.tests().forEach(t -> names.add(t.name()));
-    if (prog.application() != null) names.add(prog.application().name());
-    if (!names.contains(stem)) {
-      throw new CompileError(rel + " must declare a type named '" + stem + "'");
-    }
-  }
-
   private static Program parse(Path file) throws IOException {
     String src = Files.readString(file);
     try {
-      if (file.toString().endsWith(".zn")) { // braces-Python surface
-        String stem = file.getFileName().toString();
-        stem = stem.substring(0, stem.length() - ".zn".length());
-        // a file with top-level defs is a MODULE, referenced by its lowercase file name
-        // (Pythonic: `mathutil.sum_to(...)`), not a capitalized Java-style class.
-        String cls = stem.isEmpty() ? "Main" : stem;
-        return new PyParser(PyLexer.lex(src), cls).parseProgram();
+      if (!file.toString().endsWith(".zn")) {
+        throw new CompileError("expected a .zn source file");
       }
-      return new Parser(Lexer.lex(src)).parseProgram();
+      String stem = file.getFileName().toString();
+      stem = stem.substring(0, stem.length() - ".zn".length());
+      // A file with top-level defs is a module, referenced by its lowercase file name.
+      String cls = stem.isEmpty() ? "Main" : stem;
+      return new ZincParser(ZincLexer.lex(src), cls).parseProgram();
     } catch (CompileError e) {
       throw new CompileError(file.getFileName() + ": " + e.getMessage());
     }

@@ -1,9 +1,0 @@
-# boolean operators and comparison chains
-def main() {
-    a = true
-    b = false
-    print(a && b)
-    print(a || b)
-    print(!b)
-    print(3 < 5 && 5 <= 5)
-}

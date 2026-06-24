@@ -548,12 +548,12 @@ class CodeGen {
   }
 
 
-  /** zinc.http client over httpc — Java-shaped, sync send only (fan-out = worker Actors). */
+  /** zinc.http client over httpc — sync send only (fan-out = worker Actors). */
   static final String HTTP_SOURCE = "-module('zinc.http').\n"
       + "-compile({no_auto_import, [get/1, put/2]}).  %% get/put are the one-shot facade here\n"
       + "-export([send/2, get/1, post/2, put/2, delete/1, add_header/3, with_body/3, header/2,\n"
       + "         open_stream/2, s_has_next_chunk/1, s_next_chunk/1, s_header/2, s_close/1]).\n\n"
-      + "%% one-shot facade: default client + send (http.get(url) etc. in braces-Python).\n"
+      + "%% one-shot facade: default client + send (http.get(url) etc.).\n"
       + "get(Url)     -> send(#{}, #{url => Url, method => get}).\n"
       + "delete(Url)  -> send(#{}, #{url => Url, method => delete}).\n"
       + "post(Url, B) -> send(#{}, #{url => Url, method => post, body => B}).\n"
@@ -1376,7 +1376,7 @@ class CodeGen {
       curClassName = program.application().name();
       out.put(curModule, genApplicationModule(program.application()));
     }
-    // source-map header: every module here came from this one .zinc file. Paired with
+    // source-map header: every module here came from this one .zn file. Paired with
     // the per-line `%@N` markers (genStmts), zc maps a crash frame back to file:line.
     // Honest-lines: these are comments, the generated Erlang stays the truth.
     out.replaceAll((mod, src) -> "%% @zinc-src " + srcFile + "\n" + src);
@@ -2870,7 +2870,7 @@ class CodeGen {
       case FieldAccess x -> {
         if (x.obj() instanceof VarRef vr && !env.containsKey(vr.name())) {
           // Color.RED -> 'RED' (enum values are atoms). Atoms are Tag.of("..."):
-          // the field form Tag.x isn't legal Java (Tag can't enumerate every atom).
+          // Tag cannot enumerate every atom, so support the static method form too.
           if (vr.name().equals("Tag") || vr.name().equals("Atom")) {
             throw new CompileError(vr.name() + "." + x.field()
                 + " is not valid: write atoms as Tag.of(\"" + x.field() + "\")");
@@ -3397,7 +3397,7 @@ class CodeGen {
         && fa.obj() instanceof VarRef vr ? vr.name() : null;
   }
 
-  /** The record named by a class-literal arg: `User.class` (Java) or bare `User` (Pythonic).
+  /** The record named by a class-literal arg: `User.class` or bare `User`.
    *  Returns the name only if it resolves to a known record; null otherwise. */
   private String classLitRecordName(Expr e) {
     String n = classLitName(e);                                  // User.class
@@ -3460,7 +3460,7 @@ class CodeGen {
     switch (name) {
       case "Sys" -> {
         // zinc's sleep facade: unlike java.lang.Thread.sleep it throws no checked
-        // InterruptedException, so it stays legal Java without a throws clause.
+        // InterruptedException, so callers do not need a throws clause.
         if (x.method().equals("sleep")) {
           return "timer:sleep(" + genExpr(x.args().get(0), env) + ")";
         }
@@ -3901,8 +3901,8 @@ class CodeGen {
     return String.join(", ", out);
   }
 
-  /** byte[] literal -> Erlang binary. Each 8-bit segment takes the value mod 256, so a
-   *  Java signed byte like -1 becomes 0xFF (the legal-Java way to write a high byte). */
+  /** byte[] literal -> Erlang binary. Each 8-bit segment takes the value mod 256, so
+   *  -1 becomes 0xFF. */
   private String byteBinary(ListLit bl, Map<String, String> env) {
     var segs = new ArrayList<String>();
     for (Expr e : bl.elems()) segs.add("(" + genExpr(e, env) + ")");

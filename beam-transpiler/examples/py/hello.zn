@@ -1,4 +1,0 @@
-# braces-Python -> BEAM: the first program through the new frontend
-def main() {
-    print("Hello from braces-Python on BEAM!")
-}

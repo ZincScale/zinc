@@ -1,5 +1,0 @@
-public class Fmt {
-  static String banner(String s) {
-    return "[" + s + "]";
-  }
-}

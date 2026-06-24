@@ -149,18 +149,21 @@ Useful file APIs:
 - `Files.modifiedTime(path)` and `Files.size(path)` for ingest checks
 - `Files.openReader/openWriter/openAppender` for scoped, bounded-memory streaming
 
-## Run The Canonical Dogfood App
+## Run A Project Application
 
-`dogfood/flowdemo` is the current acceptance app. It proves the pieces compose:
+`examples/zinc/project_app` is a small project-mode Application. It proves the `zinc.toml`
+path, an Application-owned Actor child, and `zc run --once`:
 
 ```sh
 cd beam-transpiler
-./dogfood/flowdemo/test.sh
+zc run --once examples/zinc/project_app
 ```
 
-It exercises typed config, recursive file discovery, extension filtering, streaming readers
-and writers, success/failure routing, HTTP `/health` and `/status`, and worker restart
-evidence.
+Expected output:
+
+```text
+8
+```
 
 ## Next
 

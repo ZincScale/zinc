@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end for the canonical Zinc-on-BEAM .zn surface. This intentionally stays separate
-# from e2e-py.sh so the compatibility frontend can remain green while canonical syntax grows.
+# End-to-end for the canonical Zinc-on-BEAM .zn surface.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -15,7 +14,7 @@ printf 'Main-Class: Zc\n' > "$D/manifest.txt"
 cp -r rebar_zinc "$D/rebar_zinc"
 zc() { timeout 180 "$JBIN/java" -DZINC_HOME_LIB="$D" -jar "$D/zc.jar" "$@"; }
 
-examples=(hello go_hello top_level go_control go_enums go_assert go_int_literals go_bitwise go_shift go_precedence go_type_casts go_arrays go_sized_arrays go_bool_alias go_numeric_aliases go_interp_escape go_typed_collections go_string_aliases nulls_tuples beam_helpers generic_records generic_functions functions fizzbuzz counter supervised records collections strings trycatch exceptions match protocols lambdas_sam json sealed resources channel multifile fileio filestream pipeline http_client http_facade encoding webauth record_model veneer bools floats)
+examples=(hello go_hello top_level go_control go_enums go_assert go_int_literals go_bitwise go_shift go_precedence go_type_casts go_arrays go_sized_arrays go_bool_alias go_numeric_aliases go_interp_escape go_typed_collections go_string_aliases nulls_tuples beam_helpers generic_records generic_functions functions fizzbuzz counter supervised records collections strings trycatch exceptions match protocols lambdas_sam json sealed resources channel multifile project_app fileio filestream pipeline http_client http_facade encoding webauth record_model veneer bools floats)
 declare -A want=(
   [hello]='Hello from Zinc on BEAM!'
   [go_hello]=$'Hello, World!\nHello, Zinc!\nThe answer is 42'
@@ -61,6 +60,7 @@ declare -A want=(
   [pipeline]=$'5\ntrue'
   [http_client]='connect refused caught'
   [http_facade]='facade refused caught'
+  [project_app]='8'
   [encoding]=$'aGk=\ntrue\n4142\ntrue\ntrue'
   [webauth]=$'true\n64\n64\n36\n0\ntrue'
   [record_model]=$'user\n8\nvin\n2'
@@ -85,6 +85,8 @@ declare -A wanterr=(
   [generic_function_arg]="generic_function_arg.zn:6: identity arg 1 ('value'): cannot bind a String to int"
   [generic_function_list_arg]="generic_function_list_arg.zn:6: first arg 1 ('values'): cannot bind a String to int"
   [lambda_param_type]="lambda_param_type.zn:6: lambda parameter 'n': cannot bind a int to String"
+  [reserved_namespace]="'Time' is a reserved name"
+  [empty_test]="test class EmptyTest has no test cases: a test is a void method with no parameters"
 )
 
 fail=0
@@ -131,5 +133,27 @@ for ex in "${!wanterr[@]}"; do
     fail=1
   fi
 done
+
+printf 'void main() { print("legacy") }\n' > "$D/legacy.zinc"
+if zc run --once "$D/legacy.zinc" >/dev/null 2>"$D/legacy_zc.err"; then
+  echo "FAIL  legacy-zinc/zc  ->  ran, expected retired-source error"
+  fail=1
+elif grep -qF ".zinc sources are retired; use .zn" "$D/legacy_zc.err"; then
+  echo "PASS  legacy-zinc/zc"
+else
+  echo "FAIL  legacy-zinc/zc  ->  got '$(head -1 "$D/legacy_zc.err")'"
+  fail=1
+fi
+
+if "$JBIN/java" -cp "$D/classes" zinc.Main "$D/legacy.zinc" "$D/raw_legacy" \
+    >/dev/null 2>"$D/legacy_raw.err"; then
+  echo "FAIL  legacy-zinc/raw  ->  compiled, expected .zn-only error"
+  fail=1
+elif grep -qF "expected a .zn source file" "$D/legacy_raw.err"; then
+  echo "PASS  legacy-zinc/raw"
+else
+  echo "FAIL  legacy-zinc/raw  ->  got '$(head -1 "$D/legacy_raw.err")'"
+  fail=1
+fi
 
 exit $fail

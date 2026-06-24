@@ -1,4 +1,0 @@
-public class Main {
-  static void f() { System.out.println(1); }
-  public static void main(String[] args) { int x = f(); System.out.println(x); }
-}

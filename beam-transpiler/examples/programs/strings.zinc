@@ -1,9 +1,0 @@
-public class Main {
-  public static void main(String[] args) {
-    String name = "BEAM";
-    int n = 3;
-    System.out.println("hi-" + name + "-" + n);   // concat + int formatting
-    System.out.println("line1\nline2");           // escape sequences
-    System.out.println("say \"hi\"");
-  }
-}

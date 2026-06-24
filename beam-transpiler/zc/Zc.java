@@ -33,16 +33,13 @@ public class Zc {
     }
     switch (args[0]) {
       case "init", "new" -> {
-        boolean javaSurface = false;
-        boolean legacyPy = false;
         String name = null;
         for (int i = 1; i < args.length; i++) {
-          if (args[i].equals("--java")) javaSurface = true;
-          else if (args[i].equals("--py")) legacyPy = true; // accepted for old scripts
-          else if (!args[i].startsWith("-")) name = args[i];
+          if (args[i].startsWith("-")) die("usage: zc init <name>");
+          name = args[i];
         }
-        if (name == null) die("usage: zc init [--java|--py] <name>");
-        init(name, javaSurface, legacyPy);
+        if (name == null) die("usage: zc init <name>");
+        init(name);
       }
       case "build" -> build(projectDir(args));
       case "release" -> release(projectDir(args));
@@ -52,7 +49,10 @@ public class Zc {
         boolean once = args.length >= 2 && args[1].equals("--once");
         int pi = once ? 2 : 1;
         String path = args.length > pi ? args[pi] : ".";
-        boolean scriptFile = path.endsWith(".zinc") || path.endsWith(".zn");
+        if (path.endsWith(".zinc")) {
+          die("zc: .zinc sources are retired; use .zn");
+        }
+        boolean scriptFile = path.endsWith(".zn");
         boolean scriptDir = Files.isDirectory(Path.of(path))
             && !Files.exists(Path.of(path).resolve("zinc.toml")); // a folder of .zn, no project
         if (scriptFile || scriptDir) {
@@ -71,7 +71,7 @@ public class Zc {
         ensureGenerated(dir, cfg);
         vendorDeps(dir, cfg);
         // two passes: rebar snapshots the test dir BEFORE the pre-compile hook
-        // transpiles .zinc -> zinc_gen/*.erl, so a fresh project's first eunit
+        // transpiles .zn -> zinc_gen/*.erl, so a fresh project's first eunit
         // run would see zero tests. The compile pass materializes the .erl files;
         // eunit then picks them up. (Incremental, so the cost is one no-op pass.)
         exec(dir, rebarCmd("as", "test", "compile"));
@@ -121,7 +121,7 @@ public class Zc {
       }
       case "doctor" -> doctor();
       case "fmt" -> {
-        if (args.length < 2) die("usage: zc fmt <file.zinc|.zn | dir>");
+        if (args.length < 2) die("usage: zc fmt <file.zn | dir>");
         fmt(Path.of(args[1]));
       }
       case "version", "--version", "-v" -> System.out.println("zc 0.1.0 (zinc on BEAM)");
@@ -143,12 +143,6 @@ public class Zc {
   // ---- init ----
 
   static void init(String name) throws IOException {
-    init(name, false, false);
-  }
-
-  /** Default scaffolds canonical Zinc (.zn); `--py` keeps the legacy Python-shaped sample,
-   *  and `--java` keeps the original legal-Java frontend sample. */
-  static void init(String name, boolean javaSurface, boolean legacyPy) throws IOException {
     Path dir = Path.of(name);
     if (Files.exists(dir)) die("zc: directory '" + name + "' already exists");
     Files.createDirectories(dir.resolve("src"));
@@ -164,18 +158,8 @@ public class Zc {
         [deps]
         # hex packages, e.g.:  cowboy = "2.12.0"
         """.formatted(base));
-    String entry = javaSurface ? "src/Main.zinc" : "src/main.zn";
-    Files.writeString(dir.resolve(entry), javaSurface ? """
-        public class Main {
-          public static void main(String[] args) {
-            System.out.println("Hello from %s!");
-          }
-        }
-        """.formatted(base) : legacyPy ? """
-        def main() {
-            print("Hello from %s!")
-        }
-        """.formatted(base) : """
+    String entry = "src/main.zn";
+    Files.writeString(dir.resolve(entry), """
         void main() {
             print("Hello from %s!")
         }
@@ -616,8 +600,8 @@ public class Zc {
     System.out.println("  ZC_HOME    " + zcHome());
     System.out.println("  java       " + System.getProperty("java.version") + " ("
         + System.getProperty("java.home") + ")"
-        + (Files.isDirectory(zcHome().resolve("java").resolve("bin")) ? "" : "  [host java;"
-            + " 'zc toolchain install' adds a managed JDK]"));
+        + (Files.isDirectory(zcHome().resolve("jre").resolve("bin")) ? "" : "  [host java;"
+            + " install.sh can add a managed JRE]"));
     toolchainList();
     Path here = Path.of(".");
     if (Files.exists(here.resolve("zinc.toml"))) {
@@ -626,6 +610,8 @@ public class Zc {
       System.out.println("  project    [otp] " + pin + " -> "
           + (managed != null ? "managed " + managed
              : "PATH erl (zc toolchain install " + pin + " to manage)"));
+      System.out.println("  sources    src " + countSources(here.resolve("src"))
+          + " .zn, test " + countSources(here.resolve("test")) + " .zn");
     }
     Path rebarManaged = zcHome().resolve("bin").resolve("rebar3");
     Path rebarCached = Path.of(System.getProperty("user.home"), ".cache", "zinc", "rebar3");
@@ -698,16 +684,15 @@ public class Zc {
     if (!Files.isDirectory(src)) return false;
     try (var paths = Files.walk(src)) {
       for (Path p : (Iterable<Path>) paths::iterator) {
-        if (!p.toString().endsWith(".zinc") && !p.toString().endsWith(".zn")) continue;
+        if (!p.toString().endsWith(".zn")) continue;
         String s = Files.readString(p);
-        if (s.contains("implements Application") || s.contains("implements Actor")
-            || s.contains("(Application)") || s.contains("(Actor)")) return true;
+        if (s.contains(": Application") || s.contains(": Actor")) return true;
       }
     }
     return false;
   }
 
-  /** zc run file.zinc — transpile + erlc + run, one command, no project ceremony.
+  /** zc run file.zn — transpile + erlc + run, one command, no project ceremony.
    *  once=true runs the entry and exits (main + init:stop) even for an Application. */
   static void runSingle(Path file, boolean once) throws Exception {
     if (!Files.exists(file)) die("zc: no such file: " + file);
@@ -749,7 +734,7 @@ public class Zc {
         for (Path app : apps) {
           if (Files.isDirectory(app.resolve("ebin"))) {
             cmd.add("-pa");
-            cmd.add(app.resolve("ebin").toString());
+            cmd.add(app.resolve("ebin").toAbsolutePath().toString());
           }
         }
       }
@@ -815,7 +800,7 @@ public class Zc {
   }
 
   /** Run erl with stdout inherited (program output) but stderr captured-and-teed, so on a
-   *  crash we can append a zinc-flavored trace mapping erl frames back to .zinc:line.
+   *  crash we can append a zinc-flavored trace mapping erl frames back to .zn:line.
    *  srcDir = where the generated .erl (with @zinc-src + %@L markers) live. */
   static void runErl(Path dir, Path srcDir, String... cmd) throws Exception {
     var pb = new ProcessBuilder(cmd).directory(dir.toFile());
@@ -853,7 +838,7 @@ public class Zc {
   static final Pattern MARKER = Pattern.compile("%@L(\\d+)");
 
   /** Turn the raw erl stacktrace into a zinc trace: each frame from a generated module
-   *  (one carrying `%% @zinc-src`) maps back to its .zinc file + the nearest `%@L` marker
+   *  (one carrying `%% @zinc-src`) maps back to its .zn file + the nearest `%@L` marker
    *  at/above the crash line. BEAM-internal frames are dropped. null = nothing to add. */
   static String annotateCrash(String stderr, Path srcDir) throws IOException {
     var frames = new ArrayList<String>();
@@ -953,20 +938,36 @@ public class Zc {
   // trailing whitespace trimmed, blank runs collapsed to one, single trailing newline.
 
   static boolean isSource(Path p) {
-    return p.toString().endsWith(".zinc") || p.toString().endsWith(".zn");
+    return p.toString().endsWith(".zn");
+  }
+
+  static boolean isGeneratedPath(Path p) {
+    for (Path part : p) {
+      String name = part.toString();
+      if (name.equals("_build") || name.equals("zinc_gen")) return true;
+    }
+    return false;
+  }
+
+  static long countSources(Path dir) throws IOException {
+    if (!Files.isDirectory(dir)) return 0;
+    try (var paths = Files.walk(dir)) {
+      return paths.filter(p -> !isGeneratedPath(p) && isSource(p)).count();
+    }
   }
 
   static void fmt(Path target) throws IOException {
     if (Files.isDirectory(target)) {
       try (var paths = Files.walk(target)) {
-        for (Path p : (Iterable<Path>) paths::iterator) {
+        var srcs = paths.filter(p -> !isGeneratedPath(p) && isSource(p)).sorted().toList();
+        for (Path p : srcs) {
           if (isSource(p)) fmtFile(p);
         }
       }
     } else if (isSource(target)) {
       fmtFile(target);
     } else {
-      die("zc fmt: not a .zinc/.zn file or directory: " + target);
+      die("zc fmt: not a .zn file or directory: " + target);
     }
   }
 
@@ -1028,11 +1029,9 @@ public class Zc {
     System.out.println("""
         usage: zc <command> [args]
 
-          zc init [--java|--py] <name>
-                                create a new project (default = canonical src/main.zn,
-                                --py = legacy Python-shaped .zn, --java = legal-Java .zinc)
-          zc build [dir]        transpile .zinc/.zn + compile (rebar3 under the hood)
-          zc run [dir|file]     build + run main(); a .zinc/.zn file runs in script mode
+          zc init <name>        create a canonical src/main.zn project
+          zc build [dir]        transpile .zn + compile (rebar3 under the hood)
+          zc run [dir|file]     build + run main(); a .zn file runs in script mode
           zc release [dir]      self-contained OTP release tarball (ERTS + beam + boot)
           zc test [dir]         run the test suite (EUnit underneath)
           zc clean [dir]        remove build output and generated .erl
@@ -1042,7 +1041,7 @@ public class Zc {
           zc toolchain install [ver]   install a managed OTP into ~/.zc/otp (rustup model)
           zc toolchain list            list managed toolchains
           zc doctor             check the install: versions, toolchains, resolution
-          zc fmt <file|dir>     reindent .zinc/.zn (2-space, by brace depth)
+          zc fmt <file|dir>     reindent .zn (2-space, by brace depth)
           zc version            show version
         """);
   }

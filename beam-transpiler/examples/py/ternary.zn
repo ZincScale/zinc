@@ -1,5 +1,0 @@
-def main() {
-    n = 7
-    print(n > 5 ? "big" : "small")
-    print(n < 0 ? -1 : n)
-}

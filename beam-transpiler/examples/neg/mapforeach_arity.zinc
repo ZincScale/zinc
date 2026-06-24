@@ -1,6 +1,0 @@
-public class Main {
-  public static void main(String[] args) {
-    Map<String, String> m = new HashMap<>();
-    m.forEach(k -> System.out.println(k));   // forEach needs (k, v), not (k)
-  }
-}

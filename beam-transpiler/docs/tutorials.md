@@ -8,30 +8,30 @@ These tutorials use the current `.zn` surface. They assume `zc` is on your `PATH
 Create a project:
 
 ```sh
-zc new --py userstore
+zc new userstore
 cd userstore
 zc add cowboy@2.12.0
 ```
 
 Replace `src/main.zn`:
 
-```python
-record User(id: String, name: String)
+```zinc
+record User(String id, String name)
 
-class Store(Actor) {
-    users: Map<String, User> = {}
+class Store : Actor {
+    Map<String, User> users = {}
 
-    def put(id: String, u: User) { users[id] = u }
-    def get(id: String) -> User { return users.get(id) }
-    def reset() { users = {} }
+    void put(String id, User u) { users[id] = u }
+    User get(String id) { return users.get(id) }
+    void reset() { users = {} }
 }
 
-class Main(Application) {
-    store = Store()
-    server = HttpServer(8080, Router.create()
+class Main : Application {
+    Store store = Store()
+    HttpServer server = HttpServer(8080, Router.create()
         .get("/health", req -> Response.ok("ok"))
         .post("/users/{id}", req -> {
-            u: User = Json.decode(User, req.body())
+            User u = Json.decode(User, req.body())
             store.put(req.pathParam("id"), u)
             return Response.status(201)
         })
@@ -39,11 +39,11 @@ class Main(Application) {
             Response.ok(Json.encode(store.get(req.pathParam("id"))) )
                 .header("content-type", "application/json"))
         .get("/boom", req -> {
-            x = 1 / 0
+            int x = 1 / 0
             return Response.ok("never")
         }))
 
-    def main() {
+    void main() {
         print("listening on :8080")
     }
 }
@@ -79,67 +79,50 @@ Stop it with `Ctrl-C`. Build a release with:
 zc release
 ```
 
-## Tutorial 2: Read The Flowdemo Dogfood App
+## Tutorial 2: Read A Project Application
 
-`dogfood/flowdemo` is the canonical acceptance app for solidifying typical application
-behavior. Run it from the repository:
+`examples/zinc/project_app` is a minimal Application project. Run it from the repository:
 
 ```sh
 cd beam-transpiler
-./dogfood/flowdemo/test.sh
+zc run --once examples/zinc/project_app
 ```
 
-The app is intentionally small, but it exercises production-shaped pieces together:
+The app is intentionally small, but it exercises the project-mode pieces together:
 
-- typed config: `Config.decode(FlowConfig, configPath)`
-- recursive file discovery: `Files.walk(inputDir)`
-- filtering: `Files.extension(path).equals("jsonl")`
-- metadata: `Files.modifiedTime(path)`
-- bounded streaming: nested `with Files.openReader/openAppender`
-- record processing through an actor worker
-- sealed success/failure routing
-- HTTP `/health` and `/status`
-- worker crash and restart evidence
+- `zinc.toml` project metadata
+- `class Main : Application`
+- a supervised `Counter : Actor` field
+- `zc run --once` for deterministic command output
 
 Open the source:
 
 ```sh
-sed -n '1,220p' dogfood/flowdemo/src/main.zn
+sed -n '1,120p' examples/zinc/project_app/src/main.zn
 ```
 
-The most important pattern is the processing loop:
+The important pattern is that the Application owns the Actor as a field:
 
-```python
-for path in Files.walk(cfg.inputDir) {
-    if Files.extension(path).equals("jsonl") {
-        with Files.openReader(path) as r {
-            with Files.openAppender(cfg.successPath) as okWriter {
-                with Files.openAppender(cfg.failurePath) as badWriter {
-                    while r.hasNextLine() {
-                        result = worker.process(path, r.nextLine())
-                        match result {
-                            case Success(ff) { okWriter.writeLine(ff.name + "," + ff.score) }
-                            case Failed(reason, raw) { badWriter.writeLine(reason + ":" + raw) }
-                        }
-                    }
-                }
-            }
-        }
+```zinc
+class Main : Application {
+    Counter counter = Counter()
+
+    void main() {
+        counter.add(8)
+        print(counter.get())
     }
 }
 ```
 
-That is the application model Zinc is trying to make boring: discover files, stream records,
-process through supervised actors, route outcomes, and expose health/status without writing
-OTP boilerplate.
+That is the core service model: declare the supervision tree in source fields, then write
+ordinary imperative code against process handles.
 
 ## More Examples
 
 The full tested reading path is [examples/README.md](../examples/README.md). The highest-value
 files after these tutorials are:
 
-- `examples/py/resources.zn` - config, paths, recursive discovery, and streaming.
-- `examples/py/selfheal.zn` - actor restart with stable handles.
-- `examples/py/pipeline.zn` - bounded multi-process file pipeline.
-- `examples/py/http_client.zn` and `http_facade.zn` - HTTP client behavior.
-- `examples/py/sql.zn` - Postgres API and transactions.
+- `examples/zinc/resources.zn` - config, paths, recursive discovery, and streaming.
+- `examples/zinc/supervised.zn` - actor restart with stable handles.
+- `examples/zinc/pipeline.zn` - bounded multi-process file pipeline.
+- `examples/zinc/http_client.zn` and `http_facade.zn` - HTTP client behavior.

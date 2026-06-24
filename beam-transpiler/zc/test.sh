@@ -29,29 +29,98 @@ else
   exit 1
 fi
 
+# zc new is canonical-only: obsolete scaffold flags must fail, not silently create a
+# different project shape.
+flag_check='
+set +e
+out=$(/work/bin/zc init --template old 2>&1)
+status=$?
+set -e
+if [ $status -ne 0 ] && echo "$out" | grep -q "usage: zc init <name>"; then echo FLAG-OK; fi
+'
+got=$(run_in_docker "$flag_check" | tail -1)
+if [ "$got" = "FLAG-OK" ]; then
+  echo "PASS  zc init rejects old flags"
+else
+  echo "FAIL  zc init flag rejection  ->  got '$got'  want 'FLAG-OK'"
+  exit 1
+fi
+
+# -- zc fmt + doctor: project tree formatting is canonical-source-only and skips generated dirs --
+fmt_doctor='
+/work/bin/zc init demo >/dev/null 2>&1 && cd demo && mkdir -p test _build src/zinc_gen
+cat > src/main.zn <<EOF
+void main() {
+print("x")
+}
+EOF
+cat > test/main_test.zn <<EOF
+class MainTest : Test {
+void ok() {
+Assert.equals(1, 1)
+}
+}
+EOF
+cat > _build/ignored.zn <<EOF
+void ignored() {
+print("build")
+}
+EOF
+cat > src/zinc_gen/ignored.zn <<EOF
+void ignored() {
+print("generated")
+}
+EOF
+/work/bin/zc fmt . >/tmp/fmt.out
+/work/bin/zc doctor >/tmp/doctor.out
+if grep -q "  print(\"x\")" src/main.zn \
+  && grep -q "  void ok()" test/main_test.zn \
+  && grep -q "^print(\"build\")" _build/ignored.zn \
+  && grep -q "^print(\"generated\")" src/zinc_gen/ignored.zn \
+  && grep -q "sources    src 1 .zn, test 1 .zn" /tmp/doctor.out; then
+  echo FMT-DOCTOR-OK
+fi
+'
+got=$(run_in_docker "$fmt_doctor" | tail -1)
+if [ "$got" = "FMT-DOCTOR-OK" ]; then
+  echo "PASS  zc fmt/doctor"
+else
+  echo "FAIL  zc fmt/doctor  ->  got '$got'  want 'FMT-DOCTOR-OK'"
+  exit 1
+fi
+
 # -- zc test: green suite passes (exit 0), red suite fails (exit 1) --
 fixture='
 /work/bin/zc init demo 1>&2 && cd demo && mkdir -p test
-cat > src/Counter.zinc <<EOF
-class Counter implements Actor {
-  int count = 0;
-  public void incr()         { count = count + 1; }
-  public int get()           { return count; }
-  public int divideBy(int n) { return count / n; }
-}
-EOF
-cat > test/CounterTest.zinc <<EOF
-class CounterTest implements Test {
-  public void counts() {
-    var c = new Counter();
-    c.incr();
-    c.incr();
-    Assert.equals(2, c.get());
+cat > src/counter.zn <<EOF
+class Counter : Actor {
+  int count = 0
+
+  void incr() {
+    count = count + 1
   }
 
-  public void crashObservableAtTheCall() {
-    var c = new Counter();
-    Assert.fails(() -> c.divideBy(0));
+  int get() {
+    return count
+  }
+
+  int divideBy(int n) {
+    return count / n
+  }
+}
+EOF
+cat > test/counter_test.zn <<EOF
+class CounterTest : Test {
+  void counts() {
+    var c = Counter()
+    c.incr()
+    c.incr()
+    Assert.equals(2, c.get())
+  }
+
+  void crashObservableAtTheCall() {
+    var c = Counter()
+    Assert.fails(() -> c.divideBy(0))
   }
 }
 EOF
@@ -60,18 +129,18 @@ EOF
 green=$(/work/bin/zc test 2>&1); status=$?
 echo "$green" 1>&2
 if [ $status -eq 0 ] && echo "$green" | grep -q "2 tests, 0 failures"; then echo GREEN-OK; fi
-cat > test/CounterTest.zinc <<EOF
-class CounterTest implements Test {
-  public void wrongOnPurpose() {
-    var c = new Counter();
-    Assert.equals(5, c.get());
+cat > test/counter_test.zn <<EOF
+class CounterTest : Test {
+  void wrongOnPurpose() {
+    var c = Counter()
+    Assert.equals(5, c.get())
   }
 }
 EOF
 red=$(/work/bin/zc test 2>&1); rstatus=$?
 echo "$red" 1>&2
-# failures must cite the .zinc source line (assert source maps), and exit 1
-if [ $rstatus -ne 0 ] && echo "$red" | grep -q "CounterTest.zinc:"; then echo RED-OK; fi
+# failures must cite the .zn source line (assert source maps), and exit 1
+if [ $rstatus -ne 0 ] && echo "$red" | grep -q "counter_test.zn:"; then echo RED-OK; fi
 '
 got=$(run_in_docker "$fixture" | tail -2 | tr '\n' ' ')
 

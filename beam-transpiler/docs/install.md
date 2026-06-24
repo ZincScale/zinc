@@ -70,8 +70,6 @@ zc doctor       # versions, managed toolchains, and how the [otp] pin resolves
 
 ```
 zc new <name>         create a canonical Zinc project (zinc.toml, src/main.zn)
-zc new --py <name>    create a legacy Python-shaped .zn project
-zc new --java <name>  create a legacy legal-Java .zinc project
 zc run [dir]          build, then run main()
 zc build [dir]        transpile + compile (no run)
 zc test [dir]         run the test suite (EUnit underneath)

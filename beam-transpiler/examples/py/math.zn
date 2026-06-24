@@ -1,5 +1,0 @@
-def main() {
-    print(Math.max(3, 9))
-    print(Math.abs(-4))
-    print(Math.min(2, 8))
-}

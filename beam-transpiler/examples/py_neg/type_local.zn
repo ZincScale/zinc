@@ -1,4 +1,0 @@
-def main() {
-    x: int = "no"
-    print(x)
-}

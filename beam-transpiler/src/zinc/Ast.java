@@ -22,8 +22,8 @@ final class Ast {
    *  — an algebraic union; variants are record-shaped, construct + match as tagged tuples. */
   record SealedDecl(String name, List<RecordDecl> variants) {}
 
-  /** class CalcTest implements Test { public void addsUp() {...} } — every public void
-   *  zero-arg method is a test case (JUnit 3 / EUnit convention), the rest helpers.
+  /** class CalcTest : Test { void addsUp() {...} } — every void zero-arg method is a
+   *  test case (JUnit 3 / EUnit convention), the rest helpers.
    *  Lowers to an EUnit module: process-per-test, parallel. Never ships in releases. */
   record TestDecl(String name, List<MethodDecl> methods, List<String> testMethods) {}
 
@@ -42,7 +42,7 @@ final class Ast {
   // super(expr) call supplies the message. Drops the old auto-ctor-from-fields.
   record ExceptionDecl(String name, List<FieldDecl> fields, MethodDecl ctor) {}
 
-  /** class Main implements Application { Actor fields = root children; optional main. }
+  /** class Main : Application { Actor fields = root children; optional main. }
    *  The explicit root: lowers to the generated root supervisor's static children. */
   record ApplicationDecl(String name, List<FieldDecl> fields, MethodDecl main) {
     String erlMod() {
@@ -53,7 +53,7 @@ final class Ast {
   /** enum Color { RED, GREEN } — values lower to atoms 'RED', 'GREEN'. */
   record EnumDecl(String name, List<String> values) {}
 
-  /** import util.MathUtil; -> class MathUtil defined in util/MathUtil.src */
+  /** import util.MathUtil; -> class MathUtil defined in util/MathUtil.zn */
   record Import(List<String> path) {
     String className() {
       return path.get(path.size() - 1);

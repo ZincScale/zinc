@@ -47,7 +47,7 @@ git push origin "$TAG"
 echo "==> creating GitHub release $TAG (make_latest=false)"
 api() { curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Accept: application/vnd.github+json" "$@"; }
-BODY="zc $VER — Java-on-BEAM toolchain.\n\nInstall:\n\`\`\`\ncurl -fsSL https://github.com/$REPO/releases/download/$TAG/install.sh | sh\n\`\`\`"
+BODY="zc $VER — Zinc-on-BEAM toolchain.\n\nInstall:\n\`\`\`\ncurl -fsSL https://github.com/$REPO/releases/download/$TAG/install.sh | sh\n\`\`\`"
 RID=$(api -X POST "https://api.github.com/repos/$REPO/releases" \
   -d "{\"tag_name\":\"$TAG\",\"name\":\"zc $VER\",\"make_latest\":\"false\",\"body\":\"$BODY\"}" \
   | grep -m1 -o '"id"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*')

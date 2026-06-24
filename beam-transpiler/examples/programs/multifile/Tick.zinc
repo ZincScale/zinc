@@ -1,5 +1,0 @@
-class Tick implements Actor {
-  int n = 0;
-  public void inc() { n = n + 1; }
-  public int get()  { return n; }
-}

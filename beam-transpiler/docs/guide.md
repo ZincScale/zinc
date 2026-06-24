@@ -1,9 +1,8 @@
 # Zinc Guide
 
 Zinc on BEAM compiles `.zn` code to Erlang/OTP. The canonical surface is type-first Zinc
-syntax with BEAM-native actors and applications; the older Python-shaped `.zn` form remains
-accepted for compatibility. The compiler emits BEAM modules and the `zc` CLI builds and runs
-them with rebar3.
+syntax with BEAM-native actors and applications. The compiler emits BEAM modules and the
+`zc` CLI builds and runs them with rebar3.
 
 ## Programs And Modules
 
@@ -54,7 +53,7 @@ print(u.name)
 ```
 
 Enums, sealed unions, nominal interfaces, instance classes, and lambdas are supported. See
-`examples/py/records.zn`, `match.zn`, `sealed.zn`, and `protocols.zn`.
+`examples/zinc/records.zn`, `match.zn`, `sealed.zn`, and `protocols.zn`.
 
 ## Collections
 
@@ -180,7 +179,7 @@ with Files.openReader(src) as r {
 ```
 
 For cross-process pipelines, use `Channel<T>`, `FileReader.pump`, and `FileWriter.drain`.
-See `examples/py/pipeline.zn`.
+See `examples/zinc/pipeline.zn`.
 
 ## JSON, HTTP, SQL, And Other Stdlib Pieces
 
@@ -215,11 +214,10 @@ class Main : Application {
 }
 ```
 
-SQL is exposed through `Db`, `query`, `exec`, and transaction lambdas. See
-`examples/py/sql.zn`.
+SQL is exposed through `Db`, `query`, `exec`, and transaction lambdas.
 
 Other covered APIs include `Log`, `Base64`, `Hex`, `Gzip`, `Crypto`, `Random`, and `Uuid`.
-See `examples/py/encoding.zn` and `webauth.zn`.
+See `examples/zinc/encoding.zn` and `webauth.zn`.
 
 ## FFI And Dependencies
 
@@ -243,8 +241,6 @@ zc add cowboy@2.12.0
 
 ```sh
 zc new <name>               create a canonical .zn project
-zc new --py <name>          create a legacy Python-shaped .zn project
-zc new --java <name>        create a legacy legal-Java .zinc project
 zc run [file|dir]           build and run
 zc run --once [dir]         run Application main and stop, useful for tests
 zc build [dir]              transpile and compile
@@ -260,6 +256,6 @@ zc doctor                   inspect install/toolchain resolution
 ## What To Read Next
 
 - [Getting started](getting-started.md) for the first project path.
-- [Tutorials](tutorials.md) for an HTTP service and flowdemo tour.
+- [Tutorials](tutorials.md) for an HTTP service and project examples.
 - [Examples](../examples/README.md) for tested `.zn` snippets by topic.
 - [Solidification plan](solidification-plan.md) for current engineering priorities.

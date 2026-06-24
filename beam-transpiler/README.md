@@ -36,20 +36,16 @@ Method signatures define the protocol.
 ## Current Surface
 
 The primary surface is `.zn`: canonical Zinc syntax with BEAM-native actors and applications.
-The compiler still accepts the older Python-shaped `.zn` syntax as a compatibility frontend,
-but new docs, examples, and applications should use the canonical type-first form. It supports:
+It supports:
 
 - top-level scripts with `void main()` and service projects with `class Main : Application`
 - actors, supervision, dynamic children, typed calls, async casts, and restart-stable handles
 - records, enums, sealed unions, interfaces, lambdas, lists, dicts, and checked returns
-- `try` / `except`, `raise`, interpolated strings, `match`, `for`, `while`, `break`, and `continue`
+- `try` / `catch`, `throw`, interpolated strings, `match`, `for`, `while`, `break`, and `continue`
 - JSON record codecs, dynamic JSON access, config decode, files/path helpers, scoped streaming
 - `Channel<T>` pipelines, HTTP client/server, Postgres access, logging, encoding, crypto, UUIDs
 - `from erlang import ...` FFI for raw OTP or Hex modules
 - `zc new`, `zc run`, `zc build`, `zc test`, `zc check`, `zc release`, and managed OTP
-
-The legacy legal-Java `.zinc` frontend remains tested by `./e2e.sh`. Use `zc new --java`
-only when you specifically need that compatibility surface.
 
 ## Quick Start From This Checkout
 
@@ -68,34 +64,33 @@ cd flowtoy
 zc run
 ```
 
-For a realistic acceptance app, run the dogfood flow engine:
+For a project-mode Application example with a supervised child, run:
 
 ```sh
 cd beam-transpiler
-./dogfood/flowdemo/test.sh
+zc run --once examples/zinc/project_app
 ```
 
-`flowdemo` loads typed JSON config, recursively discovers input files, filters by extension,
-streams records, routes success/failure output, exposes HTTP health/status routes, and proves
-worker restart behavior through a black-box test.
+`project_app` uses `class Main : Application`, a supervised `Counter : Actor` field, and
+the normal project build path through `zinc.toml`.
 
 ## Documentation
 
 - [Install](docs/install.md) - release install, offline install, and contributor setup.
-- [Getting started](docs/getting-started.md) - first script, first project, and flowdemo tour.
+- [Getting started](docs/getting-started.md) - first script, first project, and actor tour.
 - [Guide](docs/guide.md) - language, actors, I/O, standard library, and CLI.
-- [Tutorials](docs/tutorials.md) - build a small HTTP service and inspect the flowdemo app.
+- [Tutorials](docs/tutorials.md) - build a small HTTP service and inspect project examples.
 - [Examples](examples/README.md) - tested `.zn` examples by topic.
-- [Solidification plan](docs/solidification-plan.md) - current dogfood-driven engineering plan.
+- [Roadmap](ROADMAP.md) - current engineering plan and release path.
 
 ## Development Checks
 
 ```sh
 cd beam-transpiler
 ./e2e-zinc.sh                  # canonical Zinc-on-BEAM .zn suite
-./e2e-py.sh                    # legacy Python-shaped .zn compatibility suite
-./dogfood/flowdemo/test.sh     # canonical app acceptance target
-./e2e.sh                       # legacy .zinc compatibility suite
+./zc/test.sh                   # zc scaffold/run/test workflow
+./rebar_zinc/test.sh           # rebar plugin workflow
+./package-test.sh              # release artifact smoke
 ```
 
 The compiler is implemented in Java under `src/zinc/`. The CLI lives in `zc/Zc.java`, and the
