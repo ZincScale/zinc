@@ -69,7 +69,7 @@ fi
 echo "No prebuilt binary found — building from source..."
 if ! command -v go &>/dev/null; then
     echo "Error: Go is required to build from source."
-    echo "Install Go 1.26+: https://go.dev/dl/"
+    echo "Install Go 1.26.4+: https://go.dev/dl/"
     exit 1
 fi
 

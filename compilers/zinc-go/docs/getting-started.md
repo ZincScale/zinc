@@ -11,7 +11,7 @@ One-line install (Linux / macOS):
 curl -sL https://raw.githubusercontent.com/ZincScale/zinc/master/compilers/zinc-go/install.sh | bash
 ```
 
-Or build from source (requires Go 1.26+):
+Or build from source (requires Go 1.26.4+):
 
 ```bash
 git clone https://github.com/ZincScale/zinc.git
@@ -111,7 +111,7 @@ version = "0.1.0"
 main = "main.zn"
 
 [go]
-version = "1.26"
+version = "1.26.4"
 
 [deps]
 mux = "github.com/gorilla/mux@v1.8.1"

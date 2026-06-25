@@ -70,7 +70,7 @@ func build(input, outDir string, quiet bool) error {
 	// Write a go.mod so `go build` works in the output directory
 	goModPath := filepath.Join(outDir, "go.mod")
 	if _, err := os.Stat(goModPath); os.IsNotExist(err) {
-		goMod := "module zinc_build\n\ngo 1.26\n"
+		goMod := "module zinc_build\n\ngo 1.26.4\n"
 		if wErr := os.WriteFile(goModPath, []byte(goMod), 0o644); wErr != nil {
 			return fmt.Errorf("write go.mod: %w", wErr)
 		}
@@ -106,7 +106,7 @@ func run(input string, progArgs []string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write go.mod for the temporary module
-	goMod := "module zinc_run\n\ngo 1.26\n"
+	goMod := "module zinc_run\n\ngo 1.26.4\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ version = "0.1.0"
 main = "main.zn"
 
 [go]
-version = "1.26"
+version = "1.26.4"
 `, baseName)
 	if err := os.WriteFile(filepath.Join(name, "zinc.toml"), []byte(zincToml), 0o644); err != nil {
 		return fmt.Errorf("write zinc.toml: %w", err)
@@ -332,20 +332,20 @@ func findZincToml(dir string) string {
 
 // loadZincToml parses a zinc.toml file (simple line-based TOML subset).
 //
-//     [project]
-//     name    = "myapp"
-//     version = "0.1.0"
-//     main    = "main.zn"
+//	[project]
+//	name    = "myapp"
+//	version = "0.1.0"
+//	main    = "main.zn"
 //
-//     [go]
-//     version = "1.26"
+//	[go]
+//	version = "1.26.4"
 //
-//     [deps]
-//     viper    = "github.com/spf13/viper@v1.20.1"      # module + version → go.mod require
-//     viperRem = "github.com/spf13/viper/remote"       # subpackage alias only — no require
+//	[deps]
+//	viper    = "github.com/spf13/viper@v1.20.1"      # module + version → go.mod require
+//	viperRem = "github.com/spf13/viper/remote"       # subpackage alias only — no require
 //
-//     [replace]
-//     viper = "/home/local/fork-of-viper"
+//	[replace]
+//	viper = "/home/local/fork-of-viper"
 //
 // [deps] is the single dependency table — keys are the local aliases used
 // in Zinc (`import viper`), values are the fully-qualified Go import paths.
@@ -367,7 +367,7 @@ func loadZincToml(path string) (*zincConfig, error) {
 	cfg := &zincConfig{
 		Version:  "0.1.0",
 		Main:     "main.zn",
-		GoVer:    "1.26",
+		GoVer:    "1.26.4",
 		Imports:  make(map[string]string),
 		Replaces: make(map[string]string),
 	}
