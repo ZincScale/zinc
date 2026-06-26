@@ -3,15 +3,23 @@ package main
 // Project management: build, run, init, format, zinc.toml, deps, cross-compile.
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	codegen "zinc-go/internal/codegen_go"
 	"zinc-go/internal/parser"
 )
+
+const requiredGoVersion = "1.26.4"
+
+var goPreflightDone bool
+var managedGoCache string
 
 // ---------------------------------------------------------------------------
 // Build
@@ -34,9 +42,141 @@ func cleanOutDir(outDir string) {
 	}
 }
 
+func goCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("go", args...)
+	env := os.Environ()
+	if managedGoCache != "" {
+		env = append(env, "GOCACHE="+managedGoCache)
+	}
+	env = setEnv(env, withGoFlag(env, "-buildvcs=false"))
+	cmd.Env = env
+	return cmd
+}
+
+func setEnv(env []string, kv string) []string {
+	key := strings.SplitN(kv, "=", 2)[0] + "="
+	out := env[:0]
+	for _, e := range env {
+		if !strings.HasPrefix(e, key) {
+			out = append(out, e)
+		}
+	}
+	return append(out, kv)
+}
+
+func withGoFlag(env []string, flag string) string {
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "GOFLAGS=") {
+			continue
+		}
+		flags := strings.TrimPrefix(kv, "GOFLAGS=")
+		if strings.Contains(" "+flags+" ", " "+flag+" ") {
+			return "GOFLAGS=" + flags
+		}
+		if strings.TrimSpace(flags) == "" {
+			return "GOFLAGS=" + flag
+		}
+		return "GOFLAGS=" + flags + " " + flag
+	}
+	return "GOFLAGS=" + flag
+}
+
+func ensureGoToolchain(quiet bool) error {
+	if goPreflightDone {
+		return nil
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		return fmt.Errorf("Go toolchain not found on PATH; install Go %s+ or run the zinc-go installer", requiredGoVersion)
+	}
+
+	out, err := exec.Command("go", "env", "GOVERSION").Output()
+	if err != nil {
+		return fmt.Errorf("go env GOVERSION failed: %w", err)
+	}
+	version := strings.TrimSpace(string(out))
+	if compareGoVersion(version, requiredGoVersion) < 0 {
+		return fmt.Errorf("Go %s+ is required, found %s; update Go or put a newer go on PATH", requiredGoVersion, version)
+	}
+
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot = filepath.Join(os.TempDir(), "zinc-go-cache")
+	}
+	managedGoCache = filepath.Join(cacheRoot, "zinc-go", "go-build")
+	if err := os.MkdirAll(managedGoCache, 0o755); err != nil {
+		return fmt.Errorf("create managed Go build cache: %w", err)
+	}
+
+	if ok, _ := goStdReady(); ok {
+		goPreflightDone = true
+		return nil
+	}
+	if !quiet {
+		fmt.Fprintln(os.Stderr, "zinc-go: preparing Go standard library cache ...")
+	}
+	install := goCmd("install", "std")
+	if !quiet {
+		install.Stdout = os.Stdout
+		install.Stderr = os.Stderr
+	}
+	if err := install.Run(); err != nil {
+		return fmt.Errorf("prepare Go standard library cache: %w", err)
+	}
+	if ok, detail := goStdReady(); !ok {
+		return fmt.Errorf("Go standard library is still not buildable after cache prep: %s", detail)
+	}
+	goPreflightDone = true
+	return nil
+}
+
+func goStdReady() (bool, string) {
+	cmd := goCmd("list", "fmt")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err == nil && strings.TrimSpace(string(out)) == "fmt" {
+		return true, ""
+	}
+	detail := strings.TrimSpace(stderr.String())
+	if detail == "" && err != nil {
+		detail = err.Error()
+	}
+	return false, detail
+}
+
+func compareGoVersion(got, want string) int {
+	gv := parseGoVersion(got)
+	wv := parseGoVersion(want)
+	for i := 0; i < len(gv); i++ {
+		if gv[i] < wv[i] {
+			return -1
+		}
+		if gv[i] > wv[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func parseGoVersion(v string) [3]int {
+	var out [3]int
+	m := regexp.MustCompile(`go?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?`).FindStringSubmatch(v)
+	for i := 1; i <= 3 && i < len(m); i++ {
+		if m[i] == "" {
+			continue
+		}
+		n, _ := strconv.Atoi(m[i])
+		out[i-1] = n
+	}
+	return out
+}
+
 // build transpiles .zn file(s) to .go, writes them to outDir, and then
 // invokes `go build` to produce a native binary.
 func build(input, outDir string, quiet bool) error {
+	if err := ensureGoToolchain(quiet); err != nil {
+		return err
+	}
 	info, err := os.Stat(input)
 	if err != nil {
 		return err
@@ -77,7 +217,7 @@ func build(input, outDir string, quiet bool) error {
 	}
 
 	// Run go build
-	cmd := exec.Command("go", "build", "-o", "zinc-app", ".")
+	cmd := goCmd("build", "-o", "zinc-app", ".")
 	cmd.Dir = outDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -99,6 +239,9 @@ func build(input, outDir string, quiet bool) error {
 // run transpiles .zn file(s) to a temp directory and executes the result,
 // passing progArgs to the compiled program.
 func run(input string, progArgs []string) error {
+	if err := ensureGoToolchain(true); err != nil {
+		return err
+	}
 	tmpDir, err := os.MkdirTemp("", "zinc-run-*")
 	if err != nil {
 		return err
@@ -136,7 +279,7 @@ func run(input string, progArgs []string) error {
 
 	// Build and run
 	binPath := filepath.Join(tmpDir, "zinc-app")
-	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	buildCmd := goCmd("build", "-o", binPath, ".")
 	buildCmd.Dir = tmpDir
 	buildCmd.Stderr = os.Stderr
 	if bErr := buildCmd.Run(); bErr != nil {
@@ -577,6 +720,9 @@ func loadDepClassDecls(cfg *zincConfig) map[string]map[string]*parser.ClassDecl 
 
 // buildProject transpiles a zinc.toml project: src/*.zn → zinc-out/ → go build.
 func buildProject(projectDir, outDir string, quiet bool) error {
+	if err := ensureGoToolchain(quiet); err != nil {
+		return err
+	}
 	tomlPath := findZincToml(projectDir)
 	if tomlPath == "" {
 		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
@@ -613,7 +759,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	// transpile to clean up indirect deps once .go files reveal what's
 	// actually used. Mirrors the testProject path's earlier fix.
 	if len(cfg.Deps) > 0 {
-		dl := exec.Command("go", "mod", "download", "all")
+		dl := goCmd("mod", "download", "all")
 		dl.Dir = outDir
 		if !quiet {
 			dl.Stderr = os.Stderr
@@ -646,7 +792,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 
 	// If there are deps, run go mod tidy again after transpilation
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
+		tidy := goCmd("mod", "tidy")
 		tidy.Dir = outDir
 		tidy.Stdout = os.Stdout
 		tidy.Stderr = os.Stderr
@@ -660,7 +806,7 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	if binName == "" {
 		binName = "zinc-app"
 	}
-	cmd := exec.Command("go", "build", "-o", binName, ".")
+	cmd := goCmd("build", "-o", binName, ".")
 	cmd.Dir = outDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -677,6 +823,9 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 
 // runProject transpiles a zinc.toml project to a temp dir and runs it.
 func runProject(projectDir string, progArgs []string) error {
+	if err := ensureGoToolchain(true); err != nil {
+		return err
+	}
 	tomlPath := findZincToml(projectDir)
 	if tomlPath == "" {
 		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
@@ -705,7 +854,7 @@ func runProject(projectDir string, progArgs []string) error {
 	// pulls listed deps without pruning. Tidy still runs after transpile
 	// to clean up indirect deps. Mirrors testProject's earlier fix.
 	if len(cfg.Deps) > 0 {
-		dl := exec.Command("go", "mod", "download", "all")
+		dl := goCmd("mod", "download", "all")
 		dl.Dir = tmpDir
 		dl.Stderr = os.Stderr
 		if err := dl.Run(); err != nil {
@@ -739,7 +888,7 @@ func runProject(projectDir string, progArgs []string) error {
 	}
 
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
+		tidy := goCmd("mod", "tidy")
 		tidy.Dir = tmpDir
 		tidy.Stderr = os.Stderr
 		if err := tidy.Run(); err != nil {
@@ -749,7 +898,7 @@ func runProject(projectDir string, progArgs []string) error {
 
 	// Build and run
 	binPath := filepath.Join(tmpDir, "zinc-app")
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd := goCmd("build", "-o", binPath, ".")
 	cmd.Dir = tmpDir
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -775,6 +924,9 @@ func runProject(projectDir string, progArgs []string) error {
 // goTestArgs are forwarded unchanged so callers can pass -run, -race, -v,
 // -count, etc.
 func testProject(projectDir string, goTestArgs []string) error {
+	if err := ensureGoToolchain(false); err != nil {
+		return err
+	}
 	tomlPath := findZincToml(projectDir)
 	if tomlPath == "" {
 		return fmt.Errorf("no zinc.toml found in %s or parents", projectDir)
@@ -810,7 +962,7 @@ func testProject(projectDir string, goTestArgs []string) error {
 	// transpile (line ~793) to clean up indirect deps once .go files
 	// reveal what's actually used.
 	if len(cfg.Deps) > 0 {
-		dl := exec.Command("go", "mod", "download", "all")
+		dl := goCmd("mod", "download", "all")
 		dl.Dir = outDir
 		dl.Stderr = os.Stderr
 		if err := dl.Run(); err != nil {
@@ -849,7 +1001,7 @@ func testProject(projectDir string, goTestArgs []string) error {
 	}
 
 	if len(cfg.Deps) > 0 {
-		tidy := exec.Command("go", "mod", "tidy")
+		tidy := goCmd("mod", "tidy")
 		tidy.Dir = outDir
 		tidy.Stdout = os.Stdout
 		tidy.Stderr = os.Stderr
@@ -859,7 +1011,7 @@ func testProject(projectDir string, goTestArgs []string) error {
 	}
 
 	args := append([]string{"test", "./..."}, goTestArgs...)
-	cmd := exec.Command("go", args...)
+	cmd := goCmd(args...)
 	cmd.Dir = outDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -975,9 +1127,12 @@ func crossCompile(outDir, target string) error {
 		outBin = binName[:len(binName)-4] + "-" + goos + "-" + goarch + ".exe"
 	}
 
-	cmd := exec.Command("go", "build", "-o", outBin, ".")
+	if err := ensureGoToolchain(false); err != nil {
+		return err
+	}
+	cmd := goCmd("build", "-o", outBin, ".")
 	cmd.Dir = outDir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(cmd.Env,
 		"GOOS="+goos,
 		"GOARCH="+goarch,
 		"CGO_ENABLED=0",
