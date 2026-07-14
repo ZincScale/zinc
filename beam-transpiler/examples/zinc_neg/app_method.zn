@@ -1,9 +1,0 @@
-class Main : Application {
-    void helper() {
-        print("nope")
-    }
-
-    void main() {
-        helper()
-    }
-}

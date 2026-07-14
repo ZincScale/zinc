@@ -1,8 +1,0 @@
-(int, String) user() {
-    return (7, "vin")
-}
-
-void main() {
-    (String id, String name) = user()
-    print(id + name)
-}

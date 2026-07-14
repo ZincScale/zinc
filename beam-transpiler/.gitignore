@@ -1,7 +1,0 @@
-out/
-.dart_tool/
-.packages
-pubspec.lock
-*.jar
-dist/
-erl_crash.dump

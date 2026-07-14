@@ -1,8 +1,0 @@
-void main() {
-    var scores = {"a": 1, "b": 2}
-    scores["a"] = scores["a"] + 10
-    print(scores["a"] + scores["b"])
-
-    var xs = [10, 20, 30]
-    print(xs[0] + len(xs))
-}

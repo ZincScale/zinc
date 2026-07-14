@@ -8,9 +8,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 [![Release](https://img.shields.io/github/v/release/ZincScale/zinc?label=release)](https://github.com/ZincScale/zinc/releases/latest)
 
-**Zinc is a typed, OO language that compiles to Go.** The same shape Kotlin
-has to the JVM, TypeScript has to JavaScript, Crystal has to Ruby — Zinc
-brings to Go.
+**Zinc is a personal typed, OO language and compiler project that emits Go.**
+It explores classes, sealed types, pattern matching, structured error handling,
+and higher-level concurrency syntax while reusing the Go toolchain and runtime.
+It is not positioned as a replacement for Go or as a language seeking broad
+adoption.
 
 ```zinc
 import stdlib/errors
@@ -44,42 +46,19 @@ void main() {
 One static binary out, no runtime, no GC layer to babysit. Reads like Kotlin
 or TypeScript; runs like Go.
 
-## Why Zinc
+## Project goals
 
-Every other major language has acquired a typed, ergonomic successor that
-targets it natively:
+Zinc is a place to explore how a more expressive surface language maps onto
+Go without building a new runtime:
 
-| Host | Successor | Brought |
-|---|---|---|
-| JVM | **Kotlin** | classes, sealed types, null safety, data classes |
-| JavaScript | **TypeScript** | static types, classes, generics |
-| Ruby | **Crystal** | static types, AOT compilation |
-| Python | **Mojo / Cython** | static types, AOT path for hot code |
-| Go | — | (this is the gap Zinc fills) |
-
-Go is excellent for systems work but deliberately minimal: no class
-inheritance, no sealed/ADT types, no proper error syntax beyond
-`if err != nil`, no resource-cleanup expression, no implicit-self, no
-pattern matching, no string interpolation. Developers coming from
-Kotlin, TypeScript, or C# feel the friction immediately.
-
-Zinc closes the gap *without* abandoning anything that makes Go great.
-
-- **You keep OO.** Four of the TIOBE top five languages are OO. Telling
-  most working developers "give up classes to get a static binary" is
-  asking too much. Zinc gives them classes, inheritance, sealed types,
-  data classes, *and* the Go binary.
-- **You keep AOT.** Single static binary. Tens-of-milliseconds startup.
-  Sub-10MB executables. Cross-compile to anything Go targets. Drops
-  straight into Kubernetes, Lambda, scratch containers — no runtime
-  layer.
-- **You keep the Go ecosystem.** `import net/http`, `import sync`,
-  `import github.com/spf13/viper` — Go packages import directly into
-  Zinc and call natively. No wrappers, no FFI shims, no JNI. The
-  generated Go code is readable; you can audit, debug, or hand-edit it.
-- **You keep Go's runtime.** Goroutines, channels, the GC, the stdlib —
-  battle-tested at scale, reused as-is. Zinc surfaces them as `spawn`,
-  `Channel<T>`, `select { }`, `parallel for`.
+- **Language design.** Classes, inheritance, sealed/data types, pattern
+  matching, implicit self, interpolation, and structured error handling.
+- **Readable lowering.** Generated Go stays inspectable instead of becoming
+  an opaque native-code backend.
+- **Runtime reuse.** Zinc uses Go's garbage collector, standard library,
+  goroutines, channels, and synchronization primitives.
+- **Practical experimentation.** The compiler is usable in personal projects,
+  but its purpose is exploration rather than ecosystem or market adoption.
 
 See [docs/why-zinc.md](docs/why-zinc.md) for the long version.
 
@@ -339,12 +318,12 @@ Full index at **[docs/](docs/README.md)**. Highlights:
 **Current release: [v0.7](https://github.com/ZincScale/zinc/releases/latest)** (2026-05-07).
 
 The full e2e suite is green (128 tests across positive, negative, and
-project regression suites), and the language is in production use as
-the implementation language for
-[zinc-flow](https://github.com/ZincScale/zinc-flow), a NiFi-class data
-flow engine. The grammar surface is stabilized as `v2-2026-05-01`
-(reported by `zinc-go version`); editor plugins and build tools can pin
-on it.
+project regression suites). It remains available for existing personal
+projects, including
+[zinc-flow](https://github.com/ZincScale/zinc-flow). The grammar surface is
+stabilized as `v2-2026-05-01` (reported by `zinc-go version`); editor plugins
+and build tools can pin on it. Future work is driven by personal use and
+interest rather than an adoption roadmap.
 
 ## Architecture
 

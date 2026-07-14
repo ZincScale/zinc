@@ -1,5 +1,0 @@
-class EmptyTest : Test {
-    int helper() {
-        return 1
-    }
-}

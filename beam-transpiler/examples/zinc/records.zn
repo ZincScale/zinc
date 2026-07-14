@@ -1,7 +1,0 @@
-record User(id: String, name: String)
-
-void main() {
-    User u = User("7", "vin")
-    print(u.id)
-    print(u.name)
-}

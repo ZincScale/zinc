@@ -1,9 +1,0 @@
-void main() {
-    String b64 = Base64.encode("hi")
-    print(b64)
-    print(Base64.encode(Base64.decode(b64)) == b64)
-    print(Hex.encode("AB"))
-    var msg = "zinc on the beam, zinc on the beam"
-    print(Gzip.decompress(Gzip.compress(msg)) == msg)
-    print(Time.now() > 0)
-}

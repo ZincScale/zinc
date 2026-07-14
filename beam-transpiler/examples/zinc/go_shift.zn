@@ -1,9 +1,0 @@
-void main() {
-    var one = 1
-    var left = one << 4
-    var right = left >> 2
-
-    print("1 << 4 = ${left}")
-    print("16 >> 2 = ${right}")
-    print("mix = ${(3 << 3) | 1}")
-}

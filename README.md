@@ -4,34 +4,23 @@
 
 # Zinc
 
-Zinc is a family of tools for writing cleaner source while still emitting target-native code.
-The active project is the BEAM transpiler: Python-shaped `.zn` code with types, actors, and
-OTP supervision, compiled to Erlang and run with the `zc` CLI.
+Zinc is a personal compiler and language-design project: a family of experiments in writing
+cleaner source while still emitting target-native code. It is maintained for exploration,
+learning, and use in the author's own projects rather than as a proposed mainstream language
+or commercial product.
 
 | Project | Category | Target | Status |
 |---------|----------|--------|--------|
-| [beam-transpiler](beam-transpiler/) | Compiler + CLI | Erlang/OTP (BEAM) | **Active.** `.zn` braces-Python -> Erlang/OTP, with supervised actors, streaming I/O, HTTP, JSON, SQL, releases, and managed OTP tooling. |
-| `beam-transpiler` legacy `.zinc` surface | Compiler frontend | Erlang/OTP (BEAM) | Maintained as a tested compatibility surface. New docs and examples target `.zn`. |
-
-## Start Here
-
-```sh
-cd beam-transpiler
-export PATH="$PWD/bin:$PATH"
-zc run examples/py/hello.zn
-```
-
-Then read:
-
-- [BEAM transpiler README](beam-transpiler/README.md) for the thesis and current status.
-- [Getting started](beam-transpiler/docs/getting-started.md) for install, first script, first project, and flowdemo.
-- [Guide](beam-transpiler/docs/guide.md) for the language and standard library surface.
-- [Examples](beam-transpiler/examples/README.md) for the tested `.zn` reading path.
+| [compilers/zinc-go](compilers/zinc-go/) | Compiler + CLI | Go | Personal language/compiler project; feature-complete enough for continued experimentation and existing uses. |
+| [dialects/zinc-python](dialects/zinc-python/) | Transpiler + CLI | Python | Earlier braces-Python experiment retained for reference and personal use. |
+| [build-tools/zinc-java](build-tools/zinc-java/) | Build tool | Java | Personal toolchain experiment. |
+| [build-tools/zinc-csharp](build-tools/zinc-csharp/) | Build tool | C#/.NET | Personal toolchain experiment. |
 
 ## Repository Map
 
-- `beam-transpiler/` - the active compiler, `zc` CLI, prelude, examples, and dogfood apps.
-- `beam-lab/` - lowering experiments and BEAM performance notes.
+- `compilers/zinc-go/` - the typed OO language and Go source compiler.
+- `dialects/zinc-python/` - the braces-Python to Python transpiler experiment.
+- `build-tools/` - Java and C# toolchain experiments.
 - `perf/` - benchmark scripts and results.
 - `docs/` - repository-level design notes.
 

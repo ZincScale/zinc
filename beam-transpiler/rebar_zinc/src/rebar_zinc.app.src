@@ -1,7 +1,0 @@
-{application, rebar_zinc, [
-    {description, "rebar3 plugin: transpile zinc (Java-syntax) .src files to Erlang"},
-    {vsn, "0.1.0"},
-    {registered, []},
-    {applications, [kernel, stdlib]},
-    {env, []}
-]}.

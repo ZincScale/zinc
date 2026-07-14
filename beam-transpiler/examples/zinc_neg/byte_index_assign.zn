@@ -1,5 +1,0 @@
-void main() {
-    byte[] data = [65, 66, 67]
-    data[1] = 70
-    print(data)
-}
