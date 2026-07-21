@@ -570,6 +570,21 @@ The plugin communicates with the core over a versioned local JSON-RPC
 protocol. Other editor integrations may use the same protocol. The core must
 not replace an editor's existing Python language server.
 
+The initial protocol implementation is newline-delimited JSON-RPC 2.0 over the
+core process's stdin and stdout:
+
+```text
+pymgr --root /project serve --stdio
+```
+
+Protocol `1.0` exposes initialization and capabilities, workspace generation
+and interpreter state, structured doctor findings, module diagnostics, import
+cycles, loop inventory and explanations, dependency mutations, and preview-first
+module moves and symbol renames. Mutating refactors require explicit
+`apply: true`; notifications follow JSON-RPC rules and do not receive responses.
+The stdio transport opens no network listener, stores no credentials, and may
+be restarted whenever the editor project closes or the core is upgraded.
+
 An early technical spike MUST verify which PyCharm refresh operations are
 available through stable plugin APIs. If a full automatic refresh is not
 available, the plugin must detect the stale generation and present a single
@@ -721,6 +736,11 @@ requested.
 
 Exit criterion: a successful dependency update becomes navigable in PyCharm
 without restarting the IDE or manually reinstalling packages.
+
+Implementation status: the versioned JSON-RPC-over-stdio core boundary is
+implemented, including workspace generation/interpreter state, diagnostics,
+dependency actions, refactor previews, and loop presentation data. The PyCharm
+plugin, project-model refresh spike, and IDE UI remain pending.
 
 ### Phase 6: runtime intelligence
 

@@ -44,6 +44,7 @@ pymgr move acme.old acme.new --apply
 pymgr loops src/acme
 pymgr loop explain src/acme/service.py:42
 pymgr loop compare --warmups 1 --runs 5 src/acme/service.py:42 -- python check_workload.py
+pymgr serve --stdio
 ```
 
 Refactors are previews unless `--apply` is supplied. Derived state is stored in
@@ -55,3 +56,21 @@ expected behavior and exit unsuccessfully if either candidate is not equivalent;
 project source is never replaced. When NumPy, pandas, or Polars is already a
 declared dependency, their iterator adapters can also point out a possible
 array or column expression without adding a package or changing the data model.
+
+## Editor protocol
+
+`pymgr serve --stdio` exposes the first Phase 5 editor boundary as
+newline-delimited JSON-RPC 2.0. `pymgr/initialize` negotiates protocol version
+`1.0` and returns the workspace generation, synchronization state, and supported
+capabilities. Current methods provide:
+
+- Workspace status, interpreter details, and doctor findings.
+- Module diagnostics and import cycles.
+- Loop inventory and explanations.
+- Dependency mutations through the same transactional workspace manager.
+- Module-move and symbol-rename previews, with explicit `apply: true` required
+  for mutation.
+
+The service uses stdin/stdout rather than opening a network listener. A PyCharm
+plugin can restart it freely and watch `.pymgr/state.json`; the project itself
+does not load the service or depend on it.

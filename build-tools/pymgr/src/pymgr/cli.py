@@ -17,6 +17,7 @@ from pymgr.refactor import (
     run_import_tool,
     update_export,
 )
+from pymgr.rpc import serve_stdio
 from pymgr.workspace import Workspace, WorkspaceError
 
 
@@ -102,6 +103,12 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--runs", type=int, default=5)
     compare.add_argument("--timeout", type=float, default=60.0)
     compare.add_argument("workload", nargs=argparse.REMAINDER)
+    serve = commands.add_parser("serve")
+    serve.add_argument(
+        "--stdio",
+        action="store_true",
+        help="serve newline-delimited JSON-RPC 2.0 over stdin and stdout",
+    )
     return parser
 
 
@@ -250,6 +257,12 @@ def run(argv: Sequence[str] | None = None) -> int:
                 "ready: workspace metadata, lockfile, interpreter, and source roots agree"
             )
         return 1 if any(item.level == "error" for item in findings) else 0
+
+    if args.command == "serve":
+        if not args.stdio:
+            raise WorkspaceError("serve currently requires --stdio")
+        serve_stdio(workspace, sys.stdin, sys.stdout)
+        return 0
 
     if args.command == "loops":
         findings = LoopAnalyzer(workspace).scan(args.paths)
