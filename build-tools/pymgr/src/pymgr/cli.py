@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Sequence
 
 from pymgr.analysis import ProjectIndex
+from pymgr.loops import LoopAnalyzer, LoopFinding
 from pymgr.refactor import (
     apply_plan,
     plan_module_move,
     plan_symbol_rename,
+    run_import_tool,
     update_export,
 )
 from pymgr.workspace import Workspace, WorkspaceError
@@ -51,7 +53,14 @@ def _parser() -> argparse.ArgumentParser:
     resolve = commands.add_parser("resolve")
     resolve.add_argument("target")
     imports = commands.add_parser("imports")
-    imports.add_argument("module")
+    imports.add_argument(
+        "targets",
+        nargs="+",
+        help="module to inspect, or 'fix'/'organize' followed by optional paths",
+    )
+    imports.add_argument(
+        "--apply", action="store_true", help="apply safe Ruff import fixes"
+    )
     importers = commands.add_parser("importers")
     importers.add_argument("module")
     graph = commands.add_parser("graph")
@@ -79,6 +88,12 @@ def _parser() -> argparse.ArgumentParser:
     rename.add_argument("qualified_symbol")
     rename.add_argument("new_name")
     rename.add_argument("--apply", action="store_true", help="apply the displayed plan")
+
+    loops = commands.add_parser("loops")
+    loops.add_argument("paths", nargs="*")
+    loop = commands.add_parser("loop")
+    loop.add_argument("action", choices=["explain"])
+    loop.add_argument("location")
     return parser
 
 
@@ -171,6 +186,21 @@ def _plan_payload(plan, applied: bool) -> dict:
     }
 
 
+def _loop_payload(finding: LoopFinding) -> dict:
+    return {"location": finding.location, **asdict(finding)}
+
+
+def _emit_loops(findings: list[LoopFinding], as_json: bool) -> None:
+    if as_json:
+        _emit([_loop_payload(finding) for finding in findings], True)
+        return
+    for finding in findings:
+        print(
+            f"{finding.location}: {finding.construct} — {finding.recommendation} "
+            f"[{finding.evidence}; performance {finding.performance}]"
+        )
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     workspace = Workspace.discover(args.root)
@@ -209,16 +239,57 @@ def run(argv: Sequence[str] | None = None) -> int:
             )
         return 1 if any(item.level == "error" for item in findings) else 0
 
+    if args.command == "loops":
+        findings = LoopAnalyzer(workspace).scan(args.paths)
+        _emit_loops(findings, args.json)
+        return 0
+    if args.command == "loop":
+        finding = LoopAnalyzer(workspace).explain(args.location)
+        if args.json:
+            _emit(_loop_payload(finding), True)
+        else:
+            print(f"{finding.location}: {finding.construct}")
+            print(f"Intent: {finding.intent}")
+            print(f"Recommendation: {finding.recommendation}")
+            print(f"Reason: {finding.reason}")
+            print(f"Evidence: {finding.evidence}; performance: {finding.performance}")
+            for blocker in finding.blockers:
+                print(f"Blocker: {blocker}")
+            for alternative in finding.alternatives:
+                print(f"Alternative: {alternative}")
+            if finding.suggested_code:
+                print("Suggested shape:")
+                print(finding.suggested_code)
+        return 0
+
     index = _index(workspace)
     if args.command == "modules":
         _emit(_module_payload(index), args.json)
     elif args.command == "resolve":
         _emit(_resolve(index, workspace, args.target), args.json)
     elif args.command == "imports":
-        module = index.modules.get(args.module)
-        if not module:
-            raise WorkspaceError(f"unknown local module: {args.module}")
-        _emit([asdict(reference) for reference in module.imports], args.json)
+        operation = args.targets[0]
+        if operation in {"fix", "organize"}:
+            result = run_import_tool(workspace, operation, args.targets[1:], args.apply)
+            _emit(
+                {
+                    "mode": result.mode,
+                    "applied": result.applied,
+                    "files": [str(path) for path in result.files],
+                    "diff": result.output if not result.applied else "",
+                    "output": result.output if result.applied else "",
+                },
+                args.json,
+            )
+        else:
+            if len(args.targets) != 1 or args.apply:
+                raise WorkspaceError(
+                    "module import queries accept one module and no --apply"
+                )
+            module = index.modules.get(operation)
+            if not module:
+                raise WorkspaceError(f"unknown local module: {operation}")
+            _emit([asdict(reference) for reference in module.imports], args.json)
     elif args.command == "importers":
         payload = [
             {"module": module, **asdict(reference)}

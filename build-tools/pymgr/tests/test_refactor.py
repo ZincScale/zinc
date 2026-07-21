@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pymgr.analysis import ProjectIndex
 from pymgr.refactor import (
     apply_plan,
     plan_module_move,
     plan_symbol_rename,
+    run_import_tool,
     update_export,
 )
-from pymgr.workspace import Workspace
+from pymgr.workspace import Workspace, WorkspaceError
 
 
 def _index(project: Path) -> ProjectIndex:
@@ -90,3 +93,117 @@ def test_export_management_uses_explicit_reexport_form(project: Path) -> None:
     assert "from .client import Client as Client" in source
     assert "__all__ = ['Client']" in source
     assert _index(project).modules["acme"].exports == ["Client"]
+
+
+def test_cross_package_move_rewrites_relative_imports(project: Path) -> None:
+    source_root = project / "src"
+    package = source_root / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "shared.py").write_text(
+        "def helper():\n    return 1\n", encoding="utf-8"
+    )
+    worker = package / "worker.py"
+    worker.write_text(
+        "from .shared import helper\n\ndef run():\n    return helper()\n",
+        encoding="utf-8",
+    )
+
+    plan = plan_module_move(_index(project), "acme.worker", "other.worker")
+    apply_plan(plan)
+
+    moved = source_root / "other" / "worker.py"
+    assert moved.exists()
+    assert "from acme.shared import helper" in moved.read_text(encoding="utf-8")
+    assert (source_root / "other" / "__init__.py").exists()
+
+
+def test_package_directory_move_updates_descendants_and_importers(
+    project: Path,
+) -> None:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    legacy = package / "legacy"
+    legacy.mkdir()
+    (legacy / "__init__.py").write_text(
+        "from .models import Model as Model\n__all__ = ['Model']\n",
+        encoding="utf-8",
+    )
+    (legacy / "models.py").write_text("class Model:\n    pass\n", encoding="utf-8")
+    consumer = package / "use.py"
+    consumer.write_text("from acme.legacy.models import Model\n", encoding="utf-8")
+
+    plan = plan_module_move(_index(project), "acme.legacy", "acme.modern")
+    assert plan.move_is_directory
+    apply_plan(plan)
+
+    assert not legacy.exists()
+    modern = package / "modern"
+    assert (modern / "models.py").exists()
+    assert "from .models import Model as Model" in (modern / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from acme.modern.models import Model" in consumer.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_import_organization_is_preview_first_and_delegates_to_ruff(
+    project: Path,
+) -> None:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    module = package / "order.py"
+    original = "import sys\nimport os\n\nprint(os.name, sys.version)\n"
+    module.write_text(original, encoding="utf-8")
+    workspace = Workspace(project)
+
+    preview = run_import_tool(workspace, "organize", [str(module)], False)
+
+    assert not preview.applied
+    assert preview.output
+    assert module.read_text(encoding="utf-8") == original
+
+    applied = run_import_tool(workspace, "organize", [str(module)], True)
+
+    assert applied.files == (module,)
+    assert module.read_text(encoding="utf-8").startswith("import os\nimport sys\n")
+
+
+def test_package_move_refuses_destination_inside_source(project: Path) -> None:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    legacy = package / "legacy"
+    legacy.mkdir()
+    (legacy / "__init__.py").write_text("", encoding="utf-8")
+
+    with pytest.raises(WorkspaceError, match="inside itself"):
+        plan_module_move(_index(project), "acme.legacy", "acme.legacy.child")
+
+
+def test_package_move_refuses_unindexed_python_source(project: Path) -> None:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    legacy = package / "legacy"
+    legacy.mkdir()
+    (legacy / "__init__.py").write_text("", encoding="utf-8")
+    (legacy / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+
+    with pytest.raises(WorkspaceError, match="unindexed Python source"):
+        plan_module_move(_index(project), "acme.legacy", "acme.modern")
+
+
+def test_import_fix_applies_only_ruff_safe_fixes(project: Path) -> None:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    module = package / "unused.py"
+    module.write_text("import os\n\nvalue = 1\n", encoding="utf-8")
+    workspace = Workspace(project)
+
+    preview = run_import_tool(workspace, "fix", [str(module)], False)
+    assert "Would fix" in preview.output
+    assert "import os" in module.read_text(encoding="utf-8")
+
+    applied = run_import_tool(workspace, "fix", [str(module)], True)
+
+    assert applied.files == (module,)
+    assert "import os" not in module.read_text(encoding="utf-8")

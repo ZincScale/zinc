@@ -15,7 +15,7 @@ or commercial product.
 | [dialects/zinc-python](dialects/zinc-python/) | Transpiler + CLI | Python | Earlier braces-Python experiment retained for reference and personal use. |
 | [build-tools/zinc-java](build-tools/zinc-java/) | Build tool | Java | Personal toolchain experiment. |
 | [build-tools/zinc-csharp](build-tools/zinc-csharp/) | Build tool | C#/.NET | Personal toolchain experiment. |
-| [build-tools/pymgr](build-tools/pymgr/) | Development tool | Python projects | Optional uv environment, module/API, and safe-refactoring coordinator. |
+| [build-tools/pymgr](build-tools/pymgr/) | Development tool | Python projects | Optional uv environment, module/API, refactoring, and loop-analysis coordinator. |
 
 ## Repository Map
 

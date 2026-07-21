@@ -110,22 +110,22 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "libcst" },
+    { name = "ruff" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
-    { name = "ruff" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "libcst", specifier = ">=1.8,<2" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.4,<10" },
+requires-dist = [
+    { name = "libcst", specifier = ">=1.8,<2" },
     { name = "ruff", specifier = ">=0.14,<1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.4,<10" }]
 
 [[package]]
 name = "pytest"

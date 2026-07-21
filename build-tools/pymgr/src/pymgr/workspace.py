@@ -46,6 +46,7 @@ class ProjectMember:
     name: str
     dependencies: frozenset[str]
     source_roots: tuple[Path, ...]
+    packaged: bool
 
 
 Runner = Callable[[Path, Sequence[str]], subprocess.CompletedProcess[str]]
@@ -144,7 +145,12 @@ class Workspace:
                 raise WorkspaceError(
                     f"source root escapes the workspace: {source_root}"
                 )
-        return ProjectMember(root, name, frozenset(dependencies), source_roots)
+        packaged = "build-system" in config or bool(
+            config.get("tool", {}).get("uv", {}).get("package", False)
+        )
+        return ProjectMember(
+            root, name, frozenset(dependencies), source_roots, packaged
+        )
 
     def project_members(self) -> list[ProjectMember]:
         root_config = self.config()
@@ -303,6 +309,51 @@ print(json.dumps({
         except (IndexError, json.JSONDecodeError) as error:
             raise WorkspaceError(
                 f"module probe returned invalid output: {output!r}"
+            ) from error
+
+    def environment_inventory(self) -> dict:
+        script = """
+import importlib.metadata
+import json
+import pathlib
+import re
+import sys
+
+distributions = {}
+for distribution in importlib.metadata.distributions():
+    name = distribution.metadata.get("Name")
+    if not name:
+        continue
+    normalized = re.sub(r"[-_.]+", "-", name).lower()
+    direct_url = None
+    raw_url = distribution.read_text("direct_url.json")
+    if raw_url:
+        try:
+            direct_url = json.loads(raw_url)
+        except json.JSONDecodeError:
+            direct_url = {"invalid": True}
+    distributions[normalized] = {
+        "name": name,
+        "version": distribution.version,
+        "location": str(pathlib.Path(distribution.locate_file("")).resolve()),
+        "direct_url": direct_url,
+    }
+print(json.dumps({
+    "python": sys.executable,
+    "version": sys.version.split()[0],
+    "prefix": sys.prefix,
+    "sys_path": sys.path,
+    "distributions": distributions,
+}))
+"""
+        output = self._run(
+            ["uv", "run", "--locked", "--no-sync", "python", "-c", script]
+        )
+        try:
+            return json.loads(output.splitlines()[-1])
+        except (IndexError, json.JSONDecodeError) as error:
+            raise WorkspaceError(
+                f"environment inventory returned invalid output: {output!r}"
             ) from error
 
     def _restore(self, snapshots: dict[Path, bytes | None]) -> None:
@@ -474,6 +525,83 @@ print(json.dumps({
                         str(source_root),
                         "existing directory",
                         "create it or update [tool.pymgr]",
+                    )
+                )
+        if shutil.which("uv") is not None and lock.exists() and state.status == "ready":
+            try:
+                inventory = self.environment_inventory()
+                if state.python and inventory.get("python") != state.python:
+                    findings.append(
+                        Diagnostic(
+                            "error",
+                            "active interpreter",
+                            str(inventory.get("python")),
+                            state.python,
+                            "run pymgr sync",
+                        )
+                    )
+                if (
+                    state.python_version
+                    and inventory.get("version") != state.python_version
+                ):
+                    findings.append(
+                        Diagnostic(
+                            "error",
+                            "Python version",
+                            str(inventory.get("version")),
+                            state.python_version,
+                            "run pymgr sync",
+                        )
+                    )
+                installed = inventory.get("distributions", {})
+                for member in self.project_members():
+                    normalized = _normalize_distribution(member.name)
+                    if member.packaged and normalized not in installed:
+                        findings.append(
+                            Diagnostic(
+                                "error",
+                                f"workspace member {member.name}",
+                                "not installed",
+                                "editable synchronized installation",
+                                "run pymgr sync",
+                            )
+                        )
+                    elif member.packaged:
+                        direct_url = installed[normalized].get("direct_url") or {}
+                        editable = direct_url.get("dir_info", {}).get("editable", False)
+                        if not editable:
+                            findings.append(
+                                Diagnostic(
+                                    "warning",
+                                    f"workspace member {member.name}",
+                                    str(
+                                        direct_url
+                                        or "installed without direct_url.json"
+                                    ),
+                                    "editable installation from the workspace",
+                                    "run pymgr sync",
+                                )
+                            )
+                try:
+                    self._run(["uv", "pip", "check"])
+                except WorkspaceError as error:
+                    findings.append(
+                        Diagnostic(
+                            "error",
+                            "installed distributions",
+                            str(error),
+                            "compatible installed dependency metadata",
+                            "run pymgr sync",
+                        )
+                    )
+            except WorkspaceError as error:
+                findings.append(
+                    Diagnostic(
+                        "error",
+                        "environment inventory",
+                        str(error),
+                        "queryable synchronized environment",
+                        "run pymgr sync",
                     )
                 )
         return findings

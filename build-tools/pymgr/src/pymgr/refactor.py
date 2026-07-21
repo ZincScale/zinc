@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import ast
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -10,7 +13,7 @@ from libcst.helpers import get_full_name_for_node
 from libcst.metadata import QualifiedNameProvider
 
 from pymgr.analysis import ProjectIndex
-from pymgr.workspace import WorkspaceError, _atomic_write
+from pymgr.workspace import Workspace, WorkspaceError, _atomic_write
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,15 @@ class RefactorPlan:
     warnings: tuple[str, ...] = ()
     source: Path | None = None
     destination: Path | None = None
+    move_is_directory: bool = False
+
+
+@dataclass(frozen=True)
+class ImportToolResult:
+    mode: str
+    applied: bool
+    files: tuple[Path, ...]
+    output: str
 
 
 def _dotted_expression(name: str) -> cst.BaseExpression:
@@ -83,6 +95,30 @@ class _ImportMoveTransformer(cst.CSTTransformer):
                 relative=tuple(cst.Dot() for _ in range(dots)), module=module
             )
         return updated_node.with_changes(module=_dotted_expression(replaced))
+
+
+class _RelocateRelativeImportsTransformer(cst.CSTTransformer):
+    def __init__(self, old_module: str, new_module: str, is_package: bool) -> None:
+        self.old_module = old_module
+        self.new_module = new_module
+        self.is_package = is_package
+
+    def leave_ImportFrom(
+        self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom
+    ) -> cst.ImportFrom:
+        if not original_node.relative:
+            return updated_node
+        absolute = _absolute_import_from(
+            self.old_module, self.is_package, original_node
+        )
+        if not absolute:
+            return updated_node
+        dots, module = _relative_import_parts(
+            self.new_module, self.is_package, absolute
+        )
+        return updated_node.with_changes(
+            relative=tuple(cst.Dot() for _ in range(dots)), module=module
+        )
 
 
 class _QualifiedRenameTransformer(cst.CSTTransformer):
@@ -194,6 +230,8 @@ def _relative_import_parts(
         if left != right:
             break
         common += 1
+    if common == 0:
+        return 0, _dotted_expression(target)
     dots = len(package) - common + 1
     remainder = ".".join(target_parts[common:])
     return dots, _dotted_expression(remainder) if remainder else None
@@ -215,37 +253,124 @@ def _validate_python(source: str, path: Path) -> None:
         ) from error
 
 
+def run_import_tool(
+    workspace: Workspace, mode: str, paths: Iterable[str], apply: bool
+) -> ImportToolResult:
+    if mode not in {"fix", "organize"}:
+        raise WorkspaceError(f"unknown import operation: {mode}")
+    requested = list(paths)
+    targets = (
+        [_resolve_workspace_path(workspace, path) for path in requested]
+        if requested
+        else workspace.source_roots()
+    )
+    files = tuple(_python_files(targets))
+    before = {path: path.read_bytes() for path in files}
+    ruff = Path(sys.executable).parent / (
+        "ruff.exe" if sys.platform == "win32" else "ruff"
+    )
+    executable = str(ruff) if ruff.is_file() else shutil.which("ruff")
+    if not executable:
+        raise WorkspaceError("the isolated pymgr installation does not contain Ruff")
+    rule = "I" if mode == "organize" else "F401"
+    command = [
+        executable,
+        "check",
+        "--select",
+        rule,
+        "--no-cache",
+        "--color",
+        "never",
+    ]
+    command.append("--fix-only" if apply else "--diff")
+    command.extend(str(path) for path in targets)
+    try:
+        result = subprocess.run(
+            command,
+            cwd=workspace.root,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise WorkspaceError(
+            f"Ruff import {mode} timed out after {error.timeout} seconds"
+        ) from error
+    preview_diff = not apply and result.returncode == 1 and "Would fix" in result.stdout
+    if result.returncode and not preview_diff:
+        if apply:
+            for path, content in before.items():
+                _atomic_write(path, content)
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise WorkspaceError(f"Ruff import {mode} failed: {detail}")
+    changed = tuple(
+        path for path, content in before.items() if path.read_bytes() != content
+    )
+    if apply:
+        try:
+            for path in changed:
+                _validate_python(path.read_text(encoding="utf-8"), path)
+        except BaseException:
+            for path, content in before.items():
+                _atomic_write(path, content)
+            raise
+    return ImportToolResult(mode, apply, changed, result.stdout.strip())
+
+
+def _resolve_workspace_path(workspace: Workspace, value: str) -> Path:
+    path = (workspace.root / value).resolve()
+    if path != workspace.root and workspace.root not in path.parents:
+        raise WorkspaceError(f"import operation path escapes the workspace: {value}")
+    if not path.exists():
+        raise WorkspaceError(f"import operation path does not exist: {value}")
+    return path
+
+
+def _python_files(paths: Iterable[Path]) -> Iterable[Path]:
+    seen: set[Path] = set()
+    for path in paths:
+        candidates = [path] if path.is_file() else sorted(path.rglob("*.py"))
+        for candidate in candidates:
+            if candidate.suffix == ".py" and candidate not in seen:
+                seen.add(candidate)
+                yield candidate
+
+
 def plan_module_move(index: ProjectIndex, old: str, new: str) -> RefactorPlan:
     if old not in index.modules:
         raise WorkspaceError(f"unknown local module: {old}")
     if new in index.modules:
         raise WorkspaceError(f"destination module already exists: {new}")
     old_info = index.modules[old]
+    source = old_info.path.parent if old_info.is_package else old_info.path
     if old_info.is_package:
-        raise WorkspaceError(
-            "package-directory moves are not yet supported; move individual modules"
-        )
-    destination = old_info.source_root.joinpath(*new.split(".")).with_suffix(".py")
+        indexed = {
+            module.path.resolve()
+            for module in index.modules.values()
+            if module.path == source or source in module.path.parents
+        }
+        unindexed = [
+            path for path in source.rglob("*.py") if path.resolve() not in indexed
+        ]
+        if unindexed:
+            raise WorkspaceError(
+                f"package contains unindexed Python source: {unindexed[0]}"
+            )
+    destination = old_info.source_root.joinpath(*new.split("."))
+    if not old_info.is_package:
+        destination = destination.with_suffix(".py")
+    if old_info.is_package and source in destination.parents:
+        raise WorkspaceError("cannot move a package inside itself")
     if destination.exists():
         raise WorkspaceError(f"destination path already exists: {destination}")
 
-    old_parent = old.rpartition(".")[0]
-    new_parent = new.rpartition(".")[0]
     warnings: list[str] = []
     changes: list[Change] = []
     for module in index.modules.values():
         before = module.path.read_text(encoding="utf-8")
         tree = ast.parse(before, filename=str(module.path))
-        if module.name == old and old_parent != new_parent:
-            relative = [
-                node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom) and node.level
-            ]
-            if relative:
-                raise WorkspaceError(
-                    f"{old} contains relative imports; cross-package move requires an explicit import migration first"
-                )
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
@@ -255,9 +380,20 @@ def plan_module_move(index: ProjectIndex, old: str, new: str) -> RefactorPlan:
                 warnings.append(
                     f"{module.path}:{getattr(node, 'lineno', 1)} string reference requires review"
                 )
-        parsed = _parse_module(before, module.path)
-        after = parsed.visit(
-            _ImportMoveTransformer(old, new, module.name, module.is_package)
+        relocated_name = module.name
+        if module.name == old or (
+            old_info.is_package and module.name.startswith(old + ".")
+        ):
+            relocated_name = _replace_prefix(module.name, old, new)
+        transformed = _parse_module(before, module.path)
+        if relocated_name != module.name:
+            transformed = transformed.visit(
+                _RelocateRelativeImportsTransformer(
+                    module.name, relocated_name, module.is_package
+                )
+            )
+        after = transformed.visit(
+            _ImportMoveTransformer(old, new, relocated_name, module.is_package)
         ).code
         if after != before:
             _validate_python(after, module.path)
@@ -267,8 +403,9 @@ def plan_module_move(index: ProjectIndex, old: str, new: str) -> RefactorPlan:
         summary=f"move {old} to {new}: {len(changes)} file(s) update imports",
         changes=tuple(changes),
         warnings=tuple(sorted(set(warnings))),
-        source=old_info.path,
+        source=source,
         destination=destination,
+        move_is_directory=old_info.is_package,
     )
 
 
@@ -389,12 +526,21 @@ def _common_prefix_length(left: tuple[str, ...], right: tuple[str, ...]) -> int:
 
 def _result_paths(plan: RefactorPlan) -> Iterable[Path]:
     for change in plan.changes:
-        if plan.source and plan.destination and change.path == plan.source:
+        if plan.source and plan.destination and plan.move_is_directory:
+            try:
+                relative = change.path.relative_to(plan.source)
+            except ValueError:
+                yield change.path
+            else:
+                yield plan.destination / relative
+        elif plan.source and plan.destination and change.path == plan.source:
             yield plan.destination
         else:
             yield change.path
-    if plan.destination and not any(
-        change.path == plan.source for change in plan.changes
+    if (
+        plan.destination
+        and not plan.move_is_directory
+        and not any(change.path == plan.source for change in plan.changes)
     ):
         yield plan.destination
 

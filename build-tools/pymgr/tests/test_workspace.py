@@ -37,6 +37,24 @@ class FakeUV:
         return subprocess.CompletedProcess(args, 0, "", "")
 
 
+class MissingEditableUV(FakeUV):
+    def __call__(self, root: Path, args) -> subprocess.CompletedProcess[str]:
+        if args[:3] == ["uv", "run", "--locked"] and any(
+            "direct_url.json" in argument for argument in args
+        ):
+            output = json.dumps(
+                {
+                    "python": sys.executable,
+                    "version": sys.version.split()[0],
+                    "prefix": str(root / ".venv"),
+                    "sys_path": [],
+                    "distributions": {},
+                }
+            )
+            return subprocess.CompletedProcess(args, 0, output + "\n", "")
+        return super().__call__(root, args)
+
+
 def test_sync_is_transactional_and_publishes_generation(project: Path) -> None:
     runner = FakeUV()
     workspace = Workspace(project, runner)
@@ -100,3 +118,26 @@ def test_doctor_explains_unsynchronized_workspace(project: Path) -> None:
     subjects = {item.subject for item in findings}
     assert "uv.lock" in subjects
     assert "workspace state" in subjects
+
+
+def test_doctor_detects_missing_editable_workspace_member(
+    project: Path, monkeypatch
+) -> None:
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + "\n[build-system]\nrequires = ['uv_build']\nbuild-backend = 'uv_build'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("pymgr.workspace.shutil.which", lambda _name: "/bin/uv")
+    workspace = Workspace(project, MissingEditableUV())
+    workspace.init()
+    workspace.mutate("sync")
+
+    findings = workspace.doctor()
+
+    assert any(
+        finding.subject == "workspace member acme"
+        and finding.observed == "not installed"
+        for finding in findings
+    )

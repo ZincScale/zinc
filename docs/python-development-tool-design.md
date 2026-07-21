@@ -1,7 +1,7 @@
 # Python Development Tool Design
 
-**Status:** design contract; the initial Phase 1-3 vertical slice lives in
-`build-tools/pymgr/` and is under active implementation.
+**Status:** design contract; Phase 1-3 and the initial static portion of Phase 4
+live in `build-tools/pymgr/` and remain under active implementation.
 
 This document defines a development tool for ordinary Python projects. The
 tool coordinates dependency management, IDE state, module resolution, public
@@ -402,6 +402,10 @@ pymgr imports fix
 pymgr imports organize
 ```
 
+Import fixing and organization delegate to the isolated tool installation's
+Ruff engine. `pymgr` owns preview, path safety, validation, and rollback; it does
+not implement a competing import sorter.
+
 Refactoring MUST use a concrete syntax tree. Regex or unrestricted textual
 replacement is prohibited.
 
@@ -435,6 +439,11 @@ Initial commands:
 ```text
 pymgr loops [path]
 pymgr loop explain <file:line>
+```
+
+Planned measured-comparison command:
+
+```text
 pymgr loop compare <file:line> -- <command...>
 ```
 
@@ -658,6 +667,10 @@ has one unambiguous origin.
 Exit criterion: moving a representative module updates all static imports and
 exports without textual search-and-replace or formatting loss.
 
+Implementation status: file and package moves, cross-package relative-import
+migration, qualified symbol renames, re-export updates, and Ruff-backed import
+organization are implemented. Dynamic references remain review-only.
+
 ### Phase 4: loop analysis
 
 - Loop inventory and semantic classification.
@@ -669,6 +682,12 @@ exports without textual search-and-replace or formatting loss.
 Exit criterion: representative loops receive useful semantic and memory advice,
 and every performance ranking is reproducible on its named interpreter and
 workload. "Keep this loop" is a first-class successful result.
+
+Implementation status: `loops` and `loop explain` inventory and classify
+explicit loops, comprehensions, generators, reductions, iterator adapters, and
+common accumulator/index patterns. Measured comparison and dependency-specific
+vectorization adapters remain pending; current reports explicitly mark
+performance as unmeasured.
 
 ### Phase 5: PyCharm integration
 
