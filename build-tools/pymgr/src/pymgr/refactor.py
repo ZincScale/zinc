@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import keyword
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,49 @@ class ImportToolResult:
     applied: bool
     files: tuple[Path, ...]
     output: str
+
+
+def manage_public_api(
+    index: ProjectIndex,
+    module_name: str,
+    name: str,
+    from_module: str | None,
+    add: bool,
+) -> tuple[Path, bool]:
+    if not name.isidentifier() or keyword.iskeyword(name):
+        raise WorkspaceError("public name must be a Python identifier")
+    module = index.modules.get(module_name)
+    if not module:
+        raise WorkspaceError(f"unknown local module: {module_name}")
+    export_module = False
+    if add and from_module:
+        source = index.modules.get(from_module)
+        if not source:
+            raise WorkspaceError(f"unknown export source module: {from_module}")
+        export_module = (
+            from_module.rsplit(".", 1)[-1] == name
+            and name not in source.definitions
+            and name not in source.exports
+        )
+        if (
+            name not in source.definitions
+            and name not in source.exports
+            and not export_module
+        ):
+            raise WorkspaceError(f"{from_module} does not define or export {name}")
+    elif add and name not in module.definitions and name not in module.export_origins:
+        raise WorkspaceError(
+            f"{module_name} does not define {name}; provide --from MODULE"
+        )
+    changed = update_export(
+        module.path,
+        module_name,
+        name,
+        from_module,
+        add,
+        export_module=export_module,
+    )
+    return module.path, changed
 
 
 def _dotted_expression(name: str) -> cst.BaseExpression:
@@ -558,7 +602,13 @@ def _string_value(element: cst.BaseElement) -> str | None:
 
 
 def update_export(
-    path: Path, package: str, name: str, from_module: str | None, add: bool
+    path: Path,
+    module_name: str,
+    name: str,
+    from_module: str | None,
+    add: bool,
+    *,
+    export_module: bool = False,
 ) -> bool:
     before = path.read_text(encoding="utf-8") if path.exists() else ""
     module = _parse_module(before, path)
@@ -602,8 +652,16 @@ def update_export(
         body[all_index] = assignment
 
     if add and from_module:
-        relative = _relative_import(package, from_module)
-        canonical = f"from {relative} import {name} as {name}\n"
+        import_from = from_module
+        import_name = name
+        if export_module:
+            if "." not in from_module:
+                raise WorkspaceError("cannot re-export a top-level module")
+            import_from, import_name = from_module.rsplit(".", 1)
+        relative = _relative_import(
+            module_name, path.name == "__init__.py", import_from
+        )
+        canonical = f"from {relative} import {import_name} as {name}\n"
         already_present = False
         for statement in body:
             if isinstance(statement, cst.SimpleStatementLine):
@@ -616,10 +674,13 @@ def update_export(
                                 as_name = (
                                     alias.asname.name.value if alias.asname else None
                                 )
-                                if alias_name == name and as_name == name:
+                                if alias_name == import_name and as_name == name:
                                     already_present = True
         if not already_present:
-            body.insert(all_index, cst.parse_statement(canonical))
+            body.insert(_import_insertion_index(body), cst.parse_statement(canonical))
+
+    if not add:
+        body = _remove_explicit_reexport(body, name)
 
     after = module.with_changes(body=tuple(body)).code
     _validate_python(after, path)
@@ -629,11 +690,68 @@ def update_export(
     return True
 
 
-def _relative_import(package: str, module: str) -> str:
+def _relative_import(current: str, is_package: bool, module: str) -> str:
+    package = current if is_package else current.rpartition(".")[0]
+    if not package:
+        return module
+    if module == package:
+        return "."
     prefix = package + "."
     if module.startswith(prefix):
         return "." + module[len(prefix) :]
     return module
+
+
+def _import_insertion_index(body: list[cst.BaseStatement]) -> int:
+    index = 0
+    if body and isinstance(body[0], cst.SimpleStatementLine):
+        first = body[0].body
+        if (
+            len(first) == 1
+            and isinstance(first[0], cst.Expr)
+            and isinstance(first[0].value, (cst.SimpleString, cst.ConcatenatedString))
+        ):
+            index = 1
+    while index < len(body):
+        statement = body[index]
+        if not isinstance(statement, cst.SimpleStatementLine) or not all(
+            isinstance(item, (cst.Import, cst.ImportFrom)) for item in statement.body
+        ):
+            break
+        index += 1
+    return index
+
+
+def _remove_explicit_reexport(
+    body: list[cst.BaseStatement], name: str
+) -> list[cst.BaseStatement]:
+    result: list[cst.BaseStatement] = []
+    for statement in body:
+        if (
+            not isinstance(statement, cst.SimpleStatementLine)
+            or len(statement.body) != 1
+            or not isinstance(statement.body[0], cst.ImportFrom)
+            or not isinstance(statement.body[0].names, tuple)
+        ):
+            result.append(statement)
+            continue
+        import_from = statement.body[0]
+        aliases = tuple(
+            alias
+            for alias in import_from.names
+            if not (
+                get_full_name_for_node(alias.name) == name
+                and alias.asname is not None
+                and alias.asname.name.value == name
+            )
+        )
+        if len(aliases) == len(import_from.names):
+            result.append(statement)
+        elif aliases:
+            result.append(
+                statement.with_changes(body=(import_from.with_changes(names=aliases),))
+            )
+    return result
 
 
 def _import_from_name(node: cst.ImportFrom) -> str:

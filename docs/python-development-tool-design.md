@@ -76,7 +76,7 @@ The tool MUST:
 1. Make dependency changes transactional and reproducible.
 2. Keep the project environment and IDE project model synchronized.
 3. Explain exactly how a module or symbol resolves.
-4. Give packages an explicit, enforceable public API convention.
+4. Give modules and packages an explicit, enforceable public API convention.
 5. Model imports across files and workspace packages.
 6. Detect cycles, shadowing, undeclared dependencies, and boundary violations.
 7. Safely update static imports and exports when modules or symbols move.
@@ -291,6 +291,7 @@ Initial commands:
 
 ```text
 pymgr modules
+pymgr module create <qualified-module> [--package]
 pymgr resolve <module-or-symbol>
 pymgr imports <module>
 pymgr importers <module>
@@ -312,6 +313,12 @@ For each module, the static index records:
 - Static workspace dependency edges.
 - Content hash and workspace generation.
 
+`module create` owns regular-package scaffolding. It creates the requested
+module or package, missing parent directories, required `__init__.py` files,
+and static empty `__all__` declarations. It rejects invalid identifiers,
+existing targets, path-shape conflicts, and ambiguous source roots rather than
+overwriting or guessing.
+
 The resolver MUST detect and explain:
 
 - Local modules shadowing the standard library.
@@ -329,7 +336,7 @@ Static indexing MUST NOT import or execute application modules. Runtime import
 probing is allowed only as an explicit diagnostic subprocess with a timeout,
 captured output, and a clear warning that module code may execute.
 
-Example verbose result:
+Example resolver result:
 
 ```text
 Interpreter:     /project/.venv/bin/python
@@ -349,9 +356,10 @@ IDE generation:  42, synchronized
 Initial commands:
 
 ```text
-pymgr exports <package>
-pymgr export <package> <name> --from <module>
-pymgr unexport <package> <name>
+pymgr exports <module>
+pymgr export <module> <local-name>
+pymgr export <module> <name> --from <source-module>
+pymgr unexport <module> <name>
 pymgr api snapshot
 pymgr api diff
 pymgr api check
@@ -364,6 +372,23 @@ from .client import Client as Client
 from .config import Config as Config
 
 __all__ = ["Client", "Config"]
+```
+
+An ordinary module exposes its own definitions with the same source of truth:
+
+```python
+def calculate() -> int:
+    return 42
+
+__all__ = ["calculate"]
+```
+
+A package may expose a submodule itself using an explicit alias:
+
+```python
+from . import billing as billing
+
+__all__ = ["billing"]
 ```
 
 Rules:
@@ -692,6 +717,7 @@ and the environment can always be explained or repaired by the tool.
 - Workspace dependency boundaries.
 - Cycle detection.
 - Explicit export management.
+- Module/package scaffolding with regular-package markers.
 - API snapshots and diffs.
 
 Exit criterion: every static import and declared public export is queryable and

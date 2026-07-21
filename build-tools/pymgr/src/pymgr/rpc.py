@@ -9,9 +9,11 @@ from pymgr.loop_compare import comparison_report
 from pymgr.loops import LoopAnalyzer
 from pymgr.refactor import (
     apply_plan,
+    manage_public_api,
     plan_module_move,
     plan_symbol_rename,
 )
+from pymgr.scaffold import create_module
 from pymgr.tracing import query_callers, query_uses, trace_report
 from pymgr.workspace import Workspace, WorkspaceError
 
@@ -35,6 +37,9 @@ class RpcServer:
             "workspace/status": self._workspace_status,
             "workspace/doctor": self._workspace_doctor,
             "modules/list": self._modules_list,
+            "modules/create": self._modules_create,
+            "exports/list": self._exports_list,
+            "exports/update": self._exports_update,
             "imports/cycles": self._imports_cycles,
             "loops/list": self._loops_list,
             "loops/explain": self._loops_explain,
@@ -110,6 +115,8 @@ class RpcServer:
                 "interpreterVerification": True,
                 "dependencyMutations": ["sync", "check", "add", "remove", "update"],
                 "moduleDiagnostics": True,
+                "moduleScaffolding": True,
+                "publicApiManagement": True,
                 "refactorPreview": ["move", "rename"],
                 "loopAnalysis": ["list", "explain", "comparison"],
                 "runtimeIntelligence": ["uses", "callers", "traceReport"],
@@ -149,6 +156,50 @@ class RpcServer:
             ],
             "issues": [asdict(issue) for issue in index.issues],
         }
+
+    def _modules_create(self, params: dict[str, object]) -> dict[str, object]:
+        created = create_module(
+            self.workspace,
+            _string(params, "module"),
+            package=_boolean(params, "package", default=False),
+            source_root=_optional_string(params, "sourceRoot"),
+        )
+        return {
+            "module": created.module,
+            "kind": created.kind,
+            "path": str(created.path.relative_to(self.workspace.root)),
+            "sourceRoot": str(created.source_root.relative_to(self.workspace.root)),
+            "created": [
+                str(path.relative_to(self.workspace.root)) for path in created.created
+            ],
+        }
+
+    def _exports_list(self, params: dict[str, object]) -> dict[str, object]:
+        module_name = _string(params, "module")
+        module = ProjectIndex(self.workspace).build().modules.get(module_name)
+        if not module:
+            raise WorkspaceError(f"unknown local module: {module_name}")
+        return {
+            "module": module_name,
+            "exports": [
+                {
+                    "name": name,
+                    "origin": module.export_origins.get(name, f"{module.name}.{name}"),
+                }
+                for name in module.exports
+            ],
+        }
+
+    def _exports_update(self, params: dict[str, object]) -> dict[str, object]:
+        index = ProjectIndex(self.workspace).build()
+        path, changed = manage_public_api(
+            index,
+            _string(params, "module"),
+            _string(params, "name"),
+            _optional_string(params, "fromModule"),
+            _boolean(params, "add", default=True),
+        )
+        return {"changed": changed, "path": str(path)}
 
     def _imports_cycles(self, params: dict[str, object]) -> dict[str, object]:
         _no_params(params)

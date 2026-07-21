@@ -15,7 +15,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
-import java.awt.FlowLayout;
+import java.awt.GridLayout;
 
 public final class PymgrToolWindowFactory implements ToolWindowFactory {
     @Override
@@ -27,13 +27,18 @@ public final class PymgrToolWindowFactory implements ToolWindowFactory {
         output.setEditable(false);
         output.setLineWrap(true);
         output.setWrapStyleWord(true);
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel actions = new JPanel(new GridLayout(0, 4, 4, 4));
 
         button(actions, "Refresh", service::refreshStatus);
         button(actions, "Sync", service::sync);
         button(actions, "Use Interpreter", service::selectSynchronizedInterpreter);
         button(actions, "Doctor", () -> service.requestView("workspace/doctor", object(), output::setText));
         button(actions, "Modules", () -> service.requestView("modules/list", object(), output::setText));
+        button(actions, "New Module", () -> createModule(project, service, output, false));
+        button(actions, "New Package", () -> createModule(project, service, output, true));
+        button(actions, "Exports", () -> promptRequest(project, service, output, "Module", "exports/list", "module"));
+        button(actions, "Export", () -> updateExport(project, service, output, true));
+        button(actions, "Unexport", () -> updateExport(project, service, output, false));
         button(actions, "Cycles", () -> service.requestView("imports/cycles", object(), output::setText));
         button(actions, "Trace Report", () -> service.requestView("trace/report", object(), output::setText));
         button(actions, "Loop Result", () -> service.requestView("loops/comparison", object(), output::setText));
@@ -59,6 +64,48 @@ public final class PymgrToolWindowFactory implements ToolWindowFactory {
         if (value != null && !value.isBlank()) {
             service.mutateDependency(operation, value);
         }
+    }
+
+    private static void createModule(
+            Project project,
+            PymgrProjectService service,
+            JBTextArea output,
+            boolean packageModule) {
+        String value = Messages.showInputDialog(
+                project,
+                "Qualified module name",
+                packageModule ? "pymgr New Package" : "pymgr New Module",
+                null);
+        if (value != null && !value.isBlank()) {
+            service.createModule(value.trim(), packageModule, output::setText);
+        }
+    }
+
+    private static void updateExport(
+            Project project,
+            PymgrProjectService service,
+            JBTextArea output,
+            boolean add) {
+        String module = Messages.showInputDialog(project, "Owning module", "pymgr Public API", null);
+        if (module == null || module.isBlank()) {
+            return;
+        }
+        String name = Messages.showInputDialog(project, "Public name", "pymgr Public API", null);
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        String fromModule = null;
+        if (add) {
+            fromModule = Messages.showInputDialog(
+                    project,
+                    "Source module (leave blank for a local definition)",
+                    "pymgr Public API",
+                    null);
+            if (fromModule == null) {
+                return;
+            }
+        }
+        service.updateExport(module.trim(), name.trim(), fromModule, add, output::setText);
     }
 
     private static void promptRequest(

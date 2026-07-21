@@ -123,6 +123,35 @@ public final class PymgrProjectService implements Disposable {
         request(method, params, result -> display.accept(result.toString()));
     }
 
+    public void createModule(String module, boolean packageModule, Consumer<String> display) {
+        JsonObject params = new JsonObject();
+        params.addProperty("module", module);
+        params.addProperty("package", packageModule);
+        request("modules/create", params, result -> {
+            display.accept(result.toString());
+            refreshProjectModel();
+        });
+    }
+
+    public void updateExport(
+            String module,
+            String name,
+            String fromModule,
+            boolean add,
+            Consumer<String> display) {
+        JsonObject params = new JsonObject();
+        params.addProperty("module", module);
+        params.addProperty("name", name);
+        params.addProperty("add", add);
+        if (fromModule != null && !fromModule.isBlank()) {
+            params.addProperty("fromModule", fromModule.trim());
+        }
+        request("exports/update", params, result -> {
+            display.accept(result.toString());
+            refreshProjectModel();
+        });
+    }
+
     public void requestRefactor(String method, JsonObject params, Consumer<String> display) {
         params.addProperty("apply", false);
         request(method, params, preview -> {

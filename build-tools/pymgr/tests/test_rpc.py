@@ -63,6 +63,8 @@ def test_rpc_initialize_exposes_generation_and_editor_capabilities(
     assert result["python"] == "/tmp/python"
     assert result["capabilities"]["generationWatcher"] is True
     assert result["capabilities"]["refactorPreview"] == ["move", "rename"]
+    assert result["capabilities"]["moduleScaffolding"] is True
+    assert result["capabilities"]["publicApiManagement"] is True
     assert result["capabilities"]["runtimeIntelligence"] == [
         "uses",
         "callers",
@@ -106,6 +108,38 @@ def test_rpc_refactor_is_preview_only_by_default(project: Path) -> None:
     assert result["move"] == {"from": str(module), "to": str(destination)}
     assert module.exists()
     assert not destination.exists()
+
+
+def test_rpc_creates_modules_and_updates_public_api(project: Path) -> None:
+    server = RpcServer(Workspace(project))
+
+    created = server.handle(_request("modules/create", {"module": "acme.service"}))
+    service = project / "src" / "acme" / "service.py"
+    service.write_text(
+        service.read_text(encoding="utf-8") + "\ndef run():\n    return 1\n",
+        encoding="utf-8",
+    )
+    exported = server.handle(
+        _request(
+            "exports/update",
+            {"module": "acme.service", "name": "run", "add": True},
+            request_id=2,
+        )
+    )
+    listed = server.handle(
+        _request("exports/list", {"module": "acme.service"}, request_id=3)
+    )
+
+    assert created is not None
+    assert created["result"]["created"] == [
+        "src/acme/__init__.py",
+        "src/acme/service.py",
+    ]
+    assert exported is not None and exported["result"]["changed"] is True
+    assert listed is not None
+    assert listed["result"]["exports"] == [
+        {"name": "run", "origin": "acme.service.run"}
+    ]
 
 
 def test_rpc_rejects_unknown_versions_methods_and_invalid_params(

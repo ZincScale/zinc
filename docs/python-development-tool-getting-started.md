@@ -83,6 +83,22 @@ regular package under `src/`, `__init__.py`, an explicit empty `__all__`, the
 The empty `__all__` means the package initially exposes no public names; use
 `pymgr export` as the API grows.
 
+Create modules and packages without manually building their package plumbing:
+
+```text
+pymgr module create acme.models
+pymgr module create acme.services --package
+```
+
+pymgr creates missing parent directories, regular-package `__init__.py` files,
+and explicit empty `__all__` declarations. You can then focus on definitions in
+the generated module files and use the API commands to expose them.
+
+Within the supported project model, pymgr owns this plumbing: `new` creates
+project metadata and the initial package, `module create` maintains the package
+tree, and `export`/`unexport` maintain declared APIs. Framework-specific files
+remain application concerns rather than Python package requirements.
+
 To adopt an existing packaged project instead:
 
 ```text
@@ -215,6 +231,34 @@ An empty `update` is rejected; choose package names or `--all` explicitly.
 
 ## 5. Modules and imports
 
+### `module create`
+
+Create an ordinary module and every missing regular parent package:
+
+```text
+pymgr module create acme.billing.invoice
+```
+
+This creates `src/acme/billing/invoice.py` plus missing `acme/__init__.py` and
+`acme/billing/__init__.py` files. Every created Python file starts with
+`__all__ = []`, so nothing is accidentally declared public.
+
+Create a subpackage instead of a module file:
+
+```text
+pymgr module create acme.billing.providers --package
+```
+
+In a workspace with multiple configured source roots, select one explicitly:
+
+```text
+pymgr module create service.handlers --source-root packages/service/src
+```
+
+The command refuses invalid Python identifiers, existing targets, module versus
+package path conflicts, and ambiguous source roots. It never overwrites an
+existing project file.
+
 ### `modules`
 
 List local modules, owning workspace packages, paths, package status, exports,
@@ -287,35 +331,55 @@ pymgr cycles
 
 ## 6. Public APIs
 
-`pymgr` treats a static `__all__` in `__init__.py` as the declared public API.
-It diagnoses missing `__init__.py` files under the regular-package policy,
-warns about imports of underscore-prefixed private names, and reports dynamic
-`__all__` or star imports rather than guessing. Export commands and safe
-move/rename refactors update package re-exports and `__all__` together.
+`pymgr` treats a static `__all__` in every module and package `__init__.py` as
+the declared public API. A name that is absent from `__all__` remains importable
+under normal Python semantics, but pymgr treats it as private. It diagnoses
+missing `__init__.py` files under the regular-package policy, warns about
+imports of underscore-prefixed private names, and reports dynamic `__all__` or
+star imports rather than guessing. Export commands and safe move/rename
+refactors update re-exports and `__all__` together.
 
 ### `exports`
 
-List a package's public names and their origins.
+List a module or package's public names and their origins.
 
 ```text
 pymgr exports acme
+pymgr exports acme.billing.models
 ```
 
 ### `export`
 
-Add a public re-export and update `__all__`.
+Expose a definition already present in a module:
 
 ```text
-pymgr export acme User --from acme.models
+pymgr export acme.billing.models Invoice
+```
+
+Re-export a symbol from a child module through a package and update
+`__init__.py`:
+
+```text
+pymgr export acme.billing Invoice --from acme.billing.models
+```
+
+Expose a submodule or subpackage itself:
+
+```text
+pymgr export acme billing --from acme.billing
 ```
 
 ### `unexport`
 
-Remove a public name from the package surface.
+Remove a public name from a module or package surface.
 
 ```text
-pymgr unexport acme User
+pymgr unexport acme.billing Invoice
+pymgr unexport acme.billing.models Invoice
 ```
+
+For package re-exports created by pymgr, this removes both the `__all__` entry
+and the corresponding explicit `from ... import Name as Name` statement.
 
 ### `api snapshot`
 
@@ -513,6 +577,7 @@ The **pymgr** tool window:
 - Can select an already-configured matching interpreter.
 - Requests VFS and code-analysis refresh after synchronization.
 - Runs add, remove, update, doctor, module, and cycle actions.
+- Creates modules/packages and manages module or package exports.
 - Presents loop explanations/comparisons, uses, callers, and trace reports.
 - Previews move/rename plans and requires confirmation before applying them.
 
@@ -538,9 +603,9 @@ Initialize with one JSON object per line:
 {"jsonrpc":"2.0","id":1,"method":"pymgr/initialize","params":{"protocolVersion":"1.0"}}
 ```
 
-The service exposes workspace/doctor state, modules, cycles, loop results,
-runtime evidence, transactional dependencies, and preview-first refactors. It
-opens no network listener.
+The service exposes workspace/doctor state, module/package creation, public API
+management, modules, cycles, loop results, runtime evidence, transactional
+dependencies, and preview-first refactors. It opens no network listener.
 
 ## 12. CI example
 

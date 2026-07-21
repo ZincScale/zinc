@@ -12,12 +12,13 @@ from pymgr.loop_compare import LoopComparison, compare_loop
 from pymgr.loops import LoopAnalyzer, LoopFinding
 from pymgr.refactor import (
     apply_plan,
+    manage_public_api,
     plan_module_move,
     plan_symbol_rename,
     run_import_tool,
-    update_export,
 )
 from pymgr.rpc import serve_stdio
+from pymgr.scaffold import create_module
 from pymgr.tracing import query_callers, query_uses, run_trace, trace_report
 from pymgr.workspace import Workspace, WorkspaceError
 
@@ -60,6 +61,19 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     commands.add_parser("modules")
+    module = commands.add_parser("module")
+    module_actions = module.add_subparsers(dest="module_action", required=True)
+    create = module_actions.add_parser("create")
+    create.add_argument("module")
+    create.add_argument(
+        "--package",
+        action="store_true",
+        help="create a package directory instead of a module file",
+    )
+    create.add_argument(
+        "--source-root",
+        help="configured source root to use when the workspace is ambiguous",
+    )
     resolve = commands.add_parser("resolve")
     resolve.add_argument("target")
     imports = commands.add_parser("imports")
@@ -78,13 +92,13 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("cycles")
 
     exports = commands.add_parser("exports")
-    exports.add_argument("package")
+    exports.add_argument("module")
     export = commands.add_parser("export")
-    export.add_argument("package")
+    export.add_argument("module")
     export.add_argument("name")
-    export.add_argument("--from", dest="from_module", required=True)
+    export.add_argument("--from", dest="from_module")
     unexport = commands.add_parser("unexport")
-    unexport.add_argument("package")
+    unexport.add_argument("module")
     unexport.add_argument("name")
 
     api = commands.add_parser("api")
@@ -371,6 +385,27 @@ def run(argv: Sequence[str] | None = None) -> int:
                 print(finding.suggested_code)
         return 0
 
+    if args.command == "module":
+        created = create_module(
+            workspace,
+            args.module,
+            package=args.package,
+            source_root=args.source_root,
+        )
+        _emit(
+            {
+                "module": created.module,
+                "kind": created.kind,
+                "path": str(created.path.relative_to(workspace.root)),
+                "source_root": str(created.source_root.relative_to(workspace.root)),
+                "created": [
+                    str(path.relative_to(workspace.root)) for path in created.created
+                ],
+            },
+            args.json,
+        )
+        return 0
+
     index = _index(workspace)
     if args.command == "modules":
         _emit(_module_payload(index), args.json)
@@ -414,9 +449,9 @@ def run(argv: Sequence[str] | None = None) -> int:
         _emit(index.cycles(), args.json)
         return 1 if index.cycles() else 0
     elif args.command == "exports":
-        module = index.modules.get(args.package)
-        if not module or not module.is_package:
-            raise WorkspaceError(f"unknown local package: {args.package}")
+        module = index.modules.get(args.module)
+        if not module:
+            raise WorkspaceError(f"unknown local module: {args.module}")
         _emit(
             [
                 {
@@ -428,17 +463,15 @@ def run(argv: Sequence[str] | None = None) -> int:
             args.json,
         )
     elif args.command in {"export", "unexport"}:
-        module = index.modules.get(args.package)
-        if not module or not module.is_package:
-            raise WorkspaceError(f"unknown local package: {args.package}")
-        changed = update_export(
-            module.path,
-            args.package,
+        from_module = getattr(args, "from_module", None)
+        path, changed = manage_public_api(
+            index,
+            args.module,
             args.name,
-            getattr(args, "from_module", None),
+            from_module,
             args.command == "export",
         )
-        _emit({"changed": changed, "path": str(module.path)}, args.json)
+        _emit({"changed": changed, "path": str(path)}, args.json)
     elif args.command == "api":
         if args.action == "snapshot":
             path = index.write_api_snapshot()

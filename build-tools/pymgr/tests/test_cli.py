@@ -90,3 +90,38 @@ def test_cli_import_organization_requires_explicit_apply(project: Path, capsys) 
     applied = json.loads(capsys.readouterr().out)
     assert applied["applied"] is True
     assert module.read_text(encoding="utf-8").startswith("import os\nimport sys\n")
+
+
+def test_cli_creates_module_and_manages_its_public_api(project: Path, capsys) -> None:
+    assert (
+        run(
+            [
+                "--root",
+                str(project),
+                "--json",
+                "module",
+                "create",
+                "acme.service",
+            ]
+        )
+        == 0
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert created["module"] == "acme.service"
+    assert created["created"] == [
+        "src/acme/__init__.py",
+        "src/acme/service.py",
+    ]
+
+    service = project / "src" / "acme" / "service.py"
+    service.write_text(
+        service.read_text(encoding="utf-8") + "\ndef run():\n    return 1\n",
+        encoding="utf-8",
+    )
+    assert run(["--root", str(project), "export", "acme.service", "run"]) == 0
+    capsys.readouterr()
+    assert "__all__ = ['run']" in service.read_text(encoding="utf-8")
+
+    assert run(["--root", str(project), "unexport", "acme.service", "run"]) == 0
+    capsys.readouterr()
+    assert "__all__ = []" in service.read_text(encoding="utf-8")

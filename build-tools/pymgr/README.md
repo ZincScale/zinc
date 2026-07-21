@@ -2,8 +2,9 @@
 
 `pymgr` is an optional development coordinator for ordinary Python projects.
 It provides transactional uv environment changes, module/API diagnostics,
-preview-first refactors, loop guidance and measurement, opt-in runtime tracing,
-and a PyCharm integration. Application code never imports or depends on it.
+module and package scaffolding, explicit public-API management, preview-first
+refactors, loop guidance and measurement, opt-in runtime tracing, and a PyCharm
+integration. Application code never imports or depends on it.
 
 ## Quick start
 
@@ -33,6 +34,17 @@ cd /path/to/python-project
 pymgr init
 pymgr sync
 pymgr doctor
+```
+
+Create package structure and manage public APIs without hand-editing
+`__init__.py`:
+
+```text
+pymgr module create acme.billing.models
+pymgr module create acme.billing.providers --package
+# Write the Model logic in src/acme/billing/models.py.
+pymgr export acme.billing.models Model
+pymgr export acme.billing Model --from acme.billing.models
 ```
 
 The target must use `pyproject.toml`, a `src/` layout, regular packages, and

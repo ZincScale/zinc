@@ -61,6 +61,10 @@ generation, synchronization state, and interpreter agreement.
   interpreter is already registered as a PyCharm SDK. If it is not registered,
   add it in PyCharm's Python Interpreter settings and retry.
 - **Doctor**, **Modules**, and **Cycles** show environment and source analysis.
+- **New Module** and **New Package** create the requested dotted path, missing
+  regular parent packages, `__init__.py` files, and empty `__all__` declarations.
+- **Exports** lists a module or package API. **Export** exposes a local
+  definition or re-exports from another module; **Unexport** removes it.
 - **Add**, **Remove**, and **Update All** perform transactional dependency
   operations through pymgr.
 - **Loop** explains a `file.py:line`; **Loop Result** shows the latest measured
@@ -71,8 +75,8 @@ generation, synchronization state, and interpreter agreement.
   confirmation before applying it.
 
 The plugin polls generation state every two seconds. After a successful sync,
-dependency mutation, or refactor, it requests a virtual-file and Python code
-analysis refresh.
+dependency mutation, module/package creation, API update, or refactor, it
+requests a virtual-file and Python code-analysis refresh.
 
 ## Troubleshooting
 

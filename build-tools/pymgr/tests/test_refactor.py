@@ -95,6 +95,58 @@ def test_export_management_uses_explicit_reexport_form(project: Path) -> None:
     assert _index(project).modules["acme"].exports == ["Client"]
 
 
+def test_module_can_export_its_own_definition(project: Path) -> None:
+    module = project / "src" / "acme" / "service.py"
+    module.write_text("def run():\n    return 1\n", encoding="utf-8")
+
+    changed = update_export(module, "acme.service", "run", None, True)
+
+    assert changed
+    assert "__all__ = ['run']" in module.read_text(encoding="utf-8")
+    assert _index(project).modules["acme.service"].exports == ["run"]
+
+
+def test_unexport_removes_managed_reexport_import(project: Path) -> None:
+    package = project / "src" / "acme"
+    initializer = package / "__init__.py"
+    initializer.write_text(
+        "from .client import Client as Client\n\n__all__ = ['Client']\n",
+        encoding="utf-8",
+    )
+
+    changed = update_export(initializer, "acme", "Client", None, False)
+
+    assert changed
+    source = initializer.read_text(encoding="utf-8")
+    assert "from .client" not in source
+    assert "__all__ = []" in source
+
+
+def test_package_can_export_a_submodule(project: Path) -> None:
+    package = project / "src" / "acme"
+    initializer = package / "__init__.py"
+    initializer.write_text(
+        "def main():\n    return 1\n\n__all__ = []\n", encoding="utf-8"
+    )
+    (package / "billing.py").write_text("__all__ = []\n", encoding="utf-8")
+
+    changed = update_export(
+        initializer,
+        "acme",
+        "billing",
+        "acme.billing",
+        True,
+        export_module=True,
+    )
+
+    assert changed
+    source = initializer.read_text(encoding="utf-8")
+    assert "from . import billing as billing" in source
+    assert source.index("from . import") < source.index("def main")
+    assert "__all__ = ['billing']" in source
+    assert _index(project).modules["acme"].export_origins["billing"] == "acme.billing"
+
+
 def test_cross_package_move_rewrites_relative_imports(project: Path) -> None:
     source_root = project / "src"
     package = source_root / "acme"
