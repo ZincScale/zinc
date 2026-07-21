@@ -1,0 +1,25 @@
+[project]
+name = "pymgr"
+version = "0.1.0"
+description = "Optional development coordinator for ordinary Python projects"
+requires-python = ">=3.12"
+dependencies = [
+    "libcst>=1.8,<2",
+]
+
+[project.scripts]
+pymgr = "pymgr.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+    "ruff>=0.14,<1",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

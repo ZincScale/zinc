@@ -15,12 +15,13 @@ or commercial product.
 | [dialects/zinc-python](dialects/zinc-python/) | Transpiler + CLI | Python | Earlier braces-Python experiment retained for reference and personal use. |
 | [build-tools/zinc-java](build-tools/zinc-java/) | Build tool | Java | Personal toolchain experiment. |
 | [build-tools/zinc-csharp](build-tools/zinc-csharp/) | Build tool | C#/.NET | Personal toolchain experiment. |
+| [build-tools/pymgr](build-tools/pymgr/) | Development tool | Python projects | Optional uv environment, module/API, and safe-refactoring coordinator. |
 
 ## Repository Map
 
 - `compilers/zinc-go/` - the typed OO language and Go source compiler.
 - `dialects/zinc-python/` - the braces-Python to Python transpiler experiment.
-- `build-tools/` - Java and C# toolchain experiments.
+- `build-tools/` - Java, C#/.NET, and Python-project tooling experiments.
 - `perf/` - benchmark scripts and results.
 - `docs/` - repository-level design notes.
 
