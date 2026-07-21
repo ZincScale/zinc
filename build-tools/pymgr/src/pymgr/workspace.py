@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -114,6 +115,53 @@ class Workspace:
         cls, start: Path | None = None, runner: Runner | None = None
     ) -> Workspace:
         return cls(find_workspace(start), runner)
+
+    @classmethod
+    def create(
+        cls,
+        target: Path,
+        *,
+        name: str | None = None,
+        python: str = "3.12",
+        description: str | None = None,
+        runner: Runner | None = None,
+    ) -> tuple[Workspace, State]:
+        root = target.resolve()
+        if root.exists():
+            if not root.is_dir():
+                raise WorkspaceError(f"new project target is not a directory: {root}")
+            if any(root.iterdir()):
+                raise WorkspaceError(
+                    f"new project target must be absent or empty: {root}"
+                )
+        actual_runner = runner or _default_runner
+        if shutil.which("uv") is None and actual_runner is _default_runner:
+            raise WorkspaceError("uv is not installed or not on PATH")
+        root.parent.mkdir(parents=True, exist_ok=True)
+        command = ["uv", "init", "--package", "--python", python]
+        if name:
+            command.extend(["--name", name])
+        if description:
+            command.extend(["--description", description])
+        command.append(str(root))
+        try:
+            result = actual_runner(root.parent, command)
+        except subprocess.TimeoutExpired as error:
+            raise WorkspaceError(
+                f"uv init timed out after {error.timeout} seconds"
+            ) from error
+        if result.returncode:
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"exit status {result.returncode}"
+            )
+            raise WorkspaceError(f"uv init failed: {detail}")
+
+        workspace = cls(root, actual_runner)
+        workspace.init()
+        workspace._initialize_public_api()
+        return workspace, workspace.mutate("sync")
 
     def config(self) -> dict:
         try:
@@ -239,6 +287,41 @@ class Workspace:
         state = self.load_state()
         self.save_state(state)
         return state
+
+    def _initialize_public_api(self) -> None:
+        for source_root in self.source_roots():
+            if not source_root.is_dir():
+                continue
+            for package in source_root.iterdir():
+                initializer = package / "__init__.py"
+                if package.is_dir() and initializer.is_file():
+                    text = initializer.read_text(encoding="utf-8")
+                    try:
+                        tree = ast.parse(text, filename=str(initializer))
+                    except SyntaxError as error:
+                        raise WorkspaceError(
+                            f"cannot initialize public API in {initializer}: {error}"
+                        ) from error
+                    declares_all = any(
+                        (
+                            isinstance(node, (ast.Assign, ast.AnnAssign))
+                            and any(
+                                isinstance(target, ast.Name) and target.id == "__all__"
+                                for target in (
+                                    node.targets
+                                    if isinstance(node, ast.Assign)
+                                    else [node.target]
+                                )
+                            )
+                        )
+                        for node in tree.body
+                    )
+                    if not declares_all:
+                        suffix = "" if not text or text.endswith("\n") else "\n"
+                        _atomic_write(
+                            initializer,
+                            f"{text}{suffix}\n__all__ = []\n".lstrip("\n").encode(),
+                        )
 
     @contextmanager
     def mutation_lock(self) -> Iterator[None]:
@@ -457,6 +540,25 @@ print(json.dumps({
             and bool(current_hash)
         )
         return state, synchronized
+
+    def run_command(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        workload = list(command[1:] if command and command[0] == "--" else command)
+        if not workload:
+            raise WorkspaceError("run requires a command after --")
+        _, synchronized = self.status()
+        if not synchronized:
+            raise WorkspaceError(
+                "workspace is not synchronized; run pymgr sync before pymgr run"
+            )
+        if shutil.which("uv") is None and self.runner is _default_runner:
+            raise WorkspaceError("uv is not installed or not on PATH")
+        arguments = ["uv", "run", "--locked", "--no-sync", *workload]
+        if self.runner is not _default_runner:
+            return self.runner(self.root, arguments)
+        try:
+            return subprocess.run(arguments, cwd=self.root, check=False, text=True)
+        except OSError as error:
+            raise WorkspaceError(f"cannot run {workload[0]}: {error}") from error
 
     def doctor(self) -> list[Diagnostic]:
         findings: list[Diagnostic] = []

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from pymgr.cli import run
-from pymgr.loop_compare import compare_loop
+from pymgr.loop_compare import compare_loop, comparison_report
 from pymgr.loops import LoopAnalyzer
 from pymgr.workspace import Workspace, WorkspaceError
 
@@ -180,6 +180,7 @@ def test_loop_compare_isolates_candidates_and_persists_reproducible_report(
     assert payload["workload_id"] == comparison.workload_id
     assert payload["runs"] == 2
     assert payload["interpreter"]["controller_version"]
+    assert comparison_report(Workspace(project))["path"] == comparison.report
 
 
 def test_loop_compare_cli_emits_json_measurements(project: Path, capsys) -> None:

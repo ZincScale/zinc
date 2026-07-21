@@ -18,6 +18,7 @@ from pymgr.refactor import (
     update_export,
 )
 from pymgr.rpc import serve_stdio
+from pymgr.tracing import query_callers, query_uses, run_trace, trace_report
 from pymgr.workspace import Workspace, WorkspaceError
 
 
@@ -31,6 +32,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
+    new = commands.add_parser("new")
+    new.add_argument("path", type=Path)
+    new.add_argument("--name")
+    new.add_argument("--python", default="3.12")
+    new.add_argument("--description")
     commands.add_parser("init")
     sync = commands.add_parser("sync")
     sync.add_argument(
@@ -40,6 +46,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands.add_parser("status")
     commands.add_parser("doctor")
+    execute = commands.add_parser("run")
+    execute.add_argument("run_args", nargs=argparse.REMAINDER)
 
     add = commands.add_parser("add")
     add.add_argument("packages", nargs="+")
@@ -109,6 +117,20 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="serve newline-delimited JSON-RPC 2.0 over stdin and stdout",
     )
+    uses = commands.add_parser("uses")
+    uses.add_argument("symbol")
+    uses.add_argument("--trace", type=Path)
+    callers = commands.add_parser("callers")
+    callers.add_argument("symbol")
+    callers.add_argument("--trace", type=Path)
+    trace = commands.add_parser("trace")
+    trace.add_argument(
+        "--loop",
+        action="append",
+        default=[],
+        help="target a loop at file.py:line for entry/header/elapsed observations",
+    )
+    trace.add_argument("trace_args", nargs=argparse.REMAINDER)
     return parser
 
 
@@ -222,6 +244,18 @@ def _comparison_payload(comparison: LoopComparison) -> dict:
 
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "new":
+        if args.root is not None:
+            raise WorkspaceError("new does not accept --root; pass the target path")
+        workspace, state = Workspace.create(
+            args.path,
+            name=args.name,
+            python=args.python,
+            description=args.description,
+        )
+        _emit({"root": str(workspace.root), "state": asdict(state)}, args.json)
+        return 0
+
     workspace = Workspace.discover(args.root)
 
     if args.command == "init":
@@ -257,12 +291,32 @@ def run(argv: Sequence[str] | None = None) -> int:
                 "ready: workspace metadata, lockfile, interpreter, and source roots agree"
             )
         return 1 if any(item.level == "error" for item in findings) else 0
+    if args.command == "run":
+        return workspace.run_command(args.run_args).returncode
 
     if args.command == "serve":
         if not args.stdio:
             raise WorkspaceError("serve currently requires --stdio")
         serve_stdio(workspace, sys.stdin, sys.stdout)
         return 0
+
+    if args.command in {"uses", "callers"}:
+        query = query_uses if args.command == "uses" else query_callers
+        _emit(query(workspace, args.symbol, args.trace), args.json)
+        return 0
+
+    if args.command == "trace":
+        if args.trace_args and args.trace_args[0] == "report":
+            if args.loop:
+                raise WorkspaceError("trace report does not accept --loop")
+            if len(args.trace_args) > 2:
+                raise WorkspaceError("trace report accepts at most one report path")
+            report_path = args.trace_args[1] if len(args.trace_args) == 2 else None
+            _emit(trace_report(workspace, report_path), args.json)
+            return 0
+        result = run_trace(workspace, args.trace_args, args.loop)
+        _emit(asdict(result), args.json)
+        return result.returncode
 
     if args.command == "loops":
         findings = LoopAnalyzer(workspace).scan(args.paths)

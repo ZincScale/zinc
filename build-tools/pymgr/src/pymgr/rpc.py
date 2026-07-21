@@ -5,12 +5,14 @@ from dataclasses import asdict
 from typing import IO, Any, Callable
 
 from pymgr.analysis import ProjectIndex
+from pymgr.loop_compare import comparison_report
 from pymgr.loops import LoopAnalyzer
 from pymgr.refactor import (
     apply_plan,
     plan_module_move,
     plan_symbol_rename,
 )
+from pymgr.tracing import query_callers, query_uses, trace_report
 from pymgr.workspace import Workspace, WorkspaceError
 
 
@@ -36,6 +38,10 @@ class RpcServer:
             "imports/cycles": self._imports_cycles,
             "loops/list": self._loops_list,
             "loops/explain": self._loops_explain,
+            "loops/comparison": self._loops_comparison,
+            "uses/query": self._uses_query,
+            "callers/query": self._callers_query,
+            "trace/report": self._trace_report,
             "dependencies/mutate": self._dependencies_mutate,
             "refactors/move": self._refactors_move,
             "refactors/rename": self._refactors_rename,
@@ -97,13 +103,16 @@ class RpcServer:
             "generation": state.generation,
             "workspaceStatus": state.status,
             "synchronized": synchronized,
+            "python": state.python,
+            "pythonVersion": state.python_version,
             "capabilities": {
                 "generationWatcher": True,
                 "interpreterVerification": True,
                 "dependencyMutations": ["sync", "check", "add", "remove", "update"],
                 "moduleDiagnostics": True,
                 "refactorPreview": ["move", "rename"],
-                "loopAnalysis": ["list", "explain"],
+                "loopAnalysis": ["list", "explain", "comparison"],
+                "runtimeIntelligence": ["uses", "callers", "traceReport"],
             },
         }
 
@@ -160,6 +169,26 @@ class RpcServer:
         location = _string(params, "location")
         finding = LoopAnalyzer(self.workspace).explain(location)
         return {"location": finding.location, **asdict(finding)}
+
+    def _loops_comparison(self, params: dict[str, object]) -> dict[str, object]:
+        return comparison_report(self.workspace, _optional_string(params, "path"))
+
+    def _uses_query(self, params: dict[str, object]) -> dict[str, object]:
+        return query_uses(
+            self.workspace,
+            _string(params, "symbol"),
+            _optional_string(params, "trace"),
+        )
+
+    def _callers_query(self, params: dict[str, object]) -> dict[str, object]:
+        return query_callers(
+            self.workspace,
+            _string(params, "symbol"),
+            _optional_string(params, "trace"),
+        )
+
+    def _trace_report(self, params: dict[str, object]) -> dict[str, object]:
+        return trace_report(self.workspace, _optional_string(params, "trace"))
 
     def _dependencies_mutate(self, params: dict[str, object]) -> dict[str, object]:
         operation = _string(params, "operation")
@@ -268,4 +297,11 @@ def _boolean(params: dict[str, object], name: str, *, default: bool) -> bool:
     value = params.get(name, default)
     if not isinstance(value, bool):
         raise RpcFailure(-32602, f"{name} must be a boolean")
+    return value
+
+
+def _optional_string(params: dict[str, object], name: str) -> str | None:
+    value = params.get(name)
+    if value is not None and (not isinstance(value, str) or not value):
+        raise RpcFailure(-32602, f"{name} must be a non-empty string when supplied")
     return value

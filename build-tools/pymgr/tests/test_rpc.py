@@ -60,8 +60,14 @@ def test_rpc_initialize_exposes_generation_and_editor_capabilities(
     assert isinstance(result, dict)
     assert result["protocolVersion"] == PROTOCOL_VERSION
     assert result["generation"] == 4
+    assert result["python"] == "/tmp/python"
     assert result["capabilities"]["generationWatcher"] is True
     assert result["capabilities"]["refactorPreview"] == ["move", "rename"]
+    assert result["capabilities"]["runtimeIntelligence"] == [
+        "uses",
+        "callers",
+        "traceReport",
+    ]
 
 
 def test_rpc_lists_modules_and_explains_loops(project: Path) -> None:

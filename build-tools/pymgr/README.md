@@ -1,76 +1,77 @@
 # pymgr
 
 `pymgr` is an optional development coordinator for ordinary Python projects.
-It keeps uv environment mutations transactional, explains the local module and
-export graph, and applies conservative syntax-aware refactors. The application
-does not import or depend on `pymgr`.
+It provides transactional uv environment changes, module/API diagnostics,
+preview-first refactors, loop guidance and measurement, opt-in runtime tracing,
+and a PyCharm integration. Application code never imports or depends on it.
 
-This directory contains the working Phase 1-3 foundation and the static and
-measured-comparison portions of Phase 4 from
-[`docs/python-development-tool-design.md`](../../docs/python-development-tool-design.md):
+## Quick start
 
-1. Environment foundation.
-2. Modules and exports.
-3. Safe refactoring.
-4. Loop construct analysis.
+Install the development tool from this checkout:
 
-The implementation is an isolated Python CLI because these phases rely on
-Python's own AST and LibCST for semantics-preserving source edits. It is managed
-separately from every target project by uv.
+```text
+cd build-tools/pymgr
+./install.sh
+```
+
+The installer uses uv internally to make the `pymgr` command available. Once
+installed, project workflows go through pymgr.
+
+Create a new project entirely through the pymgr interface:
+
+```text
+pymgr new /path/to/python-project --python 3.14
+cd /path/to/python-project
+pymgr doctor
+pymgr run -- python-project
+```
+
+Or initialize and synchronize an existing packaged project:
+
+```text
+cd /path/to/python-project
+pymgr init
+pymgr sync
+pymgr doctor
+```
+
+The target must use `pyproject.toml`, a `src/` layout, regular packages, and
+Python 3.12 or newer. uv remains pymgr's internal environment engine, while
+project-facing workflows use `pymgr`. `pymgr init` adds `[tool.pymgr]` only
+when it is missing and creates disposable `.pymgr/` state.
+
+Read the complete [getting-started and command guide](../../docs/python-development-tool-getting-started.md)
+for project setup, workflows, output interpretation, PyCharm installation, and
+an example for every command. The architectural and safety rules live in the
+[design contract](../../docs/python-development-tool-design.md).
 
 ## Development
 
 ```text
-uv sync
-uv run pytest
-uv run pymgr --help
+pymgr sync
+pymgr run -- pytest
+pymgr run -- ruff check src tests
+pymgr --help
 ```
 
-From a target project:
+Build the optional PyCharm plugin:
 
 ```text
-pymgr init
-pymgr sync
-pymgr doctor
-pymgr modules
-pymgr cycles
-pymgr exports acme
-pymgr imports fix
-pymgr imports fix --apply
-pymgr imports organize
-pymgr imports organize --apply
-pymgr move acme.old acme.new
-pymgr move acme.old acme.new --apply
-pymgr loops src/acme
-pymgr loop explain src/acme/service.py:42
-pymgr loop compare --warmups 1 --runs 5 src/acme/service.py:42 -- python check_workload.py
-pymgr serve --stdio
+cd pycharm-plugin
+./gradlew buildPlugin
 ```
 
-Refactors are previews unless `--apply` is supplied. Derived state is stored in
-`.pymgr/` and can be deleted without changing application behavior. Loop advice
-separates semantic, heuristic, and measured evidence and never makes an
-unmeasured speed claim. `loop compare` runs the original and a safely generated
-candidate in disposable workspace copies. The supplied command must assert the
-expected behavior and exit unsuccessfully if either candidate is not equivalent;
-project source is never replaced. When NumPy, pandas, or Polars is already a
-declared dependency, their iterator adapters can also point out a possible
-array or column expression without adding a package or changing the data model.
+Install the generated ZIP from `pycharm-plugin/build/distributions/` using
+PyCharm's **Settings > Plugins > Install Plugin from Disk**. See the plugin's
+[standalone usage guide](pycharm-plugin/README.md) for configuration, every
+tool-window action, and troubleshooting.
 
-## Editor protocol
+## Safety model
 
-`pymgr serve --stdio` exposes the first Phase 5 editor boundary as
-newline-delimited JSON-RPC 2.0. `pymgr/initialize` negotiates protocol version
-`1.0` and returns the workspace generation, synchronization state, and supported
-capabilities. Current methods provide:
-
-- Workspace status, interpreter details, and doctor findings.
-- Module diagnostics and import cycles.
-- Loop inventory and explanations.
-- Dependency mutations through the same transactional workspace manager.
-- Module-move and symbol-rename previews, with explicit `apply: true` required
-  for mutation.
-
-The service uses stdin/stdout rather than opening a network listener. A PyCharm
-plugin can restart it freely and watch `.pymgr/state.json`; the project itself
-does not load the service or depend on it.
+- Dependency mutations use uv, a workspace lock, validation, and rollback.
+- Refactors and import cleanup are previews unless `--apply` is explicit.
+- Loop speed claims exist only after a named workload is measured.
+- Tracing launches only the requested Python child process and stores no values
+  or object representations.
+- `.pymgr/` contains disposable state, reports, and traces.
+- Removing the CLI, plugin, or `.pymgr/` does not change application behavior.

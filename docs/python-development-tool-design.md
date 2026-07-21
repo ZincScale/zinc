@@ -1,7 +1,9 @@
 # Python Development Tool Design
 
-**Status:** design contract; Phase 1-3 plus Phase 4 static analysis and measured
-comparison live in `build-tools/pymgr/` and remain under active implementation.
+**Status:** design contract implemented through Phase 6 in `build-tools/pymgr/`,
+including the optional PyCharm plugin. Automated acceptance is complete; a live
+PyCharm installation smoke test remains a release check rather than missing
+implementation.
 
 This document defines a development tool for ordinary Python projects. The
 tool coordinates dependency management, IDE state, module resolution, public
@@ -9,8 +11,8 @@ exports, safe refactoring, and runtime tracing. It does not introduce a new
 language and does not replace Python's existing package managers, type engines,
 linters, or IDEs.
 
-The CLI name `pymgr` is a placeholder. Do not use `pydev`, which is already the
-name of an established Python IDE project.
+The CLI is named `pymgr`. The earlier `pydev` candidate was rejected because it
+is already the name of an established Python IDE project.
 
 ## 1. Problem
 
@@ -140,7 +142,7 @@ criteria for the narrow model pass.
 | Importable project code | configured `src/` roots |
 | Public symbols | module or package `__all__` |
 | Tool policy | `[tool.pymgr]` in `pyproject.toml` |
-| Static index | `.pymgr/index.sqlite`, disposable |
+| Static analysis | source files, rebuilt in memory for each query |
 | Runtime observations | `.pymgr/traces/*.sqlite`, disposable |
 | Loop performance evidence | explicit trace or benchmark run, disposable |
 | Workspace state | `.pymgr/state.json`, derived |
@@ -187,7 +189,7 @@ pymgr CLI and optional daemon
 |- environment and import doctor
 |- refactoring coordinator
 |- JSON-RPC service for editor integrations
-`- SQLite state and indexes
+`- JSON workspace state and disposable SQLite reports
 
 isolated Python helper
 |- concrete-syntax-tree transformations
@@ -246,15 +248,22 @@ state may always be deleted and rebuilt.
 Initial commands:
 
 ```text
+pymgr new <path> [--name <name>] [--python <version>]
 pymgr init
 pymgr sync
 pymgr add <package>
 pymgr remove <package>
-pymgr update [package]
+pymgr update <package>...
 pymgr update --all
 pymgr status
 pymgr doctor
+pymgr run -- <command...>
 ```
+
+`new` delegates creation of a packaged `src/` project to uv, adds pymgr policy
+and an explicit package `__all__`, then completes the normal synchronization
+transaction. `run` executes through the locked environment only when the
+recorded generation is synchronized; it never performs an implicit mutation.
 
 Every mutation MUST:
 
@@ -282,7 +291,7 @@ Initial commands:
 
 ```text
 pymgr modules
-pymgr resolve <module-or-symbol> [--verbose]
+pymgr resolve <module-or-symbol>
 pymgr imports <module>
 pymgr importers <module>
 pymgr graph imports
@@ -613,26 +622,29 @@ over recommending manual package uninstall/reinstall.
 
 ## 17. Caching and persistence
 
-SQLite stores the derived static index and trace data. Caches are keyed by:
+The current implementation rebuilds its static project index in memory for
+each query. It persists only derived workspace state in `.pymgr/state.json`,
+loop-comparison reports as JSON, runtime traces as SQLite, and API snapshots
+when the user explicitly requests them. Persisted reports record or derive
+identity from:
 
 - Workspace identity.
 - Workspace generation.
 - Source content hash.
 - Python feature version.
 - Tool schema version.
-- Type-engine version where semantic results are cached.
 - Interpreter build and workload identity for measured loop advice.
 
-All cache writes use temporary files or transactions and publish atomically.
-The tool must recover from deleted or corrupt derived state by rebuilding it.
-No cache is required for source correctness.
+Workspace-state and source-file writes use atomic replacement; SQLite trace
+writes use transactions. The tool must recover from deleted derived state by
+rebuilding it. No derived state is required for source correctness.
 
 ## 18. Security and safety
 
 - Static indexing never executes application modules.
 - Explicit runtime probes run in subprocesses with timeouts.
 - Dependency credentials remain owned by uv or existing credential providers.
-- State and trace databases do not store credentials.
+- Workspace state files and trace databases do not store credentials.
 - Tracing captures identities and types, not values, by default.
 - Refactors are dry-run first and use atomic file replacement.
 - Dependency changes retain enough prior state to roll back.
@@ -663,7 +675,7 @@ spikes, but those later phases must not begin until their own risks are proven.
 
 ### Phase 1: environment foundation
 
-- `init`, `sync`, `add`, `remove`, and `update`.
+- `new`, `init`, `sync`, `add`, `remove`, `update`, and locked `run`.
 - Workspace state, generation, and mutation locking.
 - Rollback after failed synchronization.
 - `status` and environment-focused `doctor`.
@@ -739,8 +751,12 @@ without restarting the IDE or manually reinstalling packages.
 
 Implementation status: the versioned JSON-RPC-over-stdio core boundary is
 implemented, including workspace generation/interpreter state, diagnostics,
-dependency actions, refactor previews, and loop presentation data. The PyCharm
-plugin, project-model refresh spike, and IDE UI remain pending.
+dependency actions, refactor previews, loop presentation, and runtime evidence.
+The optional PyCharm 2026.1 plugin watches generation changes, verifies or
+selects an already-configured interpreter, refreshes the VFS and code analyzer,
+and presents dependency, refactor, loop, usage, caller, and trace actions. Its
+Gradle build is verified against the PyCharm SDK; installation in a live IDE is
+the remaining release smoke test.
 
 ### Phase 6: runtime intelligence
 
@@ -753,11 +769,22 @@ plugin, project-model refresh spike, and IDE UI remain pending.
 Exit criterion: developers can navigate representative dynamic call paths that
 static analysis alone cannot resolve.
 
+Implementation status: `trace` launches only an explicit Python 3.12+ child
+through a standalone `sys.monitoring` agent, without environment hooks or a
+runtime dependency. Disposable SQLite reports record project call edges,
+function counts and elapsed time, raised and handled exception types, imports,
+and selected loop entries/header hits/elapsed time. `trace report`, `uses`, and
+`callers` expose the data while keeping static imports and observed calls as
+separate evidence classes; the RPC service and PyCharm tool window present the
+same reports.
+
 ## 20. Acceptance workflow
 
 The complete initial product is accepted when this workflow succeeds:
 
 ```text
+pymgr new acme --python 3.14
+cd acme
 pymgr update pydantic
 pymgr move acme.old.models acme.models --apply
 pymgr api check
@@ -765,6 +792,7 @@ pymgr loops src/acme
 pymgr loop explain src/acme/models.py:42
 pymgr loop compare --warmups 2 --runs 10 src/acme/models.py:42 -- python check_models.py
 pymgr trace -- pytest
+pymgr run -- pytest
 ```
 
 Afterward:

@@ -1,0 +1,23 @@
+<idea-plugin>
+  <id>dev.zincscale.pymgr</id>
+  <name>pymgr</name>
+  <vendor>ZincScale</vendor>
+  <description><![CDATA[
+    <p>Optional Python project synchronization, diagnostics, refactoring, loop analysis,
+    and runtime trace presentation backed by the pymgr CLI.</p>
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.python</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <postStartupActivity implementation="dev.zincscale.pymgr.PymgrStartupActivity"/>
+    <toolWindow id="pymgr"
+                anchor="right"
+                canCloseContents="false"
+                factoryClass="dev.zincscale.pymgr.PymgrToolWindowFactory"/>
+    <notificationGroup id="pymgr"
+                       displayType="BALLOON"
+                       isLogByDefault="true"/>
+  </extensions>
+</idea-plugin>

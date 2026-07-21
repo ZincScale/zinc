@@ -54,6 +54,35 @@ class LoopComparison:
     )
 
 
+def comparison_report(
+    workspace: Workspace, path: str | Path | None = None
+) -> dict[str, object]:
+    directory = (workspace.state_dir / "loop-comparisons").resolve()
+    if path is None:
+        candidates = sorted(directory.glob("*.json")) if directory.is_dir() else []
+        if not candidates:
+            raise WorkspaceError(
+                "no loop comparison reports found; run pymgr loop compare first"
+            )
+        report = candidates[-1]
+    else:
+        report = Path(path)
+        if not report.is_absolute():
+            report = workspace.root / report
+        report = report.resolve()
+        if report.parent != directory or not report.is_file():
+            raise WorkspaceError(
+                "loop comparison path must be inside .pymgr/loop-comparisons"
+            )
+    try:
+        payload = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise WorkspaceError(f"cannot read loop comparison report: {error}") from error
+    if not isinstance(payload, dict) or "workload_id" not in payload:
+        raise WorkspaceError(f"invalid loop comparison report: {report}")
+    return {"path": str(report.relative_to(workspace.root)), **payload}
+
+
 def compare_loop(
     workspace: Workspace,
     location: str,
