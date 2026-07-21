@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from pymgr.analysis import ProjectIndex
+from pymgr.loop_compare import LoopComparison, compare_loop
 from pymgr.loops import LoopAnalyzer, LoopFinding
 from pymgr.refactor import (
     apply_plan,
@@ -92,8 +93,15 @@ def _parser() -> argparse.ArgumentParser:
     loops = commands.add_parser("loops")
     loops.add_argument("paths", nargs="*")
     loop = commands.add_parser("loop")
-    loop.add_argument("action", choices=["explain"])
-    loop.add_argument("location")
+    loop_actions = loop.add_subparsers(dest="loop_action", required=True)
+    explain = loop_actions.add_parser("explain")
+    explain.add_argument("location")
+    compare = loop_actions.add_parser("compare")
+    compare.add_argument("location")
+    compare.add_argument("--warmups", type=int, default=1)
+    compare.add_argument("--runs", type=int, default=5)
+    compare.add_argument("--timeout", type=float, default=60.0)
+    compare.add_argument("workload", nargs=argparse.REMAINDER)
     return parser
 
 
@@ -201,6 +209,10 @@ def _emit_loops(findings: list[LoopFinding], as_json: bool) -> None:
         )
 
 
+def _comparison_payload(comparison: LoopComparison) -> dict:
+    return asdict(comparison)
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     workspace = Workspace.discover(args.root)
@@ -244,6 +256,36 @@ def run(argv: Sequence[str] | None = None) -> int:
         _emit_loops(findings, args.json)
         return 0
     if args.command == "loop":
+        if args.loop_action == "compare":
+            comparison = compare_loop(
+                workspace,
+                args.location,
+                args.workload,
+                warmups=args.warmups,
+                runs=args.runs,
+                timeout_seconds=args.timeout,
+            )
+            if args.json:
+                _emit(_comparison_payload(comparison), True)
+            else:
+                print(f"{comparison.location}: measured loop comparison")
+                for candidate in comparison.candidates:
+                    print(
+                        f"{candidate.name}: median {candidate.median_seconds:.6f}s; "
+                        f"mean {candidate.mean_seconds:.6f}s; "
+                        f"stdev {candidate.stdev_seconds:.6f}s "
+                        f"({comparison.runs} runs)"
+                    )
+                if comparison.ranking == "inconclusive":
+                    print("Ranking: inconclusive within observed variability")
+                else:
+                    print(
+                        f"Ranking: {comparison.ranking} measured faster "
+                        f"({comparison.speedup:.3f}x)"
+                    )
+                print(f"Report: {comparison.report}")
+                print(f"Caveat: {comparison.caveat}")
+            return 0
         finding = LoopAnalyzer(workspace).explain(args.location)
         if args.json:
             _emit(_loop_payload(finding), True)

@@ -1,7 +1,7 @@
 # Python Development Tool Design
 
-**Status:** design contract; Phase 1-3 and the initial static portion of Phase 4
-live in `build-tools/pymgr/` and remain under active implementation.
+**Status:** design contract; Phase 1-3 plus Phase 4 static analysis and measured
+comparison live in `build-tools/pymgr/` and remain under active implementation.
 
 This document defines a development tool for ordinary Python projects. The
 tool coordinates dependency management, IDE state, module resolution, public
@@ -441,10 +441,11 @@ pymgr loops [path]
 pymgr loop explain <file:line>
 ```
 
-Planned measured-comparison command:
+Measured-comparison command:
 
 ```text
 pymgr loop compare <file:line> -- <command...>
+pymgr loop compare --warmups 2 --runs 10 <file:line> -- <command...>
 ```
 
 The analyzer first classifies intent: stateful control flow, eager collection
@@ -477,10 +478,23 @@ comparison tied to an interpreter build, input fixture, warm-up policy, and
 workload command. Reports include absolute timings, variability, and conversion
 costs where relevant; microbenchmarks are not extrapolated to production.
 
-`loop compare` runs user-approved candidates in a child process and requires
-the supplied tests or equivalence checks to pass for every candidate. Generated
-variants and measurements remain disposable `.pymgr/` data and never replace
-source automatically. Interpreter changes invalidate cached performance advice.
+`loop compare` runs user-approved candidates in child processes and requires
+the supplied tests or equivalence command to pass for every candidate. It
+currently compares the original source with a complete analyzer-generated
+collection, reduction, or predicate rewrite. Every warm-up and measured run
+starts from a fresh isolated workspace copy; `.git`, `.pymgr`, `.venv`, bytecode,
+and caches are not copied. The command must therefore name the interpreter and
+all test or fixture setup it needs.
+
+Candidate order alternates between runs. Reports record source hashes, command,
+controller and workload interpreter identity, warm-up policy, absolute samples,
+mean, median, standard deviation, range, and a stable workload identifier. A
+ranking is inconclusive when the observed difference is within run variability.
+The timer covers the complete child-process command, including startup, so the
+result describes that supplied workload rather than an isolated loop body or
+production performance. Generated variants are temporary, measurements remain
+disposable `.pymgr/loop-comparisons/` data, and project source is never replaced.
+Interpreter or source changes produce a different report identity.
 
 ## 14. Static usages and runtime tracing
 
@@ -685,9 +699,15 @@ workload. "Keep this loop" is a first-class successful result.
 
 Implementation status: `loops` and `loop explain` inventory and classify
 explicit loops, comprehensions, generators, reductions, iterator adapters, and
-common accumulator/index patterns. Measured comparison and dependency-specific
-vectorization adapters remain pending; current reports explicitly mark
-performance as unmeasured.
+common accumulator/index patterns. `loop compare` measures safe generated
+collection, reduction, and predicate candidates in isolated copies, rejects any
+candidate whose equivalence command fails, and persists reproducible reports.
+Conservative adapters recognize declared NumPy `nditer`, pandas `iterrows` and
+`itertuples`, and Polars `iter_rows` usage. They recommend array or column
+expressions only as semantic review candidates and never add a dependency,
+rewrite the data model, or claim they are faster without measurement. Static
+reports still mark performance as unmeasured until a comparison is explicitly
+requested.
 
 ### Phase 5: PyCharm integration
 
@@ -723,6 +743,7 @@ pymgr move acme.old.models acme.models --apply
 pymgr api check
 pymgr loops src/acme
 pymgr loop explain src/acme/models.py:42
+pymgr loop compare --warmups 2 --runs 10 src/acme/models.py:42 -- python check_models.py
 pymgr trace -- pytest
 ```
 

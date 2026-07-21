@@ -31,6 +31,11 @@ class LoopFinding:
 class LoopAnalyzer:
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
+        self.dependencies = frozenset(
+            dependency
+            for member in workspace.project_members()
+            for dependency in member.dependencies
+        )
 
     def scan(self, paths: Sequence[str] = ()) -> list[LoopFinding]:
         targets = (
@@ -109,6 +114,10 @@ class LoopAnalyzer:
         following = siblings[index + 1 :] if index >= 0 else []
         leaked_names = _target_names(node.target).intersection(_loaded_names(following))
         leak_blocker = ("loop target is read after the loop",) if leaked_names else ()
+
+        dependency_finding = self._dependency_iteration(path, node, leak_blocker)
+        if dependency_finding:
+            return dependency_finding
 
         collection = _collection_candidate(previous, node)
         if collection and not leak_blocker:
@@ -236,6 +245,79 @@ class LoopAnalyzer:
                 "built-in reduction for one accumulated result",
             ),
         )
+
+    def _dependency_iteration(
+        self, path: str, node: ast.For, inherited_blockers: tuple[str, ...]
+    ) -> LoopFinding | None:
+        iterator = _call_name(node.iter)
+        control = tuple(dict.fromkeys((*inherited_blockers, *_control_features(node))))
+        if "pandas" in self.dependencies and iterator.endswith(".iterrows"):
+            recommendation = (
+                "Keep explicit row iteration because this loop has control flow"
+                if control
+                else "Consider a vectorized pandas Series or DataFrame expression"
+            )
+            return _finding(
+                path,
+                node,
+                "pandas DataFrame.iterrows",
+                "tabular row iteration",
+                "heuristic",
+                recommendation,
+                "pandas is already declared and iterrows materializes each row as a Series; vectorization is appropriate only when the body is an equivalent column-wise expression.",
+                (
+                    "DataFrame.itertuples(...) when genuinely row-wise Python logic is required",
+                    "keep iterrows when Series row semantics are required",
+                ),
+                control,
+            )
+        if "pandas" in self.dependencies and iterator.endswith(".itertuples"):
+            return _finding(
+                path,
+                node,
+                "pandas DataFrame.itertuples",
+                "tabular row iteration",
+                "semantic",
+                "Keep itertuples for genuinely row-wise Python logic",
+                "The declared pandas dependency provides this row iterator; use a vectorized column expression instead only when it preserves the body semantics.",
+                ("vectorized Series or DataFrame expression for element-wise logic",),
+                control,
+            )
+        if "polars" in self.dependencies and iterator.endswith(".iter_rows"):
+            recommendation = (
+                "Keep explicit row iteration because this loop has control flow"
+                if control
+                else "Consider a native Polars expression"
+            )
+            return _finding(
+                path,
+                node,
+                "Polars iter_rows",
+                "tabular row iteration",
+                "heuristic",
+                recommendation,
+                "Polars is already declared; an expression can preserve columnar execution when the loop body maps directly to Polars operations.",
+                ("keep iter_rows for external side effects or stateful row logic",),
+                control,
+            )
+        if "numpy" in self.dependencies and iterator in {"np.nditer", "numpy.nditer"}:
+            recommendation = (
+                "Keep explicit NumPy iteration because this loop has control flow"
+                if control
+                else "Consider a NumPy ufunc, broadcasting, or array reduction"
+            )
+            return _finding(
+                path,
+                node,
+                "NumPy nditer",
+                "numeric array iteration",
+                "heuristic",
+                recommendation,
+                "NumPy is already declared; an array operation is suitable only when it preserves dtype, shape, broadcasting, mutation, and exception semantics.",
+                ("keep nditer for explicit multidimensional iteration or mutation",),
+                control,
+            )
+        return None
 
     def _while_loop(self, path: str, node: ast.While) -> LoopFinding:
         blockers = tuple(_control_features(node))

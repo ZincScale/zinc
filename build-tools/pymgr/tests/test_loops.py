@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
+import pytest
+
 from pymgr.cli import run
+from pymgr.loop_compare import compare_loop
 from pymgr.loops import LoopAnalyzer
-from pymgr.workspace import Workspace
+from pymgr.workspace import Workspace, WorkspaceError
 
 
 def _loop_project(project: Path) -> Path:
@@ -113,3 +117,156 @@ def test_set_accumulation_and_index_only_traversal_get_specific_advice(
 
     assert "set comprehension" in by_line[3].recommendation
     assert by_line[6].recommendation == "Iterate over the collection elements directly"
+
+
+def _comparison_project(project: Path) -> tuple[Path, Path]:
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    module = package / "compare.py"
+    module.write_text(
+        """def doubled(items):
+    result = []
+    for item in items:
+        result.append(item * 2)
+    return result
+""",
+        encoding="utf-8",
+    )
+    check = project / "check.py"
+    check.write_text(
+        """import sys
+sys.path.insert(0, "src")
+from acme.compare import doubled
+
+assert doubled(range(100)) == [item * 2 for item in range(100)]
+""",
+        encoding="utf-8",
+    )
+    return module, check
+
+
+def test_loop_compare_isolates_candidates_and_persists_reproducible_report(
+    project: Path,
+) -> None:
+    module, check = _comparison_project(project)
+    original = module.read_text(encoding="utf-8")
+
+    comparison = compare_loop(
+        Workspace(project),
+        f"{module}:3",
+        [sys.executable, check.name],
+        warmups=0,
+        runs=2,
+        timeout_seconds=5,
+    )
+
+    assert module.read_text(encoding="utf-8") == original
+    assert comparison.location == "src/acme/compare.py:3"
+    assert comparison.command == (sys.executable, "check.py")
+    assert comparison.ranking in {"original", "suggested", "inconclusive"}
+    assert comparison.speedup is not None
+    assert {candidate.name for candidate in comparison.candidates} == {
+        "original",
+        "suggested",
+    }
+    assert all(
+        len(candidate.timings_seconds) == 2
+        and candidate.min_seconds > 0
+        and candidate.source_sha256
+        for candidate in comparison.candidates
+    )
+    report = project / comparison.report
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["workload_id"] == comparison.workload_id
+    assert payload["runs"] == 2
+    assert payload["interpreter"]["controller_version"]
+
+
+def test_loop_compare_cli_emits_json_measurements(project: Path, capsys) -> None:
+    module, check = _comparison_project(project)
+
+    assert (
+        run(
+            [
+                "--root",
+                str(project),
+                "--json",
+                "loop",
+                "compare",
+                "--warmups",
+                "0",
+                "--runs",
+                "2",
+                f"{module}:3",
+                "--",
+                sys.executable,
+                check.name,
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ranking"] in {"original", "suggested", "inconclusive"}
+    assert len(payload["candidates"]) == 2
+    assert payload["command"] == [sys.executable, "check.py"]
+
+
+def test_loop_compare_rejects_a_candidate_that_fails_the_equivalence_command(
+    project: Path,
+) -> None:
+    module, check = _comparison_project(project)
+    check.write_text(
+        """from pathlib import Path
+
+source = Path("src/acme/compare.py").read_text(encoding="utf-8")
+raise SystemExit(0 if "result.append" in source else 7)
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="suggested candidate failed"):
+        compare_loop(
+            Workspace(project),
+            f"{module}:3",
+            [sys.executable, check.name],
+            warmups=0,
+            runs=2,
+            timeout_seconds=5,
+        )
+
+    assert not (project / ".pymgr" / "loop-comparisons").exists()
+
+
+def test_declared_dataframe_dependency_enables_conservative_adapter(
+    project: Path,
+) -> None:
+    (project / "pyproject.toml").write_text(
+        """[project]
+name = "acme"
+version = "0.1.0"
+dependencies = ["pandas>=2"]
+
+[tool.pymgr]
+source-roots = ["src"]
+""",
+        encoding="utf-8",
+    )
+    package = project / "src" / "acme"
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    module = package / "table.py"
+    module.write_text(
+        """def show(frame):
+    for index, row in frame.iterrows():
+        print(index, row.value)
+""",
+        encoding="utf-8",
+    )
+
+    finding = LoopAnalyzer(Workspace(project)).explain(f"{module}:2")
+
+    assert finding.construct == "pandas DataFrame.iterrows"
+    assert finding.evidence == "heuristic"
+    assert "vectorized pandas" in finding.recommendation
+    assert "itertuples" in finding.alternatives[0]
+    assert finding.performance == "unmeasured"
