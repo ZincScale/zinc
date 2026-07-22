@@ -21,11 +21,11 @@ import (
 
 // Lexer tokenizes Zinc source code.
 type Lexer struct {
-	src     []rune
-	pos     int // current position
-	line    int
-	col     int
-	Errors  []string
+	src    []rune
+	pos    int // current position
+	line   int
+	col    int
+	Errors []string
 }
 
 // New creates a Lexer from source text.
@@ -310,7 +310,7 @@ func (l *Lexer) readStringWithQuote(quote rune, line, col int) Token {
 				} else if ic == '\\' && (l.peekAt(1) == '"' || l.peekAt(1) == '\'') {
 					// Escaped quote inside interpolation: \" → "
 					// Allows: "result: {fn(\"arg\")}" → fmt.Sprintf("result: %v", fn("arg"))
-					l.advance() // consume backslash
+					l.advance()               // consume backslash
 					sb.WriteRune(l.advance()) // consume and write the quote
 					continue
 				} else if ic == '"' || ic == '\'' {
@@ -422,7 +422,7 @@ func (l *Lexer) readLiteralString(line, col int) Token {
 	return l.makeToken(TOKEN_STRING_LIT, sb.String(), line, col)
 }
 
-// readTripleQuoteString reads a """ or ''' multi-line string.
+// readTripleQuoteString reads a triple-double-quoted or triple-single-quoted string.
 func (l *Lexer) readTripleQuoteString(quote rune, line, col int) Token {
 	l.advance() // consume first quote
 	l.advance() // consume second quote

@@ -60,4 +60,3 @@ func ResolveZincMethodReturn(typeName string, typeArgs []string, method string) 
 
 	return ""
 }
-

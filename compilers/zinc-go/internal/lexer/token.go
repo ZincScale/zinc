@@ -19,13 +19,13 @@ type TokenType int
 
 const (
 	// Literals
-	TOKEN_INT_LIT      TokenType = iota
-	TOKEN_FLOAT_LIT              // 1.5
-	TOKEN_STRING_LIT             // "hello"
-	TOKEN_INTERP_STRING          // "Hello, ${name}!"
-	TOKEN_BOOL_LIT               // true / false
-	TOKEN_NULL                   // null
-	TOKEN_IDENT                  // identifiers
+	TOKEN_INT_LIT       TokenType = iota
+	TOKEN_FLOAT_LIT               // 1.5
+	TOKEN_STRING_LIT              // "hello"
+	TOKEN_INTERP_STRING           // "Hello, ${name}!"
+	TOKEN_BOOL_LIT                // true / false
+	TOKEN_NULL                    // null
+	TOKEN_IDENT                   // identifiers
 
 	// Keywords
 	TOKEN_CLASS
@@ -61,57 +61,57 @@ const (
 	TOKEN_READONLY // read (read-only field)
 	TOKEN_OVERRIDE // override (method override)
 	TOKEN_USING    // using (resource acquisition, defer .Close())
-	TOKEN_NOT   // not (boolean negation, "not in", "is not")
-	TOKEN_AND   // and (boolean and, alias for &&)
-	TOKEN_PARALLEL   // parallel (parallel for)
-	TOKEN_INIT       // init (constructor-set immutable field)
-	TOKEN_TIMEOUT    // timeout(dur) { }
-	TOKEN_TYPE       // type (type alias)
-	TOKEN_SELECT     // select (multiplex over channel ops)
-	TOKEN_DEFAULT    // default(T) — Go zero value of any type
+	TOKEN_NOT      // not (boolean negation, "not in", "is not")
+	TOKEN_AND      // and (boolean and, alias for &&)
+	TOKEN_PARALLEL // parallel (parallel for)
+	TOKEN_INIT     // init (constructor-set immutable field)
+	TOKEN_TIMEOUT  // timeout(dur) { }
+	TOKEN_TYPE     // type (type alias)
+	TOKEN_SELECT   // select (multiplex over channel ops)
+	TOKEN_DEFAULT  // default(T) — Go zero value of any type
 
 	// Symbols
-	TOKEN_LPAREN    // (
-	TOKEN_RPAREN    // )
-	TOKEN_LBRACE    // {
-	TOKEN_RBRACE    // }
-	TOKEN_LBRACKET  // [
-	TOKEN_RBRACKET  // ]
-	TOKEN_COMMA     // ,
-	TOKEN_DOT       // .
-	TOKEN_COLON     // :
-	TOKEN_SEMICOLON // ;
-	TOKEN_ASSIGN    // =
-	TOKEN_PLUS      // +
-	TOKEN_MINUS     // -
-	TOKEN_STAR      // *
-	TOKEN_SLASH     // /
-	TOKEN_PERCENT   // %
-	TOKEN_BANG      // !
-	TOKEN_AMP       // & (bitwise AND)
-	TOKEN_PIPE      // | (bitwise OR)
-	TOKEN_CARET     // ^ (bitwise XOR)
-	TOKEN_AMP_AMP   // &&
-	TOKEN_PIPE_PIPE // ||
-	TOKEN_EQ        // ==
-	TOKEN_NEQ       // !=
-	TOKEN_LT        // <
-	TOKEN_LTE       // <=
-	TOKEN_GT        // >
-	TOKEN_GTE       // >=
-	TOKEN_PLUS_EQ    // +=
-	TOKEN_MINUS_EQ   // -=
-	TOKEN_STAR_EQ    // *=
-	TOKEN_SLASH_EQ   // /=
-	TOKEN_ARROW              // ->
-	TOKEN_QUESTION           // ?
-	TOKEN_QUESTION_DOT       // ?.
-	TOKEN_RAW_STRING         // `raw string`
-	TOKEN_AT                 // @
-	TOKEN_DOTDOT             // ..
-	TOKEN_DOTDOTEQ           // ..=
-	TOKEN_DOTDOTDOT          // ...
-	TOKEN_STAR_STAR          // **
+	TOKEN_LPAREN       // (
+	TOKEN_RPAREN       // )
+	TOKEN_LBRACE       // {
+	TOKEN_RBRACE       // }
+	TOKEN_LBRACKET     // [
+	TOKEN_RBRACKET     // ]
+	TOKEN_COMMA        // ,
+	TOKEN_DOT          // .
+	TOKEN_COLON        // :
+	TOKEN_SEMICOLON    // ;
+	TOKEN_ASSIGN       // =
+	TOKEN_PLUS         // +
+	TOKEN_MINUS        // -
+	TOKEN_STAR         // *
+	TOKEN_SLASH        // /
+	TOKEN_PERCENT      // %
+	TOKEN_BANG         // !
+	TOKEN_AMP          // & (bitwise AND)
+	TOKEN_PIPE         // | (bitwise OR)
+	TOKEN_CARET        // ^ (bitwise XOR)
+	TOKEN_AMP_AMP      // &&
+	TOKEN_PIPE_PIPE    // ||
+	TOKEN_EQ           // ==
+	TOKEN_NEQ          // !=
+	TOKEN_LT           // <
+	TOKEN_LTE          // <=
+	TOKEN_GT           // >
+	TOKEN_GTE          // >=
+	TOKEN_PLUS_EQ      // +=
+	TOKEN_MINUS_EQ     // -=
+	TOKEN_STAR_EQ      // *=
+	TOKEN_SLASH_EQ     // /=
+	TOKEN_ARROW        // ->
+	TOKEN_QUESTION     // ?
+	TOKEN_QUESTION_DOT // ?.
+	TOKEN_RAW_STRING   // `raw string`
+	TOKEN_AT           // @
+	TOKEN_DOTDOT       // ..
+	TOKEN_DOTDOTEQ     // ..=
+	TOKEN_DOTDOTDOT    // ...
+	TOKEN_STAR_STAR    // **
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -123,8 +123,8 @@ var tokenNames = map[TokenType]string{
 	TOKEN_STRING_LIT:    "STRING",
 	TOKEN_INTERP_STRING: "INTERP_STRING",
 	TOKEN_BOOL_LIT:      "BOOL",
-	TOKEN_NULL:       "null",
-	TOKEN_IDENT:      "IDENT",
+	TOKEN_NULL:          "null",
+	TOKEN_IDENT:         "IDENT",
 
 	TOKEN_CLASS:     "class",
 	TOKEN_INTERFACE: "interface",
@@ -161,51 +161,51 @@ var tokenNames = map[TokenType]string{
 	TOKEN_USING:     "using",
 	TOKEN_NOT:       "not",
 	TOKEN_AND:       "and",
-	TOKEN_PARALLEL:   "parallel",
-	TOKEN_INIT:       "init",
-	TOKEN_TIMEOUT:    "timeout",
-	TOKEN_SELECT:     "select",
-	TOKEN_TYPE:       "type",
-	TOKEN_DEFAULT:    "default",
+	TOKEN_PARALLEL:  "parallel",
+	TOKEN_INIT:      "init",
+	TOKEN_TIMEOUT:   "timeout",
+	TOKEN_SELECT:    "select",
+	TOKEN_TYPE:      "type",
+	TOKEN_DEFAULT:   "default",
 
-	TOKEN_LPAREN:    "(",
-	TOKEN_RPAREN:    ")",
-	TOKEN_LBRACE:    "{",
-	TOKEN_RBRACE:    "}",
-	TOKEN_LBRACKET:  "[",
-	TOKEN_RBRACKET:  "]",
-	TOKEN_COMMA:     ",",
-	TOKEN_DOT:       ".",
-	TOKEN_COLON:     ":",
-	TOKEN_SEMICOLON: ";",
-	TOKEN_ASSIGN:    "=",
-	TOKEN_PLUS:      "+",
-	TOKEN_MINUS:     "-",
-	TOKEN_STAR:      "*",
-	TOKEN_SLASH:     "/",
-	TOKEN_PERCENT:   "%",
-	TOKEN_BANG:      "!",
-	TOKEN_AMP_AMP:   "&&",
-	TOKEN_PIPE_PIPE: "||",
-	TOKEN_EQ:        "==",
-	TOKEN_NEQ:       "!=",
-	TOKEN_LT:        "<",
-	TOKEN_LTE:       "<=",
-	TOKEN_GT:        ">",
-	TOKEN_GTE:       ">=",
-	TOKEN_PLUS_EQ:   "+=",
-	TOKEN_MINUS_EQ:  "-=",
-	TOKEN_STAR_EQ:   "*=",
-	TOKEN_SLASH_EQ:  "/=",
-	TOKEN_ARROW:             "->",
-	TOKEN_QUESTION:          "?",
-	TOKEN_QUESTION_DOT:      "?.",
-	TOKEN_RAW_STRING:        "RAW_STRING",
-	TOKEN_AT:                "@",
-	TOKEN_DOTDOT:            "..",
-	TOKEN_DOTDOTEQ:          "..=",
-	TOKEN_DOTDOTDOT:         "...",
-	TOKEN_STAR_STAR:         "**",
+	TOKEN_LPAREN:       "(",
+	TOKEN_RPAREN:       ")",
+	TOKEN_LBRACE:       "{",
+	TOKEN_RBRACE:       "}",
+	TOKEN_LBRACKET:     "[",
+	TOKEN_RBRACKET:     "]",
+	TOKEN_COMMA:        ",",
+	TOKEN_DOT:          ".",
+	TOKEN_COLON:        ":",
+	TOKEN_SEMICOLON:    ";",
+	TOKEN_ASSIGN:       "=",
+	TOKEN_PLUS:         "+",
+	TOKEN_MINUS:        "-",
+	TOKEN_STAR:         "*",
+	TOKEN_SLASH:        "/",
+	TOKEN_PERCENT:      "%",
+	TOKEN_BANG:         "!",
+	TOKEN_AMP_AMP:      "&&",
+	TOKEN_PIPE_PIPE:    "||",
+	TOKEN_EQ:           "==",
+	TOKEN_NEQ:          "!=",
+	TOKEN_LT:           "<",
+	TOKEN_LTE:          "<=",
+	TOKEN_GT:           ">",
+	TOKEN_GTE:          ">=",
+	TOKEN_PLUS_EQ:      "+=",
+	TOKEN_MINUS_EQ:     "-=",
+	TOKEN_STAR_EQ:      "*=",
+	TOKEN_SLASH_EQ:     "/=",
+	TOKEN_ARROW:        "->",
+	TOKEN_QUESTION:     "?",
+	TOKEN_QUESTION_DOT: "?.",
+	TOKEN_RAW_STRING:   "RAW_STRING",
+	TOKEN_AT:           "@",
+	TOKEN_DOTDOT:       "..",
+	TOKEN_DOTDOTEQ:     "..=",
+	TOKEN_DOTDOTDOT:    "...",
+	TOKEN_STAR_STAR:    "**",
 
 	TOKEN_EOF:     "EOF",
 	TOKEN_ILLEGAL: "ILLEGAL",
@@ -244,38 +244,38 @@ var keywords = map[string]TokenType{
 	//   from  — was reserved for "from X import Y" syntax that never landed
 	//   defer — handled by `using` (deterministic resource cleanup)
 	//   use   — supplanted by `using`
-	"catch":     TOKEN_CATCH,
-	"print":     TOKEN_PRINT,
-	"var":       TOKEN_VAR,
-	"pub":       TOKEN_PUB,
-	"super":     TOKEN_SUPER,
-	"this":      TOKEN_THIS,
-	"import":    TOKEN_IMPORT,
-	"as":        TOKEN_AS,
-	"in":        TOKEN_IN,
-	"true":      TOKEN_TRUE,
-	"false":     TOKEN_FALSE,
-	"null":      TOKEN_NULL,
-	"enum":      TOKEN_ENUM,
-	"match":     TOKEN_MATCH,
-	"case":      TOKEN_CASE,
-	"package":   TOKEN_PACKAGE,
-	"const":     TOKEN_CONST,
-	"is":        TOKEN_IS,
-	"with":      TOKEN_WITH,
-	"data":      TOKEN_DATA,
-	"spawn":     TOKEN_SPAWN,
-	"readonly":  TOKEN_READONLY,
-	"override":  TOKEN_OVERRIDE,
-	"using":     TOKEN_USING,
-	"not":       TOKEN_NOT,
-	"and":       TOKEN_AND,
-	"parallel":   TOKEN_PARALLEL,
-	"init":       TOKEN_INIT,
-	"timeout":    TOKEN_TIMEOUT,
-	"type":       TOKEN_TYPE,
-	"select":     TOKEN_SELECT,
-	"default":    TOKEN_DEFAULT,
+	"catch":    TOKEN_CATCH,
+	"print":    TOKEN_PRINT,
+	"var":      TOKEN_VAR,
+	"pub":      TOKEN_PUB,
+	"super":    TOKEN_SUPER,
+	"this":     TOKEN_THIS,
+	"import":   TOKEN_IMPORT,
+	"as":       TOKEN_AS,
+	"in":       TOKEN_IN,
+	"true":     TOKEN_TRUE,
+	"false":    TOKEN_FALSE,
+	"null":     TOKEN_NULL,
+	"enum":     TOKEN_ENUM,
+	"match":    TOKEN_MATCH,
+	"case":     TOKEN_CASE,
+	"package":  TOKEN_PACKAGE,
+	"const":    TOKEN_CONST,
+	"is":       TOKEN_IS,
+	"with":     TOKEN_WITH,
+	"data":     TOKEN_DATA,
+	"spawn":    TOKEN_SPAWN,
+	"readonly": TOKEN_READONLY,
+	"override": TOKEN_OVERRIDE,
+	"using":    TOKEN_USING,
+	"not":      TOKEN_NOT,
+	"and":      TOKEN_AND,
+	"parallel": TOKEN_PARALLEL,
+	"init":     TOKEN_INIT,
+	"timeout":  TOKEN_TIMEOUT,
+	"type":     TOKEN_TYPE,
+	"select":   TOKEN_SELECT,
+	"default":  TOKEN_DEFAULT,
 }
 
 // LookupIdent returns the token type for a string — keyword or IDENT.

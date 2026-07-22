@@ -137,9 +137,10 @@ func (p *Parser) formatTypeExpr(t TypeExpr) string {
 
 // v2IsTypeAnnotation checks if the current position looks like a type followed
 // by a name (for var/const/init declarations). Returns true for patterns like:
-//   ident ident    → simple type + name
-//   ident<         → generic type
-//   ident? ident   → nullable type + name
+//
+//	ident ident    → simple type + name
+//	ident<         → generic type
+//	ident? ident   → nullable type + name
 func (p *Parser) v2IsTypeAnnotation() bool {
 	if !p.v2IsIdent() {
 		return false

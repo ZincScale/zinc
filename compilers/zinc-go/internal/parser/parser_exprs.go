@@ -141,7 +141,7 @@ func (p *Parser) v2ParseComparison() Expr {
 			continue
 		}
 		// Guard: if two adjacent < or > tokens form a shift operator, don't consume as comparison
-		if (p.check(lexer.TOKEN_GT) || p.check(lexer.TOKEN_LT)) {
+		if p.check(lexer.TOKEN_GT) || p.check(lexer.TOKEN_LT) {
 			cur := p.peek()
 			next := p.peekAt(1)
 			if cur.Type == next.Type && cur.Line == next.Line && next.Col == cur.Col+1 {
@@ -652,7 +652,9 @@ func (p *Parser) v2ParsePrimary() Expr {
 				elems = append(elems, p.v2ParseExpr())
 				for p.check(lexer.TOKEN_COMMA) {
 					p.advance()
-					if p.check(lexer.TOKEN_RBRACKET) { break }
+					if p.check(lexer.TOKEN_RBRACKET) {
+						break
+					}
 					elems = append(elems, p.v2ParseExpr())
 				}
 				p.expect(lexer.TOKEN_RBRACKET)
@@ -672,7 +674,9 @@ func (p *Parser) v2ParsePrimary() Expr {
 				vals = append(vals, v)
 				for p.check(lexer.TOKEN_COMMA) {
 					p.advance()
-					if p.check(lexer.TOKEN_RBRACE) { break }
+					if p.check(lexer.TOKEN_RBRACE) {
+						break
+					}
 					k = p.v2ParseExpr()
 					p.expect(lexer.TOKEN_COLON)
 					v = p.v2ParseExpr()

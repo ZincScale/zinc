@@ -36,9 +36,9 @@ type parseError struct {
 
 // Parser converts a token stream into an AST.
 type Parser struct {
-	tokens  []lexer.Token
-	pos     int
-	Errors  []string
+	tokens []lexer.Token
+	pos    int
+	Errors []string
 }
 
 // New creates a Parser from a list of tokens.
@@ -384,6 +384,7 @@ func (p *Parser) looksLikeTypedLiteralAt(base int) bool {
 // Supports:
 //   - dotted names: <core.FlowFile, String>
 //   - nested generics: <List<int>, Map<String, Box<int>>>
+//
 // Delegates each type-arg to v2ParseType so nested generics are handled by the
 // same machinery that powers type-context parsing (typed literals, var decls).
 // The returned []string is the formatted type-expr form expected by CallExpr.TypeArgs.

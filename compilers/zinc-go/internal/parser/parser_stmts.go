@@ -412,10 +412,11 @@ func (p *Parser) v2ParseMatchStmt() *MatchStmt {
 // v2ParseSelectStmt: select { case ch.recv(): stmts ... case _: stmts }
 //
 // Each case is one of:
-//   case <var> = <chan>.recv(): stmts   — recv with binding
-//   case <chan>.recv():        stmts    — recv without binding
-//   case <chan>.send(<expr>):  stmts    — send
-//   case _:                    stmts    — default (fires when none ready)
+//
+//	case <var> = <chan>.recv(): stmts   — recv with binding
+//	case <chan>.recv():        stmts    — recv without binding
+//	case <chan>.send(<expr>):  stmts    — send
+//	case _:                    stmts    — default (fires when none ready)
 //
 // Body of each case extends until the next `case` or closing `}`.
 // At most one `case _` per select. Maps 1:1 to Go's select statement.

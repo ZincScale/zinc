@@ -70,12 +70,12 @@ func (t V2Type) String() string {
 }
 
 var (
-	typeInt     = V2Type{Name: "int"}
-	typeDouble  = V2Type{Name: "double"}
-	typeStr     = V2Type{Name: "String"}
-	typeBool    = V2Type{Name: "bool"}
-	typeNull    = V2Type{Name: "null"}
-	typeAny     = V2Type{Name: "any"}
+	typeInt    = V2Type{Name: "int"}
+	typeDouble = V2Type{Name: "double"}
+	typeStr    = V2Type{Name: "String"}
+	typeBool   = V2Type{Name: "bool"}
+	typeNull   = V2Type{Name: "null"}
+	typeAny    = V2Type{Name: "any"}
 )
 
 // V2Scope tracks variable types in a scope.
@@ -1146,8 +1146,8 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 									continue
 								}
 								if sig.Params[i].TypeExpr != nil {
-																		c.nodeTypes[arg] = sig.Params[i]
-									}
+									c.nodeTypes[arg] = sig.Params[i]
+								}
 							}
 						}
 						return sig.ReturnType
@@ -1201,8 +1201,8 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 									continue
 								}
 								if sig.Params[i].TypeExpr != nil {
-																		c.nodeTypes[arg] = sig.Params[i]
-									}
+									c.nodeTypes[arg] = sig.Params[i]
+								}
 							}
 						}
 						return sig.ReturnType
@@ -1236,8 +1236,8 @@ func (c *V2Checker) inferTypeImpl(e parser.Expr) V2Type {
 							continue
 						}
 						if sig.Params[i].TypeExpr != nil {
-														c.nodeTypes[arg] = sig.Params[i]
-							}
+							c.nodeTypes[arg] = sig.Params[i]
+						}
 					}
 				}
 				// Spread args at the call site (`f(...xs)`) make the

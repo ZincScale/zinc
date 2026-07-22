@@ -1,20 +1,10 @@
 # Build artifacts
-*.class
-out/
 dist/
 zinc-out/
-
-# Mill
-.mill-*
 
 # IDE
 .idea/
 *.iml
 .vscode/
 
-# Compiler build
-compiler/out/
-compiler/lib/
 .claude/
-__pycache__/
-*.pyc

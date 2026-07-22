@@ -20,9 +20,7 @@ make build
 sudo make install
 ```
 
-The binary is installed as **`zinc-go`**. (The name avoids collision
-with sibling targets like `zinc-python`; pick the binary matching the
-backend you want.)
+The binary is installed as **`zinc-go`**.
 
 Verify:
 

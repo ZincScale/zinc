@@ -435,7 +435,13 @@ func (g *Generator) emitConstructor(typeName string, ctor *parser.CtorDecl, cls 
 		g.currentParams[p.Name] = true
 	}
 	g.currentClass = typeName
-	defer func() { g.currentFields = nil; g.currentFieldGoName = nil; g.currentMethods = nil; g.currentParams = nil; g.currentClass = "" }()
+	defer func() {
+		g.currentFields = nil
+		g.currentFieldGoName = nil
+		g.currentMethods = nil
+		g.currentParams = nil
+		g.currentClass = ""
+	}()
 
 	tpDecl := goTypeParams(cls.TypeParams)
 	tpArgs := goTypeArgs(cls.TypeParams)
@@ -863,12 +869,12 @@ func (g *Generator) collectParentMethods(cls *parser.ClassDecl, methods map[stri
 // backticks) for a field's annotations. Recognizes @Json / @Yaml / @Toml
 // and joins multiple tags with spaces, e.g.
 //
-//   @Json("name") @Yaml("name") String userName
+//	@Json("name") @Yaml("name") String userName
 //
 // becomes the tag `json:"name" yaml:"name"`. Tag options like `omitempty`
 // are trailing bare-ident args:
 //
-//   @Json("email", omitempty) → json:"email,omitempty"
+//	@Json("email", omitempty) → json:"email,omitempty"
 //
 // Unknown field annotations are a compile error — fields only carry
 // serialization tags today. Returns "" when there are no annotations.

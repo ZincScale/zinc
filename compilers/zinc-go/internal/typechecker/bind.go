@@ -66,11 +66,11 @@ const (
 	SymUnknown SymbolKind = iota
 
 	// User scope
-	SymLocal         // var, for-loop var, lambda arg, with-resource, match binding
-	SymParam         // function/method/ctor parameter
-	SymField         // class/data class field, accessed bare in a method body via implicit `this`
-	SymThis          // explicit `this` reference
-	SymSuper         // explicit `super` reference
+	SymLocal // var, for-loop var, lambda arg, with-resource, match binding
+	SymParam // function/method/ctor parameter
+	SymField // class/data class field, accessed bare in a method body via implicit `this`
+	SymThis  // explicit `this` reference
+	SymSuper // explicit `super` reference
 
 	// Same-package
 	SymFn            // top-level function in current package
@@ -86,11 +86,11 @@ const (
 	SymSealedVariant // data variant of a sealed class
 
 	// Imports
-	SymZincPkg       // zinc subpackage import alias (e.g., `core`, `fabric/registry`)
-	SymGoPkg         // Go-imported package alias (e.g., `hambaAvro`, `strings`)
+	SymZincPkg // zinc subpackage import alias (e.g., `core`, `fabric/registry`)
+	SymGoPkg   // Go-imported package alias (e.g., `hambaAvro`, `strings`)
 
 	// Builtins
-	SymBuiltin       // Go builtin (error, len, cap, make, append, etc.)
+	SymBuiltin // Go builtin (error, len, cap, make, append, etc.)
 )
 
 func (k SymbolKind) String() string {
@@ -163,8 +163,9 @@ type Symbol struct {
 //
 // `Bindings` (Phase 3.3) — every Ident → Symbol resolution.
 // `NodeTypes` (Phase 3.5) — every Expr → V2Type from CheckV2's inference.
-//   Optional; nil when the typecheck driver didn't populate it. Codegen
-//   should null-check before consulting.
+//
+//	Optional; nil when the typecheck driver didn't populate it. Codegen
+//	should null-check before consulting.
 type BoundProgram struct {
 	Prog      *parser.Program
 	Bindings  map[*parser.Ident]Symbol
@@ -373,10 +374,10 @@ type binder struct {
 	// even when the member came from a parent. currentClassMemberPub
 	// records the IsPub flag for each member so the bound Symbol can
 	// carry it through to codegen's casing logic.
-	currentClass            string
-	currentClassFields      map[string]bool
-	currentClassMethods     map[string]bool
-	currentClassMemberPub   map[string]bool
+	currentClass          string
+	currentClassFields    map[string]bool
+	currentClassMethods   map[string]bool
+	currentClassMemberPub map[string]bool
 
 	// currentFnIsThrower — true while walking the body of a function /
 	// method / ctor whose return signature ends in `error`. Drives the

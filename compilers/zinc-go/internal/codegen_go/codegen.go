@@ -27,25 +27,25 @@ const recvName = "this"
 
 // Generator produces Go source from a Zinc AST.
 type Generator struct {
-	buf            strings.Builder
-	indent         int
-	className      string // derived from filename or "main"
-	imports        map[string]bool
-	structs        map[string]*parser.ClassDecl
-	sourceFile     string // for //line directives
+	buf                strings.Builder
+	indent             int
+	className          string // derived from filename or "main"
+	imports            map[string]bool
+	structs            map[string]*parser.ClassDecl
+	sourceFile         string            // for //line directives
 	currentFields      map[string]bool   // field names of current class (for implicit self)
 	currentFieldGoName map[string]string // zinc field name → Go field name (respects pub)
-	currentMethods map[string]bool // method names of current class (for implicit self)
-	currentParams  map[string]bool // parameter names (shadow field names)
-	currentLocals  map[string]bool // locally-declared var names in scope (shadow fields)
-	currentClass   string          // current class name (for pub member lookups)
+	currentMethods     map[string]bool   // method names of current class (for implicit self)
+	currentParams      map[string]bool   // parameter names (shadow field names)
+	currentLocals      map[string]bool   // locally-declared var names in scope (shadow fields)
+	currentClass       string            // current class name (for pub member lookups)
 
 	// Error handling
-	currentReturnType     string            // return type of current function (for zero values in error returns)
-	currentOuterReturnType string           // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
-	currentReturnOptional bool              // true if current function returns T? (pointer type)
-	currentFuncParams     []*parser.ParamDecl // params of current function (for lambda type inference)
-	currentMethodRetType  string            // Go return type of current method (for channel recv type assertions)
+	currentReturnType      string              // return type of current function (for zero values in error returns)
+	currentOuterReturnType string              // Go return type of the enclosing function, regardless of thrower status. Used by the try-IIFE tuple shape to know T for `(T, bool, error)`.
+	currentReturnOptional  bool                // true if current function returns T? (pointer type)
+	currentFuncParams      []*parser.ParamDecl // params of current function (for lambda type inference)
+	currentMethodRetType   string              // Go return type of current method (for channel recv type assertions)
 
 	// Default parameters
 	// Stream operations
@@ -100,32 +100,32 @@ type Generator struct {
 	// switch. matchInLoopDepth is the nesting count: only the
 	// outermost match-in-loop sees the label, since inner match
 	// blocks inside outer matches still target the same loop.
-	loopBreakLabel    string
-	matchInLoopDepth  int
-	loopBreakCounter  int
+	loopBreakLabel   string
+	matchInLoopDepth int
+	loopBreakCounter int
 
 	// Variable type tracking
-	varTypes            map[string]string       // variable name → element type
-	renamedVars         map[string]string     // original name → safe name (for builtin shadows)
-	dataClassDecls      map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
-	goResolver          *GoTypeResolver       // introspects Go packages at transpile time
-	importMap           map[string]string     // import prefix → full Go package path
-	typeImports         map[string]string     // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
-	activeTypeParams    map[string]bool       // currently-in-scope generic type parameter names
+	varTypes         map[string]string                // variable name → element type
+	renamedVars      map[string]string                // original name → safe name (for builtin shadows)
+	dataClassDecls   map[string]*parser.DataClassDecl // data class name → full decl (for implicit-self in methods)
+	goResolver       *GoTypeResolver                  // introspects Go packages at transpile time
+	importMap        map[string]string                // import prefix → full Go package path
+	typeImports      map[string]string                // short type name → qualified Go name (e.g. "Mutex" → "sync.Mutex")
+	activeTypeParams map[string]bool                  // currently-in-scope generic type parameter names
 
 	// Visibility tracking
 
 	// Subpackage support
-	packageName      string            // Go package name (default: "main")
-	moduleName       string            // Go module name from zinc.toml (for subpackage import paths)
-	zincSubpackages  map[string]bool   // known zinc subpackage names (directory names in src/)
-	subpkgExports    map[string]map[string]string // pkg → name → kind ("data", "class", "func", "interface")
-	subpkgDataFields map[string]map[string][]*parser.FieldDecl   // pkg → data class name → field params
-	localDataFields  map[string][]*parser.FieldDecl              // current package data class name → params
-	subpkgStructs    map[string]map[string]*parser.ClassDecl    // pkg → class name → full class decl (for method lookups)
-	subpkgTypeAliases map[string]map[string]parser.TypeExpr    // pkg → alias name → underlying TypeExpr (for cross-pkg resolveFuncTypeExpr)
-	importAliases    map[string]string // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
-	importGoAliases  map[string]string // Go import path → local alias (when alias differs from package name)
+	packageName       string                                    // Go package name (default: "main")
+	moduleName        string                                    // Go module name from zinc.toml (for subpackage import paths)
+	zincSubpackages   map[string]bool                           // known zinc subpackage names (directory names in src/)
+	subpkgExports     map[string]map[string]string              // pkg → name → kind ("data", "class", "func", "interface")
+	subpkgDataFields  map[string]map[string][]*parser.FieldDecl // pkg → data class name → field params
+	localDataFields   map[string][]*parser.FieldDecl            // current package data class name → params
+	subpkgStructs     map[string]map[string]*parser.ClassDecl   // pkg → class name → full class decl (for method lookups)
+	subpkgTypeAliases map[string]map[string]parser.TypeExpr     // pkg → alias name → underlying TypeExpr (for cross-pkg resolveFuncTypeExpr)
+	importAliases     map[string]string                         // import alias → Go module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
+	importGoAliases   map[string]string                         // Go import path → local alias (when alias differs from package name)
 
 	// Compile-time errors accumulated during codegen (e.g., non-exhaustive match).
 	// Checked by the caller after GenerateFiles returns.
@@ -224,14 +224,14 @@ func (g *Generator) compileWarning(line int, format string, args ...any) {
 // New creates a new Go code generator.
 func New() *Generator {
 	return &Generator{
-		imports:             make(map[string]bool),
-		structs:             make(map[string]*parser.ClassDecl),
-		varTypes:            make(map[string]string),
-		renamedVars:         make(map[string]string),
-		goResolver:          NewGoTypeResolver(),
-		importMap:           make(map[string]string),
-		typeImports:         make(map[string]string),
-		addrOfReported:      make(map[*parser.UnaryExpr]bool),
+		imports:        make(map[string]bool),
+		structs:        make(map[string]*parser.ClassDecl),
+		varTypes:       make(map[string]string),
+		renamedVars:    make(map[string]string),
+		goResolver:     NewGoTypeResolver(),
+		importMap:      make(map[string]string),
+		typeImports:    make(map[string]string),
+		addrOfReported: make(map[*parser.UnaryExpr]bool),
 	}
 }
 

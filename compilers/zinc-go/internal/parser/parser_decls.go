@@ -21,8 +21,9 @@ import (
 // --- Declarations ------------------------------------------------------------
 
 // v2ParseFnDecl: ReturnType name(params) { body }
-//                void name(params) { body }
-//                ReturnType name(params) = expr  (single-expression)
+//
+//	void name(params) { body }
+//	ReturnType name(params) = expr  (single-expression)
 //
 // Type-first declaration matches Java/C#/Dart shape. The literal `void`
 // stands in for "no return type" — `init` constructors keep their own
@@ -289,7 +290,8 @@ func (p *Parser) v2ParseClassDecl() *ClassDecl {
 }
 
 // v2ParseMethodDecl: [abstract] ReturnType name(params) [{ body }]
-//                    [abstract] void name(params) [{ body }]
+//
+//	[abstract] void name(params) [{ body }]
 func (p *Parser) v2ParseMethodDecl() *MethodDecl {
 	_ = p.peek().Line
 	retType := p.v2ParseFnReturnType()

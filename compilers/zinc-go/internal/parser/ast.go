@@ -23,8 +23,8 @@ type Node interface {
 
 // Program is the root AST node.
 type Program struct {
-	SourceFile string             // source .zn file (set by project mode)
-	Package    *PackageDecl       // optional package declaration (nil = package main)
+	SourceFile string       // source .zn file (set by project mode)
+	Package    *PackageDecl // optional package declaration (nil = package main)
 	Imports    []*ImportDecl
 	Decls      []TopLevelDecl // ClassDecl | InterfaceDecl | FnDecl
 	Stmts      []Stmt         // v2: top-level script statements (script mode)
@@ -51,32 +51,33 @@ type ImportDecl struct {
 	Alias string // optional alias
 }
 
-func (i *ImportDecl) nodeTag()      {}
+func (i *ImportDecl) nodeTag()     {}
 func (i *ImportDecl) topLevelTag() {}
 
 // --- Declarations ------------------------------------------------------------
 
 // ClassDecl: [@annotations] [abstract] [sealed] class Dog[<T>] : Animal, Speaker { ... }
 type ClassDecl struct {
-	Line             int // source line number (1-indexed)
-	Name             string
-	IsSealed         bool                  // sealed class (has variant data classes)
-	TypeParams       []string              // generic type parameter names
-	TypeParamBounds  map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
-	Parents          []ParentRef           // base class + interfaces (with generic args)
-	Fields      []*FieldDecl
-	Ctor        *CtorDecl   // primary constructor (nil if none)
-	Ctors       []*CtorDecl // overloaded constructors (nil or empty if none)
-	Methods     []*MethodDecl
-	Variants    []*DataClassDecl // sealed class variants
-	Annotations []*Annotation
+	Line            int // source line number (1-indexed)
+	Name            string
+	IsSealed        bool                  // sealed class (has variant data classes)
+	TypeParams      []string              // generic type parameter names
+	TypeParamBounds map[string][]TypeExpr // bounds per type param (3.6.1); nil if no bounds declared
+	Parents         []ParentRef           // base class + interfaces (with generic args)
+	Fields          []*FieldDecl
+	Ctor            *CtorDecl   // primary constructor (nil if none)
+	Ctors           []*CtorDecl // overloaded constructors (nil or empty if none)
+	Methods         []*MethodDecl
+	Variants        []*DataClassDecl // sealed class variants
+	Annotations     []*Annotation
 }
 
 // ParentRef is one entry in a class's parent list. zinc syntax
 // `class Foo : Bar, Container<T>, core.Describable` produces:
-//   ParentRef{Name: "Bar"}
-//   ParentRef{Name: "Container", TypeArgs: [T]}
-//   ParentRef{Name: "core.Describable"}
+//
+//	ParentRef{Name: "Bar"}
+//	ParentRef{Name: "Container", TypeArgs: [T]}
+//	ParentRef{Name: "core.Describable"}
 //
 // TypeArgs is nil for non-generic parents. Codegen for targets that
 // need to propagate generics through inheritance (Crystal: `include
@@ -87,7 +88,7 @@ type ParentRef struct {
 	TypeArgs []TypeExpr
 }
 
-func (c *ClassDecl) nodeTag()      {}
+func (c *ClassDecl) nodeTag()     {}
 func (c *ClassDecl) topLevelTag() {}
 
 // InterfaceDecl: interface Speaker[<T>] { ... }
@@ -99,7 +100,7 @@ type InterfaceDecl struct {
 	Methods         []*MethodSig
 }
 
-func (i *InterfaceDecl) nodeTag()      {}
+func (i *InterfaceDecl) nodeTag()     {}
 func (i *InterfaceDecl) topLevelTag() {}
 
 // MethodSig is an interface method signature.
@@ -143,7 +144,7 @@ type FnDecl struct {
 	Annotations     []*Annotation
 }
 
-func (f *FnDecl) nodeTag()      {}
+func (f *FnDecl) nodeTag()     {}
 func (f *FnDecl) topLevelTag() {}
 func (f *FnDecl) stmtTag()     {} // v2: nested functions are statements
 
@@ -171,7 +172,7 @@ type DataClassDecl struct {
 	Methods         []*MethodDecl
 }
 
-func (d *DataClassDecl) nodeTag()      {}
+func (d *DataClassDecl) nodeTag()     {}
 func (d *DataClassDecl) topLevelTag() {}
 
 // EnumDecl: enum Color { Red, Green, Blue }
@@ -181,7 +182,7 @@ type EnumDecl struct {
 	Variants []string
 }
 
-func (e *EnumDecl) nodeTag()      {}
+func (e *EnumDecl) nodeTag()     {}
 func (e *EnumDecl) topLevelTag() {}
 
 // ConstDecl: [pub] const NAME: Type = expr
@@ -193,7 +194,7 @@ type ConstDecl struct {
 	Value Expr
 }
 
-func (c *ConstDecl) nodeTag()      {}
+func (c *ConstDecl) nodeTag()     {}
 func (c *ConstDecl) topLevelTag() {}
 
 // TypeAliasDecl: type Name = TypeExpr
@@ -203,7 +204,7 @@ type TypeAliasDecl struct {
 	Type TypeExpr
 }
 
-func (t *TypeAliasDecl) nodeTag()      {}
+func (t *TypeAliasDecl) nodeTag()     {}
 func (t *TypeAliasDecl) topLevelTag() {}
 
 // Annotation: @Name or @Name("arg1", "arg2")
@@ -254,8 +255,8 @@ type SimpleType struct {
 	Name string
 }
 
-func (s *SimpleType) nodeTag()  {}
-func (s *SimpleType) typeTag()  {}
+func (s *SimpleType) nodeTag() {}
+func (s *SimpleType) typeTag() {}
 
 // GenericType: List<T>, Map<K,V>, Chan<T>
 type GenericType struct {
@@ -273,7 +274,6 @@ type OptionalType struct {
 
 func (o *OptionalType) nodeTag() {}
 func (o *OptionalType) typeTag() {}
-
 
 // ArrayType: int[], String[], Type[]
 type ArrayType struct {
@@ -379,7 +379,7 @@ func (i *IfStmt) stmtTag() {}
 
 // ForStmt: for (init; cond; post) { }  OR  for item in list { }  OR  for (i, item) in list { }
 type ForStmt struct {
-	Line  int // source line number (1-indexed)
+	Line int // source line number (1-indexed)
 
 	// C-style
 	Init Stmt // VarStmt or AssignStmt
@@ -400,9 +400,9 @@ func (f *ForStmt) stmtTag() {}
 
 // WhileStmt: while (cond) { }
 type WhileStmt struct {
-	Line  int // source line number (1-indexed)
-	Cond  Expr
-	Body  *BlockStmt
+	Line int // source line number (1-indexed)
+	Cond Expr
+	Body *BlockStmt
 }
 
 func (w *WhileStmt) nodeTag() {}
@@ -457,26 +457,26 @@ func (m *MatchStmt) stmtTag() {}
 
 // MatchCase: case val => { body }  OR  _ => { body }
 type MatchCase struct {
-	Pattern Expr       // nil = wildcard (_)
+	Pattern Expr // nil = wildcard (_)
 	Body    *BlockStmt
 }
 
 // SelectStmt: multiplex over channel send/recv operations.
 //
-//   select {
-//       case x = ch1.recv(): ...      // recv with binding
-//       case ch2.recv(): ...           // recv without binding
-//       case ch3.send(value): ...      // send
-//       case time.After(d).recv(): ... // timer (just a recv on a timer chan)
-//       default: ...                   // optional, fires when none ready
-//   }
+//	select {
+//	    case x = ch1.recv(): ...      // recv with binding
+//	    case ch2.recv(): ...           // recv without binding
+//	    case ch3.send(value): ...      // send
+//	    case time.After(d).recv(): ... // timer (just a recv on a timer chan)
+//	    default: ...                   // optional, fires when none ready
+//	}
 //
 // Maps 1:1 to Go's select statement. Each case's CallExpr is restricted
 // to <chan>.recv() or <chan>.send(arg) at parse time.
 type SelectStmt struct {
-	Line    int           // source line number (1-indexed)
+	Line    int // source line number (1-indexed)
 	Cases   []*SelectCase
-	Default *BlockStmt    // nil if no default
+	Default *BlockStmt // nil if no default
 }
 
 func (s *SelectStmt) nodeTag() {}
@@ -486,10 +486,10 @@ func (s *SelectStmt) stmtTag() {}
 //   - Recv:  Channel.Recv() with optional Binding (binding == "" → no binding)
 //   - Send:  Channel.Send(SendValue)
 type SelectCase struct {
-	Kind      string     // "recv" | "send"
-	Channel   Expr       // the channel expression (left of .recv()/.send())
-	Binding   string     // recv-only: var name to bind, "" if none
-	SendValue Expr       // send-only: the value being sent
+	Kind      string // "recv" | "send"
+	Channel   Expr   // the channel expression (left of .recv()/.send())
+	Binding   string // recv-only: var name to bind, "" if none
+	SendValue Expr   // send-only: the value being sent
 	Body      *BlockStmt
 }
 
@@ -886,5 +886,5 @@ type LambdaExpr struct {
 	Expr       Expr       // non-nil for single-expression form
 }
 
-func (*LambdaExpr) nodeTag()            {}
-func (*LambdaExpr) exprTag()            {}
+func (*LambdaExpr) nodeTag() {}
+func (*LambdaExpr) exprTag() {}

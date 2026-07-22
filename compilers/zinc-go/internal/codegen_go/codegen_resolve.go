@@ -527,7 +527,7 @@ func (g *Generator) lookupFieldTypeExpr(className, fieldName string) parser.Type
 //   - Ident             — local var (bound.NodeTypes) or current-class field
 //   - SelectorExpr      — `a.b`: resolve a's class, look up b's declared type
 //   - CallExpr          — `a.method()`: resolve a's class, look up method's
-//                         return type
+//     return type
 //
 // This is the companion to resolveReceiverGenericType for the case where
 // the receiver is a class instance (not a collection) — needed so we can
@@ -651,7 +651,7 @@ func (g *Generator) fieldGenericType(cls *parser.ClassDecl, fieldName string) *p
 //   - IndexExpr      `m[k]` where m is Map<K,V> → returns V if generic
 //   - SelectorExpr   `obj.field` — walks obj's class, reads field's type
 //   - CallExpr       `obj.method()` — walks obj's class, reads method's
-//                    return type
+//     return type
 //
 // Motivation: the map/list method rewrites (`.keys()`, `.values()`,
 // `.containsKey()`, `.size()`, `.recv()` for typed channels, etc.) need
@@ -1348,6 +1348,7 @@ func isZincErrorType(t parser.TypeExpr) bool {
 //   - bare `error`            → nil  (void thrower)
 //   - `(T, error)`            → [T]  (single-value thrower)
 //   - `(T1, T2, error)`       → [T1, T2] (multi-value thrower)
+//
 // For non-thrower return types, returns nil. Callers should check
 // returnTypeDeclaresError first.
 func throwerValueTypes(retType parser.TypeExpr) []parser.TypeExpr {
@@ -1545,15 +1546,15 @@ func (g *Generator) isAutoPointerizedGoStructField(t parser.TypeExpr) (string, b
 // the current class via implicit-self or explicit `this.X`.
 //
 // Resolution order (typechecker-first):
-//   1. Bare Ident → bound.Bindings[ident].Kind == SymField. The binder
-//      walks Sigs.ParentTypes at class entry so inherited fields are
-//      already covered.
-//   2. SelectorExpr `this.X` → walk Sigs.ClassFields starting at
-//      currentClass and following ParentTypes. The Field is a string
-//      (no Ident node) so the bind side-map can't resolve it; the
-//      class member tables in CollectedSigs are the natural source.
-//   3. Codegen-side currentFields fallback for legacy paths that
-//      bypass bind+Sigs (single-file scripts, tests).
+//  1. Bare Ident → bound.Bindings[ident].Kind == SymField. The binder
+//     walks Sigs.ParentTypes at class entry so inherited fields are
+//     already covered.
+//  2. SelectorExpr `this.X` → walk Sigs.ClassFields starting at
+//     currentClass and following ParentTypes. The Field is a string
+//     (no Ident node) so the bind side-map can't resolve it; the
+//     class member tables in CollectedSigs are the natural source.
+//  3. Codegen-side currentFields fallback for legacy paths that
+//     bypass bind+Sigs (single-file scripts, tests).
 func (g *Generator) isSelfMemberField(e parser.Expr) bool {
 	if id, ok := e.(*parser.Ident); ok && g.bound != nil {
 		if sym, ok := g.bound.Bindings[id]; ok {

@@ -164,14 +164,14 @@ func (g *Generator) emitStmt(s parser.Stmt) {
 
 // emitTimeoutStmt: timeout(d) { body } [or { fallback }] →
 //
-//   _done := make(chan struct{})
-//   go func() { defer close(_done); /* body */ }()
-//   select {
-//   case <-_done:
-//       // body finished in time
-//   case <-time.After(d):
-//       /* fallback (or panic if no handler) */
-//   }
+//	_done := make(chan struct{})
+//	go func() { defer close(_done); /* body */ }()
+//	select {
+//	case <-_done:
+//	    // body finished in time
+//	case <-time.After(d):
+//	    /* fallback (or panic if no handler) */
+//	}
 //
 // Body runs in a goroutine because select needs a channel signal to know
 // it's complete. The handler is the user's "what to do on timeout" hook;
@@ -203,10 +203,10 @@ func (g *Generator) emitTimeoutStmt(t *parser.TimeoutStmt) {
 // emitSelectStmt translates zinc's `select { case ch.recv(): ... }` to Go's
 // `select { case <-ch: ... }`. Each case maps 1:1:
 //
-//   case <chan>.recv():        →  case <-ch:
-//   case <var> = <chan>.recv(): →  case <var> := <-ch:
-//   case <chan>.send(<expr>):  →  case ch <- <expr>:
-//   case _:                    →  default:
+//	case <chan>.recv():        →  case <-ch:
+//	case <var> = <chan>.recv(): →  case <var> := <-ch:
+//	case <chan>.send(<expr>):  →  case ch <- <expr>:
+//	case _:                    →  default:
 func (g *Generator) emitSelectStmt(s *parser.SelectStmt) {
 	g.writeln("select {")
 	for _, c := range s.Cases {
@@ -1443,19 +1443,24 @@ func (g *Generator) isTypeSwitchMatch(m *parser.MatchStmt) bool {
 }
 
 // emitTypeSwitchMatch generates a Go type switch for sealed class / data class matching.
-// match result {
-//     case Single(ff) { ... }
-//     case Multiple(ffs) { ... }
-// }
+//
+//	match result {
+//	    case Single(ff) { ... }
+//	    case Multiple(ffs) { ... }
+//	}
+//
 // →
 // switch _v := result.(type) {
 // case Single:
-//     ff := _v.Ff
-//     ...
+//
+//	ff := _v.Ff
+//	...
+//
 // case Multiple:
-//     ffs := _v.Ffs
-//     ...
-// }
+//
+//	    ffs := _v.Ffs
+//	    ...
+//	}
 func (g *Generator) emitTypeSwitchMatch(m *parser.MatchStmt) {
 	g.checkMatchExhaustiveness(m)
 	g.writeln("switch _v := %s.(type) {", g.formatExpr(m.Subject))
@@ -2211,6 +2216,7 @@ func (g *Generator) methodBodyThrowsRec(className, methodName string, visited ma
 //   - In a thrower function: `return zero, err` (or `return err` for void)
 //   - Otherwise: `panic(err)` — unchecked-exception semantics for a
 //     top-level uncaught error (e.g. main() with a typed-only catch).
+//
 // The caller is responsible for guarding with `if err != nil { ... }`.
 func (g *Generator) emitErrReturn(errVar string) {
 	if !g.currentFuncIsThrower {
@@ -2551,7 +2557,6 @@ func (g *Generator) hoistArg(e parser.Expr) parser.Expr {
 	}
 	return rewritten
 }
-
 
 // emitErrorPropagatingVar emits `var x = call()` where call() throws:
 //
@@ -3011,6 +3016,7 @@ func (g *Generator) stmtCanReturnError(s parser.Stmt) bool {
 // Handles:
 //   - bare `Foo(...)` — local class, looked up in g.structs
 //   - `pkg.Foo(...)` — class in a sibling subpackage (g.subpkgStructs)
+//
 // External Go deps are not yet supported — those would need the
 // dependency's class decls to be loaded.
 // exprIsErrorVar reports whether `e` is the in-scope error variable
@@ -3266,12 +3272,12 @@ func (g *Generator) flattenReturnValueSlots(value parser.Expr) []string {
 // emitWithResource lowers a single `using` resource binding. Three
 // shapes:
 //
-//   1. `var r = expr or { handler }` — comma-ok form, handler runs on
-//      the error path.
-//   2. `var r = thrower()` (no handler) — comma-ok form with the error
-//      auto-propagating through emitErrReturn (matches the bare
-//      ExprStmt thrower-call shape elsewhere in the codegen).
-//   3. `var r = expr` (no handler, non-thrower) — direct assignment.
+//  1. `var r = expr or { handler }` — comma-ok form, handler runs on
+//     the error path.
+//  2. `var r = thrower()` (no handler) — comma-ok form with the error
+//     auto-propagating through emitErrReturn (matches the bare
+//     ExprStmt thrower-call shape elsewhere in the codegen).
+//  3. `var r = expr` (no handler, non-thrower) — direct assignment.
 //
 // In all three cases a `defer r.Close()` is added so the resource is
 // released when the enclosing block exits.

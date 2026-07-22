@@ -66,8 +66,8 @@ func (g *Generator) formatExpr(e parser.Expr) string {
 					// Go-name casing, ensuring the import is registered.
 					switch sym.Kind {
 					case typechecker.SymFn, typechecker.SymType, typechecker.SymClass,
-					typechecker.SymDataClass, typechecker.SymInterface, typechecker.SymEnum,
-					typechecker.SymTypeAlias, typechecker.SymConst, typechecker.SymEnumVariant:
+						typechecker.SymDataClass, typechecker.SymInterface, typechecker.SymEnum,
+						typechecker.SymTypeAlias, typechecker.SymConst, typechecker.SymEnumVariant:
 						if goPath, ok := g.importMap[sym.Pkg]; ok {
 							g.needImport(goPath)
 						}

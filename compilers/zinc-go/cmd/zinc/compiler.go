@@ -566,13 +566,13 @@ func compileDirWithSubpackagesAndExtras(srcDir, outDir, moduleName string, quiet
 	sort.Strings(leafPkgs)
 
 	// 3. Parse all subpackages and collect exports (two-pass: parse first, generate second)
-	allExports := make(map[string]map[string]string)            // pkg → name → kind
-	allDataFields := make(map[string]map[string][]*parser.FieldDecl)  // pkg → data class name → fields
+	allExports := make(map[string]map[string]string)                 // pkg → name → kind
+	allDataFields := make(map[string]map[string][]*parser.FieldDecl) // pkg → data class name → fields
 	allClassDecls := make(map[string]map[string]*parser.ClassDecl)   // pkg → class name → full decl
 	allTypeAliases := make(map[string]map[string]parser.TypeExpr)    // pkg → alias name → underlying TypeExpr
-	allMerged := make(map[string]*parser.Program)               // pkg → merged AST
-	allZnFiles := make(map[string][]string)                     // pkg → source file paths
-	allProgs := make(map[string][]*parser.Program)              // pkg → per-file ASTs (one per file in znFiles)
+	allMerged := make(map[string]*parser.Program)                    // pkg → merged AST
+	allZnFiles := make(map[string][]string)                          // pkg → source file paths
+	allProgs := make(map[string][]*parser.Program)                   // pkg → per-file ASTs (one per file in znFiles)
 
 	for _, pkg := range leafPkgs {
 		pkgDir := pkgFsDir[pkg]

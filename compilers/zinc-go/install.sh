@@ -1,7 +1,6 @@
 #!/bin/bash
 # zinc-go installer — downloads prebuilt binary or builds from source.
-# Installs as `zinc-go` (not `zinc`) so it coexists on PATH with
-# zinc-python's `zinc-python` binary; pick the one matching your target.
+# Installs as `zinc-go`.
 set -e
 
 REPO="ZincScale/zinc"
