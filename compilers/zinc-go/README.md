@@ -308,6 +308,8 @@ Full index at **[docs/](docs/README.md)**. Highlights:
 - [Getting Started](docs/getting-started.md) — install, project layout, workflow
 - [Language Tour](docs/language-tour.md) — every feature with runnable examples
 - [Interop with Go](docs/interop-with-go.md) — calling Go from Zinc
+- [Library dependencies](docs/library-dependencies.md) — Zinc modules,
+  stdlib resolution, and Go's shared module cache
 - [Classes & Inheritance](docs/classes.md)
 - [Error Handling](docs/error-handling.md)
 - [Concurrency](docs/concurrency.md)
@@ -317,7 +319,7 @@ Full index at **[docs/](docs/README.md)**. Highlights:
 
 **Current release: [v0.7](https://github.com/ZincScale/zinc/releases/latest)** (2026-05-07).
 
-The full e2e suite is green (128 tests across positive, negative, and
+The full e2e suite is green (129 tests across positive, negative, and
 project regression suites). It remains available for existing personal
 projects, including
 [zinc-flow](https://github.com/ZincScale/zinc-flow). The grammar surface is
@@ -340,7 +342,7 @@ compilers/zinc-go/
   examples-fail/      negative tests (compile-time rejections)
   examples-test/      `test "..." { }` regression suites
   expected/           expected outputs for e2e
-  stdlib/src/         errors, asserts, config, logging (written in Zinc)
+  stdlib/src/         versioned Zinc library sources
   docs/               documentation
 ```
 

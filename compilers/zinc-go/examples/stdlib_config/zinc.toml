@@ -1,0 +1,15 @@
+[project]
+name = "stdlib_config"
+version = "0.1.0"
+kind = "application"
+main = "main.zn"
+
+[stdlib]
+module = "github.com/ZincScale/zinc-stdlib"
+version = "v0.1.0"
+
+[go]
+version = "1.26.4"
+
+[replace]
+stdlib = "../../stdlib/zinc-out"

@@ -106,7 +106,12 @@ directory name. To import a subpackage: `import store`.
 [project]
 name = "myapp"
 version = "0.1.0"
+kind = "application"
 main = "main.zn"
+
+[stdlib]
+module = "github.com/ZincScale/zinc-stdlib"
+version = "v0.1.0"
 
 [go]
 version = "1.26.4"
@@ -136,9 +141,32 @@ import mux
 var r = mux.NewRouter()
 ```
 
-`[replace]` keys match `[deps]` keys, so the two can't get out of
-sync. Relative paths in `[replace]` resolve against the manifest
-directory.
+`[replace]` keys normally match `[deps]` keys, so the two can't get out
+of sync. Relative paths in `[replace]` resolve against the manifest
+directory. The reserved `stdlib` alias can be replaced without a matching
+dependency entry.
+
+## Standard library
+
+Standard-library packages need only an import:
+
+```zinc
+import stdlib/config
+
+var cfg = config.Config()
+cfg.setDefault("server.port", 8080)
+cfg.load("config", "yaml", ".")
+var port = cfg.getInt("server.port")
+```
+
+The compiler selects the project-pinned `zinc-stdlib` module automatically and
+Go downloads it into `GOMODCACHE`. Applications do not declare Viper or the
+stdlib in `[deps]`. The `[stdlib]` section is deliberately separate: its stable
+module coordinate and version survive compiler upgrades and internal source-tree
+reorganizations until the application deliberately changes them. Older projects
+without the section use the compiler's default coordinate. See
+[Library Dependencies](library-dependencies.md) for the module layout, cache
+behavior, version overrides, and local development.
 
 ## Tests
 

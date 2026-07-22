@@ -16,6 +16,12 @@ echo "Building zinc compiler..."
 cd "$DIR" && go build -o /tmp/zinc-go-bin ./cmd/zinc/ || { echo "FAIL: compiler build failed"; exit 1; }
 ZINC_BIN="/tmp/zinc-go-bin"
 
+# Build the standard library as a publishable Go module before consumer
+# projects run. The stdlib_config fixture uses a local [replace], while the
+# unit suite separately exercises a downloaded module through GOMODCACHE.
+STDLIB_OUT="$DIR/stdlib/zinc-out"
+"$ZINC_BIN" build "$DIR/stdlib" -o "$STDLIB_OUT" || { echo "FAIL: stdlib module build failed"; exit 1; }
+
 for zn in "$ZN_DIR"/*.zn; do
     name=$(basename "$zn" .zn)
     expected="$EXPECTED_DIR/${name}.txt"

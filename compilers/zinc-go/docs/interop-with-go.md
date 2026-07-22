@@ -18,8 +18,8 @@ import strings
 import net/http
 import encoding/json
 
-// 2. Zinc stdlib & project subpackages — paths starting with stdlib/
-//    or referencing a sibling directory
+// 2. Zinc stdlib & project subpackages — stdlib coordinates are selected
+//    automatically; sibling directories belong to the current project
 import stdlib/errors
 import stdlib/asserts
 import store               // sibling subpackage in this project
@@ -52,7 +52,10 @@ Add deps from the CLI:
 zinc-go add github.com/gorilla/mux@v1.8.1
 ```
 
-`[replace]` keys match `[deps]` keys for local-path overrides.
+`[replace]` keys match `[deps]` keys for local-path overrides. The reserved
+`stdlib` alias is automatic and may be replaced without a `[deps]` entry.
+Downloaded Go and Zinc modules share Go's standard module cache; see
+[Library Dependencies](library-dependencies.md).
 
 ## Calling Go functions
 

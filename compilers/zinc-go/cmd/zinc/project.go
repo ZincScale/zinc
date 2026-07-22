@@ -4,7 +4,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,15 @@ import (
 )
 
 const requiredGoVersion = "1.26.4"
+
+const (
+	stdlibAlias      = "stdlib"
+	stdlibModulePath = "github.com/ZincScale/zinc-stdlib"
+	stdlibVersion    = "v0.1.0"
+	librarySchema    = 1
+	libraryManifest  = "zinc-library.json"
+	librarySourceDir = "zinc-src"
+)
 
 var goPreflightDone bool
 var managedGoCache string
@@ -322,11 +333,16 @@ func initProject(name string) error {
 	zincToml := fmt.Sprintf(`[project]
 name = "%s"
 version = "0.1.0"
+kind = "application"
 main = "main.zn"
+
+[stdlib]
+module = "%s"
+version = "%s"
 
 [go]
 version = "1.26.4"
-`, baseName)
+`, baseName, stdlibModulePath, stdlibVersion)
 	if err := os.WriteFile(filepath.Join(name, "zinc.toml"), []byte(zincToml), 0o644); err != nil {
 		return fmt.Errorf("write zinc.toml: %w", err)
 	}
@@ -448,13 +464,28 @@ func formatZinc(src string) string {
 
 // zincConfig holds parsed zinc.toml fields.
 type zincConfig struct {
-	Name     string
-	Version  string
-	Main     string
-	GoVer    string
-	Deps     []string
-	Imports  map[string]string // import alias → module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
-	Replaces map[string]string // module → local path (for local development)
+	Name          string
+	Version       string
+	Main          string
+	Kind          string
+	GoVer         string
+	StdlibModule  string
+	StdlibVersion string
+	Deps          []string
+	Imports       map[string]string // import alias → module path (e.g. "stdlib" → "github.com/ZincScale/zinc-stdlib")
+	Replaces      map[string]string // module → local path (for local development)
+}
+
+type zincLibraryManifest struct {
+	Schema int    `json:"schema"`
+	Module string `json:"module"`
+	Source string `json:"source"`
+}
+
+type goModuleInfo struct {
+	Path    string        `json:"Path"`
+	Dir     string        `json:"Dir"`
+	Replace *goModuleInfo `json:"Replace"`
 }
 
 // findZincToml walks up from dir looking for zinc.toml.
@@ -508,11 +539,14 @@ func loadZincToml(path string) (*zincConfig, error) {
 		return nil, err
 	}
 	cfg := &zincConfig{
-		Version:  "0.1.0",
-		Main:     "main.zn",
-		GoVer:    "1.26.4",
-		Imports:  make(map[string]string),
-		Replaces: make(map[string]string),
+		Version:       "0.1.0",
+		Main:          "main.zn",
+		Kind:          "application",
+		GoVer:         "1.26.4",
+		StdlibModule:  stdlibModulePath,
+		StdlibVersion: stdlibVersion,
+		Imports:       make(map[string]string),
+		Replaces:      make(map[string]string),
 	}
 	// replaceByAlias holds [replace] entries that key off [deps] aliases —
 	// resolved after the whole file is parsed so [replace] can precede or
@@ -538,6 +572,22 @@ func loadZincToml(path string) (*zincConfig, error) {
 		key = strings.Trim(key, "\"")
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, "\"")
+
+		if section == "stdlib" {
+			switch key {
+			case "module":
+				if val == "" || strings.Contains(val, "://") || strings.Contains(val, "@") {
+					return nil, fmt.Errorf("zinc.toml: [stdlib] module must be a Go module path, got %q", val)
+				}
+				cfg.StdlibModule = val
+			case "version":
+				if val == "" {
+					return nil, fmt.Errorf("zinc.toml: [stdlib] version cannot be empty")
+				}
+				cfg.StdlibVersion = val
+			}
+			continue
+		}
 
 		// [deps] — unified table: alias = "module/path[@version]".
 		// With @version: alias-resolved import + go.mod require.
@@ -571,6 +621,11 @@ func loadZincToml(path string) (*zincConfig, error) {
 			}
 		case "main":
 			cfg.Main = val
+		case "kind":
+			if val != "application" && val != "library" {
+				return nil, fmt.Errorf("zinc.toml: project kind must be application or library, got %q", val)
+			}
+			cfg.Kind = val
 		}
 	}
 
@@ -596,6 +651,11 @@ func loadZincToml(path string) (*zincConfig, error) {
 		// (`"github.com/ZincScale/zinc-stdlib" = ".."`) so users coming
 		// from go.mod conventions don't trip on the alias-only rule.
 		modulePath, ok := cfg.Imports[key]
+		if !ok && key == stdlibAlias {
+			modulePath = cfg.StdlibModule
+			cfg.Imports[stdlibAlias] = modulePath
+			ok = true
+		}
 		if !ok {
 			// Strip @version suffix on the [deps] value before comparing
 			// since [replace] keys are bare module paths.
@@ -627,6 +687,64 @@ func loadZincToml(path string) (*zincConfig, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// prepareProjectConfig applies dependencies implied by Zinc source imports.
+// The standard library is the only reserved dependency: users select packages
+// with `import stdlib/...` and do not need to repeat its coordinates in every
+// zinc.toml. An explicit [deps] entry remains authoritative for version pins.
+func prepareProjectConfig(cfg *zincConfig, srcDir string) error {
+	// Import paths are stored with dots in the AST (`stdlib/config` becomes
+	// `stdlib.config`) and converted back to slashes during code generation.
+	usesStdlib, err := sourceImportsPrefix(srcDir, stdlibAlias+".")
+	if err != nil {
+		return err
+	}
+	if !usesStdlib {
+		return nil
+	}
+
+	modulePath, present := cfg.Imports[stdlibAlias]
+	if !present {
+		modulePath = cfg.StdlibModule
+		if modulePath == "" {
+			modulePath = stdlibModulePath
+		}
+		cfg.Imports[stdlibAlias] = modulePath
+	}
+	for _, dep := range cfg.Deps {
+		if strings.HasPrefix(dep, modulePath+" ") {
+			return nil
+		}
+	}
+	version := cfg.StdlibVersion
+	if version == "" {
+		version = stdlibVersion
+	}
+	if _, replaced := cfg.Replaces[modulePath]; replaced {
+		version = "v0.0.0"
+	}
+	cfg.Deps = append(cfg.Deps, modulePath+" "+version)
+	return nil
+}
+
+func sourceImportsPrefix(srcDir, prefix string) (bool, error) {
+	files, err := collectZnFiles(srcDir)
+	if err != nil {
+		return false, err
+	}
+	for _, path := range files {
+		prog, err := parseFile(path)
+		if err != nil {
+			return false, err
+		}
+		for _, imp := range prog.Imports {
+			if strings.HasPrefix(imp.Path, prefix) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // splitModuleVersion splits "github.com/foo/bar@v1.2.3" into ("github.com/foo/bar", "v1.2.3").
@@ -670,52 +788,217 @@ func isProjectDir(dir string) bool {
 	return findZincToml(dir) != ""
 }
 
-// loadDepClassDecls loads class declarations from external deps that
-// have a [replace] pointing at a local directory. The replace path
-// points at the dep's built `zinc-out/`; the Zinc sources live at the
-// sibling `src/` directory. Each subdirectory of `src/` is a
-// subpackage; its class decls are registered under the subpackage's
-// directory name so the codegen can type-check cross-package returns
-// (e.g. `return errors.ConfigError(...)` knows ConfigError extends Err).
-func loadDepClassDecls(cfg *zincConfig) map[string]map[string]*parser.ClassDecl {
-	out := make(map[string]map[string]*parser.ClassDecl)
-	for _, modulePath := range cfg.Imports {
-		localPath, ok := cfg.Replaces[modulePath]
-		if !ok {
-			continue
+// writeZincLibraryMetadata makes a transpiled project publishable as a Zinc
+// module. Go source remains the executable form; the original Zinc source is
+// retained as metadata for semantics that cannot be reconstructed from Go.
+func writeZincLibraryMetadata(srcDir, outDir, moduleName string) error {
+	if err := relativizeGeneratedLineDirectives(srcDir, outDir); err != nil {
+		return err
+	}
+	metaRoot := filepath.Join(outDir, librarySourceDir)
+	if err := os.RemoveAll(metaRoot); err != nil {
+		return err
+	}
+	if err := filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		// <replace-path>/../src
-		srcDir := filepath.Join(filepath.Dir(localPath), "src")
-		info, err := os.Stat(srcDir)
-		if err != nil || !info.IsDir() {
-			continue
+		if info.IsDir() || filepath.Ext(path) != ".zn" {
+			return nil
 		}
-		subdirs, err := collectSubdirs(srcDir)
+		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
-			continue
+			return err
 		}
-		for _, sub := range subdirs {
-			subPath := filepath.Join(srcDir, sub)
-			znFiles, _ := collectZnFilesFlat(subPath)
-			if len(znFiles) == 0 {
-				continue
-			}
-			progs := make([]*parser.Program, 0, len(znFiles))
-			for _, path := range znFiles {
-				prog, err := parseFile(path)
-				if err != nil {
-					continue
-				}
-				progs = append(progs, prog)
-			}
-			if len(progs) == 0 {
-				continue
-			}
-			merged := mergePrograms(progs)
-			out[sub] = codegen.CollectClassDecls(merged)
+		dst := filepath.Join(metaRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dst, data, 0o644)
+	}); err != nil {
+		return fmt.Errorf("copy Zinc library metadata: %w", err)
+	}
+
+	manifest := zincLibraryManifest{Schema: librarySchema, Module: moduleName, Source: librarySourceDir}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(outDir, libraryManifest), data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", libraryManifest, err)
+	}
+	return nil
+}
+
+// relativizeGeneratedLineDirectives keeps published modules portable. The Go
+// compiler can still map diagnostics back to the packaged Zinc metadata, but
+// consumers never see the library maintainer's absolute checkout path.
+func relativizeGeneratedLineDirectives(srcDir, outDir string) error {
+	absSrc, err := filepath.Abs(srcDir)
+	if err != nil {
+		return err
+	}
+	slashPrefix := "//line " + filepath.ToSlash(absSrc) + "/"
+	nativePrefix := "//line " + absSrc + string(filepath.Separator)
+	return filepath.Walk(outDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || filepath.Ext(path) != ".go" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := strings.ReplaceAll(string(data), slashPrefix, "//line "+librarySourceDir+"/")
+		if nativePrefix != slashPrefix {
+			text = strings.ReplaceAll(text, nativePrefix, "//line "+librarySourceDir+"/")
+		}
+		return os.WriteFile(path, []byte(text), info.Mode().Perm())
+	})
+}
+
+// resolvedModuleDirs asks Go for the exact directories selected by go.mod.
+// Those paths point into GOMODCACHE for downloaded versions and at the target
+// directory for local replacements.
+func resolvedModuleDirs(goModDir string) (map[string]string, error) {
+	cmd := goCmd("list", "-m", "-json", "all")
+	cmd.Dir = goModDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("resolve module cache directories: %w", err)
+	}
+	resolved := make(map[string]string)
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var mod goModuleInfo
+		if err := dec.Decode(&mod); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("decode go list module data: %w", err)
+		}
+		dir := mod.Dir
+		if mod.Replace != nil && mod.Replace.Dir != "" {
+			dir = mod.Replace.Dir
+		}
+		if mod.Path != "" && dir != "" {
+			resolved[mod.Path] = dir
 		}
 	}
-	return out
+	return resolved, nil
+}
+
+// loadDepClassDecls reads Zinc metadata from resolved Go modules. A normal Go
+// dependency has no Zinc manifest and is intentionally ignored. Zinc modules
+// carry their source under the manifest's source directory.
+func loadDepClassDecls(cfg *zincConfig, goModDir string) (map[string]map[string]*parser.ClassDecl, error) {
+	out := make(map[string]map[string]*parser.ClassDecl)
+	if len(cfg.Imports) == 0 {
+		return out, nil
+	}
+	moduleDirs, err := resolvedModuleDirs(goModDir)
+	if err != nil {
+		return nil, err
+	}
+	for depAlias, modulePath := range cfg.Imports {
+		moduleDir, ok := moduleDirs[modulePath]
+		if !ok {
+			continue // alias-only Go subpackage, not a required module
+		}
+		manifestPath := filepath.Join(moduleDir, libraryManifest)
+		data, err := os.ReadFile(manifestPath)
+		if os.IsNotExist(err) {
+			if depAlias == stdlibAlias {
+				return nil, fmt.Errorf("standard library module %s has no %s", modulePath, libraryManifest)
+			}
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read Zinc metadata for %s: %w", modulePath, err)
+		}
+		var manifest zincLibraryManifest
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return nil, fmt.Errorf("parse %s in %s: %w", libraryManifest, modulePath, err)
+		}
+		if manifest.Schema != librarySchema {
+			return nil, fmt.Errorf("unsupported Zinc library schema %d in %s", manifest.Schema, modulePath)
+		}
+		if manifest.Module != modulePath {
+			return nil, fmt.Errorf("Zinc library manifest module %q does not match dependency %q", manifest.Module, modulePath)
+		}
+		if manifest.Source == "" || filepath.IsAbs(manifest.Source) {
+			return nil, fmt.Errorf("invalid Zinc metadata source %q in %s", manifest.Source, modulePath)
+		}
+		srcDir := filepath.Clean(filepath.Join(moduleDir, manifest.Source))
+		rel, err := filepath.Rel(moduleDir, srcDir)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("Zinc metadata source %q escapes module %s", manifest.Source, modulePath)
+		}
+		info, err := os.Stat(srcDir)
+		if err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("Zinc metadata directory %s is missing for %s", manifest.Source, modulePath)
+		}
+
+		if err := collectExternalClasses(out, depAlias, srcDir); err != nil {
+			return nil, fmt.Errorf("load Zinc metadata for %s: %w", modulePath, err)
+		}
+	}
+	return out, nil
+}
+
+func collectExternalClasses(out map[string]map[string]*parser.ClassDecl, depAlias, srcDir string) error {
+	packages, err := collectSubdirs(srcDir)
+	if err != nil {
+		return err
+	}
+	rootFiles, err := collectZnFilesFlat(srcDir)
+	if err != nil {
+		return err
+	}
+	if len(rootFiles) > 0 {
+		if err := collectExternalPackage(out, depAlias, rootFiles); err != nil {
+			return err
+		}
+	}
+	for _, pkg := range packages {
+		files, err := collectZnFilesFlat(filepath.Join(srcDir, pkg))
+		if err != nil {
+			return err
+		}
+		if len(files) == 0 {
+			continue
+		}
+		if err := collectExternalPackage(out, filepath.Base(pkg), files); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func collectExternalPackage(out map[string]map[string]*parser.ClassDecl, alias string, files []string) error {
+	progs := make([]*parser.Program, 0, len(files))
+	for _, path := range files {
+		prog, err := parseFile(path)
+		if err != nil {
+			return err
+		}
+		progs = append(progs, prog)
+	}
+	classes := codegen.CollectClassDecls(mergePrograms(progs))
+	if len(classes) == 0 {
+		return nil
+	}
+	if _, exists := out[alias]; exists {
+		return fmt.Errorf("duplicate external Zinc package alias %q", alias)
+	}
+	out[alias] = classes
+	return nil
 }
 
 // buildProject transpiles a zinc.toml project: src/*.zn → zinc-out/ → go build.
@@ -736,6 +1019,9 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	srcDir := filepath.Join(root, "src")
 	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
 		return fmt.Errorf("no src/ directory in project %s", root)
+	}
+	if err := prepareProjectConfig(cfg, srcDir); err != nil {
+		return fmt.Errorf("resolve source dependencies: %w", err)
 	}
 
 	cleanOutDir(outDir)
@@ -777,7 +1063,10 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 	}
 
 	// Load dep class decls (stdlib etc.) so cross-package type checks work.
-	externalClassDecls = loadDepClassDecls(cfg)
+	externalClassDecls, err = loadDepClassDecls(cfg, outDir)
+	if err != nil {
+		return err
+	}
 	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 {
@@ -788,6 +1077,9 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		if err := compileDir(srcDir, outDir, quiet, cfg.Imports); err != nil {
 			return err
 		}
+	}
+	if err := writeZincLibraryMetadata(srcDir, outDir, moduleName); err != nil {
+		return err
 	}
 
 	// If there are deps, run go mod tidy again after transpilation
@@ -801,12 +1093,18 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		}
 	}
 
-	// Build
+	// Applications produce a native executable. Libraries validate every
+	// generated package while leaving zinc-out/ as a clean publishable module.
+	var cmd *exec.Cmd
 	binName := cfg.Name
-	if binName == "" {
-		binName = "zinc-app"
+	if cfg.Kind == "library" {
+		cmd = goCmd("build", "./...")
+	} else {
+		if binName == "" {
+			binName = "zinc-app"
+		}
+		cmd = goCmd("build", "-o", binName, ".")
 	}
-	cmd := goCmd("build", "-o", binName, ".")
 	cmd.Dir = outDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -814,7 +1112,10 @@ func buildProject(projectDir, outDir string, quiet bool) error {
 		return fmt.Errorf("go build failed: %w", err)
 	}
 
-	if !quiet {
+	if !quiet && cfg.Kind == "library" {
+		absOut, _ := filepath.Abs(outDir)
+		fmt.Printf("  Library module: %s\n", absOut)
+	} else if !quiet {
 		absOut, _ := filepath.Abs(filepath.Join(outDir, binName))
 		fmt.Printf("  Built: %s\n", absOut)
 	}
@@ -837,6 +1138,12 @@ func runProject(projectDir string, progArgs []string) error {
 
 	root := filepath.Dir(tomlPath)
 	srcDir := filepath.Join(root, "src")
+	if cfg.Kind == "library" {
+		return fmt.Errorf("cannot run library project %s; use zinc-go build", cfg.Name)
+	}
+	if err := prepareProjectConfig(cfg, srcDir); err != nil {
+		return fmt.Errorf("resolve source dependencies: %w", err)
+	}
 
 	tmpDir, err := os.MkdirTemp("", "zinc-run-*")
 	if err != nil {
@@ -869,7 +1176,10 @@ func runProject(projectDir string, progArgs []string) error {
 		moduleName = "zinc_project"
 	}
 
-	externalClassDecls = loadDepClassDecls(cfg)
+	externalClassDecls, err = loadDepClassDecls(cfg, tmpDir)
+	if err != nil {
+		return err
+	}
 	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 {
@@ -880,6 +1190,9 @@ func runProject(projectDir string, progArgs []string) error {
 		if err := compileDir(srcDir, tmpDir, true, cfg.Imports); err != nil {
 			return err
 		}
+	}
+	if err := writeZincLibraryMetadata(srcDir, tmpDir, moduleName); err != nil {
+		return err
 	}
 
 	// Re-generate go.mod (may have new imports from transpiled code)
@@ -940,6 +1253,9 @@ func testProject(projectDir string, goTestArgs []string) error {
 	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
 		return fmt.Errorf("no src/ directory in project %s", root)
 	}
+	if err := prepareProjectConfig(cfg, srcDir); err != nil {
+		return fmt.Errorf("resolve source dependencies: %w", err)
+	}
 
 	// Use zinc-out/ (same as build) so incremental test runs reuse cached
 	// module state. If that's wrong we can switch to a temp dir later.
@@ -987,7 +1303,10 @@ func testProject(projectDir string, goTestArgs []string) error {
 		extraPkgs = map[string]string{"tests": testsDir}
 	}
 
-	externalClassDecls = loadDepClassDecls(cfg)
+	externalClassDecls, err = loadDepClassDecls(cfg, outDir)
+	if err != nil {
+		return err
+	}
 	defer func() { externalClassDecls = nil }()
 
 	if len(subdirs) > 0 || len(extraPkgs) > 0 {
@@ -998,6 +1317,9 @@ func testProject(projectDir string, goTestArgs []string) error {
 		if err := compileDir(srcDir, outDir, false, cfg.Imports); err != nil {
 			return err
 		}
+	}
+	if err := writeZincLibraryMetadata(srcDir, outDir, moduleName); err != nil {
+		return err
 	}
 
 	if len(cfg.Deps) > 0 {

@@ -1,5 +1,6 @@
 /zinc
 /zinc-go
+/stdlib/zinc
 zinc-out/
 zinc-app
 dist/

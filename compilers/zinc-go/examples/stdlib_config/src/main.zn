@@ -1,0 +1,11 @@
+import stdlib/config
+import os
+
+void main() {
+    var cfg = config.Config()
+    cfg.setDefault("server.port", 8080)
+    print("default=${cfg.getInt(\"server.port\")}")
+
+    os.Setenv("SERVER_PORT", "9090")
+    print("environment=${cfg.getInt(\"server.port\")}")
+}

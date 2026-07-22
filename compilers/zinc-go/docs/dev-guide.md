@@ -71,8 +71,10 @@ stdlib/src/
 
 These are written in Zinc and transpiled the same way as user code. If
 you're adding a stdlib API, write it as Zinc, not Go. The transpiler
-treats stdlib calls as ordinary cross-package method calls — no
-special-casing.
+treats stdlib calls as ordinary cross-package method calls. The dependency
+resolver reserves the `stdlib` alias, downloads the versioned module through
+Go, and reads its `zinc-library.json` metadata from the resolved module cache.
+See [Library Dependencies](library-dependencies.md).
 
 ## Compiler-error UX
 

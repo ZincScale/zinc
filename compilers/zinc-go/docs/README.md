@@ -23,6 +23,8 @@ you're trying to do.
 ### ...call Go from Zinc (or read the emitted Go)
 - **[Interop with Go](interop-with-go.md)** — calling Go packages, the
   auto-pointerization rules, and what the emitted Go looks like.
+- **[Library Dependencies](library-dependencies.md)** — published Zinc
+  modules, automatic stdlib resolution, and `GOMODCACHE` reuse.
 
 ### ...hack on the compiler itself
 - **[Dev Guide](dev-guide.md)** — architecture, build/test workflow,
@@ -36,5 +38,5 @@ you're trying to do.
 ## Status
 
 Current release: **[v0.7](https://github.com/ZincScale/zinc/releases/latest)**
-(2026-05-07). E2E suite: 128 tests green. Grammar surface stamped
+(2026-05-07). E2E suite: 129 tests green. Grammar surface stamped
 `v2-2026-05-01`.
